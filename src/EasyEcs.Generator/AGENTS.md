@@ -139,7 +139,7 @@ EasyEcsAnalyzer.Parts.cs     EECS062-069, EECS102 (a [Prefab] the generator cann
                              combines), hand-written reductions, keys and groups the attributes could declare, a wrong
                              Identity, a setup attribute on a type it does not fit, a managed type without a Nino
                              formatter (Warning when the code saves what holds it: entity saves write no singletons)
-EasyEcsAnalyzer.Forms.cs     EECS080-085, EECS103 and EECS105-106: what the generator declares for code written by hand (a one-entity
+EasyEcsAnalyzer.Forms.cs     EECS080-085, EECS103 and EECS108-109: what the generator declares for code written by hand (a one-entity
                              job [ForEntity] writes, a [ForEach] method that destroys every entity it visits: [Consume],
                              a batch method's vector loop written by hand that the method for one row gets generated,
                              the walk and Clear of Emitted<T> a [ForEachRecord] method gets generated)

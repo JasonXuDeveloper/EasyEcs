@@ -137,7 +137,7 @@ public sealed class ForEntityAttribute : Attribute;
 /// another record type, the <see cref="World"/>, and (outside a system) values of any other type. One thread, no
 /// allocation; the system writes <see cref="Emitted{T}"/>. A pass that throws clears nothing: the records stay, the
 /// ones handled included. Records added to <see cref="Emitted{T}"/> while the pass runs are cleared unhandled
-/// (an <see cref="Emit{T}"/> of the same record is refused: EECS105).
+/// (an <see cref="Emit{T}"/> of the same record is refused: EECS108).
 /// <code>
 /// [ForEachRecord]
 /// static void Send(in EntityUpdate update, ref Stats stats) => stats.Sent += update.Viewers;   // each update, once

@@ -734,8 +734,8 @@ Pages to write in the docs pass (en + zh each; zh terms: 块 = a parallel chunk 
 - **guide/emit (Emit<T>)**: a section "Handling the records: `[ForEachRecord]`". Form: `[ForEachRecord] static void
   Send(in EntityUpdate u, ref Stats s, Lookup<Viewers> v, World w)`; runs in declaration order inside the system,
   an entry point `Owner.Method(world, values...)` outside; records in emitted order, then cleared; a pass that throws
-  clears nothing; an `Emit<T>` of the same record type is refused (EECS105). Costs: RecordBenchmark (both tally into
-  a singleton: 100k records 284.1 us by hand, 278.9 us generated; 1k 2.44 / 2.52 us; 0 B). EECS106 (Info) and its fix
+  clears nothing; an `Emit<T>` of the same record type is refused (EECS108). Costs: RecordBenchmark (both tally into
+  a singleton: 100k records 284.1 us by hand, 278.9 us generated; 1k 2.44 / 2.52 us; 0 B). EECS109 (Info) and its fix
   (a system's OnUpdate that is only the walk becomes the method).
 - **guide/systems#vector-loops**: enums are lanes (their integer's: compare, convert, set to a constant), and a bool
   component of one field (one byte per row, read as a mask, written as 0 or 1); a bool among several fields keeps the
@@ -745,7 +745,7 @@ Pages to write in the docs pass (en + zh each; zh terms: 块 = a parallel chunk 
 - **guide/dynamic-buffers**: `world.ReserveBuffers(prefab, count)` next to `FillPool`: a list per instance and member
   holding the buffer; lists of `MaxPooledLength` elements (set it first), process-wide, not cumulative across prefabs
   sharing a type; when not to (a buffer that stays short: count x MaxPooledLength of memory).
-- **guide/analyzer**: EECS105 (Error) and EECS106 (Info, fix) entries; EECS086's total case; EECS055's new bool reason.
+- **guide/analyzer**: EECS108 (Error) and EECS109 (Info, fix) entries; EECS086's total case; EECS055's new bool reason.
 - **api.mdx**: done on the branch (rows for `[Accumulate]`, `[ForEachRecord]`, `ReserveBuffers`, the record pass).
 - **migration / changelog / README "What's new"**: New: `[Accumulate]`, struct-level `[Sum]`..`[Any]`,
   `[ForEachRecord]`, `World.ReserveBuffers`, enum and bool lanes. No breaking change (EECS055's message for a component

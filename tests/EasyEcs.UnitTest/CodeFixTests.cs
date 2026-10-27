@@ -414,12 +414,12 @@ public class CodeFixTests
         "[Accumulate] public struct Tot : ISingletonComponent, IReduction<Tot> { public long N; public static Tot Identity => default; public static Tot Combine(Tot a, Tot b) => new() { N = a.N + b.N }; }\n"
         + "[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Tot t) => t.N += p.V; }",
         "static void A(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }")]
-    [TestCase("EECS106", "Handle each record in a [ForEachRecord] method",                                                 // a block
+    [TestCase("EECS109", "Handle each record in a [ForEachRecord] method",                                                 // a block
         "public record struct Rec(int V); public struct Tot : ISingletonComponent { public long N; }\n[EcsSystem] public ref struct S\n{\n    static void OnUpdate(World world)\n    {\n"
         + "        ref var tot = ref world.GetOrAddSingleton<Tot>();\n        ref var records = ref world.GetOrAddSingleton<Emitted<Rec>>().Items;\n"
         + "        foreach (ref readonly var record in records.AsReadOnlySpan())\n        {\n            if (record.V > 0)\n                tot.N += record.V;\n        }\n        records.Clear();\n    }\n}",
         "{\n    [ForEachRecord]\n    static void Handle(in Rec record, ref Tot tot)\n    {\n        if (record.V > 0)\n            tot.N += record.V;\n    }\n}")]
-    [TestCase("EECS106", "Handle each record in a [ForEachRecord] method",                                                 // one statement, the World
+    [TestCase("EECS109", "Handle each record in a [ForEachRecord] method",                                                 // one statement, the World
         "public record struct Rec(EntityId Id); \n[EcsSystem] public ref struct S\n{\n    static void OnUpdate(World world)\n    {\n"
         + "        ref var records = ref world.GetSingleton<Emitted<Rec>>().Items;\n        foreach (var r in records)\n            world.GetEntity(r.Id).Destroy();\n        records.Clear();\n    }\n}",
         "{\n    [ForEachRecord]\n    static void Handle(in Rec r, World world) => world.GetEntity(r.Id).Destroy();\n}")]

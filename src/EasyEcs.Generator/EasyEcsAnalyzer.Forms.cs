@@ -16,8 +16,8 @@ namespace EasyEcs.Generator;
 /// (EECS080-EECS085): a hand-written one-entity job [ForEntity] would write (EECS080), a [ForEntity] method that cannot
 /// be one (EECS081), an [UpdateInterval] that cannot apply (EECS083), a [ForEach] method that destroys every entity it visits by hand (EECS084), a [Consume] that
 /// cannot apply (EECS085); a batch method's vector loop written by hand that the generator writes from the method
-/// for one row (EECS103, <see cref="HandSimd"/>); a [ForEachRecord] method the generator cannot write (EECS105) and the
-/// walk and clear of Emitted&lt;T&gt; it writes, written by hand (EECS106). Each computes its code fix as diagnostic properties.
+/// for one row (EECS103, <see cref="HandSimd"/>); a [ForEachRecord] method the generator cannot write (EECS108) and the
+/// walk and clear of Emitted&lt;T&gt; it writes, written by hand (EECS109). Each computes its code fix as diagnostic properties.
 /// </summary>
 public static partial class EasyEcsAnalyzer
 {
@@ -72,25 +72,25 @@ public static partial class EasyEcsAnalyzer
         "horizontal operations, loads at other offsets, accumulators across vectors and calls into user code are left alone.",
         helpLinkUri: Help("EECS103"));
 
-    public static readonly DiagnosticDescriptor BadRecordPass = new("EECS105", "Invalid [ForEachRecord] method",
+    public static readonly DiagnosticDescriptor BadRecordPass = new("EECS108", "Invalid [ForEachRecord] method",
         "[ForEachRecord] method '{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
         "A [ForEachRecord] method is static and takes the record it handles first, by 'in': the generator runs it on each " +
         "record of Emitted<T> in order, then clears them. What belongs to rows (components, Maybe, Mut, Reduce, Scratch, " +
         "the Entity, filters, [Consume]) has no meaning for a record, and an Emit<T> of its own record type would be " +
         "cleared unhandled. The generator writes nothing for an invalid method.",
-        helpLinkUri: Help("EECS105"));
+        helpLinkUri: Help("EECS108"));
 
-    public static readonly DiagnosticDescriptor HandWrittenRecordPass = new("EECS106", "The records of Emitted<T> walked and cleared by hand",
+    public static readonly DiagnosticDescriptor HandWrittenRecordPass = new("EECS109", "The records of Emitted<T> walked and cleared by hand",
         "'{0}' walks the records of Emitted<{1}> and clears them by hand: a [ForEachRecord] method taking 'in {1} {2}' gets the walk and the Clear generated",
         Category, DiagnosticSeverity.Info, true,
         "Code that gets Emitted<T>'s list, runs a loop over it and clears it handles each record once, in the order the " +
         "passes emitted them: what a [ForEachRecord] method does, written once per record type. The method holds only the " +
         "loop's body; its other parameters are what the body used (singletons, the World). The fix writes it when the " +
         "loop is a system's OnUpdate whole: the singletons it took by ref, the list, the loop and the Clear.",
-        helpLinkUri: Help("EECS106"));
+        helpLinkUri: Help("EECS109"));
 
-    /// <summary>EECS106's property: the record method's parameters after the record ("ref global::S s, ..."), when the fix applies.</summary>
+    /// <summary>EECS109's property: the record method's parameters after the record ("ref global::S s, ..."), when the fix applies.</summary>
     public const string RecordParameters = "RecordParameters", RecordName = "Record";
 
     /// <summary>EECS103's properties: the method for one row's parameter list and its statements (one per line).</summary>
@@ -164,7 +164,7 @@ public static partial class EasyEcsAnalyzer
                 : "each entity goes after its row"));
     }
 
-    // ---------------- EECS105 / EECS106: [ForEachRecord] ----------------
+    // ---------------- EECS108 / EECS109: [ForEachRecord] ----------------
 
     private static void AnalyzeRecordPass(SymbolAnalysisContext context)
     {
@@ -174,7 +174,7 @@ public static partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// EECS106: a foreach over a local that holds <c>ref world.GetSingleton&lt;Emitted&lt;T&gt;&gt;().Items</c> (or
+    /// EECS109: a foreach over a local that holds <c>ref world.GetSingleton&lt;Emitted&lt;T&gt;&gt;().Items</c> (or
     /// GetOrAddSingleton, or its AsReadOnlySpan()), followed in the same block by that local's Clear(). The fix's
     /// parameters when the block is a system's OnUpdate holding only 'ref' singleton locals, the list, the loop and the
     /// Clear, and the loop's body uses only the record, those locals and the World.
@@ -222,7 +222,7 @@ public static partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// The parameters after the record of the [ForEachRecord] method EECS106's fix writes, or null when it does not
+    /// The parameters after the record of the [ForEachRecord] method EECS109's fix writes, or null when it does not
     /// apply: the block is a system's static OnUpdate(World), its statements are 'ref' locals of singletons read from
     /// that World, the list, the loop (one variable) and the Clear, and the loop's body uses no other local.
     /// </summary>

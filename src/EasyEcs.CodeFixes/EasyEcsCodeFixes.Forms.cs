@@ -21,7 +21,7 @@ namespace EasyEcs.CodeFixes;
 public sealed partial class EasyEcsCodeFixes
 {
     /// <summary>
-    /// EECS106: a system's OnUpdate that walks Emitted&lt;T&gt; and clears it becomes <c>[ForEachRecord] static void
+    /// EECS109: a system's OnUpdate that walks Emitted&lt;T&gt; and clears it becomes <c>[ForEachRecord] static void
     /// Handle(in T record, ref S s, ...)</c> holding the loop's body (the singleton locals as 'ref' parameters, the World
     /// when the body uses it: the analyzer's property), its lines moved out by one level.
     /// </summary>

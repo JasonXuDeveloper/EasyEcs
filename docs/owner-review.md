@@ -19,7 +19,7 @@ leave this file; it is not published on the site.
   the value on another) and saves no line; nothing general fits that is not the two calls. Would change: user code
   where the key's own component is the one read (then `Lookup<T>.TryFind(key, out entity)` plus `[entity]` could
   become one call), seen in two places.
-- **EECS086 (a total kept by hand) and EECS106 (Emitted<T> walked and cleared by hand) are Info** (feat-generator-gaps):
+- **EECS086 (a total kept by hand) and EECS109 (Emitted<T> walked and cleared by hand) are Info** (feat-generator-gaps):
   as Warnings they fire in the samples, BattleServer.cs and the benchmarks' baselines, which that branch could not edit;
   EECS086 is a Warning with its fix once the singleton already reduces. Would change: the samples moved to
   `[Accumulate]` and `[ForEachRecord]` (VoxelServer rewrite): then both become Warnings (one line each in the analyzer).

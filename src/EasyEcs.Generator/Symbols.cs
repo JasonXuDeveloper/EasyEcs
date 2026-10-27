@@ -866,7 +866,7 @@ internal static class Symbols
     private static bool IsFramework(ITypeSymbol type) => Named(type.ContainingNamespace, "EasyEcs");
 
     /// <summary>
-    /// Why a [ForEachRecord] method cannot be generated (EECS105), or null: it also has [ForEach] or [ForEntity], is an
+    /// Why a [ForEachRecord] method cannot be generated (EECS108), or null: it also has [ForEach] or [ForEntity], is an
     /// instance or generic method, does not take its record first by <c>in</c>, has a filter or [Consume], or takes what
     /// a pass over records has none of (a component, a Maybe, a Reduce, the Entity, ...) or an <c>Emit&lt;T&gt;</c> of its
     /// own record (cleared unhandled when the pass ends).
@@ -1406,7 +1406,7 @@ internal static class Symbols
     {
         var type = method.ContainingType;
         bool outside = IsRunner(method);
-        if (IsForEachRecord(method)) // a pass over records: no components, no filter (EECS105 says why not)
+        if (IsForEachRecord(method)) // a pass over records: no components, no filter (EECS108 says why not)
             return RecordProblem(method) == null && Unnameable(method) == null && (outside ? !EntryPointCollides(method) : IsValidSystem(type));
         if (IsForEntity(method) ? ForEntityProblem(method) != null : ConsumeProblem(method) != null) return false;
         if (!method.IsStatic || outside && EntryPointCollides(method)) return false;

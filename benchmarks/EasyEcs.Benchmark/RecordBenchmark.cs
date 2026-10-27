@@ -5,7 +5,7 @@ namespace EasyEcs.Benchmark;
 /// <summary>
 /// Records handled once: per operation, <see cref="Records"/> records are appended to <c>Emitted&lt;Hit&gt;</c> (what
 /// passes taking an <c>Emit&lt;Hit&gt;</c> leave), then handled in order into a singleton and cleared. <c>HandWritten</c>
-/// is a system's update as EECS106 finds it: the singleton and the list taken by ref, the walk, the Clear;
+/// is a system's update as EECS109 finds it: the singleton and the list taken by ref, the walk, the Clear;
 /// <c>ForEachRecord</c> is the generated pass of a <c>[ForEachRecord]</c> method with the same body, taking the singleton
 /// by ref. Both leave the same tally (checked in setup). Steady state allocates 0 bytes.
 /// </summary>

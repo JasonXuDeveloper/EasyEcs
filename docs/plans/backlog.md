@@ -170,7 +170,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       readability counts once the asm is equal.
 - [x] **Generator gaps found by the VoxelServer plan** (`voxel-rewrite.md` section 3): built on feat-generator-gaps,
   waiting to merge: G0 enum lanes and single-bool components in vector loops, G5 `[Accumulate]` totals (EECS086's
-  total case and fix), G6 `[ForEachRecord]` (EECS105, EECS106 and fix), G4 `World.ReserveBuffers(prefab, count)`; G7
+  total case and fix), G6 `[ForEachRecord]` (EECS108, EECS109 and fix), G4 `World.ReserveBuffers(prefab, count)`; G7
   not built (owner-review.md). Docs pass: docs-todos.md "feat-generator-gaps". G1 / G2 come with inner-loops WP5 /
   WP2; G8 / G9 with L2.
 - [ ] **A `using` alias to a system does not bind its generated entry point**: `using Alias = Hunters;` then

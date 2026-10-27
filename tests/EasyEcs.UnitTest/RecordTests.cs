@@ -8,7 +8,7 @@ namespace EasyEcs.UnitTest;
 
 /// <summary>
 /// [ForEachRecord]: a method run on each record of <see cref="Emitted{T}"/> in the order the passes emitted them, then
-/// the records cleared, against the walk and Clear written by hand; its generated code, EECS105 and EECS106.
+/// the records cleared, against the walk and Clear written by hand; its generated code, EECS108 and EECS109.
 /// </summary>
 public class RecordTests
 {
@@ -60,7 +60,7 @@ public class RecordTests
         }
     }
 
-    /// <summary>The walk and Clear by hand: what [ForEachRecord] replaces (EECS106).</summary>
+    /// <summary>The walk and Clear by hand: what [ForEachRecord] replaces (EECS109).</summary>
     [EcsSystem, UpdateAfter<Strikes>]
     public ref struct HandBook
     {
@@ -246,7 +246,7 @@ public class RecordTests
     [TestCase("[EcsSystem] public ref struct S { [ForEachRecord] static void A(in Rec r, int n) { } }", "takes 'n', which a pass over records has none of")] // a caller's value in a system
     public async Task AnInvalidRecordMethodIsReported(string source, string reason)
     {
-        var found = (await GeneratorTests.Analyze([Data + source])).Where(d => d.Id == "EECS105").Select(d => d.GetMessage()).ToArray();
+        var found = (await GeneratorTests.Analyze([Data + source])).Where(d => d.Id == "EECS108").Select(d => d.GetMessage()).ToArray();
         Assert.That(found, Has.Exactly(1).Items);
         Assert.That(found[0], Does.Contain(reason));
     }
@@ -260,7 +260,7 @@ public class RecordTests
     [TestCase("public static class H { public static int F(World w) { ref var rs = ref w.GetOrAddSingleton<Emitted<Rec>>().Items; int n = 0; foreach (ref readonly var r in rs.AsReadOnlySpan()) n += r.V; rs.Clear(); return n; } }", false)]
     public async Task AHandWrittenWalkAndClearIsReported(string source, bool fixable)
     {
-        var found = (await GeneratorTests.Analyze([Data + source])).Where(d => d.Id == "EECS106").ToArray();
+        var found = (await GeneratorTests.Analyze([Data + source])).Where(d => d.Id == "EECS109").ToArray();
         Assert.That(found.Select(d => d.GetMessage()), Has.Exactly(1).Items);
         Assert.That(found[0].GetMessage(), Does.Contain("walks the records of Emitted<Rec> and clears them by hand: a [ForEachRecord] method taking 'in Rec r'"));
         Assert.That(found[0].Severity, Is.EqualTo(DiagnosticSeverity.Info));
@@ -271,5 +271,5 @@ public class RecordTests
     [TestCase("public static class H { public static void F(World w) { ref var rs = ref w.GetOrAddSingleton<Emitted<Rec>>().Items; rs.Clear(); foreach (var r in rs) { } } }")] // cleared before
     [TestCase("public static class H { public static void F(World w, DynamicBuffer<Rec> rs) { foreach (var r in rs) { } rs.Clear(); } }")]                                // not Emitted's
     public async Task OtherWalksAreLeftAlone(string source) =>
-        Assert.That((await GeneratorTests.Analyze([Data + source])).Where(d => d.Id == "EECS106"), Is.Empty);
+        Assert.That((await GeneratorTests.Analyze([Data + source])).Where(d => d.Id == "EECS109"), Is.Empty);
 }
