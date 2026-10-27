@@ -58,6 +58,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `[LookupKey]`、`[UniqueKey]`、`[Group]` | 特性 | 标在 partial 组件的成员上（`[LookupKey]` 标在类型上：键是整个值）：生成器显式实现 `IIndexed<TKey>.Key`（`IUniqueIndexed<TKey>`）或 `IGroup.Group`。 |
 | `[GroupBy]`、`[WhenTargetDestroyed(policy)]`、`[NotSaved]` | 特性 | 每个 World 从第一张含这个类型的表开始应用的设置：分组、目标被销毁时链接的策略；`[NotSaved]`：任何存档都不写这个类型，读档保留 World 自己的单例。 |
 | `[OrderBy(box...)]`、`IOrderKey<TKey>` | 特性、接口 | 写在 partial 组件的成员上：每个 World 让含这个组件的表按这个键排序（`Interval`、`Margin`），覆盖成对方法初始化时请求的顺序；生成器写出显式的 `OrderKey` 和 `BoxPoint`。 |
+| `[Neighbor]` | 特性 | 写在 `[ForEach]` 方法的参数上：成对中另一个实体的组件（按 `in` 取）或它的 `Entity`；方法对第一个判断给出的截断距离以内的每一对运行一次（成对方法）。 |
 | `RowBlocks`、`BlockPair` | ref struct、record struct | 一张有序表的行，每 `Size` 行一簇（8 行，ARM64 上 4 行），每簇一个包围盒（`world.Blocks<T>()`、`entities.Blocks`）：`Count`、`SortedRows`、`Start`、`End`、`Min(axis)`、`Max(axis)`、`Read<T>()`、`Ids`、`Has(row)`、`Pairs(reach, into)`。 |
 | `IRowOrder<T>`、`RowKeys` | 接口、静态类 | 给生成代码用：顺序怎样读一行（`Key`、`Point`，静态成员），一个点按格子大小算出的 Morton 码（`RowKeys.Morton`）。 |
 | `Scratch<T>` | ref struct | `[ForEach]` 参数：方法在当前线程上的工作内存，在行、遍历和 World 之间保留：`Value`。 |
@@ -173,6 +174,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `[ForEach]` / `[ForEntity]` 方法或 lambda 遍历的 `[View]` 参数 | 同把这些组件直接当参数 | job 在行上构造视图（每个字段一个 ref，不拷贝）；`ref` 字段算系统的写（被追踪的组件每个访问过的行都打 tick），`Mut<T>` 字段算只在写过的行上打 tick 的写（没有向量循环），`ref readonly` 字段算读；调用视图成员的方法，和把同样代码写在参数上一样能得到向量循环（成员被内联）；接收视图的 lambda 遍历保留标量循环；同一组件被访问两次报 EECS099 |
 | `[View]` 生成的 `entity.AsX()` / `TryGetX(out X)` | O(字段数) | 每个字段一个 ref（`ref` 用 `Get`，`ref readonly` 和 `Mut<T>` 用 `Read`，`Mut<T>` 的写入会打 tick）；缺组件或实体不存活时 `AsX` 抛异常，`TryGetX` 返回 false；不是结构变更 |
 | `[ForEach, Consume]` | 遍历本身，之后 O(M + S)：一次 `DestroyAll`（整张表一起释放）或每行一次销毁 | 遍历结束时销毁访问过的行：方法不做结构变更时按它的过滤条件做一次 `DestroyAll`，否则在方法处理完每一行后销毁那一行；遍历期间才开始匹配的行保留；批量销毁的遍历抛异常时什么也不销毁；所在的系统独自运行；不能和 `Slices` 一起用（EECS085） |
+| `[ForEach]` 成对方法（`[Neighbor]` 参数） | 每次遍历 O(N + M) 画出窗口的包围盒，有窗口离开包围盒时 O(W log W + 窗口对数)，之后 O(截断距离内的对数) 次调用，方法符合条件时每次调用处理一个向量的行；N、M = 行数和邻居数，W = 每 `Vector<float>.Count` 行一个的窗口数 | 行和邻居的距离通过方法的截断判断（每行一个或统一一个）的每一对都运行，包括行自己的实体；每个通道按查询顺序遇到邻居的表、按行的顺序遇到它们的行，所以向量循环和逐对运行的方法逐位相同；第一次遍历让被比较组件的表排序（判断用到的轴上的 Morton 码）；单线程，所在的系统独自运行；预热后不分配 |
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
 | 带向量循环的 `[ForEach]` 方法（生成的，[向量循环](/zh/docs/guide/systems#vector-loops)） | O(M + S / L + 段数)，L = 每个向量的行数（先 `Vector512`，再 `Vector<T>`；按通道大小和 CPU，2 到 64） | 行、结果（`FloatMode.Fast` 之外）、变更 tick 和读写都和逐行运行的方法相同；每段先广播一次统一值，不足 L 行的尾部由方法自己跑；单线程时按 `ForEachMasked` 运行（只有部分行通过的字，每 L 行一个带掩码的向量），并行时按 `ForEachBatchParallel` 跑每块里连续的行；2 到 4 个字段的组件每个向量多一次解交错加载和一次交错存储（没有 AVX2 或 AVX-512 时每行都由方法跑）；`Reduce<T>` 每条通道每个字段一个累加器，每段合并一次；零分配 |
 | `world.ForEachMasked<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数 + 部分通过的字数) | 同 `ForEachBatch`，但只有部分行通过的 64 行字整个交给 job，通过的行记成位（`IForEachMasked`），不再按每一段通过的行各调一次；全部通过的字并进连续段 |

@@ -333,7 +333,8 @@ public static partial class EasyEcsAnalyzer
         foreach (var p in method.Parameters)
         {
             var kind = Symbols.Classify(p, outside);
-            if (kind is Symbols.ParamKind.Invalid or Symbols.ParamKind.Context) continue;
+            // A [Neighbor] component the body never names says which entities are neighbors: it is their filter.
+            if (kind is Symbols.ParamKind.Invalid or Symbols.ParamKind.Context or Symbols.ParamKind.Neighbor) continue;
             var location = p.Locations.FirstOrDefault();
             var component = Symbols.QueriedComponent(p);
             // Excluded by the method's filters too: EECS016 or EECS049 says the method never runs, the cost is moot.

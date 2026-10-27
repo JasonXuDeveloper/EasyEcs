@@ -28,7 +28,7 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                neighbors within a cutoff: a grid read through lookups, a grid of copies, neighbor lists,
                                the cluster-pair kernel over Morton-sorted blocks with its sort every 1 / 10 / 20 ticks;
                                Locality/Crowd.cs; the same kernel on the core's order and blocks, 8, 4 or 16 wide:
-                               Locality/CoreClusters.cs), NearestZombie / NearestPlayer (the samples' nearest searches against a
+                               Locality/CoreClusters.cs; the generated pair method, vector loop and one pair at a time: Locality/CrowdPairs.cs), NearestZombie / NearestPlayer (the samples' nearest searches against a
                                search of sorted blocks; Locality/Nearest.cs, Locality/SortedBlocks.cs: the Morton sort,
                                blocks of 8 with boxes, the box tree), Compress (a mask to a row list: branch, branchless,
                                AVX2 permutation table, 128-bit shuffle table (NEON TBL / PSHUFB), AVX-512 compress,

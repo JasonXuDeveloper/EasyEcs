@@ -117,6 +117,24 @@ using (var crowd = new World())
     Check(blocks > 0 && pairs >= blocks, "an ordered table's blocks and block pairs");
 }
 
+// A pair method: the generated order (Morton keys of the neighbors' tables), the pair lists and the vector loop of a
+// window of rows against each neighbor, in native code; each row counts the others within 1.5 of it.
+using (var flock = new World())
+{
+    for (int i = 0; i < 200; i++) flock.CreateEntity(new Bird(i % 20, i / 20), new Near());
+    Flock.Count(flock);
+    bool right = true;
+    foreach (var item in flock.Query<Bird, Near>())
+    {
+        var (x, y) = (item.Bird.X, item.Bird.Y);
+        int expected = (x > 0 ? 1 : 0) + (x < 19 ? 1 : 0) + (y > 0 ? 1 : 0) + (y < 9 ? 1 : 0)
+                       + (x > 0 && y > 0 ? 1 : 0) + (x < 19 && y > 0 ? 1 : 0) + (x > 0 && y < 9 ? 1 : 0) + (x < 19 && y < 9 ? 1 : 0);
+        right &= item.Near.Value == expected;
+    }
+
+    Check(right, "a pair method counts each row's neighbors");
+}
+
 Console.WriteLine($"AOT battle: {battle.Tick} ticks, {battle.Hits} hits, {battle.Deaths} deaths, {server.World.EntityCount} entities");
 return 0;
 
@@ -131,6 +149,20 @@ partial record struct Spot(float X, float Y) : IComponent
 {
     [OrderBy(nameof(X), nameof(Y))]
     public readonly uint Cell => (uint)X << 16 | (uint)Y;
+}
+
+record struct Bird(float X, float Y) : IComponent;
+record struct Near(int Value) : IComponent;
+
+static class Flock
+{
+    [ForEach]
+    public static void Count(in Bird p, ref Near near, [Neighbor] in Bird q)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= 1.5f * 1.5f || d2 == 0) return;
+        near.Value++;
+    }
 }
 
 partial record struct Badge([UniqueKey] int Id) : IComponent;

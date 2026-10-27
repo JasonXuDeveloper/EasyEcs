@@ -43,6 +43,9 @@ code duplicated across projects, a project reaching into another's internals.
 - **Fast and simple together**: a simplification that costs speed is not one; a fast path that duplicates a slow one
   should share its core.
 
+- **tools/Inlining** runs each benchmark method once: it reads `[Params]` and `[ParamsSource]` (a gate parameter is a
+  `[ParamsSource]`); a benchmark shape it cannot run is a gap in the tool, fixed there.
+
 ## Exemplar pass (before every docs pass)
 
 Users copy what they read, so once a round's features have merged, every piece of code users read is rewritten in the

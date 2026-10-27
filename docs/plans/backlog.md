@@ -74,6 +74,15 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        ARM64 (owner's M4 run, `locality.md` 6.1a): crowded maps 2-8x, sparse maps only 1.1-2.1x while neighbor lists
        reach 2.5-3.4x: L2 ships clusters there too (faster is kept, owner) and optimizes: 4-row blocks and the
        neighbor-list form on ARM64, picked by density; never a slower case (no re-sort every tick on sparse maps).
+       **Built on `feat-locality-pairs`** (`locality.md` 6.6): `[Neighbor]`, the pass, the generated order / job / vector
+       loop, EECS105-107, cutoff per row, two kinds of entity, ties and the keep-target hint. Open: the spread-map nearest
+       re-measure, the ARM64 neighbor-list form by density, writes to j (Pickup), parallel pair passes, the EECS107 fix,
+       nested-walk rewrites, Lookup gathers under Auto. L4 (examples) moved to the finish phase (docs-todos).
+       Follow-up after L2 merges (owner, 2026-10-27: "cluster pairs + prefetch, faster?"): prefetch the j block of the
+       pair `k` pairs ahead (its rows' lines of every column the pair method reads) behind the same `LastLevelCache`
+       gate as item 6; i blocks are sequential and need none. Expected to pay only when the ordered table is past the
+       last-level cache (this machine's L3 is 260 MiB: PairsBenchmark at 4M-16M rows, plus a forced-on column just
+       under the cache); ships only if faster there and never slower in the cache (`audit-perf`, two rounds, 0 B).
 2. [x] **ARM64 parity of the generated forms** (merged 186c84d): LD2-4 / ST2-4 for multi-field components, NEON TBL /
        TBX for wide components (a gate per form), BitMask in registers, the `arm64` CI job asserting loop lines.
        Owner's M4 run (default job, one round): SteerGenerated 2.07x faster than SteerScalar at 1k, 1.55x at 100k;
@@ -93,11 +102,11 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 4. [ ] **G1** (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
        implementation-only body facts; SystemUpdates without Collect; SetFusions reruns; Systems / SystemPlaces share
        one FAWMN; Kernel's GetSemanticModel calls. G6 (C# 14 extension lookup cost) research only.
-5. [ ] **Generated code tuned for the machine** (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
+5. [ ] **Generated code tuned for the machine** (running: worktree agent, branch `feat-microarch`) (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
        accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
        prefetch / streaming stores.
-6. [ ] **Prefetched lookup chases with a size gate** (`feat-prefetch-gate`: row and vector forms; `feat-prefetch-all`,
-       ready to merge: index probes, relation targets, parallel row methods, fused walks and pairs, lambda passes,
+6. [x] **Prefetched lookup chases with a size gate** (`feat-prefetch-gate`: row and vector forms; `feat-prefetch-all`,
+       merged at bbd5c8a; its SVE path is first proven by the arm64 CI job, qemu could not: index probes, relation targets, parallel row methods, fused walks and pairs, lambda passes,
        `World.DestroyEntities`' id list, SVE's PRFB on ARM64; `borrowed-ideas.md` 5, item 1; decision drafts and docs
        to-dos in `docs-todos.md`, "feat-prefetch-all"). The owner's rule "a faster case ships, a slower one never":
        16M 1.28-1.77x across the forms (a shared key's Count 1.04-1.19x), in the cache today's code. A pass prefetches
@@ -109,6 +118,13 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        Left, the owner's: `LookupChaseGateBenchmark` and the prefetch classes on a 32 MiB-LLC x86 box; the M4's
        loads-ahead pair (`LookupChaseLoadAheadBenchmark`, below); approve the hidden names `LookupExtensions.Probes`
        and `LookupExtensions.PrefetchKey`; a gate per form on the L2 (`owner-review.md`).
+   The owner's answers (2026-10-27): the hidden names `LookupExtensions.Probes` / `PrefetchKey` stay; SVE's PRFB stays
+   and the owner runs the CI workflow by hand on the work branch (its arm64 job is the proof; if it fails,
+   `Prefetching.IsSupported` keeps x86 only); **a gate per form now** (next code item, `audit-perf`): fused walks,
+   `DestroyEntities`' id list, parallel probes and buffer chases open past the L2 (forced on at 1M here: 18.1 -> 11.5,
+   3.96 -> 3.02, 5.54 -> 4.92, 41.6 -> 39.3 ms), plain probes keep the last-level gate (20.1 -> 23.0 ms forced on);
+   the L2 size read like the LLC (sysfs index2, `GetLogicalProcessorInformationEx`, `hw.perflevel0.l2cachesize`);
+   proven per form at the size between the L2 and the LLC, nothing slower in the L2.
    ARM64 without SVE (the M4; owner, 2026-10-26: "is there another instruction or the TLB instead?"): .NET 10 exposes
    no PRFM (only SVE's PRFB/PRFD, and the M4 has SVE in streaming mode only), so the candidate is a plain load issued
    ahead (`Locality/Chase.cs` `LoadAhead`: the record of row i + k loaded into a ring, the row touched from it k / 2

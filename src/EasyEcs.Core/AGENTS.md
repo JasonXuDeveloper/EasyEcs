@@ -139,6 +139,12 @@ RowOrder.cs                  ordered tables: IRowOrder<T> (a key and a box point
                              where a row moves in, reset by a restore)
 RowBlocks.cs                 RowBlocks: the read path of one ordered table (blocks, boxes per axis, columns, ids,
                              Pairs: the block pairs within a reach, a sweep) and BlockPair
+Pairs.cs                     [Neighbor] (a pair method's other entity) and the pass of a pair method: IPairJob (the
+                             generated job: the cutoff, per row or one, and its run over a table against another),
+                             PairRun (one table against one: windows of Vector<float>.Count rows, their lane masks,
+                             the CSR row ranges of the neighbors' windows), World.ForPairs (the order requested once,
+                             then PairState: window boxes drawn every pass and checked against the kept ones widened
+                             by an adaptive margin, a sweep of the boxes widened by the windows' reach when one left)
 World.Order.cs               OrderRows<T, TOrder> (the request generated setup makes), the cadence (SortDue from
                              World.Run), SortRows<T>, Blocks<T> (OrderedTables)
 Cleanup.cs                   ICleanupComponent + Retired tag (entities kept alive until their cleanup components go)
