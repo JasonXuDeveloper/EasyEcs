@@ -11,8 +11,11 @@ namespace VoxelServer;
 // the chunks of parallel passes (the world measures its systems on whichever thread runs them). A restore keeps the
 // lists, tables and indexes the rehearsal grew, and every pool keeps what it was given back, so the replay allocates
 // nothing; a byte that does fails the run. The helper threads are a fixed set, and what one sets up for a method (a
-// tile's texture) they all have, so it does not matter which of them runs what. Not counted: the runtime's own threads
-// (the JIT compiles a method that turned hot on a thread of its own, and may allocate doing so).
+// tile's texture) they all have, so it does not matter which of them runs what. There are two rehearsals: a capture
+// leaves the world's buffers sharing their lists with the snapshot until written, and a restore gives the rows written
+// since lists of their own, so the first run after the capture starts from other rows than every run after it. Not
+// counted: the runtime's own threads (the JIT compiles a method that turned hot on a thread of its own, and may
+// allocate doing so).
 public static class Steady
 {
     public const int Ticks = 5 * Rules.TicksPerSecond;
@@ -23,7 +26,7 @@ public static class Steady
         using var files = new RegionFiles(capacity.Chunks * 4);
         regions.CopyTo(files);
         long allocated = 0;
-        for (int round = 0; round < 2; round++)        // the rehearsal, then the replay
+        for (int round = 0; round < 3; round++)        // the rehearsals, then the replay
         {
             files.CopyTo(regions);
             world.Restore(snapshot);
