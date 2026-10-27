@@ -82,7 +82,7 @@ EECS076（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS051](#eecs051) | 错误 | 遍历进行中不更新 World | |
 | [EECS052](#eecs052) | 警告 | 新实体的组件在创建时就给出 | 创建时带上组件 |
 | [EECS053](#eecs053) | 警告 | 只在部分行上写入的追踪变化组件用 `Mut<T>` | `Mut<T>` |
-| [EECS054](#eecs054) | 错误 | `ChunkRows` 不小于 0，且只用于并行方法 | 去掉 `ChunkRows` |
+| [EECS054](#eecs054) | 错误 | `ChunkSize` 不小于 0，且只用于并行方法 | 去掉 `ChunkSize` |
 | [EECS055](#eecs055) | 信息 | 数值组件的 `[ForEach]` 方法得到向量循环 | |
 | [EECS056](#eecs056) | 错误 | `SimdMode = SimdMode.Require` 只用于符合条件的方法 | |
 | [EECS057](#eecs057) | 错误 | 归约的单例每遍只写一次 | |
@@ -1609,9 +1609,9 @@ public ref struct RespawnSystem
 
 ## EECS054 [#eecs054]
 
-**不合法的 `[ForEach(ChunkRows = N)]`。** 错误。代码修复：去掉 `ChunkRows`；之前跳过这个方法的生成器会重新生成它。
+**不合法的 `[ForEach(ChunkSize = N)]`。** 错误。代码修复：去掉 `ChunkSize`；之前跳过这个方法的生成器会重新生成它。
 
-`ChunkRows` 是[并行方法](/zh/docs/guide/threading#chunk-rows)的一个线程每次取的行数：0 表示由运行时按测得的每行开销决定，大于 0 则指定
+`ChunkSize` 是[并行方法](/zh/docs/guide/threading#chunk-rows)的一个线程每次取的行数：0 表示由运行时按测得的每行开销决定，大于 0 则指定
 （向上取整到 64）。没有 `Parallel = true` 的方法只在一个线程上跑，没有块可言；负数没有意义。
 
 ```csharp tab="报告" doccheck=expect-EECS054
@@ -1620,7 +1620,7 @@ public ref struct PlanRoutes
 {
     const int Steps = 4_096;
 
-    [ForEach(ChunkRows = 64)]   // 单线程：没有块可设大小
+    [ForEach(ChunkSize = 64)]   // 单线程：没有块可设大小
     static void Plan(in Position from, ref Velocity heading)
     {
         float x = from.X;
@@ -1636,7 +1636,7 @@ public ref struct PlanRoutes
 {
     const int Steps = 4_096;
 
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Plan(in Position from, ref Velocity heading)
     {
         float x = from.X;
@@ -1646,7 +1646,7 @@ public ref struct PlanRoutes
 }
 ```
 
-改成并行（像这里，几百行重活），或者去掉 `ChunkRows`。轻量的行两者都不需要：保持默认的块（[什么时候设](/zh/docs/guide/threading#chunk-rows)）。
+改成并行（像这里，几百行重活），或者去掉 `ChunkSize`。轻量的行两者都不需要：保持默认的块（[什么时候设](/zh/docs/guide/threading#chunk-rows)）。
 
 ## EECS055 [#eecs055]
 
@@ -1913,7 +1913,7 @@ public ref struct TakeHits
 
 ## EECS061 [#eecs061]
 
-**并行 job 的字段在遍历之后被读取。** 警告。代码修复：在调用没有传 `chunkRows` 时，改成在一个线程上运行这个 job（`ForEach` /
+**并行 job 的字段在遍历之后被读取。** 警告。代码修复：在调用没有传 `chunkSize` 时，改成在一个线程上运行这个 job（`ForEach` /
 `ForEachEntity` / `ForEachBatch`）；`ForParallel` 没有对应的单线程调用，不提供修复。
 
 `ForEachParallel`、`ForEachEntityParallel`、`ForEachBatchParallel` 和 `world.ForParallel` 给每一块运行一个 job 副本，什么都不合并回来：按 `ref` 传入的 job 保持调用之前的值。

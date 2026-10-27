@@ -132,7 +132,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D127](#d127-math-lowerings) | Vector loops lower integer division and the math .NET has vectors for, exactly unless `FloatMode.Fast` |
 | [D128](#d128-spin-gates-and-settled-measurements) | Parallel work's queue and pools take a spin gate; allocation tests measure once no background collection runs |
 | [D129](#d129-lookup-key) | `[IndexKey]` is `[LookupKey]` |
-| [D130](#d130-measured-chunks) | Parallel passes cut chunks by the rows' measured cost; `ChunkRows` only overrides it |
+| [D130](#d130-measured-chunks) | Parallel passes cut chunks by the rows' measured cost; `ChunkSize` only overrides it |
 | [D131](#d131-lookup-gathers) | Vector loops gather other entities' fields when the method asks for it (`SimdMode.Require`) |
 | [D134](#d134-eecs103) | EECS103: a batch method's hand-written vector loop is reported with the method for one row |
 | [D135](#d135-inlined-locals) | Generated jobs stay within the inliner's 32 IL locals; loops past it run as methods per width |
@@ -1626,7 +1626,7 @@ unreported ([D46](#d46-mut-stamps-per-write)); batch methods are left out.
 
 ## D67. Chunk size for few heavy rows [#d67-chunk-rows]
 
-**Decision.** `[ForEach(Parallel = true, ChunkRows = n)]` (and `chunkRows:` on the parallel calls) sets the rows a
+**Decision.** `[ForEach(Parallel = true, ChunkSize = n)]` (and `chunkSize:` on the parallel calls) sets the rows a
 thread claims at a time, rounded up to 64; without it the runtime keeps choosing (about four chunks per thread, at
 least 1,024 rows, 4,096 when the method writes a tracked component). Chunks of a stamping pass may split a 4,096-row
 block of change ticks: before the pass, the blocks it covers are opened at its tick (`Rest` takes the previous latest,
@@ -1654,7 +1654,7 @@ block of change ticks: before the pass, the blocks it covers are opened at its t
   together without a loop or a sentinel; opening the blocks before the pass needs neither.
 - **Per-thread block summaries merged after the pass:** an array per thread and a merge per pass, for what one
   atomic OR per 64 rows already gives.
-- **Guided scheduling** (chunks that shrink as the pass ends): the adaptive runner and `ChunkRows` cover the cases
+- **Guided scheduling** (chunks that shrink as the pass ends): the adaptive runner and `ChunkSize` cover the cases
   measured so far.
 
 ## D68. Vector loops without opting in [#d68-vector-loops-without-opting-in]
@@ -1778,7 +1778,7 @@ and fixes too, and left them out.
   work per row at run time, which the analyzer cannot see; the runner already runs a small pass on the caller
   (adaptive helper waking). The cost rule of [D29](#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)
   (only a measured cost) excludes it.
-- **`ChunkRows` that is not a multiple of 64:** the runtime rounds it up to 64 for free
+- **`ChunkSize` that is not a multiple of 64:** the runtime rounds it up to 64 for free
   ([D67](#d67-chunk-rows)), so the code works as written; a rule would only ask for the rounding by hand.
 - **`Math` to `MathF` on floats:** for `Sqrt`, `Abs`, `Min` and `Max` both are exact, so nothing is gained; for the
   transcendental functions (`Sin`, `Exp`, `Pow`) `MathF` returns different, less precise results, so the fix would
@@ -1793,7 +1793,7 @@ and fixes too, and left them out.
 ## D71. Unique keys inline, and direct-mapped keys [#d71-direct-index]
 
 **Decision.** A unique index keeps each key's one entity inline in the key's head, with no id array per key. A unique
-component whose keys map onto a bounded range of slots may declare `IDirectIndexed<TKey>` (`static Slots`,
+component whose keys map onto a bounded range of slots may declare `IDirectMapped<TKey>` (`static Slots`,
 `static SlotOf(key)`): its index keeps an array of `Slots` entries beside the hash, each holding a key and its
 entity, so `Get`, `TryGet` and the uniqueness check of a write read one entry. A key whose slot is out of range or
 held by another key is found through the hash, which stays the index for `Find`, `Count` and the ordered walks. The
@@ -1835,11 +1835,11 @@ updates it needs.
 
 ## D73. Survey items not added [#d73-survey-items-not-added]
 
-**Decision.** The survey that added `IDirectIndexed<TKey>`, `CollectIds` and the whole-word `SetAll` measured these
+**Decision.** The survey that added `IDirectMapped<TKey>`, `CollectIds` and the whole-word `SetAll` measured these
 changes to the voxel server and the core too, and left them out.
 
 **Considered and dropped.**
-- **A chunk grid beside the unique index:** superseded by `IDirectIndexed<TKey>` ([D71](#d71-direct-index)), which
+- **A chunk grid beside the unique index:** superseded by `IDirectMapped<TKey>` ([D71](#d71-direct-index)), which
   reads as fast and is kept by every write.
 - **Writing the voxel server's `InChunk` only when an entity's chunk changed:** the difference stayed within noise.
 - **Copying presence bits a word at a time** instead of bit by bit: contradictory A/B runs (faster in one, slower in
@@ -2028,7 +2028,7 @@ reports a shape a tile cannot hold, EECS073 two tiles of one cell type in one me
   them, two rounds): searching the index 147–159 µs, a direct-mapped key 107 µs, ids read from a component 1.4–1.5 µs
   at 1 thread (60–66, 46–48 and 2.8–2.9 µs at 4). Not built: in a stencil pass the search is about a fifth of the
   cost, and a cache needs per-entity state outside the tables and an invalidation on every create, destroy and key
-  change; a key that implements `IDirectIndexed<TKey>` makes each search an array read without one.
+  change; a key that implements `IDirectMapped<TKey>` makes each search an array read without one.
 - **The neighbor search unrolled for every neighborhood (each of the 26 slots a constant):** tried and dropped.
   `TileNeighborBenchmark` at 1 thread, two rounds against three of the loop over the slots: searching the index
   148–154 µs against 166–173 µs, but a direct-mapped key 127 µs against 117–123 µs (the unrolled body outgrows what an
@@ -2507,7 +2507,7 @@ call changes.
   `MinValue` or -∞, `true`, `false`) and `Combine`, field by field.
 - **A key or a group:** `[LookupKey]` or `[UniqueKey]` on a member (`[LookupKey]` on the type for the value itself), and
   `[Group]` on an `int` or enum member. The generator adds `IIndexed<TKey>`, `IUniqueIndexed<TKey>` or `IGroup` with an
-  explicit `Key` or `Group`, unless an interface the struct declares brings it (`IDirectIndexed<TKey>` keeps its
+  explicit `Key` or `Group`, unless an interface the struct declares brings it (`IDirectMapped<TKey>` keeps its
   `Slots` and `SlotOf`).
 - **World setup:** `[GroupBy]`, `[WhenTargetDestroyed(policy)]` and `[NotSaved]` are registered when the module loads.
   Every world applies them from its first table holding the type. A world's own `GroupBy` or `WhenTargetDestroyed`
@@ -3151,7 +3151,7 @@ public ref struct DyingSystem
 
 ## D125. Passes that merge per chunk cut 16 chunks; the helpers' spin, the partitioner and the chunk size stay as they were [#d125-scheduler-tuning]
 
-**Decision.** A parallel pass that merges per chunk (a `Reduce<T>`, an `Emit<T>`) and sets no `ChunkRows` cuts its
+**Decision.** A parallel pass that merges per chunk (a `Reduce<T>`, an `Emit<T>`) and sets no `ChunkSize` cuts its
 rows into 16 chunks of 1,024 to 16,384 rows, from the row count alone; the threads only share them out. Other passes
 keep about four chunks per thread. Four scheduler changes were measured and left out: helpers that spin only while
 work is near, one spinning helper at a time, an affinity partitioner, and a tuner of the chunk size.
@@ -3192,7 +3192,7 @@ work is near, one spinning helper at a time, an affinity partitioner, and a tune
   thread, and `RunnerBenchmark.HandWrittenJob` 48, 46 -> 55, 54 µs. It could not try chunks under 1,024 rows, the
   floor of the default; a tuner that does would pick from rows (64 to 16,384) instead of chunks per thread, only for
   passes that do not merge (their boundaries must not move), and a pass that stamps a tracked component below 4,096
-  rows opens its blocks first, as `ChunkRows` already does ([D67](#d67-chunk-rows)). [D130](#d130-measured-chunks)
+  rows opens its blocks first, as `ChunkSize` already does ([D67](#d67-chunk-rows)). [D130](#d130-measured-chunks)
   cuts by the measured time per row instead.
 
 ## D126. Vector loops: flat lanes for element-wise passes, the masked form starts from the rows that pass [#d126-loop-shape]
@@ -3396,22 +3396,22 @@ generated members (`world.XIndex`, `IIndexed<TKey>.Key`) and the index types do 
 - **An `[Obsolete]` alias:** pre-1.0, as in D54, D64 and D100: the compiler finds every use and the code fix
   rewrites it.
 
-## D130. Parallel passes cut chunks by the rows' measured cost; `ChunkRows` only overrides it [#d130-measured-chunks]
+## D130. Parallel passes cut chunks by the rows' measured cost; `ChunkSize` only overrides it [#d130-measured-chunks]
 
 **Decision.** A parallel pass (a `[ForEach(Parallel = true)]` method, `ForEachParallel`, `ForParallel`) that sets no
-`ChunkRows` cuts its chunks from the time its rows took. Each pass keeps a moving average of thread time per row,
+`ChunkSize` cuts its chunks from the time its rows took. Each pass keeps a moving average of thread time per row,
 from the runs it already times to choose between helpers and the caller alone, and from one run in 16 of a pass that
 runs as one chunk; the first timed run is dropped (cold). From it: four chunks per thread, unless that makes chunks
 longer than 25 µs (heavy rows: chunks of 25 µs, at most 64 per thread) or shorter than 5 µs (a short pass: chunks of
 5 µs, one on the caller when the whole pass is shorter), a multiple of 64 rows. Before the first measurement the
 count rule decides (four per thread, 1,024 to 16,384 rows). A pass that merges per chunk keeps 16 chunks by count
-([D125](#d125-scheduler-tuning)): its chunk boundaries must not follow timing. `ChunkRows` stays as an override; a
-stamping pass whose measured chunks are under 4,096 rows opens its blocks, as `ChunkRows` does
+([D125](#d125-scheduler-tuning)): its chunk boundaries must not follow timing. `ChunkSize` stays as an override; a
+stamping pass whose measured chunks are under 4,096 rows opens its blocks, as `ChunkSize` does
 ([D67](#d67-chunk-rows)).
 
 **Why.**
 - **The row count did not know the rows' cost.** A few hundred rows of microseconds each (a chunk of terrain, a path
-  search) made one chunk of the 1,024-row floor and ran on one thread unless the user found `ChunkRows`; uneven rows
+  search) made one chunk of the 1,024-row floor and ran on one thread unless the user found `ChunkSize`; uneven rows
   (an eighth costing 64 times the rest, all in one place) left threads idle behind the chunk holding them. The cost
   is already measured (the runner times every run it samples), so the chunk size costs one division per pass.
 - **Measured, BDN, two rounds, base / new, 4 threads, load 1.6 to 3.4, 0 B both** (`ChunkRowsBenchmark`, a parallel
@@ -3444,7 +3444,7 @@ stamping pass whose measured chunks are under 4,096 rows opens its blocks, as `C
 - **Static priors** (bytes per row, a vector loop or a scalar one, the generator's estimate of a method's cost): the
   measured cost replaces any guess after one run, and the first run keeps the count rule, so they would only change
   the first pass.
-- **Dropping `ChunkRows`:** it stays for a pass that knows better than one run's average (rows whose cost changes
+- **Dropping `ChunkSize`:** it stays for a pass that knows better than one run's average (rows whose cost changes
   from tick to tick). EECS054 still reports an invalid one (negative, or on a method that is not parallel); its
   description says 0 lets the runtime choose from the measured cost.
 

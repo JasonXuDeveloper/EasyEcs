@@ -85,7 +85,7 @@ From each package's public API and the comparison ports, which compile against t
 | Hierarchy | ✅ `ChildOf`, `Children`, cascading destroy | ✅ `AddChild`, `ChildEntities` | ❌ | ❌ |
 | Disable a component, keep its value | ✅ `Disable<T>()` / `Enable<T>()` | ⚠️ whole entity (`Enabled`) | ❌ | ⚠️ whole entity, or a component (`Disable<T>()`) |
 | Parallel systems | ✅ conflict-free stages from generated access | ❌ | ❌ | ✅ `ParallelSystem<T>` (you keep them independent) |
-| Parallel query | ✅ `[ForEach(Parallel = true)]`, analyzer-checked, chunks claimed dynamically (`ChunkRows`) | ✅ `QueryJob`, `ParallelJobRunner` | ✅ `InlineParallelQuery`, `JobScheduler` | ✅ `DefaultParallelRunner` |
+| Parallel query | ✅ `[ForEach(Parallel = true)]`, analyzer-checked, chunks claimed dynamically (`ChunkSize`) | ✅ `QueryJob`, `ParallelJobRunner` | ✅ `InlineParallelQuery`, `JobScheduler` | ✅ `DefaultParallelRunner` |
 | Snapshots in memory | ✅ `Capture` / `Restore` | ❌ | ❌ | ❌ |
 | Saves | ✅ binary `Save` / `Load` (Nino) | ✅ JSON | ❌ in core (Arch.Persistence) | ✅ text and binary |
 | Move entities to another world | ✅ `MoveEntities`, `SaveEntities` / `LoadEntities` | ✅ `CopyEntity` | ❌ | ✅ `CopyTo(world)` |

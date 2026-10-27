@@ -38,7 +38,7 @@
       默认 1：每次运行访问每一行。
     </summary>
   </member>
-  <member name="P:EasyEcs.ForEachAttribute.ChunkRows" source="6fbe89e708ee">
+  <member name="P:EasyEcs.ForEachAttribute.ChunkSize" source="6fbe89e708ee">
     <summary>
       与 <see cref="P:EasyEcs.ForEachAttribute.Parallel" /> 一起用：一个线程每次取的行数，向上取整到 64 的倍数（相当于 OpenMP 的
       <c>schedule(dynamic, n)</c>）。默认由运行时按每次遍历测得的行开销决定：每个线程大约四块；行很重时每块约 25 µs

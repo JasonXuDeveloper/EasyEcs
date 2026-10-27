@@ -82,7 +82,7 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
 - 内置 `Meter`：数据都在 `SystemStats` 里，发布出去是文档里给出的宿主写法，EasyEcs 不必依赖指标库
   （[D51](/zh/docs/decisions#d51-not-added)）。
 - World 校验和：对 `world.Save` 的输出做哈希，用户代码里就能做，不必给所有人定死一种算法（[D51](/zh/docs/decisions#d51-not-added)）。
-- 唯一索引旁边的地形网格、只在变化时才写 `InChunk`、按位字拷贝存在位、只拷贝变化过的边的光环：测过，没有净收益，或者被 `IDirectIndexed<TKey>`
+- 唯一索引旁边的地形网格、只在变化时才写 `InChunk`、按位字拷贝存在位、只拷贝变化过的边的光环：测过，没有净收益，或者被 `IDirectMapped<TKey>`
   和推送光环的设计取代（[D73](/zh/docs/decisions#d73-survey-items-not-added)）。
 - 网格瓦片的生成式逐格内核：字节运算会提升成 `int`，模板又按行归约；瓦片负责加载光环，规则留在方法里（[D77](/zh/docs/decisions#d77-tiles)）。
 - 网格模板一次加载走多步（时间分块）、沿 y 的滑动窗口、缓存瓦片的邻居：测过，在装得进缓存的网格上更慢，或不值得为它加每实体状态

@@ -217,9 +217,9 @@ catch (InvalidOperationException)
 生成器看不到的唯一组件（运行时才闭合的泛型组件），第一次写入会抛 `InvalidOperationException`，直到在任意一个 World 里调用一次
 `world.Index<T, TKey>()` 完成登记。
 
-#### 直接映射的键：`IDirectIndexed<TKey>` [#direct-index]
+#### 直接映射的键：`IDirectMapped<TKey>` [#direct-index]
 
-能映射到一小段有界槽位上的唯一键（玩家周围的格子或地形、房间、座位、小 id），查找时可以不走哈希。实现 `IDirectIndexed<TKey>`
+能映射到一小段有界槽位上的唯一键（玩家周围的格子或地形、房间、座位、小 id），查找时可以不走哈希。实现 `IDirectMapped<TKey>`
 而不是 `IUniqueIndexed<TKey>`，写明有多少个槽位、每个键落在哪个槽位：索引在哈希旁边多存一个槽位数组，`Get`、`TryGet` 和每次写入的唯一性检查
 都只读一个数组元素。哈希仍然是索引本身：槽位超出范围、或者槽位被别的键占着（冲突）的键通过哈希找到，`Find`、`Count` 和有序遍历也和
 其他唯一索引一样。
@@ -248,13 +248,13 @@ catch (InvalidOperationException)
 />
 
 ```csharp
-public record struct Tile(int X, int Y) : IComponent, IDirectIndexed<(int, int)>
+public record struct Tile(int X, int Y) : IComponent, IDirectMapped<(int, int)>
 {
     public (int, int) Key => (X, Y);
 
     // 同时加载的格子彼此相距不到 64，所以坐标对 64 取模，每个格子都有自己的槽位。
-    static int IDirectIndexed<(int, int)>.Slots => 64 * 64;
-    static int IDirectIndexed<(int, int)>.SlotOf((int, int) key) => (key.Item2 & 63) * 64 + (key.Item1 & 63);
+    static int IDirectMapped<(int, int)>.Slots => 64 * 64;
+    static int IDirectMapped<(int, int)>.SlotOf((int, int) key) => (key.Item2 & 63) * 64 + (key.Item1 & 63);
 }
 ```
 
@@ -570,7 +570,7 @@ arrows left after the archer died: 0
 | 键没变也调用 `Set` | `unit.SetZoneIfChanged(id)`，或者先比较 | 键不变的 `Set` 不会重新链接，但仍是一次写入 |
 | 扫描比较键 | `Find(key)` / `Count(key)` | O(1)，之后每个匹配 O(1) |
 | 自己维护“键 → 实体”的字典，每次写入前手动检查 | `IUniqueIndexed<TKey>`，`Get` / `TryGet` | 每次写入一次哈希探测，所有写入路径都会检查 |
-| 在唯一索引旁边手写一个实体 id 网格 | [`IDirectIndexed<TKey>`](#direct-index) | 每次查找读一个数组元素，每次写入都会维护，背后还有哈希 |
+| 在唯一索引旁边手写一个实体 id 网格 | [`IDirectMapped<TKey>`](#direct-index) | 每次查找读一个数组元素，每次写入都会维护，背后还有哈希 |
 | 每个 tick 给查询结果排序 | `Range` / `Descending` | 键在变化时一直保持有序 |
 | 整组遍历很多大键 | [`GroupBy`](/zh/docs/guide/groups) | 同组的行连续存放在自己的表里 |
 
@@ -616,7 +616,7 @@ arrows left after the archer died: 0
 | 唯一键已被别的实体持有 | 抛 `InvalidOperationException`，什么也不改 | 运行时：先 `TryGet`，或者先从原持有者手里移走 |
 | 还没从原持有者手里拿走，就把唯一键给了新持有者 | 抛 `InvalidOperationException` | 先改原持有者 |
 | 对带唯一键的实体 `Clone`、`CreateEntities` 或 `Instantiate(prefab, span)` 多个 | 抛 `InvalidOperationException`：副本会共用这个键 | 每个实体给自己的键 |
-| 稀疏的键或很大的范围（账号 id）用 `IDirectIndexed<TKey>` | 槽位数组和范围一样长、大部分是空的，或者大部分键冲突 | 用普通的 `IUniqueIndexed<TKey>` |
+| 稀疏的键或很大的范围（账号 id）用 `IDirectMapped<TKey>` | 槽位数组和范围一样长、大部分是空的，或者大部分键冲突 | 用普通的 `IUniqueIndexed<TKey>` |
 | 同时持有的键会冲突的槽位函数（取模比已加载区域还小） | 查找都走哈希：没有收益 | 让 `Slots` 覆盖 World 同时持有的键 |
 | `IUniqueIndexed<EntityId>`，或唯一组件另带第二种键类型 | 编译错误 | [EECS036](/zh/docs/guide/analyzer#eecs036)：链接用 `IIndexed<EntityId>` |
 | 对称链接只写了一边 | 一个玩家是对方的好友，反过来却不是 | 用一个辅助方法同时写两边（[对称关系](#symmetric-relations)） |

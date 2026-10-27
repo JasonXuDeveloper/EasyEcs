@@ -59,11 +59,11 @@ Native AOT 下发布时加上 `<IlcInstructionSet>native</IlcInstructionSet>`（
 
 `[ForEach(Parallel = true)]` 把行切成块交给线程池，就像 OpenMP 的 `#pragma omp parallel for`：
 [并行方法](/zh/docs/guide/systems#parallel-methods)。线程从一个共享计数器领块，就像 `schedule(dynamic, n)`；默认的 `n`
-适合大量轻量行。几百行重活（每行几微秒）设 `ChunkRows = 64`，每个线程才都有活干：[块大小](/zh/docs/guide/threading#chunk-rows)。
+适合大量轻量行。几百行重活（每行几微秒）设 `ChunkSize = 64`，每个线程才都有活干：[块大小](/zh/docs/guide/threading#chunk-rows)。
 读写互不冲突的系统本来就会同时运行，不需要这些：[并行系统](/zh/docs/guide/threading#parallel-systems)。
 
 对所有行求总数（计数、总和、包围盒）用 `Reduce<T>` 参数：每块累加进自己的部分结果，每行没有锁也没有原子操作，部分结果按行的顺序合并进
-单例，整数精确，`ChunkRows` 固定时浮点可复现：[归约](/zh/docs/guide/threading#reductions)。并行方法写静态计数器报
+单例，整数精确，`ChunkSize` 固定时浮点可复现：[归约](/zh/docs/guide/threading#reductions)。并行方法写静态计数器报
 [EECS060](/zh/docs/guide/analyzer#eecs060)，`ForEachParallel` 之后读 job 字段报 [EECS061](/zh/docs/guide/analyzer#eecs061)。
 
 每行的工作列表（搜索的候选、边界）用 `Scratch<T>`：每个方法、每个线程一个，就像 OpenMP 的 `threadprivate`，每个线程只分配一次，由行自己清空；
@@ -110,7 +110,7 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
 | 你熟悉的 | 在 EasyEcs 里 | 在哪 |
 | --- | --- | --- |
 | OpenMP `parallel for` | `[ForEach(Parallel = true)]` | [并行方法](/zh/docs/guide/systems#parallel-methods) |
-| OpenMP `schedule(dynamic, n)` | `ChunkRows = n`（不设时用默认大小） | [`ChunkRows`](/zh/docs/guide/threading#chunk-rows) |
+| OpenMP `schedule(dynamic, n)` | `ChunkSize = n`（不设时用默认大小） | [`ChunkSize`](/zh/docs/guide/threading#chunk-rows) |
 | OpenMP `reduction(+: x)`、MPI `Allreduce` | 归约进单例 `T : IReduction<T>` 的 `Reduce<T>` 参数 | [归约](/zh/docs/guide/threading#reductions) |
 | OpenMP 的 `private` / `threadprivate` 临时空间 | `Scratch<T>` 参数（从 `default` 开始，不是一份拷贝：没有 `firstprivate`） | [临时空间](/zh/docs/guide/threading#scratch) |
 | OpenMP `sections` / task | 同一阶段的系统，读写互不冲突时同时运行 | [并行系统](/zh/docs/guide/threading#parallel-systems) |
@@ -123,7 +123,7 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
 | MPI 光环交换（幽灵格子） | `Tile<TCell, TTile>.Pad`：瓦片四周填上邻居朝向它的边 | [网格瓦片](/zh/docs/guide/grids) |
 | Burst 自动向量化 | `[ForEach]` 方法的向量循环 | [向量循环](/zh/docs/guide/systems#vector-loops) |
 | Burst 里手写 `float4` / Unity.Mathematics | 用 `Vector<T>` / `Vector128<T>` 的批处理方法 | [批处理方法](/zh/docs/guide/systems#batch-methods) |
-| Burst `IJobParallelFor` 的 batch count | `ChunkRows` | [`ChunkRows`](/zh/docs/guide/threading#chunk-rows) |
+| Burst `IJobParallelFor` 的 batch count | `ChunkSize` | [`ChunkSize`](/zh/docs/guide/threading#chunk-rows) |
 | Burst Inspector | EECS055，以及 `SimdMode = SimdMode.Require`（EECS056） | [分析器](/zh/docs/guide/analyzer#eecs055) |
 | GPU 片元着色器、纹理采样 | 接收 `Tile<TCell, TTile>` 的 `[ForEach]` 方法，用 `Load128` 读周围的格子 | [网格瓦片](/zh/docs/guide/grids) |
 | GPU 模板缓冲 | `padded.Rows(reads)`：每行一位，用 `TrailingZeroCount` 访问 | [网格瓦片](/zh/docs/guide/grids) |
@@ -148,7 +148,7 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
 | 优化没人测过的系统 | 代码更难读，什么也没省下 | [`MeasureSystems`](/zh/docs/guide/systems#measuring-systems) |
 | 想向量化的方法里混用不同大小的 lane（`float` 和 `double`、`int` 和 `byte`） | 保持标量 | [EECS055](/zh/docs/guide/analyzer#eecs055)；`SimdMode = SimdMode.Require` 让它报错 |
 | 并行方法写共享计数器 | 更新丢失 | [EECS060](/zh/docs/guide/analyzer#eecs060)：改用 [`Reduce<T>`](/zh/docs/guide/threading#reductions) |
-| 大量轻量行也设 `ChunkRows` | 同样的活要领更多次块 | 基准（[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)） |
+| 大量轻量行也设 `ChunkSize` | 同样的活要领更多次块 | 基准（[`ChunkSize`](/zh/docs/guide/threading#chunk-rows)） |
 | 在并行方法里手动读另一块瓦片的格子 | 每行一次查找，每个格子都有边界情况 | 代码审查：`Tile<TCell, TTile>` 参数一次填好瓦片（[网格瓦片](/zh/docs/guide/grids#pitfalls)） |
 
 ## 相关页面 [#related]
@@ -158,7 +158,7 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
     `[ForEach]`、批处理方法、并行方法和向量循环的完整讲解。
   </Card>
   <Card title="多线程与并行" href="/zh/docs/guide/threading">
-    所有者线程、并行阶段和 `ChunkRows`。
+    所有者线程、并行阶段和 `ChunkSize`。
   </Card>
   <Card title="网格瓦片" href="/zh/docs/guide/grids">
     瓦片、光环、模板掩码和休眠的瓦片，带完整例子。

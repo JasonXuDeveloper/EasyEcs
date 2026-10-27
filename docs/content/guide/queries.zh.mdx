@@ -376,8 +376,8 @@ var heal = new Heal();
 world.ForEachParallel<Health, Heal>(ref heal, Filters.Active);   // 每一行只跑一次，在某一个线程上
 ```
 
-最后一个参数 `chunkRows` 指定一个线程每次领多少行（`schedule(dynamic, n)` 里的 `n`，向上取整到 64；默认 0，按行数决定）：
-适合只有几百行、每行几微秒的活，默认会把它们留在一块里。`[ForEach(Parallel = true, ChunkRows = n)]` 传的就是它
+最后一个参数 `chunkSize` 指定一个线程每次领多少行（`schedule(dynamic, n)` 里的 `n`，向上取整到 64；默认 0，按行数决定）：
+适合只有几百行、每行几微秒的活，默认会把它们留在一块里。`[ForEach(Parallel = true, ChunkSize = n)]` 传的就是它
 （[块大小](/zh/docs/guide/threading#chunk-rows)）。
 
 ```csharp
@@ -398,7 +398,7 @@ public struct Replan : IForEach<Plan>, INoStructuralChanges
 
 ```csharp
 var replan = new Replan();
-world.ForEachParallel<Plan, Replan>(ref replan, chunkRows: 64);
+world.ForEachParallel<Plan, Replan>(ref replan, chunkSize: 64);
 ```
 
 job 不能读别的行的 job 会写的东西（别的实体、单例组件），调用期间也不能有其他代码修改 World。

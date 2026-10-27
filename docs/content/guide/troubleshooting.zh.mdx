@@ -336,13 +336,13 @@ InvalidOperationException: The tile was loaded without its mask (mask: false): i
 ## 为什么我的并行方法只在一个线程上跑？ [#parallel-one-thread]
 
 并行 `[ForEach]` 方法把行切成块，每块至少 1,024 行（写被追踪的组件时 4,096 行），不到两块就在调用线程上跑。辅助线程帮不上忙的遍历，
-也在那里跑。几百个很重的行于是只有一块。**修法：**把 [`ChunkRows`](/zh/docs/guide/threading#chunk-rows) 设成一个线程每次拿的行数
+也在那里跑。几百个很重的行于是只有一块。**修法：**把 [`ChunkSize`](/zh/docs/guide/threading#chunk-rows) 设成一个线程每次拿的行数
 （从 行数 ÷ 线程数 ÷ 4 开始，不低于 64）；轻的行保持默认。
 
 ## 为什么浮点总和在不同运行或机器上不一样？ [#float-total]
 
 浮点的 `Reduce<T>` 求和按块舍入，默认块大小跟着线程数走，所以换台机器就切出别的块。**修法：**设
-[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)：这样每次运行、任何线程数下总和都一样，只是不与同一方法 `Parallel = false` 时的总和逐位相同
+[`ChunkSize`](/zh/docs/guide/threading#chunk-rows)：这样每次运行、任何线程数下总和都一样，只是不与同一方法 `Parallel = false` 时的总和逐位相同
 （[归约](/zh/docs/guide/threading#reductions)）。整数总和、最小值和最大值怎样都是精确的。
 
 ## 为什么 `EntityRandom` 抽出同样的数？ [#random-repeats]

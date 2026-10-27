@@ -174,21 +174,21 @@ public ref struct RegenerateAll
 打 tick，而且默认情况下这类方法按 4,096 行的倍数切块（每块至少 4,096 行），正好对齐共用一份变更 tick 摘要的区段，不会有
 两个线程更新同一份摘要。在块里调 `Mut<T>.Write()` 和 `SetIfChanged`，和用 `ref` 一样安全。这样一来，不超过 4,096 行的表只有一块。
 
-#### 块大小：行少而重时用 `ChunkRows` [#chunk-rows]
+#### 块大小：行少而重时用 `ChunkSize` [#chunk-rows]
 
 并行遍历把行切成块，线程做完手上的一块，就通过一个共享计数器再领下一块，和 OpenMP 的 `schedule(dynamic, n)` 一样：分到便宜行的线程
 接着领下一块，别的线程还在忙，不均匀的行就这样摊平了。默认一块约为每个线程份额的四分之一，至少 1,024 行（方法写被追踪组件时
 至少 4,096 行），至多 `World.MaxChunkRows`（16,384）行。这适合大量轻量的行。如果只有几百行、每行要花几微秒（一块地形、一次寻路、
 一个人群格子），它们就只成一块，一个线程在跑，其他线程干等。
 
-`ChunkRows = n` 就是 `schedule(dynamic, n)` 里的 `n`：一个线程每次领多少行。
+`ChunkSize = n` 就是 `schedule(dynamic, n)` 里的 `n`：一个线程每次领多少行。
 
 <Callout type="idea" title="适合">
   只有几百到几千行、每行几微秒的并行方法：地形、寻路、人群格子、模拟岛。
 </Callout>
 
 <Callout type="warn" title="不适合">
-  行很轻（每行几次算术），不管有多少行：默认的块已经能喂饱每个线程，块再小只会多领几次。方法不是并行的也不行：`ChunkRows`
+  行很轻（每行几次算术），不管有多少行：默认的块已经能喂饱每个线程，块再小只会多领几次。方法不是并行的也不行：`ChunkSize`
   要求 `Parallel = true`。
 </Callout>
 
@@ -215,14 +215,14 @@ public ref struct CrowdPressure
 }
 ```
 
-```csharp tab="ChunkRows = 64"
+```csharp tab="ChunkSize = 64"
 [EcsSystem]
 public ref struct CrowdPressure
 {
     const int Iterations = 2_000;   // 每个格子几微秒的活
 
     // 500 个格子：8 块、每块至多 64 行，线程做完一块就领下一块
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Relax(in Cell cell, ref Crowd crowd)
     {
         float pressure = crowd.Pressure;
@@ -233,21 +233,21 @@ public ref struct CrowdPressure
 }
 ```
 
-- **向上取整到 64。** 一个存在位字和变更 tick 字只归一个线程，所以 `ChunkRows = 10` 实际是 64。
+- **向上取整到 64。** 一个存在位字和变更 tick 字只归一个线程，所以 `ChunkSize = 10` 实际是 64。
 - **按表切。** 每张匹配的表各切各的，从第一行起按 `n` 的倍数切；一块不会跨两张表，表的最后一块装剩下的行。分帧方法
   （[`Slices`](/zh/docs/guide/systems#slices)）切的是它这次访问的那一片。
 - **被追踪的写入。** 写被追踪组件的方法，块可以切开一个 4,096 行的 tick 块：遍历开始前，它覆盖的 tick 块先按这次遍历的 tick 打开，
-  共用一个 tick 块的线程用原子 OR 在摘要里置自己的位，每写 64 行一次（每次遍历本来就要付这次 OR）。不设 `ChunkRows` 时，这种方法每块都是整的 tick 块，不会有两个线程共用一个
+  共用一个 tick 块的线程用原子 OR 在摘要里置自己的位，每写 64 行一次（每次遍历本来就要付这次 OR）。不设 `ChunkSize` 时，这种方法每块都是整的 tick 块，不会有两个线程共用一个
   （[D67](/zh/docs/decisions#d67-chunk-rows)）。
 - **`n` 怎么选。** 每块要领一次，也就是对计数器做一次 compare-and-swap。让每个线程分到好几块（行数 ÷ 线程数 ÷ 4 是个不错的起点，不低于 64），
-  只有每行的活远大于领一次的开销时才设 `ChunkRows`，轻量的行保持默认。不到两块时在调用线程上跑；辅助线程帮不上忙的遍历也在调用线程上跑
+  只有每行的活远大于领一次的开销时才设 `ChunkSize`，轻量的行保持默认。不到两块时在调用线程上跑；辅助线程帮不上忙的遍历也在调用线程上跑
   （[开销](#what-it-costs)）。
-- **写在哪里。** `ChunkRows` 要求 `Parallel = true`，取 0（默认：按行数决定）或更大（[EECS054](/zh/docs/guide/analyzer#eecs054)）。
-  临时调用时，并行调用的最后一个参数就是它：`world.ForEachParallel(ref job, filter, chunkRows: 64)` 和 `ForEachEntityParallel`
+- **写在哪里。** `ChunkSize` 要求 `Parallel = true`，取 0（默认：按行数决定）或更大（[EECS054](/zh/docs/guide/analyzer#eecs054)）。
+  临时调用时，并行调用的最后一个参数就是它：`world.ForEachParallel(ref job, filter, chunkSize: 64)` 和 `ForEachEntityParallel`
   （[查询](/zh/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)）。
 
 默认为什么仍按行数决定、被切开的块怎么保持变更 tick 准确、还考虑过什么（guided 调度、每线程一份摘要）：见
-[D67](/zh/docs/decisions#d67-chunk-rows)。[VoxelServer](/zh/docs/samples/voxel-server) 的水流就用 `ChunkRows = 64` 跑那几百个有水流动的地形。
+[D67](/zh/docs/decisions#d67-chunk-rows)。[VoxelServer](/zh/docs/samples/voxel-server) 的水流就用 `ChunkSize = 64` 跑那几百个有水流动的地形。
 
 开启 `WorldOptions.MeasureSystems` 后，`system.Stats` 会把帮忙的线程也算进去：`LastAllocated` 和 `TotalAllocated` 是
 运行这个系统的线程，加上跑过它并行方法分块的每个线程上分配的字节数之和；时间是整次运行的耗时。开启 `ParallelSystems`
@@ -345,9 +345,9 @@ Console.WriteLine($"{crowd.Count} 个单位，x 从 {crowd.MinX} 到 {crowd.MaxX
   `Combine`，不要求交换律（部分结果按行的顺序合并）。用特性声明的归约每个字段都要有特性（[EECS064](/zh/docs/guide/analyzer#eecs064)），
   类型要是 `partial`（[EECS062](/zh/docs/guide/analyzer#eecs062)）；特性能声明却手写的归约报 [EECS065](/zh/docs/guide/analyzer#eecs065)，
   会改变合并对象的 `Identity`（求最小值用 0）报 [EECS066](/zh/docs/guide/analyzer#eecs066)。
-- **精确，或可复现。** 整数结果在每次运行、任何线程数下都精确。浮点求和按块舍入，所以取决于块从哪里开始：[`ChunkRows`](#chunk-rows)
+- **精确，或可复现。** 整数结果在每次运行、任何线程数下都精确。浮点求和按块舍入，所以取决于块从哪里开始：[`ChunkSize`](#chunk-rows)
   固定时，每次运行、任何线程数下结果都相同（测试检查了 1、2、3、4 和 8 个线程），但和同一个方法 `Parallel = false` 的结果不逐位相同。
-  默认块大小随线程数变化：浮点总数要在不同机器上复现时，设定 `ChunkRows`。最小值、最大值和包围盒不涉及舍入，怎样都精确。
+  默认块大小随线程数变化：浮点总数要在不同机器上复现时，设定 `ChunkSize`。最小值、最大值和包围盒不涉及舍入，怎样都精确。
 - **单线程时**，部分结果是 job 的局部变量，每段连续的行一个；方法、结果和调度都一样。系统之外的 `[ForEach]` 方法归约进调用它时传入的 World。
 - **在向量循环里**，每条通道有自己的累加器，按通道顺序合进这段行的部分结果。条件是每个字段都标了 `[Sum]`、`[Min]` 或 `[Max]`
   （或者手写的 `Combine` 把它设成两边该字段的和、`Min` 或 `Max`），并且字段是方法那么大的通道（[向量循环](/zh/docs/guide/systems#vector-loops)）；
@@ -678,7 +678,7 @@ world.AddSystem<TickRandomSystem>();
 
 | 什么时候 | 同步 |
 | --- | --- |
-| 每行 | 没有。唯一的例外是设了 [`ChunkRows`](#chunk-rows)、又写被追踪组件的方法：把一个 4,096 行区段拆开的几块用原子 OR 置它的变更 tick 摘要，每写 64 行一次（[D67](/zh/docs/decisions#d67-chunk-rows)）。 |
+| 每行 | 没有。唯一的例外是设了 [`ChunkSize`](#chunk-rows)、又写被追踪组件的方法：把一个 4,096 行区段拆开的几块用原子 OR 置它的变更 tick 摘要，每写 64 行一次（[D67](/zh/docs/decisions#d67-chunk-rows)）。 |
 | 每块 | 在这次运行的游标上做一次比较并交换来领取它（游标带着这次运行的纪元，所以晚启动的助手线程永远领不到下一次运行的块）；做完时，对剩余块数做一次 `Interlocked.Decrement`，对用时做一次 `Interlocked.Add`。 |
 | 每次运行 | 游标上两次 `Interlocked.Exchange`（打开和关闭），每唤醒一个助手线程再加一次比较并交换和一个排队的线程池工作项。 |
 | 运行结束 | 调用线程自旋，用 `Volatile.Read` 读剩余块数，直到读到 0。每块 `Decrement` 的完整内存屏障让它的写入（它的行、它的 job 副本和部分结果）排在调用线程的合并和遍历之后的代码之前。 |
@@ -730,8 +730,8 @@ public ref struct CriticalSystem
 - **每块一个 job 副本。** `Execute` 写进 job 字段的东西不会合并回来：总数用 `[ForEach]` 方法的 [`Reduce<T>`](#reductions)，调用之后读字段报
   [EECS061](/zh/docs/guide/analyzer#eecs061)。写所有块共享的内存报 [EECS060](/zh/docs/guide/analyzer#eecs060)。
 - **不做结构变更。** job 运行时 World 的结构是冻结的：结构变更会抛出异常。调用期间列表不能变，每块只写自己的元素或下标。
-- **块。** 大约每个线程四块，是 64 的倍数，在 1,024 和 `World.MaxChunkRows` 之间；最后一个参数 `chunkRows` 给少量重活设块大小，作用和
-  [`ChunkRows`](#chunk-rows) 一样。少于两块，或者运行器正忙时，在调用线程上运行。
+- **块。** 大约每个线程四块，是 64 的倍数，在 1,024 和 `World.MaxChunkRows` 之间；最后一个参数 `chunkSize` 给少量重活设块大小，作用和
+  [`ChunkSize`](#chunk-rows) 一样。少于两块，或者运行器正忙时，在调用线程上运行。
 - **所有者线程，零分配**（每种 job 类型第一次调用之后）。
 
 `ForParallelBenchmark` 对 10 万条记录做轻活和重活，对比单线程、`ForParallel` 和 `Parallel.For`（[D80](/zh/docs/decisions#d80-for-parallel)）。
@@ -904,7 +904,7 @@ unit 0 at (7.06, 7.06) with 60 hp
 - **只给重系统打开 `ParallelSystems`**，也就是要遍历成千上万个实体的系统。
 - **按数据拆，不按方法拆。** 写不同组件的两个系统能一起跑；什么都写的系统只能单独跑。
 - **只读就用 `in`。** 只读的 `ref` 也算写，而写会冲突（[EECS025](/zh/docs/guide/analyzer#eecs025) 会报出来）。
-- **行少而重时设块大小。** 只有几百行、每行几微秒的并行方法设 [`ChunkRows`](#chunk-rows)，每个线程都能分到活；大量轻量行保持默认。
+- **行少而重时设块大小。** 只有几百行、每行几微秒的并行方法设 [`ChunkSize`](#chunk-rows)，每个线程都能分到活；大量轻量行保持默认。
 - **归约，不要共享。** 并行遍历上的计数或求和用 [`Reduce<T>`](#reductions) 参数：每块一个部分结果，每行没有原子操作。
 - **每个线程一份临时空间，不是每行一份。** 每行要填的列表用 [`Scratch<T>`](#scratch)（上限固定的小缓冲用 `stackalloc`），不要每行 `new`。
 - **查找，不要拿 World。** 读其他实体走 [`Lookup<T>`](#lookups)，方法能保持并行，单线程时也更快。
@@ -927,7 +927,7 @@ unit 0 at (7.06, 7.06) with 60 hp
 - **一个 World、一个线程：** 热路径没有锁也没有原子操作；结构变更只是检查并设置一个普通标志。
 - **一个并行阶段：** 交给可复用的线程池工作项，不分配；它在重的系统上省下多少，见上面 `ParallelSystemsBenchmark` 的表。
 - **一个并行方法：** 同一个调度器，按块分配；调用线程总是参与。只有实测表明辅助线程能让这次遍历比单线程快至少五分之一时才唤醒它们，
-  所以 tick 之间的小遍历就在调用线程上跑。每块要领一次、复制一份 job；写被追踪组件的方法设了 [`ChunkRows`](#chunk-rows) 时，
+  所以 tick 之间的小遍历就在调用线程上跑。每块要领一次、复制一份 job；写被追踪组件的方法设了 [`ChunkSize`](#chunk-rows) 时，
   遍历前每 4,096 行还要打开一次 tick 块，每写 64 行做一次原子 OR。[`Reduce<T>`](#reductions) 每块多一个 job 副本，这一遍结束时合并一次；
   [`Scratch<T>`](#scratch) 每块查一次这个线程的值；[`Lookup<T>`](#lookups) 每次读取一次实体查找；[`Emit<T>`](#emit) 每条记录追加一次，这一遍结束时每块的列表拷贝一次。`world.ForParallel`
   的开销和并行遍历一样，只是没有行。一次遍历的原子操作：[运行器怎样同步](#runner-contract)。
@@ -943,9 +943,9 @@ unit 0 at (7.06, 7.06) with 60 hp
 | 不带 `Entity` 的方法通过手里的句柄改结构 | 系统进了它不该进的阶段 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 在所有者线程之外 `Task.Run(() => world.CreateEntity(...))` | 两个线程同时改一个 World | [EECS014](/zh/docs/guide/analyzer#eecs014) |
 | 只读却写成 `ref` 参数 | 声明了写：能一起跑的系统变少 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
-| 几百行重活的并行方法没设 `ChunkRows` | 只有一块：一个线程干活，其他线程干等 | 代码审查：[`ChunkRows`](#chunk-rows) |
-| 大量轻量行也设 `ChunkRows` | 每个小块都要领一次：开销变大，没有收益 | 代码审查：保持默认 |
-| 没有 `Parallel = true` 却设 `ChunkRows`，或小于 0 | 编译错误：单线程的方法没有块 | [EECS054](/zh/docs/guide/analyzer#eecs054) |
+| 几百行重活的并行方法没设 `ChunkSize` | 只有一块：一个线程干活，其他线程干等 | 代码审查：[`ChunkSize`](#chunk-rows) |
+| 大量轻量行也设 `ChunkSize` | 每个小块都要领一次：开销变大，没有收益 | 代码审查：保持默认 |
+| 没有 `Parallel = true` 却设 `ChunkSize`，或小于 0 | 编译错误：单线程的方法没有块 | [EECS054](/zh/docs/guide/analyzer#eecs054) |
 | 代码假定块按行的顺序执行，或每个线程一块 | 块是线程做完一块后再领的，顺序不定，线程也不定 | 代码审查：每行的结果写回它自己那一行 |
 | 并行方法写静态计数器或共享列表 | 更新丢失，列表被写坏 | [EECS060](/zh/docs/guide/analyzer#eecs060)；改用 [`Reduce<T>`](#reductions) |
 | 总和放在 job 字段里，`ForEachParallel` 之后再读 | 还是旧值：每一块跑的是副本 | [EECS061](/zh/docs/guide/analyzer#eecs061) |
@@ -953,7 +953,7 @@ unit 0 at (7.06, 7.06) with 60 hp
 | 在方法里把 `Reduce<T>.Value` 当总数读 | 它是这一块的部分结果 | 代码审查：这一遍之后再读 `T` |
 | 同一个 `T` 两个 `Reduce<T>`，或旁边有 `ref T` | 一个结果覆盖另一个 | [EECS057](/zh/docs/guide/analyzer#eecs057) |
 | `Combine` 不满足结合律（平均值的平均值） | 结果取决于块从哪里开始 | 代码审查：归约总和与计数，最后再除 |
-| 用默认块大小在不同机器间比较浮点总数 | 末几位不同 | 设定 [`ChunkRows`](#chunk-rows) |
+| 用默认块大小在不同机器间比较浮点总数 | 末几位不同 | 设定 [`ChunkSize`](#chunk-rows) |
 | `Scratch<T>` 里的列表用之前没清空 | 这一行看到上一行的元素 | 代码审查：行开始时 `Clear()` |
 | 把 `Scratch<T>` 持有的引用存进组件 | 这个线程的下一行会改掉这个实体的数据 | [EECS058](/zh/docs/guide/analyzer#eecs058) |
 | 用 `Lookup<T>` 查同一个方法会写的组件 | 读到写入之前或之后的行，在别的线程上还会读到写了一半的值 | [EECS059](/zh/docs/guide/analyzer#eecs059)：写到另一个组件（双缓冲） |

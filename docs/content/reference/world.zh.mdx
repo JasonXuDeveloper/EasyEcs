@@ -528,7 +528,7 @@ public void ForEachBatchParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref T
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-多线程版的 [`World.ForEachBatch`](/zh/docs/reference/world#foreachbatch)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64：`[ForEach(Parallel = true, ChunkRows = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
+多线程版的 [`World.ForEachBatch`](/zh/docs/reference/world#foreachbatch)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64：`[ForEach(Parallel = true, ChunkSize = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
@@ -568,7 +568,7 @@ public void ForEachEntityParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref 
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-多线程版的 [`World.ForEachEntity`](/zh/docs/reference/world#foreachentity)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64：`[ForEach(Parallel = true, ChunkRows = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
+多线程版的 [`World.ForEachEntity`](/zh/docs/reference/world#foreachentity)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64：`[ForEach(Parallel = true, ChunkSize = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
@@ -658,7 +658,7 @@ public void ForEachParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob j
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-多线程版的 [`World.ForEach`](/zh/docs/reference/world#foreach-3)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64：`[ForEach(Parallel = true, ChunkRows = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
+多线程版的 [`World.ForEach`](/zh/docs/reference/world#foreach-3)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.ParallelChunkRows`](/zh/docs/reference/world#parallelchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkRows` 向上取整到 64：`[ForEach(Parallel = true, ChunkSize = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 

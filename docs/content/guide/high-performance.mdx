@@ -72,13 +72,13 @@ default baseline has no `Vector512` ([FAQ](/en/docs/faq#native-aot)).
 `[ForEach(Parallel = true)]` cuts the rows into chunks that the thread pool takes, like OpenMP's
 `#pragma omp parallel for`: [parallel methods](/en/docs/guide/systems#parallel-methods). Threads claim the chunks from
 one shared counter, like `schedule(dynamic, n)`; the default `n` suits many light rows. A few hundred heavy rows (each
-microseconds) set `ChunkRows = 64`, so every thread gets work: [chunk size](/en/docs/guide/threading#chunk-rows).
+microseconds) set `ChunkSize = 64`, so every thread gets work: [chunk size](/en/docs/guide/threading#chunk-rows).
 Systems whose access does not conflict already run at once without any of this:
 [parallel systems](/en/docs/guide/threading#parallel-systems).
 
 A total over the rows (a count, a sum, a bounding box) is a `Reduce<T>` parameter: each chunk adds into its own
 partial result, with no lock or atomic per row, and the partial results are combined in row order into a singleton,
-exact for integers and reproducible for floats with a fixed `ChunkRows`:
+exact for integers and reproducible for floats with a fixed `ChunkSize`:
 [reductions](/en/docs/guide/threading#reductions). A static counter written by a parallel method is
 [EECS060](/en/docs/guide/analyzer#eecs060), a job field read after `ForEachParallel`
 [EECS061](/en/docs/guide/analyzer#eecs061).
@@ -137,7 +137,7 @@ and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what th
 | You know | In EasyEcs | Where |
 | --- | --- | --- |
 | OpenMP `parallel for` | `[ForEach(Parallel = true)]` | [Parallel methods](/en/docs/guide/systems#parallel-methods) |
-| OpenMP `schedule(dynamic, n)` | `ChunkRows = n` (the default size when unset) | [Chunk size](/en/docs/guide/threading#chunk-rows) |
+| OpenMP `schedule(dynamic, n)` | `ChunkSize = n` (the default size when unset) | [Chunk size](/en/docs/guide/threading#chunk-rows) |
 | OpenMP `reduction(+: x)`, MPI `Allreduce` | a `Reduce<T>` parameter into a singleton `T : IReduction<T>` | [Reductions](/en/docs/guide/threading#reductions) |
 | OpenMP `private` / `threadprivate` scratch | a `Scratch<T>` parameter (it starts at `default`, not as a copy: no `firstprivate`) | [Scratch](/en/docs/guide/threading#scratch) |
 | OpenMP `sections` / tasks | systems of one stage, run at once when their access does not conflict | [Parallel systems](/en/docs/guide/threading#parallel-systems) |
@@ -150,7 +150,7 @@ and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what th
 | MPI halo exchange (ghost cells) | `Tile<TCell, TTile>.Pad`: the tile padded with its neighbors' facing edges | [Grid tiles](/en/docs/guide/grids) |
 | Burst auto-vectorization | vector loops of `[ForEach]` methods | [Vector loops](/en/docs/guide/systems#vector-loops) |
 | Burst `float4` / Unity.Mathematics by hand | a batch method with `Vector<T>` / `Vector128<T>` | [Batch methods](/en/docs/guide/systems#batch-methods) |
-| Burst `IJobParallelFor` batch count | `ChunkRows` | [Chunk size](/en/docs/guide/threading#chunk-rows) |
+| Burst `IJobParallelFor` batch count | `ChunkSize` | [Chunk size](/en/docs/guide/threading#chunk-rows) |
 | Burst Inspector | EECS055, and `SimdMode = SimdMode.Require` (EECS056) | [Analyzer](/en/docs/guide/analyzer#eecs055) |
 | GPU fragment shader, texture sampling | a `[ForEach]` method over a `Tile<TCell, TTile>`, `Load128` of the cells around | [Grid tiles](/en/docs/guide/grids) |
 | GPU stencil | `padded.Rows(reads)`: a bit per row, visited with `TrailingZeroCount` | [Grid tiles](/en/docs/guide/grids) |
@@ -175,7 +175,7 @@ and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what th
 | Optimizing a system nobody measured | Code that is harder to read and saves nothing | [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) |
 | Mixing lanes of different sizes (`float` and `double`, `int` and `byte`) in a method meant to vectorize | It stays scalar | [EECS055](/en/docs/guide/analyzer#eecs055); `SimdMode = SimdMode.Require` makes it an error |
 | A shared counter written by a parallel method | Lost updates | [EECS060](/en/docs/guide/analyzer#eecs060): a [`Reduce<T>`](/en/docs/guide/threading#reductions) instead |
-| `ChunkRows` on many light rows | Many more claims for the same work | Benchmark ([chunk size](/en/docs/guide/threading#chunk-rows)) |
+| `ChunkSize` on many light rows | Many more claims for the same work | Benchmark ([chunk size](/en/docs/guide/threading#chunk-rows)) |
 | Reading another tile's cells by hand from a parallel method | A lookup per row, edge cases per cell | Review: a `Tile<TCell, TTile>` parameter pads the tile once ([grid tiles](/en/docs/guide/grids#pitfalls)) |
 
 ## Related [#related]

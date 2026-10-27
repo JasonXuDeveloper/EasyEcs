@@ -355,7 +355,7 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 - **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/analyzer#eecs036)）；几个实体共用的键（用普通的 `[LookupKey]`）。
 - **开销：** 第一张含该组件的表出现时索引就建好了，所以每次写入都会检查：每个变了的键一次哈希查找，批量调用和读档多遍历一遍行。
   `Get` 和 `TryGet` 是一次哈希查找，只读这个键自己的记录：唯一键直接存它的实体，每个键没有数组。能映射到有界槽位的键
-  （`IDirectIndexed<TKey>`：网格格子、小 id）改为读一个数组元素（[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)）。
+  （`IDirectMapped<TKey>`：网格格子、小 id）改为读一个数组元素（[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)）。
 - **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
 
 ### 有序区间 [#ordered-ranges]
@@ -538,12 +538,12 @@ restarted.Load(bytes.WrittenSpan);
 （[EECS010](/zh/docs/guide/analyzer#eecs010)）：结构变更、批量方法、以 `ref` 接收单例。`world.ForEachParallel` 和
 `ForEachEntityParallel` 对结构体 job 做同样的事。
 
-- **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分；配上 `ChunkRows = n`，也适合只有几百行、每行几微秒的活（地形、寻路）。
+- **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分；配上 `ChunkSize = n`，也适合只有几百行、每行几微秒的活（地形、寻路）。
 - **别用于：** 几千个实体的轻量行：交接的开销比活本身还大。
 - **开销：** 线程做完一块就领下一块，也就是 OpenMP 的 `schedule(dynamic, n)`。默认每块 1,024 到 16,384 行，大约每个线程四块，零分配；
-  写被追踪组件的方法按 4,096 行的整数倍切块（变更摘要一段的行数），所以表要更大才会被拆开。`ChunkRows = n` 指定每块的行数
+  写被追踪组件的方法按 4,096 行的整数倍切块（变更摘要一段的行数），所以表要更大才会被拆开。`ChunkSize = n` 指定每块的行数
   （向上取整到 64；[EECS054](/zh/docs/guide/analyzer#eecs054)）。
-- **指南：** [多线程与并行](/zh/docs/guide/threading)、[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)
+- **指南：** [多线程与并行](/zh/docs/guide/threading)、[`ChunkSize`](/zh/docs/guide/threading#chunk-rows)
 
 ### 对所有行求总数（归约） [#reductions]
 
@@ -553,7 +553,7 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 存活的单位数、一种资源的总量、人群的范围：每遍对大量行求一个结果。
 - **别用于：** 每个实体各自的结果（写进这一行的组件），以及每个 tick 只有几行会改变的总数（在改这些行的地方更新）。
 - **开销：** 每行一次对本块自己的结构体的写入，没有锁也没有原子操作；每块一个 job 副本，合并一次；第一遍之后零分配。整数精确；
-  `ChunkRows` 固定时，浮点结果在任何线程数下都相同。[EECS057](/zh/docs/guide/analyzer#eecs057) 拒绝对 `T` 的第二处写入；
+  `ChunkSize` 固定时，浮点结果在任何线程数下都相同。[EECS057](/zh/docs/guide/analyzer#eecs057) 拒绝对 `T` 的第二处写入；
   [EECS060](/zh/docs/guide/analyzer#eecs060) 和 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告它所替代的共享计数器和 job 字段。
 - **指南：** [多线程与并行](/zh/docs/guide/threading#reductions)
 

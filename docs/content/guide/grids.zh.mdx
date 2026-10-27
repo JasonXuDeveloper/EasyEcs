@@ -140,7 +140,7 @@ public ref struct DiffuseSystem
 {
     const float Rate = 0.2f;
 
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTemperature>> next)
     {
         var plate = heat.Pad();
@@ -197,7 +197,7 @@ public ref struct CommitHeatSystem
 所以只有瓦片会进到方法里；方法运行之前，job 在键的索引里找到瓦片的邻居，交给它构造的 `Tile`。
 
 ```csharp tab="你写的" doccheck=skip
-[ForEach(Parallel = true, ChunkRows = 64)]
+[ForEach(Parallel = true, ChunkSize = 64)]
 static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTemperature>> next)
 ```
 
@@ -227,7 +227,7 @@ internal static readonly QueryFilter DiffuseFilter0 =
 
 // 系统的 Update 和 Access：
 var job0 = new DiffuseJob0 { k0 = LookupExtensions.Prepared<HeatPlate, PlatePos>(world) };
-world.ForEachEntityParallel<DynamicBuffer<NextTemperature>, DiffuseJob0>(ref job0, in DiffuseFilter0, chunkRows: 64);
+world.ForEachEntityParallel<DynamicBuffer<NextTemperature>, DiffuseJob0>(ref job0, in DiffuseFilter0, chunkSize: 64);
 
 access.Index<HeatPlate, PlatePos>();          // 读网格，它的索引在阶段之前建好
 access.Read<DynamicBuffer<Temperature>>();    // 读每块瓦片的格子
@@ -276,7 +276,7 @@ public ref struct SpreadGasSystem
 {
     const float Rate = 0.1f;
 
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Spread(Tile<Gas, GasCube> gas, Mut<DynamicBuffer<NextGas>> next)
     {
         var cube = gas.Pad();
@@ -361,7 +361,7 @@ public static class LifeRule
 [EcsSystem]
 public ref struct LifeSystem
 {
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next) =>
         LifeRule.Step(life, MemoryMarshal.Cast<NextAlive, byte>(next.Write().AsSpan()));
 }
@@ -384,7 +384,7 @@ public record struct LifeChange(TileFaces Edges, bool Changed) : IComponent; // 
 [EcsSystem]
 public ref struct SparseLifeSystem
 {
-    [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
+    [ForEach(Parallel = true, ChunkSize = 64), With<Awake>]
     static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next, ref LifeChange change)
     {
         var step = next.Write().AsSpan();
@@ -421,17 +421,17 @@ public ref struct WakeSystem
 ### 一次数组读取找到邻居：直接映射的键 [#direct-index]
 
 生成器在键的索引里找瓦片的邻居，每个一次哈希探测（每块瓦片每遍 4 到 26 个）。键能映射到有界的槽位范围时（固定地图上的板、玩家周围加载的地形，
-彼此不会相隔 64），瓦片再实现 [`IDirectIndexed<TKey>`](/zh/docs/guide/indexes-and-relations#direct-index) 并用 `[UniqueKey]`，
+彼此不会相隔 64），瓦片再实现 [`IDirectMapped<TKey>`](/zh/docs/guide/indexes-and-relations#direct-index) 并用 `[UniqueKey]`，
 每次查找就是一次数组读取：
 
 ```csharp
 public partial record struct MapPlate([UniqueKey] PlatePos Pos)
-    : IComponent, ITile<PlatePos>, IDirectIndexed<PlatePos>
+    : IComponent, ITile<PlatePos>, IDirectMapped<PlatePos>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
-    static int IDirectIndexed<PlatePos>.Slots => 64 * 64;
-    static int IDirectIndexed<PlatePos>.SlotOf(PlatePos p) => (p.Z & 63) * 64 + (p.X & 63);
+    static int IDirectMapped<PlatePos>.Slots => 64 * 64;
+    static int IDirectMapped<PlatePos>.SlotOf(PlatePos p) => (p.Z & 63) * 64 + (p.X & 63);
 
     static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
     {
@@ -536,7 +536,7 @@ using EasyEcs;
 [EcsSystem]
 public ref struct StepSystem
 {
-    [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
+    [ForEach(Parallel = true, ChunkSize = 64), With<Awake>]
     static void Step(Tile<Cell, Plate> life, Mut<DynamicBuffer<NextCell>> next, ref Change change)
     {
         var step = next.Write().AsSpan();
@@ -685,7 +685,7 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
 | 每次 `Load` 一个格子 | 对一行格子用 `Load128` / `Load256` | 一行 16 个字节格子就是一条指令 |
 | 2D 五点模板用 `Rows(TileStencil.All)` | `Rows(TileStencil.Layer)`（3D 用 `Cross`） | 访问的行更少，结果相同 |
 | 每块瓦片都步进 | `ChangedEdges`、`Facing` 和一个 `Awake` 标签 | 网格的开销只是活跃瓦片的开销 |
-| 通过哈希找邻居 | `IDirectIndexed<TKey>` 加 `[UniqueKey]` | 每个邻居一次数组读取 |
+| 通过哈希找邻居 | `IDirectMapped<TKey>` 加 `[UniqueKey]` | 每个邻居一次数组读取 |
 | 一个 `byte` 就放得下的值用 `float` 格子 | 放得下的最窄的格子 | 每个向量多四倍的格子 |
 | 每遍都清空下一步的缓冲 | 写这一遍之后要读的每一行 | 不必把这一遍本来就要重写的内存整个写一遍 |
 | 高瓦片的活只在几层，却 `Pad()` 所有层 | 对有活的层 `Pad(from, to)` | 拷贝和遍历只覆盖这些层 |
@@ -701,7 +701,7 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
 
 ## 开销 [#what-it-costs]
 
-- **每块瓦片每遍：** 形状的邻居范围里每个邻居查找一次（4 到 26 个，每个一次哈希探测，`IDirectIndexed` 下是一次数组读取），每个实体只做一次，
+- **每块瓦片每遍：** 形状的邻居范围里每个邻居查找一次（4 到 26 个，每个一次哈希探测，`IDirectMapped` 下是一次数组读取），每个实体只做一次，
   方法里同一网格的瓦片参数共用；外加一次方法调用（它不内联进 job，见[生成器写了什么](#generated)）。
 - **遍历之前：** 在所有者线程上创建并建好键的索引，第一次 O(瓦片数)；之后的遍历直接用建好的索引。
 - **每次 `Pad`：** 拷贝瓦片的格子和邻居朝向它的边，O(层数 × (Width + 2r) × (Depth + 2r))，外加每行一位。线程有了纹理之后不再分配。

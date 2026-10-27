@@ -425,7 +425,7 @@ holds (`Set`, create, `Instantiate`, `Clone`, `SetAll`, `Enable`, loads and move
 - **Cost:** the index exists from the first table holding the component, so every write is checked: one hash probe
   per changed key, an extra pass over the rows for the bulk calls and loads. `Get` and `TryGet` are a hash probe
   that reads the key's record alone: a unique key holds its entity inline, with no array per key. A key that maps
-  onto bounded slots (`IDirectIndexed<TKey>`: grid cells, small ids) is found by one array entry instead
+  onto bounded slots (`IDirectMapped<TKey>`: grid cells, small ids) is found by one array entry instead
   ([direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index)).
 - **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
 
@@ -637,12 +637,12 @@ changes, batch methods, singletons taken by `ref`. `world.ForEachParallel` and `
 for struct jobs.
 
 - **Use it for:** heavy per-entity work over tens of thousands of entities: steering, path following, AI scoring;
-  with `ChunkRows = n`, a few hundred rows that cost microseconds each (terrain chunks, path searches).
+  with `ChunkSize = n`, a few hundred rows that cost microseconds each (terrain chunks, path searches).
 - **Skip it for:** light rows over a few thousand entities: the hand-off costs more than the work.
 - **Cost:** the threads claim chunks one at a time as they finish, OpenMP's `schedule(dynamic, n)`. By default
   chunks of 1,024 to 16,384 rows, about four per thread, allocation-free; a method that writes a tracked component
   cuts at multiples of 4,096 rows (the blocks its change summaries cover), so a table needs more rows before it is
-  split. `ChunkRows = n` sets the chunk size (rounded up to 64; [EECS054](/en/docs/guide/analyzer#eecs054)).
+  split. `ChunkSize = n` sets the chunk size (rounded up to 64; [EECS054](/en/docs/guide/analyzer#eecs054)).
 - **Guide:** [Threading](/en/docs/guide/threading), [chunk size](/en/docs/guide/threading#chunk-rows)
 
 ### Totals over the rows (reductions) [#reductions]
@@ -657,7 +657,7 @@ and the partial results, combined in row order, replace `T` when the pass ends: 
   where the rows change).
 - **Cost:** a write into the chunk's own struct per row, no lock or atomic; one job copy per chunk, combined once;
   0 bytes after the first pass. Integers are exact; a float result is the same on any thread count for a fixed
-  `ChunkRows`. [EECS057](/en/docs/guide/analyzer#eecs057) rejects a second write of `T`;
+  `ChunkSize`. [EECS057](/en/docs/guide/analyzer#eecs057) rejects a second write of `T`;
   [EECS060](/en/docs/guide/analyzer#eecs060) and [EECS061](/en/docs/guide/analyzer#eecs061) report the shared
   counters and job fields it replaces.
 - **Guide:** [Threading](/en/docs/guide/threading#reductions)

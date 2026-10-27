@@ -235,10 +235,10 @@ generator registers how to create each unique component's index when its assembl
 it cannot see (a generic one, closed at run time), the first write throws `InvalidOperationException` until one
 `world.Index<T, TKey>()` call, in any world, registers it.
 
-#### Direct-mapped keys: `IDirectIndexed<TKey>` [#direct-index]
+#### Direct-mapped keys: `IDirectMapped<TKey>` [#direct-index]
 
 A unique key that maps onto a small, bounded range of slots (a tile or a chunk around the players, a room, a seat, a
-small id) can skip the hash on its lookups. Implement `IDirectIndexed<TKey>` instead of `IUniqueIndexed<TKey>` and
+small id) can skip the hash on its lookups. Implement `IDirectMapped<TKey>` instead of `IUniqueIndexed<TKey>` and
 say how many slots there are and which slot a key takes: the index keeps an array of slots beside the hash, so `Get`,
 `TryGet` and the uniqueness check of every write read one array entry. The hash stays the index: a key whose slot is
 out of range, or held by another key (a collision), is found through it, and `Find`, `Count` and the ordered walks
@@ -269,13 +269,13 @@ work as on any unique index.
 />
 
 ```csharp
-public record struct Tile(int X, int Y) : IComponent, IDirectIndexed<(int, int)>
+public record struct Tile(int X, int Y) : IComponent, IDirectMapped<(int, int)>
 {
     public (int, int) Key => (X, Y);
 
     // The tiles loaded at once lie within 64 of each other, so a coordinate modulo 64 gives each its own slot.
-    static int IDirectIndexed<(int, int)>.Slots => 64 * 64;
-    static int IDirectIndexed<(int, int)>.SlotOf((int, int) key) => (key.Item2 & 63) * 64 + (key.Item1 & 63);
+    static int IDirectMapped<(int, int)>.Slots => 64 * 64;
+    static int IDirectMapped<(int, int)>.SlotOf((int, int) key) => (key.Item2 & 63) * 64 + (key.Item1 & 63);
 }
 ```
 
@@ -606,7 +606,7 @@ entity.
 | `Set` with the key the entity already has | `unit.SetZoneIfChanged(id)`, or compare first | A `Set` that keeps the key re-links nothing, but it is still a write |
 | A scan comparing a key | `Find(key)` / `Count(key)` | O(1), then O(1) per match |
 | A dictionary from key to entity checked by hand before each write | `IUniqueIndexed<TKey>`, `Get` / `TryGet` | One hash probe per write, checked on every path that writes |
-| A hand-written grid of entity ids beside a unique index | [`IDirectIndexed<TKey>`](#direct-index) | One array entry per lookup, kept by every write, with the hash behind it |
+| A hand-written grid of entity ids beside a unique index | [`IDirectMapped<TKey>`](#direct-index) | One array entry per lookup, kept by every write, with the hash behind it |
 | Sorting a query's results each tick | `Range` / `Descending` | The keys stay sorted as they change |
 | Walking many big keys whole | [`GroupBy`](/en/docs/guide/groups) | A group's rows are contiguous in their own tables |
 
@@ -661,7 +661,7 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
 | A unique key another entity holds | `InvalidOperationException`; nothing changes | At run time: `TryGet` first, or move the key from its holder first |
 | Moving a unique key to its new holder before taking it from the old one | `InvalidOperationException` | Change the old holder first |
 | `Clone`, `CreateEntities` or `Instantiate(prefab, span)` of several entities with a unique key | `InvalidOperationException`: the copies would share it | Give each entity its own key |
-| `IDirectIndexed<TKey>` over sparse keys or a huge range (account ids) | A slot array as long as the range, mostly empty, or most keys colliding | Plain `IUniqueIndexed<TKey>` |
+| `IDirectMapped<TKey>` over sparse keys or a huge range (account ids) | A slot array as long as the range, mostly empty, or most keys colliding | Plain `IUniqueIndexed<TKey>` |
 | A slot function whose keys held at once collide (a modulo smaller than the loaded area) | Lookups go to the hash: no gain | Make `Slots` cover the keys a world holds at once |
 | `IUniqueIndexed<EntityId>`, or a unique component with a second key type | Compile error | [EECS036](/en/docs/guide/analyzer#eecs036): `IIndexed<EntityId>` for links |
 | A symmetric link written on one side only | One player is the other's friend, not the reverse | One helper writes both sides ([symmetric relations](#symmetric-relations)) |

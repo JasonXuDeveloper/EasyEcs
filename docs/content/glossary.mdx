@@ -149,7 +149,7 @@ faster; a busy runner leaves the items to the calling thread. See
 
 A slice of the matching rows of a parallel method (`[ForEach(Parallel = true)]`, `ForEachParallel`): a multiple of 64
 rows, by default about four per thread, between 1,024 and 16,384 rows (a multiple of 4,096 when the method writes a
-tracked component), or `ChunkRows` rounded up to 64. The [runner](#runner)'s threads claim the chunks one at a time
+tracked component), or `ChunkSize` rounded up to 64. The [runner](#runner)'s threads claim the chunks one at a time
 as they finish (OpenMP's `schedule(dynamic, n)`); fewer than two chunks run on the calling thread alone. See
 [chunk size](/en/docs/guide/threading#chunk-rows).
 

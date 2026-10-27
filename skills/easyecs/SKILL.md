@@ -36,7 +36,7 @@ available as Markdown: add `.md` to its URL.
   `int` or enum member declares a table group the same way (a hand-written `Group` returning one: EECS067), and `[GroupBy]` on the type makes every world group by it
   (no `world.GroupBy<T>()` per world). A key computed from several members stays a hand-written `Key`. When the keys a
   world holds at once map onto bounded slots (grid cells modulo the loaded area, small ids), make it
-  `IDirectIndexed<TKey>` (`static Slots`, `static SlotOf(key)`, pure arithmetic) instead of keeping a grid of ids by
+  `IDirectMapped<TKey>` (`static Slots`, `static SlotOf(key)`, pure arithmetic) instead of keeping a grid of ids by
   hand; never for sparse keys or huge ranges.
 - A list per entity is a `DynamicBuffer<T>` component; never copy it by value (EECS012). Call
   `EnsureCapacity(n)` on it (and `world.Reserve<T…>(n)` on the world) before a wave of known size. Write a whole
@@ -109,7 +109,7 @@ available as Markdown: add `.md` to its URL.
   `[UpdateInterval(n, Phase = p)]` on the system (EECS083: n >= 1, 0 <= p < n).
 - A system never calls `World.Update()` (EECS034): the host runs the world.
 - `[ForEach(Parallel = true)]` methods write data only and make no structural changes (EECS010); a later system on the
-  owner thread acts on that data. A few hundred heavy rows (microseconds each) set `ChunkRows = 64` so threads take 64
+  owner thread acts on that data. A few hundred heavy rows (microseconds each) set `ChunkSize = 64` so threads take 64
   rows at a time (EECS054: only with `Parallel = true`); light rows keep the default. Threads claim chunks from one
   shared counter, like OpenMP's `schedule(dynamic, n)`: never assume an order between chunks.
 - Code that runs on several threads (a parallel `[ForEach]` method, the `Execute` of a job run by `ForEachParallel`,
@@ -126,7 +126,7 @@ available as Markdown: add `.md` to its URL.
   after the pass, never `Reduce<T>.Value` as the total (it is the chunk's part). One `Reduce<T>` per `T` per pass
   (EECS057). A singleton that a system resets each update and a `[ForEach]` method then accumulates through `ref`
   (`s.Count++`, `s.Max = Math.Max(s.Max, x)`) is that reduction written by hand (EECS086): take `ref Reduce<T>` and
-  drop the reset. A total that grows across updates (a score) stays a `ref T`. Set `ChunkRows` when a float total must be the same on every machine. A list or buffer a row fills
+  drop the reset. A total that grows across updates (a score) stays a `ref T`. Set `ChunkSize` when a float total must be the same on every machine. A list or buffer a row fills
   is a `Scratch<T>` parameter (`var list = scratch.Value ??= new(); list.Clear();`), or `stackalloc` for a small
   fixed bound, never a `new` per row; never store what a scratch holds into a component or singleton (EECS058).
   Read other entities through a `Lookup<T>` parameter (`lookup[id]`, `Read`, `Has`, `TryFind` by key), never a

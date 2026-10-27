@@ -281,7 +281,7 @@ and halo into shared memory. The loop samples neighbors with no edge case and co
 `Vector128<byte>`. Its neighbors are read as they were before the pass and only `NextFluid` is written, so it is a
 [parallel method](/en/docs/guide/systems#parallel-methods). A few hundred chunks flow at a time, each one costing
 microseconds, far under the 4,096 rows of a default chunk of a pass that writes a tracked component, so it sets
-`ChunkRows = 64` and the threads take 64 chunks at a time ([chunk size](/en/docs/guide/threading#chunk-rows)). Byte
+`ChunkSize = 64` and the threads take 64 chunks at a time ([chunk size](/en/docs/guide/threading#chunk-rows)). Byte
 lanes are integer arithmetic: the same water on every machine.
 
 Nothing is cleared that does not have to be. The stencil (`Rows(TileStencil.Layer | TileStencil.Above)`) visits only a row

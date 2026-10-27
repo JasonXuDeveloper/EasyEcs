@@ -101,7 +101,7 @@ form in .NET 10. Each ships when the methods that need it measure faster.
 - A world checksum: a hash of `world.Save` output does it in user code, without fixing an algorithm for everyone
   ([D51](/en/docs/decisions#d51-not-added)).
 - A chunk grid beside the unique index, `InChunk` written only when it changed, presence bits copied a word at a
-  time, and a halo that copies only the changed edges: measured, no net win, or superseded by `IDirectIndexed<TKey>`
+  time, and a halo that copies only the changed edges: measured, no net win, or superseded by `IDirectMapped<TKey>`
   and the push-halo design ([D73](/en/docs/decisions#d73-survey-items-not-added)).
 - A generated per-cell kernel for grid tiles: byte arithmetic promotes to `int`, and stencils reduce per row; the
   tile loads the halo and the method keeps the rule ([D77](/en/docs/decisions#d77-tiles)).

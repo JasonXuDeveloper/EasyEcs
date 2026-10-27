@@ -259,7 +259,7 @@ What makes it hold:
   a [`Reduce<T>`](/en/docs/guide/threading#reductions) keeps each chunk's partial result in a job copy the runner
   reuses, so a parallel total allocates nothing after its first pass.
 - **Unique keys hold their entity inline**: a unique index keeps each key's one entity in the key's own record, so
-  it allocates no array per key and a lookup reads one record. A direct-indexed key (`IDirectIndexed<TKey>`) is
+  it allocates no array per key and a lookup reads one record. A direct-mapped key (`IDirectMapped<TKey>`) is
   found by one entry of a slot array, as fast as a hand-written grid, with the hash behind it for the keys the slots
   miss ([D71](/en/docs/decisions#d71-direct-index)).
 
@@ -304,7 +304,7 @@ helpers ([D22](/en/docs/decisions)). Two kinds of work use it:
   straddle chunks), that the threads claim one at a time through a shared cursor as they finish, OpenMP's
   `schedule(dynamic, n)`. By default a chunk is about a quarter of each thread's share, between 1,024 and 16,384 rows,
   and a method that writes a tracked component gets a multiple of 4,096 rows, 4,096 at least, so two threads never
-  share the change-tick summary of a 4,096-row block. `ChunkRows = n` sets `n` for a few hundred heavy rows; chunks
+  share the change-tick summary of a 4,096-row block. `ChunkSize = n` sets `n` for a few hundred heavy rows; chunks
   that then share a block set its summary with an atomic OR, once per 64 written rows
   ([D67](/en/docs/decisions#d67-chunk-rows)). A [`Reduce<T>`](/en/docs/guide/threading#reductions) parameter gives
   each chunk its own partial result, a local per run of rows that the JIT keeps in a register (the parameter is a

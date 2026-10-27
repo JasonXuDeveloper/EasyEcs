@@ -102,7 +102,7 @@ EECS049, not also a cost of its parameters; an instance hook of a system is EECS
 | [EECS051](#eecs051) | Error | A world does not update during a pass | |
 | [EECS052](#eecs052) | Warning | A component of a new entity is given to its creation | Create it with the component |
 | [EECS053](#eecs053) | Warning | A tracked component written on some rows only is a `Mut<T>` | `Mut<T>` |
-| [EECS054](#eecs054) | Error | `ChunkRows` is 0 or more, on a parallel method | Remove `ChunkRows` |
+| [EECS054](#eecs054) | Error | `ChunkSize` is 0 or more, on a parallel method | Remove `ChunkSize` |
 | [EECS055](#eecs055) | Info | A `[ForEach]` method over numbers gets a vector loop | |
 | [EECS056](#eecs056) | Error | `SimdMode = SimdMode.Require` on a method that qualifies | |
 | [EECS057](#eecs057) | Error | One write of a reduced singleton per pass | |
@@ -1732,10 +1732,10 @@ cheaper write: suppress the warning there.
 
 ## EECS054 [#eecs054]
 
-**Invalid `[ForEach(ChunkRows = N)]`.** Error. Code fix: removes `ChunkRows`; the generator, which skipped the method,
+**Invalid `[ForEach(ChunkSize = N)]`.** Error. Code fix: removes `ChunkSize`; the generator, which skipped the method,
 writes it again.
 
-`ChunkRows` is the rows a thread of a [parallel method](/en/docs/guide/threading#chunk-rows) takes at a time: 0 lets
+`ChunkSize` is the rows a thread of a [parallel method](/en/docs/guide/threading#chunk-rows) takes at a time: 0 lets
 the runtime choose from the rows' measured cost, more sets it (rounded up to 64). A method without `Parallel = true`
 runs on one thread and has no chunks, and a negative count means nothing.
 
@@ -1745,7 +1745,7 @@ public ref struct PlanRoutes
 {
     const int Steps = 4_096;
 
-    [ForEach(ChunkRows = 64)]   // one thread: no chunks to size
+    [ForEach(ChunkSize = 64)]   // one thread: no chunks to size
     static void Plan(in Position from, ref Velocity heading)
     {
         float x = from.X;
@@ -1761,7 +1761,7 @@ public ref struct PlanRoutes
 {
     const int Steps = 4_096;
 
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Plan(in Position from, ref Velocity heading)
     {
         float x = from.X;
@@ -1771,7 +1771,7 @@ public ref struct PlanRoutes
 }
 ```
 
-Run it in parallel (as here, for a few hundred heavy rows), or drop `ChunkRows`. Light rows need neither: keep the
+Run it in parallel (as here, for a few hundred heavy rows), or drop `ChunkSize`. Light rows need neither: keep the
 default chunks ([when to set it](/en/docs/guide/threading#chunk-rows)).
 
 ## EECS055 [#eecs055]
@@ -2053,7 +2053,7 @@ at the cost of a contended cache line on every row.
 ## EECS061 [#eecs061]
 
 **A parallel job's field read after the pass.** Warning. Code fix: runs the job on one thread (`ForEach` /
-`ForEachEntity` / `ForEachBatch`), when the call passes no `chunkRows`; a `ForParallel` call has no such twin and gets
+`ForEachEntity` / `ForEachBatch`), when the call passes no `chunkSize`; a `ForParallel` call has no such twin and gets
 no fix.
 
 `ForEachParallel`, `ForEachEntityParallel`, `ForEachBatchParallel` and `world.ForParallel` run a copy of the job per

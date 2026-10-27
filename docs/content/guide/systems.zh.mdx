@@ -272,7 +272,7 @@ public ref struct HungerSystem
 
 | 特性 | 含义 |
 | --- | --- |
-| `[ForEach]` | 对每个匹配的实体执行方法；`Parallel = true` 表示[多线程](#parallel-methods)（加上 `ChunkRows = n` 指定[一个线程每次领多少行](/zh/docs/guide/threading#chunk-rows)），`Slices = N` 表示[每次运行只处理一部分行](#slices) |
+| `[ForEach]` | 对每个匹配的实体执行方法；`Parallel = true` 表示[多线程](#parallel-methods)（加上 `ChunkSize = n` 指定[一个线程每次领多少行](/zh/docs/guide/threading#chunk-rows)），`Slices = N` 表示[每次运行只处理一部分行](#slices) |
 | `[With<T>]` | 实体必须有 `T`，`T` 不作为参数传入；可重复 |
 | `[Without<T>]` | 实体不能有 `T`；可重复 |
 | `[WithAny<T>]` | 实体至少要有方法上某个 `[WithAny<T>]` 的组件 |
@@ -290,7 +290,7 @@ public ref struct HungerSystem
       description: '把行切成块，多个线程同时领取（见下文的并行方法）。',
       default: 'false',
     },
-    ChunkRows: {
+    ChunkSize: {
       type: 'int',
       description: '配合 Parallel：一个线程每次领多少行，向上取整到 64（OpenMP 的 schedule(dynamic, n)）；0 表示按行数决定。EECS054。',
       default: '0',
@@ -531,7 +531,7 @@ public ref struct DriftSystem
 
 `[ForEach(Parallel = true)]` 把匹配的行切成块（默认每个线程大约四块，块大小是 64 行的倍数，介于 1,024 和
 `World.MaxChunkRows` = 16,384 之间），调用线程加上最多 `WorldOptions.MaxDegreeOfParallelism - 1` 个线程池线程做完一块就领下一块，
-和 OpenMP 的 `schedule(dynamic, n)` 一样。它适合几万个实体、每个实体计算量都很重的工作（寻路、转向、AI 评分），或者配上 `ChunkRows`
+和 OpenMP 的 `schedule(dynamic, n)` 一样。它适合几万个实体、每个实体计算量都很重的工作（寻路、转向、AI 评分），或者配上 `ChunkSize`
 处理只有几百行、每行几微秒的活；计算很轻时，分发的开销比省下的还多。
 
 ```csharp
@@ -553,7 +553,7 @@ public ref struct SteeringSystem
 单例组件只能用 `in`。它也不能写别的行会读的东西，比如通过 `Get` 写另一个实体。不足两块时在调用线程上执行。第一次更新之后不再分配内存。
 
 写被追踪组件的方法（`ref` 或 [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 参数）默认按 4,096 行的倍数切块，
-所以不超过 4,096 行的表只在一个线程上跑（[原因](/zh/docs/guide/threading#parallel-foreach-methods)）。`ChunkRows = n` 指定一个线程每次领多少行，
+所以不超过 4,096 行的表只在一个线程上跑（[原因](/zh/docs/guide/threading#parallel-foreach-methods)）。`ChunkSize = n` 指定一个线程每次领多少行，
 也就是 `schedule(dynamic, n)` 里的 `n`，向上取整到 64，适合只有几百行、每行很重的情况：
 
 ```csharp
@@ -565,7 +565,7 @@ public ref struct RouteSystem
 {
     const int Steps = 4_096;   // 每个代理一次寻路：每个几微秒
 
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Search(in Position from, in Goal goal, ref Route route)
     {
         int length = 0;
@@ -581,7 +581,7 @@ public ref struct RouteSystem
 }
 ```
 
-块怎么领、`n` 怎么选、开销多少，见[`ChunkRows`](/zh/docs/guide/threading#chunk-rows)。
+块怎么领、`n` 怎么选、开销多少，见[`ChunkSize`](/zh/docs/guide/threading#chunk-rows)。
 
 ### 向量循环：生成器写的 SIMD [#vector-loops]
 
@@ -1156,7 +1156,7 @@ run order: MoveSystem
 | 向量循环覆盖不到的数据（混合的 lane 类型、查找表） | 用 `Vector<T>` 的批处理方法 | 对整段行做 SIMD |
 | 最热的循环里用 `Maybe<T>` | 用 `[With<T>]` / `[Without<T>]` 拆成两个方法 | 每行不用判断存在位 |
 | 很轻的计算也 `Parallel = true` | 普通 `[ForEach]` | 分发的开销比省下的多 |
-| 只有几百行重活的 `Parallel = true`，默认只成一块 | [`ChunkRows = 64`](/zh/docs/guide/threading#chunk-rows) | 每个线程都领块，而不是一个线程包圆 |
+| 只有几百行重活的 `Parallel = true`，默认只成一块 | [`ChunkSize = 64`](/zh/docs/guide/threading#chunk-rows) | 每个线程都领块，而不是一个线程包圆 |
 | 只读的 `Maybe<T>`（或通过 `Entity` 逐行查找） | [`ReadOnlyMaybe<T>`](#read-only-maybe) | 调度时算读，从不打 tick，也不用每行查找（[EECS027](/zh/docs/guide/analyzer#eecs027)） |
 | 同一个节奏的每个方法都重复写一个过滤 | [分组过滤](#group-filters) | 只写一次 |
 | 可以等的工作每个 tick 都做 | `[UpdateInterval(N, Phase = P)]` | 分摊到多个 tick |
@@ -1219,7 +1219,7 @@ run order: MoveSystem
 | 系统里的泛型 `[ForEach]` 方法 | 没有类型参数 | [EECS004](/zh/docs/guide/analyzer#eecs004)；改成泛型系统 |
 | span 和逐实体参数混用 | 一段行对应不到单个值 | [EECS009](/zh/docs/guide/analyzer#eecs009) |
 | 并行方法改结构或写单例组件 | 块之间发生竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
-| 没有 `Parallel = true` 却设 `ChunkRows`，或小于 0 | 单线程的方法没有块 | [EECS054](/zh/docs/guide/analyzer#eecs054) |
+| 没有 `Parallel = true` 却设 `ChunkSize`，或小于 0 | 单线程的方法没有块 | [EECS054](/zh/docs/guide/analyzer#eecs054) |
 | 被索引组件用 `Maybe<T>` | 它的 `ref` 可能绕过索引改掉键 | [EECS015](/zh/docs/guide/analyzer#eecs015)：改用 `ReadOnlyMaybe<T>` |
 | 实体没有 `T` 时读 `ReadOnlyMaybe<T>.Value` | 抛 `InvalidOperationException` | 先判断 `HasValue` |
 | 通过 `in` 参数修改集合 | 被当成读来调度，也不会打 tick | [EECS011](/zh/docs/guide/analyzer#eecs011) |

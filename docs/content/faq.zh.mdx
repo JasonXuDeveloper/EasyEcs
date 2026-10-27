@@ -62,7 +62,7 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
   做结构变更，会直接抛异常，而不会把表弄坏。分析器能看出的跨线程修改会直接报错（[EECS013、EECS014](/zh/docs/guide/analyzer)）。
 - **EasyEcs 自己加的并行是经过检查的。** `WorldOptions.ParallelSystems` 只让生成的访问集互不冲突的系统一起跑，结果与逐个运行相同；
   `[ForEach(Parallel = true)]` 方法不能做结构变更，也不能写单例（EECS010）；它的线程做完一块就领下一块（OpenMP 的
-  `schedule(dynamic, n)`），几百行重活用 `ChunkRows = n` 指定块大小（[块大小](/zh/docs/guide/threading#chunk-rows)）。对所有行求总数用 `Reduce<T>` 参数，
+  `schedule(dynamic, n)`），几百行重活用 `ChunkSize = n` 指定块大小（[块大小](/zh/docs/guide/threading#chunk-rows)）。对所有行求总数用 `Reduce<T>` 参数，
   每块一个部分结果（[归约](/zh/docs/guide/threading#reductions)）；并行方法写静态字段或共享对象报 EECS060，遍历之后读并行 job 的字段报 EECS061。
 - **来自其他线程的输入**（网络、IO）放进你自己的队列，由一个系统在所有者线程上取出处理。
 

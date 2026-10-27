@@ -149,7 +149,7 @@ public ref struct DiffuseSystem
 {
     const float Rate = 0.2f;
 
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTemperature>> next)
     {
         var plate = heat.Pad();
@@ -210,7 +210,7 @@ tile. Its filter asks for the tile component and the cell buffer, so only tiles 
 method runs, the job finds the tile's neighbors in the key's index and hands them to the `Tile` it builds.
 
 ```csharp tab="You write" doccheck=skip
-[ForEach(Parallel = true, ChunkRows = 64)]
+[ForEach(Parallel = true, ChunkSize = 64)]
 static void Diffuse(Tile<Temperature, HeatPlate> heat, Mut<DynamicBuffer<NextTemperature>> next)
 ```
 
@@ -240,7 +240,7 @@ internal static readonly QueryFilter DiffuseFilter0 =
 
 // The system's Update and Access:
 var job0 = new DiffuseJob0 { k0 = LookupExtensions.Prepared<HeatPlate, PlatePos>(world) };
-world.ForEachEntityParallel<DynamicBuffer<NextTemperature>, DiffuseJob0>(ref job0, in DiffuseFilter0, chunkRows: 64);
+world.ForEachEntityParallel<DynamicBuffer<NextTemperature>, DiffuseJob0>(ref job0, in DiffuseFilter0, chunkSize: 64);
 
 access.Index<HeatPlate, PlatePos>();          // a reader of the grid, its index built before the stage
 access.Read<DynamicBuffer<Temperature>>();    // a reader of every tile's cells
@@ -294,7 +294,7 @@ public ref struct SpreadGasSystem
 {
     const float Rate = 0.1f;
 
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Spread(Tile<Gas, GasCube> gas, Mut<DynamicBuffer<NextGas>> next)
     {
         var cube = gas.Pad();
@@ -388,7 +388,7 @@ public static class LifeRule
 [EcsSystem]
 public ref struct LifeSystem
 {
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next) =>
         LifeRule.Step(life, MemoryMarshal.Cast<NextAlive, byte>(next.Write().AsSpan()));
 }
@@ -413,7 +413,7 @@ public record struct LifeChange(TileFaces Edges, bool Changed) : IComponent; // 
 [EcsSystem]
 public ref struct SparseLifeSystem
 {
-    [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
+    [ForEach(Parallel = true, ChunkSize = 64), With<Awake>]
     static void Step(Tile<Alive, LifePlate> life, Mut<DynamicBuffer<NextAlive>> next, ref LifeChange change)
     {
         var step = next.Write().AsSpan();
@@ -452,17 +452,17 @@ a mostly quiet grid against stepping every tile.
 
 The generator finds a tile's neighbors in the key's index, a hash probe each (4 to 26 per tile and pass). When the
 keys map onto a bounded range of slots (the plates of a fixed map, the chunks loaded around the players, never 64
-apart), the tile also implements [`IDirectIndexed<TKey>`](/en/docs/guide/indexes-and-relations#direct-index) with a
+apart), the tile also implements [`IDirectMapped<TKey>`](/en/docs/guide/indexes-and-relations#direct-index) with a
 `[UniqueKey]`, and each search is one array read:
 
 ```csharp
 public partial record struct MapPlate([UniqueKey] PlatePos Pos)
-    : IComponent, ITile<PlatePos>, IDirectIndexed<PlatePos>
+    : IComponent, ITile<PlatePos>, IDirectMapped<PlatePos>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
-    static int IDirectIndexed<PlatePos>.Slots => 64 * 64;
-    static int IDirectIndexed<PlatePos>.SlotOf(PlatePos p) => (p.Z & 63) * 64 + (p.X & 63);
+    static int IDirectMapped<PlatePos>.Slots => 64 * 64;
+    static int IDirectMapped<PlatePos>.SlotOf(PlatePos p) => (p.Z & 63) * 64 + (p.X & 63);
 
     static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
     {
@@ -577,7 +577,7 @@ using EasyEcs;
 [EcsSystem]
 public ref struct StepSystem
 {
-    [ForEach(Parallel = true, ChunkRows = 64), With<Awake>]
+    [ForEach(Parallel = true, ChunkSize = 64), With<Awake>]
     static void Step(Tile<Cell, Plate> life, Mut<DynamicBuffer<NextCell>> next, ref Change change)
     {
         var step = next.Write().AsSpan();
@@ -727,7 +727,7 @@ edge every other tick, and each plate keeps the other awake through `Facing`.
 | One cell per `Load` | `Load128` / `Load256` over a row of cells | A row of 16 byte cells is one instruction |
 | `Rows(TileStencil.All)` for a 2D five-point stencil | `Rows(TileStencil.Layer)` (`Cross` in 3D) | Fewer rows visited, the same result |
 | Stepping every tile | `ChangedEdges`, `Facing` and an `Awake` tag | A grid costs what its active tiles cost |
-| Neighbors found through the hash | `IDirectIndexed<TKey>` with a `[UniqueKey]` | One array read per neighbor |
+| Neighbors found through the hash | `IDirectMapped<TKey>` with a `[UniqueKey]` | One array read per neighbor |
 | `float` cells where a `byte` holds the value | The narrowest cell that holds it | Four times the cells per vector |
 | Clearing the step buffer every pass | Writing every row the pass later reads | No full write of memory the pass rewrites anyway |
 | `Pad()` of every layer of a tall tile whose work is in a few | `Pad(from, to)` of the layers that hold it | The copy and the walk cover only those layers |
@@ -746,7 +746,7 @@ search. The measured numbers of the water shader, by hand against the tile, are 
 ## What it costs [#what-it-costs]
 
 - **Per tile and pass:** one search per neighbor in the shape's neighborhood (4 to 26, a hash probe each, one array
-  read with `IDirectIndexed`), done once per entity and shared by the method's tile parameters of one grid, and one
+  read with `IDirectMapped`), done once per entity and shared by the method's tile parameters of one grid, and one
   call of the method (it is not inlined into the job, [what the generator writes](#generated)).
 - **Before the pass:** the key's index is created and built on the owner thread, O(tiles) the first time; later
   passes find it built.

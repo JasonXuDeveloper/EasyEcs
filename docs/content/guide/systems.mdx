@@ -294,7 +294,7 @@ over:
 
 | Attribute | Meaning |
 | --- | --- |
-| `[ForEach]` | run the method for every matching entity; `Parallel = true` for [several threads](#parallel-methods) (with `ChunkRows = n`, [the rows a thread takes at a time](/en/docs/guide/threading#chunk-rows)), `Slices = N` for [part of the rows per run](#slices) |
+| `[ForEach]` | run the method for every matching entity; `Parallel = true` for [several threads](#parallel-methods) (with `ChunkSize = n`, [the rows a thread takes at a time](/en/docs/guide/threading#chunk-rows)), `Slices = N` for [part of the rows per run](#slices) |
 | `[With<T>]` | the entity must have `T`, not passed in; repeatable |
 | `[Without<T>]` | the entity must not have `T`; repeatable |
 | `[WithAny<T>]` | the entity must have at least one of the method's `[WithAny<T>]` components |
@@ -312,7 +312,7 @@ The properties of `[ForEach]`:
       description: 'Cut the rows into chunks that several threads claim at once (parallel methods, below).',
       default: 'false',
     },
-    ChunkRows: {
+    ChunkSize: {
       type: 'int',
       description: 'With Parallel: the rows a thread claims at a time, rounded up to 64 (OpenMP schedule(dynamic, n)); 0 chooses from the row count. EECS054.',
       default: '0',
@@ -574,7 +574,7 @@ A scalar loop over spans gains little over a per-entity method; write a batch me
 rows, between 1,024 and `World.MaxChunkRows` = 16,384) that the calling thread plus up to
 `WorldOptions.MaxDegreeOfParallelism - 1` thread-pool threads claim one at a time as they finish, like OpenMP's
 `schedule(dynamic, n)`. It is for heavy per-entity work (path finding, steering, AI scoring) over tens of thousands
-of entities, or over a few hundred rows that cost microseconds each with `ChunkRows`; for light work the hand-off
+of entities, or over a few hundred rows that cost microseconds each with `ChunkSize`; for light work the hand-off
 costs more than it saves.
 
 ```csharp
@@ -599,7 +599,7 @@ nothing after its first update.
 
 A method that writes a tracked component (a `ref` or a [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed)
 parameter) is cut by default at multiples of 4,096 rows, so a table of 4,096 rows or fewer runs on one thread
-([why](/en/docs/guide/threading#parallel-foreach-methods)). `ChunkRows = n` sets the rows a thread takes at a time,
+([why](/en/docs/guide/threading#parallel-foreach-methods)). `ChunkSize = n` sets the rows a thread takes at a time,
 the `n` of `schedule(dynamic, n)`, rounded up to 64, for a few hundred heavy rows:
 
 ```csharp
@@ -611,7 +611,7 @@ public ref struct RouteSystem
 {
     const int Steps = 4_096;   // a path search per agent: microseconds each
 
-    [ForEach(Parallel = true, ChunkRows = 64)]
+    [ForEach(Parallel = true, ChunkSize = 64)]
     static void Search(in Position from, in Goal goal, ref Route route)
     {
         int length = 0;
@@ -1247,7 +1247,7 @@ move although it was added second, so the grounded unit loses half its speed bef
 | Data a vector loop does not cover (mixed lane types, a lookup table) | A batch method with `Vector<T>` | SIMD over whole runs of rows |
 | `Maybe<T>` in the hottest loop | Two methods with `[With<T>]` / `[Without<T>]` | No presence test per row |
 | `Parallel = true` on light work | A plain `[ForEach]` | The hand-off costs more than it saves |
-| `Parallel = true` over a few hundred heavy rows, one chunk by default | [`ChunkRows = 64`](/en/docs/guide/threading#chunk-rows) | Every thread claims chunks instead of one doing them all |
+| `Parallel = true` over a few hundred heavy rows, one chunk by default | [`ChunkSize = 64`](/en/docs/guide/threading#chunk-rows) | Every thread claims chunks instead of one doing them all |
 | `Maybe<T>` (or a lookup through the `Entity`) that only reads | [`ReadOnlyMaybe<T>`](#read-only-maybe) | A read for the scheduler, never stamped, no lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)) |
 | A filter repeated on every method of a cadence | A [group filter](#group-filters) | Written once |
 | Work every tick that could wait | `[UpdateInterval(N, Phase = P)]` | Spread over ticks |
@@ -1319,7 +1319,7 @@ needed, and a method that writes a singleton:
 | A generic `[ForEach]` method in a system | No type arguments | [EECS004](/en/docs/guide/analyzer#eecs004); make the system generic |
 | Spans mixed with per-entity parameters | No single value per run | [EECS009](/en/docs/guide/analyzer#eecs009) |
 | A parallel method that changes structure or writes a singleton | Races between chunks | [EECS010](/en/docs/guide/analyzer#eecs010) |
-| `ChunkRows` without `Parallel = true`, or below 0 | A method on one thread has no chunks | [EECS054](/en/docs/guide/analyzer#eecs054) |
+| `ChunkSize` without `Parallel = true`, or below 0 | A method on one thread has no chunks | [EECS054](/en/docs/guide/analyzer#eecs054) |
 | A `Maybe<T>` of an indexed component | Its `ref` could change the key behind the index's back | [EECS015](/en/docs/guide/analyzer#eecs015): a `ReadOnlyMaybe<T>` |
 | `ReadOnlyMaybe<T>.Value` read when the entity lacks `T` | `InvalidOperationException` | Test `HasValue` first |
 | Writing a collection through an `in` parameter | Scheduled as a read, never stamped | [EECS011](/en/docs/guide/analyzer#eecs011) |

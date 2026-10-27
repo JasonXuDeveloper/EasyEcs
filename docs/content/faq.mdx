@@ -77,7 +77,7 @@ The rules are explicit and short ([D13](/en/docs/decisions#d13-one-owner-thread-
 - **The parallelism EasyEcs adds is checked.** `WorldOptions.ParallelSystems` runs systems together only when their
   generated access does not conflict, with the same result as running them one by one; a
   `[ForEach(Parallel = true)]` method must change no structure and write no singleton (EECS010); its threads claim
-  chunks of rows as they finish (OpenMP's `schedule(dynamic, n)`), and `ChunkRows = n` sizes them for a few hundred heavy
+  chunks of rows as they finish (OpenMP's `schedule(dynamic, n)`), and `ChunkSize = n` sizes them for a few hundred heavy
   rows ([chunk size](/en/docs/guide/threading#chunk-rows)). A total over the rows is a `Reduce<T>` parameter, a
   partial result per chunk ([reductions](/en/docs/guide/threading#reductions)); a parallel method that writes a static
   or shared object is EECS060, a parallel job's field read after the pass EECS061.

@@ -387,13 +387,13 @@ names it for a method that looks meant for a vector loop, `SimdMode = SimdMode.R
 A parallel `[ForEach]` method splits its rows into chunks, at least 1,024 rows each (4,096 when it writes a tracked
 component), and fewer than two chunks run on the calling thread. A pass whose helpers do not make it faster runs there
 too. A few hundred heavy rows are then one chunk. **Fix:** set
-[`ChunkRows`](/en/docs/guide/threading#chunk-rows) to the rows a thread should take at a time (rows ÷ threads ÷ 4 is a
+[`ChunkSize`](/en/docs/guide/threading#chunk-rows) to the rows a thread should take at a time (rows ÷ threads ÷ 4 is a
 good start, never below 64); light rows keep the default.
 
 ## Why does a float total differ between runs or machines? [#float-total]
 
 A floating-point `Reduce<T>` sum is rounded per chunk, and the default chunk size follows the thread count, so another
-machine cuts other chunks. **Fix:** set [`ChunkRows`](/en/docs/guide/threading#chunk-rows): the total is then the same
+machine cuts other chunks. **Fix:** set [`ChunkSize`](/en/docs/guide/threading#chunk-rows): the total is then the same
 on every run and for any thread count, though not bit for bit the total of the same method with `Parallel = false`
 ([reductions](/en/docs/guide/threading#reductions)). Integer totals, minimum and maximum are exact either way.
 

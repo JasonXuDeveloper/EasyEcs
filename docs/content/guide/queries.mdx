@@ -411,9 +411,9 @@ var heal = new Heal();
 world.ForEachParallel<Health, Heal>(ref heal, Filters.Active);   // each row runs once, on one of the threads
 ```
 
-The last argument, `chunkRows`, sets the rows a thread takes at a time (the `n` of `schedule(dynamic, n)`, rounded up
+The last argument, `chunkSize`, sets the rows a thread takes at a time (the `n` of `schedule(dynamic, n)`, rounded up
 to 64; 0, the default, chooses from the row count): for a few hundred rows that cost microseconds each, which the
-default would leave in one chunk. It is what `[ForEach(Parallel = true, ChunkRows = n)]` passes
+default would leave in one chunk. It is what `[ForEach(Parallel = true, ChunkSize = n)]` passes
 ([chunk size](/en/docs/guide/threading#chunk-rows)).
 
 ```csharp
@@ -434,7 +434,7 @@ public struct Replan : IForEach<Plan>, INoStructuralChanges
 
 ```csharp
 var replan = new Replan();
-world.ForEachParallel<Plan, Replan>(ref replan, chunkRows: 64);
+world.ForEachParallel<Plan, Replan>(ref replan, chunkSize: 64);
 ```
 
 The job must not read what another row's job writes (another entity, a singleton), and nothing else may change the

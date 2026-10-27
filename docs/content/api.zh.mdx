@@ -34,7 +34,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `ITracked` | 标记接口 | 每行记录最后一次写入或移除时的变更 tick（[变更追踪](/zh/docs/guide/change-tracking)）。 |
 | `IIndexed<TKey>` | 接口 | World 按 `Key` 建索引的组件；用 `Set` 写入（EECS015）。键是 `EntityId` 时就是指向实体的链接。 |
 | `IUniqueIndexed<TKey>`、`UniqueIndexExtensions` | 接口、扩展方法 | 一个键只对应一个实体的索引组件：把别人已有的键给第二个实体的写入会抛异常；`index.Get(key)`、`TryGet`（[索引与关系](/zh/docs/guide/indexes-and-relations)）。 |
-| `IDirectIndexed<TKey>` | 接口 | 键能映射到有限个槽的唯一组件（`static Slots`、`static SlotOf(key)`）：索引在哈希旁边多存一个槽数组，`Get` / `TryGet` 和写入时的唯一性检查只读一个元素（[索引与关系](/zh/docs/guide/indexes-and-relations)）。 |
+| `IDirectMapped<TKey>` | 接口 | 键能映射到有限个槽的唯一组件（`static Slots`、`static SlotOf(key)`）：索引在哈希旁边多存一个槽数组，`Get` / `TryGet` 和写入时的唯一性检查只读一个元素（[索引与关系](/zh/docs/guide/indexes-and-relations)）。 |
 | `IRelation` | 接口 | `DynamicBuffer<T>` 的元素，把所在实体链接到 `Target`（[索引与关系](/zh/docs/guide/indexes-and-relations)）。 |
 | `ChildOf` | record struct | `ChildOf(EntityId Parent)`：层级；销毁父实体时子实体一起销毁（[层级](/zh/docs/guide/hierarchy)）。 |
 | `IGroup` | 接口 | 用 `Group` 的值拆分表的组件（`world.GroupBy<T>()`，[分组](/zh/docs/guide/groups)）。 |
@@ -47,7 +47,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `TargetPolicy`、`TargetPolicyExtensions` | 枚举、扩展方法 | 目标被销毁时链接怎么处理：`Keep`、`Remove`、`Destroy`。 |
 | `[EcsSystem]` | 特性 | 标在只有静态成员的 `ref struct` 上：一个系统。钩子是标了 `[OnCreate]`、`[OnUpdate]`、`[OnDestroy]` 的静态方法，参数取 `World`、`SystemHandle`、两者或都不取（[系统](/zh/docs/guide/systems)）。 |
 | `SystemHandle` | readonly struct | 加入 World 的一个系统：`Enabled`、`Error`、`Stats`、`LastRunTick`、`RunCount`、`Name`、`Type`、`World`、`IsAlive`；系统移除后句柄失效（成员抛异常）。 |
-| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkRows = n`、`Slices = N`、`SimdMode = SimdMode.Auto` / `Require` / `Off`、`FloatMode = FloatMode.Exact` / `Fast`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[ForEntity]`（通过生成的入口在单个实体上运行的静态方法）。 |
+| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkSize = n`、`Slices = N`、`SimdMode = SimdMode.Auto` / `Require` / `Off`、`FloatMode = FloatMode.Exact` / `Fast`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[ForEntity]`（通过生成的入口在单个实体上运行的静态方法）。 |
 | `Maybe<T>` | ref struct | `[ForEach]` 方法的可选组件参数：`HasValue`、`Value`。 |
 | `ReadOnlyMaybe<T>` | ref struct | 只读版本：`Value` 是 `ref readonly`，从不打 tick，带索引的组件也能用；`Maybe<T>` 可以转换成它。 |
 | `[View]` | 特性 | 标在由 `ref`（写）、`ref readonly`（读）和 `Mut<T>`（在部分行上写）组件字段加业务方法组成的 `ref struct` 上：一个实体的若干组件，`[ForEach]` 和 `[ForEntity]` 方法可以把它当参数，实体用 `entity.AsX()` / `TryGetX(out X)` 拿到它。 |
@@ -181,8 +181,8 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
 | 带向量循环的 `[ForEach]` 方法（生成的，[向量循环](/zh/docs/guide/systems#vector-loops)） | O(M + S / L + 段数)，L = 每个向量的行数（先 `Vector512`，再 `Vector<T>`；按通道大小和 CPU，2 到 64） | 行、结果（`FloatMode.Fast` 之外）、变更 tick 和读写都和逐行运行的方法相同；每段先广播一次统一值，不足 L 行的尾部由方法自己跑；单线程时按 `ForEachMasked` 运行（只有部分行通过的字，每 L 行一个带掩码的向量），并行时按 `ForEachBatchParallel` 跑每块里连续的行；2 到 4 个字段的组件每个向量多一次解交错加载和一次交错存储（没有 AVX2 或 AVX-512 时每行都由方法跑）；`Reduce<T>` 每条通道每个字段一个累加器，每段合并一次；零分配 |
 | `world.ForEachMasked<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数 + 部分通过的字数) | 同 `ForEachBatch`，但只有部分行通过的 64 行字整个交给 job，通过的行记成位（`IForEachMasked`），不再按每一段通过的行各调一次；全部通过的字并进连续段 |
-| `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` / `ForEachBatchParallel`（一块中连续行的 span） | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.MaxChunkRows` 行（job 写被追踪组件时为 4,096 的整数倍），或 `chunkRows` 向上取整到 64（`[ForEach(ChunkRows = n)]`；这时遍历前打开 O(B) 个区段，B 为 4,096 行的区段数，每写 64 行一次原子 OR），每块一个 job 副本（job 做归约 `Reduce<T>` 时保留这些副本，按块的顺序合并，O(块数)）；只在划算时唤醒助手线程 |
-| `world.ForParallel<TJob>(count, ref job, chunkRows)` / `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)` | O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | 和 `ForEachParallel` 同一个运行器、同样的块（没有表：没有变更 tick，每块 1,024 到 `World.MaxChunkRows`，或 `chunkRows` 向上取整到 64）；每块一个 job 副本，不合并回来；结构被冻结（结构变更抛异常）；每种 job 类型第一次调用之后 0 B |
+| `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkSize)` / `ForEachEntityParallel` / `ForEachBatchParallel`（一块中连续行的 span） | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.MaxChunkRows` 行（job 写被追踪组件时为 4,096 的整数倍），或 `chunkSize` 向上取整到 64（`[ForEach(ChunkSize = n)]`；这时遍历前打开 O(B) 个区段，B 为 4,096 行的区段数，每写 64 行一次原子 OR），每块一个 job 副本（job 做归约 `Reduce<T>` 时保留这些副本，按块的顺序合并，O(块数)）；只在划算时唤醒助手线程 |
+| `world.ForParallel<TJob>(count, ref job, chunkSize)` / `ForParallel<T, TJob>(ref buffer, ref job, chunkSize)` | O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | 和 `ForEachParallel` 同一个运行器、同样的块（没有表：没有变更 tick，每块 1,024 到 `World.MaxChunkRows`，或 `chunkSize` 向上取整到 64）；每块一个 job 副本，不合并回来；结构被冻结（结构变更抛异常）；每种 job 类型第一次调用之后 0 B |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | 指向行内的 ref：被追踪组件的每个被访问行都算写入；循环里不能 `await` |
 | `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | 指向行内的 `ref readonly`：不打 tick；其余同 `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M)，需要测位的表再加 S / 64 | 累加表计数，或数存在位（和 tick），AVX-512 下每步 8 个字 |
@@ -244,7 +244,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
 | `Lanes.Compact<T>(source, mask, destination)` | O(1)：最多 64 个元素；8 字节或 4 字节的元素，AVX-512 为 8 步或 4 步向量操作，没有选中元素的步跳过；没有 AVX-512 时，选中不超过 12 个就每个选中元素一步，否则 AVX2 为 16 步或 8 步，128 位向量（ARM64 的 NEON、SSSE3）对 4 字节元素为 16 步，其余情况每个元素一步，直到最后一个选中的元素 | 对 `mask` 的每个置位 `i`，按顺序把 `source[i]` 写到 `destination` 开头，返回 `PopCount(mask)`；不读 `source` 之外的内存，只写这么多个元素；某一位落在 `source.Length` 或之后、或 `destination` 短于 `PopCount(mask)` 时抛出 `ArgumentException`；不分配 |
-| `Lanes.RowNumbers(mask, first, destination)` | O(1)：对 0 到 63 这些数做 `Compact`，再按向量加上 `first` | 对 `mask` 的每个置位 `i`，按顺序写出 `first + i`，返回 `PopCount(mask)`：把条件通过的一个字的行变成行列表；`destination` 太短时抛出 `ArgumentException`；不分配 |
+| `Lanes.Selection(mask, first, destination)` | O(1)：对 0 到 63 这些数做 `Compact`，再按向量加上 `first` | 对 `mask` 的每个置位 `i`，按顺序写出 `first + i`，返回 `PopCount(mask)`：把条件通过的一个字的行变成行列表；`destination` 太短时抛出 `ArgumentException`；不分配 |
 
 `Tile<TCell, TTile>`，网格分块上模板计算的 `[ForEach]` 参数，以及它加载的带边层：
 

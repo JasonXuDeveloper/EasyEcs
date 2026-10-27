@@ -80,7 +80,7 @@ EasyEcs 领先，但不到上面的幅度；完整服务器 tick 就在这里。
 | 层级 | ✅ `ChildOf`、`Children`、级联销毁 | ✅ `AddChild`、`ChildEntities` | ❌ | ❌ |
 | 禁用组件并保留值 | ✅ `Disable<T>()` / `Enable<T>()` | ⚠️ 整个实体（`Enabled`） | ❌ | ⚠️ 整个实体，或单个组件（`Disable<T>()`） |
 | 并行系统 | ✅ 由生成的访问集组成无冲突阶段 | ❌ | ❌ | ✅ `ParallelSystem<T>`（是否独立由你保证） |
-| 并行查询 | ✅ `[ForEach(Parallel = true)]`，分析器检查，块动态领取（`ChunkRows`） | ✅ `QueryJob`、`ParallelJobRunner` | ✅ `InlineParallelQuery`、`JobScheduler` | ✅ `DefaultParallelRunner` |
+| 并行查询 | ✅ `[ForEach(Parallel = true)]`，分析器检查，块动态领取（`ChunkSize`） | ✅ `QueryJob`、`ParallelJobRunner` | ✅ `InlineParallelQuery`、`JobScheduler` | ✅ `DefaultParallelRunner` |
 | 内存快照 | ✅ `Capture` / `Restore` | ❌ | ❌ | ❌ |
 | 存档 | ✅ 二进制 `Save` / `Load`（Nino） | ✅ JSON | ❌ 核心里没有（Arch.Persistence） | ✅ 文本和二进制 |
 | 把实体搬到另一个 World | ✅ `MoveEntities`、`SaveEntities` / `LoadEntities` | ✅ `CopyEntity` | ❌ | ✅ `CopyTo(world)` |

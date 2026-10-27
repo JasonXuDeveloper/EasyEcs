@@ -38,7 +38,7 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `: ITracked` | Rows record the tick of their last write and removal | [Change tracking](/en/docs/guide/change-tracking) |
 | `[LookupKey]` on a member (or on the struct: the whole value) of a `partial` struct | Found by value through `world.Index<T, TKey>()`; the generator writes `IIndexed<TKey>` and its `Key` (a key of several members: `IIndexed<TKey>` by hand) | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `[UniqueKey]` on a member (or the struct) | A key that names one entity (`IUniqueIndexed<TKey>`): `index.Get(key)`; a write that would give a second entity the key throws | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
-| `: IDirectIndexed<TKey>` with `Key`, `static Slots`, `static SlotOf(key)` | A unique key that maps onto bounded slots (grid cells): `Get` / `TryGet` read one array entry | [Direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index) |
+| `: IDirectMapped<TKey>` with `Key`, `static Slots`, `static SlotOf(key)` | A unique key that maps onto bounded slots (grid cells): `Get` / `TryGet` read one array entry | [Direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index) |
 | `[LookupKey] EntityId` | A link to one entity, found from the target | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `: IRelation` with `Target` | Many links per entity, kept in a buffer | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
 | `[Group]` on an `int` (or `int` enum) member; `[GroupBy]` on the struct | Splits tables by value (`IGroup`): in every world with `[GroupBy]`, else after `world.GroupBy<T>()` | [Groups](/en/docs/guide/groups) |
@@ -215,7 +215,7 @@ bit
 | Attribute | On | Does |
 | --- | --- | --- |
 | `[ForEach]` / `[ForEach(Parallel = true)]` | Method | The method is the loop; `Parallel` splits rows across threads ([EECS010](/en/docs/guide/analyzer#eecs010)) |
-| `[ForEach(Parallel = true, ChunkRows = n)]` | Method | Threads claim `n` rows at a time (OpenMP's `schedule(dynamic, n)`): for a few hundred heavy rows ([chunk size](/en/docs/guide/threading#chunk-rows), [EECS054](/en/docs/guide/analyzer#eecs054)) |
+| `[ForEach(Parallel = true, ChunkSize = n)]` | Method | Threads claim `n` rows at a time (OpenMP's `schedule(dynamic, n)`): for a few hundred heavy rows ([chunk size](/en/docs/guide/threading#chunk-rows), [EECS054](/en/docs/guide/analyzer#eecs054)) |
 | `[ForEach(SimdMode = SimdMode.Require)]` | Method | The method must get its vector loop, else a build error ([EECS056](/en/docs/guide/analyzer#eecs056)); `SimdMode.Off` keeps it scalar without [EECS055](/en/docs/guide/analyzer#eecs055) |
 | `[ForEach(FloatMode = FloatMode.Fast)]` | Method | `Sin`, `Cos`, `Exp`, `Log`, `Log2`, `Hypot` in the vector loop take .NET's vector approximations, and a float `Reduce<T>` sum adds lane by lane; `Exact` (the default) keeps the method's results bit for bit ([FloatMode](/en/docs/guide/systems#float-mode)) |
 | `[ForEach, Consume]` | Method | The rows the pass visited are destroyed when it ends: events, commands ([Consume](/en/docs/guide/systems#consume), [EECS084](/en/docs/guide/analyzer#eecs084)) |
@@ -292,7 +292,7 @@ bool anyDead = world.Any<Dead>();
 | `world.ForEach<T1..T9, TJob>(ref job, filter)` | A struct job `IForEach<T…>`: `Execute(ref T1 …)` |
 | `world.ForEachEntity<…>(ref job, filter)` | `IForEachEntity<T…>`: `Execute(Entity e, ref T1 …)` |
 | `world.ForEachBatch<…>(ref job, filter)` | `IForEachBatch<T…>`: runs of rows as spans |
-| `world.ForEachParallel` / `ForEachEntityParallel` | A struct job in chunks on several threads (`chunkRows:` sets the chunk size) |
+| `world.ForEachParallel` / `ForEachEntityParallel` | A struct job in chunks on several threads (`chunkSize:` sets the chunk size) |
 | `Runner.Method(world, …)` | The entry point of a static `[ForEach]` method outside a system |
 | `static int WriteMask => mask` on a job | Components the job writes (bit k - 1 for component k), stamped for change tracking; default `-1`, all |
 | `: INoStructuralChanges` on a job | The job promises no structural change: no per-entity bookkeeping, structure frozen while it runs |
