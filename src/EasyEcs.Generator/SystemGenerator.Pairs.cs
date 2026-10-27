@@ -140,18 +140,39 @@ public sealed partial class SystemGenerator
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "default", // EECS105 reports the parameter
         }).Prepend(owner.AccessorArgument));
+        // The test's distance from the row's point and the neighbor's, in float as the method computes it: a neighbor
+        // past the window's reach (over every cutoff of its rows by a margin far above the rounding) fails the method's
+        // test, so it is skipped without a call. NaN never skips.
+        int rowColumn = 0, rowPoint = 0, otherPoint = -1;
+        foreach (var p in method.Parameters)
+        {
+            if (p.Kind != Symbols.ParamKind.Component) continue;
+            rowColumn++;
+            if (rowPoint == 0 && p.Type == t) rowPoint = rowColumn;
+        }
+        for (int i = 0; i < method.Parameters.Length && otherPoint < 0; i++)
+            if (method.Parameters[i] is { Kind: Symbols.ParamKind.Neighbor } p && p.Type == t) otherPoint = i;
+        bool prune = axes.Length > 0 && pair.Cutoff.Length > 0 && rowPoint > 0 && otherPoint >= 0;
         sb.Append("        private void Rows(in global::EasyEcs.PairRun run)\n        {\n");
         sb.Append(Columns("            "));
         sb.Append("            bool skips = run.Skips;\n");
         sb.Append("            for (int w = 0, size = run.Size; w < run.Windows; w++)\n            {\n");
         sb.Append("                ulong lanes = run.Lanes(w);\n                if (lanes == 0) continue;\n");
         sb.Append("                var ranges = run.Ranges(w);\n");
+        if (prune) sb.Append("                float reach = run.Reach(w), reach2 = reach * reach;\n");
         sb.Append("                for (; lanes != 0; lanes &= lanes - 1)\n                {\n");
         sb.Append("                    nint i = (nint)w * size + global::System.Numerics.BitOperations.TrailingZeroCount(lanes);\n");
+        if (prune) sb.Append($"                    ref readonly {t} at = ref {unsafeType}.Add(ref r{rowPoint}, i);\n");
         sb.Append("                    for (int k = 0; k < ranges.Length; k += 2)\n");
-        sb.Append("                        for (int j = ranges[k], end = ranges[k + 1]; j < end; j++)\n");
+        sb.Append("                        for (int j = ranges[k], end = ranges[k + 1]; j < end; j++)\n                        {\n");
+        if (prune)
+        {
+            sb.Append($"                            ref readonly {t} near = ref {unsafeType}.Add(ref o{otherPoint}, j);\n");
+            sb.Append("                            float " + string.Join(", ", axes.Select((a, k) => $"d{k} = at.{a} - near.{a}")) + ";\n");
+            sb.Append("                            if (" + string.Join(" + ", axes.Select((_, k) => $"d{k} * d{k}")) + " > reach2) continue;\n");
+        }
         sb.Append($"                            if (!skips || !run.Skip(j)) __ForEach{owner.TypeParameters}.{method.Name}_{number}({args});\n");
-        sb.Append("                }\n            }\n        }\n");
+        sb.Append("                        }\n                }\n            }\n        }\n");
 
         if (pair.Simd is { } simd)
         {

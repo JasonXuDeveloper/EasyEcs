@@ -80,11 +80,13 @@ public readonly ref struct PairRun
     private readonly Archetype _table, _other;
     private readonly ulong[] _rows, _neighbors;
     private readonly int[] _starts, _ranges;
+    private readonly float[] _reach;
     private readonly int _windows, _size;
 
     internal PairRun(World world, Archetype table, Archetype other, ulong[] rows, ulong[] neighbors, int[] starts,
-        int[] ranges, int windows, int size)
+        int[] ranges, float[] reach, int windows, int size)
     {
+        _reach = reach;
         _world = world;
         _table = table;
         _other = other;
@@ -132,6 +134,14 @@ public readonly ref struct PairRun
         int start = _starts[window];
         return _ranges.AsSpan(start, _starts[window + 1] - start);
     }
+
+    /// <summary>
+    /// The reach of window <paramref name="window"/> this pass: the largest cutoff of its rows, a little over it (never
+    /// below: a pair farther than it fails the method's test), infinity without a cutoff. The method per pair skips the
+    /// neighbors past it without a call. O(1).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public float Reach(int window) => _reach[window];
 
     /// <summary>Some rows of the other table fail the neighbors' filter: <see cref="Skip"/> tells which.</summary>
     public bool Skips => _neighbors != null;
@@ -322,7 +332,7 @@ internal sealed class PairState
                 bool skips = otherMode == RowFilter.Test || other.Count != other.AliveCount;
                 if (skips) Passing(other, otherFilter, otherMode, ref _neighbors);
                 var list = ListOf(own, their);
-                job.Run(new PairRun(world, table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.WindowCount, size));
+                job.Run(new PairRun(world, table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Reach, own.WindowCount, size));
             }
         }
     }
@@ -365,7 +375,7 @@ internal sealed class PairState
         else
         {
             if (_cutoffs.Length < count) _cutoffs = new double[Math.Max(count, _cutoffs.Length * 2)]; // warm-up only
-            job.CutoffsSquared(new PairRun(world, table, table, _rows, null, null, null, 0, size), _cutoffs.AsSpan(0, count));
+            job.CutoffsSquared(new PairRun(world, table, table, _rows, null, null, null, null, 0, size), _cutoffs.AsSpan(0, count));
             for (int w = 0; w < n; w++)
             {
                 int first = w * size;
