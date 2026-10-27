@@ -1166,8 +1166,7 @@ internal sealed class Archetype
         }
 
         var rows = into ?? new TableCopy(this);
-        if (rows.Slots.Length < count) rows.Slots = new EntityId[count];
-        Slots.AsSpan(0, count).CopyTo(rows.Slots);
+        bool kept = into != null && Kept(into, rewrites); // its rows' lists may still match: see CopyChangedLists
         for (int c = 0; c < Columns.Length; c++)
         {
             var info = _infos[c];
@@ -1181,9 +1180,11 @@ internal sealed class Archetype
                 {
                     if (column != null) info.Discard(column, 0, old);
                     column = info.Create(count);
+                    old = 0;
                 }
                 else if (old > count) info.Discard(column, count, old - count); // no stale references kept alive
-                info.CopyRows(Columns[c], column, count);
+                if (kept && info.IsBuffer) CopyChangedLists(c, rows, count, Math.Min(old, count), into.Synced, toCopy: true);
+                else info.CopyRows(Columns[c], column, count);
             }
             else
             {
@@ -1202,11 +1203,54 @@ internal sealed class Archetype
             else rows.DropBits(c);
         }
 
+        if (rows.Slots.Length < count) rows.Slots = new EntityId[count];
+        Slots.AsSpan(0, count).CopyTo(rows.Slots); // after the columns: CopyChangedLists compares the old slots
         Absent.CopyTo(rows.Absent, 0);
         rows.Count = count;
         rows.Synced = tick;
         rows.Rewrites = rewrites;
         return rows;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="rows"/> was made equal to this table and no load rewrote rows since, so a row holding the
+    /// entity the copy holds in that row, its tracked column not written since <see cref="TableCopy.Synced"/>, holds
+    /// the copy's value, though other rows changed (<see cref="CopyChangedLists"/>).
+    /// </summary>
+    private static bool Kept(TableCopy rows, int rewrites) => rows.Synced != 0 && rows.Rewrites == rewrites;
+
+    /// <summary>
+    /// Copy the lists of buffer column <paramref name="c"/>, rows [0, <paramref name="count"/>), between the table and
+    /// <paramref name="rows"/> (a copy <see cref="Kept"/>, of other rows than the table's now: the full path), into the
+    /// copy (<paramref name="toCopy"/>) or back: a row below <paramref name="kept"/> (rows both sides held before) that
+    /// holds the same entity on both sides and was not written since <paramref name="since"/> (the copy's
+    /// <see cref="TableCopy.Synced"/>) holds equal elements on both sides and is skipped; every other row gets copies in
+    /// a list of the target's own (<see cref="BufferStore.AssignOwn"/>). Before either side's slots are overwritten.
+    /// O(rows + elements copied).
+    /// </summary>
+    private void CopyChangedLists(int c, TableCopy rows, int count, int kept, ulong since, bool toCopy)
+    {
+        var info = _infos[c];
+        int ticks = ColumnIndex(info.Companion);
+        ref ulong tick = ref Unsafe.As<RowTick, ulong>(ref Data<RowTick>(ticks));
+        ref long mine = ref Unsafe.As<EntityId, long>(ref MemoryMarshal.GetArrayDataReference(Slots));
+        ref long theirs = ref Unsafe.As<EntityId, long>(ref MemoryMarshal.GetArrayDataReference(rows.Slots));
+        for (int first = 0; first < count; first += 64)
+        {
+            int end = Math.Min(64, count - first);
+            ulong copy = 0;
+            for (int i = 0; i < end; i++)
+            {
+                int row = first + i;
+                // Below kept: rows of both sides' slots and of the ticks column (the table's capacity covers them).
+                if (row >= kept || Unsafe.Add(ref mine, row) != Unsafe.Add(ref theirs, row) || Unsafe.Add(ref tick, row) >= since)
+                    copy |= 1UL << i;
+            }
+
+            if (copy == 0) continue;
+            if (toCopy) info.CopyWritten(Columns[c], rows.Columns[c], first, copy);
+            else info.CopyWritten(rows.Columns[c], Columns[c], first, copy);
+        }
     }
 
     /// <summary>
@@ -1403,8 +1447,11 @@ internal sealed class Archetype
             return true;
         }
 
+        bool kept = !swap && rows != null && Kept(rows, rewrites); // its rows' lists may still match: see CopyChangedLists
+        ulong since = rows?.Synced ?? 0;
         if (rows != null) rows.Synced = 0; // the caller syncs it again once the table holds its rows (not a load's)
         int count = rows?.Count ?? 0;
+        int before = Math.Min(Count, count); // rows both sides held
         if (_hasManaged && Count > count)
         {
             // The rows past the restored ones are gone: their buffers' lists go back to their pool. Dense, so each list
@@ -1416,15 +1463,17 @@ internal sealed class Archetype
         Reserve(count);
         if (rows != null)
         {
-            rows.Slots.AsSpan(0, count).CopyTo(Slots);
             for (int c = 0; c < Columns.Length; c++)
             {
                 if (_infos[c].Owner >= 0) continue; // change ticks: stamped or cleared by the caller
-                if (_infos[c].Size < 0) _infos[c].CopyRows(rows.Columns[c], Columns[c], count, swap, own: !swap);
+                if (kept && _infos[c].IsBuffer) CopyChangedLists(c, rows, count, before, since, toCopy: false);
+                else if (_infos[c].Size < 0) _infos[c].CopyRows(rows.Columns[c], Columns[c], count, swap, own: !swap);
                 else
                     Unsafe.CopyBlockUnaligned(ref Aligned(Columns[c]), ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(rows.Columns[c])),
                         (uint)(count * _infos[c].Size));
             }
+
+            rows.Slots.AsSpan(0, count).CopyTo(Slots); // after the columns: CopyChangedLists compares the old slots
         }
 
         foreach (ref var row in Slots.AsSpan(count, Math.Max(Count - count, 0))) row = new EntityId(Tombstone, row.Version);
