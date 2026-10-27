@@ -32,10 +32,10 @@ names the skill:
 
 - [ ] **Fewer copies c + d** ("Next" items 12c and 12d, branch `feat-fewer-copies`): Permute swaps columns with a spare,
       incremental Capture / Restore, and fix-ci's restore cost won back.
-- [ ] **VoxelServer: zombies follow a distance field** ("Next" item 8, branch `feat-zombie-field`).
+- [ ] **Generator crash on components from another assembly** ("Next" item 8b, branch `fix-kernel-foreign`).
 - [ ] **L2 leftovers** ("Next" item 1, branch `feat-pairs-2`): the open list of item 1.
 
-Merged since the last update: CI fixes (`fix-ci`, ae9d525: Restore gives rows written since the capture their own
+Merged since the last update: the zombies' distance field (`feat-zombie-field`, 9c73602), CI fixes (`fix-ci`, ae9d525: Restore gives rows written since the capture their own
 copy on the owner thread, VoxelServer 0 B again; DocCheck 0), L1 ordered rows + L3 compress (`feat-locality-core`), the pair form
 (`feat-locality-pairs`), vector loops through the user's own calls (`feat-call-inliner`), the prefetch gate per form
 (`feat-prefetch-gate`, 216e29a: row chases, fused walks, buffer chases and `DestroyEntities` past the L2; probes and
@@ -49,8 +49,9 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Next, in this order
 
-Agent slots as they free (at most 3): item 1 (running), item 8 (running), then 11 + 12a + 12b together (one tile
-branch: padded storage, ping-pong, zero rows, edges found while stepping), 12c + 12d (core copies), 12e, 9, 10, 4.
+Agent slots as they free (at most 3): item 1, 8b and 12c + 12d (running), then 8c, 11 + 12a + 12b together (one tile
+branch: padded storage, ping-pong, zero rows, edges found while stepping), 12e, 9, 10, 4, 7, Later, then Finish.
+Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 1a).
 
 1. [ ] **L2: the generated pair form** (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
        the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
@@ -270,7 +271,8 @@ branch: padded storage, ping-pong, zero rows, edges found while stepping), 12c +
   matches the call by the written name; fix it (an alias is ordinary C#), with a generator test, or have the
   analyzer say so if it cannot be fixed.
 - [ ] **Flaky: `ParallelReductionsScratchAndLookupsDoNotAllocate`** fails about once per full Release run (seen on
-  45feeeb), passes 5 of 5 alone on the tip and on the base before the call inliner. The parallel allocation
+  45feeeb; 1 in 2 runs with `DOTNET_EnableAVX2=0`; in the normal run of the 216e29a merge gate), passes 5 of 5 alone
+  on the tip and on the base before the call inliner. The parallel allocation
   checks' measurement race (#166's fix) has another path when the whole suite runs: find it and fix the cause or
   the measurement, never loosen the 0 B check.
 - [ ] **Native AOT: no class-initialization check per iteration for a loop's tables** (owner's find, 2026-10-26):
@@ -304,9 +306,6 @@ branch: padded storage, ping-pong, zero rows, edges found while stepping), 12c +
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
       the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
-- [ ] Flaky under full-suite load: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate`
-      (1 failure in 2 runs with `DOTNET_EnableAVX2=0`; again in the normal run of the 216e29a merge gate; passes
-      alone, 5 of 5): find the measurement race (#166's kind).
 
 ## Finish
 
@@ -318,26 +317,34 @@ Starts only when every code item of Next and Later is done (owner, 2026-10-26: "
       included (vector loops through plain `[ForEach]`, `[Accumulate]`, `[ForEachRecord]`, `Emit`, `Scratch`,
       `EntityRandom`, views, `[OrderBy]` / pairs, tiles with `[GaussSeidel]` and the ping-pong step, `IDirectMapped`,
       `ChunkSize` only where it pays, the least code the generator allows):
-      a. **VoxelServer, a large rewrite** (owner, 2026-10-26: every high-performance feature, the least user code):
-         its per-system plan is made first (read-only); gaps it exposes (lines users would write twice) become code
-         items before the rewrite, so the rewrite only uses what exists. Bools split (Body.OnGround, Exposure.Sunlit).
+      a. **VoxelServer, a large rewrite** (owner, 2026-10-26: every high-performance feature, the least user code;
+         2026-10-27: "需要大规模重构"): the plan is `voxel-rewrite.md`, made on 2515638 before L1 / L2, the call
+         inliner, the generator gaps, the prefetch gates, the distance field and the tile items. It found ~7% to cut
+         as line edits; the owner expects a restructure, so it is refreshed now on the tip against everything merged
+         since (systems merged or split, components reshaped for vector loops, pairs instead of rings, tiles instead
+         of hand loops). Its per-system plan is made now, read-only, not at Finish (per system: the features it does not use yet,
+         the lines saved, the generator or feature gaps it exposes); the gaps (lines users would write twice) go into
+         Later as code items, so the rewrite itself only uses what already exists. Bools split (Body.OnGround,
+         Exposure.Sunlit).
       b. The other samples, `templates/`, the live demo (`demo/`, its page includes the files).
       c. Benchmark worlds (`BattleServer.cs`: the Battle singleton moves to `[Accumulate]`, then GeneratorBenchmark's
-         EECS086 filter exception is deleted; `WorldSimulation.cs`), with an A/B on each rewritten world.
+         EECS086 filter exception is deleted: EECS086's total case reports Shoot, SendFire and SendFireOut, and a
+         benchmark must not keep suppressing a rule our own example breaks; `WorldSimulation.cs`), with an A/B on each
+         rewritten world.
       d. Unit tests that show usage (fixtures, scenario and feature tests: the forms users would copy), not the tests
          that pin an old form on purpose (code fixes, analyzer negatives, migrations).
       e. Every code example of the docs (`docs/content` fences en + zh, the guide pages' full examples, the public
          skill `skills/easyecs/SKILL.md`, README), DocCheck at 0.
       Proof: outputs and README / page output blocks match, 0 B steady state, tests three ways, A/B no slower.
 - [ ] **Directory restructure of the whole repository** (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only,
-  after feat-prefetch-all and feat-locality-pairs merge; the layout plan (old → new per file, every path reference)
+  after every agent branch merges; the layout plan (old → new per file, every path reference)
   goes to the owner first.
 - [ ] **EECS086, EECS109 and EECS055's "a bool among N fields" become Warnings** (owner, 2026-10-27) once the
       samples use `[Accumulate]` / `[ForEachRecord]` and VoxelServer splits its bools (Body.OnGround, Exposure.Sunlit):
-      one line each in the analyzer (pass `true`, fixable, in Kernel.cs for EECS055), with the rewrite below.
+      one line each in the analyzer (pass `true`, fixable, in Kernel.cs for EECS055), with step 1 above.
 - [ ] **Generated-members scan before the release** (roadmap "Less code through the generator", D26,
       `audit-generator`): the API, the battle server and the guides scanned for lines users write twice.
-- [ ] **Docs pass** (#141): everything in `docs-todos.md`; DocCheck (296 problems) and ApiDocs (46) to 0; decision
+- [ ] **Docs pass** (#141): everything in `docs-todos.md`; DocCheck and ApiDocs kept at 0 (both 0 since the fix-ci merge); decision
       record for the 8 declined declarations; roadmap item for inner loops; analyzer range EECS002-103.
 - [ ] The `arm64` CI job (`ci.yml`, `runs-on: ubuntu-24.04-arm`, added b1dbdb0) has never run: it runs on the next
       push to master or a manual dispatch; if the label is wrong the job fails at once and the label is fixed then.
