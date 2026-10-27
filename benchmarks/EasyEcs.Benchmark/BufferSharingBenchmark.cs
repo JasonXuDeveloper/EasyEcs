@@ -119,5 +119,20 @@ public class BufferSnapshotBenchmark
         _world.Restore(_snapshot);
     }
 
+    /// <summary><c>Rollback</c> with an entity spawned into the table after the capture: the restore rewrites it whole.</summary>
+    [Benchmark]
+    public void RollbackSpawning()
+    {
+        _world.Capture(_snapshot);
+        for (int i = 0; i < WrittenRows; i++)
+        {
+            _next = (_next + 97) % _entities.Length;
+            _entities[_next].Get<DynamicBuffer<int>>().AsSpan()[0] = _next;
+        }
+
+        _world.CreateEntity(new Owner(1), new DynamicBuffer<int>());
+        _world.Restore(_snapshot);
+    }
+
     public record struct Owner(int Player) : IComponent;
 }
