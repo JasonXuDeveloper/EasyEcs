@@ -79,30 +79,31 @@ public static unsafe class LookupLanes
 
     /// <summary>
     /// Whether a pass reading rows of <paramref name="rowSize"/> bytes of other entities of <paramref name="world"/>
-    /// prefetches them (<see cref="Lookup{T}.Prefetches"/>): only where a prefetch exists (<see cref="CanPrefetch"/>) and
-    /// when the records and rows a chase lands on, those of every live entity, are past the last-level cache
-    /// (<see cref="LastLevelCache"/>; unknown: never). In the cache, a prefetch has no miss to hide and costs up to twice
-    /// the chase's time (LookupChaseBenchmark at 1,000 entities); past it, it hides most of two misses per row. Read
-    /// once per pass, by the job's initializer.
+    /// prefetches them (<see cref="Lookup{T}.Prefetches"/>, <see cref="Lookup{T}.PrefetchesPastL2"/>): only where a
+    /// prefetch exists (<see cref="CanPrefetch"/>) and when the records and rows a chase lands on, those of every live
+    /// entity, are past a cache of <paramref name="cache"/> bytes (<see cref="CacheSizes"/>; 0, unknown: never). In the
+    /// cache, a prefetch has no miss to hide and costs up to twice the chase's time (LookupChaseBenchmark at 1,000
+    /// entities); past it, it hides most of two misses per row. Read once per pass, by the job's initializer or the call site.
     /// </summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
-    public static bool Prefetches(World world, int rowSize) =>
-        CanPrefetch && PastCache((long)world.EntityCount * (Unsafe.SizeOf<EntityMeta>() + rowSize), LastLevelCache.Bytes);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool Prefetches(World world, int rowSize, long cache) =>
+        CanPrefetch && PastCache((long)world.EntityCount * (Unsafe.SizeOf<EntityMeta>() + rowSize), cache);
 
     /// <summary>How many ids ahead a core loop over a list of ids prefetches records (<see cref="PrefetchesIds"/>).</summary>
     internal const int IdsAhead = 16;
 
     /// <summary>
-    /// Whether a core loop over <paramref name="count"/> ids of <paramref name="world"/> (DestroyEntities, a save or a
-    /// move of entities) prefetches the record of the id <see cref="IdsAhead"/> ahead of the one it handles: where a
-    /// prefetch exists, for a list longer than the distance, and when every live entity's record and a line of its row
-    /// are past the last-level cache. Read once per call.
+    /// Whether a core loop over <paramref name="count"/> ids of <paramref name="world"/> (DestroyEntities) prefetches
+    /// the record of the id <see cref="IdsAhead"/> ahead of the one it handles: where a prefetch exists, for a list
+    /// longer than the distance, and when every live entity's record and a line of its row are past the L2
+    /// (<see cref="CacheSizes.L2OrLastLevel"/>: a list in random order pays as soon as its records leave the L2,
+    /// IdListPrefetchBenchmark). Read once per call.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static bool PrefetchesIds(World world, int count) =>
-        CanPrefetch && count > IdsAhead && PastCache((long)world.EntityCount * (Unsafe.SizeOf<EntityMeta>() + 64), LastLevelCache.Bytes);
+        CanPrefetch && count > IdsAhead && PastCache((long)world.EntityCount * (Unsafe.SizeOf<EntityMeta>() + 64), CacheSizes.L2OrLastLevel);
 
-    /// <summary>Whether <paramref name="bytes"/> are past a last-level cache of <paramref name="cache"/> bytes (0: unknown, never).</summary>
+    /// <summary>Whether <paramref name="bytes"/> are past a cache of <paramref name="cache"/> bytes (0: unknown, never).</summary>
     internal static bool PastCache(long bytes, long cache) => cache > 0 && bytes > cache;
 
     /// <summary>

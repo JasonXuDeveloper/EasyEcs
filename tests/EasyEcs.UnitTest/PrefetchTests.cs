@@ -125,13 +125,21 @@ public ref struct ChasePairSecondSystem
 
 public class PrefetchTests
 {
-    /// <summary>Runs <paramref name="body"/> with the last-level cache taken as <paramref name="bytes"/>, then restores it.</summary>
-    private static void WithCache(long bytes, Action body)
+    /// <summary>
+    /// Runs <paramref name="body"/> with the last-level cache taken as <paramref name="bytes"/> and the L2 as
+    /// <paramref name="l2"/> (the same when not given: 0 and 1 turn every form's gate off and on), then restores both.
+    /// </summary>
+    private static void WithCache(long bytes, Action body, long? l2 = null)
     {
-        long was = LastLevelCache.Bytes;
-        LastLevelCache.Bytes = bytes;
+        long was = CacheSizes.LastLevel, wasL2 = CacheSizes.L2;
+        CacheSizes.LastLevel = bytes;
+        CacheSizes.L2 = l2 ?? bytes;
         try { body(); }
-        finally { LastLevelCache.Bytes = was; }
+        finally
+        {
+            CacheSizes.LastLevel = was;
+            CacheSizes.L2 = wasL2;
+        }
     }
 
     private static Course[] Run(World world, Action<World> pass)
@@ -199,11 +207,12 @@ public class PrefetchTests
     }
 
     /// <summary>
-    /// The gate: a pass prefetches only where a prefetch exists (x86) and when every live entity's record and row of T
-    /// (16 + size bytes each) are past the last-level cache; an unknown cache (0) never.
+    /// The last level's gate (a vector loop's chases): a pass prefetches only where a prefetch exists (x86, ARM64 with
+    /// SVE) and when every live entity's record and row of T (16 + size bytes each) are past the last-level cache; an
+    /// unknown cache (0) never.
     /// </summary>
     [Test]
-    public void ThePassPrefetchesOnlyPastTheLastLevelCache()
+    public void AVectorLoopsChasesPrefetchOnlyPastTheLastLevelCache()
     {
         using var world = new World();
         world.CreateEntities(new Entity[1_000], new Beacon(1, 2));
@@ -213,6 +222,45 @@ public class PrefetchTests
         WithCache(0, () => Assert.That(Lookup<Beacon>.Prefetches(world), Is.False, "an unknown cache"));
         Assert.That(LookupLanes.PastCache(1L << 40, 0), Is.False);
         Assert.That(LookupLanes.PastCache(33L << 20, 32L << 20), Is.True);
+    }
+
+    /// <summary>
+    /// A gate per form: index probes (parallel ones too) and vector loops' chases past the last-level cache, the forms
+    /// that pay past the L2 (the row form's chases, DestroyEntities' id list) past one core's L2; an unknown L2
+    /// falls back to the last-level gate (never more eager than it), an unknown last level with it keeps every form off.
+    /// </summary>
+    [Test]
+    public void EachFormHasItsCache()
+    {
+        using var world = new World();
+        world.CreateEntities(new Entity[1_000], new Beacon(1, 2));
+        using var keys = Seekers(10, 1_000);
+        bool can = LookupLanes.CanPrefetch;
+        long bytes = 1_000 * (16 + 8);
+        // Between the L2 and the last level: only the forms gated on the L2 prefetch.
+        WithCache(1L << 40, () =>
+        {
+            Assert.That(Lookup<Beacon>.Prefetches(world), Is.False, "a vector loop's chase in the last level");
+            Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.EqualTo(can), "a row form's chase past the L2");
+            Assert.That(LookupExtensions.Probes<Login, int>(keys), Is.False, "a probe in the last level");
+            Assert.That(LookupLanes.PrefetchesIds(world, 100), Is.EqualTo(can), "an id list past the L2");
+            Assert.That(LookupLanes.PrefetchesIds(world, LookupLanes.IdsAhead), Is.False, "a list no longer than the distance");
+        }, l2: 1);
+        // The L2 gate compares with the L2's size: in it, off.
+        WithCache(1L << 40, () => Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.False, "in the L2"), l2: bytes);
+        WithCache(1L << 40, () => Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.EqualTo(can), "past the L2"), l2: bytes - 1);
+        // An unknown L2: the last level's gate.
+        WithCache(1L << 40, () =>
+        {
+            Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.False, "an unknown L2 in the last level");
+            Assert.That(LookupLanes.PrefetchesIds(world, 100), Is.False);
+        }, l2: 0);
+        WithCache(1, () => Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.EqualTo(can), "an unknown L2 past the last level"), l2: 0);
+        WithCache(0, () =>
+        {
+            Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.False, "both unknown");
+            Assert.That(LookupLanes.PrefetchesIds(world, 100), Is.False);
+        }, l2: 0);
         Assert.That(LookupLanes.PastCache(16L << 20, 32L << 20), Is.False);
     }
 
@@ -248,8 +296,8 @@ public class PrefetchTests
         string Job(string name) => text.Split("internal ref struct ").Single(j => j.StartsWith(name + " "));
         const string add = "global::System.Runtime.CompilerServices.Unsafe.Add";
 
-        // The row form: the call site picks the twin past the cache, today's job otherwise.
-        Assert.That(text, Does.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.Prefetches(world))")
+        // The row form: the call site picks the twin past the L2 (its form's gate), today's job otherwise.
+        Assert.That(text, Does.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastL2(world))")
             .And.Contain("new __ForEach.RowJob0Chases { World = world }").And.Contain("new __ForEach.RowJob0 { World = world }"));
         Assert.That(Job("RowJob0Chases"), Does.Contain($".Prefetch({add}(ref r2, i + 16).Target);").And.Contain($".PrefetchRow({add}(ref r2, i + 8).Target);")
             .And.Contain("if (rows > 16)"));
@@ -511,6 +559,7 @@ public class PrefetchTests
                 [ForEach] public static void Unique(in Wants w, ref Way way, Lookup<Code> codes) => way.X = codes.TryFind(w.Code, out var e) ? e.Id.Index : 0;
                 [ForEach] public static void Links(in DynamicBuffer<Link> links, ref Way way, Lookup<Spot> spots) { foreach (var l in links) if (spots.Has(l.Target)) way.X += spots.Read(l.Target).X; }
                 [ForEach(Parallel = true)] public static void Wide(in Aim a, ref Way w, Lookup<Spot> spots) => w.X = spots.Has(a.Target) ? spots.Read(a.Target).X : 0;
+                [ForEach(Parallel = true)] public static void UniqueParallel(in Wants w, ref Way way, Lookup<Code> codes) => way.X = codes.TryFind(w.Code, out var e) ? e.Id.Index : 0;
             }
             [EcsSystem] public ref struct Walk
             {
@@ -541,6 +590,12 @@ public class PrefetchTests
         Assert.That(text, Does.Contain("WideJob3Chases").And.Contain("ForEachBatchParallel"));
         // The fused walk's twin, picked past the cache before today's walk.
         Assert.That(text, Does.Contain("First_Second_Fused0Chases").And.Contain("FirstJob0Chases"));
+        // A gate per form: probes (in parallel too) and a vector loop's chases past the last level; the row form's chases
+        // (a buffer's, in parallel, in a fused walk) past the L2.
+        Assert.That(text, Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Code, int>(world))")
+            .And.Contain("UniqueParallelJob4Chases"));
+        Assert.That(text, Does.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastL2(world))"), "the row form's chases");
+        Assert.That(text, Does.Not.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.Prefetches(world))"), "no row form on the last level's gate");
         // Lambda passes: the vector loop's gate in its job, the row form's twin picked at the interceptor.
         Assert.That(text, Does.Contain("f2 = global::EasyEcs.Lookup<global::Game.Spot>.Prefetches(__world)"));
         Assert.That(text, Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Code, int>(__world))").And.Contain("LambdaJob1Chases"));
@@ -550,19 +605,23 @@ public class PrefetchTests
     [Test]
     public void TheOperatingSystemsCacheSizeIsRead()
     {
-        Assert.That(LastLevelCache.ParseSize("266240K\n"), Is.EqualTo(266240L << 10));
-        Assert.That(LastLevelCache.ParseSize("32M"), Is.EqualTo(32L << 20));
-        Assert.That(LastLevelCache.ParseSize("1G"), Is.EqualTo(1L << 30));
-        Assert.That(LastLevelCache.ParseSize("4096"), Is.EqualTo(4096));
-        Assert.That(LastLevelCache.ParseSize(""), Is.Zero);
-        Assert.That(LastLevelCache.ParseSize("big"), Is.Zero);
+        Assert.That(CacheSizes.ParseSize("266240K\n"), Is.EqualTo(266240L << 10));
+        Assert.That(CacheSizes.ParseSize("32M"), Is.EqualTo(32L << 20));
+        Assert.That(CacheSizes.ParseSize("1G"), Is.EqualTo(1L << 30));
+        Assert.That(CacheSizes.ParseSize("4096"), Is.EqualTo(4096));
+        Assert.That(CacheSizes.ParseSize(""), Is.Zero);
+        Assert.That(CacheSizes.ParseSize("big"), Is.Zero);
         if (!OperatingSystem.IsLinux()) Assert.Ignore("the readers checked here are Linux's");
-        long sysfs = LastLevelCache.FromSysfs("/sys/devices/system/cpu/cpu0/cache");
-        long sysconf = LastLevelCache.FromSysconf();
-        TestContext.Out.WriteLine($"sysfs {sysfs} bytes, sysconf {sysconf} bytes, read {LastLevelCache.Read()} bytes");
+        long sysfs = CacheSizes.FromSysfs("/sys/devices/system/cpu/cpu0/cache");
+        long sysconf = CacheSizes.FromSysconf();
+        long l2 = CacheSizes.FromSysfs("/sys/devices/system/cpu/cpu0/cache", 2), l2Sysconf = CacheSizes.FromSysconf(2);
+        TestContext.Out.WriteLine($"sysfs {sysfs} bytes, sysconf {sysconf} bytes, read {CacheSizes.ReadLastLevel()} bytes; L2 sysfs {l2}, sysconf {l2Sysconf}, read {CacheSizes.ReadL2()}");
         Assert.That(sysfs, Is.GreaterThan(0));
         if (sysconf > 0) Assert.That(sysconf, Is.EqualTo(sysfs));
-        Assert.That(LastLevelCache.Read(), Is.EqualTo(sysfs));
+        Assert.That(CacheSizes.ReadLastLevel(), Is.EqualTo(sysfs));
+        Assert.That(l2, Is.GreaterThan(0).And.LessThanOrEqualTo(sysfs), "an L2 no larger than the last level");
+        if (l2Sysconf > 0) Assert.That(l2Sysconf, Is.EqualTo(l2));
+        Assert.That(CacheSizes.ReadL2(), Is.EqualTo(l2));
     }
 
     /// <summary>
@@ -576,9 +635,9 @@ public class PrefetchTests
 #pragma warning disable SYSLIB5003 // Sve: IsSupported only
         bool sve = System.Runtime.Intrinsics.Arm.Sve.IsSupported;
 #pragma warning restore SYSLIB5003
-        TestContext.Out.WriteLine($"{System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}: SSE {System.Runtime.Intrinsics.X86.Sse.IsSupported}, SVE {sve}, prefetch {Prefetching.IsSupported}, last-level cache {LastLevelCache.Bytes} bytes");
+        TestContext.Out.WriteLine($"{System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}: SSE {System.Runtime.Intrinsics.X86.Sse.IsSupported}, SVE {sve}, prefetch {Prefetching.IsSupported}, last-level cache {CacheSizes.LastLevel} bytes, L2 {CacheSizes.L2} bytes");
         Assert.That(Prefetching.IsSupported, Is.EqualTo(System.Runtime.Intrinsics.X86.Sse.IsSupported || sve));
-        Assert.That(LastLevelCache.Bytes == 0 || Prefetching.IsSupported, Is.True, "the size is read only where a prefetch exists");
+        Assert.That(CacheSizes.LastLevel == 0 && CacheSizes.L2 == 0 || Prefetching.IsSupported, Is.True, "the sizes are read only where a prefetch exists");
         long line = 0;
         Prefetching.Line(&line); // never faults, changes nothing
         Prefetching.Line(null);
@@ -589,14 +648,30 @@ public class PrefetchTests
     [Test]
     public void AnUnknownCacheMeansNoPrefetch()
     {
-        Assert.That(LastLevelCache.FromSysfs("/nonexistent/cache"), Is.Zero);
+        Assert.That(CacheSizes.FromSysfs("/nonexistent/cache"), Is.Zero);
+        Assert.That(CacheSizes.FromSysfs("/nonexistent/cache", 2), Is.Zero);
         var empty = Directory.CreateTempSubdirectory();
         try
         {
             Directory.CreateDirectory(Path.Combine(empty.FullName, "index0"));
-            Assert.That(LastLevelCache.FromSysfs(empty.FullName), Is.Zero, "an index without a size");
+            Assert.That(CacheSizes.FromSysfs(empty.FullName), Is.Zero, "an index without a size");
             File.WriteAllText(Path.Combine(empty.FullName, "index0", "size"), "unknown");
-            Assert.That(LastLevelCache.FromSysfs(empty.FullName), Is.Zero, "a size that is no number");
+            Assert.That(CacheSizes.FromSysfs(empty.FullName), Is.Zero, "a size that is no number");
+            // The L2 is the level-2 data or unified cache: not the level-2 instruction cache, not one without a level.
+            File.WriteAllText(Path.Combine(empty.FullName, "index0", "size"), "64K");
+            File.WriteAllText(Path.Combine(empty.FullName, "index0", "level"), "2\n");
+            File.WriteAllText(Path.Combine(empty.FullName, "index0", "type"), "Instruction\n");
+            Assert.That(CacheSizes.FromSysfs(empty.FullName, 2), Is.Zero, "an instruction cache");
+            Directory.CreateDirectory(Path.Combine(empty.FullName, "index1"));
+            File.WriteAllText(Path.Combine(empty.FullName, "index1", "size"), "1024K");
+            Assert.That(CacheSizes.FromSysfs(empty.FullName, 2), Is.Zero, "a cache without a level");
+            File.WriteAllText(Path.Combine(empty.FullName, "index1", "level"), "2\n");
+            File.WriteAllText(Path.Combine(empty.FullName, "index1", "type"), "Unified\n");
+            Directory.CreateDirectory(Path.Combine(empty.FullName, "index2"));
+            File.WriteAllText(Path.Combine(empty.FullName, "index2", "size"), "32M");
+            File.WriteAllText(Path.Combine(empty.FullName, "index2", "level"), "3\n");
+            Assert.That(CacheSizes.FromSysfs(empty.FullName, 2), Is.EqualTo(1L << 20), "the level-2 unified cache");
+            Assert.That(CacheSizes.FromSysfs(empty.FullName), Is.EqualTo(32L << 20), "the last level: the largest");
         }
         finally { empty.Delete(true); }
 

@@ -24,13 +24,16 @@ public sealed partial class ValueIndex<T, TKey>
 
     /// <summary>
     /// Whether a pass probing this index prefetches its probes: where a prefetch exists, and when the index's lines a
-    /// probe lands on (slots, buckets and entries, lists of ids) are past the last-level cache; in the cache a prefetch
-    /// costs more than it hides (BatchProbeBenchmark: 1.3-1.6x at 1k and 100k keys). Reads the hash's arrays for
-    /// <see cref="Prefetch"/>. Once per pass, on the owner thread.
+    /// probe lands on (slots, buckets and entries, lists of ids) are past the last-level cache, on one thread and in
+    /// parallel alike: just past the L2 a probe's prefetch costs more than it hides, in parallel too
+    /// (ProbePrefetchBenchmark; borrowed-ideas.md item 1, "A gate per form"); in the cache it costs 1.3-1.6x
+    /// (BatchProbeBenchmark at 1k and 100k keys). Reads the hash's arrays for <see cref="Prefetch"/>. Once per pass, on
+    /// the owner thread.
     /// </summary>
     internal bool Probes()
     {
-        if (!Prefetching.IsSupported || LastLevelCache.Bytes <= 0) return false;
+        long cache = CacheSizes.LastLevel;
+        if (!Prefetching.IsSupported || cache <= 0) return false;
         bool hashed = _heads.Count > 0 && HashSlots<TKey, IndexHead>.Works;
         int stride = hashed ? HashSlots<TKey, IndexHead>.Stride(_heads, out _probeBuckets, out _probeEntries, out _probeComparer) : 0;
         if (stride == 0) _probeBuckets = null;
@@ -39,7 +42,7 @@ public sealed partial class ValueIndex<T, TKey>
             + (long)_byTarget.Length * Unsafe.SizeOf<IndexHead>()
             + (long)_heads.Count * (sizeof(int) + Math.Max(stride, Unsafe.SizeOf<IndexHead>()))
             + (Unique ? 0 : (long)_nodes.Length * Unsafe.SizeOf<EntityId>()); // the lists of ids
-        return LookupLanes.PastCache(bytes, LastLevelCache.Bytes);
+        return LookupLanes.PastCache(bytes, cache);
     }
 
     /// <summary>

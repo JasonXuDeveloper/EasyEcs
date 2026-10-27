@@ -96,36 +96,26 @@ public partial class LookupChaseBenchmark
 
 /// <summary>
 /// The size gate of the generated jobs' prefetches (borrowed-ideas.md item 1): the plain method's job row by row
-/// (<see cref="Chase.Hunt"/>; past the cache its twin job prefetching), in parallel (the per-row form, which prefetches
-/// nothing: the gate's cost there), and as D131's vector loop (<see cref="Chase.HuntGathered"/>), with the gate as
-/// this machine's last-level cache decides it (<see cref="Gate.Auto"/>), forced off (today's loop) and forced on (a world
-/// in the cache prefetching all the same: what the gate saves). The owner runs it on machines with other caches.
+/// (<see cref="Chase.Hunt"/>; past the cache its twin job prefetching), in parallel (its twin a batch job over each
+/// chunk's runs of rows), and as D131's vector loop (<see cref="Chase.HuntGathered"/>), with the gates as this
+/// machine's caches decide them (<see cref="PrefetchGate.Gate.Auto"/>: the row forms past the L2, the vector loop past
+/// the last-level cache), forced off (today's loop) and forced on (a world in the cache prefetching all the same: what
+/// the gate saves). The owner runs it on machines with other caches.
 /// </summary>
 [MemoryDiagnoser]
 public class LookupChaseGateBenchmark
 {
-    public enum Gate { Auto, Off, On }
+    [ParamsSource(typeof(PrefetchGate), nameof(PrefetchGate.Sizes))] public int Entities;
 
-    [Params(1_000, 1_000_000, 16_000_000)] public int Entities;
-
-    [Params(Gate.Auto, Gate.Off, Gate.On)] public Gate Prefetch;
+    [ParamsSource(typeof(PrefetchGate), nameof(PrefetchGate.Gates))] public PrefetchGate.Gate Prefetch;
 
     private World _world;
-
-    // The gate's cache size is internal to EasyEcs.Core (tests inject it the same way): 0 is unknown (off), 1 byte is
-    // past it for any world (on).
-    private static readonly System.Reflection.FieldInfo Cache =
-        typeof(World).Assembly.GetType("EasyEcs.LastLevelCache")!.GetField("Bytes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-
-    private long _machine;
+    private PrefetchGate _gate;
 
     [GlobalSetup]
     public void Setup()
     {
-        Isa.Print();
-        _machine = (long)Cache.GetValue(null)!;
-        Console.WriteLine($"// last-level cache: {_machine} bytes");
-        if (Prefetch != Gate.Auto) Cache.SetValue(null, Prefetch == Gate.On ? 1L : 0L);
+        _gate = PrefetchGate.Set(Prefetch);
         _world = Chase.Create(Entities);
         for (int i = 0; i < 3; i++) Hunting();
     }
@@ -133,7 +123,7 @@ public class LookupChaseGateBenchmark
     [GlobalCleanup]
     public void Cleanup()
     {
-        Cache.SetValue(null, _machine);
+        _gate.Dispose();
         _world.Dispose();
     }
 

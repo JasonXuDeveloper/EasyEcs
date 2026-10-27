@@ -321,7 +321,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
         if (method.HasChaseTwin)
         {
-            // Past the last-level cache (any of its lookups' tables), the twin prefetching the chases; else today's job.
+            // Past the cache of its chases' forms (any of its lookups), the twin prefetching the chases; else today's job.
             sb.Append($"{indent}if ({ChaseGate([method], world)})\n{indent}{{\n");
             Pass(method with { IsChaseTwin = true }, $"{forEach}.{method.Name}Job{i}Chases{method.TypeParameters}", indent + "    ");
             sb.Append($"{indent}}}\n{indent}else\n{indent}{{\n");
@@ -593,7 +593,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
     /// <summary>
     /// The row loop of the twin job of a method that chases other entities (<see cref="ForEachModel.Chases"/>), run only
-    /// past the last-level cache (its pass's call site decides), group prefetching (AMAC): each chase's dependent loads
+    /// past the cache of its form (its pass's call site decides: ChaseGate), group prefetching (AMAC): each chase's dependent loads
     /// one stage per k rows (k = <see cref="ForEachModel.ChaseDistance"/>), the first stage furthest ahead, since each
     /// address is known only once the stage before brought its line in: an entity's record 2k rows ahead, then its row k
     /// ahead (for each element of a buffer of links too); an index probe's slot or bucket, then its entry. First the
@@ -648,7 +648,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
         // A vector loop that must take every row has the method's own job beside it, for hardware without its vectors.
         if (suffix.Length == 0 && method.Simd is { VectorTail: true }) EmitJob(sb, owner, method with { Simd = null }, number, "Rows");
-        // A method chasing other entities has a twin prefetching them, for the passes past the last-level cache.
+        // A method chasing other entities has a twin prefetching them, for the passes past the cache of its form.
         if (suffix.Length == 0 && method.HasChaseTwin) EmitJob(sb, owner, method with { IsChaseTwin = true }, number, "Chases");
         string job = $"{method.Name}Job{number}{suffix}{method.TypeParameters}";
         var components = method.Query.ToArray();
@@ -1101,7 +1101,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
         /// <summary>
         /// Its reads of other entities at ids its rows hold (<see cref="Generator.Chases"/>). Without a
-        /// vector loop, a pass past the last-level cache runs its twin job (<see cref="IsChaseTwin"/>), which walks
+        /// vector loop, a pass past the cache of its form (ChaseGate) runs its twin job (<see cref="IsChaseTwin"/>), which walks
         /// runs of rows and prefetches them <see cref="ChaseDistance"/> rows ahead; any other pass runs today's job.
         /// </summary>
         public EquatableArray<Chase> Chases { get; init; } = new([]);
@@ -1118,7 +1118,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
         /// <summary>
         /// This is the twin (<c>Job{i}Chases</c>): a job over runs of rows prefetching the chases, run only by a pass
-        /// whose call site found it past the last-level cache (<c>Lookup&lt;T&gt;.Prefetches</c>, once per pass).
+        /// whose call site found it past the cache of its form (ChaseGate, once per pass).
         /// </summary>
         public bool IsChaseTwin { get; init; }
 
@@ -1144,7 +1144,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         {
             if (Pair != null) return Pair.Describe(Name);
             if (Record.Length > 0) return $"{Name}: the records of Emitted<{Record.Replace("global::", "")}>, in order, then cleared";
-            if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(HasChaseTwin ? ", lookups prefetched past the last-level cache" : "")}";
+            if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(HasChaseTwin ? ", lookups prefetched past the cache" : "")}";
             var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Lane}>)" };
             if (simd.Flat != null) parts.Add("flat");
             else if (simd.Interleaves) parts.Add("interleaved fields");
