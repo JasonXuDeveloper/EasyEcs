@@ -217,9 +217,9 @@ public class PrefetchTests
         using var world = new World();
         world.CreateEntities(new Entity[1_000], new Beacon(1, 2));
         int bytes = 1_000 * (16 + 8);
-        WithCache(bytes - 1, () => Assert.That(Lookup<Beacon>.Prefetches(world), Is.EqualTo(LookupLanes.CanPrefetch), "past the cache"));
-        WithCache(bytes, () => Assert.That(Lookup<Beacon>.Prefetches(world), Is.False, "in the cache"));
-        WithCache(0, () => Assert.That(Lookup<Beacon>.Prefetches(world), Is.False, "an unknown cache"));
+        WithCache(bytes - 1, () => Assert.That(Lookup<Beacon>.PrefetchesPastLastLevel(world), Is.EqualTo(LookupLanes.CanPrefetch), "past the cache"));
+        WithCache(bytes, () => Assert.That(Lookup<Beacon>.PrefetchesPastLastLevel(world), Is.False, "in the cache"));
+        WithCache(0, () => Assert.That(Lookup<Beacon>.PrefetchesPastLastLevel(world), Is.False, "an unknown cache"));
         Assert.That(LookupLanes.PastCache(1L << 40, 0), Is.False);
         Assert.That(LookupLanes.PastCache(33L << 20, 32L << 20), Is.True);
     }
@@ -240,7 +240,7 @@ public class PrefetchTests
         // Between the L2 and the last level: only the forms gated on the L2 prefetch.
         WithCache(1L << 40, () =>
         {
-            Assert.That(Lookup<Beacon>.Prefetches(world), Is.False, "a vector loop's chase in the last level");
+            Assert.That(Lookup<Beacon>.PrefetchesPastLastLevel(world), Is.False, "a vector loop's chase in the last level");
             Assert.That(Lookup<Beacon>.PrefetchesPastL2(world), Is.EqualTo(can), "a row form's chase past the L2");
             Assert.That(LookupExtensions.Probes<Login, int>(keys), Is.False, "a probe in the last level");
             Assert.That(LookupLanes.PrefetchesIds(world, 100), Is.EqualTo(can), "an id list past the L2");
@@ -304,7 +304,7 @@ public class PrefetchTests
         Assert.That(Job("RowJob0"), Does.Not.Contain("Prefetch"));
         Assert.That(Job("SeenJob1Chases"), Does.Contain($".Prefetch({add}(ref r1, i + 16).Target);").And.Not.Contain(".PrefetchRow("));
         // The vector loop: per vector, behind the gate the job's initializer reads once per pass.
-        Assert.That(text, Does.Contain("f3 = global::EasyEcs.Lookup<global::Game.Spot>.Prefetches(world)"));
+        Assert.That(text, Does.Contain("f3 = global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastLastLevel(world)"));
         Assert.That(Job("VectorJob2"), Does.Contain("if (f3) __p3.PrefetchAhead(ref e2, 2, 1, i, rows, 16, "));
         Assert.That(text, Does.Not.Contain("WrittenJob3Chases"));
         Assert.That(Job("WrittenJob3"), Does.Not.Contain("Prefetch").And.Not.Contain("public bool f"));
@@ -595,9 +595,9 @@ public class PrefetchTests
         Assert.That(text, Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Code, int>(world))")
             .And.Contain("UniqueParallelJob4Chases"));
         Assert.That(text, Does.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastL2(world))"), "the row form's chases");
-        Assert.That(text, Does.Not.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.Prefetches(world))"), "no row form on the last level's gate");
+        Assert.That(text, Does.Not.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastLastLevel(world))"), "no row form on the last level's gate");
         // Lambda passes: the vector loop's gate in its job, the row form's twin picked at the interceptor.
-        Assert.That(text, Does.Contain("f2 = global::EasyEcs.Lookup<global::Game.Spot>.Prefetches(__world)"));
+        Assert.That(text, Does.Contain("f2 = global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastLastLevel(__world)"));
         Assert.That(text, Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Code, int>(__world))").And.Contain("LambdaJob1Chases"));
     }
 
@@ -677,6 +677,6 @@ public class PrefetchTests
 
         using var world = new World();
         world.CreateEntities(new Entity[100_000], new Beacon(1, 2));
-        WithCache(0, () => Assert.That(Lookup<Beacon>.Prefetches(world), Is.False));
+        WithCache(0, () => Assert.That(Lookup<Beacon>.PrefetchesPastLastLevel(world), Is.False));
     }
 }

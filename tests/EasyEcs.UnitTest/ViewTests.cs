@@ -329,7 +329,7 @@ public class ViewTests
         {
             using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
             world.AddSingleton<Arena.Clock>() = new Arena.Clock(0.1f);
-            var entities = Movers(world, World.ParallelChunkRows * 3 + 17);
+            var entities = Movers(world, World.MaxChunkRows * 3 + 17);
             world.AddSystem<ViewMovementParallel>();
             for (int i = 0; i < 4; i++) world.Update();
             return entities.Select(e => (e.Get<Arena.Position>().X, e.Get<Arena.Position>().Y)).ToArray();

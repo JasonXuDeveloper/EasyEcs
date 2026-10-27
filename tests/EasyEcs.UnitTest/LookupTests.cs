@@ -319,7 +319,7 @@ public class LookupTests
         var accounts = new Entity[100];
         world.Reserve<Login>(accounts.Length);
         for (int i = 0; i < accounts.Length; i++) accounts[i] = world.CreateEntity(new Login(i)); // unique keys
-        world.CreateEntities(new Entity[World.ParallelChunkRows * 2], new Wants(7), new Found(), new Place(1, 1));
+        world.CreateEntities(new Entity[World.MaxChunkRows * 2], new Wants(7), new Found(), new Place(1, 1));
         world.AddSystem<FindLogin>();
         world.AddSystem<CountFollowers>();
         for (int i = 0; i < 10; i++) world.Update();

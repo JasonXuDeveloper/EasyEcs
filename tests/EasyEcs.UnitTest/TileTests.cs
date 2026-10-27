@@ -222,7 +222,7 @@ public class TileTests
         int w = TTile.Width, d = TTile.Depth, h = TTile.Height;
         int ox = Off(x, w), oy = Off(y, h), oz = Off(z, d);
         int sx = x - ox * w, sy = y - oy * h, sz = z - oz * d;
-        if (TTile.Boundary != TileBoundary.Fill)
+        if (TTile.Boundary != TileBoundary.Border)
         {
             if (ox != 0 && !Has(ox, 0, 0)) (ox, sx) = (0, Remap(x, w));
             if (oz != 0 && !Has(0, 0, oz)) (oz, sz) = (0, Remap(z, d));
@@ -421,14 +421,14 @@ public class TileTests
 
     // ---------------- the active rows ----------------
 
-    [TestCase(TileReads.Self)]
-    [TestCase(TileReads.Layer)]
-    [TestCase(TileReads.Layer | TileReads.Above)]
-    [TestCase(TileReads.Cross)]
-    [TestCase(TileReads.All)]
-    [TestCase(TileReads.NorthSouth | TileReads.Below)]
-    [TestCase(TileReads.Diagonals)]
-    public void RowsVisitsTheRowsWhoseStencilReadsACellThatIsNotZero(TileReads reads)
+    [TestCase(TileStencil.Self)]
+    [TestCase(TileStencil.Layer)]
+    [TestCase(TileStencil.Layer | TileStencil.Above)]
+    [TestCase(TileStencil.Cross)]
+    [TestCase(TileStencil.All)]
+    [TestCase(TileStencil.NorthSouth | TileStencil.Below)]
+    [TestCase(TileStencil.Diagonals)]
+    public void RowsVisitsTheRowsWhoseStencilReadsACellThatIsNotZero(TileStencil reads)
     {
         // A halo of 1: exactly the rows whose stencil reads a cell that is not zero.
         VisitedRows<Column>(reads, Box(2, 1, 2, new TilePos(1, 0, 0)), 40, exact: true, [(0, 3), (1, 2), (3, 3)]);
@@ -436,7 +436,7 @@ public class TileTests
         VisitedRows<DeepColumn>(reads, Box(2, 2, 2, new TilePos(1, 0, 0)), 6, exact: false, [(0, 5), (2, 3), (5, 5)]);
     }
 
-    private static void VisitedRows<TTile>(TileReads reads, IEnumerable<TilePos> places, int wet, bool exact, (int From, int To)[] ranges)
+    private static void VisitedRows<TTile>(TileStencil reads, IEnumerable<TilePos> places, int wet, bool exact, (int From, int To)[] ranges)
         where TTile : struct, IComponent, ITile<TilePos>
     {
         using var world = new World();
@@ -470,15 +470,15 @@ public class TileTests
             for (int y = from; y <= to; y++)
             for (int z = 0; z < d; z++)
             {
-                bool needed = (reads & TileReads.Self) != 0 && Active(padded, y, z);
+                bool needed = (reads & TileStencil.Self) != 0 && Active(padded, y, z);
                 for (int k = 1; k <= r; k++)
                 {
-                    needed |= (reads & TileReads.NorthSouth) != 0 && (Active(padded, y, z - k) || Active(padded, y, z + k));
+                    needed |= (reads & TileStencil.NorthSouth) != 0 && (Active(padded, y, z - k) || Active(padded, y, z + k));
                     if (k > hy) continue;
-                    needed |= (reads & TileReads.Above) != 0 && Active(padded, y + k, z);
-                    needed |= (reads & TileReads.Below) != 0 && Active(padded, y - k, z);
+                    needed |= (reads & TileStencil.Above) != 0 && Active(padded, y + k, z);
+                    needed |= (reads & TileStencil.Below) != 0 && Active(padded, y - k, z);
                     for (int j = 1; j <= r; j++)
-                        needed |= (reads & TileReads.Diagonals) != 0 && (Active(padded, y + k, z - j) || Active(padded, y + k, z + j)
+                        needed |= (reads & TileStencil.Diagonals) != 0 && (Active(padded, y + k, z - j) || Active(padded, y + k, z + j)
                             || Active(padded, y - k, z - j) || Active(padded, y - k, z + j));
                 }
 
@@ -527,7 +527,7 @@ public class TileTests
         {
             var plate = heat.Pad();
             var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
-            foreach (var row in plate.Rows(TileReads.Layer))
+            foreach (var row in plate.Rows(TileStencil.Layer))
             {
                 var cells = plate.At(row);
                 for (int x = 0; x < 16; x += Vector128<float>.Count)
@@ -664,7 +664,7 @@ public class TileTests
     {
         var plate = heat.Pad();
         var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
-        foreach (var row in plate.Rows(TileReads.Layer))
+        foreach (var row in plate.Rows(TileStencil.Layer))
         {
             var c = plate.At(row);
             for (int x = 0; x < 16; x += 4)
@@ -705,8 +705,8 @@ public class TileTests
         static void Step(Tile<Heat, BlurTorus> heat, Mut<DynamicBuffer<NextHeat>> next) => Blur(heat, next);
     }
 
-    [TestCase(TileBoundary.Fill, 1)]
-    [TestCase(TileBoundary.Fill, 4)]
+    [TestCase(TileBoundary.Border, 1)]
+    [TestCase(TileBoundary.Border, 4)]
     [TestCase(TileBoundary.Clamp, 1)]
     [TestCase(TileBoundary.Clamp, 4)]
     [TestCase(TileBoundary.Mirror, 1)]
@@ -717,7 +717,7 @@ public class TileTests
     {
         switch (boundary)
         {
-            case TileBoundary.Fill: BlurGrid<BlurFill, BlurFillSystem>(threads, p => new BlurFill(p), boundary, new TilePos(1, 0, 2), new TilePos(3, 0, 0)); break;
+            case TileBoundary.Border: BlurGrid<BlurFill, BlurFillSystem>(threads, p => new BlurFill(p), boundary, new TilePos(1, 0, 2), new TilePos(3, 0, 0)); break;
             case TileBoundary.Clamp: BlurGrid<BlurClamp, BlurClampSystem>(threads, p => new BlurClamp(p), boundary); break;
             case TileBoundary.Mirror: BlurGrid<BlurMirror, BlurMirrorSystem>(threads, p => new BlurMirror(p), boundary); break;
             default: BlurGrid<BlurTorus, BlurTorusSystem>(threads, p => new BlurTorus(p), null); break;
@@ -771,7 +771,7 @@ public class TileTests
         float At(int x, int z) => boundary switch
         {
             null => grid[(x + cells) % cells, (z + cells) % cells],
-            TileBoundary.Fill => x < 0 || z < 0 || x >= cells || z >= cells || !plates.ContainsKey(new TilePos(x / 16, 0, z / 16)) ? 0 : grid[x, z],
+            TileBoundary.Border => x < 0 || z < 0 || x >= cells || z >= cells || !plates.ContainsKey(new TilePos(x / 16, 0, z / 16)) ? 0 : grid[x, z],
             TileBoundary.Clamp => grid[Math.Clamp(x, 0, cells - 1), Math.Clamp(z, 0, cells - 1)],
             _ => grid[Mirror(x), Mirror(z)],
         };
@@ -802,7 +802,7 @@ public class TileTests
         {
             var plate = life.Pad();
             var into = MemoryMarshal.Cast<NextLife, byte>(next.Write().AsSpan());
-            foreach (var row in plate.Rows(TileReads.Layer))
+            foreach (var row in plate.Rows(TileStencil.Layer))
             {
                 var c = plate.At(row);
                 var alive = c.Load128<byte>();
@@ -896,7 +896,7 @@ public class TileTests
             var plate = heat.Pad();
             var step = next.Write().AsSpan();
             var into = MemoryMarshal.Cast<NextHeat, float>(step);
-            foreach (var row in plate.Rows(TileReads.Layer))
+            foreach (var row in plate.Rows(TileStencil.Layer))
             {
                 var cells = plate.At(row);
                 for (int x = 0; x < 16; x += Vector128<float>.Count)
@@ -1007,7 +1007,7 @@ public class TileTests
         {
             var plate = heat.Pad();
             var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
-            foreach (var row in plate.Rows(TileReads.Layer))
+            foreach (var row in plate.Rows(TileStencil.Layer))
             {
                 var c = plate.At(row);
                 for (int x = 0; x < 16; x += 4)
@@ -1191,7 +1191,7 @@ public class TileTests
         {
             var strip = heat.Pad();
             var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
-            foreach (var row in strip.Rows(TileReads.Self))
+            foreach (var row in strip.Rows(TileStencil.Self))
             {
                 var c = strip.At(row);
                 for (int x = 0; x < 8; x += 4)

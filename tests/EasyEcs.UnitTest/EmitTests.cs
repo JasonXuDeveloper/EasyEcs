@@ -191,13 +191,13 @@ public class EmitTests
     [Test]
     public void ARunnerEmitsSeveralKindsOfRecords()
     {
-        var (world, targets) = Fight(World.ParallelChunkRows, 5, 4);
+        var (world, targets) = Fight(World.MaxChunkRows, 5, 4);
         using (world)
         {
             Runners.Look(world);
             ref var seen = ref world.GetSingleton<Emitted<Seen>>().Items;
             ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
-            Assert.That((seen.Count, hits.Count), Is.EqualTo((World.ParallelChunkRows, World.ParallelChunkRows * 2)));
+            Assert.That((seen.Count, hits.Count), Is.EqualTo((World.MaxChunkRows, World.MaxChunkRows * 2)));
             for (int i = 0; i < seen.Count; i++)
             {
                 Assert.That(hits[2 * i].Target, Is.EqualTo(seen[i].Subject));
@@ -238,7 +238,7 @@ public class EmitTests
     [Test]
     public void ReplaysFromASnapshotDoNotAllocate()
     {
-        var (world, _) = Fight(World.ParallelChunkRows * 4, 16, 4);
+        var (world, _) = Fight(World.MaxChunkRows * 4, 16, 4);
         using (world)
         {
             world.AddSystem<ParallelStrikes>();
@@ -280,7 +280,7 @@ public class EmitTests
     [Test]
     public void ParallelEmitsDoNotAllocateAfterWarmUp()
     {
-        var (world, _) = Fight(World.ParallelChunkRows * 4, 16, 4);
+        var (world, _) = Fight(World.MaxChunkRows * 4, 16, 4);
         using (world)
         {
             world.AddSystem<ParallelStrikes>();
@@ -296,7 +296,7 @@ public class EmitTests
         // MeasureSystems adds what helper threads allocate during a pass to its system's stats.
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4, MeasureSystems = true });
         var aimed = world.CreateEntity(new Hp(0));
-        world.CreateEntities(new Entity[World.ParallelChunkRows * 4], new Attack(1), new Aim(aimed.Id));
+        world.CreateEntities(new Entity[World.MaxChunkRows * 4], new Attack(1), new Aim(aimed.Id));
         var strikes = world.AddSystem<ParallelStrikes>();
         world.AddSystem<ApplyHits>();
         for (int i = 0; i < 30; i++) world.Update();

@@ -61,7 +61,7 @@ public class ConcurrencyTests
     public void StructuralChangeInAParallelForEachThrowsAndLeavesTheWorldUsable()
     {
         using var world = new World();
-        var entities = new Entity[World.ParallelChunkRows * 2 + 1];
+        var entities = new Entity[World.MaxChunkRows * 2 + 1];
         world.CreateEntities(entities, new Health(0));
         int count = world.EntityCount;
 

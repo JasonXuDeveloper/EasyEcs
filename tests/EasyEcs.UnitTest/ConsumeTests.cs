@@ -146,7 +146,7 @@ public class ConsumeTests
 
         using var parallel = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
         parallel.AddSystem<ParallelHits>();
-        parallel.CreateEntities(new Entity[World.ParallelChunkRows * 4], new Hit(0, default));
+        parallel.CreateEntities(new Entity[World.MaxChunkRows * 4], new Hit(0, default));
         parallel.Update();
         Assert.That(parallel.Count<Hit>(), Is.Zero);
     }

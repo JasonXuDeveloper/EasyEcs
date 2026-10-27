@@ -201,7 +201,7 @@ public class RecordTests
     [Test]
     public void ARecordPassDoesNotAllocateAfterItsFirstUpdates()
     {
-        var (world, _) = Fighters(World.ParallelChunkRows * 2);
+        var (world, _) = Fighters(World.MaxChunkRows * 2);
         using var _w = world;
         world.AddSystem<Strikes>();
         world.AddSystem<Book>();

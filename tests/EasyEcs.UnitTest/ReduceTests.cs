@@ -329,7 +329,7 @@ public partial class ReduceTests
     [Test]
     public void ParallelIntegerReductionsAreExactOnEveryRun()
     {
-        const int count = World.ParallelChunkRows * 5 + 123;
+        const int count = World.MaxChunkRows * 5 + 123;
         using var world = Pointed(count);
         world.AddSystem<ParallelScores>();
         for (int run = 0; run < 300; run++)
@@ -434,11 +434,11 @@ public partial class ReduceTests
     [Test]
     public void ARunnerReducesIntoItsSingleton()
     {
-        using var world = Pointed(World.ParallelChunkRows * 3);
+        using var world = Pointed(World.MaxChunkRows * 3);
         for (int run = 0; run < 20; run++)
         {
             Runners.Score(world);
-            Assert.That(world.Scores.Sum, Is.EqualTo((long)(World.ParallelChunkRows * 3 - 1) * World.ParallelChunkRows * 3 / 2));
+            Assert.That(world.Scores.Sum, Is.EqualTo((long)(World.MaxChunkRows * 3 - 1) * World.MaxChunkRows * 3 / 2));
         }
     }
 
@@ -457,7 +457,7 @@ public partial class ReduceTests
     [Test]
     public void AParallelReductionDoesNotAllocateAfterItsFirstPass()
     {
-        using var world = Pointed(World.ParallelChunkRows * 4);
+        using var world = Pointed(World.MaxChunkRows * 4);
         world.AddSystem<ParallelScores>();
         for (int i = 0; i < 10; i++) world.Update();
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 300; i++) world.Update(); }), Is.Zero);
@@ -559,7 +559,7 @@ public partial class ReduceTests
     [TestCase(4, true)]
     public void AnAccumulatedTotalIsTheHandWrittenOneBitForBit(int threads, bool parallel)
     {
-        using var world = Pointed(World.ParallelChunkRows * 2 + 77, threads);
+        using var world = Pointed(World.MaxChunkRows * 2 + 77, threads);
         var more = new Entity[300];
         world.CreateEntities(more, new Points(0), new Spot(0, 0)); // a second table
         for (int i = 0; i < more.Length; i++) more[i].Points = new Points(-i * 3);
@@ -608,8 +608,8 @@ public partial class ReduceTests
     [Test]
     public void RunnersAndLambdaPassesAccumulateToo()
     {
-        using var world = Pointed(World.ParallelChunkRows * 3);
-        long pass = (long)(World.ParallelChunkRows * 3 - 1) * World.ParallelChunkRows * 3 / 2;
+        using var world = Pointed(World.MaxChunkRows * 3);
+        long pass = (long)(World.MaxChunkRows * 3 - 1) * World.MaxChunkRows * 3 / 2;
         TotalRunners.Add(world);
         TotalRunners.Add(world);
         Assert.That(world.Grand.Sum, Is.EqualTo(2 * pass));
@@ -620,7 +620,7 @@ public partial class ReduceTests
     [Test]
     public void AnAccumulatedTotalDoesNotAllocateAfterItsFirstPass()
     {
-        using var world = Pointed(World.ParallelChunkRows * 4);
+        using var world = Pointed(World.MaxChunkRows * 4);
         world.AddSystem<ParallelTotals>();
         world.AddSystem<SerialTotals>();
         for (int i = 0; i < 10; i++) world.Update();

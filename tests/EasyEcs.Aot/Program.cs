@@ -63,7 +63,7 @@ using (var healing = new World())
 using (var small = new World())
 {
     small.CreateEntities(new Entity[2], new Life { Value = 1 });
-    Check(!Lookup<Life>.Prefetches(small), "a world in the cache does not prefetch");
+    Check(!Lookup<Life>.PrefetchesPastLastLevel(small), "a world in the cache does not prefetch");
 }
 
 // The prefetching twins with the gates forced on (caches of 1 byte, as the unit tests set them): index probes

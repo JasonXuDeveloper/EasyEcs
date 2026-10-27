@@ -13,12 +13,12 @@ public class AllocationTests
         // Several tables of chunks, several threads: the job copies kept per chunk, the thread's scratch, an index built
         // before the stage. Warm-up runs every method; what one thread sets up, every helper thread has.
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4, ParallelSystems = true });
-        world.CreateEntities(new Entity[World.ParallelChunkRows * 3], new ReduceTests.Points(3));
-        world.CreateEntities(new Entity[World.ParallelChunkRows], new ReduceTests.Points(1), new ReduceTests.Spot(1, 2));
-        world.CreateEntities(new Entity[World.ParallelChunkRows * 2], new ScratchTests.Number(12345), new ScratchTests.DigitSum());
+        world.CreateEntities(new Entity[World.MaxChunkRows * 3], new ReduceTests.Points(3));
+        world.CreateEntities(new Entity[World.MaxChunkRows], new ReduceTests.Points(1), new ReduceTests.Spot(1, 2));
+        world.CreateEntities(new Entity[World.MaxChunkRows * 2], new ScratchTests.Number(12345), new ScratchTests.DigitSum());
         var leader = world.CreateEntity(new LookupTests.Found());
         leader.Found = new LookupTests.Found(leader.Id, 0);
-        world.CreateEntities(new Entity[World.ParallelChunkRows], new Follows(leader.Id), new LookupTests.Place(1, 0));
+        world.CreateEntities(new Entity[World.MaxChunkRows], new Follows(leader.Id), new LookupTests.Place(1, 0));
         world.AddSystem<ReduceTests.ParallelScores>();
         world.AddSystem<ReduceTests.ParallelBounds>();
         world.AddSystem<ReduceTests.ParallelCensus>();
@@ -37,7 +37,7 @@ public class AllocationTests
         }
 
         Assert.That(total, Is.Zero, $"update {at} allocated {first} B first, {total} B in all; {Workers.Count} helper threads");
-        Assert.That(leader.Found.Followers, Is.EqualTo(World.ParallelChunkRows));
+        Assert.That(leader.Found.Followers, Is.EqualTo(World.MaxChunkRows));
     }
 
     [Test]
@@ -525,7 +525,7 @@ public class AllocationTests
     public void ParallelForEachDoesNotAllocateAfterItsFirstCall()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
-        world.CreateEntities(new Entity[World.ParallelChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
+        world.CreateEntities(new Entity[World.MaxChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
         world.AddSystem<ParallelTests.ChunkedIncrement>();
         for (int i = 0; i < 10; i++) world.Update();
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 500; i++) world.Update(); }), Is.Zero);
@@ -536,7 +536,7 @@ public class AllocationTests
     {
         // Timing, bytes and entity counts of every run, in parallel stages and parallel [ForEach] passes too.
         using var world = new World(new WorldOptions { MeasureSystems = true, ParallelSystems = true, MaxDegreeOfParallelism = 4 });
-        world.CreateEntities(new Entity[World.ParallelChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
+        world.CreateEntities(new Entity[World.MaxChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
         world.CreateEntities(new Entity[100], new Position(0, 0), new Velocity(1, 1));
         world.AddSystem<ParallelTests.ChunkedIncrement>();
         var moves = world.AddSystem<SystemTests.Moves>();

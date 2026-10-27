@@ -163,7 +163,7 @@ public class ScratchTests
     [Test]
     public void AParallelPassWithScratchDoesNotAllocateAfterWarmUp()
     {
-        using var world = Numbered(World.ParallelChunkRows * 4);
+        using var world = Numbered(World.MaxChunkRows * 4);
         world.AddSystem<SumDigits>();
         for (int i = 0; i < 20; i++) world.Update(); // every helper thread has created its list
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);

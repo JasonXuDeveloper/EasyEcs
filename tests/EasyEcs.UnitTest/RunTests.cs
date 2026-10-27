@@ -132,7 +132,7 @@ public class RunTests
     {
         // The pass froze the gate, so Run on a helper thread neither freezes nor thaws it (no plain store races).
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
-        world.CreateEntities(new Entity[World.ParallelChunkRows * 4], new Health(7));
+        world.CreateEntities(new Entity[World.MaxChunkRows * 4], new Health(7));
         var job = new RunFromChunks();
         for (int i = 0; i < 20; i++) world.ForEachEntityParallel<Health, RunFromChunks>(ref job);
         var bare = world.CreateEntity(new Health(1));
