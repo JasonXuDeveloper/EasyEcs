@@ -4,9 +4,10 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// Records handled once: per operation, <see cref="Records"/> records are appended to <c>Emitted&lt;Hit&gt;</c> (what
-/// passes taking an <c>Emit&lt;Hit&gt;</c> leave), then handled in order and cleared. <c>HandWritten</c> gets the list,
-/// walks it and clears it (what EECS106 reports); <c>ForEachRecord</c> is the generated pass of a <c>[ForEachRecord]</c>
-/// method with the same body. Both return the same value (checked in setup). Steady state allocates 0 bytes.
+/// passes taking an <c>Emit&lt;Hit&gt;</c> leave), then handled in order into a singleton and cleared. <c>HandWritten</c>
+/// is a system's update as EECS106 finds it: the singleton and the list taken by ref, the walk, the Clear;
+/// <c>ForEachRecord</c> is the generated pass of a <c>[ForEachRecord]</c> method with the same body, taking the singleton
+/// by ref. Both leave the same tally (checked in setup). Steady state allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
 public class RecordBenchmark
@@ -22,7 +23,10 @@ public class RecordBenchmark
         _world = new World();
         _hits = new Hit[Records];
         for (int i = 0; i < _hits.Length; i++) _hits[i] = new Hit(i, i % 97);
-        if (HandWritten() != ForEachRecord()) throw new System.InvalidOperationException("the two passes differ");
+        _world.GetOrAddSingleton<Tally>();
+        long hand = HandWritten();
+        _world.GetSingleton<Tally>() = default;
+        if (hand != ForEachRecord()) throw new System.InvalidOperationException("the two passes differ");
         for (int i = 0; i < 10; i++)
         {
             HandWritten();
@@ -37,35 +41,41 @@ public class RecordBenchmark
     public long HandWritten()
     {
         _world.GetOrAddSingleton<Emitted<Hit>>().Items.AddRange(_hits);
-        long total = 0, order = 0;
+        ref var tally = ref _world.GetSingleton<Tally>();
         ref var hits = ref _world.GetOrAddSingleton<Emitted<Hit>>().Items;
         foreach (ref readonly var hit in hits.AsReadOnlySpan())
         {
-            total += hit.Amount;
-            order = order * 31 + hit.Target;
+            tally.Total += hit.Amount;
+            tally.Order = tally.Order * 31 + hit.Target;
         }
         hits.Clear();
-        return total ^ order;
+        return tally.Total ^ tally.Order;
     }
 
     [Benchmark]
     public long ForEachRecord()
     {
         _world.GetOrAddSingleton<Emitted<Hit>>().Items.AddRange(_hits);
-        long total = 0, order = 0;
-        HitRecords.Book(_world, ref total, ref order);
-        return total ^ order;
+        HitRecords.Book(_world);
+        ref readonly var tally = ref _world.GetSingleton<Tally>();
+        return tally.Total ^ tally.Order;
     }
 
     public record struct Hit(int Target, int Amount);
+
+    public struct Tally : ISingletonComponent
+    {
+        public long Total;
+        public long Order;
+    }
 }
 
 public static class HitRecords
 {
     [ForEachRecord]
-    public static void Book(in RecordBenchmark.Hit hit, ref long total, ref long order)
+    public static void Book(in RecordBenchmark.Hit hit, ref RecordBenchmark.Tally tally)
     {
-        total += hit.Amount;
-        order = order * 31 + hit.Target;
+        tally.Total += hit.Amount;
+        tally.Order = tally.Order * 31 + hit.Target;
     }
 }
