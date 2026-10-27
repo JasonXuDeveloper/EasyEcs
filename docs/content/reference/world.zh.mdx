@@ -1094,6 +1094,16 @@ public void Reserve<T1, T2, T3, T4, T5, T6, T7, T8, T9>(int count) where T1 : st
 - `world.Reserve<T1..Tn>(count)`：O(n)，外加一次扩容
 - `world.Reserve(prefab, count)`：O(c)，外加一次扩容
 
+### `ReserveBuffers` [#reservebuffers]
+
+```csharp
+public void ReserveBuffers(Prefab prefab, int count);
+```
+
+给 `prefab` 的实例持有的 [`DynamicBuffer`](/zh/docs/reference/dynamicbuffer) 列表补池，接下来 `count` 个实例的缓冲第一次写入时就从池里取列表，不用分配：每种类型的池补到（[`DynamicBuffer.FillPool`](/zh/docs/reference/dynamicbuffer#fillpool)）每个实例、每个带这个缓冲的成员都有一个列表。列表有 [`DynamicBuffer.MaxPooledLength`](/zh/docs/reference/dynamicbuffer#maxpooledlength) 个元素（先把它设成缓冲会达到的长度），所以一个一直很短的缓冲配上很大的数量，只是白占内存。和池一样对整个进程生效，而且不累加：带同一种缓冲的预制体共用它的池，这里只补到它们数量中较大的那个。一次性 O(组件数 + 列表数) 次分配。只能在所有者线程调用。
+
+**复杂度**（[API 表](/zh/docs/api)）：O(c + 行数)，外加一次性 O(lists) 次分配
+
 ### `Restore` [#restore]
 
 ```csharp

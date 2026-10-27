@@ -10,7 +10,8 @@ When you add, rename or delete a file here, update its line (`verify` checks eve
 ```
 Contracts.cs                 IComponent, ITracked, ISingletonComponent, INoStructuralChanges and the other markers
 Declarations.cs              attributes whose code the generators write: [Sum]/[Product]/[Min]/[Max]/[All]/[Any]
-                             (a reduction), [LookupKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
+                             (a reduction; on the struct, for its fields without one), [Accumulate] (a total: each pass
+                             combined into the world's value), [LookupKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
                              [GroupBy] (on the member: a group every world splits by), [OrderBy] (the order of the
                              tables, overriding an inferred one), [WhenTargetDestroyed], [NotSaved]
 Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/SetIfChanged/
@@ -34,7 +35,8 @@ EcsSystem.cs                 [EcsSystem] (a system: a ref struct of static membe
 ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, SimdMode), [With<T>], [Without<T>], [Changed<T>],
                              [Removed<T>] ([WithAny<..>] / [ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
                              [Consume] (the visited rows destroyed after the pass), [ForEntity] (a static method run
-                             on one entity through a generated entry point)
+                             on one entity through a generated entry point), [ForEachRecord] (a static method run on
+                             each record of Emitted<T> in order, then the records cleared)
 Maybe.cs                     Maybe<T>: an optional component parameter of a [ForEach] method
 Mut.cs                       Mut<T>: a [ForEach] parameter stamped only on the rows it writes (Write, SetIfChanged);
                              Values.Same, the boxing-free equality of SetIfChanged
@@ -59,7 +61,8 @@ Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo
                              PaddedTile.Rows (TZCNT walk), TileCursor.Load128, ChangedEdges / Facing (sleeping tiles)
 Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
                              chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear);
-                             AddIds / AddLanes: a vector loop's passing lanes appended compacted, in row order
+                             AddIds / AddLanes: a vector loop's passing lanes appended compacted, in row order;
+                             Emitted<T>.Consume + IForEachRecord<T>: a [ForEachRecord] pass (the records walked, then cleared)
 EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
                              (four SplitMix64 finalizer rounds); a singleton (Seed, and a Tick the world adds one to
                              at the start of every update: World.Run) and static members
@@ -86,7 +89,8 @@ SystemStats.cs               per-system run counts, times, allocated bytes and v
 ScheduleInfo.cs              what World.DescribeSchedule returns (groups, stages, systems, waits, registration-only
                              pairs) and its ToString / ToMermaid
 World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration, Instantiate of a
-                             Prefab, with given components too, and Entity.Clone: one row copy, CloneRow)
+                             Prefab, with given components too, and Entity.Clone: one row copy, CloneRow; Reserve and
+                             ReserveBuffers of a prefab: its tables, and the pools of the buffer lists its instances take)
 World.Defaults.cs            TypeDefaults: the setup a type declares ([GroupBy], [WhenTargetDestroyed]), applied by
                              every world from its first table holding the type (rules pending until a destroy or
                              the index needs them); what a world set up itself is never overridden
