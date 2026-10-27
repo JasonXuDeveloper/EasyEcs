@@ -89,6 +89,10 @@ regression in WorldSimulation, BattleServer and the feature's neighbors. A bench
 
 ## 7. Docs (`audit-docs`; written in the final docs pass)
 
+Before the docs pass, the exemplar pass (`audit-code`, its first step of Finish) rewrites every sample, the demo, the
+benchmark worlds, the usage tests and the docs' code examples with the most fitting forms, this feature's included:
+note in the backlog where the feature should appear so that pass finds it.
+
 Per `docs/WRITING.md`, en and zh structurally identical:
 - the guide page's anatomy: what it is; when to use it (idea / warn Callouts); how to use it, recommended (generated)
   form first, with `You write` / `The generator writes` tabs (and in every headline example that uses the form:

@@ -57,8 +57,14 @@ shows the newest forms).
 
 - **Scope**: `samples/` (every sample, VoxelServer included), `templates/`, `demo/EasyEcs.Demo`, the headline
   benchmark worlds (`BattleServer.cs`, `WorldSimulation.cs`, the recommended variant of each feature benchmark), the
-  tests that model usage (scenario and BattleServer tests, fixtures), and every C# fence of `docs/content` (with the
-  docs pass when the page itself changes).
+  tests that model usage (scenario and BattleServer tests, fixtures, feature tests written as users would write the
+  feature), and every C# fence of `docs/content` (en + zh, the guide pages' full examples), the public skill and the
+  README (with the docs pass when the page itself changes).
+- **When**: it is the first step of Finish, before the docs pass (owner, 2026-10-27: every sample, the demo, the
+  benchmarks, the unit tests and the docs' code examples use the most correct, most fitting features, new ones
+  included). A sample far behind the newest forms (VoxelServer) gets a large rewrite, not a touch-up: plan it per
+  system first, read-only; a line users would still write twice is a code gap, fixed in the library before the
+  rewrite, so the rewrite only uses what exists.
 - **What changes**: each place uses the form the round made the recommended one (generated members and
   declarations, `[ForEach]` / lambda passes, views and prefabs, vector-loop-eligible methods, fusion-friendly passes,
   structural changes in passes, `[LookupKey]`, ...): read the changelog's entries of the round and the feature
