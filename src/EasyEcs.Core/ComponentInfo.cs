@@ -248,9 +248,11 @@ internal abstract class ComponentInfo
     /// Copy rows [0, <paramref name="count"/>) of a managed column for a snapshot (capture or restore): values, and for
     /// <see cref="DynamicBuffer{T}"/> columns their lists, shared until either side writes (<see cref="BufferStore.Assign"/>). With
     /// <paramref name="swap"/> the lists change sides instead (a Load's private snapshot): the target's old lists go to
-    /// the source, for the next Load to refill.
+    /// the source, for the next Load to refill. With <paramref name="own"/> (a restore into the live table) a row
+    /// written since the capture takes copies of the source's elements instead of sharing its list
+    /// (<see cref="BufferStore.AssignOwn"/>).
     /// </summary>
-    public abstract void CopyRows(Array source, Array target, int count, bool swap = false);
+    public abstract void CopyRows(Array source, Array target, int count, bool swap = false, bool own = false);
 
     /// <summary>
     /// Rows [0, order.Length) of managed column <paramref name="column"/> in a new order: row <c>i</c> takes the value of
@@ -447,7 +449,7 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
         }
     }
 
-    public override void CopyRows(Array source, Array target, int count, bool swap = false)
+    public override void CopyRows(Array source, Array target, int count, bool swap = false, bool own = false)
     {
         if (default(T) is not IBuffer) // a JIT-time constant
         {
@@ -463,6 +465,7 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
             ref var store = ref Unsafe.As<T, BufferStore>(ref rows[i]);
             ref var saved = ref Unsafe.As<T, BufferStore>(ref from[i]);
             if (swap) (store, saved) = (saved, store);
+            else if (own) BufferStore.AssignOwn(ref store, saved);
             else BufferStore.Assign(ref store, saved);
         }
     }
