@@ -19,6 +19,36 @@ public partial record struct PairTarget(EntityId Id, float Distance, bool Held) 
 public partial record struct PairLoot(bool Taken, int By, int Order) : IComponent, ITracked;
 public partial record struct PairBag(int Count) : IComponent;
 public partial record struct PairHeat(int Value) : IComponent, ITracked;
+public partial record struct PairItem(int Loot);
+
+/// <summary>
+/// The pairs a pass met, in its order: their count, the sum of their keys, the first and the last (associative, not
+/// commutative: the chunks' results must be combined in order).
+/// </summary>
+public struct PairTally : ISingletonComponent, IReduction<PairTally>
+{
+    public int Count;
+    public long Sum, First, Last;
+
+    public static PairTally Identity => default;
+
+    public static PairTally Combine(PairTally a, PairTally b) =>
+        a.Count == 0 ? b : b.Count == 0 ? a : new PairTally { Count = a.Count + b.Count, Sum = a.Sum + b.Sum, First = a.First, Last = b.Last };
+
+    public void Add(long key)
+    {
+        if (Count++ == 0) First = key;
+        Last = key;
+        Sum += key;
+    }
+}
+
+/// <summary>The pairs met over every pass: a total.</summary>
+[Accumulate, Sum]
+public partial struct PairTotal : ISingletonComponent
+{
+    public long Pairs;
+}
 
 /// <summary>Pair methods ([Neighbor]): what the tests run against the pairs a loop over both sides would visit.</summary>
 public static class Neighbors
@@ -188,6 +218,49 @@ public static class Neighbors
         heat.Value++;
     }
 #pragma warning restore EECS053
+
+    /// <summary>The pairs within range, as a result of the pass (<c>Reduce&lt;T&gt;</c>): one pair at a time.</summary>
+    [ForEach]
+    public static void Tally(Entity self, in PairSpot p, [Neighbor] in PairSpot q, [Neighbor] Entity other, ref Reduce<PairTally> tally)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y;
+        if (dx * dx + dy * dy >= Range * Range) return;
+        tally.Value.Add((long)self.Id.Index << 32 | (uint)other.Id.Index);
+    }
+
+    /// <summary><see cref="Tally"/> on several threads: each chunk's result, combined in chunk order.</summary>
+    [ForEach(Parallel = true)]
+    public static void TallyParallel(Entity self, in PairSpot p, [Neighbor] in PairSpot q, [Neighbor] Entity other, ref Reduce<PairTally> tally)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y;
+        if (dx * dx + dy * dy >= Range * Range) return;
+        tally.Value.Add((long)self.Id.Index << 32 | (uint)other.Id.Index);
+    }
+
+    /// <summary>The pairs within range added to a total ([Accumulate]) on several threads.</summary>
+    [ForEach(Parallel = true)]
+    public static void Total(in PairSpot p, [Neighbor] in PairSpot q, ref Reduce<PairTotal> total)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y;
+        if (dx * dx + dy * dy < Range * Range) total.Value.Pairs++;
+    }
+
+    /// <summary>
+    /// <see cref="Pick"/> into a buffer of the collector through <c>Mut&lt;T&gt;</c>: only the collectors that take
+    /// loot are stamped.
+    /// </summary>
+    [ForEach]
+    [With<PairHunter>]
+    public static void PickInto(Entity self, in PairSpot p, Mut<DynamicBuffer<PairItem>> items, [Neighbor] in PairSpot q, [Neighbor] Entity other, [Neighbor] ref PairLoot loot)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= Range * Range || loot.Taken) return;
+        loot = new PairLoot(true, self.Id.Index, items.Value.Count);
+        items.Write().Add(new PairItem(other.Id.Index));
+    }
+
+    [ForEach]
+    public static void ResetItems(ref DynamicBuffer<PairItem> items) => items.Clear();
 
     [ForEach]
     public static void ResetLoot(ref PairLoot loot) => loot = default;
@@ -887,6 +960,131 @@ public class NeighborTests
             }), Is.EqualTo(0));
             return 0;
         });
+    }
+
+    // Every pair within range of the crowd, keyed as the tally keys them: the reference of the pass's results.
+    private static (int Count, long Sum) EveryPair(World world)
+    {
+        var rows = new List<(EntityId Id, PairSpot P)>();
+        foreach (var item in world.Query<PairSpot>()) rows.Add((item.Entity.Id, item.Component1));
+        int count = 0;
+        long sum = 0;
+        foreach (var (a, p) in rows)
+            foreach (var (b, q) in rows)
+            {
+                float dx = p.X - q.X, dy = p.Y - q.Y;
+                if (dx * dx + dy * dy >= Neighbors.Range * Neighbors.Range) continue;
+                count++;
+                sum += (long)a.Index << 32 | (uint)b.Index;
+            }
+
+        return (count, sum);
+    }
+
+    [TestCase(1, 3000, 30f, false)]
+    [TestCase(4, 20000, 60f, true)]
+    [TestCase(4, 900, 10f, false)] // one chunk
+    public void AResultOfThePassEqualsEveryPairAndTheChunksCombineInOrder(int threads, int count, float extent, bool tables)
+    {
+        using var world = Crowd(count, extent, count, tables, threads);
+        for (int pass = 0; pass < 3; pass++)
+        {
+            Neighbors.Tally(world);
+            var serial = world.GetSingleton<PairTally>();
+            var (pairs, sum) = EveryPair(world);
+            Assert.That((serial.Count, serial.Sum), Is.EqualTo((pairs, sum)), "the serial pass against every pair");
+            world.GetSingleton<PairTally>() = default;
+            Neighbors.TallyParallel(world);
+            Assert.That(world.GetSingleton<PairTally>(), Is.EqualTo(serial), "the chunks combined in order: the first and the last pair too");
+            foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + 0.2f, item.Component1.Y);
+            world.Update();
+        }
+    }
+
+    [Test]
+    public void ATotalAddsEveryPassesPairs()
+    {
+        using var world = Crowd(20000, 60f, 9, tables: true, threads: 4);
+        long expected = 0;
+        for (int pass = 0; pass < 3; pass++)
+        {
+            expected += EveryPair(world).Count;
+            Neighbors.Total(world);
+            Assert.That(world.GetSingleton<PairTotal>().Pairs, Is.EqualTo(expected));
+            foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X - 0.3f, item.Component1.Y);
+            world.Update();
+        }
+    }
+
+    private static List<Entity> WithItems(World world)
+    {
+        var collectors = Entities<PairBag>(world);
+        foreach (var e in collectors) e.GetOrAdd<DynamicBuffer<PairItem>>();
+        return collectors;
+    }
+
+    [TestCase(300, 900, 20f, false)]
+    [TestCase(400, 1200, 25f, true)]
+    public void AMutOfTheRowStampsOnlyTheRowsItWrites(int collectors, int loot, float extent, bool tables)
+    {
+        using var world = Pickup(collectors, loot, extent, collectors + loot, tables);
+        var all = WithItems(world);
+        Neighbors.Pick(world); // sorts the rows; Pick and PickInto take the loot alike
+        ResetPickup(world);
+        Neighbors.Pick(world);
+        var expected = new Dictionary<EntityId, PairLoot>();
+        var loots = new Dictionary<int, Entity>();
+        foreach (var item in world.Read<PairLoot>())
+        {
+            expected[item.Entity.Id] = item.Component1;
+            loots[item.Entity.Id.Index] = item.Entity;
+        }
+        var bags = new Dictionary<EntityId, int>();
+        foreach (var item in world.Query<PairBag>()) bags[item.Entity.Id] = item.Component1.Count;
+
+        ResetPickup(world);
+        Neighbors.ResetItems(world);
+        world.Update();
+        ulong mark = world.ChangeTick;
+        var since = QueryFilter.Create().Changed<DynamicBuffer<PairItem>>(mark);
+        Assert.That(world.Count<DynamicBuffer<PairItem>>(since), Is.Zero);
+        Neighbors.PickInto(world);
+        foreach (var (_, e) in loots) Assert.That(e.Read<PairLoot>(), Is.EqualTo(expected[e.Id]), $"loot {e.Id}");
+        var changed = new HashSet<EntityId>();
+        foreach (var item in world.Read<DynamicBuffer<PairItem>>(since)) changed.Add(item.Entity.Id);
+        foreach (var e in all)
+        {
+            var items = e.Read<DynamicBuffer<PairItem>>().AsReadOnlySpan();
+            Assert.That(items.Length, Is.EqualTo(bags[e.Id]), $"collector {e.Id}");
+            for (int i = 0; i < items.Length; i++)
+                Assert.That(expected[loots[items[i].Loot].Id].By, Is.EqualTo(e.Id.Index), "each item is loot the collector took");
+            Assert.That(changed.Contains(e.Id), Is.EqualTo(items.Length > 0), "stamped where written, and only there");
+        }
+    }
+
+    [Test]
+    public void PassesWithResultsAndMutsAllocateNothingOnceWarm()
+    {
+        using var world = Crowd(30000, 60f, 6, tables: true, threads: 4);
+        using var pickup = Pickup(1000, 3000, 40f, 6, true);
+        WithItems(pickup);
+        for (int i = 0; i < 200; i++) Passes(world, pickup); // re-sorts, past tiering and OSR
+        Assert.That(Allocations.Of(() =>
+        {
+            for (int i = 0; i < 20; i++) Passes(world, pickup);
+        }), Is.EqualTo(0));
+
+        static void Passes(World world, World pickup)
+        {
+            Neighbors.Tally(world);
+            Neighbors.TallyParallel(world);
+            Neighbors.Total(world);
+            world.Update();
+            ResetPickup(pickup);
+            Neighbors.ResetItems(pickup);
+            Neighbors.PickInto(pickup);
+            pickup.Update();
+        }
     }
 
     [Test]

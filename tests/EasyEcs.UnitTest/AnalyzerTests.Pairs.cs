@@ -19,6 +19,7 @@ public partial class AnalyzerTests
         public record struct At3(System.Numerics.Vector3 V) : IComponent;
         public struct Quarry : IComponent;
         public record struct Seen(int V) : IComponent, ITracked;
+        [Sum] public partial struct Tally : ISingletonComponent { public int N; }
         """;
 
     // [EcsSystem] ref struct S { ... } around each method
@@ -32,7 +33,17 @@ public partial class AnalyzerTests
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; }")] // the row's Near
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] in Drift d, [Neighbor] ref Drift e) { float dx = p.X - q.X; if (dx * dx >= 1) return; e.X = d.X; }")] // twice
     [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1) return; d.X++; }")]
+    [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, Mut<Seen> s, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; s.Write().V++; }")] // a Mut<T> in parallel
     public Task BadPairMethodsReport(string method) => AssertReports("EECS105", GeneratorTests.Components, PairParts, InSystem(method));
+
+    [Test]
+    public async Task AParallelMutOfThePairsRowSaysWhy()
+    {
+        var found = await GeneratorTests.Analyze([GeneratorTests.Components, PairParts,
+            InSystem("[ForEach(Parallel = true)] static void A(in Spot p, Mut<Seen> s, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; s.Write().V++; }")]);
+        Assert.That(found.Single(d => d.Id == "EECS105").GetMessage(), Is.EqualTo(
+            "Pair method 'A' runs in parallel and takes 's' as a Mut<T>: its stamps per write would share the change ticks of the chunks' rows; take it by 'ref' (every row the pass runs for is stamped) or drop Parallel"));
+    }
 
     // A neighbor's Entity by ref is no parameter a [ForEach] method takes.
     [Test]
@@ -56,6 +67,9 @@ public partial class AnalyzerTests
     [TestCase("[ForEach] static void A(in At3 p, ref Near n, [Neighbor] in At3 q) { if ((p.V - q.V).LengthSquared() < 4f) { n.Value++; } }")]
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1 || d.X > 0) return; d.X = 1; n.Value++; }")] // a write of the neighbor (a pickup)
     [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, in Reach r) { float dx = p.X - q.X; if (dx * dx >= r.Value) return; n.Value++; }")] // on several threads
+    [TestCase("[ForEach] static void A(in Spot p, [Neighbor] in Spot q, ref Reduce<Tally> t) { float dx = p.X - q.X; if (dx * dx >= 1) return; t.Value.N++; }")] // a result of the pass
+    [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, [Neighbor] in Spot q, ref Reduce<Tally> t) { float dx = p.X - q.X; if (dx * dx >= 1) return; t.Value.N++; }")] // each chunk's
+    [TestCase("[ForEach] static void A(in Spot p, Mut<Seen> s, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1 || d.X > 0) return; d.X = 1; s.Write().V++; }")] // a Mut<T> of the row
     [TestCase("[ForEach] static void A(in Spot p, ref Near n) { n.Value = (int)p.X; }")]                                                                         // no [Neighbor]: no pair rule
     public Task PairMethodsLeaveAlone(string method) => AssertClean(GeneratorTests.Components, PairParts, InSystem(method));
 
