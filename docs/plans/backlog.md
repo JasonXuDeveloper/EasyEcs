@@ -75,7 +75,8 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        reach 2.5-3.4x: L2 ships clusters there too (faster is kept, owner) and optimizes: 4-row blocks and the
        neighbor-list form on ARM64, picked by density; never a slower case (no re-sort every tick on sparse maps).
        **Built on `feat-locality-pairs`** (`locality.md` 6.6): `[Neighbor]`, the pass, the generated order / job / vector
-       loop, EECS105-107, cutoff per row, two kinds of entity, ties and the keep-target hint. Open: the spread-map nearest
+       loop, EECS105-107, cutoff per row, two kinds of entity, ties and the keep-target hint (merged; `[Neighbor]` approved
+       by the owner, 2026-10-27). Open: the spread-map nearest
        re-measure, the ARM64 neighbor-list form by density, writes to j (Pickup), parallel pair passes, the EECS107 fix,
        nested-walk rewrites, Lookup gathers under Auto. L4 (examples) moved to the finish phase (docs-todos).
        Follow-up after L2 merges (owner, 2026-10-27: "cluster pairs + prefetch, faster?"): prefetch the j block of the
@@ -183,9 +184,10 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       `__d0 = Zero; __d0 |= x` where `__d0 = x` would do. Users read this code (docs "The generator writes" tabs), so
       readability counts once the asm is equal.
 - [x] **Generator gaps found by the VoxelServer plan** (`voxel-rewrite.md` section 3): built on feat-generator-gaps,
-  waiting to merge: G0 enum lanes and single-bool components in vector loops, G5 `[Accumulate]` totals (EECS086's
+  merged: G0 enum lanes and single-bool components in vector loops, G5 `[Accumulate]` totals (EECS086's
   total case and fix), G6 `[ForEachRecord]` (EECS108, EECS109 and fix), G4 `World.ReserveBuffers(prefab, count)`; G7
-  not built (owner-review.md). Docs pass: docs-todos.md "feat-generator-gaps". G1 / G2 come with inner-loops WP5 /
+  not built (owner-review.md). Names approved by the owner (2026-10-27): `[Accumulate]`, `[ForEachRecord]` +
+  `IForEachRecord<T>`, `World.ReserveBuffers`. Docs pass: docs-todos.md "feat-generator-gaps". G1 / G2 come with inner-loops WP5 /
   WP2; G8 / G9 with L2.
 - [ ] **A `using` alias to a system does not bind its generated entry point**: `using Alias = Hunters;` then
   `Alias.Hunt(world)` fails with CS7036 (found by feat-locality-core). Find whether the generator or the interceptor
