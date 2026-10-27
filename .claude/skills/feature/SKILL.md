@@ -60,6 +60,9 @@ The analyzer computes the fix as diagnostic properties; a `CodeFixTests` case co
 
 ## 5. Tests (`tests/EasyEcs.UnitTest`, one file per feature)
 
+A test project that references a sample builds the sample's generated code: when hundreds of unrelated CS7036 /
+CS0122 errors appear, look for CS8785 first (a generator exception dropped every generated file).
+
 Behaviour; a regression test that fails before each bug fix; edge cases (stale and recycled ids, empty tables, structural changes mid-pass, retired entities,
 exceptions mid-pass); the allocation test (0 B in steady state, measured through `Allocations.Of` or from `Allocations.Baseline()`,
 which wait for a running background collection first, never from a raw first read; D128); after a copy-on-write capture the first replay starts from different rows than every later one, so a steady-state

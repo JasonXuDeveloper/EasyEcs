@@ -166,6 +166,12 @@ its own worktree.
    a benchmark for what was not covered, a decision record, changelog, and the docs' "How to use it fast" / "What it
    costs" sections and `api.mdx` complexity rows when they change.
 
+- **A sample whose game changes** (a new field, a new rule): its cost is the world changing, not systems added; compare
+  the outputs too, and on a shared machine interleave base / A / B rounds (single rounds of the same code swung
+  34-57 ms per 100 ticks, VoxelServer's distance field, 2026-10-27).
+- **Relaxed fields** (distance, flow): a step starts from zero, not from the last field; starting from the last one
+  counts down through stale values ("count to infinity": 7.5 sweeps with a long tail against 2.7).
+
 ## Report
 
 A table: idea | source | what EasyEcs does now | expected gain | benchmark | result (numbers) | verdict (build /
