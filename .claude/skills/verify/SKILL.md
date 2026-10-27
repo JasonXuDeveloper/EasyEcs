@@ -39,6 +39,9 @@ dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o <scratch>/aot && <sc
   numbers taken while builds, tests or samples run outside the lock are noise (parallel rows swing by 2x): rerun them
   on a quiet machine.
 - Long commands (`bun run build`, the demo, BenchmarkDotNet) run in the background.
+- A failure that comes and goes: reproduce it first (a steady-state check 10 or more times) before bisecting, or the
+  bisect blames an innocent commit; a generator merge is proven innocent by diffing its generated code against the
+  parent's (VoxelServer's allocation, 2026-10-27, blamed feat-views; the cause was copy-on-write lists after a restore).
 - Before a release: `tools/bench.sh --site --sync` on the final code (every class the site shows), the README
   numbers (headline, tables) from the new `bench.json`, changelog / README "What's new" / migration complete, the
   roadmap updated; the GitHub description's numbers are the owner's to change (say so).

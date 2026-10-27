@@ -62,7 +62,8 @@ The analyzer computes the fix as diagnostic properties; a `CodeFixTests` case co
 
 Behaviour; a regression test that fails before each bug fix; edge cases (stale and recycled ids, empty tables, structural changes mid-pass, retired entities,
 exceptions mid-pass); the allocation test (0 B in steady state, measured through `Allocations.Of` or from `Allocations.Baseline()`,
-which wait for a running background collection first, never from a raw first read; D128); bit-identical results at 1 and 4 threads for
+which wait for a running background collection first, never from a raw first read; D128); after a copy-on-write capture the first replay starts from different rows than every later one, so a steady-state
+check rehearses twice before it measures; bit-identical results at 1 and 4 threads for
 parallel code; equivalence with the scalar method for vector loops; the AOT test when the feature reaches
 generics or reflection (`tests/EasyEcs.Aot`); for each new or changed analyzer rule and code fix, its tests and edge
 cases (`audit-analyzer`, "Tests: every rule, every edge").
