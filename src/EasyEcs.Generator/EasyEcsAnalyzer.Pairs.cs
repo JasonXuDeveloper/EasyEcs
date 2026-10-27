@@ -13,7 +13,7 @@ namespace EasyEcs.Generator;
 /// The rules of pair methods (<c>[Neighbor]</c> parameters, <see cref="PairForm"/>): a declaration that cannot run per
 /// pair (EECS105), a body whose cutoff test the generator cannot read, so every pair runs (EECS106), and a neighbor
 /// search written by hand that the pair form writes (EECS107: a [ForEach] method that loops over other entities of its
-/// own component, read through a Lookup&lt;T&gt;, and tests their squared distance; a Warning with its fix where
+/// own component, read through a Lookup&lt;T&gt; or walked as a query, and tests their squared distance; a Warning with its fix where
 /// <see cref="PairRewrite"/> rewrites it, else a suggestion).
 /// </summary>
 public static partial class EasyEcsAnalyzer
@@ -44,7 +44,8 @@ public static partial class EasyEcsAnalyzer
         "[ForEach] method '{0}' searches the neighbors of its row by hand ({1}): a pair method ([Neighbor] parameters) does it",
         Category, DiagnosticSeverity.Warning, true,
         "A method that loops over other entities of its own component (a grid of cells, an index of chunks, a list of " +
-        "ids), reads each through a Lookup<T> and tests its squared distance to the row's is a neighbor search. A pair " +
+        "ids, each read through a Lookup<T>, or a walk of world.Read / Query) and tests their squared distance to the " +
+        "row's is a neighbor search. A pair " +
         "method takes the neighbor's components as [Neighbor] parameters and tests the distance once: the pass keeps the " +
         "tables in space order and visits windows of rows against the rows within the cutoff, a vector of rows per " +
         "instruction where the body qualifies, with no grid to build or keep. The code fix rewrites the method when the " +
@@ -82,7 +83,7 @@ public static partial class EasyEcsAnalyzer
 
         if (PairForm.HandWritten(method, syntax, context.SemanticModel, context.CancellationToken) is not { } how) return;
         // A Warning with its fix when the rewrite is mechanical (PairRewrite), a suggestion otherwise.
-        var rewrite = PairRewrite.OfLookupSearch(method, syntax, context.SemanticModel, context.CancellationToken);
+        var rewrite = PairRewrite.Of(method, syntax, context.SemanticModel, context.CancellationToken);
         var properties = rewrite == null ? null : ImmutableDictionary<string, string?>.Empty
             .Add("Fix", "Pairs").Add("PairParameters", rewrite.Parameters).Add("PairBody", rewrite.Body);
         context.ReportDiagnostic(Diagnostic.Create(HandWrittenNeighbors, syntax.Identifier.GetLocation(),

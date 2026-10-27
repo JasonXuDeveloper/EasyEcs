@@ -45,10 +45,10 @@ SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): t
 PairForm.cs                  what a pair method is, read once for the generator and the analyzer: Problem (EECS105's
                              reason), Read (the distance test: dx * dx sums, DistanceSquared, LengthSquared, and the
                              cutoff: values, singletons, the row's in components; EECS106's reason), HandWritten
-                             (EECS107: a loop over other entities read through a Lookup<T> of the row's component
+                             (EECS107: a loop over other entities, read through a Lookup<T> of the row's component or walked as a query of the World,
                              testing their squared distance)
 PairRewrite.cs               EECS107's fix, read once for the analyzer and its code fix: a search over candidate ids
-                             read through Lookup<T> rewritten as the pair method ([Neighbor] parameters, the cutoff
+                             read through Lookup<T> or a walk of world.Read / Query rewritten as the pair method ([Neighbor] parameters, the cutoff
                              test returning), only when mechanical (the search is the whole body, the pair reads
                              nothing of it, the generator reads its test)
 Fusion.cs                    the fusion rule read once for the generator and the analyzer (FusionSide: what a method

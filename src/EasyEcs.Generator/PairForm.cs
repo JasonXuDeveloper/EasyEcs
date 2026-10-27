@@ -139,17 +139,19 @@ internal static class PairForm
     /// <summary>
     /// How a [ForEach] method that is no pair method searches its row's neighbors by hand (EECS107), or null: in a loop,
     /// it tests the squared distance between a component of its row and the same component of another entity read
-    /// through a Lookup&lt;T&gt;.
+    /// through a Lookup&lt;T&gt;, or of an item of a query it walks (<c>foreach (var o in world.Read&lt;Position&gt;())</c>).
     /// </summary>
     public static string? HandWritten(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
     {
-        if (IsPairMethod(method) || !method.Parameters.Any(p => Symbols.Classify(p, Symbols.IsRunner(method)) == Symbols.ParamKind.Lookup)) return null;
+        bool outside = Symbols.IsRunner(method);
+        if (IsPairMethod(method) || !method.Parameters.Any(p => Symbols.Classify(p, outside) is Symbols.ParamKind.Lookup or Symbols.ParamKind.World)) return null;
         (syntax, model) = Symbols.WithBody(method, syntax, model);
         if (((SyntaxNode?)syntax.Body ?? syntax.ExpressionBody) is not { } node ||!node.DescendantNodes().Any(n => n is ForStatementSyntax
                 or ForEachStatementSyntax or WhileStatementSyntax or DoStatementSyntax) || model.GetOperation(node, ct) is not { } body)
             return null;
-        return new Reader(method, body, hand: true).TestsInLoop()
-            ? "a loop over other entities, read through a Lookup<T>, tests their squared distance to the row's"
+        return new Reader(method, body, hand: true).TestsInLoop() is { } walk
+            ? walk ? "a walk of a query of other entities tests their squared distance to the row's"
+                : "a loop over other entities, read through a Lookup<T>, tests their squared distance to the row's"
             : null;
     }
 
@@ -186,16 +188,22 @@ internal static class PairForm
     {
         private readonly bool _outside = Symbols.IsRunner(method);
 
-        /// <summary>The first squared distance a relational test inside a loop compares (EECS107), or null.</summary>
-        public bool TestsInLoop()
+        /// <summary>
+        /// Whether a relational test inside a loop compares a squared distance (EECS107): null if none, else whether the
+        /// neighbor's side is an item of a query walk (else a read through a Lookup&lt;T&gt;).
+        /// </summary>
+        public bool? TestsInLoop()
         {
             foreach (var op in body.Descendants())
                 if (op is IBinaryOperation { OperatorKind: BinaryOperatorKind.GreaterThanOrEqual or BinaryOperatorKind.GreaterThan
                         or BinaryOperatorKind.LessThan or BinaryOperatorKind.LessThanOrEqual } test
-                    && InLoop(test) && (Distance(test.LeftOperand) != null || Distance(test.RightOperand) != null))
-                    return true;
-            return false;
+                    && InLoop(test) && (Distance(test.LeftOperand) ?? Distance(test.RightOperand)) != null)
+                    return _walked;
+            return null;
         }
+
+        // The last Other check of the hand mode took an item of a query walk.
+        private bool _walked;
 
         private bool InLoop(IOperation op)
         {
@@ -320,11 +328,25 @@ internal static class PairForm
             && Symbols.Classify(p, _outside) == Symbols.ParamKind.Component && p.RefKind == RefKind.In ? p : null;
 
         /// <summary>The neighbor's side: a [Neighbor] parameter, or (by hand) a read of another entity's component of the row's type.</summary>
-        private bool Other(IOperation root, IParameterSymbol row) => hand
-            ? LookupRead(root) is { } lookup
-              && Symbols.Classify(lookup, _outside) == Symbols.ParamKind.Lookup
-              && SymbolEqualityComparer.Default.Equals(Symbols.LookupElement(lookup.Type), row.Type)
-            : root is IParameterReferenceOperation { Parameter: var p } && Symbols.Classify(p, _outside) == Symbols.ParamKind.Neighbor;
+        private bool Other(IOperation root, IParameterSymbol row)
+        {
+            if (!hand) return root is IParameterReferenceOperation { Parameter: var p } && Symbols.Classify(p, _outside) == Symbols.ParamKind.Neighbor;
+            if (LookupRead(root) is { } lookup)
+            {
+                _walked = false;
+                return Symbols.Classify(lookup, _outside) == Symbols.ParamKind.Lookup
+                       && SymbolEqualityComparer.Default.Equals(Symbols.LookupElement(lookup.Type), row.Type);
+            }
+
+            // A query walk's item (o.Component1, the generated o.Position) of the row's component.
+            _walked = true;
+            return root is IPropertyReferenceOperation { Instance: ILocalReferenceOperation { Local: var item } } property
+                   && SymbolEqualityComparer.Default.Equals(property.Type, row.Type) && IsQueryItem(item.Type);
+        }
+
+        /// <summary>A QueryItem or ReadItem of EasyEcs (the iteration variable of a query walk).</summary>
+        private static bool IsQueryItem(ITypeSymbol type) =>
+            type is INamedTypeSymbol { Name: "QueryItem" or "ReadItem", ContainingNamespace: { Name: "EasyEcs", ContainingNamespace.IsGlobalNamespace: true } };
 
         /// <summary>The parameter <paramref name="op"/> reads another entity's component through (<c>lookup.Read(id)</c>), or null.</summary>
         private static IParameterSymbol? LookupRead(IOperation op) =>
