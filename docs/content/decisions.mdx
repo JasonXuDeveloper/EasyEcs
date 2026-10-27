@@ -2119,7 +2119,7 @@ and `new Random()` in a `[ForEach]` method; its fix draws from `EntityRandom` wi
 **Decision.** `world.ForParallel(count, ref job)` runs an `IForRange` job (`Execute(start, end)`) over indexes, and
 `world.ForParallel(ref buffer, ref job)` an `IForSpan<T>` job (`Execute(start, span)`) over the elements of a
 `DynamicBuffer<T>` (an `Emitted<T>`'s records), on the world's runner: the chunks of parallel `[ForEach]` (about four
-per thread, multiples of 64 between 1,024 and `MaxChunkRows`, or `chunkRows`), the same claiming and helper
+per thread, multiples of 64 between 1,024 and `MaxChunkRows`, or `chunkSize`), the same claiming and helper
 waking, the structure frozen during the call. One job copy per chunk; nothing is merged back. EECS060 and EECS061
 cover the jobs.
 

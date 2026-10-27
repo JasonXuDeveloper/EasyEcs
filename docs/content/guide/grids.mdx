@@ -91,7 +91,7 @@ public partial record struct HeatPlate([LookupKey] PlatePos Pos) : IComponent, I
     },
     Boundary: {
       type: 'static TileBoundary',
-      description: 'What the halo holds where there is no neighbor: Fill (a value), Clamp (the edge cell repeated) or Mirror.',
+      description: 'What the halo holds where there is no neighbor: Border (a value), Clamp (the edge cell repeated) or Mirror.',
       default: 'TileBoundary.Border',
     },
   }}
@@ -514,7 +514,7 @@ The terms come from CUDA and MPI, which solve the same problem on a GPU and acro
 | `Halo` | the apron | the ghost width (halo depth) |
 | `tile.Pad()` | the tile and its apron loaded into shared memory | a halo exchange |
 | `TileNeighborhood.Faces` / `All` | a von Neumann / Moore stencil | the face / face, edge and corner exchanges |
-| `TileBoundary.Border` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / clamped / Neumann boundary |
+| `TileBoundary.Border` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / zero-gradient (replicate) / Neumann boundary |
 | a `Beside` that wraps | `cudaAddressModeWrap` | `MPI_Cart_create` with periodic dimensions |
 | a commit system after the step | ping-pong buffers | the old and new arrays of a Jacobi sweep |
 

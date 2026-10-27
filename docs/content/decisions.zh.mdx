@@ -1683,7 +1683,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 
 **决定。** `world.ForParallel(count, ref job)` 对下标运行 `IForRange` job（`Execute(start, end)`），`world.ForParallel(ref buffer, ref job)` 对一个
 `DynamicBuffer<T>`（`Emitted<T>` 的记录）的元素运行 `IForSpan<T>` job（`Execute(start, span)`），都在 World 的运行器上：并行 `[ForEach]` 的块
-（每个线程约四块，1,024 到 `MaxChunkRows` 之间 64 的整数倍，或 `chunkRows`）、同样的认领和唤醒帮手线程的方式，调用期间结构被冻结。
+（每个线程约四块，1,024 到 `MaxChunkRows` 之间 64 的整数倍，或 `chunkSize`）、同样的认领和唤醒帮手线程的方式，调用期间结构被冻结。
 每块一个 job 副本，什么都不合并回来。EECS060 和 EECS061 检查这些 job。
 
 **原因。**

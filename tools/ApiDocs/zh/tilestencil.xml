@@ -4,7 +4,7 @@
       模板在一个格子周围读什么，它决定 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" /> 访问哪些行：
       某一行读到的行里有不为零的格子时，访问这一行（一行算上它的 halo 格子，所以沿 x 读的模板只需要这一行）。
       只要读到的全是零、结果就是零的模板（水不会凭空流出，冷处不会升温），就会跳过安静的行，结果不变。
-      一行能读多远由形状的 <see cref="P:EasyEcs.ITileShape.Halo" /> 决定。
+      模板的半径由形状的 <see cref="P:EasyEcs.ITileShape.Halo" /> 决定。
     </summary>
   </member>
   <member name="F:EasyEcs.TileStencil.Self" source="fc2b367dc754">

@@ -931,3 +931,14 @@ names the field each term comes from (audit-naming, "The reference design's voca
 - zh: Slice is 分帧 everywhere (was 分片, which reads as sharding); glossary row in `tools/ApiDocs/zh/README.md`.
 - Still to come: block -> cluster and `Pairs(reach)` -> `Pairs(cutoff)` (feat-pairs-2), `[RedBlack]` ->
   `[GaussSeidel]` (feat-zombie-field), `Pad()` -> `ExchangeHalo()` with backlog item 12a.
+
+## Terminology audit (2026-10-27, read-only agent): docs-pass items
+- Glossary: add each term's source field (vector loop: Burst/ISPC; struct job: Unity IJob*; batch method: IJobChunk;
+  `Mut<T>`/`SetIfChanged`: Bevy `Mut`/`set_if_neq`; change tick: Bevy; tracked: Unity change versions; optional:
+  Bevy `Option<&T>`/Flecs `?`; tombstone: databases/LSM, and say compaction once; stage: Bevy sync points; access set:
+  Bevy `Access`; prefab: Unity/Flecs; dynamic buffer/cleanup/disabled: Unity; relation/ChildOf: Flecs; group: Flecs
+  `group_by`; slice: time slicing). New entries: stencil, lanes/ballot, fusion, pair search (cutoff, neighbor list),
+  ordered tables and clusters (Morton, bounding box, margin), `[Accumulate]`, `IDirectIndexed`.
+- zh pages: 截断距离 -> 截断半径 (7 uses) after feat-pairs-2 merges (the glossary row says 截断半径).
+- EECS093 title/message: "...that are not fused into one walk" (the setting is `FusionMode`).
+- `OrderBy.Margin` doc comment: "half of LAMMPS's skin" (both boxes widen by it); keep the name.

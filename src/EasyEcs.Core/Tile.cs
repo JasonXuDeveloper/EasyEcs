@@ -129,7 +129,7 @@ public interface ITile<TKey> : ITileShape, IIndexed<TKey> where TKey : IEquatabl
 /// is visited when one of the rows it reads holds a cell that is not zero (a row counts its halo cells, so a stencil
 /// reading along x needs nothing more than the row). A stencil whose result is zero wherever everything it reads is
 /// zero (water that does not flow out of nothing, heat that does not rise from cold) then skips the quiet rows and gets
-/// the same result. A row's reach is the shape's <see cref="ITileShape.Halo"/>.
+/// the same result. A stencil's radius is the shape's <see cref="ITileShape.Halo"/>.
 /// </summary>
 [Flags]
 public enum TileStencil : byte

@@ -86,7 +86,7 @@ public partial record struct HeatPlate([LookupKey] PlatePos Pos) : IComponent, I
     },
     Boundary: {
       type: 'static TileBoundary',
-      description: '没有邻居处光环里放什么：Fill（一个值）、Clamp（重复边缘格子）或 Mirror（镜像）。',
+      description: '没有邻居处光环里放什么：Border（一个值）、Clamp（重复边缘格子）或 Mirror（镜像）。',
       default: 'TileBoundary.Border',
     },
   }}
@@ -474,7 +474,7 @@ public partial record struct MapPlate([UniqueKey] PlatePos Pos)
 | `Halo` | apron | 幽灵格子的宽度（halo 深度） |
 | `tile.Pad()` | 把分块和 apron 载入共享内存 | 光环交换 |
 | `TileNeighborhood.Faces` / `All` | von Neumann / Moore 模板 | 只交换面 / 交换面、棱和角 |
-| `TileBoundary.Border` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / 钳制 / Neumann 边界 |
+| `TileBoundary.Border` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / 零梯度（复制边缘） / Neumann 边界 |
 | 回绕的 `Beside` | `cudaAddressModeWrap` | 带周期维度的 `MPI_Cart_create` |
 | 步进之后的提交系统 | 乒乓缓冲 | Jacobi 迭代的新旧两个数组 |
 
