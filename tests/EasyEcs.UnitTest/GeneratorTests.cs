@@ -352,7 +352,7 @@ public class GeneratorTests
     // of merges, past the IL locals a runner inlines (D135), and ARM64's table lookups do not pay.
     [TestCase("[ForEach] static void A(ref Sixteen r, in G g) { r.F0 = r.F0 - r.F7 * g.Pull; r.F15 = System.MathF.Min(r.F15 + r.F0, 10) * 0.5f + g.Pull * g.Pull; }", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 3 fields it uses declares 33 locals per 16 rows, past the 32 a job's loop may declare to be inlined; it uses 3 of Sixteen's 16 fields (F0, F7, F15): split them into a component of their own (a component of 3 fields gets a vector loop)", true)]
     [TestCase("[ForEach] static void A(ref Sixteen r, in G g) => r.F0 = r.F0 * g.Pull + r.F3 * r.F6 - r.F9 * r.F12 + r.F3 * g.Pull - r.F6 * r.F9 + r.F12;", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 5 fields it uses declares 33 locals per 16 rows, past the 32 a job's loop may declare to be inlined", false)]
-    [TestCase("[ForEach] static void A(ref Unit u) { if (u.Alive) u.Hp--; }", "field Unit.Alive is a bool, not a lane type (float, double, int, uint, long, ulong, byte, sbyte, short or ushort)")]
+    [TestCase("[ForEach] static void A(ref Unit u) { if (u.Alive) u.Hp--; }", "field Unit.Alive is a bool, not a lane type (float, double, int, uint, long, ulong, byte, sbyte, short or ushort): a state of some rows is a tag the method filters on (With<T> / Without<T>), a value a byte")]
     [TestCase("[ForEach] static void A(ref Px p, in B8 b) => p.R = (byte)(p.R + b.V);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field; it uses 1 of Px's 2 fields (R): move it into a component of its own (a component of one field gets a vector loop)", true)]
     [TestCase("[ForEach] static void A(ref Px p) => p.R = (byte)(p.R + p.G);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field")]
     [TestCase("[ForEach] static void A(ref F f, in Pos p) => f.V = System.Numerics.Vector2.Dot(p.Value, p.Value);", "Vector2.Dot adds the fields of a vector together, in an order not proven to be the scalar code's")]
@@ -662,6 +662,32 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect((__m0 & __pass), (__a1_0 + __c1_0), __a1_0);")
             .And.Contain("__a1_1 = global::System.Numerics.Vector.ConditionalSelect(__pass, global::System.Numerics.Vector.Min(__a1_1, __c1_0), __a1_1);")
             .And.Not.Contain("var __h1_0 = __a1_0;"), generated);
+    }
+
+    // A floating-point Min, Max or Fast sum is a chain of 3-4 cycles per vector: the loop over whole vectors runs two
+    // vectors per iteration into two sets of those accumulators, folded after it; the loop after it takes the vector
+    // left. Integer accumulators (a 1-cycle chain) and masked words keep one set.
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", "__a1_0 = __a1_0 + __a1_0b;", true)]
+    [TestCase("[ForEach] static void A(in F f, ref Reduce<Low> l) => l.Value.V = System.MathF.Min(l.Value.V, f.V);", "__a1_0 = global::System.Numerics.Vector.Min(__a1_0, __a1_0b);", true)]
+    [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) { c.Value.N++; c.Value.Low = System.Math.Min(c.Value.Low, p.V); }", null, false)]
+    public void AFloatReductionRunsTwoVectorsPerIteration(string method, string fold, bool paired)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "public struct Low : ISingletonComponent, IReduction<Low> { public float V; public static Low Identity => new() { V = float.PositiveInfinity }; public static Low Combine(Low a, Low b) => new() { V = System.MathF.Min(a.V, b.V) }; }",
+            $"[EcsSystem] public ref struct S {{ {method} }}"), out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        if (!paired)
+        {
+            Assert.That(generated, Does.Not.Contain("2 * global::"), generated);
+            return;
+        }
+        Assert.That(generated, Does.Contain("var __a1_0b = __a1_0;")
+            .And.Contain("for (nint last = rows - 2 * global::System.Numerics.Vector<float>.Count; i <= last; i += global::System.Numerics.Vector<float>.Count)")
+            .And.Contain("for (nint last = rows - 2 * global::System.Runtime.Intrinsics.Vector512<float>.Count;")
+            .And.Contain(fold), generated);
+        // the masked words' loop keeps one set
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "var __a1_0b").Count, Is.EqualTo(2), generated);
     }
 
     // T.Combine is part of the loop: an edit of it in another file re-emits the method (here: no longer field by field).

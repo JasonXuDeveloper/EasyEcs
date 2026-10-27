@@ -973,7 +973,7 @@ public class KernelTests
 {
     /// <summary>The lengths that cut a vector short or leave a tail, at both vector widths, and a long run.</summary>
     private static readonly int[] Lengths = [0, 1, Vector<float>.Count - 1, Vector<float>.Count, Vector<float>.Count + 1,
-        Vector512<float>.Count - 1, Vector512<float>.Count + 1, Vector<double>.Count + 1, 1000];
+        Vector512<float>.Count - 1, Vector512<float>.Count + 1, Vector<double>.Count + 1, 2 * Vector<float>.Count, 3 * Vector512<float>.Count + 1, 1000];
 
     private static readonly float[] Special = [float.NaN, -0f, 0f, 1f, -1f, 2f, 3f, 0.5f, 2.5f, -2.5f, float.PositiveInfinity, float.NegativeInfinity, 1e-30f, float.MaxValue,
         2147483648f, -2147483904f, 4294967296f, 3e9f, -3e9f, float.Epsilon];
