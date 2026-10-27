@@ -10,7 +10,7 @@ description: "键能映射到一个有界槽位范围的唯一组件（网格格
 public interface IDirectIndexed<TKey> : IUniqueIndexed<TKey>, IIndexed<TKey> where TKey : IEquatable<TKey>
 ```
 
-键能映射到一个有界槽位范围的唯一组件（网格格子、地块、房间、玩家席位）：它的索引在哈希旁边多存一个 [`IDirectIndexed.Slots`](/zh/docs/reference/idirectindexed#slots) 项的数组，一个键的实体放在 [`IDirectIndexed.SlotOf`](/zh/docs/reference/idirectindexed#slotof) 给出的那一项，所以 `Get` / `TryGet` 和写入时的唯一性检查只读一个数组项，不用探测哈希。索引仍然是哈希：槽位越界的键，或者槽位被别的键占着的键（同一槽位的两个键：冲突），都通过哈希找到；`Find`、`Count` 和有序遍历照常走哈希，和任何唯一索引一样。槽位函数要把一个 World 同时持有的键折叠到不同的槽位上（区块坐标对已加载区域的边长取模）；数组占 [`IDirectIndexed.Slots`](/zh/docs/reference/idirectindexed#slots) ×（键的大小 + 12 字节），和索引一起分配。
+键能映射到一个有界槽位范围的唯一组件（网格格子、地块、房间、玩家席位）：它的索引在哈希旁边多存一个 [`IDirectIndexed.Slots`](/zh/docs/reference/idirectindexed#slots) 项的数组，一个键的实体放在 [`IDirectIndexed.SlotOf`](/zh/docs/reference/idirectindexed#slotof) 给出的那一项，所以 `Get` / `TryGet` 和写入时的唯一性检查只读一个数组项，不用探测哈希。索引仍然是哈希：槽位越界的键，或者槽位被别的键占着的键（同一槽位的两个键：冲突），都通过哈希找到；`Find`、`Count` 和有序遍历照常走哈希，和任何唯一索引一样。槽位函数要把一个 World 同时持有的键折叠到不同的槽位上（地形坐标对已加载区域的边长取模）；数组占 [`IDirectIndexed.Slots`](/zh/docs/reference/idirectindexed#slots) ×（键的大小 + 12 字节），和索引一起分配。
 
 ```csharp
 public record struct Cell(int X, int Y) : IComponent, IDirectIndexed<(int, int)>

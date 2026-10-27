@@ -2,16 +2,16 @@
 <doc>
   <member name="T:EasyEcs.BlockPair" source="9741eabc1eef">
     <summary>
-      包围盒挨得近的两块（<see cref="M:EasyEcs.RowBlocks.Pairs(System.Single,System.Span{EasyEcs.BlockPair})" />）：
-      <see cref="P:EasyEcs.BlockPair.First" /> 的行对 <see cref="P:EasyEcs.BlockPair.Second" /> 的行，两者可以是同一块。
+      包围盒挨得近的两簇（<see cref="M:EasyEcs.RowBlocks.Pairs(System.Single,System.Span{EasyEcs.BlockPair})" />）：
+      <see cref="P:EasyEcs.BlockPair.First" /> 的行对 <see cref="P:EasyEcs.BlockPair.Second" /> 的行，两者可以是同一簇。
     </summary>
-    <param name="First">调用 <see cref="M:EasyEcs.RowBlocks.Pairs(System.Single,System.Span{EasyEcs.BlockPair})" /> 找到这对的那张表里的一块。</param>
-    <param name="Second">同一张表里的一块（不小于 <paramref name="First" />），或另一张表里的一块。</param>
+    <param name="First">调用 <see cref="M:EasyEcs.RowBlocks.Pairs(System.Single,System.Span{EasyEcs.BlockPair})" /> 找到这对的那张表里的一簇。</param>
+    <param name="Second">同一张表里的一簇（不小于 <paramref name="First" />），或另一张表里的一簇。</param>
   </member>
   <member name="P:EasyEcs.BlockPair.First" source="596e14581d66">
-    <summary>调用 <see cref="M:EasyEcs.RowBlocks.Pairs(System.Single,System.Span{EasyEcs.BlockPair})" /> 找到这对的那张表里的一块。</summary>
+    <summary>调用 <see cref="M:EasyEcs.RowBlocks.Pairs(System.Single,System.Span{EasyEcs.BlockPair})" /> 找到这对的那张表里的一簇。</summary>
   </member>
   <member name="P:EasyEcs.BlockPair.Second" source="3f911dcea26f">
-    <summary>同一张表里的一块（不小于 <paramref name="First" />），或另一张表里的一块。</summary>
+    <summary>同一张表里的一簇（不小于 <paramref name="First" />），或另一张表里的一簇。</summary>
   </member>
 </doc>

@@ -32,7 +32,7 @@ icon: RotateCcwClock
 - 枚举元素的 `DynamicBuffer`（`DynamicBuffer<Block>`）现在和结构体元素一样有生成的具名成员：`chunk.Block`、`HasBlock`、
   `WriteBlock()`、`GetOrAddBlock()`、`RemoveBlock()`，以及预制体的 `SetBlock(…)`。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
 - `DynamicBuffer<T>.MaxPooledLength` 按元素类型设置：缓冲被销毁或移除时，最长多少个元素的列表还给回收池（默认是 4 KB 能放下的个数）。
-  大缓冲反复出现又消失时调高它，比如玩家周围加载又卸载的区块，新缓冲就会重用旧列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
+  大缓冲反复出现又消失时调高它，比如玩家周围加载又卸载的地形，新缓冲就会重用旧列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 - 分析器规则 [EECS053](/zh/docs/guide/analyzer#eecs053)（警告，有代码修复）：`[ForEach]` 方法以 `ref` 传入追踪变化的组件（`ITracked`、
   `DynamicBuffer<T>`），却有路径不写它（提前 `return`、写在 `if` 里），访问到的每一行都会被打 tick，`[Changed<T>]` 系统就会看到它根本没改过的行。
   修复改成 `Mut<T>`（写入改成 `x.Write()`，读取改成 `x.Value`），只给写过的行打 tick。
@@ -42,7 +42,7 @@ icon: RotateCcwClock
   （EECS015 接受它，带索引组件的 `Maybe<T>` 仍然报错）。`Maybe<T>` 可以转换成它。见[系统](/zh/docs/guide/systems#read-only-maybe)。
 - `world.SaveEntitiesWithout(output, ids, set)` 保存一组实体，写 `ComponentSet` 以外的所有组件：加载后会重新算出的数据不进存档。见
   [迁移与卸载](/zh/docs/guide/migration-and-unload#save-entities-without)。
-- `DynamicBuffer<T>.FillPool(lists)` 在启动时往 `T` 的回收池里放入这么多个容量为 `MaxPooledLength` 的空列表，世界增长到的那些实体（玩家周围的区块）
+- `DynamicBuffer<T>.FillPool(lists)` 在启动时往 `T` 的回收池里放入这么多个容量为 `MaxPooledLength` 的空列表，世界增长到的那些实体（玩家周围的地形）
   的缓冲在服务器运行时从池里取列表，不再分配。见[动态缓冲](/zh/docs/guide/dynamic-buffers#pool)。
 
 - 按一行写的 `[ForEach]` 方法，只要它的组件都只有 1 到 4 个同一类型的数值（`float`、`double`、`int`、`uint`、`long`、`ulong`），就以 SIMD
@@ -96,7 +96,7 @@ icon: RotateCcwClock
   `ForEachBatchParallel` 运行的 job 的 `Execute` 写了所有线程共享的内存（静态字段、上下文参数或 job 字段引用的对象），这些写入会竞争。
   规则 [EECS061](/zh/docs/guide/analyzer#eecs061)（警告，有代码修复）：并行调用之后读 job 的字段，而它给每块跑一个副本、什么都不合并回来
   （自己实现了 `Merges` 的 job 不报）；修复改为在一个线程上运行这个 job（`ForEach`、`ForEachEntity`、`ForEachBatch`）。
-- `IDirectIndexed<TKey>`：键能映射到一段有界槽位上的唯一组件（网格格子、玩家周围的区块、小 id）声明 `static int Slots` 和
+- `IDirectIndexed<TKey>`：键能映射到一段有界槽位上的唯一组件（网格格子、玩家周围的地形、小 id）声明 `static int Slots` 和
   `static int SlotOf(TKey key)`；它的索引在哈希旁边多存一个槽位数组，`Get`、`TryGet` 和写入的唯一性检查都只读一个数组元素。超出范围或
   槽位被占的键通过哈希找到，`Find`、`Count` 和有序遍历仍由哈希负责。见[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)和
   [决策](/zh/docs/decisions#d71-direct-index)。
@@ -226,8 +226,8 @@ icon: RotateCcwClock
 - 加载两次保存之间会增长的世界（`Load`、`LoadKeeping`）时，id 记录按新 id 的个数精确增长，每次加载都要整体复制一遍；现在改为翻倍增长，
   `LoadEntities` 暂存新到实体的那个世界也按目标世界的大小创建，并同样翻倍增长。
 - `Restore` 以及往已有快照里 `Capture` 时，每行的 `DynamicBuffer`（以及关系链接）复制进这一行已有的列表，不再每行新建一个列表、把旧的丢给 GC。
-- 并行 `[ForEach]` 方法通过 `Maybe<T>` 写追踪组件时，像对它查询的组件一样，在各块运行前先打开该组件的变更 tick 区块：同一区块里的两个块
-  可能争写区块摘要，`[Changed<T>]` 系统随后会漏掉这次遍历写过的行（[决策](/zh/docs/decisions#d94-optional-writes)）。
+- 并行 `[ForEach]` 方法通过 `Maybe<T>` 写追踪组件时，像对它查询的组件一样，在各块运行前先打开该组件的变更 tick 区段：同一区段里的两个块
+  可能争写区段摘要，`[Changed<T>]` 系统随后会漏掉这次遍历写过的行（[决策](/zh/docs/decisions#d94-optional-writes)）。
 - 私有或 `file` 结构体不再夺走另一个类型里同名嵌套结构体的生成成员（`Tests.Census` 与 `Server.Census`）：此前 `world.Census`
   不存在（CS1061）。只有自身也获得成员的类型才会彼此让出。
 
@@ -279,7 +279,7 @@ icon: RotateCcwClock
 - 带组件刷出实体只拷贝一次行，不再是先 `Instantiate` 再 `Set`。见[决策 D41](/zh/docs/decisions#d41-instantiate-with-components)。
 - 每个 tick 重算被追踪值的系统，不再让每个 `[Changed<T>]` 读取方访问每一行：用 `Mut<T>` 时只有值真变了的行才打 tick。
   见[决策 D46](/zh/docs/decisions#d46-mut-stamps-per-write)。
-- `ChangedAny` 跳过它的组件都没写过的表、4,096 行的块和 64 行的位字。见[决策 D49](/zh/docs/decisions#d49-changedany-semantics)。
+- `ChangedAny` 跳过它的组件都没写过的表、4,096 行的区段和 64 行的位字。见[决策 D49](/zh/docs/decisions#d49-changedany-semantics)。
 - 源生成器在 IDE 里每次按键做的工作更少，分析器在构建时分配更少：方法体里的类型名不再连同方法体一起绑定，比较符号也不再拼字符串。
   见[决策 D62](/zh/docs/decisions#d62-generators-bind-outside-bodies)。
 
@@ -336,7 +336,7 @@ icon: RotateCcwClock
 - 并行 pass（并行 `[ForEach]`、`ForEachParallel`，或者并行系统的一个阶段）可能卡死，调用方一直自旋，同时某一块（或某个系统）被执行两次：
   上一轮还没收尾的 helper 线程，会在下一轮任务更多时领走下一轮的任务。分片的并行 pass 每次运行的块数都不同，几秒内就会触发。
   现在每一轮开始前先关闭上一轮的领取。见[多线程与并行](/zh/docs/guide/threading#parallel-foreach-methods)。
-- 写被追踪组件的并行 `[ForEach]` 可能漏打变更 tick：同一个 4,096 行块里的两个分块会争用这个块的变更摘要，`[Changed<T>]` 读取方可能跳过被写过的行。
+- 写被追踪组件的并行 `[ForEach]` 可能漏打变更 tick：同一个 4,096 行的区段里的两个分块会争用这个区段的变更摘要，`[Changed<T>]` 读取方可能跳过被写过的行。
   这类遍历现在按 4,096 行的整数倍切块。见[决策 D48](/zh/docs/decisions#d48-parallel-tracked-chunks)。
 - `RemoveTypes` 删掉表之后，往旧快照里 `Capture(into)`，或者之后再 `Load`，可能复用另一张表（列不同）的副本。现在副本只给它自己的表复用。
   见[快照](/zh/docs/guide/snapshots)。

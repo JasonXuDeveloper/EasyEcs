@@ -172,7 +172,7 @@ var chunkSave = new NinoArrayBufferWriter();
 world.SaveEntitiesWithout(chunkSave, [chunk.Id], ChunkSaves.Derived);   // 只有 Terrain // [!code highlight]
 ```
 
-`LoadEntities` 创建出来的区块只有 `Terrain`，没有 `HeightMap`；再由一个带 `[Without<HeightMap>]` 的系统把它算回来。
+`LoadEntities` 创建出来的地形只有 `Terrain`，没有 `HeightMap`；再由一个带 `[Without<HeightMap>]` 的系统把它算回来。
 
 | 实体 | 存档用 |
 | --- | --- |

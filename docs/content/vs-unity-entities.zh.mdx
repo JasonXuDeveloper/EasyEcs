@@ -128,7 +128,7 @@ public ref struct DeathSystem
 
 Unity 的变更过滤按 chunk 算：只要有系统对某个 chunk 拿过写权限，它就算变了，所以过滤返回的是整个 chunk，不管写没写。
 EasyEcs 按行追踪，按组件自愿开启：把组件标成 `ITracked`，`[Changed<T>]` 就只访问系统上次运行以来通过 `ref`
-写过的行，没写过的表、4,096 行的块和 64 行的字都直接跳过。`[Removed<T>]` 对失去该组件的实体做同样的事。见
+写过的行，没写过的表、4,096 行的区段和 64 行的字都直接跳过。`[Removed<T>]` 对失去该组件的实体做同样的事。见
 [变更追踪](/zh/docs/guide/change-tracking)。
 
 ## EasyEcs 是 Unity 的 ECS 吗？ [#unity]
