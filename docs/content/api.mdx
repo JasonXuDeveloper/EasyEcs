@@ -57,7 +57,8 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `[Prefab]` | attribute | On a partial struct with one field per component, its initializer the default: the generator writes `X.Prefab`, a `static readonly Prefab` of those defaults, for `world.Instantiate(X.Prefab)`. |
 | `Mut<T>` | ref struct | A component parameter of a `[ForEach]` method that counts as written only on the rows the method writes: `Value`, `Write()`, `SetIfChanged(value)` ([change tracking](/en/docs/guide/change-tracking)). |
 | `Reduce<T>`, `IReduction<T>` | struct, interface | A `[ForEach]` parameter, taken by `ref`, reducing a pass into singleton `T`, which implements `IReduction<T>` (`Identity`, `Combine`): `Value`, `Combine(value)`. |
-| `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]` | attributes | On every instance field of a partial struct: the generator writes its `IReduction<T>` (`Identity` and a field-wise `Combine`). |
+| `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]` | attributes | On every instance field of a partial struct (on the struct: for the fields without one): the generator writes its `IReduction<T>` (`Identity` and a field-wise `Combine`). |
+| `[Accumulate]` | attribute | On a singleton that reduces: a total, each pass's result combined into the world's value instead of replacing it. |
 | `[LookupKey]`, `[UniqueKey]`, `[Group]` | attributes | On a member of a partial component (`[LookupKey]` on the type: the value itself): the generator writes the explicit `IIndexed<TKey>.Key` (`IUniqueIndexed<TKey>`) or `IGroup.Group`. |
 | `[GroupBy]`, `[WhenTargetDestroyed(policy)]`, `[NotSaved]` | attributes | Setup every world applies from its first table holding the type: its grouping, the policy of links to a destroyed target; `[NotSaved]`: no save writes the type, a load keeps the world's own singleton. |
 | `[OrderBy(box...)]`, `IOrderKey<TKey>` | attribute, interface | On a member of a partial component: every world keeps the tables holding it in the order of that key (`Interval`, `Margin`), overriding an order a pair method's setup requested; the generator writes the explicit `OrderKey` and `BoxPoint`. |
@@ -66,6 +67,7 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `IRowOrder<T>`, `RowKeys` | interface, static class | For generated code: how an order reads a row (`Key`, `Point`, static), the Morton code of a point by a cell (`RowKeys.Morton`). |
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `Emit<T>`, `Emitted<T>` | ref struct, struct | A `[ForEach]` parameter, taken by value, appending records (`Add`, `AddRange`) joined in chunk order into singleton `Emitted<T>` (`Items`, a `DynamicBuffer<T>`) when the pass ends. |
+| `[ForEachRecord]`, `IForEachRecord<T>` | attribute, interface | On a static method taking `in T` first: the generator runs it on each record of `Emitted<T>` in order, then clears them (`Emitted<T>.Consume` runs its job). |
 | `EntityRandom` | record struct | A singleton (`Seed`, `Tick`) and pure static functions: deterministic random numbers per (seed, entity, tick, stream): `Bits`, `Float`, `Range`, `Chance`. |
 | `IForRange`, `IForSpan<T>` | interfaces | Jobs of `world.ForParallel`: `Execute(start, end)` over a range of indexes, `Execute(start, span)` over the elements of a list. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out entity)`, `Find(key)`, `Count(key)`. |
@@ -143,7 +145,8 @@ component it has; components the source lacks stay absent and are not removals.
 | `world.Instantiate(prefab, Span<Entity> entities)` | O(count × c) | one gate pass and at most one table growth for the wave |
 | `world.Instantiate(prefab, in T1 … in Tn)` | O(c + n) amortized | the prefab's values plus the given ones (replacing the prefab's, or added; a disabled one given is enabled), in one row copy into the final table, no intermediate table; a given `ChildOf` links the hierarchy, a unique key is checked first; O(members × c) plus one move for a group, whose entity of the prefab passed gets the components |
 | `world.Instantiate(prefab, Span<Entity> entities, in T1 … in Tn)` | O(count × (c + n)) | the same values for every instance; one gate pass, at most one table growth, each given column filled at once |
-| `world.Reserve(prefab, count)` | O(c), plus one growth | pre-sizes the tables the next `count` instances go to, so a spawn wave never grows them during a tick; also the instances' index keys, retired table and free ids (not their buffer lists: `FillPool`) |
+| `world.Reserve(prefab, count)` | O(c), plus one growth | pre-sizes the tables the next `count` instances go to, so a spawn wave never grows them during a tick; also the instances' index keys, retired table and free ids (not their buffer lists: `ReserveBuffers`) |
+| `world.ReserveBuffers(prefab, count)` | O(c + rows), plus O(lists) allocations once | fills the pool of each `DynamicBuffer<T>` the prefab holds (`FillPool`) until it holds a list per instance and member holding it; process-wide, not cumulative across prefabs |
 | `entity.Clone()` | O(c) | a new entity of the same world and table with a copy of every component; throws if not alive or retired (kept for its cleanup components) |
 
 ## Dynamic buffers [#dynamic-buffers]
@@ -216,7 +219,7 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | --- | --- | --- |
 | `reduce.Value` | O(1) | a field: the partial result of this chunk (of the pass, on one thread), which starts at `T.Identity` |
 | `reduce.Combine(T value)` | O(1) plus `T.Combine` | `Value = T.Combine(Value, value)` |
-| end of the pass | O(chunks) `T.Combine` calls | the partial results in chunk order (row order), then one write of the singleton (added when missing) |
+| end of the pass | O(chunks) `T.Combine` calls | the partial results in chunk order (row order), then one write of the singleton (added when missing); `[Accumulate]`: one more `Combine`, the world's value first |
 
 `Emit<T>`, the `[ForEach]` parameter of records a pass appends:
 
@@ -224,6 +227,7 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | --- | --- | --- |
 | `emit.Add(in T record)` / `AddRange(records)` | O(1) amortized / O(records) | appends to this chunk's list (of the pass, on one thread), no lock and no atomic; lists come from a pool kept at the largest size a chunk needed |
 | end of the pass | O(records) | the chunks' lists appended to `Emitted<T>.Items` (added when missing) in chunk order (row order, the same for any thread count); one write of the singleton; the reader clears it |
+| `[ForEachRecord]` pass | O(records), one thread | each record by `in`, in the order emitted, then one `Clear`; nothing when `Emitted<T>` is missing; a pass that throws clears nothing; zero allocation |
 
 `EntityRandom`, deterministic random numbers:
 

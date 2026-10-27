@@ -1,0 +1,12 @@
+<doc>
+  <member name="T:EasyEcs.AccumulateAttribute" source="353a65e8a6c5">
+    <summary>
+      跨遍历保存累计值的归约单例（<see cref="T:EasyEcs.IReduction`1" />）：带 <see cref="T:EasyEcs.Reduce`1" /> 参数的遍历把结果合并进
+      World 里的值（<c>Combine(World 里的值, 这次遍历的结果)</c>：先到的行在前），而不是替换它。不标它时，每次遍历的结果替换这个值。
+      <c>[Accumulate, Sum] public partial record struct Stats(long Kills, long Hits) : ISingletonComponent;</c>，再写
+      <c>static void Die(in Health h, ref Reduce&lt;Stats&gt; stats) { if (h.Value &lt;= 0) stats.Value.Kills++; }</c>，
+      就把这次遍历的击杀数加到整局的总数上，单线程或多线程都一样，不用给遍历单独建单例，也不用再写一个系统把它加到总数里。
+      World 里还没有这个单例时，从 <c>Identity</c> 开始。
+    </summary>
+  </member>
+</doc>

@@ -1094,6 +1094,16 @@ Pre-size the table of entities with exactly `T1, T2` and the entity storage, so 
 - `world.Reserve<T1..Tn>(count)`: O(n), plus one growth
 - `world.Reserve(prefab, count)`: O(c), plus one growth
 
+### `ReserveBuffers` [#reservebuffers]
+
+```csharp
+public void ReserveBuffers(Prefab prefab, int count);
+```
+
+Fill the pools of the [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) lists `prefab`'s instances hold, so the first writes to the buffers of the next `count` instances take a list instead of allocating one: each type's pool is filled ([`DynamicBuffer.FillPool`](/en/docs/reference/dynamicbuffer#fillpool)) until it holds one list per instance and per member holding the buffer. The lists have [`DynamicBuffer.MaxPooledLength`](/en/docs/reference/dynamicbuffer#maxpooledlength) elements (set it first to the length the buffers reach), so a large count of a buffer that stays short costs memory for nothing. Process-wide like the pools, and not cumulative: prefabs holding the same buffer type share its pool, which this fills up to the larger of their counts. O(components + lists) allocations once. Owner thread only.
+
+**Complexity** ([API table](/en/docs/api)): O(c + rows), plus O(lists) allocations once
+
 ### `Restore` [#restore]
 
 ```csharp

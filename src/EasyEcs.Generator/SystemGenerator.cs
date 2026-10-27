@@ -41,10 +41,18 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             .Where(static m => m is not null)
             .WithTrackingName("Systems");
 
+        // [ForEachRecord] methods: passes over the records of Emitted<T>, in the same models as [ForEach] methods.
+        var records = context.SyntaxProvider
+            .ForAttributeWithMetadataName(Symbols.ForEachRecordAttribute,
+                static (node, _) => node is MethodDeclarationSyntax,
+                static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ctx.SemanticModel, ct))
+            .Where(static m => m is not null)
+            .WithTrackingName("RecordMethods");
+
         // Group per type: Collect re-runs this cheap step on any change, but each grouped model is equatable, so
         // RegisterSourceOutput only re-emits types whose methods or declaration actually changed.
-        var updates = methods.Collect().Combine(systems.Collect())
-            .SelectMany(static (pair, _) => UpdateModel.Group(pair.Left!, pair.Right!))
+        var updates = methods.Collect().Combine(records.Collect()).Combine(systems.Collect())
+            .SelectMany(static (pair, _) => UpdateModel.Group(pair.Left.Left.AddRange(pair.Left.Right)!, pair.Right!))
             .WithTrackingName("SystemUpdates");
         // A system's code is reached only through the set's module initializer: implementation output, which IDEs skip
         // while typing. Entry points of other types are API the user's code calls.
@@ -248,6 +256,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     : method.HasFilter ? " and passes its filters" : "";
                 sb.Append($"        /// <summary>Runs <c>{method.Name}</c> on <paramref name=\"{entity}\"/> when it is alive, has the method's components{which}: true when it ran. Owner thread only.</summary>\n");
             }
+            else if (method.Record.Length > 0)
+                sb.Append($"        /// <summary>Runs <c>{method.Name}</c> on each record of <paramref name=\"{world}\"/>'s Emitted, in the order they were emitted, then clears them. Owner thread only.</summary>\n");
             else
             {
                 string which = method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>"
@@ -294,6 +304,13 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         }
 
         string job = $"{forEach}.{method.Name}Job{i}{method.TypeParameters}";
+        if (method.Record.Length > 0) // [ForEachRecord]: the records in order, then cleared
+        {
+            sb.Append($"{indent}var {local} = new {job}{Fields(method, world)};\n");
+            sb.Append($"{indent}global::EasyEcs.Emitted<{method.Record}>.Consume({world}, ref {local});\n");
+            return;
+        }
+
         void Pass(ForEachModel m, string name, string at)
         {
             sb.Append($"{at}var {local} = new {name}{Fields(m, world)};\n");
@@ -398,13 +415,24 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
     /// <summary>
     /// A pass's reductions (<c>Reduce&lt;T&gt;</c>), combined into the job by the pass: each replaces its singleton
-    /// (added when missing), once per pass.
+    /// (added when missing), once per pass, or for an [Accumulate] singleton is combined into it, the world's value
+    /// first (added at Identity when missing).
     /// </summary>
     private static void EmitReductions(StringBuilder sb, ForEachModel method, string world, string job, string indent)
     {
         for (int i = 0; i < method.Parameters.Length; i++)
             if (method.Parameters[i] is { Kind: Symbols.ParamKind.Reduction } p)
-                sb.Append($"{indent}{world}.GetOrAddSingleton<{p.Type}>() = {job}.a{i}.Value;\n");
+            {
+                if (!p.Accumulates)
+                {
+                    sb.Append($"{indent}{world}.GetOrAddSingleton<{p.Type}>() = {job}.a{i}.Value;\n");
+                    continue;
+                }
+
+                string total = job.Replace(".", "_") + "_total" + i;
+                sb.Append($"{indent}ref var {total} = ref {world}.GetOrAddSingleton({p.Type}.Identity); // [Accumulate]: the total, then this pass\n");
+                sb.Append($"{indent}{total} = {p.Type}.Combine({total}, {job}.a{i}.Value);\n");
+            }
     }
 
     /// <summary>
@@ -481,6 +509,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             // field test per pass otherwise, nothing in the row loop. Count takes no slice: a sliced pass reports its share.
             string count = $"world.Count<{method.ComponentTypes}>({(whole.Length == 0 ? "" : whole.Substring(2))})";
             if (method.Slices > 1) count = $"{count} / {method.Slices}";
+            if (method.Record.Length > 0) // the records it handles
+                count = $"(world.HasSingleton<global::EasyEcs.Emitted<{method.Record}>>() ? world.GetSingleton<global::EasyEcs.Emitted<{method.Record}>>().Items.Count : 0)";
             sb.Append($"        if (global::EasyEcs.SystemCode.Measuring(world)) global::EasyEcs.SystemCode.Visit(system, {count});\n");
             EmitPass(sb, method, forEach, i, "world", $"job{i}", filter, whole, "        ");
         }
@@ -533,6 +563,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             {
                 Declare($"Index<{p.Grid}, {p.Key}>()");
                 Declare($"Read<{p.Type}>()");
+                continue;
+            }
+
+            if (p.Kind == Symbols.ParamKind.Record) // reads and clears Emitted<T>
+            {
+                Declare($"WriteSingleton<global::EasyEcs.Emitted<{p.Type}>>()");
                 continue;
             }
 
@@ -604,6 +640,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             EmitPairJob(sb, owner, method, number); // SystemGenerator.Pairs.cs
             return;
         }
+        if (method.Record.Length > 0)
+        {
+            EmitRecordJob(sb, owner, method, number);
+            return;
+        }
+
         // A vector loop that must take every row has the method's own job beside it, for hardware without its vectors.
         if (suffix.Length == 0 && method.Simd is { VectorTail: true }) EmitJob(sb, owner, method with { Simd = null }, number, "Rows");
         // A method chasing other entities has a twin prefetching them, for the passes past the last-level cache.
@@ -841,6 +883,34 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Filter{number} = {FilterChain(method)};\n\n");
     }
 
+    /// <summary>
+    /// The job of a [ForEachRecord] method (an <c>IForEachRecord&lt;T&gt;</c> ref struct, run by
+    /// <c>Emitted&lt;T&gt;.Consume</c>): its singletons resolved once per pass as ref fields, its lookups and emits as a
+    /// [ForEach] job's on one thread, the method called on each record.
+    /// </summary>
+    private static void EmitRecordJob(StringBuilder sb, OwnerModel owner, ForEachModel method, int number)
+    {
+        string job = $"{method.Name}Job{number}{method.TypeParameters}";
+        sb.Append($"    internal ref struct {job} : global::EasyEcs.IForEachRecord<{method.Record}>\n    {{\n");
+        if (method.NeedsWorld) sb.Append("        public global::EasyEcs.World World;\n");
+        for (int i = 0; i < method.Parameters.Length; i++)
+            if (JobField(method, i, "") is { } field)
+                foreach (var line in field.Declaration.Split('\n')) sb.Append("        ").Append(line).Append('\n');
+        if (sb[sb.Length - 2] != '{') sb.Append('\n');
+        var args = string.Join(", ", method.Parameters.Select((p, i) => p.Kind switch
+        {
+            Symbols.ParamKind.Record => "in record",
+            Symbols.ParamKind.Singleton => $"{p.RefKind} s{i}",
+            Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
+            Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref this.e{i})",
+            Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
+            _ => "World",
+        }).Prepend(owner.AccessorArgument));
+        sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
+        sb.Append($"        public void Execute(in {method.Record} record) => __ForEach{owner.TypeParameters}.{method.Name}_{number}({args});\n");
+        sb.Append("    }\n\n");
+    }
+
     /// <summary>The filter of <paramref name="method"/> as the expression that builds it.</summary>
     private static string FilterChain(ForEachModel method) => "global::EasyEcs.QueryFilter.Create()" + string.Concat(
         method.With.Select(t => $".With<{t}>()").Concat(method.Without.Select(t => $".Without<{t}>()"))
@@ -917,8 +987,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <param name="Cell">A Tile's cell type, else "".</param>
     /// <param name="Grid">A Tile's tile component (its key is <paramref name="Key"/>), else "".</param>
     /// <param name="Fields">A view's component fields, in declaration order (empty for any other parameter).</param>
+    /// <param name="Accumulates">A Reduce&lt;T&gt; of a singleton declared [Accumulate]: the pass's result is combined into the world's value.</param>
     private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false, string Key = "",
-        string Cell = "", string Grid = "", EquatableArray<ViewFieldModel> Fields = default);
+        string Cell = "", string Grid = "", EquatableArray<ViewFieldModel> Fields = default, bool Accumulates = false);
 
     /// <summary>A view's component field: its name, its component, and "ref" (written) or "in" (read).</summary>
     /// <summary>A view's field: its name, component, and how the job sets it: "ref", "in" (ref readonly) or "mut" (a Mut&lt;T&gt;).</summary>
@@ -966,6 +1037,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
         /// <summary>[Consume]: the entities the pass visits are destroyed.</summary>
         public bool Consume { get; init; }
+
+        /// <summary>[ForEachRecord]: the record type it handles (its first parameter's), else "".</summary>
+        public string Record { get; init; } = "";
 
         /// <summary>
         /// [Consume] after the pass, with one DestroyAll of its filter: a method that makes no structural change (or a
@@ -1069,6 +1143,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public string Describe()
         {
             if (Pair != null) return Pair.Describe(Name);
+            if (Record.Length > 0) return $"{Name}: the records of Emitted<{Record.Replace("global::", "")}>, in order, then cleared";
             if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(HasChaseTwin ? ", lookups prefetched past the last-level cache" : "")}";
             var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Lane}>)" };
             if (simd.Flat != null) parts.Add("flat");
@@ -1119,10 +1194,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
             // Spans are modeled as their element type: Span<T> writes T, ReadOnlySpan<T> reads it.
             bool outside = Symbols.IsRunner(method);
-            var parameters = method.Parameters.Select(p =>
+            string record = Symbols.IsForEachRecord(method) ? Symbols.RecordType(method)!.ToDisplayString(Symbols.Fqn) : "";
+            var parameters = method.Parameters.Select((p, at) =>
             {
                 string declared = (p.RefKind switch { RefKind.Ref => "ref ", RefKind.In => "in ", RefKind.RefReadOnlyParameter => "ref readonly ", _ => "" })
                     + p.Type.ToDisplayString(Symbols.Fqn);
+                if (at == 0 && record.Length > 0) return new ParamModel(Symbols.ParamKind.Record, record, "in", p.Name, declared);
                 return Symbols.Classify(p, outside) switch
                 {
                     Symbols.ParamKind.ComponentSpan => new ParamModel(Symbols.ParamKind.ComponentSpan,
@@ -1135,7 +1212,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                         Symbols.MutElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,
                         Symbols.Implements(Symbols.MutElement(p.Type)!, Symbols.TrackChanges)),
                     Symbols.ParamKind.Reduction => new ParamModel(Symbols.ParamKind.Reduction, // a write of the singleton, once per pass
-                        Symbols.ReduceElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
+                        Symbols.ReduceElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared, Accumulates: Symbols.Accumulates(Symbols.ReduceElement(p.Type)!)),
                     Symbols.ParamKind.Scratch => new ParamModel(Symbols.ParamKind.Scratch, Symbols.ScratchElement(p.Type)!.ToDisplayString(Symbols.Fqn), "", p.Name, declared),
                     Symbols.ParamKind.Emit => new ParamModel(Symbols.ParamKind.Emit, // a write of Emitted<T>, once per pass
                         Symbols.EmitElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
@@ -1168,7 +1245,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 if (!list.Contains(type)) list.Add(type);
             }
 
-            foreach (var (kind, type, _) in Symbols.AttributeFilters(method)) Add(kind, type);
+            if (record.Length == 0) foreach (var (kind, type, _) in Symbols.AttributeFilters(method)) Add(kind, type);
             // A Tile reads the entity's cells and tile component: the rows must have both.
             foreach (var p in method.Parameters)
                 if (Symbols.TileElements(p.Type) is { } tile && Symbols.Classify(p) == Symbols.ParamKind.Tile)
@@ -1183,7 +1260,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             query.AddRange(parameters.Where(p => p.Kind == Symbols.ParamKind.View).SelectMany(p => p.Fields.Select(f => f.Type)));
             // No component parameter: the first [With<T>] (else [Changed<T>]) becomes the queried component (passed to the
             // job, not the method).
-            if (query.Count == 0)
+            if (query.Count == 0 && record.Length == 0)
             {
                 if (with.Count == 0) query.Add(changed[0]); // the [Changed<T>] filter keeps its T: it also filters rows
                 else
@@ -1194,7 +1271,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             }
             // The system group's filters ([Without<Inactive>] public struct Gameplay : ISystemGroup, ISystemGroupWith<T> /
             // ISystemGroupWithout<T>) join every method's (after the queried component is chosen: a group's [With<T>] only filters).
-            foreach (var (kind, type, _, _) in Symbols.GroupFilters(method)) Add(kind, type);
+            if (record.Length == 0) foreach (var (kind, type, _, _) in Symbols.GroupFilters(method)) Add(kind, type);
             if (query.Count > 0) with.RemoveAll(query.Contains); // a group's [With<T>] (or a Tile's) the method already queries
 
             bool stable = Symbols.IsStable(method, syntax, model);
@@ -1217,16 +1294,16 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
                     Slices = Symbols.Slices(method), ChunkRows = Symbols.ChunkRows(method), Identifies = identifies,
-                    One = Symbols.IsForEntity(method), Consume = Symbols.IsConsume(method),
+                    One = Symbols.IsForEntity(method), Consume = Symbols.IsConsume(method), Record = record,
                     // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
                     // One entity has no run of rows to vectorize; a system's loop is its implementation's (SystemLoops).
-                    Simd = Symbols.IsForEntity(method) || !outside || PairForm.IsPairMethod(method) ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
+                    Simd = Symbols.IsForEntity(method) || !outside || PairForm.IsPairMethod(method) || record.Length > 0 ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
                     Scalar = scalar ?? "",
                     Pair = outside && PairForm.IsPairMethod(method) ? PairModel.Create(method, syntax, model, ct) : null,
                     // Reads of other entities at the row's ids, by EntityId (a keyed lookup finds through its index).
-                    Chases = Symbols.IsForEntity(method) ? new([]) : Usable(Generator.Chases.Of(method, syntax, model, ct), parameters),
+                    Chases = Symbols.IsForEntity(method) || record.Length > 0 ? new([]) : Usable(Generator.Chases.Of(method, syntax, model, ct), parameters),
                     OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),
-                    Fusion = outside || PairForm.IsPairMethod(method) ? null : FusionSide.Of(method, stable, identifies, parallel), // a pair pass walks windows
+                    Fusion = outside || PairForm.IsPairMethod(method) || record.Length > 0 ? null : FusionSide.Of(method, stable, identifies, parallel), // a pair pass walks windows
                 };
         }
 

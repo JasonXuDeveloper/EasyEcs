@@ -21,7 +21,8 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              write; Slices -> the slice of the run; ChunkRows -> the chunkRows argument; Lookup reads at an id of an in component, key probes (TryFind / Find / Count at an in component's key) and reads at the ids of an in buffer's elements (Chases), no vector loop -> a twin job (Job{i}Chases) over runs of rows prefetching each chase's stages k rows apart (records 2k and rows k ahead; probes by the index's representation), which the pass runs past the last-level cache (EmitChases, EmitPass; parallel: the twin is a batch job per chunk, ForEachBatchParallel); [Consume] -> DestroyAll of
                              the filter after a pass without structural changes, a destroy per row otherwise;
                              [ForEntity] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
-                             over entity.Run; [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
+                             over entity.Run; [ForEachRecord] -> an IForEachRecord<T> job run by
+                             Emitted<T>.Consume (stage RecordMethods, joined to the methods of the updates); [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
                              methods in declaration order; [UpdateInterval] -> its Interval / Phase), and per
                              assembly the set __EasyEcsSystems: one Add per system and per closed generic system any
                              API names (AddSystem<G<P>>, [UpdateAfter<G<P>>], ...), a switch per hook; no system
@@ -101,7 +102,8 @@ EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS
 PartGenerator.cs             [Sum]..[Any], [LookupKey]/[UniqueKey], [Group], [OrderBy] -> a part of the partial struct
                              (IReduction<T>, IIndexed<K>.Key, IGroup.Group, IOrderKey<K>.OrderKey / BoxPoint); Parts.cs: the models and Problems read once for the
                              generator and the analyzer (other generators read keys and groups through Symbols)
-Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (Kernel.Vectorize: the loop, or the
+Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (enums as their integer's lanes, a bool
+                             component of one field as 1-byte lanes read as a mask; Kernel.Vectorize: the loop, or the
                              reason EECS055 / EECS056 report, as a ScalarReason: fixable or inherent; a lambda pass's
                              body through the same Translate, with its Lane);
                              Kernel.Narrow.cs: byte / sbyte / short / ushort lanes (int values followed as low bits and an interval, saturating idioms); Kernel.Struct.cs:
@@ -149,9 +151,10 @@ EasyEcsAnalyzer.Parts.cs     EECS062-069, EECS102 (a [Prefab] the generator cann
                              combines), hand-written reductions, keys and groups the attributes could declare, a wrong
                              Identity, a setup attribute on a type it does not fit, a managed type without a Nino
                              formatter (Warning when the code saves what holds it: entity saves write no singletons)
-EasyEcsAnalyzer.Forms.cs     EECS080-085 and EECS103: what the generator declares for code written by hand (a one-entity
+EasyEcsAnalyzer.Forms.cs     EECS080-085, EECS103 and EECS108-109: what the generator declares for code written by hand (a one-entity
                              job [ForEntity] writes, a [ForEach] method that destroys every entity it visits: [Consume],
-                             a batch method's vector loop written by hand that the method for one row gets generated)
+                             a batch method's vector loop written by hand that the method for one row gets generated,
+                             the walk and Clear of Emitted<T> a [ForEachRecord] method gets generated)
                              and those attributes (and [UpdateInterval]) where they cannot apply (EECS082 is retired)
 HandSimd.cs                  EECS103's detection, read once for the analyzer and its code fix: a batch [ForEach]
                              method whose body is a hand-written vector loop (prelude of streams and broadcasts, one
@@ -160,7 +163,9 @@ HandSimd.cs                  EECS103's detection, read once for the analyzer and
 EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089: a [ForEach] method doing by hand what a parameter does per
                              chunk (a singleton reset by system code and accumulated row by row: Reduce<T>, reported
                              at the end of the compilation; other entities read through the World: Lookup<T>; records
-                             appended to a singleton's list: Emit<T>); no code fix (the reset, the readers move too)
+                             appended to a singleton's list: Emit<T>); a total kept across passes and added to row by row: Reduce<T> of an
+                             [Accumulate] singleton (Info until the singleton reduces, then a Warning with its fix);
+                             no fix for a reset total (the reset, the readers move too)
 EasyEcsAnalyzer.Layout.cs    EECS091 (compilation end): a component of 32 bytes or more whose fields no frequent
                              [ForEach] pass touches are half of it (ColdFieldPasses: the fields each pass names,
                              collected from AnalyzeBody; components EECS055 already advises to split are left to it)

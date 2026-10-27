@@ -360,7 +360,7 @@ public class GeneratorTests
     // of merges, past the IL locals a runner inlines (D135), and ARM64's table lookups do not pay.
     [TestCase("[ForEach] static void A(ref Sixteen r, in G g) { r.F0 = r.F0 - r.F7 * g.Pull; r.F15 = System.MathF.Min(r.F15 + r.F0, 10) * 0.5f + g.Pull * g.Pull; }", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 3 fields it uses declares 33 locals per 16 rows, past the 32 a job's loop may declare to be inlined; it uses 3 of Sixteen's 16 fields (F0, F7, F15): split them into a component of their own (a component of 3 fields gets a vector loop)", true)]
     [TestCase("[ForEach] static void A(ref Sixteen r, in G g) => r.F0 = r.F0 * g.Pull + r.F3 * r.F6 - r.F9 * r.F12 + r.F3 * g.Pull - r.F6 * r.F9 + r.F12;", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 5 fields it uses declares 33 locals per 16 rows, past the 32 a job's loop may declare to be inlined", false)]
-    [TestCase("[ForEach] static void A(ref Unit u) { if (u.Alive) u.Hp--; }", "field Unit.Alive is a bool, not a lane type (float, double, int, uint, long, ulong, byte, sbyte, short or ushort)")]
+    [TestCase("[ForEach] static void A(ref Unit u) { if (u.Alive) u.Hp--; }", "field Unit.Alive is a bool among 4 fields: a vector loop takes a bool in a component of its own (one byte per row)")]
     [TestCase("[ForEach] static void A(ref Px p, in B8 b) => p.R = (byte)(p.R + b.V);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field; it uses 1 of Px's 2 fields (R): move it into a component of its own (a component of one field gets a vector loop)", true)]
     [TestCase("[ForEach] static void A(ref Px p) => p.R = (byte)(p.R + p.G);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field")]
     [TestCase("[ForEach] static void A(ref F f, in Pos p) => f.V = System.Numerics.Vector2.Dot(p.Value, p.Value);", "Vector2.Dot adds the fields of a vector together, in an order not proven to be the scalar code's")]
@@ -996,7 +996,7 @@ public class GeneratorTests
     // Every tracked stage of ComponentGenerator and SystemGenerator: a new stage is added here (the test fails until it is).
     private static readonly string[] TrackedStages =
     [
-        "ForEachMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
+        "ForEachMethods", "RecordMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
         "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes", "LambdaPasses", "LambdaFiles", "Views", "Prefabs",
         "SystemPlaces", "SystemFusions", "SetFusions", "SystemLoops", "SystemCode",
@@ -1012,6 +1012,7 @@ public class GeneratorTests
     [TestCase("public P P = new() { V = 3 };", "public P P = new() { V = 3 }; ")] // a prefab declaration's trivia
     [TestCase("q.V += 2 + e.Id.Index;", "q.V += 3 + e.Id.Index;")]                       // a fused (scalar) method's body: its pair stays
     [TestCase("if (d2 >= 4f) return; q.V++;", "if (d2 >= 4f) return;  q.V++;")]                  // a pair method's trivia: its kernel and cutoff stay
+    [TestCase("c.Ticks += h.V;", "c.Ticks += h.V + 1;")]                                 // a [ForEachRecord] method's body
     public void EditsThatChangeNoModelHitTheCache(string before, string after)
     {
         string code = "using EasyEcs;\n" + Components +
@@ -1028,6 +1029,8 @@ public class GeneratorTests
             "[Prefab] public partial struct Kind { public P P = new() { V = 3 }; public Q Q; }" +
             "[EcsSystem] public ref struct F1 { [ForEach] static void Fa(ref Q q, Entity e) => q.V += e.Id.Index; [ForEach] static void Fb(ref Q q, Entity e) => q.V += 2 + e.Id.Index; } [EcsSystem] public ref struct F2 { [ForEach] static void Fc(ref Q q) => q.V++; }" +
             "public struct Fp : IComponent { public float X, Y; } [EcsSystem] public ref struct Pr { [ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X, dy = p.Y - o.Y, d2 = dx * dx + dy * dy; if (d2 >= 4f) return; q.V++; } }";
+            "[Accumulate, Sum] public partial struct Tot : ISingletonComponent { public long N; } [EcsSystem] public ref struct Ac { [ForEach] static void T(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }" +
+            "public record struct Hit(int V); [EcsSystem] public ref struct Rc { [ForEachRecord] static void H(in Hit h, ref Clock c) => c.Ticks += h.V; }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         // A lambda pass in a file of its own: its interceptor names the file's checksum, so an edit there is a new model.
@@ -1046,6 +1049,24 @@ public class GeneratorTests
         foreach (var name in TrackedStages.Append("SourceOutput").Append("ImplementationSourceOutput")) // and nothing is emitted again
             Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                 Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged), name);
+    }
+
+    // [Accumulate]: the pass's result is combined into the world's total (added at Identity), the total first; a
+    // singleton without it is replaced.
+    [Test]
+    public void AnAccumulatedReductionCombinesIntoItsTotal()
+    {
+        string source = "using EasyEcs;\n" + Components +
+            "[Accumulate, Sum] public partial struct Tot : ISingletonComponent { public long N; } public partial struct Last : ISingletonComponent { [Sum] public long N; }" +
+            "[EcsSystem] public ref struct Ac { [ForEach] static void T(in P p, ref Reduce<Tot> t, ref Reduce<Last> l) { t.Value.N += p.V; l.Value.N += p.V; } }" +
+            "public static class R { [ForEach(Parallel = true)] public static void U(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }";
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(source), out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        string text = string.Join("\n", output.SyntaxTrees.Select(t => t.ToString()));
+        Assert.That(text, Does.Contain("ref var job_total1 = ref world.GetOrAddSingleton(global::Tot.Identity); // [Accumulate]: the total, then this pass\n"
+                                      + "        job_total1 = global::Tot.Combine(job_total1, job.a1.Value);").Or.Match(@"ref var \w+_total\d = ref \w+\.GetOrAddSingleton\(global::Tot\.Identity\)"));
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(text, @"= global::Tot\.Combine\(\w+_total\d, ").Count, Is.EqualTo(2), "the system and the runner");
+        Assert.That(text, Does.Match(@"GetOrAddSingleton<global::Last>\(\) = \w+\.a2\.Value;"));
     }
 
     // Realistic keystrokes, in a build (every output) and as the IDE runs the generators while typing (implementation

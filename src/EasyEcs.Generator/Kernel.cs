@@ -456,13 +456,24 @@ internal sealed partial class Kernel
     /// <summary>The type argument of a Scratch&lt;T&gt; / Lookup&lt;T&gt; parameter, for a reason.</summary>
     private static string? Element(ITypeSymbol type) => type is INamedTypeSymbol { TypeArguments.Length: 1 } named ? named.TypeArguments[0].Name : null;
 
-    private static bool IsLaneType(ITypeSymbol? type) => type?.SpecialType is SpecialType.System_Single or SpecialType.System_Double
+    /// <summary>
+    /// The lane type a value of <paramref name="type"/> is held as: an enum's underlying integer type (its lanes are its
+    /// values' bits, and its comparisons, bitwise operations and conversions those of the integer), any other type itself.
+    /// </summary>
+    private static ITypeSymbol Under(ITypeSymbol type) => type is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType: { } underlying } ? underlying : type;
+
+    private static bool IsEnum(ITypeSymbol? type) => type?.TypeKind == TypeKind.Enum;
+
+    /// <summary>A conversion C# calls an enumeration conversion: an enum to an integer, an integer to an enum, or between enums.</summary>
+    private static bool IsEnumConversion(IConversionOperation c) => Microsoft.CodeAnalysis.CSharp.CSharpExtensions.GetConversion(c).IsEnumeration;
+
+    private static bool IsLaneType(ITypeSymbol? type) => type != null && Under(type).SpecialType is SpecialType.System_Single or SpecialType.System_Double
         or SpecialType.System_Byte or SpecialType.System_SByte or SpecialType.System_Int16 or SpecialType.System_UInt16
         or SpecialType.System_Int32 or SpecialType.System_UInt32 or SpecialType.System_Int64 or SpecialType.System_UInt64;
 
-    private static int SizeOf(ITypeSymbol type) => type.SpecialType switch
+    private static int SizeOf(ITypeSymbol type) => Under(type).SpecialType switch
     {
-        SpecialType.System_Byte or SpecialType.System_SByte => 1,
+        SpecialType.System_Boolean or SpecialType.System_Byte or SpecialType.System_SByte => 1,
         SpecialType.System_Int16 or SpecialType.System_UInt16 => 2,
         SpecialType.System_Single or SpecialType.System_Int32 or SpecialType.System_UInt32 => 4,
         _ => 8,
@@ -554,6 +565,8 @@ internal sealed partial class Kernel
                     try
                     {
                         fields = Lanes(p.Type);
+                        if (fields.Length > 1 && fields.FirstOrDefault(f => IsBool(f.Type)) is { } flag)
+                            throw new Unsupported($"field {p.Type.Name}.{flag.AssociatedSymbol?.Name ?? flag.Name} is a bool among {fields.Length} fields: a vector loop takes a bool in a component of its own (one byte per row)"); // inherent until the samples split theirs (owner-review)
                         if (fields.Any(f => SizeOf(f.Type) != SizeOf(fields[0].Type)))
                             throw new Unsupported($"lane types {fields[0].Type.ToDisplayString()} and {fields.First(f => SizeOf(f.Type) != SizeOf(fields[0].Type)).Type.ToDisplayString()} differ in size");
                     }
@@ -680,14 +693,15 @@ internal sealed partial class Kernel
         var stores = new StringBuilder();
         foreach (var (p, (index, fields, _)) in kernel._components.OrderBy(c => c.Value.Index).Select(c => (c.Key, c.Value)))
         {
-            string column = Elem(fields[0].Type);
+            string column = Column(fields[0].Type);
             var loads = new StringBuilder();
             columns.Add(([kernel._wideOf.ContainsKey(p) ? "" : $"__c{index}_"], ""));
             if (kernel._wideOf.TryGetValue(p, out var wide)) kernel.WideLoads(index, wide, column, loads);
             else
                 foreach (var (h, row) in kernel.Rows(index, column))
                 {
-                    if (fields.Length == 1) loads.Append($"var __c{index}_0{h} = {V}.LoadUnsafe(ref e{index}, {row});\n");
+                    if (fields.Length == 1 && IsBool(fields[0].Type)) loads.Append($"var __c{index}_0{h} = {BoolLoad($"{V}.LoadUnsafe(ref e{index}, {row})")};\n");
+                    else if (fields.Length == 1) loads.Append($"var __c{index}_0{h} = {V}.LoadUnsafe(ref e{index}, {row});\n");
                     else
                     {
                         // Each field is loaded into its name; a field of another type of the lane size is loaded as the
@@ -726,7 +740,7 @@ internal sealed partial class Kernel
         var masked = new StringBuilder();
         foreach (var (p, (index, fields, _)) in kernel._components.Where(c => kernel._written.Contains(c.Value.Index)).OrderBy(c => c.Value.Index).Select(c => (c.Key, c.Value)))
         {
-            string column = Elem(fields[0].Type);
+            string column = Column(fields[0].Type);
             // A wide component's masked words run the method (SystemGenerator): only the loop's stores.
             if (kernel._wideOf.TryGetValue(p, out var wide))
             {
@@ -739,11 +753,12 @@ internal sealed partial class Kernel
                 // writes kept the lanes that do not pass (Kernel.Write).
                 string Blend(int f) => h.Length == 0 ? $"__c{index}_{f}" : $"{V}.ConditionalSelect({kernel.PassAs(h, Elem(fields[f].Type))}, __c{index}_{f}{h}, __o{index}_{f}{h})";
                 if (h.Length > 0) for (int f = 0; f < fields.Length; f++) kept.Append($"var __o{index}_{f}{h} = __c{index}_{f}{h};\n");
+                string One(string value) => IsBool(fields[0].Type) ? BoolStore(value) : value; // a bool: its mask as 0 or 1
                 stores.Append(fields.Length == 1
-                    ? $"{V}.StoreUnsafe(__c{index}_0{h}, ref e{index}, {row});\n"
+                    ? $"{V}.StoreUnsafe({One($"__c{index}_0{h}")}, ref e{index}, {row});\n"
                     : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, $"__c{index}_{f}{h}")))}, ref e{index}, {row});\n");
                 masked.Append(fields.Length == 1
-                    ? $"{V}.StoreUnsafe({Blend(0)}, ref e{index}, {row});\n"
+                    ? $"{V}.StoreUnsafe({One(Blend(0))}, ref e{index}, {row});\n"
                     : $"{Interleaved}.Store{fields.Length}({string.Join(", ", fields.Select((field, f) => As(Elem(field.Type), column, Blend(f))))}, ref e{index}, {row});\n");
             }
         }
@@ -765,7 +780,7 @@ internal sealed partial class Kernel
         var held = new StringBuilder();
         var restore = new StringBuilder();
         var fold = new StringBuilder();
-        string count = $"{Vec(Elem(first))}.Count";
+        string count = $"{Vec(Column(first))}.Count";
         foreach (var r in kernel._reductions.Values.OrderBy(r => r.Index))
         {
             string t = r.Type.ToDisplayString(Symbols.Fqn);
@@ -811,9 +826,9 @@ internal sealed partial class Kernel
         // Each lookup's backoff (Lookup.Resolve): after a miss, the vectors of the run to send to the method without trying.
         for (int g = 0; g < kernel._lookups.Count; g++) kernel._setup.Append($"int __b{g} = 0;\n");
         if (lane.Pairs) return kernel.ForPairs(read.ToString() + kept, masked.ToString(), Elem(first)); // Kernel.Neighbors.cs
-        return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
+        return new Code(new EquatableArray<string>(kernel._components.Values.OrderBy(c => c.Index).Select(c => Column(c.Fields[0].Type)).ToArray()),
             kernel._setup.ToString(), prologue + read + hold + kernel._body, stores.ToString(), prologue + read + kept + maskedHold + kernel._body.Masked, masked.ToString(),
-            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Elem(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
+            restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Column(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
             kernel._bails, flat, kernel._cold, kernel._wideOf.Count == 0 ? null : string.Join(" && ", kernel._components.Where(c => kernel._wideOf.ContainsKey(c.Key)).Select(c => $"__layout{c.Value.Index}")),
             kernel.WideStatics())
         {
@@ -943,12 +958,12 @@ internal sealed partial class Kernel
         foreach (var field in fields)
         {
             string name = $"{type.Name}.{field.AssociatedSymbol?.Name ?? field.Name}";
-            if (!field.IsFixedSizeBuffer && IsLaneType(field.Type)) paths.Add([field]);
+            if (!field.IsFixedSizeBuffer && (IsLaneType(field.Type) || IsBool(field.Type))) paths.Add([field]);
             else if (!field.IsFixedSizeBuffer && field.Type is INamedTypeSymbol { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None } inner
                      && SequentialLayout(inner) && paths.Count < MaxFields * 4)
                 foreach (var path in Paths(inner, $"field {name}"))
                     paths.Add([field, .. path]);
-            else throw new Unsupported($"field {name} is a {field.Type.ToDisplayString()}, not a lane type (float, double, int, uint, long, ulong, byte, sbyte, short or ushort)");
+            else throw new Unsupported($"field {name} is a {field.Type.ToDisplayString()}, not a lane type (float, double, int, uint, long, ulong, byte, sbyte, short, ushort or an enum of them)");
         }
         return paths.ToArray();
     }
@@ -979,9 +994,21 @@ internal sealed partial class Kernel
 
     private static bool IsBool(ITypeSymbol? type) => type?.SpecialType == SpecialType.System_Boolean;
     private static bool IsFloat(ITypeSymbol? t) => t?.SpecialType is SpecialType.System_Single or SpecialType.System_Double;
-    private static bool IsSigned(ITypeSymbol? t) => t?.SpecialType is SpecialType.System_Int32 or SpecialType.System_Int64
+    private static bool IsSigned(ITypeSymbol? t) => t != null && Under(t).SpecialType is SpecialType.System_Int32 or SpecialType.System_Int64
         or SpecialType.System_SByte or SpecialType.System_Int16 || IsFloat(t);
-    private static string Elem(ITypeSymbol type) => type.ToDisplayString(Symbols.Fqn);
+    private static string Elem(ITypeSymbol type) => Under(type).ToDisplayString(Symbols.Fqn);
+
+    /// <summary>
+    /// The lane type of a component's column: its first field's, a bool's as byte (0 or 1). A bool field's vector in the
+    /// loop is a mask (<see cref="BoolLoad"/>, <see cref="BoolStore"/>), as every bool value is.
+    /// </summary>
+    private static string Column(ITypeSymbol type) => IsBool(type) ? "byte" : Elem(type);
+
+    /// <summary>A bool column's bytes as the 1-byte loop's mask: all ones where the byte is not 0.</summary>
+    private static string BoolLoad(string bytes) => $"{V}.As<byte, sbyte>({V}.GreaterThan({bytes}, {Vec("byte")}.Zero))";
+
+    /// <summary>A mask stored as a bool column's bytes: exactly 1 (true) or 0, as C# writes a bool.</summary>
+    private static string BoolStore(string mask) => $"{V}.As<sbyte, byte>(-{mask})";
     private static string Vec(string element) => $"{V}<{element}>";
 
     /// <summary>The vector type of a value of <paramref name="type"/>: its lanes, or the mask type for a bool.</summary>
@@ -1633,10 +1660,15 @@ internal sealed partial class Kernel
         {
             case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when _narrow && IsLane(c.Type) && IsInt(c.Operand.Type):
                 return Truncate(WideOf(c.Operand), c.Type!, c); // (byte)(a + b): the low bits, as C# truncates
+            case IConversionOperation { IsChecked: false, OperatorMethod: null } c when _narrow && IsEnumConversion(c) && IsLane(c.Type) && IsInt(c.Operand.Type):
+                return Truncate(WideOf(c.Operand), Under(c.Type!), c); // (E)(a + b) of a narrow enum: the same low bits
             case IConversionOperation { Conversion.IsIdentity: true } c when IsLane(c.Type) || IsBool(c.Type):
                 return Expr(c.Operand);
             case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when IsLane(c.Type) && IsLane(c.Operand.Type):
                 return Convert(Expr(c.Operand), c.Operand.Type!, c.Type!) ?? throw Not(c);
+            // An enum to its integer or back (or another enum, or another integer of its size): the bits, as C# converts them unchecked.
+            case IConversionOperation { IsChecked: false, OperatorMethod: null } c when IsEnumConversion(c) && IsLane(c.Type) && IsLane(c.Operand.Type):
+                return Convert(Expr(c.Operand), Under(c.Operand.Type!), Under(c.Type!)) ?? throw Not(c);
             case IFieldReferenceOperation or IPropertyReferenceOperation when LaneOf(op) is { } c:
                 return ComponentLane(c.Index, c.Field, op);
             case IPropertyReferenceOperation { Property.Name: "HasValue", Instance: IParameterReferenceOperation { Parameter: var p } } when _optionals.TryGetValue(p, out var o):
@@ -1694,8 +1726,8 @@ internal sealed partial class Kernel
         }
     }
 
-    /// <summary>A uniform scalar of <paramref name="type"/>, broadcast once per run (before the loop).</summary>
-    private string Broadcast(string scalar, ITypeSymbol type) => Broadcast(scalar, Elem(type));
+    /// <summary>A uniform scalar of <paramref name="type"/>, broadcast once per run (before the loop); an enum's as its integer.</summary>
+    private string Broadcast(string scalar, ITypeSymbol type) => Broadcast(IsEnum(type) ? $"(({Elem(type)})({scalar}))" : scalar, Elem(type));
 
     /// <summary>A uniform scalar broadcast to lanes of <paramref name="element"/> (a fully qualified C# type).</summary>
     private string Broadcast(string scalar, string element)
@@ -1915,7 +1947,7 @@ internal sealed partial class Kernel
             ? Broadcast(Literal(System.Convert.ChangeType(constant, ClrType(type), CultureInfo.InvariantCulture), type), type)
             : Expr(op);
 
-    private static System.Type ClrType(ITypeSymbol type) => type.SpecialType switch
+    private static System.Type ClrType(ITypeSymbol type) => Under(type).SpecialType switch
     {
         SpecialType.System_Single => typeof(float), SpecialType.System_Double => typeof(double), SpecialType.System_Int32 => typeof(int),
         SpecialType.System_UInt32 => typeof(uint), SpecialType.System_Int64 => typeof(long),
@@ -2147,7 +2179,8 @@ internal sealed partial class Kernel
             case IPropertyReferenceOperation { Property: { IsStatic: false, Parameters.Length: 0 } p, Instance: { } instance }
                 when p.ContainingType.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, p)):
                 return $"{Scalar(instance)}.{p.Name}"; // an auto-property: a field read, no code of its own
-            case IConversionOperation { OperatorMethod: null, IsTryCast: false, Conversion.IsNumeric: true } or IConversionOperation { Conversion.IsIdentity: true }:
+            case IConversionOperation { OperatorMethod: null, IsTryCast: false, Conversion.IsNumeric: true } or IConversionOperation { Conversion.IsIdentity: true }
+                or IConversionOperation { OperatorMethod: null, IsTryCast: false } when IsEnumConversion((IConversionOperation)op):
                 var c = (IConversionOperation)op;
                 return $"(({c.Type!.ToDisplayString(Symbols.Fqn)})({Scalar(c.Operand)}))";
             case IBinaryOperation { OperatorMethod: null, IsChecked: false } b when b.OperatorKind is not (BinaryOperatorKind.Divide or BinaryOperatorKind.Remainder) || IsFloat(b.Type):
@@ -2193,7 +2226,7 @@ internal sealed partial class Kernel
         uint u => u.ToString(CultureInfo.InvariantCulture) + "u",
         long l => l == long.MinValue ? "long.MinValue" : $"({l.ToString(CultureInfo.InvariantCulture)}L)",
         ulong u => u.ToString(CultureInfo.InvariantCulture) + "UL",
-        _ when type is { SpecialType: not SpecialType.None } => $"(({type.ToDisplayString(Symbols.Fqn)})({System.Convert.ToString(value, CultureInfo.InvariantCulture)}))",
+        _ when type != null && Under(type) is { SpecialType: not SpecialType.None } lane => $"(({lane.ToDisplayString(Symbols.Fqn)})({System.Convert.ToString(value, CultureInfo.InvariantCulture)}))",
         _ => throw new Unsupported($"the constant {value} is not supported"),
     };
 

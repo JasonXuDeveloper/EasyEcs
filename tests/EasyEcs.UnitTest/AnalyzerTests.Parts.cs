@@ -18,6 +18,8 @@ public partial class AnalyzerTests
     [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public record struct W(int Id) : IComponent;")]                   // no link
     [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public partial record struct W([LookupKey] int Id) : IComponent;")]     // not an EntityId key
     [TestCase("[NotSaved] public record struct N(object O);")]                                                              // no component
+    [TestCase("[Accumulate] public record struct A(int N) : IComponent;")]                                                  // not a singleton
+    [TestCase("[Accumulate] public record struct A(int N) : ISingletonComponent;")]                                         // does not combine
     public async Task AWorldSetupOnATypeItDoesNotFitIsReported(string source)
     {
         Assert.That((await Analyze([source])).Where(d => d.Id.StartsWith("EECS") || d.Severity == DiagnosticSeverity.Error).Select(d => d.Id).Distinct(),

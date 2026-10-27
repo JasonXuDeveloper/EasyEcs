@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
@@ -29,8 +30,23 @@ public static partial class EasyEcsAnalyzer
         "partial result, starting at T's Identity, and combines them in row order into T when the pass ends: the same " +
         "sums, minimums and maximums, with Parallel = true and the vector loop open to the method. The pass's result " +
         "replaces T, so the rule reports a singleton that system code resets (assigns whole, sets, removes, or gives a " +
-        "field a constant) outside OnCreate: one that holds a pass's result. A total that grows across updates is left " +
-        "alone; it would reduce into a singleton of its own, which a later system adds to the total.",
+        "field a constant) outside OnCreate: one that holds a pass's result. A total that grows across updates (nothing " +
+        "resets it) is declared [Accumulate]: the pass's result is then combined into T instead of replacing it.",
+        helpLinkUri: Help("EECS086"), customTags: WellKnownDiagnosticTags.CompilationEnd);
+
+    /// <summary>
+    /// EECS086 for a total nothing resets: the pass's result is combined into the singleton ([Accumulate]), so the same
+    /// rule with the advice of that form. Its fix (when the singleton already reduces) takes the parameter as a
+    /// Reduce&lt;T&gt; and declares T [Accumulate].
+    /// </summary>
+    public static readonly DiagnosticDescriptor HandWrittenTotal = new("EECS086", "A singleton accumulated row by row",
+        "Parameter '{0}' of {1} adds to singleton {2} row by row ({3}), so the method runs on one thread and without a vector loop; {4}: each chunk keeps a partial result, and the pass's result is combined into the total {2} holds",
+        Category, DiagnosticSeverity.Warning, true,
+        "A 'ref' singleton parameter is one value every row writes: the method cannot run in parallel, and its vector loop " +
+        "has no lane to keep it in. A singleton declared [Accumulate] holds a total: a Reduce<T> parameter gives each chunk " +
+        "of rows its own partial result, starting at T's Identity, combines them in row order when the pass ends, and " +
+        "combines that into T (T's value first). Integer totals are the same, bit for bit; the method may take " +
+        "Parallel = true and the vector loop.",
         helpLinkUri: Help("EECS086"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     public static readonly DiagnosticDescriptor HandWrittenLookup = new("EECS087", "Other entities' components read through the World",
@@ -59,14 +75,24 @@ public static partial class EasyEcsAnalyzer
     private static void AnalyzeHandWritten(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body, Core core, Resets resets)
     {
         if (!Symbols.IsForEach(method) || Symbols.IsForEntity(method)) return; // one entity per call: nothing to split into chunks
-        foreach (var (p, fields) in Accumulations(method, body))
+        foreach (var (p, fields, covers) in Accumulations(method, body))
         {
             var singleton = (INamedTypeSymbol)p.Type;
             string ops = string.Join(", ", fields.Select(f => $"{f.Field.Name}: {Verb(f.Op)}"));
-            string advice = Reduces(singleton)
+            bool reduces = Reduces(singleton);
+            string advice = reduces
                 ? $"take it as 'ref Reduce<{singleton.Name}>' and accumulate into '{p.Name}.Value'"
                 : $"declare {singleton.Name} partial with {string.Join(", ", fields.Select(f => $"[{f.Op}] on {f.Field.Name}"))} and take it as 'ref Reduce<{singleton.Name}>'";
-            resets.Pending.Enqueue((p, singleton, method, [p.Name, Symbols.Describe(method), singleton.Name, ops, advice]));
+            // A total: the fields this method does not accumulate are summed (adding 0 changes nothing), so only the
+            // fields it accumulates otherwise need an attribute of their own.
+            var others = fields.Where(f => f.Op != Parts.Op.Sum).Select(f => $"[{f.Op}] on {f.Field.Name}").ToList();
+            string total = reduces
+                ? Symbols.Accumulates(singleton)
+                    ? $"take it as 'ref Reduce<{singleton.Name}>' and accumulate into '{p.Name}.Value'"
+                    : $"declare {singleton.Name} [Accumulate], take it as 'ref Reduce<{singleton.Name}>' and accumulate into '{p.Name}.Value'"
+                : $"declare {singleton.Name} partial with [Accumulate, Sum]{(others.Count == 0 ? "" : " and " + string.Join(", ", others))} and take it as 'ref Reduce<{singleton.Name}>'";
+            resets.Pending.Enqueue(new Pending(p, singleton, method, [p.Name, Symbols.Describe(method), singleton.Name, ops, advice], covers,
+                [p.Name, Symbols.Describe(method), singleton.Name, ops, total], reduces));
         }
 
         foreach (var (p, list, element) in Appends(method, body))
@@ -100,20 +126,39 @@ public static partial class EasyEcsAnalyzer
         private readonly ConcurrentDictionary<string, ConcurrentQueue<IMethodSymbol>> _names = new(); // the generated SetX / RemoveX: X
 
         /// <summary>
-        /// The EECS086 reports waiting for the end of the compilation: the parameter, its singleton, the method and the
-        /// message's arguments but the last (the reset).
+        /// The EECS086 reports waiting for the end of the compilation: the parameter, its singleton, the method, the
+        /// message's arguments but the last (the reset) of a reset singleton's report, whether the method accumulates
+        /// every field (what replacing the singleton needs), and a total's arguments.
         /// </summary>
-        public readonly ConcurrentQueue<(IParameterSymbol Parameter, INamedTypeSymbol Singleton, IMethodSymbol Method, object[] Arguments)> Pending = new();
+        public readonly ConcurrentQueue<Pending> Pending = new();
 
         public void Register(CompilationStartAnalysisContext start)
         {
             start.RegisterOperationAction(Collect, OperationKind.SimpleAssignment, OperationKind.Invocation);
             start.RegisterCompilationEndAction(context =>
             {
-                foreach (var (p, singleton, method, arguments) in Pending)
+                foreach (var pending in Pending)
+                {
+                    var (p, singleton, method) = (pending.Parameter, pending.Singleton, pending.Method);
                     if ((By(_types, singleton.OriginalDefinition, method) ?? By(_names, singleton.Name, method)) is { } reset)
-                        context.ReportDiagnostic(Diagnostic.Create(HandWrittenReduce, p.Locations.FirstOrDefault(),
-                            [.. arguments, reset.ContainingType.Name + "." + reset.Name]));
+                    {
+                        if (pending.Covers)
+                            context.ReportDiagnostic(Diagnostic.Create(HandWrittenReduce, p.Locations.FirstOrDefault(),
+                                [.. pending.Arguments, reset.ContainingType.Name + "." + reset.Name]));
+                    }
+                    else
+                    {
+                        // A total: the fix takes the parameter as a Reduce<T> and declares T [Accumulate] when T already reduces
+                        // (a Warning). A singleton that does not reduce needs its declaration rewritten by hand (partial, the
+                        // attributes, every reader of a field another pass replaced), so the advice is a suggestion (Info).
+                        var properties = pending.Reduces ? ImmutableDictionary<string, string?>.Empty.Add("Fix", "Accumulate")
+                            .Add("Singleton", singleton.Name).Add("Declare", Symbols.Accumulates(singleton) ? "" : "Accumulate")
+                            : ImmutableDictionary<string, string?>.Empty;
+                        context.ReportDiagnostic(Diagnostic.Create(HandWrittenTotal, p.Locations.FirstOrDefault(),
+                            pending.Reduces ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info,
+                            pending.Reduces ? singleton.Locations.Where(l => l.IsInSource) : [], properties, pending.Total));
+                    }
+                }
             });
         }
 
@@ -149,9 +194,17 @@ public static partial class EasyEcsAnalyzer
             resets.GetOrAdd(key, _ => new ConcurrentQueue<IMethodSymbol>()).Enqueue(method);
     }
 
+    /// <summary>
+    /// An EECS086 report waiting for the end of the compilation (<see cref="Resets.Pending"/>): <paramref name="Covers"/>
+    /// when the method accumulates every field (a reset singleton's report needs it), <paramref name="Total"/> the
+    /// arguments of a total's report, <paramref name="Reduces"/> when the singleton already combines with itself.
+    /// </summary>
+    private sealed record Pending(IParameterSymbol Parameter, INamedTypeSymbol Singleton, IMethodSymbol Method, object[] Arguments, bool Covers,
+        object[] Total, bool Reduces);
+
     /// <summary>Whether <paramref name="type"/> combines with itself: a Reduce&lt;T&gt; of it compiles.</summary>
     private static bool Reduces(INamedTypeSymbol type) => Parts.Of(type)?.WritesReduction == true
-        || type.AllInterfaces.Any(i => Symbols.Named(i.OriginalDefinition, "EasyEcs.IReduction<T>") && SymbolEqualityComparer.Default.Equals(i.TypeArguments[0], type));
+        || Symbols.ReducesItself(type);
 
     // ---------------- EECS086: a reduction written by hand ----------------
 
@@ -167,7 +220,7 @@ public static partial class EasyEcsAnalyzer
     /// when every field is accumulated, so the attributes can declare all of them. The vector-loop message (EECS055)
     /// leaves the method to this rule.
     /// </summary>
-    private static IEnumerable<(IParameterSymbol Parameter, List<Accumulated> Fields)> Accumulations(IMethodSymbol method, IOperation body)
+    private static IEnumerable<(IParameterSymbol Parameter, List<Accumulated> Fields, bool Covers)> Accumulations(IMethodSymbol method, IOperation body)
     {
         if (!Symbols.IsForEach(method) || Symbols.IsForEntity(method) || Symbols.IsBatch(method) || Symbols.IsParallel(method)
             || Symbols.Slices(method) != 1) yield break;
@@ -178,18 +231,22 @@ public static partial class EasyEcsAnalyzer
                     || SymbolEqualityComparer.Default.Equals(Symbols.ReduceElement(o.Type), singleton))))
                 continue; // a second access of the singleton: EECS057's when it is a Reduce
             if (Accumulations(body, p) is not { Count: > 0 } fields) continue;
+            bool covers = true;
             if (Parts.Of(singleton) is { WritesReduction: true } parts)
             {
                 if (fields.Any(f => parts.Fields.All(d => d.Name != f.Field.Name || d.Op != f.Op))) continue;
             }
             else if (!Reduces(singleton))
             {
-                // Every field accumulated: the attributes declare them all (a field left out would be reset by the pass).
-                int data = singleton.GetMembers().OfType<IFieldSymbol>().Count(f => !f.IsStatic && !f.IsConst);
-                if (data != fields.Count) continue;
+                // Every field accumulated: the attributes declare them all (a field the pass's result replaced would be
+                // reset). A total sums the others ([Accumulate, Sum]: adding 0 keeps them), so they must be numbers.
+                var data = singleton.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic && !f.IsConst).ToList();
+                covers = data.Count == fields.Count;
+                if (!covers && data.Any(f => !Numeric(f.Type) && !fields.Any(a => SymbolEqualityComparer.Default.Equals(a.Field, f.AssociatedSymbol ?? f))))
+                    continue;
             }
 
-            yield return (p, fields);
+            yield return (p, fields, covers);
         }
     }
 

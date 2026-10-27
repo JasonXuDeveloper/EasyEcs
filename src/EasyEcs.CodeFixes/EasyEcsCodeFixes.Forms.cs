@@ -14,11 +14,109 @@ namespace EasyEcs.CodeFixes;
 /// The fixes that turn hand-written forms into the declarations the generator reads: a [ForEach] method's final destroy
 /// into [Consume] (EECS084), and
 /// a one-entity job with its calls into a [ForEntity] method and its entry point's calls (EECS080), and a batch method's
-/// hand-written vector loop into the method for one row the generator vectorizes (EECS103). The analyzer decided each
+/// hand-written vector loop into the method for one row the generator vectorizes (EECS103), and a total accumulated
+/// through a 'ref' singleton into a Reduce&lt;T&gt; of an [Accumulate] singleton (EECS086). The analyzer decided each
 /// (its properties); these only rewrite.
 /// </summary>
 public sealed partial class EasyEcsCodeFixes
 {
+    /// <summary>
+    /// EECS109: a system's OnUpdate that walks Emitted&lt;T&gt; and clears it becomes <c>[ForEachRecord] static void
+    /// Handle(in T record, ref S s, ...)</c> holding the loop's body (the singleton locals as 'ref' parameters, the World
+    /// when the body uses it: the analyzer's property), its lines moved out by one level.
+    /// </summary>
+    private static MethodDeclarationSyntax? RecordMethod(SyntaxNode root, MethodDeclarationSyntax hook, ForEachStatementSyntax loop,
+        System.Collections.Immutable.ImmutableDictionary<string, string?> props)
+    {
+        if (!props.TryGetValue("RecordParameters", out var others) || others == null || !props.TryGetValue("Record", out var record) || record == null) return null;
+        var list = SyntaxFactory.ParseParameterList($"(in {record} {loop.Identifier.ValueText}{(others.Length > 0 ? ", " + others : "")})");
+        if (list.ContainsDiagnostics) return null;
+        var eol = EndOfLine(root);
+        var leading = hook.GetLeadingTrivia();
+        string indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last().ToFullString() : "";
+        if (hook.Modifiers.Count == 0 || hook.AttributeLists.Count > 0) return null;
+        // [ForEachRecord] on a line of its own, where the hook's line began (its leading trivia), the modifiers indented below it.
+        var attribute = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(SyntaxFactory.IdentifierName("ForEachRecord"))))
+            .WithLeadingTrivia(leading).WithTrailingTrivia(eol);
+        var method = hook.WithoutLeadingTrivia();
+        method = method.WithModifiers(method.Modifiers.Replace(method.Modifiers[0], method.Modifiers[0].WithLeadingTrivia(SyntaxFactory.Whitespace(indent))))
+            .WithAttributeLists(SyntaxFactory.SingletonList(attribute))
+            .WithIdentifier(SyntaxFactory.Identifier("Handle").WithTriviaFrom(hook.Identifier))
+            .WithParameterList(list.WithTriviaFrom(hook.ParameterList));
+        if (loop.Statement is ExpressionStatementSyntax only)
+            return method.WithBody(null).WithParameterList(method.ParameterList.WithTrailingTrivia(SyntaxFactory.Space))
+                .WithExpressionBody(SyntaxFactory.ArrowExpressionClause(only.Expression.WithoutTrivia().WithLeadingTrivia(SyntaxFactory.Space)))
+                .WithSemicolonToken(SyntaxFactory.Token(SyntaxKind.SemicolonToken).WithTrailingTrivia(hook.GetTrailingTrivia()));
+        if (loop.Statement is not BlockSyntax body) return null;
+
+        // The body's lines one level out: the loop's indentation to the method's.
+        var loopLeading = loop.GetLeadingTrivia();
+        string inner = loopLeading.Count > 0 && loopLeading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? loopLeading.Last().ToFullString() : "";
+        int shift = System.Math.Max(0, inner.Length - indent.Length);
+        string newline = eol.ToFullString();
+        var lines = body.WithoutTrivia().ToFullString().Replace("\r\n", "\n").Split('\n')
+            .Select((line, i) => i == 0 ? indent + line.TrimStart() : line.Length >= shift && line.Substring(0, shift).Trim().Length == 0 ? line.Substring(shift) : line.TrimStart());
+        var block = (BlockSyntax)SyntaxFactory.ParseStatement(string.Join(newline, lines));
+        return method.WithExpressionBody(null).WithSemicolonToken(default)
+            .WithParameterList(method.ParameterList.WithTrailingTrivia(eol))
+            .WithBody(block.WithTrailingTrivia(hook.Body?.GetTrailingTrivia() ?? hook.GetTrailingTrivia()));
+    }
+
+    /// <summary>
+    /// EECS086 for a total: parameter <paramref name="parameter"/> (<c>ref T s</c>) becomes <c>ref Reduce&lt;T&gt; s</c> and
+    /// each <c>s.F</c> of the method <c>s.Value.F</c>; with the property <c>Declare</c>, T's declaration (the diagnostic's
+    /// additional location) gets <c>[Accumulate]</c>, so the pass's result is combined into the total.
+    /// </summary>
+    private static async Task<Solution> Accumulated(Document document, Diagnostic diagnostic, ParameterSyntax parameter, CancellationToken token)
+    {
+        var solution = document.Project.Solution;
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        var root = await document.GetSyntaxRootAsync(token).ConfigureAwait(false);
+        if (model == null || root == null || parameter.Type == null || model.GetDeclaredSymbol(parameter, token) is not { } symbol
+            || parameter.Parent?.Parent is not MethodDeclarationSyntax method) return solution;
+
+        // The uses s.F become s.Value.F (each use of the parameter is a field access: the analyzer checked).
+        var uses = method.DescendantNodes().OfType<IdentifierNameSyntax>()
+            .Where(n => n.Identifier.ValueText == parameter.Identifier.ValueText && n.Parent is MemberAccessExpressionSyntax { Expression: var e } && e == n
+                        && SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(n, token).Symbol, symbol)).ToList();
+        var reduce = SyntaxFactory.GenericName(SyntaxFactory.Identifier("Reduce"),
+            SyntaxFactory.TypeArgumentList(SyntaxFactory.SingletonSeparatedList(parameter.Type.WithoutTrivia()))).WithTriviaFrom(parameter.Type);
+        var updated = method.ReplaceNodes(uses.Cast<SyntaxNode>().Append(parameter.Type), (original, _) => original == parameter.Type
+            ? reduce
+            : SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, (IdentifierNameSyntax)original, SyntaxFactory.IdentifierName("Value")));
+
+        var declared = diagnostic.Properties.TryGetValue("Declare", out var declare) && declare == "Accumulate"
+            ? diagnostic.AdditionalLocations.FirstOrDefault() : null;
+        var tree = declared?.SourceTree;
+        if (declared == null || tree == null) return solution.WithDocumentSyntaxRoot(document.Id, root.ReplaceNode(method, updated));
+        if (tree == root.SyntaxTree)
+        {
+            var type = root.FindNode(declared.SourceSpan, getInnermostNodeForTie: true).FirstAncestorOrSelf<TypeDeclarationSyntax>();
+            if (type == null) return solution;
+            return solution.WithDocumentSyntaxRoot(document.Id, root.ReplaceNodes(new SyntaxNode[] { method, type },
+                (original, rewritten) => original == method ? updated : WithAccumulate((TypeDeclarationSyntax)rewritten)));
+        }
+
+        solution = solution.WithDocumentSyntaxRoot(document.Id, root.ReplaceNode(method, updated));
+        if (solution.GetDocument(tree) is not { } other || await other.GetSyntaxRootAsync(token).ConfigureAwait(false) is not { } otherRoot
+            || otherRoot.FindNode(declared.SourceSpan, getInnermostNodeForTie: true).FirstAncestorOrSelf<TypeDeclarationSyntax>() is not { } declaration)
+            return solution;
+        return solution.WithDocumentSyntaxRoot(other.Id, otherRoot.ReplaceNode(declaration, WithAccumulate(declaration)));
+    }
+
+    /// <summary><paramref name="type"/> with <c>[Accumulate]</c> first in its first attribute list (a list of its own when it has none).</summary>
+    private static TypeDeclarationSyntax WithAccumulate(TypeDeclarationSyntax type)
+    {
+        var attribute = SyntaxFactory.Attribute(SyntaxFactory.IdentifierName("Accumulate"));
+        if (type.AttributeLists.Count > 0)
+            return type.WithAttributeLists(type.AttributeLists.Replace(type.AttributeLists[0], type.AttributeLists[0].WithAttributes(type.AttributeLists[0].Attributes.Insert(0, attribute))));
+        var leading = type.GetLeadingTrivia();
+        var indent = leading.Where(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).LastOrDefault();
+        var list = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(attribute)).WithLeadingTrivia(leading)
+            .WithTrailingTrivia(SyntaxFactory.EndOfLine("\n"));
+        return type.WithoutLeadingTrivia().WithLeadingTrivia(indent).WithAttributeLists(SyntaxFactory.SingletonList(list));
+    }
+
     /// <summary>
     /// EECS084: the method without its final destroy, with <c>Consume</c> after <c>ForEach</c> in its attribute list,
     /// and without its Entity parameter <paramref name="entity"/> when that was its only use (null: kept).

@@ -89,6 +89,41 @@ public sealed partial class World : IDisposable
         }
     }
 
+    /// <summary>
+    /// Fill the pools of the <see cref="DynamicBuffer{T}"/> lists <paramref name="prefab"/>'s instances hold, so the
+    /// first writes to the buffers of the next <paramref name="count"/> instances take a list instead of allocating one:
+    /// each type's pool is filled (<see cref="DynamicBuffer{T}.FillPool"/>) until it holds one list per instance and
+    /// per member holding the buffer. The lists have <see cref="DynamicBuffer{T}.MaxPooledLength"/> elements (set it first
+    /// to the length the buffers reach), so a large count of a buffer that stays short costs memory for nothing.
+    /// Process-wide like the pools, and not cumulative: prefabs holding the same buffer type share its pool, which this
+    /// fills up to the larger of their counts. O(components + lists) allocations once. Owner thread only.
+    /// </summary>
+    public void ReserveBuffers(Prefab prefab, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        var tables = prefab.Store._allArchetypes;
+        for (int i = 0; i < tables.Length; i++)
+        {
+            var table = tables[i];
+            for (int c = 0; c < table.Components.Length; c++)
+            {
+                var info = ComponentInfo.Of(table.Components[c]);
+                if (!info.IsBuffer || table.Count == 0) continue;
+                // The rows of every table of the prefab holding this buffer type (a member's tables too): one list each.
+                int rows = 0;
+                for (int t = 0; t < tables.Length; t++)
+                {
+                    int column = tables[t].ColumnIndex(table.Components[c]);
+                    if (column < 0 || tables[t].Count == 0) continue; // the empty tables the prefab passed through
+                    if (t < i) { rows = -1; break; } // counted with the first table holding it
+                    for (int slot = 0; slot < tables[t].Count; slot++)
+                        if (tables[t].Has(column, slot)) rows++;
+                }
+                if (rows > 0) info.FillPool((int)Math.Min((long)rows * count, Array.MaxLength));
+            }
+        }
+    }
+
     /// <summary>Create an entity without components. O(1) amortized. Owner thread only (see docs/content/guide/threading.md).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     public Entity CreateEntity()

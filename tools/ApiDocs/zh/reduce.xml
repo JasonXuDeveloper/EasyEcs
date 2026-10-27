@@ -1,10 +1,11 @@
 <doc>
-  <member name="T:EasyEcs.Reduce`1" source="7f5a9a14dc10">
+  <member name="T:EasyEcs.Reduce`1" source="9885c60c47fa">
     <summary>
       把一次 <c>[ForEach]</c> 遍历归约到单例 <typeparamref name="T" />（OpenMP 的 <c>reduction</c>，MPI 的 <c>Allreduce</c>），按 <c>ref</c> 传入：
       <c>static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;</c>。并行遍历的每个块（单线程时是整次遍历）
       累加到自己的副本里，副本从 <see cref="P:EasyEcs.IReduction`1.Identity" /> 开始：每行不加锁，也没有原子操作。遍历结束时，
-      副本按块的顺序（也就是行的顺序）合并，结果替换 World 里的 <typeparamref name="T" />（没有就先添加）。
+      副本按块的顺序（也就是行的顺序）合并，结果替换 World 里的 <typeparamref name="T" />（没有就先添加）；
+      <typeparamref name="T" /> 声明了 <see cref="T:EasyEcs.AccumulateAttribute">[Accumulate]</see> 时，结果合并进它：每次遍历都往上加的累计值。
       <para>
       整数结果是精确的，和线程无关。浮点结果取决于块从哪里开始，因为每个块的和各自舍入。做归约的遍历只按行数决定块从哪里开始
       （16 个块，每块 1,024 到 16,384 行；设置了 <see cref="P:EasyEcs.ForEachAttribute.ChunkRows" /> 时按它），所以每次运行、任何线程数下结果都一样，

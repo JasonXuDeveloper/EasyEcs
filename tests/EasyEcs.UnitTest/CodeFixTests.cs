@@ -404,6 +404,25 @@ public class CodeFixTests
         "[View] public ref struct PQ { public ref P P; public ref readonly Q Q; public void Add() => P.V += Q.V; }\n"
         + "public static class U { public static void F(Entity e) { var v = new PQ { P = ref e.Get<P>(), Q = ref e.Read<Q>() }; v.Add(); } }",
         "var v = e.AsPQ();")]
+    [TestCase("EECS086", "Take it as a Reduce<Tot> and declare Tot [Accumulate]",                                          // a total
+        "public partial struct Tot : ISingletonComponent { [Sum] public long N; }\n[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Tot t) => t.N += p.V; }",
+        "[Accumulate]\npublic partial struct Tot : ISingletonComponent { [Sum] public long N; }\n[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }")]
+    [TestCase("EECS086", "Take it as a Reduce<Tot> and declare Tot [Accumulate]",                                          // into its attribute list
+        "[Sum] public partial struct Tot : ISingletonComponent { public long N; }\n[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Tot t) => t.N += p.V; }",
+        "[Accumulate, Sum] public partial struct Tot : ISingletonComponent { public long N; }\n[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }")]
+    [TestCase("EECS086", "Take it as a Reduce<Tot>",                                                                         // already [Accumulate]
+        "[Accumulate] public struct Tot : ISingletonComponent, IReduction<Tot> { public long N; public static Tot Identity => default; public static Tot Combine(Tot a, Tot b) => new() { N = a.N + b.N }; }\n"
+        + "[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Tot t) => t.N += p.V; }",
+        "static void A(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }")]
+    [TestCase("EECS109", "Handle each record in a [ForEachRecord] method",                                                 // a block
+        "public record struct Rec(int V); public struct Tot : ISingletonComponent { public long N; }\n[EcsSystem] public ref struct S\n{\n    static void OnUpdate(World world)\n    {\n"
+        + "        ref var tot = ref world.GetOrAddSingleton<Tot>();\n        ref var records = ref world.GetOrAddSingleton<Emitted<Rec>>().Items;\n"
+        + "        foreach (ref readonly var record in records.AsReadOnlySpan())\n        {\n            if (record.V > 0)\n                tot.N += record.V;\n        }\n        records.Clear();\n    }\n}",
+        "{\n    [ForEachRecord]\n    static void Handle(in Rec record, ref Tot tot)\n    {\n        if (record.V > 0)\n            tot.N += record.V;\n    }\n}")]
+    [TestCase("EECS109", "Handle each record in a [ForEachRecord] method",                                                 // one statement, the World
+        "public record struct Rec(EntityId Id); \n[EcsSystem] public ref struct S\n{\n    static void OnUpdate(World world)\n    {\n"
+        + "        ref var records = ref world.GetSingleton<Emitted<Rec>>().Items;\n        foreach (var r in records)\n            world.GetEntity(r.Id).Destroy();\n        records.Clear();\n    }\n}",
+        "{\n    [ForEachRecord]\n    static void Handle(in Rec r, World world) => world.GetEntity(r.Id).Destroy();\n}")]
     [TestCase("EECS025", "Make it 'ref readonly'",                                                                           // a view's field nothing writes
         "[View] internal ref struct V { public ref P P; } [EcsSystem] public ref struct S { [ForEach] static void A(V v, ref Q q) => q.V = v.P.V; }",
         "[View] internal ref struct V { public ref readonly P P; }")]
@@ -439,11 +458,12 @@ public class CodeFixTests
     /// <summary>
     /// The diagnostics a rule defers to (one mistake, one diagnostic: D60), which its fix lets through: an instance
     /// method made static can be judged for its vector loop (EECS055), a key written by hand is then a key [LookupKey]
-    /// could declare (EECS067), a lambda reaching the private member it names can be judged for its loop (EECS097).
+    /// could declare (EECS067), a lambda reaching the private member it names can be judged for its loop (EECS097), a
+    /// singleton written row by row on one thread is a total [Accumulate] could hold (EECS086).
     /// </summary>
     private static readonly Dictionary<string, string[]> Deferred = new()
     {
-        ["EECS005"] = ["EECS055"], ["EECS043"] = ["EECS067"], ["EECS096"] = ["EECS097"],
+        ["EECS005"] = ["EECS055"], ["EECS043"] = ["EECS067"], ["EECS096"] = ["EECS097"], ["EECS010"] = ["EECS086"],
     };
 
     /// <summary>

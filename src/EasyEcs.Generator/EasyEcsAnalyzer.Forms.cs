@@ -15,8 +15,9 @@ namespace EasyEcs.Generator;
 /// The rules of the declarations the generator turns into code for one entity, a schedule and a consuming pass
 /// (EECS080-EECS085): a hand-written one-entity job [ForEntity] would write (EECS080), a [ForEntity] method that cannot
 /// be one (EECS081), an [UpdateInterval] that cannot apply (EECS083), a [ForEach] method that destroys every entity it visits by hand (EECS084), a [Consume] that
-/// cannot apply (EECS085); and a batch method's vector loop written by hand that the generator writes from the method
-/// for one row (EECS103, <see cref="HandSimd"/>). Each computes its code fix as diagnostic properties.
+/// cannot apply (EECS085); a batch method's vector loop written by hand that the generator writes from the method
+/// for one row (EECS103, <see cref="HandSimd"/>); a [ForEachRecord] method the generator cannot write (EECS108) and the
+/// walk and clear of Emitted&lt;T&gt; it writes, written by hand (EECS109). Each computes its code fix as diagnostic properties.
 /// </summary>
 public static partial class EasyEcsAnalyzer
 {
@@ -71,6 +72,27 @@ public static partial class EasyEcsAnalyzer
         "horizontal operations, loads at other offsets, accumulators across vectors and calls into user code are left alone.",
         helpLinkUri: Help("EECS103"));
 
+    public static readonly DiagnosticDescriptor BadRecordPass = new("EECS108", "Invalid [ForEachRecord] method",
+        "[ForEachRecord] method '{0}' {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "A [ForEachRecord] method is static and takes the record it handles first, by 'in': the generator runs it on each " +
+        "record of Emitted<T> in order, then clears them. What belongs to rows (components, Maybe, Mut, Reduce, Scratch, " +
+        "the Entity, filters, [Consume]) has no meaning for a record, and an Emit<T> of its own record type would be " +
+        "cleared unhandled. The generator writes nothing for an invalid method.",
+        helpLinkUri: Help("EECS108"));
+
+    public static readonly DiagnosticDescriptor HandWrittenRecordPass = new("EECS109", "The records of Emitted<T> walked and cleared by hand",
+        "'{0}' walks the records of Emitted<{1}> and clears them by hand: a [ForEachRecord] method taking 'in {1} {2}' gets the walk and the Clear generated",
+        Category, DiagnosticSeverity.Info, true,
+        "Code that gets Emitted<T>'s list, runs a loop over it and clears it handles each record once, in the order the " +
+        "passes emitted them: what a [ForEachRecord] method does, written once per record type. The method holds only the " +
+        "loop's body; its other parameters are what the body used (singletons, the World). The fix writes it when the " +
+        "loop is a system's OnUpdate whole: the singletons it took by ref, the list, the loop and the Clear.",
+        helpLinkUri: Help("EECS109"));
+
+    /// <summary>EECS109's property: the record method's parameters after the record ("ref global::S s, ..."), when the fix applies.</summary>
+    public const string RecordParameters = "RecordParameters", RecordName = "Record";
+
     /// <summary>EECS103's properties: the method for one row's parameter list and its statements (one per line).</summary>
     public const string PerRowParameters = "PerRowParameters", PerRowBody = "PerRowBody";
 
@@ -83,6 +105,8 @@ public static partial class EasyEcsAnalyzer
         context.RegisterSyntaxNodeAction(AnalyzeHandWrittenConsume, SyntaxKind.MethodDeclaration);
         context.RegisterSyntaxNodeAction(AnalyzeHandWrittenVectorLoop, SyntaxKind.MethodDeclaration);
         context.RegisterSymbolAction(AnalyzeConsume, SymbolKind.Method);
+        context.RegisterSymbolAction(AnalyzeRecordPass, SymbolKind.Method);
+        context.RegisterSyntaxNodeAction(AnalyzeHandWrittenRecordPass, SyntaxKind.ForEachStatement);
         context.RegisterCompilationStartAction(AnalyzeEntityJobs);
     }
 
@@ -138,6 +162,105 @@ public static partial class EasyEcsAnalyzer
         context.ReportDiagnostic(Diagnostic.Create(HandWrittenConsume, destroy.GetLocation(), properties, method.Name,
             bulk ? $"without '{entity.Name}', the method changes no structure, and its rows go at once when the pass ends"
                 : "each entity goes after its row"));
+    }
+
+    // ---------------- EECS108 / EECS109: [ForEachRecord] ----------------
+
+    private static void AnalyzeRecordPass(SymbolAnalysisContext context)
+    {
+        var method = (IMethodSymbol)context.Symbol;
+        if (Symbols.IsForEachRecord(method) && Symbols.RecordProblem(method) is { } problem)
+            context.ReportDiagnostic(Diagnostic.Create(BadRecordPass, method.Locations.FirstOrDefault(), method.Name, problem));
+    }
+
+    /// <summary>
+    /// EECS109: a foreach over a local that holds <c>ref world.GetSingleton&lt;Emitted&lt;T&gt;&gt;().Items</c> (or
+    /// GetOrAddSingleton, or its AsReadOnlySpan()), followed in the same block by that local's Clear(). The fix's
+    /// parameters when the block is a system's OnUpdate holding only 'ref' singleton locals, the list, the loop and the
+    /// Clear, and the loop's body uses only the record, those locals and the World.
+    /// </summary>
+    private static void AnalyzeHandWrittenRecordPass(SyntaxNodeAnalysisContext context)
+    {
+        var loop = (ForEachStatementSyntax)context.Node;
+        var model = context.SemanticModel;
+        var ct = context.CancellationToken;
+        var walked = loop.Expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "AsReadOnlySpan" or "AsSpan" } access, ArgumentList.Arguments.Count: 0 }
+            ? access.Expression
+            : loop.Expression;
+        if (walked is not IdentifierNameSyntax || model.GetSymbolInfo(walked, ct).Symbol is not ILocalSymbol { IsRef: true } list
+            || loop.Parent is not BlockSyntax block
+            || list.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(ct) is not VariableDeclaratorSyntax { Initializer.Value: RefExpressionSyntax { Expression: var initializer } } declarator
+            || Emitted(model.GetOperation(initializer, ct), out var world) is not { } record) return;
+        int at = block.Statements.IndexOf(loop);
+        bool Clears(StatementSyntax s) => s is ExpressionStatementSyntax { Expression: InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Clear", Expression: IdentifierNameSyntax cleared }, ArgumentList.Arguments.Count: 0 } }
+            && SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(cleared, ct).Symbol, list);
+        int clear = -1;
+        for (int i = at + 1; i < block.Statements.Count && clear < 0; i++)
+            if (Clears(block.Statements[i])) clear = i;
+        if (clear < 0 || model.GetDeclaredSymbol(loop, ct) is not ILocalSymbol item) return;
+
+        string name = record.ToMinimalDisplayString(model, loop.SpanStart);
+        var properties = ImmutableDictionary<string, string?>.Empty;
+        if (RecordFix(block, loop, clear, declarator, world, item, model, ct) is { } parameters)
+            properties = properties.Add(FixKind, "ForEachRecord").Add(RecordParameters, parameters).Add(RecordName, name);
+        string where = model.GetEnclosingSymbol(loop.SpanStart, ct) is { } method ? method.ContainingType?.Name is { } type ? $"{type}.{method.Name}" : method.Name : "the code";
+        context.ReportDiagnostic(Diagnostic.Create(HandWrittenRecordPass, loop.ForEachKeyword.GetLocation(), properties, where, name, item.Name));
+    }
+
+    /// <summary>
+    /// The record type when <paramref name="operation"/> is <c>w.GetSingleton&lt;Emitted&lt;T&gt;&gt;().Items</c> or
+    /// <c>w.GetOrAddSingleton&lt;Emitted&lt;T&gt;&gt;().Items</c>, with the World it reads (<paramref name="world"/>), else null.
+    /// </summary>
+    private static ITypeSymbol? Emitted(IOperation? operation, out IOperation? world)
+    {
+        world = null;
+        if (operation is not IFieldReferenceOperation { Field.Name: "Items", Instance: IInvocationOperation { TargetMethod: { Name: "GetSingleton" or "GetOrAddSingleton", Parameters.Length: 0 } get } call }
+            || get.TypeArguments.Length != 1 || get.TypeArguments[0] is not INamedTypeSymbol { IsGenericType: true } emitted
+            || !Symbols.Named(emitted.ConstructedFrom, "EasyEcs.Emitted<T>") || !Symbols.Named(get.ContainingType, Symbols.World)) return null;
+        world = call.Instance;
+        return emitted.TypeArguments[0];
+    }
+
+    /// <summary>
+    /// The parameters after the record of the [ForEachRecord] method EECS109's fix writes, or null when it does not
+    /// apply: the block is a system's static OnUpdate(World), its statements are 'ref' locals of singletons read from
+    /// that World, the list, the loop (one variable) and the Clear, and the loop's body uses no other local.
+    /// </summary>
+    private static string? RecordFix(BlockSyntax block, ForEachStatementSyntax loop, int clear, VariableDeclaratorSyntax list,
+        IOperation? world, ILocalSymbol item, SemanticModel model, System.Threading.CancellationToken ct)
+    {
+        if (block.Parent is not MethodDeclarationSyntax hook || model.GetDeclaredSymbol(hook, ct) is not { } method
+            || Symbols.Hook(method) != Symbols.HookKind.Update || !method.IsStatic || method.Parameters.Length != 1
+            || Symbols.Unwrap(world) is not IParameterReferenceOperation { Parameter: var worldParameter }
+            || !SymbolEqualityComparer.Default.Equals(worldParameter, method.Parameters[0])
+            || clear != block.Statements.Count - 1 || block.Statements.IndexOf(loop) != clear - 1) return null;
+        var singletons = new List<ILocalSymbol>();
+        for (int i = 0; i < clear - 1; i++)
+        {
+            if (block.Statements[i] is not LocalDeclarationStatementSyntax { Declaration.Variables: { Count: 1 } variables } || variables[0] == list) continue;
+            if (model.GetDeclaredSymbol(variables[0], ct) is not ILocalSymbol { IsRef: true, Type: var type } local || !type.IsValueType
+                || !Symbols.Implements(type, Symbols.Singleton) || variables[0].Initializer?.Value is not RefExpressionSyntax { Expression: var from }
+                || !model.GetOperation(from, ct)!.DescendantsAndSelf().Any(o => o is IParameterReferenceOperation { Parameter: var p } && SymbolEqualityComparer.Default.Equals(p, worldParameter)))
+                return null;
+            singletons.Add(local);
+        }
+        if (block.Statements.Take(clear - 1).OfType<LocalDeclarationStatementSyntax>().Count() != clear - 1) return null; // only declarations before the loop
+
+        bool usesWorld = false;
+        foreach (var name in loop.Statement.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
+            switch (model.GetSymbolInfo(name, ct).Symbol)
+            {
+                case ILocalSymbol local when !SymbolEqualityComparer.Default.Equals(local, item) && !singletons.Contains(local, SymbolEqualityComparer.Default)
+                                             && !(local.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(ct) is { } declared && loop.Statement.Span.Contains(declared.Span)):
+                    return null; // a local of the hook the method would not have
+                case IParameterSymbol p when SymbolEqualityComparer.Default.Equals(p, worldParameter):
+                    usesWorld = true;
+                    break;
+            }
+
+        var parameters = singletons.Select(s => $"ref {s.Type.ToMinimalDisplayString(model, loop.SpanStart)} {s.Name}").ToList();
+        if (usesWorld) parameters.Add($"{worldParameter.Type.ToMinimalDisplayString(model, loop.SpanStart)} {worldParameter.Name}");
+        return string.Join(", ", parameters);
     }
 
     // ---------------- EECS103: a vector loop written by hand ----------------
@@ -464,7 +587,8 @@ public sealed class FormAnalyzer : EasyEcsAnalyzer.Area
 {
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         EasyEcsAnalyzer.BadConsume, EasyEcsAnalyzer.BadUpdateInterval, EasyEcsAnalyzer.HandWrittenConsume,
-        EasyEcsAnalyzer.HandWrittenEntityJob, EasyEcsAnalyzer.HandWrittenVectorLoop);
+        EasyEcsAnalyzer.HandWrittenEntityJob, EasyEcsAnalyzer.HandWrittenVectorLoop, EasyEcsAnalyzer.BadRecordPass,
+        EasyEcsAnalyzer.HandWrittenRecordPass);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeForms(context);
 }

@@ -15,15 +15,18 @@ namespace EasyEcs;
 /// The generator writes the struct's <c>IReduction&lt;T&gt;</c> (a public static <c>Identity</c> and <c>Combine</c>,
 /// field by field), so every instance field takes one of <see cref="SumAttribute"/>, <see cref="ProductAttribute"/>,
 /// <see cref="MinAttribute"/>, <see cref="MaxAttribute"/>, <see cref="AllAttribute"/> or <see cref="AnyAttribute"/>.
+/// On the struct itself, the attribute is every field's that carries none of its own:
+/// <c>[Sum] public partial record struct Stats(long Kills, long Deaths, [Max] long Longest) : ISingletonComponent;</c>.
+/// The same holds for each of the six attributes.
 /// </summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
 public sealed class SumAttribute : Attribute;
 
 /// <summary>
 /// A field of a reduction that combines by multiplication: <c>Identity</c> 1, <c>Combine</c> <c>left * right</c>. A
 /// numeric field (see <see cref="SumAttribute"/>).
 /// </summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
 public sealed class ProductAttribute : Attribute;
 
 /// <summary>
@@ -31,7 +34,7 @@ public sealed class ProductAttribute : Attribute;
 /// <c>float</c> and <c>double</c>), <c>Combine</c> <c>Math.Min(left, right)</c>. A numeric field (see
 /// <see cref="SumAttribute"/>).
 /// </summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
 public sealed class MinAttribute : Attribute;
 
 /// <summary>
@@ -39,22 +42,34 @@ public sealed class MinAttribute : Attribute;
 /// <c>float</c> and <c>double</c>), <c>Combine</c> <c>Math.Max(left, right)</c>. A numeric field (see
 /// <see cref="SumAttribute"/>).
 /// </summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
 public sealed class MaxAttribute : Attribute;
 
 /// <summary>
 /// A <c>bool</c> field of a reduction that holds when it holds on every row: <c>Identity</c> <c>true</c>,
 /// <c>Combine</c> <c>left &amp; right</c> (see <see cref="SumAttribute"/>).
 /// </summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
 public sealed class AllAttribute : Attribute;
 
 /// <summary>
 /// A <c>bool</c> field of a reduction that holds when it holds on some row: <c>Identity</c> <c>false</c>,
 /// <c>Combine</c> <c>left | right</c> (see <see cref="SumAttribute"/>).
 /// </summary>
-[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
 public sealed class AnyAttribute : Attribute;
+
+/// <summary>
+/// A reduction singleton (<see cref="IReduction{T}"/>) that holds a total across passes: a pass with a
+/// <see cref="Reduce{T}"/> parameter combines its result into the world's value (<c>Combine(world's value, pass's
+/// result)</c>: the earlier rows first) instead of replacing it. Without it, each pass's result replaces the value.
+/// <c>[Accumulate, Sum] public partial record struct Stats(long Kills, long Hits) : ISingletonComponent;</c>, then
+/// <c>static void Die(in Health h, ref Reduce&lt;Stats&gt; stats) { if (h.Value &lt;= 0) stats.Value.Kills++; }</c>
+/// adds the pass's kills to the run's total, on one thread or several, with no singleton of the pass's own and no
+/// system that adds it to the total. A world without the singleton starts it at <c>Identity</c>.
+/// </summary>
+[AttributeUsage(AttributeTargets.Struct)]
+public sealed class AccumulateAttribute : Attribute;
 
 /// <summary>
 /// The key entities are looked up by: a world indexes the component by it (<see cref="IIndexed{TKey}"/>), several

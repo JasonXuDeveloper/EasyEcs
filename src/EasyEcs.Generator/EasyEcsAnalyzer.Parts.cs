@@ -75,7 +75,8 @@ public static partial class EasyEcsAnalyzer
         "[GroupBy] on a member of a partial component makes every world group its tables by that member (an int or an enum " +
         "of int, as [Group] declares it), or by the Group of a hand-written IGroup; " +
         "[WhenTargetDestroyed] sets what destroying an entity does to the links to it, so it goes on a relation " +
-        "(IRelation) or a component indexed by an EntityId; [NotSaved] leaves a component or a singleton out of saves. " +
+        "(IRelation) or a component indexed by an EntityId; [NotSaved] leaves a component or a singleton out of saves; " +
+        "[Accumulate] makes Reduce<T> passes combine their results into a singleton that combines with itself. " +
         "On any other type no world would apply it.",
         helpLinkUri: Help("EECS068"));
 
@@ -280,7 +281,7 @@ public static partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// EECS068: [WhenTargetDestroyed] / [NotSaved] on a type, or [GroupBy] on a member of a type, that cannot take it
+    /// EECS068: [WhenTargetDestroyed] / [NotSaved] / [Accumulate] on a type, or [GroupBy] on a member of a type, that cannot take it
     /// (<see cref="Symbols.SetupProblem"/>).
     /// </summary>
     private static void AnalyzeSetup(SymbolAnalysisContext context, INamedTypeSymbol type)
@@ -292,7 +293,7 @@ public static partial class EasyEcsAnalyzer
         foreach (var attribute in type.GetAttributes().Concat(members))
         {
             if (!Symbols.Named(attribute.AttributeClass, Symbols.GroupByAttribute) && !Symbols.Named(attribute.AttributeClass, Symbols.WhenTargetDestroyedAttribute)
-                && !Symbols.Named(attribute.AttributeClass, Symbols.NotSavedAttribute)
+                && !Symbols.Named(attribute.AttributeClass, Symbols.NotSavedAttribute) && !Symbols.Named(attribute.AttributeClass, Symbols.AccumulateAttribute)
                 || Symbols.SetupProblem(type, attribute) is not { } problem)
                 continue;
             // [GroupBy] on a member of a component: what keeps it from grouping (not partial, not an int, a second

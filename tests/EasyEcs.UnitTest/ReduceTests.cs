@@ -5,7 +5,7 @@ namespace EasyEcs.UnitTest;
 
 /// <summary>
 /// <see cref="Reduce{T}"/>: a [ForEach] pass accumulates into a partial result per chunk (per pass on one thread),
-/// combined in chunk order into its singleton when the pass ends.
+/// combined in chunk order into its singleton when the pass ends: replacing it, or added to it for an [Accumulate] total.
 /// </summary>
 public partial class ReduceTests
 {
@@ -459,6 +459,170 @@ public partial class ReduceTests
     {
         using var world = Pointed(World.ParallelChunkRows * 4);
         world.AddSystem<ParallelScores>();
+        for (int i = 0; i < 10; i++) world.Update();
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 300; i++) world.Update(); }), Is.Zero);
+    }
+
+    /// <summary>
+    /// A total: [Accumulate] combines each pass's result into the world's value, and [Sum] on the struct sums every
+    /// field without an attribute of its own.
+    /// </summary>
+    [Accumulate, Sum]
+    public partial struct Grand : ISingletonComponent
+    {
+        public long Count;
+        public long Sum;
+        [Max] public int Highest;
+    }
+
+    /// <summary>The same total written by hand: one value every row adds to (what [Accumulate] replaces).</summary>
+    public struct HandTotals : ISingletonComponent
+    {
+        public long Count;
+        public long Sum;
+        public int Highest;
+    }
+
+    /// <summary>A total that is not commutative: the world's value comes first, then the pass's.</summary>
+    [Accumulate]
+    public struct EndsTotal : ISingletonComponent, IReduction<EndsTotal>
+    {
+        public int First, Last;
+        public bool Any;
+
+        public static EndsTotal Identity => default;
+        public static EndsTotal Combine(EndsTotal left, EndsTotal right) =>
+            !left.Any ? right : !right.Any ? left : new EndsTotal { First = left.First, Last = right.Last, Any = true };
+    }
+
+    [EcsSystem]
+    public ref struct SerialTotals
+    {
+        [ForEach]
+        static void Add(in Points points, ref Reduce<Grand> totals)
+        {
+            totals.Value.Count++;
+            totals.Value.Sum += points.Value;
+            totals.Value.Highest = Math.Max(totals.Value.Highest, points.Value);
+        }
+    }
+
+    [EcsSystem]
+    public ref struct ParallelTotals
+    {
+        [ForEach(Parallel = true, ChunkRows = 64)]
+        static void Add(in Points points, ref Reduce<Grand> totals)
+        {
+            totals.Value.Count++;
+            totals.Value.Sum += points.Value;
+            totals.Value.Highest = Math.Max(totals.Value.Highest, points.Value);
+        }
+    }
+
+    [EcsSystem]
+    public ref struct HandWrittenTotals
+    {
+        [ForEach]
+        static void Add(in Points points, ref HandTotals totals)
+        {
+            totals.Count++;
+            totals.Sum += points.Value;
+            totals.Highest = Math.Max(totals.Highest, points.Value);
+        }
+    }
+
+    [EcsSystem]
+    public ref struct ParallelEndsTotal
+    {
+        [ForEach(Parallel = true, ChunkRows = 64)]
+        static void Visit(in Points points, ref Reduce<EndsTotal> ends) =>
+            ends.Combine(new EndsTotal { First = points.Value, Last = points.Value, Any = true });
+    }
+
+    public static class TotalRunners
+    {
+        [ForEach(Parallel = true)]
+        public static void Add(in Points points, ref Reduce<Grand> totals) => totals.Value.Sum += points.Value;
+    }
+
+    [Test]
+    public void AStructAttributeCombinesTheFieldsWithoutTheirOwn()
+    {
+        Assert.That(Grand.Identity, Is.EqualTo(new Grand { Highest = int.MinValue }));
+        Assert.That(Grand.Combine(new Grand { Count = 1, Sum = 2, Highest = 9 }, new Grand { Count = 3, Sum = 4, Highest = 5 }),
+            Is.EqualTo(new Grand { Count = 4, Sum = 6, Highest = 9 }));
+    }
+
+    [TestCase(1, false)]
+    [TestCase(4, false)]
+    [TestCase(1, true)]
+    [TestCase(4, true)]
+    public void AnAccumulatedTotalIsTheHandWrittenOneBitForBit(int threads, bool parallel)
+    {
+        using var world = Pointed(World.ParallelChunkRows * 2 + 77, threads);
+        var more = new Entity[300];
+        world.CreateEntities(more, new Points(0), new Spot(0, 0)); // a second table
+        for (int i = 0; i < more.Length; i++) more[i].Points = new Points(-i * 3);
+        world.GetOrAddSingleton<HandTotals>() = new HandTotals { Highest = int.MinValue };
+        if (parallel) world.AddSystem<ParallelTotals>();
+        else world.AddSystem<SerialTotals>();
+        world.AddSystem<HandWrittenTotals>();
+        Assert.That(world.HasGrand, Is.False);
+        for (int run = 0; run < 20; run++)
+        {
+            world.Update();
+            var hand = world.GetSingleton<HandTotals>();
+            Assert.That(world.Grand, Is.EqualTo(new Grand { Count = hand.Count, Sum = hand.Sum, Highest = hand.Highest }), $"run {run}");
+        }
+    }
+
+    [Test]
+    public void AnAccumulatedTotalStartsFromTheWorldsValue()
+    {
+        using var world = Pointed(1000);
+        world.GetOrAddGrand() = new Grand { Count = 7, Sum = 7, Highest = 5000 };
+        world.AddSystem<SerialTotals>();
+        world.Update();
+        world.Update();
+        Assert.That(world.Grand, Is.EqualTo(new Grand { Count = 2007, Sum = 7 + 999L * 1000, Highest = 5000 }));
+
+        using var empty = new World(); // no rows: the identity, added to nothing
+        empty.AddSystem<ParallelTotals>();
+        empty.Update();
+        Assert.That(empty.Grand, Is.EqualTo(Grand.Identity));
+    }
+
+    [Test]
+    public void AnAccumulatedTotalCombinesTheWorldsValueFirst()
+    {
+        using var world = Pointed(10_000);
+        world.GetOrAddSingleton<EndsTotal>() = new EndsTotal { First = -5, Last = -5, Any = true };
+        world.AddSystem<ParallelEndsTotal>();
+        for (int run = 0; run < 50; run++)
+        {
+            world.Update();
+            Assert.That(world.GetSingleton<EndsTotal>(), Is.EqualTo(new EndsTotal { First = -5, Last = 9_999, Any = true }), $"run {run}");
+        }
+    }
+
+    [Test]
+    public void RunnersAndLambdaPassesAccumulateToo()
+    {
+        using var world = Pointed(World.ParallelChunkRows * 3);
+        long pass = (long)(World.ParallelChunkRows * 3 - 1) * World.ParallelChunkRows * 3 / 2;
+        TotalRunners.Add(world);
+        TotalRunners.Add(world);
+        Assert.That(world.Grand.Sum, Is.EqualTo(2 * pass));
+        world.ForEachParallel(static (in Points points, ref Reduce<Grand> totals) => totals.Value.Sum += points.Value);
+        Assert.That(world.Grand.Sum, Is.EqualTo(3 * pass));
+    }
+
+    [Test]
+    public void AnAccumulatedTotalDoesNotAllocateAfterItsFirstPass()
+    {
+        using var world = Pointed(World.ParallelChunkRows * 4);
+        world.AddSystem<ParallelTotals>();
+        world.AddSystem<SerialTotals>();
         for (int i = 0; i < 10; i++) world.Update();
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 300; i++) world.Update(); }), Is.Zero);
     }

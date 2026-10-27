@@ -693,4 +693,15 @@
       （遍历中调用抛出异常）。原本无序的表 O(行数 × (键字节数 + 列数))，其余 O(行数)；稳定状态零分配。
     </summary>
   </member>
+
+  <member name="M:EasyEcs.World.ReserveBuffers(EasyEcs.Prefab,System.Int32)" source="16d7de32a0b5">
+    <summary>
+      给 <paramref name="prefab" /> 的实例持有的 <see cref="T:EasyEcs.DynamicBuffer`1" /> 列表补池，接下来 <paramref name="count" />
+      个实例的缓冲第一次写入时就从池里取列表，不用分配：每种类型的池补到（<see cref="M:EasyEcs.DynamicBuffer`1.FillPool(System.Int32)" />）
+      每个实例、每个带这个缓冲的成员都有一个列表。列表有 <see cref="P:EasyEcs.DynamicBuffer`1.MaxPooledLength" /> 个元素（先把它设成缓冲会达到的长度），
+      所以一个一直很短的缓冲配上很大的数量，只是白占内存。和池一样对整个进程生效，而且不累加：带同一种缓冲的预制体共用它的池，
+      这里只补到它们数量中较大的那个。一次性 O(组件数 + 列表数) 次分配。只能在所有者线程调用。
+    </summary>
+  </member>
 </doc>
+

@@ -127,6 +127,26 @@ public sealed class ConsumeAttribute : Attribute;
 public sealed class ForEntityAttribute : Attribute;
 
 /// <summary>
+/// A static method that handles each record the passes emitted (<see cref="Emit{T}"/>) once: its first parameter is the
+/// record, <c>in T</c>, and the generator writes the pass that runs it on every record of <see cref="Emitted{T}"/> in
+/// the order they were emitted (row order of each pass, passes in the order they ran), then clears them, so none is
+/// handled twice. In an <see cref="EcsSystemAttribute"/> system it runs in declaration order with the system's
+/// <see cref="ForEachAttribute"/> methods; in any other type it gets an entry point, a static member named like the
+/// method that takes the world and the method's other values. The other parameters are what a [ForEach] method takes
+/// beside its components: singletons (<c>ref</c> / <c>in</c>), <see cref="Lookup{T}"/>, <see cref="Emit{T}"/> of
+/// another record type, the <see cref="World"/>, and (outside a system) values of any other type. One thread, no
+/// allocation; the system writes <see cref="Emitted{T}"/>. A pass that throws clears nothing: the records stay, the
+/// ones handled included. Records added to <see cref="Emitted{T}"/> while the pass runs are cleared unhandled
+/// (an <see cref="Emit{T}"/> of the same record is refused: EECS108).
+/// <code>
+/// [ForEachRecord]
+/// static void Send(in EntityUpdate update, ref Stats stats) => stats.Sent += update.Viewers;   // each update, once
+/// </code>
+/// </summary>
+[AttributeUsage(AttributeTargets.Method), JetBrains.Annotations.MeansImplicitUse]
+public sealed class ForEachRecordAttribute : Attribute;
+
+/// <summary>
 /// Whether a <see cref="ForEachAttribute"/> method runs as a vector loop (<see cref="ForEachAttribute.SimdMode"/>). A method
 /// qualifies when it is static, makes no structural change (on one thread or in parallel), takes components (by <c>ref</c> or
 /// <c>in</c>) and <see cref="Maybe{T}"/> of them, singletons and values, and computes with operations that have an exact

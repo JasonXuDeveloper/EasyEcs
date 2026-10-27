@@ -1,0 +1,18 @@
+<doc>
+  <member name="T:EasyEcs.ForEachRecordAttribute" source="50ee1c2feec1">
+    <summary>
+      把遍历发出的每条记录（<see cref="T:EasyEcs.Emit`1" />）处理一次的静态方法：第一个参数是记录，<c>in T</c>；生成器写出一次遍历，
+      按发出的顺序（每次遍历按行的顺序，遍历按运行的顺序）对 <see cref="T:EasyEcs.Emitted`1" /> 的每条记录运行它，然后清空，
+      所以没有一条会处理两次。在 <see cref="T:EasyEcs.EcsSystemAttribute" /> 系统里，它和系统的 <see cref="T:EasyEcs.ForEachAttribute" />
+      方法按声明顺序运行；在其他类型里，它得到一个入口：和方法同名的静态成员，接收 World 和方法的其他值。其他参数和 [ForEach]
+      方法在组件之外接收的一样：单例（<c>ref</c> / <c>in</c>）、<see cref="T:EasyEcs.Lookup`1" />、另一种记录的
+      <see cref="T:EasyEcs.Emit`1" />、<see cref="T:EasyEcs.World" />，以及（系统之外）任何其他类型的值。单线程，零分配；系统写
+      <see cref="T:EasyEcs.Emitted`1" />。抛异常的遍历什么都不清空：记录都留着，已经处理过的也在。遍历运行时追加到
+      <see cref="T:EasyEcs.Emitted`1" /> 的记录不处理就被清空（同一种记录的 <see cref="T:EasyEcs.Emit`1" /> 会被拒绝：EECS108）。
+      <code>
+            [ForEachRecord]
+            static void Send(in EntityUpdate update, ref Stats stats) =&gt; stats.Sent += update.Viewers;   // each update, once
+            </code>
+    </summary>
+  </member>
+</doc>

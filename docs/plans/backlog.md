@@ -184,11 +184,11 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       identity copies (`var __c1_0 = __s1_0`); per-width constants re-created (`__u1`, `this.v0 = default`);
       `__d0 = Zero; __d0 |= x` where `__d0 = x` would do. Users read this code (docs "The generator writes" tabs), so
       readability counts once the asm is equal.
-- [ ] **Generator gaps found by the VoxelServer plan** (`voxel-rewrite.md` section 3; code items, before Finish):
-  G0 bool / enum lanes in vector loops (`Kernel.cs:929` rejects them though `Kernel.Wide.cs` maps their sizes); G5
-  accumulating reductions (sums into singletons written by hand in four systems); G6 a generated consumer of
-  `Emitted<T>` (get, loop, clear written in three places); G4 `Reserve(prefab)` filling the buffer pools; G7 a keyed
-  read of the found entity (a second Lookup). G1 / G2 come with inner-loops WP5 / WP2; G8 / G9 with L2.
+- [x] **Generator gaps found by the VoxelServer plan** (`voxel-rewrite.md` section 3): built on feat-generator-gaps,
+  waiting to merge: G0 enum lanes and single-bool components in vector loops, G5 `[Accumulate]` totals (EECS086's
+  total case and fix), G6 `[ForEachRecord]` (EECS108, EECS109 and fix), G4 `World.ReserveBuffers(prefab, count)`; G7
+  not built (owner-review.md). Docs pass: docs-todos.md "feat-generator-gaps". G1 / G2 come with inner-loops WP5 /
+  WP2; G8 / G9 with L2.
 - [ ] **A `using` alias to a system does not bind its generated entry point**: `using Alias = Hunters;` then
   `Alias.Hunt(world)` fails with CS7036 (found by feat-locality-core). Find whether the generator or the interceptor
   matches the call by the written name; fix it (an alias is ordinary C#), with a generator test, or have the
@@ -236,7 +236,9 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 Starts only when every code item of Next and Later is done (owner, 2026-10-26: "先把代码全改完").
 
 - [ ] **Exemplar pass** (#169, `audit-code`): VoxelServer / samples + templates + demo / benchmark worlds + usage
-      tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds.
+      tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds. BattleServer's Battle
+      singleton moves to [Accumulate], then GeneratorBenchmark's EECS086 filter exception is deleted (EECS086's total
+      case reports Shoot, SendFire and SendFireOut; a benchmark must not keep suppressing a rule our own example breaks).
 - [ ] **Directory restructure of the whole repository** (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only,
   after feat-prefetch-all and feat-locality-pairs merge; the layout plan (old → new per file, every path reference)
   goes to the owner first.
