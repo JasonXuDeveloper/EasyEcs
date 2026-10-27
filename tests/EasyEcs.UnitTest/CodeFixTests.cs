@@ -429,6 +429,33 @@ public class CodeFixTests
     [TestCase("EECS025", "Take it by 'in'",                                                                                  // a lambda pass's parameter
         "public static class Run { public static void F(World world) => world.ForEach(static (ref P p, ref Q q) => q.V = p.V); }",
         "world.ForEach(static (in P p, ref Q q) => q.V = p.V);")]
+    [TestCase("EECS107", "Make it a pair method",                                                                          // ids of a singleton, the self skip
+        AnalyzerTests.PairParts + "\npublic struct Hood : ISingletonComponent { public EntityId[] Ids; }\n"
+        + "[EcsSystem] public ref struct S { [ForEach] static void A(Entity self, in Spot p, ref Near n, in Hood g, Lookup<Spot> spots) { "
+        + "foreach (var id in g.Ids) { if (id == self.Id) continue; ref readonly var q = ref spots.Read(id); float dx = p.X - q.X, dy = p.Y - q.Y; "
+        + "if (dx * dx + dy * dy >= 1) continue; n.Value++; } } }",
+        "static void A(Entity self, in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] Entity other) {\n    float dx = p.X - q.X, dy = p.Y - q.Y; if (dx * dx + dy * dy >= 1 || other.Id == self.Id) return; n.Value++;\n}")]
+    [TestCase("EECS107", "Make it a pair method",                                                                          // a grid of cells, two lookups
+        AnalyzerTests.PairParts + "\npublic struct Grid : ISingletonComponent { public int Side; public int[] Start; public EntityId[] Ids; }\n"
+        + "[EcsSystem] public ref struct S\n{\n    [ForEach]\n    static void A(in Spot p, in Drift v, ref Shove push, in Grid grid, Lookup<Spot> spots, Lookup<Drift> drifts)\n    {\n"
+        + "        int cx = (int)p.X, cy = (int)p.Y, side = grid.Side;\n"
+        + "        for (int y = System.Math.Max(cy - 1, 0); y <= System.Math.Min(cy + 1, side - 1); y++)\n"
+        + "        for (int x = System.Math.Max(cx - 1, 0); x <= System.Math.Min(cx + 1, side - 1); x++)\n        {\n"
+        + "            int c = y * side + x;\n            for (int k = grid.Start[c]; k < grid.Start[c + 1]; k++)\n            {\n"
+        + "                var id = grid.Ids[k];\n                ref readonly var q = ref spots.Read(id);\n"
+        + "                float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;\n                if (d2 >= 1f || d2 == 0)\n                    continue;\n"
+        + "                // the neighbor's drift, only for the near ones\n                ref readonly var u = ref drifts.Read(id);\n"
+        + "                push.X += (1f - d2) * (dx + 0.5f * (u.X - v.X));\n                push.Y += (1f - d2) * (dy + 0.5f * (u.Y - v.Y));\n"
+        + "            }\n        }\n    }\n}",
+        "    static void A(in Spot p, in Drift v, ref Shove push, [Neighbor] in Spot q, [Neighbor] in Drift u)\n    {\n"
+        + "        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;\n        if (d2 >= 1f || d2 == 0)\n            return;\n"
+        + "        push.X += (1f - d2) * (dx + 0.5f * (u.X - v.X));\n        push.Y += (1f - d2) * (dy + 0.5f * (u.Y - v.Y));\n    }")]
+    [TestCase("EECS107", "Make it a pair method",                                                                          // reads inline, the id kept, a cutoff per row
+        AnalyzerTests.PairParts + "\npublic struct Hood : ISingletonComponent { public EntityId[] Ids; }\npublic record struct Prey(EntityId Id, float D2) : IComponent;\n"
+        + "[EcsSystem] public ref struct S { [ForEach] static void A(in Spot p, in Sight s, ref Prey prey, in Hood g, Lookup<Spot> spots) { "
+        + "foreach (var id in g.Ids) { float dx = p.X - spots.Read(id).X, dy = p.Y - spots.Read(id).Y, d2 = dx * dx + dy * dy; "
+        + "if (d2 >= s.Range * s.Range || d2 >= prey.D2) continue; prey = new Prey(id, d2); } } }",
+        "static void A(in Spot p, in Sight s, ref Prey prey, [Neighbor] in Spot spot, [Neighbor] Entity other) {\n    float dx = p.X - spot.X, dy = p.Y - spot.Y, d2 = dx * dx + dy * dy; if (d2 >= s.Range * s.Range || d2 >= prey.D2) return; prey = new Prey(other.Id, d2);\n}")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);

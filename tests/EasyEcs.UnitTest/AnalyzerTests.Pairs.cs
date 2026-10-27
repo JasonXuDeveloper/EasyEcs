@@ -1,3 +1,5 @@
+using System.Linq;
+using Microsoft.CodeAnalysis;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
@@ -71,6 +73,26 @@ public partial class AnalyzerTests
             }
             """;
         Assert.That(await Count("EECS107", GeneratorTests.Components, PairParts, grid), Is.EqualTo(1));
+    }
+
+    // EECS107 is a Warning with its fix (PairRewrite) when the search is the method's whole body and each candidate's
+    // statements read nothing of it; a suggestion (Info, no fix) for any other search.
+    [TestCase("foreach (var id in g.Ids) { ref readonly var q = ref spots.Read(id); float dx = p.X - q.X; if (dx * dx >= 1) continue; n.Value++; }", true)]
+    [TestCase("foreach (var id in g.Ids) { var q = spots.Read(id); float dx = p.X - q.X; if (dx * dx >= 1) { continue; } n.Value += 2; if (n.Value > 9) continue; n.Value--; }", true)] // a copy, a later continue
+    [TestCase("int sum = 0; foreach (var id in g.Ids) { ref readonly var q = ref spots.Read(id); float dx = p.X - q.X; if (dx * dx >= 1) continue; sum++; } n.Value = sum;", false)] // a sum written after the loop
+    [TestCase("foreach (var id in g.Ids) { ref readonly var q = ref spots.Read(id); float dx = p.X - q.X; if (dx * dx >= 1) continue; n.Value++; if (n.Value > 3) break; }", false)] // a break leaves the search
+    [TestCase("var ids = g.Ids; foreach (var id in ids) { ref readonly var q = ref spots.Read(id); float dx = p.X - q.X; if (dx * dx >= ids.Length) continue; n.Value++; }", false)] // a cutoff of the search
+    [TestCase("foreach (var id in g.Ids) { ref readonly var q = ref spots.Read(id); n.Value++; float dx = p.X - q.X; if (dx * dx >= 1) continue; n.Value++; }", false)] // a write before the test
+    [TestCase("var ids = g.Ids; foreach (var id in ids) { ref readonly var q = ref spots.Read(id); float dx = p.X - q.X; if (dx * dx >= 1) continue; n.Value += ids.Length; }", false)] // reads the search in the pair
+    [TestCase("float r = 1; foreach (var id in g.Ids) { ref readonly var q = ref spots.Read(id); float dx = p.X - q.X; if (dx * dx >= r) continue; n.Value++; }", false)] // a cutoff in a local of the search
+    public async Task HandWrittenSearchesWarnWithTheirFixOnlyWhenMechanical(string body, bool fixable)
+    {
+        string source = "public struct Hood : ISingletonComponent { public EntityId[] Ids; }\n[EcsSystem] public ref struct S { [ForEach] static void A(in Spot p, ref Near n, in Hood g, Lookup<Spot> spots) { "
+                        + body + " } }";
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, PairParts, source])).Where(d => d.Id == "EECS107").ToArray();
+        Assert.That(found, Has.Length.EqualTo(1));
+        Assert.That(found[0].Severity, Is.EqualTo(fixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info));
+        Assert.That(found[0].Properties.ContainsKey("PairBody"), Is.EqualTo(fixable));
     }
 
     [TestCase("foreach (var id in g.Ids) { ref readonly var q = ref drifts.Read(id); float dx = p.X - q.X; if (dx * dx >= 1) continue; n.Value++; }")] // another component's read
