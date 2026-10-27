@@ -631,10 +631,10 @@ public static partial class EasyEcsAnalyzer
         foreach (var field in data.GetMembers().OfType<IFieldSymbol>())
         {
             if (field.IsStatic || !HoldsEntity(field.Type, 0)) continue;
-            var member = (ISymbol?)field.AssociatedSymbol ?? field;
+            var member = Symbols.Associated(field) ?? field;
             var location = member.Locations.FirstOrDefault(l => l.IsInSource) ?? data.Locations.FirstOrDefault();
             // A plain Entity field, declared alone: its code fix makes it an EntityId (when every use still compiles).
-            bool plain = field.AssociatedSymbol == null && Symbols.Named(field.Type, Symbols.Entity)
+            bool plain = Symbols.Associated(field) == null && Symbols.Named(field.Type, Symbols.Entity)
                          && field.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: 1 } };
             context.ReportDiagnostic(Diagnostic.Create(EntityInData, location,
                 plain ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "EntityId") : null, data.Name, member.Name));
@@ -740,8 +740,7 @@ public static partial class EasyEcsAnalyzer
     }
 
     /// <summary>An auto-property has a compiler-generated backing field (computed properties hold no state).</summary>
-    private static bool IsAutoProperty(IPropertySymbol property) => property.ContainingType.GetMembers()
-        .OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property));
+    private static bool IsAutoProperty(IPropertySymbol property) => Symbols.BackingField(property) != null;
 
     private static void AnalyzeMethod(SymbolAnalysisContext context)
     {

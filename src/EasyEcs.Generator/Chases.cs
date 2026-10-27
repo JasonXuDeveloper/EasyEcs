@@ -130,7 +130,7 @@ internal static class Chases
     /// A key lookup of <c>LookupExtensions</c>: a member of its extension block (C# 14: the block is a type nested in the
     /// class), or the static method the block lowers to.
     /// </summary>
-    private static bool IsKeyLookup(IMethodSymbol method) =>
+    internal static bool IsKeyLookup(IMethodSymbol method) =>
         method.ContainingType is { } type && (type.Name == "LookupExtensions" || type.ContainingType?.Name == "LookupExtensions")
         && (type.ContainingType ?? type).ContainingNamespace is { Name: "EasyEcs", ContainingNamespace.IsGlobalNamespace: true };
 
@@ -157,7 +157,7 @@ internal static class Chases
                     at = instance;
                     break;
                 case IPropertyReferenceOperation { Property: { IsStatic: false, IsIndexer: false } prop, Instance: { } instance }
-                    when prop.ContainingType.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, prop)):
+                    when Symbols.BackingField(prop) != null:
                     members.Add(prop.Name);
                     at = instance;
                     break;

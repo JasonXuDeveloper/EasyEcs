@@ -79,8 +79,7 @@ internal sealed partial class Kernel
                 var field = parent switch
                 {
                     IFieldReferenceOperation { Field: var f } => f,
-                    IPropertyReferenceOperation { Property: var prop } => prop.ContainingType.GetMembers().OfType<IFieldSymbol>()
-                        .FirstOrDefault(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, prop)),
+                    IPropertyReferenceOperation { Property: var prop } => Symbols.BackingField(prop),
                     _ => null,
                 };
                 if (field == null || field.IsStatic) { fields = false; break; }
@@ -602,7 +601,7 @@ internal sealed partial class Kernel
         if (used.Length == 0 || used.Length > MaxFields || used.Length * 2 > all
             || used.Any(u => !IsLaneType(u[u.Length - 1].Type) || SizeOf(u[u.Length - 1].Type) != SizeOf(used[0][used[0].Length - 1].Type)))
             return "";
-        string names = string.Join(", ", used.Select(u => string.Join(".", u.Select(f => f.AssociatedSymbol?.Name ?? f.Name))));
+        string names = string.Join(", ", used.Select(u => string.Join(".", u.Select(Symbols.MemberName))));
         return used.Length == 1
             ? $"; it uses 1 of {type.Name}'s {all} fields ({names}): move it into a component of its own (a component of one field gets a vector loop)"
             : $"; it uses {used.Length} of {type.Name}'s {all} fields ({names}): split them into a component of their own (a component of {used.Length} fields gets a vector loop)";

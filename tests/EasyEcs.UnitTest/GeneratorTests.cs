@@ -282,6 +282,8 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { if (!h.HasValue) return; h.Value.V = f.V; }", true)]   // written through
     [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", false)]                    // another lane size
     [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", false)]   // in parallel
+    // A helper whose value is target-typed (new(...)): inlined where 'var' gives no type, it keeps its return type.
+    [TestCase("public record struct Cell2(int X, int Z); static Cell2 At(float v) => new((int)v, (int)v); [ForEach] static void A(ref F f) { var c = At(f.V); f.V = c.X + c.Z; }", true)]
     public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"[EcsSystem] public ref struct S {{ {members} }}"),
@@ -369,6 +371,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, in H h) { ref var v = ref f.V; v += h.V; }", "ref local 'v' is not supported: name the parameter's fields instead", true)]
     [TestCase("[ForEach] static void A(ref F f, in H h) { float v; v = h.V; f.V = v; }", "local 'v' has no initializer: give it its value where it is declared", true)]
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V = e.Id.Index;", "it uses the Entity in 'e.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)", true)]
+    [TestCase("public record struct Wide2(int A, long B); static Wide2 At(float v) => new((int)v, 1); [ForEach] static void A(ref F f) { var c = At(f.V); f.V = c.A; }", "local 'c' is a S.Wide2, not a lane type of 4 or 8 bytes")] // the helper's new(...) keeps its type in 'var c'
     public void ScalarLoopsNameTheirReason(string members, string reason, bool fixable = false)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
@@ -401,6 +404,7 @@ public class GeneratorTests
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
     [TestCase("public struct Aim : IComponent { public EntityId Target; } [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in Aim a, Lookup<D> d) { if (d.Has(a.Target)) f.V = 1; }", "it reads Lookup<D>, whose fields are not all lanes of 4 bytes (float, int, uint): a vector loop gathers only those")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in Link l, Lookup<Owned> o) { if (o.TryFind(l.Target, out var e)) f.V = 1; }", "it probes an index ('o.TryFind(l.Target, out var e)'): a key probe has no vector form; a vector loop reads other entities only at an EntityId")]
     public void ARequiredVectorLoopThatDoesNotQualifyIsAnError(string members, string reason)
     {
         var diagnostics = Analyze([Components, Lanes, $"[EcsSystem] public ref struct S {{ {members} }}"]).Result.Where(d => d.Id.StartsWith("EECS05")).ToArray();
@@ -1366,6 +1370,139 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("SetProps(int hp, float speed) => @this.Set(new global::Props { Hp = hp, Speed = speed })")
             .And.Contain("LinkAlly(global::EasyEcs.EntityId target, int weight) => @this.Link(new global::Ally { Target = target, Weight = weight })")
             .And.Not.Contain("SetLocked("));
+    }
+
+    // Components of another assembly, as a game's systems take a shared library's: positional record structs (their
+    // fields are compiler-generated backing fields, which metadata does not tie to their properties), a plain field, a
+    // Vector3, a relation.
+    private const string ForeignComponents = """
+        using System.Numerics;
+        namespace Shared;
+        public record struct Position(Vector3 Value) : IComponent, ITracked;
+        public record struct Velocity(Vector3 Value) : IComponent;
+        public record struct Target(EntityId Player) : IComponent;
+        public record struct Vision(float Range) : IComponent;
+        public record struct Hp(int Value) : IComponent;
+        public struct Speed : IComponent { public float Value; }
+        public struct Zombie : IComponent;
+        """;
+
+    // Methods over them that name the components' properties, read lanes of a Vector3 through a local, gather other
+    // entities' positions, and VoxelServer's old straight chase (which crashed the generator: backlog 8b).
+    private const string ForeignMethods = """
+        using System.Numerics;
+        using Shared;
+        [EcsSystem] public ref struct Foreign
+        {
+            [ForEach, With<Zombie>]
+            static void Chase(in Position position, in Target target, in Vision vision, ref Velocity velocity, Lookup<Position> positions)
+            {
+                var v = velocity.Value;
+                v.X = v.Z = 0;
+                var player = positions[target.Player];
+                if (player.HasValue)
+                {
+                    var to = player.Value.Value - position.Value;
+                    var flat = new Vector2(to.X, to.Z);
+                    float distance = flat.Length();
+                    if (distance > 0.1f && distance <= vision.Range)
+                    {
+                        flat /= distance;
+                        v.X = flat.X * 2.4f;
+                        v.Z = flat.Y * 2.4f;
+                    }
+                }
+                velocity = velocity with { Value = v };
+            }
+            [ForEach] static void Stop(ref Velocity velocity) { var v = velocity.Value; v.X = v.Z = 0; velocity.Value = v; }
+            [ForEach] static void Move(ref Position position, in Velocity velocity, in Speed speed) => position = position with { Value = position.Value + velocity.Value * speed.Value };
+            [ForEach] static void Bleed(ref Hp hp) { if (hp.Value > 0) hp.Value--; }
+            [ForEach(SimdMode = SimdMode.Require)] static void Pull(ref Velocity velocity, in Target target, Lookup<Position> positions)
+            {
+                var player = positions[target.Player];
+                if (player.HasValue) velocity.Value += player.Value.Value;
+            }
+        }
+        """;
+
+    /// <summary>The library of <see cref="ForeignComponents"/>, built with its generated members, as a reference.</summary>
+    private static MetadataReference ForeignLibrary()
+    {
+        var library = CSharpCompilation.Create("Shared", [CSharpSyntaxTree.ParseText("using EasyEcs;\n" + ForeignComponents, Parse)],
+            Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        Driver().RunGeneratorsAndUpdateCompilation(library, out var built, out _);
+        using var image = new System.IO.MemoryStream();
+        Assert.That(built.Emit(image).Success, Is.True);
+        return MetadataReference.CreateFromImage(image.ToArray());
+    }
+
+    [Test]
+    public void ComponentsOfAnotherAssemblyGetTheLoopsOfTheirOwn()
+    {
+        // The same methods over the same components, declared in the user's assembly and in a referenced one: the
+        // generator runs without an exception, its output compiles, and the system's code is the same text both ways.
+        static string Run(CSharpCompilation compilation)
+        {
+            var run = Driver().RunGeneratorsAndUpdateCompilation(compilation, out var output, out _).GetRunResult();
+            Assert.That(run.Results.Select(r => r.Exception), Has.All.Null);
+            string code = output.SyntaxTrees.Single(t => IsCode(t)).ToString();
+            Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, code);
+            return code;
+        }
+
+        string local = Run(Compile(ForeignComponents, ForeignMethods));
+        string foreign = Run(Compile(ForeignMethods).AddReferences(ForeignLibrary()));
+        Assert.That(foreign, Is.EqualTo(local));
+        Assert.That(foreign, Does.Contain("internal ref struct ChaseJob0 : global::EasyEcs.IForEach<"), foreign); // a call that adds lanes: rows
+        Assert.That(foreign, Does.Contain("for (nint last = rows - global::System.Numerics.Vector<"), foreign);
+    }
+
+    [Test]
+    public async Task AConstructorOfAnotherAssemblyKeepsTheMethodScalarWithItsFix()
+    {
+        // Metadata holds no constructor body: what new Velocity(v) sets is not known there, while the record's own
+        // assembly reads its positional constructor. The fix the message names compiles to the same loop.
+        const string built = """
+            using Shared;
+            [EcsSystem] public ref struct Push
+            {
+                [ForEach] static void A(ref Velocity velocity) => velocity = new Velocity(velocity.Value * 2);
+                [ForEach] static void B(ref Velocity velocity) => velocity = new Velocity { Value = velocity.Value * 2 };
+            }
+            """;
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(built).AddReferences(ForeignLibrary()), out var output, out _);
+        var reasons = (await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync()).Where(d => d.Id == "EECS055").ToArray();
+        Assert.That(reasons.Select(d => d.GetMessage()), Is.EqualTo(new[]
+        {
+            "[ForEach] method 'A' runs one row at a time, without a vector loop: it calls Velocity's constructor, which is declared in another "
+            + "assembly, so the fields it sets are not known: set them by name instead ('new Velocity { Value = ... }', or 'with { Value = ... }')",
+        }));
+        Assert.That(reasons[0].Severity, Is.EqualTo(DiagnosticSeverity.Warning));
+        Assert.That(await Diagnose(ForeignComponents, built), Has.None.EqualTo("EECS055"));   // in source: both vectorized
+    }
+
+    [Test]
+    public void AMethodWhoseTranslationThrowsKeepsItsRowsAndItsReason()
+    {
+        // A generator bug in one method's vector loop must not drop the other methods' files: Kernel.Vectorize turns the
+        // exception into the method's reason (reported by the analyzer through the same call) and the method runs per row.
+        var compilation = Compile(Components, "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Clock c) => p.V += c.Ticks; }");
+        var tree = compilation.SyntaxTrees.Last();
+        var syntax = tree.GetRoot().DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax>().Single();
+        var model = compilation.GetSemanticModel(tree);
+        var method = model.GetDeclaredSymbol(syntax)!;
+        var vectorize = typeof(SystemGenerator).Assembly.GetType("EasyEcs.Generator.Kernel")!.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Single(m => m.Name == "Vectorize" && m.GetParameters() is [{ ParameterType.Name: "IMethodSymbol" }, _, _, _, _, { ParameterType.Name: "String&" }]);
+        // The job field of the singleton throws: (_, _) => throw new InvalidOperationException("broken"), over the internal ParamKind.
+        var fieldOf = vectorize.GetParameters()[3].ParameterType;
+        var broken = System.Linq.Expressions.Expression.Lambda(fieldOf,
+            System.Linq.Expressions.Expression.Throw(System.Linq.Expressions.Expression.New(
+                typeof(System.InvalidOperationException).GetConstructor([typeof(string)])!, System.Linq.Expressions.Expression.Constant("broken")), typeof(string)),
+            System.Linq.Expressions.Expression.Parameter(typeof(int)), System.Linq.Expressions.Expression.Parameter(fieldOf.GetGenericArguments()[1])).Compile();
+        object[] arguments = [method, syntax, model, broken, System.Threading.CancellationToken.None, null];
+        Assert.That(vectorize.Invoke(null, arguments), Is.Null);
+        Assert.That(arguments[5], Is.EqualTo("the generator failed to translate it (InvalidOperationException: broken Please report this as an EasyEcs bug)"));
     }
 
     [Test]

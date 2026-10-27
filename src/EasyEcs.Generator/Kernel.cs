@@ -315,6 +315,28 @@ internal sealed partial class Kernel
     public static Code? Vectorize(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
         System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out ScalarReason? reason)
     {
+        try
+        {
+            return VectorizeMethod(method, syntax, model, fieldOf, ct, out reason);
+        }
+        catch (System.Exception e) when (e is not System.OperationCanceledException)
+        {
+            reason = Failed(e);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The reason of a method whose translation threw: a bug of the generator, not of the method. The method keeps its
+    /// row-by-row job and the analyzer reports this (the same call), so one method's failure never drops the files of
+    /// the others (a generator that throws loses all of its output, and the build then fails on every name it writes).
+    /// </summary>
+    private static ScalarReason Failed(System.Exception e) =>
+        new($"the generator failed to translate it ({e.GetType().Name}: {e.Message} Please report this as an EasyEcs bug)", false, null);
+
+    private static Code? VectorizeMethod(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
+        System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out ScalarReason? reason)
+    {
         reason = Symbols.Simd(method) == Symbols.SimdOff ? new ScalarReason("SimdMode = SimdMode.Off", false, null)
             : !method.IsStatic ? new ScalarReason("it is not static: make it static", true, null)
             : Declined(method, syntax, model) is { } declined ? new ScalarReason(declined.Reason, declined.IsFixable, null)
@@ -377,15 +399,23 @@ internal sealed partial class Kernel
             return null;
         }
 
-        var lane = new Lane(lambda, true, parallel, false, model, stable);
-        if (Declined(lane) is { } declined)
+        try
         {
-            reason = declined.Reason;
+            var lane = new Lane(lambda, true, parallel, false, model, stable);
+            if (Declined(lane) is { } declined)
+            {
+                reason = declined.Reason;
+                return null;
+            }
+            var code = Vectorize(lane, function.Body, fieldOf, ct, out ScalarReason? why);
+            reason = why?.Text;
+            return code;
+        }
+        catch (System.Exception e) when (e is not System.OperationCanceledException)
+        {
+            reason = Failed(e).Text; // as a method's (above)
             return null;
         }
-        var code = Vectorize(lane, function.Body, fieldOf, ct, out ScalarReason? why);
-        reason = why?.Text;
-        return code;
     }
 
     private static Code? Vectorize(Lane lane, IOperation root, System.Func<int, Symbols.ParamKind, string> fieldOf,
@@ -575,7 +605,7 @@ internal sealed partial class Kernel
                     {
                         fields = Lanes(p.Type);
                         if (fields.Length > 1 && fields.FirstOrDefault(f => IsBool(f.Type)) is { } flag)
-                            throw new Unsupported($"field {p.Type.Name}.{flag.AssociatedSymbol?.Name ?? flag.Name} is a bool among {fields.Length} fields: a vector loop takes a bool in a component of its own (one byte per row)"); // inherent until the samples split theirs (owner-review)
+                            throw new Unsupported($"field {p.Type.Name}.{Symbols.MemberName(flag)} is a bool among {fields.Length} fields: a vector loop takes a bool in a component of its own (one byte per row)"); // inherent until the samples split theirs (owner-review)
                         if (fields.Any(f => SizeOf(f.Type) != SizeOf(fields[0].Type)))
                             throw new Unsupported($"lane types {fields[0].Type.ToDisplayString()} and {fields.First(f => SizeOf(f.Type) != SizeOf(fields[0].Type)).Type.ToDisplayString()} differ in size");
                     }
@@ -970,7 +1000,7 @@ internal sealed partial class Kernel
         var paths = new List<IFieldSymbol[]>();
         foreach (var field in fields)
         {
-            string name = $"{type.Name}.{field.AssociatedSymbol?.Name ?? field.Name}";
+            string name = $"{type.Name}.{Symbols.MemberName(field)}";
             if (!field.IsFixedSizeBuffer && (IsLaneType(field.Type) || IsBool(field.Type))) paths.Add([field]);
             else if (!field.IsFixedSizeBuffer && field.Type is INamedTypeSymbol { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None } inner
                      && SequentialLayout(inner) && paths.Count < MaxFields * 4)
@@ -1336,7 +1366,7 @@ internal sealed partial class Kernel
         if (fields.Length == 0) throw new Unsupported($"reduction {name} has no fields");
         foreach (var field in fields)
         {
-            if (field.AssociatedSymbol != null) throw new Unsupported($"reduction {name} holds {field.AssociatedSymbol.Name} in a property: the lanes fold into fields, so make it a field", true);
+            if (Symbols.Associated(field) is { } property) throw new Unsupported($"reduction {name} holds {property.Name} in a property: the lanes fold into fields, so make it a field", true);
             if (field.IsReadOnly) throw new Unsupported($"field {name}.{field.Name} of the reduction is readonly: remove readonly", true);
             if (!IsLane(field.Type) && !IsDoubled(field.Type)) throw new Unsupported($"field {name}.{field.Name} of the reduction is a {field.Type.ToDisplayString()}, not a lane type of {LaneSizes} bytes");
             if (IsDoubled(field.Type)) _pairs = true;
@@ -1560,7 +1590,7 @@ internal sealed partial class Kernel
 
     /// <summary>Whether a member read is <paramref name="field"/>: the field, or the auto-property backed by it.</summary>
     private static bool Is(ISymbol member, IFieldSymbol field) =>
-        SymbolEqualityComparer.Default.Equals(member, field) || SymbolEqualityComparer.Default.Equals(member, field.AssociatedSymbol);
+        SymbolEqualityComparer.Default.Equals(member, field) || SymbolEqualityComparer.Default.Equals(member, Symbols.Associated(field));
 
     /// <summary>The lane whose path <paramref name="members"/> is, or -1.</summary>
     private static int Leaf(IFieldSymbol[][] paths, ISymbol[] members)
@@ -2190,7 +2220,7 @@ internal sealed partial class Kernel
             case IFieldReferenceOperation { Field: { IsStatic: false } f, Instance: { } instance }:
                 return $"{Scalar(instance)}.{f.Name}";
             case IPropertyReferenceOperation { Property: { IsStatic: false, Parameters.Length: 0 } p, Instance: { } instance }
-                when p.ContainingType.GetMembers().OfType<IFieldSymbol>().Any(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, p)):
+                when Symbols.BackingField(p) != null:
                 return $"{Scalar(instance)}.{p.Name}"; // an auto-property: a field read, no code of its own
             case IConversionOperation { OperatorMethod: null, IsTryCast: false, Conversion.IsNumeric: true } or IConversionOperation { Conversion.IsIdentity: true }
                 or IConversionOperation { OperatorMethod: null, IsTryCast: false } when IsEnumConversion((IConversionOperation)op):

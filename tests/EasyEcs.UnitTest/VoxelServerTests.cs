@@ -130,14 +130,12 @@ public class VoxelServerTests
 
 /// <summary>
 /// The zombies' chase before the scent: straight at the player they hunt, while within their Vision. Kept here as
-/// what the field replaced, to show where it sticks. One row at a time: the generator's vector loop fails on components
-/// declared in another assembly (an IndexOutOfRangeException in Kernel, which drops every generated file of this
-/// project), and a test needs no vector loop.
+/// what the field replaced, to show where it sticks.
 /// </summary>
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct StraightChaseSystem
 {
-    [ForEach(SimdMode = SimdMode.Off), With<Zombie>]
+    [ForEach, With<Zombie>]
     private static void Chase(in Position position, in Target target, in Vision vision, ref Velocity velocity, Lookup<Position> positions)
     {
         var v = velocity.Value;
@@ -155,6 +153,6 @@ public ref struct StraightChaseSystem
                 v.Z = flat.Y * Rules.ZombieSpeed;
             }
         }
-        velocity = new Velocity(v);
+        velocity = velocity with { Value = v };
     }
 }

@@ -910,7 +910,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             {
                 var f = fields[i];
                 if (f.IsFixedSizeBuffer || Unsafe(f.Type)) return [];
-                if (f.AssociatedSymbol is IPropertySymbol { DeclaredAccessibility: Accessibility.Public, IsIndexer: false,
+                if (Symbols.Associated(f) is IPropertySymbol { DeclaredAccessibility: Accessibility.Public, IsIndexer: false,
                         SetMethod.DeclaredAccessibility: Accessibility.Public } property)
                     settable[i] = (property.Name, property.Type);
                 else if (f.DeclaredAccessibility == Accessibility.Public && !f.IsReadOnly && !f.IsImplicitlyDeclared)

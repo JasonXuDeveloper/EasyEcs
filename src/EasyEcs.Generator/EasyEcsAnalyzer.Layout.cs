@@ -110,7 +110,7 @@ public static partial class EasyEcsAnalyzer
             {
                 IFieldReferenceOperation { Field: { IsStatic: false } field } f when f.Instance == at => field,
                 IPropertyReferenceOperation { Property: { IsStatic: false, IsIndexer: false } property } r when r.Instance == at
-                    => property.ContainingType.GetMembers().OfType<IFieldSymbol>().FirstOrDefault(f => SymbolEqualityComparer.Default.Equals(f.AssociatedSymbol, property)),
+                    => Symbols.BackingField(property),
                 _ => null,
             });
         }
@@ -181,12 +181,12 @@ public static partial class EasyEcsAnalyzer
         internal static ImmutableDictionary<string, string?>? SplitFix(INamedTypeSymbol component, IEnumerable<IFieldSymbol> moved)
         {
             var fields = moved.ToList();
-            if (fields.Count == 0 || fields.Any(f => f.AssociatedSymbol != null || f.IsImplicitlyDeclared) || component.GetDocumentationCommentId() is not { } id) return null;
+            if (fields.Count == 0 || fields.Any(f => Symbols.Associated(f) != null || f.IsImplicitlyDeclared) || component.GetDocumentationCommentId() is not { } id) return null;
             return ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Split").Add("Component", id)
                 .Add("Fields", string.Join(",", fields.Select(f => f.Name)));
         }
 
-        private static string Name(IFieldSymbol field) => field.AssociatedSymbol?.Name ?? field.Name;
+        private static string Name(IFieldSymbol field) => Symbols.MemberName(field);
 
         private static string Names(IEnumerable<string> names)
         {

@@ -69,7 +69,7 @@ internal static class Views
         foreach (var member in view.GetMembers())
         {
             if (member is not IFieldSymbol { IsStatic: false } field) continue;
-            ISymbol where = field.AssociatedSymbol ?? field; // an auto-property's backing field: the property
+            ISymbol where = Symbols.Associated(field) ?? field; // an auto-property's backing field: the property
             var mut = field.RefKind == RefKind.None ? Symbols.MutElement(field.Type) : null;
             if (field.RefKind == RefKind.None && mut == null)
                 return (where, $"holds '{where.Name}' by value: a view holds refs (or a Mut<T>) to its entity's components only, and state belongs in a component");

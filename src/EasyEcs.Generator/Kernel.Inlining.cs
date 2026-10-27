@@ -66,6 +66,10 @@ internal sealed partial class Kernel
     private (string Text, bool IsFixable) ReasonForCall(IOperation op, IMethodSymbol method)
     {
         if (op.Syntax.GetAnnotations(CallReason).FirstOrDefault()?.Data is { Length: > 1 } data) return (data.Substring(1), data[0] == 'F');
+        // A key probe (TryFind / Find / Count of a keyed Lookup) is EasyEcs's own, not a call to inline: it walks the
+        // index per row, which no gather replaces (an index lookup stays scalar, D131).
+        if (Chases.IsKeyLookup(method))
+            return ($"it probes an index ('{Text(op)}'): a key probe has no vector form; a vector loop reads other entities only at an EntityId", false);
         string call = $"it calls {(method.ContainingType.IsExtension ? method.ContainingType.ContainingType : method.ContainingType).Name}.{Callees.NameOf(method)}";
         if (_compilation != null && Callees.Of(_compilation).Refusal(method, default) is { } why) return ($"{call}, {why}", false);
         return (_lambda ? $"{call}: a lambda pass does not inline calls; a [ForEach] method does" : call, false);
@@ -845,6 +849,15 @@ internal sealed partial class Kernel
             var value = (ExpressionSyntax)Visit(expression)!;
             var returns = site.Called.ReturnType;
             var type = scope.Model.GetTypeInfo(expression, owner.Token).Type;
+            // A target-typed value (new(...), default) takes its type from the return; in the caller it may stand where
+            // nothing gives one ('var cell = new(...)' has none), so it names the return type: new T(...), default(T).
+            switch (value)
+            {
+                case ImplicitObjectCreationExpressionSyntax created:
+                    return ObjectCreationExpression(Token(SyntaxKind.NewKeyword).WithTrailingTrivia(Space), ParseTypeName(returns.ToDisplayString(Symbols.Fqn)), created.ArgumentList, created.Initializer);
+                case LiteralExpressionSyntax literal when literal.IsKind(SyntaxKind.DefaultLiteralExpression):
+                    return DefaultExpression(ParseTypeName(returns.ToDisplayString(Symbols.Fqn)));
+            }
             return SymbolEqualityComparer.Default.Equals(type, site.Method.ReturnType) || type == null
                 ? value
                 : CastExpression(ParseTypeName(returns.ToDisplayString(Symbols.Fqn)), ParenthesizedExpression(value));
