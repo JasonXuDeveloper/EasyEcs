@@ -419,7 +419,7 @@ public class NeighborTests
     public void APassAllocatesNothingOnceWarm()
     {
         using var world = Crowd(5000, 50f, 6, tables: true);
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 12; i++) // through one re-sort of the order's cadence (10 updates)
         {
             Neighbors.Reset(world);
             Neighbors.Separate(world);
