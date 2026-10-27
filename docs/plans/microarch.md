@@ -254,3 +254,19 @@ Integrate 1.06 / 1.07, 1.02 / 0.95; Move2Gaps 0.97 / 0.92, 1.03 / 0.96; Move3 1.
 (+-10 % at 1k rows); Move3 and Push at 1k (1.06-1.09) run the same 7-instruction loop on both sides (llvm-mca over
 both Tier1 listings: 2.1 c/it Ice Lake-SP, 1.6 Zen 4): the difference is outside the loop, in the runner's layout.
 Energy's 1.43-1.47x misses the plan's bar of 1.5x by a hair; Spread's 1.89x clears it.
+The kernel rows above were measured with the masked skip still in (reverted after); the masked loops of Energy and
+Spread are not on their hot path (no holes).
+
+The worlds, base / final head (the masked skip reverted), two rounds: WorldSimulation 10k 113.4 / 111.5 us (0.98),
+117.1 / 111.6 (0.95); 100k 1,260 / 1,336 us (1.06), 1,241 / 1,312 (1.06); BattleServer 3.88 / 4.08 ms (1.05), 4.08 /
+4.26 (1.04); LateHoles as above (Move2 0.33-0.37, Move3 0.22-0.30, Step 0.78-0.93). The WorldSimulation 100k
+difference is not the change: its generated code is identical on both sides (generated sources diffed) and a build
+of the final head without the module initializer measures the same (1,337 against 1,340 us), while that build
+against base, whose only difference for this world is other jobs' generated text in the same assembly, measures 1.05
+again (1,262 / 1,329 us): the assembly's layout, not a code path. BattleServer: 1.10 / 0.88 / 1.05 / 1.04 over four
+pairs, noise of the job.
+
+Ablations (same head, one change off): the masked skip on the word's bits against the vector test, two rounds:
+BattleServer 1.10 / 1.09, WorldSimulation 100k 1.06 / 0.92, 10k 0.99 / 0.95, CycleHoles 100k 1.04 / 1.11, Holes 100k
+0.84 / 0.95, Move2Gaps 1k 0.85 / 0.85: reverted. The module initializer against none, on the worlds: 1.03 / 1.00 /
+0.94 (WorldSimulation 10k / 100k, BattleServer): neutral where the tables are initialized before Tier1 anyway.
