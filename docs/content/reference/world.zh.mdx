@@ -1198,7 +1198,7 @@ public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent;
 public void SortRows<T>() where T : struct, IComponent;
 ```
 
-不管节奏，现在就按键排序含 `T` 的每张表：行按键的顺序排好，重新画出各簇的包围盒（成对方法推断出的顺序 `World.OrderRows`，或 [[OrderBy]](/zh/docs/reference/orderbyattribute)）。每张表的下一次排序从这次起再过它的间隔。没有表按这个组件排序时什么也不做。行会移动，所以指向这些表的引用、句柄缓存的行和标记的行到这里失效，和任何结构变更一样。只能在所有者线程、两次遍历之间调用（遍历中调用抛出异常）。原本无序的表 O(行数 × (键字节数 + 列数))，其余 O(行数)；稳定状态零分配。
+不管节奏，现在就按键排序含 `T` 的每张表：行按键的顺序排好，重新画出各簇的包围盒（邻居对方法推断出的顺序 `World.OrderRows`，或 [[OrderBy]](/zh/docs/reference/orderbyattribute)）。每张表的下一次排序从这次起再过它的间隔。没有表按这个组件排序时什么也不做。行会移动，所以指向这些表的引用、句柄缓存的行和标记的行到这里失效，和任何结构变更一样。只能在所有者线程、两次遍历之间调用（遍历中调用抛出异常）。原本无序的表 O(行数 × (键字节数 + 列数))，其余 O(行数)；稳定状态零分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：行要移动时 O(N × (K + C))，已经有序时 O(N)
 

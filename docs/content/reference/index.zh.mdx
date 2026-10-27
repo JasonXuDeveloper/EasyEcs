@@ -97,7 +97,7 @@ description: EasyEcs.Core 的全部公开类型及其成员、参数与复杂度
 | [`Reduce<T>`](/zh/docs/reference/reduce) | 把一次 [ForEach] 遍历归约到单例 T（OpenMP 的 reduction，MPI 的 Allreduce），按 ref 传入：static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;。 |
 | [`RelationIndex<T>.Sources`](/zh/docs/reference/relationindex-sources) | 枚举链接到某个目标的实体（foreach），每条链接一次。 |
 | [`Retired`](/zh/docs/reference/retired) | 退休实体的标签：Destroy 发现实体上有 ICleanupComponent，于是去掉其他组件，让实体继续存活，直到最后一个清理组件被移除（那时实体被释放，才算销毁）。 |
-| [`RowClusters`](/zh/docs/reference/rowclusters) | 一张有序表的簇（成对方法推断出的顺序，或 [OrderBy]）：表的行按键排序，每 RowClusters.Size 行一簇，每簇一个轴对齐的包围盒，盒子罩住簇里各行声明的点，再向外扩大余量。 |
+| [`RowClusters`](/zh/docs/reference/rowclusters) | 一张有序表的簇（邻居对方法推断出的顺序，或 [OrderBy]）：表的行按键排序，每 RowClusters.Size 行一簇，每簇一个轴对齐的包围盒，盒子罩住簇里各行声明的点，再向外扩大余量。 |
 | [`Scratch<T>`](/zh/docs/reference/scratch) | [ForEach] 方法在运行它的线程上的工作内存（OpenMP 的 threadprivate）：邻居列表、寻路的开放集、要填充的缓冲区。 |
 | [`SingletonRef<T>`](/zh/docs/reference/singletonref) | 某个 World 的单例 T 的句柄。 |
 | [`SystemAccess`](/zh/docs/reference/systemaccess) | 系统读写的数据，添加系统时声明一次。 |
