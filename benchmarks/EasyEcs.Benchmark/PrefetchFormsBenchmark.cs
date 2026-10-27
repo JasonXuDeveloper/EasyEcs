@@ -8,14 +8,14 @@ namespace EasyEcs.Benchmark;
 /// The prefetching forms beyond the row form's entity chase (borrowed-ideas.md item 1): index probes
 /// (<c>TryFind</c> / <c>Count</c> at a key a row holds, a hashed unique key and a key many entities share), chases per
 /// element of a buffer of ids, a parallel probe, a lambda pass, and a walk two methods share (fusion). Each plain method
-/// runs the generated code: past the cache (Auto at 16M on a machine whose last-level cache is under a few hundred MB)
-/// the pass picks the twin job that prefetches; Off and On force the gate (Off is today's job).
+/// runs the generated code: past its form's cache (the last level for a probe on one thread, the L2 for a parallel
+/// one) the pass picks the twin job that prefetches; Off and On force the gate (Off is today's job).
 /// <see cref="PrefetchGate.Gates"/> narrows the gates to Auto for a base / head comparison (EASYECS_BENCH_GATES=auto).
 /// </summary>
 [MemoryDiagnoser]
 public class ProbePrefetchBenchmark
 {
-    [Params(1_000, 1_000_000, 16_000_000)] public int Entities;
+    [ParamsSource(typeof(PrefetchGate), nameof(PrefetchGate.Sizes))] public int Entities;
 
     [ParamsSource(typeof(PrefetchGate), nameof(PrefetchGate.Gates))] public PrefetchGate.Gate Prefetch;
 
@@ -96,7 +96,7 @@ public class ProbePrefetchBenchmark
 [MemoryDiagnoser]
 public class ChaseFormsPrefetchBenchmark
 {
-    [Params(1_000, 1_000_000, 16_000_000)] public int Entities;
+    [ParamsSource(typeof(PrefetchGate), nameof(PrefetchGate.Sizes))] public int Entities;
 
     [ParamsSource(typeof(PrefetchGate), nameof(PrefetchGate.Gates))] public PrefetchGate.Gate Prefetch;
 
@@ -177,8 +177,10 @@ public ref struct HuntWalkSystem
 }
 
 /// <summary>
-/// The gate of a prefetching benchmark: Auto reads this machine's last-level cache, Off and On set the size EasyEcs.Core
-/// reads (internal, set as the tests do: 0 is unknown, never past; 1 byte, always past) until disposed.
+/// The gates of a prefetching benchmark: Auto reads this machine's caches (each form's gate: the last level, or the L2
+/// for the forms that pay past it), Off and On set the sizes EasyEcs.Core reads (internal, set as the tests do: 0 is
+/// unknown, never past; 1 byte, always past) until disposed. The sizes measured are the class's own, or
+/// EASYECS_BENCH_ENTITIES (a comma-separated list: the sizes between this machine's L2 and last-level cache).
 /// </summary>
 public sealed class PrefetchGate : IDisposable
 {
@@ -190,23 +192,41 @@ public sealed class PrefetchGate : IDisposable
             ? [Gate.Auto]
             : [Gate.Auto, Gate.Off, Gate.On];
 
-    private static readonly System.Reflection.FieldInfo Cache =
-        typeof(World).Assembly.GetType("EasyEcs.LastLevelCache")!.GetField("Bytes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+    /// <summary>The entity counts of a run: EASYECS_BENCH_ENTITIES when set, else <paramref name="sizes"/>.</summary>
+    public static int[] Entities(params int[] sizes) =>
+        Environment.GetEnvironmentVariable("EASYECS_BENCH_ENTITIES") is { Length: > 0 } list
+            ? Array.ConvertAll(list.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), int.Parse)
+            : sizes;
 
-    private readonly long _machine;
+    /// <summary>The default sizes of the prefetch classes: in L1, past the L2, inside and past the last-level cache here.</summary>
+    public static int[] Sizes => Entities(1_000, 262_144, 1_000_000, 16_000_000);
 
-    private PrefetchGate(long machine) => _machine = machine;
+    private static readonly Type CacheSizes = typeof(World).Assembly.GetType("EasyEcs.CacheSizes")!;
+
+    private static readonly System.Reflection.FieldInfo[] Caches =
+    [
+        CacheSizes.GetField("LastLevel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!,
+        CacheSizes.GetField("L2", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!,
+    ];
+
+    private readonly long[] _machine;
+
+    private PrefetchGate(long[] machine) => _machine = machine;
 
     public static PrefetchGate Set(Gate gate)
     {
         Isa.Print();
-        var set = new PrefetchGate((long)Cache.GetValue(null)!);
-        Console.WriteLine($"// last-level cache: {set._machine} bytes");
-        if (gate != Gate.Auto) Cache.SetValue(null, gate == Gate.On ? 1L : 0L);
+        var set = new PrefetchGate(Array.ConvertAll(Caches, c => (long)c.GetValue(null)!));
+        Console.WriteLine($"// last-level cache: {set._machine[0]} bytes, L2: {set._machine[1]} bytes");
+        if (gate != Gate.Auto)
+            foreach (var cache in Caches) cache.SetValue(null, gate == Gate.On ? 1L : 0L);
         return set;
     }
 
-    public void Dispose() => Cache.SetValue(null, _machine);
+    public void Dispose()
+    {
+        for (int i = 0; i < Caches.Length; i++) Caches[i].SetValue(null, _machine[i]);
+    }
 }
 
 /// <summary>
@@ -217,7 +237,7 @@ public sealed class PrefetchGate : IDisposable
 [MemoryDiagnoser]
 public class IdListPrefetchBenchmark
 {
-    [Params(1_000_000, 16_000_000)] public int Entities;
+    [ParamsSource(typeof(PrefetchGate), nameof(PrefetchGate.Sizes))] public int Entities;
 
     [ParamsSource(typeof(PrefetchGate), nameof(PrefetchGate.Gates))] public PrefetchGate.Gate Prefetch;
 
