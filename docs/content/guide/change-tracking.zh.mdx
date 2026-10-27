@@ -284,7 +284,7 @@ public ref struct ReplicateUnitSystem
 
     // 某个状态结束了：上次运行后着火或中毒（或者两个都）没了。
     [ForEach, RemovedAny<Burning, Poisoned>]
-    static void Clear(ref StatusReplica status, Maybe<Burning> burning, Maybe<Poisoned> poisoned) =>
+    static void Clear(ref StatusReplica status, ReadOnlyMaybe<Burning> burning, ReadOnlyMaybe<Poisoned> poisoned) =>
         status = new StatusReplica(burning.HasValue, poisoned.HasValue);
 }
 ```
@@ -428,7 +428,7 @@ using EasyEcs;
 [EcsSystem]
 public ref struct BurnSystem
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]   // 移除它读的 Burning：逐行执行
     static void Burn(Entity unit, ref Burning burning, ref Health health)
     {
         health.Value -= 10;

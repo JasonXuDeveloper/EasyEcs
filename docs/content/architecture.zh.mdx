@@ -220,8 +220,8 @@ flowchart LR
   是 World、记录下标和记录版本，就像 `Entity` 之于一行，所以已移除系统的句柄会失效。
 - 每个阶段再切成**片段**：属于同一个集合的连续系统。`Update()` 和 `Update<TGroup>()` 是同步的：每个片段通过按集合绑定一次的函数指针调用一次，
   这次调用遍历片段里启用且到期的系统，经集合的 `switch` 调用各自的代码，所以同一个程序集的系统互相之间是直接调用。系统的代码先跑它的
-  `[OnUpdate]` 方法，再跑生成的 `[ForEach]` job。每个阶段让变更 tick 加一，每次更新结束再加一。
-- `AddSystem` 调用 `[OnCreate]` 方法；`RemoveSystem` 和 `Dispose` 调用 `[OnDestroy]` 方法，`Dispose` 按逆序调用。
+  `OnUpdate` 方法，再跑生成的 `[ForEach]` job。每个阶段让变更 tick 加一，每次更新结束再加一。
+- `AddSystem` 调用 `OnCreate` 方法；`RemoveSystem` 和 `Dispose` 调用 `OnDestroy` 方法，`Dispose` 按逆序调用。
 - 异常会从更新中抛出；在 `SystemErrorPolicy.Disable` 下，抛异常的系统被关掉，异常留在 `system.Error` 里。
 - 系统之间只通过数据协作（[D1](/zh/docs/decisions#d1-state-changes-are-data-no-events-or-callbacks)），所有行为都按调度顺序执行。
   使用细节见[系统](/zh/docs/guide/systems)。

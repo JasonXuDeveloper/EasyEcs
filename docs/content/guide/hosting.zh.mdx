@@ -203,7 +203,6 @@ public record struct SpawnInbox(ChannelReader<SpawnRequest> Requests) : ISinglet
 [EcsSystem]
 public ref struct ReceiveSpawns
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var requests = world.SpawnInbox.Requests;
@@ -248,7 +247,6 @@ public record struct HealInbox(ChannelReader<HealRequest> Requests) : ISingleton
 [EcsSystem]
 public ref struct ReceiveHeals
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var requests = world.HealInbox.Requests;
@@ -286,7 +284,6 @@ public record struct Publisher(StatusBoard Board) : ISingletonComponent;
 [EcsSystem, UpdateInterval(20)]                                        // 20 Hz 下每秒一次
 public ref struct PublishStatus
 {
-    [OnUpdate]
     static void OnUpdate(World world) =>
         world.Publisher.Board.Publish(new ArenaStatus(world.DefaultUpdateCount, world.Count<Position>()));
 }
@@ -441,7 +438,6 @@ using EasyEcs;
 [EcsSystem]
 public ref struct ReceiveSpawns
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var requests = world.SpawnInbox.Requests;
@@ -467,7 +463,6 @@ public ref struct MovementSystem
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.Clock.Tick++;
 }
 
@@ -475,7 +470,6 @@ public ref struct ClockSystem
 [EcsSystem, UpdateInterval(20)]
 public ref struct PublishStatus
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         world.Publisher.Board.Publish(new ArenaStatus(world.Clock.Tick, world.Count<Position>()));

@@ -45,9 +45,9 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`：`Find`、`TryFind`、`Count`；键可比较时还有有序遍历（`OrderedIndexExtensions`）。 |
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`：链接到某个目标的实体。 |
 | `TargetPolicy`、`TargetPolicyExtensions` | 枚举、扩展方法 | 目标被销毁时链接怎么处理：`Keep`、`Remove`、`Destroy`。 |
-| `[EcsSystem]` | 特性 | 标在只有静态成员的 `ref struct` 上：一个系统。钩子是标了 `[OnCreate]`、`[OnUpdate]`、`[OnDestroy]` 的静态方法，参数取 `World`、`SystemHandle`、两者或都不取（[系统](/zh/docs/guide/systems)）。 |
+| `[EcsSystem]` | 特性 | 标在只有静态成员的 `ref struct` 上：一个系统。钩子是名为 `OnCreate`、`OnUpdate`、`OnDestroy` 的静态方法（不用特性），参数取 `World`、`SystemHandle`、两者或都不取（[系统](/zh/docs/guide/systems)）。 |
 | `SystemHandle` | readonly struct | 加入 World 的一个系统：`Enabled`、`Error`、`Stats`、`LastRunTick`、`RunCount`、`Name`、`Type`、`World`、`IsAlive`；系统移除后句柄失效（成员抛异常）。 |
-| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkRows = n`、`Slices = N`、`SimdMode = SimdMode.Auto` / `Require` / `Off`、`FloatMode = FloatMode.Exact` / `Fast`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[ForEntity]`（通过生成的入口在单个实体上运行的静态方法）。 |
+| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkRows = n`、`Slices = N`、`SimdMode = SimdMode.Auto` / `Require` / `Off`、`FloatMode = FloatMode.Exact` / `Fast`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[ForEntity]`（通过生成的入口在单个实体上运行的静态方法）。 |
 | `Maybe<T>` | ref struct | `[ForEach]` 方法的可选组件参数：`HasValue`、`Value`。 |
 | `ReadOnlyMaybe<T>` | ref struct | 只读版本：`Value` 是 `ref readonly`，从不打 tick，带索引的组件也能用；`Maybe<T>` 可以转换成它。 |
 | `[View]` | 特性 | 标在由 `ref`（写）、`ref readonly`（读）和 `Mut<T>`（在部分行上写）组件字段加业务方法组成的 `ref struct` 上：一个实体的若干组件，`[ForEach]` 和 `[ForEntity]` 方法可以把它当参数，实体用 `entity.AsX()` / `TryGetX(out X)` 拿到它。 |
@@ -187,7 +187,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | 指向行内的 `ref readonly`：不打 tick；其余同 `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M)，需要测位的表再加 S / 64 | 累加表计数，或数存在位（和 tick），AVX-512 下每步 8 个字 |
 | `world.Any<T1..Tn>(filter)` | 最坏 O(M + S / 64) | 找到第一个就停 |
-| `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | 只建一次，放在 `static readonly` 字段里；多个 `WithAny` 组成一个“至少有一个”的集合 |
+| `QueryFilter.Create().With<T>().Without<U>().WithAny<V, W>()` | O(1) | 只建一次，放在 `static readonly` 字段里；多个 `WithAny` 组成一个“至少有一个”的集合 |
 | `filter.Changed<T>(since)` / `[Changed<T>]` | O(1)；遍历跳过 `since` 之前写过的表、4,096 行的区段和 64 行的字 | 被追踪的 `T` 在 `since` 及之后被写过的行（[变更追踪](/zh/docs/guide/change-tracking)）；一个过滤条件只有一个 tick |
 | `filter.Removed<T>(since)` / `[Removed<T>]` | 同 `Changed` | 在 `since` 及之后失去被追踪的 `T`、且现在仍没有它的实体；已销毁的实体不报告（由销毁日志报告） |
 | `filter.ChangedAny<T1..Tn>(since)` / `[ChangedAny<T1..Tn>]` | 构建 O(n)；遍历时跳过集合里的列自 `since` 以来都没被写过的表，以及没有任何列写过的块和位字 | 2 到 9 个被追踪组件里至少有一个在 `since` 及之后被写过的行；一个过滤条件的所有 `ChangedAny` 调用合成一个集合，和其他条件按 AND 组合；每个过滤条件一个 tick |
@@ -351,8 +351,8 @@ World 保持原样。
 
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
-| `world.AddSystem<T>(changesFromNow)` | O(s²)，s 为所在分组的系统数 | 返回 `SystemHandle`；调用 `[OnCreate]` 方法；重建顺序和阶段（冷路径）；World 已有这个系统、排序出现环时抛异常，没有任何程序集为该类型生成代码时抛 `NotSupportedException`；`changesFromNow: true`：第一次运行只看调用之后的写入 |
-| `world.RemoveSystem<T>()` | O(s²) | 调用 `[OnDestroy]` 方法；返回是否移除了系统；它的句柄随之失效 |
+| `world.AddSystem<T>(changesFromNow)` | O(s²)，s 为所在分组的系统数 | 返回 `SystemHandle`；调用 `OnCreate` 方法；重建顺序和阶段（冷路径）；World 已有这个系统、排序出现环时抛异常，没有任何程序集为该类型生成代码时抛 `NotSupportedException`；`changesFromNow: true`：第一次运行只看调用之后的写入 |
+| `world.RemoveSystem<T>()` | O(s²) | 调用 `OnDestroy` 方法；返回是否移除了系统；它的句柄随之失效 |
 | `world.HasSystem<T>()` / `System<T>()` / `TryGetSystem<T>(out system)` | O(1) | 不存在时 `System<T>` 抛异常，`TryGetSystem` 返回 false 和默认句柄 |
 | `system.Enabled` / `Error` / `LastRunTick` / `RunCount` / `Stats` / `Name` / `Type` / `World` | O(1) | World 里这个系统的记录；句柄失效后抛 `InvalidOperationException` |
 | `system.IsAlive` | O(1) | 系统移除或 World 释放后为 false |
@@ -374,9 +374,9 @@ World 保持原样。
 | `world.DestroyedSince(since, Span<EntityId> into, out int count)` | O(count) | 在 `since` 及之后销毁的实体，从旧到新；`since` 早于 `DestroyLogOldestTick` 时返回 false（什么都不写）：需要重新同步；`WorldOptions.DestroyLogCapacity` 为 0 时抛异常；零分配；所有者线程或并行阶段的线程 |
 | `world.DestroyLogOldestTick` | O(1) | `DestroyedSince` 能回答的最早 tick；日志关闭时为 `ulong.MaxValue` |
 | `entity.Describe()` | O(c) | 实体组件的装箱副本，禁用的会标出；会分配（冷路径） |
-| `world.Dispose()` | O(系统数 + 实体数 + 表数) | 按逆序调用每个系统的 `[OnDestroy]` 方法，然后释放存储；所有系统句柄失效 |
+| `world.Dispose()` | O(系统数 + 实体数 + 表数) | 按逆序调用每个系统的 `OnDestroy` 方法，然后释放存储；所有系统句柄失效 |
 
-`WorldOptions.SystemErrors`：`SystemErrorPolicy.Throw`（默认：异常从 `Update()` 抛出，`[OnDestroy]` 的异常从 `Dispose` 抛出）或
+`WorldOptions.SystemErrors`：`SystemErrorPolicy.Throw`（默认：异常从 `Update()` 抛出，`OnDestroy` 的异常从 `Dispose` 抛出）或
 `Disable`（关掉出错的系统，把异常留在 `system.Error` 里，直到重新启用；出错的那次运行照样推进 `LastRunTick`）。
 `WorldOptions.MeasureSystems` 把每次运行记到 `system.Stats`（`Runs`、`LastTime`、`TotalTime`、`AverageTime`、`LastAllocated`、`TotalAllocated`、
 `LastEntities`、`TotalEntities`，读取都是 O(1)），代价是每次运行（以及并行 `[ForEach]` 的每个辅助块）多读两次时间戳和两次分配计数，

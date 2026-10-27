@@ -182,7 +182,6 @@ public record struct Census(int Entities) : ISingletonComponent;
 [EcsSystem, UpdateInterval(20)]
 public ref struct CensusSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.GetOrAddCensus().Entities = world.EntityCount;
 }
 ```
@@ -221,7 +220,6 @@ public record struct Inbox(ConcurrentQueue<FireCommand> Commands) : ISingletonCo
 [EcsSystem, UpdateInGroup<InputGroup>]
 public ref struct ReceiveCommandsSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var commands = world.Inbox.Commands;
@@ -382,7 +380,6 @@ namespace MyServer;
 [EcsSystem, UpdateInGroup<InputGroup>]
 public ref struct ReceiveCommandsSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var commands = world.Inbox.Commands;
@@ -428,7 +425,6 @@ namespace MyServer;
 [EcsSystem]
 public ref struct SpawnSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref readonly var spawner = ref world.Spawner;
@@ -503,12 +499,11 @@ using EasyEcs;
 
 namespace MyServer;
 
-// Advances the clock once per update. [OnUpdate] runs once per update, not once per entity.
+// Advances the clock once per update. OnUpdate runs once per update, not once per entity.
 // Game.AddSystems adds it last, so every other system sees the tick the update started with.
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         world.Clock.Tick++;

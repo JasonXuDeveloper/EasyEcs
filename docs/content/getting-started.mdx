@@ -183,7 +183,6 @@ as `World.Arena` (generated) or `World.GetSingleton<Arena>()`. Add to `Systems.c
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.Arena.Tick++;
 }
 ```
@@ -215,7 +214,6 @@ public ref struct DeathSystem
 [EcsSystem, UpdateAfter<DeathSystem>]
 public ref struct CorpseSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Dead>();   // every corpse in one pass
 }
 ```
@@ -268,7 +266,6 @@ public struct Report : ISystemGroup;
 [EcsSystem, UpdateInGroup<Report>]
 public ref struct ReportSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) =>
         Console.WriteLine($"tick {world.Arena.Tick}: {world.EntityCount} units, " +
                           $"{world.Count<Burning>()} burning, {world.Arena.Deaths} dead");
@@ -374,21 +371,18 @@ public ref struct DeathSystem
 [EcsSystem, UpdateAfter<DeathSystem>]
 public ref struct CorpseSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Dead>();
 }
 
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.Arena.Tick++;
 }
 
 [EcsSystem, UpdateInGroup<Report>]
 public ref struct ReportSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) =>
         Console.WriteLine($"tick {world.Arena.Tick}: {world.EntityCount} units, " +
                           $"{world.Count<Burning>()} burning, {world.Arena.Deaths} dead");

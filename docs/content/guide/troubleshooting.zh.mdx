@@ -63,7 +63,7 @@ InvalidOperationException: A structural change was made while the world's struct
 方法或句柄发生的。
 
 **修法：**把变更记成数据（标签、组件、请求实体），在一个单独运行的系统或 `[ForEach]` 方法里执行：带 `Entity` 或 `World` 参数的
-方法，或者 `[OnUpdate]` 方法。
+方法，或者 `OnUpdate` 方法。
 
 ## 为什么实体 “not alive”？ [#entity-not-alive]
 
@@ -260,7 +260,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 3. **它的分组被更新了：**带 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时运行，`world.Update()` 永远不会跑它。
 4. **它的间隔到了：**`[UpdateInterval(N)]` 时，它在所属分组每第 N 次更新时运行，第一次是第 N 次，再按它的 `Phase` 偏移。
 5. **它的过滤条件能匹配：**用 `world.Count<T…>(filter)` 数一数方法需要的实体。分组的过滤条件对分组里所有方法都生效：分组结构体上的
-   `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`，以及分组自己或它实现的任何接口带来的 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`
+   `[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]`，以及分组自己或它实现的任何接口带来的 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`
    （泛型 actor 接口就带着它们）。被禁用的组件算不存在。
 6. **确实有东西可看：**`[Changed<T>]` 方法只访问它的系统上次运行以来被写过的行，`[Removed<T>]` 方法只访问那之后失去 `T` 的实体
    （[变更追踪](/zh/docs/guide/change-tracking#ticks)）。
@@ -275,7 +275,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 1. **实体已经不在了：**拿到句柄之后被销毁了，或者是 `default(Entity)`。`Run` 不会像 `Get` 那样抛异常。
 2. **缺少方法要的组件：**方法的每个 `ref`、`in` 组件（job 则是 `TJob` 之前的每个类型实参）都必须存在，被禁用的组件算不存在。
    用 `entity.Has<T1, T2>()` 检查。
-3. **不满足过滤条件：**有 `[Without<T>]` 排除的组件、缺 `[WithAny<T>]` 要的组件、`[Changed<T>]` 之后没被写过、不在指定的分组里。
+3. **不满足过滤条件：**有 `[Without<T>]` 排除的组件、缺 `[WithAny<T1, T2>]` 要的组件、`[Changed<T>]` 之后没被写过、不在指定的分组里。
    去掉过滤条件再试一次，就能和前两种情况分开。
 
 **修法：**把 `false` 当成请求的结果（actor 没了、单位死了），而不是错误；实体可能已被替换时，按 `EntityId` 重新查找
@@ -283,7 +283,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 
 ## 为什么我的系统没有并行？ [#not-parallel]
 
-开了 `ParallelSystems`，系统只有在访问集已知、且不冲突时才会共享一个阶段。带 `World` 参数或不只当身份用的 `Entity` 参数、有 `[OnUpdate]` 方法、
+开了 `ParallelSystems`，系统只有在访问集已知、且不冲突时才会共享一个阶段。带 `World` 参数或不只当身份用的 `Entity` 参数、有 `OnUpdate` 方法、
 有 `[Consume]` 方法，或者一个 `[ForEach]` 方法都没有的系统，都单独运行。一个写另一个读或写的东西，两个系统就冲突；`ref` 参数即使
 方法体只读也算写：改用 `in`（[并行系统](/zh/docs/guide/threading#parallel-systems)）。顺序（`[UpdateAfter<T>]`）也会把后面的
 系统放进后面的阶段。
@@ -347,9 +347,9 @@ InvalidOperationException: The tile was loaded without its mask (mask: false): i
 
 ## 为什么 `EntityRandom` 抽出同样的数？ [#random-repeats]
 
-一次抽取是 (seed, entity, tick, stream) 的纯函数。tick 不推进，就会再抽出上一步的数；同一步里同一实体对同一个流抽两次，结果相等
-（[EECS088](/zh/docs/guide/analyzer#eecs088)）。**修法：**每一步把 `World.EntityRandom.Tick` 推进一次，放在推进模拟时钟的那个系统里；
-一行里的每次抽取用自己的流（[随机数](/zh/docs/guide/threading#entity-random)）。
+一次抽取是 (seed, entity, tick, stream) 的纯函数。只有 `World.Update()` 推进 tick：只靠 `Update<TGroup>()` 运行的系统会再抽出上一次更新的数；
+同一步里同一实体对同一个流抽两次，结果相等（[EECS088](/zh/docs/guide/analyzer#eecs088)）。**修法：**每一步调用一次 `World.Update()`
+（它的默认分组里可以没有系统），一行里的每次抽取用自己的流（[随机数](/zh/docs/guide/threading#entity-random)）。
 
 ## 为什么某个生成成员不见了？ [#member-missing]
 

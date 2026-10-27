@@ -37,13 +37,14 @@ memory, at the speed of a plain query over a smaller world.
 ### Mark the component [#mark-the-component]
 
 `[Group]` marks the member that names the partition the entity belongs to, an `int` or an enum of `int`: the
-generator adds `IGroup` with an explicit `Group` returning it. `[GroupBy]` on the type groups every world by it.
+generator adds `IGroup` with an explicit `Group` returning it. `[GroupBy]` in its place does the same and groups every
+world by it.
 
 <Tabs items={['You write', 'The generator writes']}>
 <Tab value="You write">
 
 ```csharp
-[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
+public partial record struct Zone([GroupBy] int Id) : IComponent;
 ```
 
 </Tab>
@@ -80,8 +81,8 @@ public partial record struct Match([Group] int Id) : IComponent;   // grouped on
 world.GroupBy<Match>();                                        // once, before the world fills
 ```
 
-`[GroupBy]` on a type that is not an `IGroup` component, or `[Group]` on a member that is not an `int` or an `int`
-enum, is reported ([EECS068](/en/docs/guide/analyzer#eecs068), [EECS036](/en/docs/guide/analyzer#eecs036)).
+`[GroupBy]` on a member of a type that is not a component, or `[Group]` on a member that is not an `int` or an
+`int` enum, is reported ([EECS068](/en/docs/guide/analyzer#eecs068), [EECS036](/en/docs/guide/analyzer#eecs036)).
 
 </Step>
 <Step>
@@ -134,7 +135,7 @@ so the analyzer rejects it as it does for indexed components ([EECS015](/en/docs
 ### Groups in systems [#in-systems]
 
 `[ForEach]` filters are attributes and cannot name a group value. A system that works on one group at a time runs a
-struct job from its `[OnUpdate]` method, with the group it reads from a singleton:
+struct job from its `OnUpdate` method, with the group it reads from a singleton:
 
 ```csharp
 public record struct ActiveZone(int Id) : ISingletonComponent;
@@ -147,7 +148,6 @@ public struct Regenerate : IForEach<Health>
 [EcsSystem]
 public ref struct RegenerateActiveZone
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var filter = QueryFilter.Create().InZone(world.ActiveZone.Id);
@@ -157,7 +157,7 @@ public ref struct RegenerateActiveZone
 }
 ```
 
-An `[OnUpdate]` method runs alone in its stage. Building the filter per update is cheap: a `QueryFilter` holds no
+An `OnUpdate` method runs alone in its stage. Building the filter per update is cheap: a `QueryFilter` holds no
 object reference.
 
 ### What follows a grouping [#what-follows]
@@ -185,7 +185,7 @@ zone, and three units walk from zone 2 into zone 1. Put the files in a console p
 using EasyEcs;
 
 // [GroupBy]: every world keeps the entities of each zone in tables of their own.
-[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
+public partial record struct Zone([GroupBy] int Id) : IComponent;
 
 public record struct Health(int Value) : IComponent;
 
@@ -229,11 +229,10 @@ public struct SumHealth : IForEach<Health>
 using EasyEcs;
 
 // Heals the units of the active zone only. [ForEach] attributes cannot name a group value,
-// so the system runs a struct job with an InGroup filter from its [OnUpdate] method.
+// so the system runs a struct job with an InGroup filter from its OnUpdate method.
 [EcsSystem]
 public ref struct RegenerateActiveZone
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         int zone = world.ActiveZone.Id;

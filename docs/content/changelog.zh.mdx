@@ -15,7 +15,7 @@ icon: RotateCcwClock
 
 - 智能体技能：`npx skills add JasonXuDeveloper/EasyEcs` 为 Claude Code、Cursor、Codex、GitHub Copilot 以及其他支持
   Agent Skills 的智能体安装 EasyEcs 规则；它取代了规则文件，原来的地址现在返回技能的内容（[AI 助手](/zh/docs/ai#agent-skill)）。
-- 系统是只有静态方法的 `[EcsSystem]` ref struct：`[ForEach]` 方法，以及 `[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]` 钩子，钩子接收
+- 系统是只有静态方法的 `[EcsSystem]` ref struct：`[ForEach]` 方法，以及 `OnCreate`、`OnUpdate` 和 `OnDestroy` 钩子，钩子接收
   `World`、`SystemHandle`、两者或都不接收。World 保存每个系统的簿记，通过 `AddSystem<T>()`、`System<T>()`、`TryGetSystem<T>(out …)` 和
   `world.Systems` 发出 `SystemHandle`（`Enabled`、`Error`、`RunCount`、`LastRunTick`、`Stats`、`Name`、`Type`）；新增 `HasSystem<T>()`。
   一个程序集里所有系统的生成代码是一个 switch，调度里连续的一段只调用一次，没有虚调用，也不为每个系统创建对象。见[系统](/zh/docs/guide/systems)
@@ -198,13 +198,13 @@ icon: RotateCcwClock
 - 分析器规则 [EECS027](/zh/docs/guide/analyzer#eecs027) 也会报告通过被访问的 `Entity` 逐行查带索引的组件；改成 `in` 参数，部分实体没有它时用
   `ReadOnlyMaybe<T>`。把警告当错误的构建会看到它：见[迁移指南](/zh/docs/migration#v4-8-analyzer)。
 - 分析器规则 [EECS030](/zh/docs/guide/analyzer#eecs030) 也会报告整个方法体只是对自己实体做一次结构变更、每行都一样的 `[ForEach]` 方法
-  （`[ForEach, With<Dead>] static void Bury(Entity e) => e.Destroy();`）：在 `[OnUpdate]` 方法里一次批量调用（`world.DestroyAll<Dead>()`）就能一次改完整张表（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
+  （`[ForEach, With<Dead>] static void Bury(Entity e) => e.Destroy();`）：在 `OnUpdate` 方法里一次批量调用（`world.DestroyAll<Dead>()`）就能一次改完整张表（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 - 新的警告 [EECS060](/zh/docs/guide/analyzer#eecs060) 和 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告在共享内存上竞争、或读了遍历从未写回的
   job 字段的并行代码；总数改用 `Reduce<T>` 参数（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 - 新的警告 [EECS071](/zh/docs/guide/analyzer#eecs071) 报告 `[ForEach]` 方法里的 `Random.Shared` 和 `new Random()`；修复改为从单例
   `EntityRandom` 抽取（[迁移指南](/zh/docs/migration#v4-8-analyzer)）。
 
-- `EcsSystem` 基类删掉了：系统是只有静态方法的 `[EcsSystem]` ref struct，钩子是 `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` 方法，
+- `EcsSystem` 基类删掉了：系统是只有静态方法的 `[EcsSystem]` ref struct，钩子是 `OnCreate` / `OnUpdate` / `OnDestroy` 方法，
   `World` 是参数，簿记（`RunCount`、`Enabled`、`Error`、`Stats`）通过它的 `SystemHandle` 读取。`AddSystem<T>()` 和
   `TryGetSystem<T>(out …)` 发出 `SystemHandle`，`AddSystem(instance)` 删掉了（构造函数参数改成 `[NotSaved]` 单例），EECS007 改为针对可变静态字段的警告。
   EECS029 和 EECS082 随它们报告的写法一起删掉了。CS0246 上的一个代码修复会改写类系统（[迁移指南](/zh/docs/migration#v4-8-systems)）。

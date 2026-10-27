@@ -218,7 +218,7 @@ using EasyEcs;
 [EcsSystem]
 public ref struct WearSystem
 {
-    [ForEach, Without<Dead>]
+    [ForEach(SimdMode = SimdMode.Off), Without<Dead>]   // 在做结构变更的地方打印：逐行执行
     static void Wear(Entity turret, ref Health hp)
     {
         hp.Value -= 30;
@@ -257,7 +257,7 @@ public ref struct FireSystem
 [EcsSystem, UpdateAfter<FireSystem>]
 public ref struct ExpireSystem
 {
-    [ForEach]
+    [ForEach(SimdMode = SimdMode.Off)]   // 在做结构变更的地方打印：逐行执行
     static void Expire(Entity shot, ref Lifetime life)
     {
         life.Ticks--;

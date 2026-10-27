@@ -233,7 +233,7 @@ public static class Bags
 {
     public static int Items(Entity player)
     {
-        var copy = player.Read<DynamicBuffer<Loot>>();   // EECS012：复制了缓冲
+        var copy = player.Loot;                          // EECS012：复制了缓冲
         return copy.Count;
     }
 }

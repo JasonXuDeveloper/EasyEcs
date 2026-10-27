@@ -17,7 +17,7 @@ public record struct Health(int Value) : IComponent, ITracked;          // 被�
 public record struct Mana(int Value) : IComponent, ITracked;
 public partial record struct Team([LookupKey] int Id) : IComponent;
 public partial record struct Account([UniqueKey] int Id) : IComponent;   // 一个键一个实体
-[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;   // 每个 World 都按它分组
+public partial record struct Zone([GroupBy] int Id) : IComponent;   // 每个 World 都按它分组
 public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
 public record struct MemberOf(EntityId Target) : IRelation;                   // 每个实体可以有多条
 public record struct Loot(int Item);                                          // DynamicBuffer 的元素
@@ -61,10 +61,10 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 
 | 调用 | 作用 |
 | --- | --- |
-| `new World(options)` | 一个独立的 World；`Dispose()` 会调用每个系统的 `[OnDestroy]` |
+| `new World(options)` | 一个独立的 World；`Dispose()` 会调用每个系统的 `OnDestroy` |
 | `world.Update()` | 把默认分组的系统执行一遍 |
 | `world.Update<TGroup>()` | 执行一个系统分组 |
-| `world.AddSystem<T>()` | 添加系统（调用 `[OnCreate]`） |
+| `world.AddSystem<T>()` | 添加系统（调用 `OnCreate`） |
 | `world.RemoveSystem<T>()` / `TryGetSystem<T>(out s)` / `Systems` | 移除、查找、列出系统 |
 | `world.EntityCount` / `Entities` | 存活实体数，以及零分配的遍历 |
 | `world.ChangeTick` | 当前的变更 tick |
@@ -76,7 +76,7 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `world.DescribeSchedule()` | 每个分组的阶段、每个系统读写什么、为什么要等、哪些系统对只靠注册顺序；`ToString()` / `ToMermaid()` |
 | `world.TrimExcess()` | 峰值过后、空闲时删掉空表并缩小其他表 |
 | `world.ForParallel(count, ref job)` / `ForParallel(ref buffer, ref job)` | 在 World 的执行器上分块运行：`IForRange` job 遍历下标，`IForSpan<T>` job 遍历 `DynamicBuffer<T>` 的元素（[ForParallel](/zh/docs/guide/threading#for-parallel)） |
-| `world.SetEntityRandom(Seed: s, Tick: 0)` / `World.EntityRandom.Tick++` | `EntityRandom` 的种子和 tick：每个数都是（种子、实体、tick、流）的函数（[EntityRandom](/zh/docs/guide/threading#entity-random)） |
+| `world.SetEntityRandom(Seed: s)` | `EntityRandom` 的种子；每次 `Update()` 推进它的 tick：每个数都是（种子、实体、tick、流）的函数（[EntityRandom](/zh/docs/guide/threading#entity-random)） |
 | `world.DestroyedSince(since, into, out count)` / `DestroyLogOldestTick` | 开了 `WorldOptions.DestroyLogCapacity` 时，某个 tick 以来销毁的实体；返回 `false` 表示读取方比日志还旧 |
 
 ```csharp
@@ -219,7 +219,7 @@ public ref struct MovementSystem
 | `[ForEach(Slices = N)]` | 方法 | 每次运行只访问一片，约 1/N 的行：每 N 次运行每行一次（不能和 `Changed` / `Removed` 一起用：[EECS035](/zh/docs/guide/analyzer#eecs035)） |
 | `[With<T>]` | 方法、系统分组 | 要求有 `T`，但不作为参数传入 |
 | `[Without<T>]` | 方法、系统分组 | 排除有 `T` 的实体 |
-| `[WithAny<A>, WithAny<B>]` | 方法、系统分组 | 至少有其中一个 |
+| `[WithAny<A, B>]` | 方法、系统分组 | 至少有其中一个 |
 | `[Changed<T>]` | 方法 | 系统上次执行后、被追踪的 `T` 被写过的行 |
 | `[Removed<T>]` | 方法 | 系统上次执行后失去了被追踪 `T` 的实体 |
 | `[ChangedAny<A, B>]` / `[RemovedAny<A, B>]` | 方法 | 2 到 9 个被追踪组件里至少有一个被写过、或被移除的行 |
@@ -239,7 +239,7 @@ public ref struct DecaySystem
 }
 ```
 
-`[Changed<T>]` 和 `[Removed<T>]` 只能写在方法上。系统分组上可以写 `[With<T>]`、`[Without<T>]`、`[WithAny<T>]`
+`[Changed<T>]` 和 `[Removed<T>]` 只能写在方法上。系统分组上可以写 `[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]`
 （写在其他结构体上由 [EECS023](/zh/docs/guide/analyzer#eecs023) 报错），也可以实现 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`。
 泛型分组接口只能用后者，因为特性里不能写类型参数：
 
@@ -253,7 +253,7 @@ public struct Shop : IActorGroup<Shop>;             // [UpdateInGroup<Shop>] 的
 
 | 成员 | 作用 |
 | --- | --- |
-| `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` | 生命周期；`[OnUpdate]` 在 `[ForEach]` 方法之前执行 |
+| `OnCreate` / `OnUpdate` / `OnDestroy` | 生命周期；`OnUpdate` 在 `[ForEach]` 方法之前执行 |
 | `World` | 系统所属的 World |
 | `[UpdateInterval(N, Phase = P)]` | 每 N 次更新执行一次，落在第 0 到 N-1 个相位 |
 | `Enabled` | 跳过这个系统；设回 `true` 会清掉 `Error` |
@@ -295,7 +295,7 @@ bool anyDead = world.Any<Dead>();
 
 | `QueryFilter` | 选出 |
 | --- | --- |
-| `.With<T>()` / `.Without<T>()` / `.WithAny<T>()` | 按有无组件，和特性相同 |
+| `.With<T>()` / `.Without<T>()` / `.WithAny<T1, T2>()` | 按有无组件，和特性相同 |
 | `.Changed<T>(since)` / `.Removed<T>(since)` | 在 tick `since` 及之后被写过、或失去了 `T` |
 | `.ChangedAny<A, B>(since)` / `.RemovedAny<A, B>(since)` | `since` 及之后至少有一个被写过、或被移除 |
 | `.Since(tick)` | 同一个过滤条件换一个 tick：一个过滤条件，带着每个客户端的 tick 跑 |

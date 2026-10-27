@@ -48,9 +48,9 @@ may make it ([Threading](/en/docs/guide/threading)).
 | `ValueIndex<T, TKey>` | sealed class | `world.Index<T, TKey>()`: `Find`, `TryFind`, `Count`; ordered walks for a comparable key (`OrderedIndexExtensions`). |
 | `RelationIndex<T>` | sealed class | `world.Relations<T>()`: the entities linking to a target. |
 | `TargetPolicy`, `TargetPolicyExtensions` | enum, extensions | What destroying a target does to the links to it: `Keep`, `Remove`, `Destroy`. |
-| `[EcsSystem]` | attribute | On a `ref struct` of static members: a system. Its hooks are static methods marked `[OnCreate]`, `[OnUpdate]`, `[OnDestroy]`, each taking the `World`, the `SystemHandle`, both or neither ([systems](/en/docs/guide/systems)). |
+| `[EcsSystem]` | attribute | On a `ref struct` of static members: a system. Its hooks are the static methods named `OnCreate`, `OnUpdate`, `OnDestroy` (no attribute), each taking the `World`, the `SystemHandle`, both or neither ([systems](/en/docs/guide/systems)). |
 | `SystemHandle` | readonly struct | A system added to a world: `Enabled`, `Error`, `Stats`, `LastRunTick`, `RunCount`, `Name`, `Type`, `World`, `IsAlive`; stale (its members throw) once the system is removed. |
-| `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `ChunkRows = n`, `Slices = N`, `SimdMode = SimdMode.Auto` / `Require` / `Off`, `FloatMode = FloatMode.Exact` / `Fast`), `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`; `[Consume]` (the visited rows destroyed after the pass); `[ForEntity]` (a static method run on one entity through its generated entry point). |
+| `ForEachAttribute` and its filters | attributes | `[ForEach]` (`Parallel = true`, `ChunkRows = n`, `Slices = N`, `SimdMode = SimdMode.Auto` / `Require` / `Off`, `FloatMode = FloatMode.Exact` / `Fast`), `[With<T>]`, `[Without<T>]`, `[WithAny<T1, T2>]`, `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<T1..Tn>]`, `[RemovedAny<T1..Tn>]`; `[Consume]` (the visited rows destroyed after the pass); `[ForEntity]` (a static method run on one entity through its generated entry point). |
 | `Maybe<T>` | ref struct | An optional component parameter of a `[ForEach]` method: `HasValue`, `Value`. |
 | `ReadOnlyMaybe<T>` | ref struct | The same, read-only: `Value` is `ref readonly`, never stamped, allowed for indexed components; a `Maybe<T>` converts to it. |
 | `[View]` | attribute | On a `ref struct` of `ref` (written), `ref readonly` (read) and `Mut<T>` (written on some rows) component fields with business methods: one entity's components, taken by `[ForEach]` and `[ForEntity]` methods and reached by `entity.AsX()` / `TryGetX(out X)`. |
@@ -192,7 +192,7 @@ A snapshot, a save or a clone of a buffer column copies the elements: O(elements
 | `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | `ref readonly` into the row: nothing is stamped; otherwise as `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M), + S / 64 for tables whose rows must be tested | sums table counts, or counts presence bits (and ticks), 8 words per step with AVX-512 |
 | `world.Any<T1..Tn>(filter)` | O(M + S / 64) worst | stops at the first match |
-| `QueryFilter.Create().With<T>().Without<U>().WithAny<V>()` | O(1) | build once, keep in a `static readonly` field; `WithAny` calls form one "at least one of" set |
+| `QueryFilter.Create().With<T>().Without<U>().WithAny<V, W>()` | O(1) | build once, keep in a `static readonly` field; `WithAny` calls form one "at least one of" set |
 | `filter.Changed<T>(since)` / `[Changed<T>]` | O(1); a pass skips tables, 4,096-row blocks and 64-row words written before `since` | rows whose tracked `T` was written at or after `since` ([change tracking](/en/docs/guide/change-tracking)); one tick per filter |
 | `filter.Removed<T>(since)` / `[Removed<T>]` | as `Changed` | entities that lost a tracked `T` at or after `since` and still lack it; destroyed entities are not reported (the destroy log reports them) |
 | `filter.ChangedAny<T1..Tn>(since)` / `[ChangedAny<T1..Tn>]` | O(n) to build; a pass skips tables none of whose columns of the set was written since `since`, and blocks and words no column wrote | rows where at least one of 2 to 9 tracked components was written at or after `since`; all `ChangedAny` calls of a filter form one set, combined with the other filters by AND; one tick per filter |
@@ -360,8 +360,8 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 
 | API | Complexity | Notes |
 | --- | --- | --- |
-| `world.AddSystem<T>(changesFromNow)` | O(s²), s = systems of its group | returns the `SystemHandle`; calls the `[OnCreate]` method; rebuilds the order and stages (cold); throws if the world has the system already, on an ordering cycle, or `NotSupportedException` for a type no assembly generated code for; `changesFromNow: true`: its first run sees only what is written after the call |
-| `world.RemoveSystem<T>()` | O(s²) | calls the `[OnDestroy]` method; returns whether a system was removed; its handles turn stale |
+| `world.AddSystem<T>(changesFromNow)` | O(s²), s = systems of its group | returns the `SystemHandle`; calls the `OnCreate` method; rebuilds the order and stages (cold); throws if the world has the system already, on an ordering cycle, or `NotSupportedException` for a type no assembly generated code for; `changesFromNow: true`: its first run sees only what is written after the call |
+| `world.RemoveSystem<T>()` | O(s²) | calls the `OnDestroy` method; returns whether a system was removed; its handles turn stale |
 | `world.HasSystem<T>()` / `System<T>()` / `TryGetSystem<T>(out system)` | O(1) | `System<T>` throws when absent; `TryGetSystem` gives false and a default handle |
 | `system.Enabled` / `Error` / `LastRunTick` / `RunCount` / `Stats` / `Name` / `Type` / `World` | O(1) | the world's record of the system; throws `InvalidOperationException` once the handle is stale |
 | `system.IsAlive` | O(1) | false once the system is removed or the world disposed |
@@ -383,10 +383,10 @@ Details: [snapshots](/en/docs/guide/snapshots), [saves](/en/docs/guide/saves),
 | `world.DestroyedSince(since, Span<EntityId> into, out int count)` | O(count) | the entities destroyed at or after `since`, oldest first; false (nothing written) when `since` is older than `DestroyLogOldestTick`: resynchronize; throws when `WorldOptions.DestroyLogCapacity` is 0; allocation-free; owner thread or a thread of a parallel stage |
 | `world.DestroyLogOldestTick` | O(1) | the oldest tick `DestroyedSince` answers for; `ulong.MaxValue` when the log is off |
 | `entity.Describe()` | O(c) | boxed copies of the entity's components, disabled ones marked; allocates (cold) |
-| `world.Dispose()` | O(systems + entities + tables) | the `[OnDestroy]` method of every system in reverse order, then releases storage; every system handle turns stale |
+| `world.Dispose()` | O(systems + entities + tables) | the `OnDestroy` method of every system in reverse order, then releases storage; every system handle turns stale |
 
 `WorldOptions.SystemErrors`: `SystemErrorPolicy.Throw` (default: the exception propagates out of `Update()`, and of
-`Dispose` for `[OnDestroy]`) or `Disable` (the system is switched off and keeps the exception in `system.Error` until it
+`Dispose` for `OnDestroy`) or `Disable` (the system is switched off and keeps the exception in `system.Error` until it
 is enabled again; a failed run still moves `LastRunTick` on). `WorldOptions.MeasureSystems` records every run into
 `system.Stats` (`Runs`, `LastTime`, `TotalTime`, `AverageTime`, `LastAllocated`, `TotalAllocated`, `LastEntities`,
 `TotalEntities`, all O(1) to read) for two timestamp reads and two allocation-counter reads per run (and per helper

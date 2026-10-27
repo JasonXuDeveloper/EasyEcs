@@ -110,7 +110,6 @@ By default an exception in a system propagates out of `Update()`, so a test asse
 [EcsSystem]
 public ref struct ScoreReport
 {
-    [OnUpdate]
     static void OnUpdate(World world) => Console.WriteLine($"kills: {world.Score.Kills}");
 }
 

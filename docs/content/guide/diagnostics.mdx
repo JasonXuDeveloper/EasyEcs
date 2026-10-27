@@ -77,7 +77,7 @@ summing table counts.
 
 ### Time each system [#timing]
 
-With `WorldOptions.MeasureSystems`, every run of a system (its `[OnUpdate]` and its `[ForEach]` methods) is measured:
+With `WorldOptions.MeasureSystems`, every run of a system (its `OnUpdate` and its `[ForEach]` methods) is measured:
 `system.Stats` holds `Runs`, `LastTime`, `TotalTime` and `AverageTime`, plus the bytes and entities below. `world.Systems` lists the systems without allocating, so
 a status page can show the slowest one ([measuring systems](/en/docs/guide/systems#measuring-systems)).
 
@@ -110,7 +110,7 @@ What the entity count means:
 
 - **Matched at the start, not visited one by one.** For a pass that changes structure it is an upper bound: an entity
   destroyed or moved out before its turn is counted but not visited.
-- **`[ForEach]` methods only.** Queries and loops in `[OnUpdate]` are not counted.
+- **`[ForEach]` methods only.** Queries and loops in `OnUpdate` are not counted.
 - **A sliced method reports its share.** A `[ForEach(Slices = N)]` method counts the matching entities divided by N
   ([slices](/en/docs/guide/systems#slices)).
 
@@ -194,7 +194,7 @@ because `[UpdateAfter<RegenSystem>]` says so (`ordered`) and both write `Health`
 they were added in decides whether replication sends this tick's positions or last tick's. That is what a
 **registration-only pair** is: two systems that conflict and that no chain of `[UpdateBefore]` / `[UpdateAfter]`
 orders. Registering them the other way round changes what the later one sees, so give each such pair the order it
-needs, here `[UpdateAfter<MoveSystem>]` on `ReplicateSystem`. A system that `RunsAlone` (an `[OnUpdate]`, a `World` parameter, a `[Consume]` method, an
+needs, here `[UpdateAfter<MoveSystem>]` on `ReplicateSystem`. A system that `RunsAlone` (an `OnUpdate`, a `World` parameter, a `[Consume]` method, an
 `Entity` used for more than its identity) conflicts with every other one and shows as `runs alone`.
 
 `server.DescribeSchedule().ToMermaid()` returns the same schedule as a flowchart, a subgraph per group and per stage,
@@ -540,7 +540,7 @@ Describing the battle server's world for a dashboard, one entity for a debugger 
 | `TrimExcess()` every tick | Tables dropped and rebuilt, growth paid again: allocations on the tick | Call it from a maintenance task ([common mistakes](/en/docs/guide/common-mistakes#trim-every-tick)) |
 | `TrimExcess()` inside a `Query` loop or a `[ForEach]` method | `InvalidOperationException` | [EECS041](/en/docs/guide/analyzer#eecs041): call it between updates |
 | Reading `system.Stats` on the exporter's thread | A struct read while the tick writes it | Publish a copy from the owner thread |
-| Expecting `LastEntities` to count `[OnUpdate]` queries | Only `[ForEach]` passes are counted | Count in `[OnUpdate]` yourself if it matters |
+| Expecting `LastEntities` to count `OnUpdate` queries | Only `[ForEach]` passes are counted | Count in `OnUpdate` yourself if it matters |
 | Leaving a registration-only pair in the schedule | Reordering `AddSystem` calls changes what a system sees | Add `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
 | Leaving `SystemErrorPolicy.Disable` on in tests | A failing system is silently off and the test checks other things | Keep the default `Throw` in tests ([testing](/en/docs/guide/testing#errors)) |
 | Logging `entity.Id.Index` alone | The index is reused by later entities | Log the entity or its `EntityId` (`1000v1`) |

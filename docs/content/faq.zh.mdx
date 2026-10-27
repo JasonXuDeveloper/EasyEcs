@@ -204,7 +204,6 @@ public ref struct ApplyHitsSystem
 [EcsSystem, UpdateAfter<ApplyHitsSystem>]                               // 排在所有读者之后
 public ref struct ClearHitsSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.DestroyAll<Hit>(); // 一次遍历清掉所有消息
 }
 ```
@@ -277,8 +276,8 @@ foreach (var item in world.Query<Position, Velocity>())
 ## 为什么 IDE 说 `[ForEach]` 方法从没被使用？ [#never-used]
 
 你的代码里确实没人调用它：调用它的是生成的代码，经 `[UnsafeAccessor]` 按名字调用，IDE 的“未使用的私有成员”分析器不把这算作使用。
-EasyEcs 对两类 IDE 都有交代：分析器包里带一个诊断抑制器，在 `[ForEach]`、`[ForEntity]`、`[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]`
-方法上隐藏 IDE0051 和 IDE0052（Visual Studio、VS Code、`dotnet build`）；这些特性和 `[EcsSystem]` 还标了 JetBrains 的 `[MeansImplicitUse]`，
+EasyEcs 对两类 IDE 都有交代：分析器包里带一个诊断抑制器，在 `[ForEach]`、`[ForEntity]`、`OnCreate`、`OnUpdate` 和 `OnDestroy`
+方法上隐藏 IDE0051 和 IDE0052（Visual Studio、VS Code、`dotnet build`）；`[ForEach]`、`[ForEntity]` 和 `[EcsSystem]` 还标了 JetBrains 的 `[MeansImplicitUse]`，
 Rider 和 ReSharper 会读它（[D107](/zh/docs/decisions#d107-never-used-warnings)）。如果提示还在，说明项目引用 EasyEcs 时没带上它的分析器
 （包上写了 `ExcludeAssets="analyzers"`，或者引用源码时没把生成器作为 `Analyzer` 引用），这时代码也根本没有生成。
 

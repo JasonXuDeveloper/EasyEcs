@@ -178,7 +178,6 @@ public ref struct WaveSystem
 {
     static int _wave;
 
-    [OnUpdate]
     static void OnUpdate() => _wave++;
 }
 ```
@@ -192,7 +191,6 @@ public record struct Wave(int Number) : ISingletonComponent;
 [EcsSystem]
 public ref struct WaveSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.GetOrAddWave().Number++;
 }
 ```
@@ -208,7 +206,6 @@ Caught by [EECS007](/en/docs/guide/analyzer#eecs007). More in
 [EcsSystem]
 public ref struct KillRewards
 {
-    [OnUpdate]
     static void OnUpdate(World world) { if (world.TryGetSystem<LootSystem>(out var loot)) loot.Enabled = false; }
 }
 ```
@@ -222,7 +219,6 @@ public struct Looted : IComponent;
 [EcsSystem]
 public ref struct LootSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.SetAll(new Looted(), QueryFilter.Create().With<Dead>().Without<Looted>());
 }
 
@@ -843,7 +839,7 @@ if (world.DefaultUpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // e
     world.TrimExcess();
 ```
 
-Caught by [EECS028](/en/docs/guide/analyzer#eecs028) (warning) in an `[OnUpdate]` or a `[ForEach]` method; no rule
+Caught by [EECS028](/en/docs/guide/analyzer#eecs028) (warning) in an `OnUpdate` or a `[ForEach]` method; no rule
 catches it in the host's loop. More in [give memory back after a peak](/en/docs/guide/diagnostics#trim).
 
 ## Threads [#threads]
@@ -1051,14 +1047,13 @@ public record struct Aim(EntityId Target) : IComponent;
 [EcsSystem]
 public ref struct StrikeSystem
 {
-    [ForEach(Parallel = true)]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Off)]   // two values per record: one row at a time
     static void Strike(in Attack attack, in Aim aim, Emit<Hit> hits) => hits.Add(new Hit(aim.Target, attack.Power));
 }
 
 [EcsSystem]
 public ref struct ApplyHitsSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
@@ -1076,7 +1071,6 @@ pass's records per update. Clear what was applied:
 [EcsSystem]
 public ref struct ApplyHitsSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;

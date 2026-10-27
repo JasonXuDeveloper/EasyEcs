@@ -92,7 +92,7 @@ int cleared = world.DestroyAll<Shot>();                          // 所有子弹
 | 遇到被禁用的 `T` | 替换：重新启用，换成新值 | | | |
 | [清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components) | | 移除最后一个时释放退休实体 | 拒绝（抛异常） | |
 
-四个调用都是所有者线程上的结构变更：在两次更新之间、系统的 `[OnUpdate]` 里，或者接收 `Entity` 或 `World` 的 `[ForEach]` 方法里调用
+四个调用都是所有者线程上的结构变更：在两次更新之间、系统的 `OnUpdate` 里，或者接收 `Entity` 或 `World` 的 `[ForEach]` 方法里调用
 （两者都不接收的方法，承诺了不做结构变更）。
 
 ## 完整例子 [#full-example]

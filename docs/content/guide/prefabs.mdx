@@ -229,11 +229,17 @@ public static class Raging
 [EcsSystem]
 public ref struct RageSystem
 {
-    [ForEach]
+    // one change per method: each runs as a vector loop
+    [ForEach, Without<Enraged>]
     static void Rage(Entity goblin, in Health health)
     {
         if (health.Value < 10) goblin.SetEnraged();          // a presence bit: the row stays
-        else goblin.RemoveEnraged();
+    }
+
+    [ForEach, With<Enraged>]
+    static void Calm(Entity goblin, in Health health)
+    {
+        if (health.Value >= 10) goblin.RemoveEnraged();
     }
 }
 ```

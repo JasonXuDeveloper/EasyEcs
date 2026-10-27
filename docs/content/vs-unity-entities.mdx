@@ -36,7 +36,7 @@ apply immediately. This page maps the concepts; it has no benchmarks against Uni
 | `IEnableableComponent`, `SetComponentEnabled` | `entity.Disable<T>()` / `Enable<T>()` | The value stays and queries skip it; no row moves after the first time. |
 | `ICleanupComponentData` | `ICleanupComponent` + the `Retired` tag | `Destroy` retires an entity that has cleanup components: it keeps them until a system removes them. |
 | `SystemAPI.GetSingleton<T>()` | `ISingletonComponent`, a `ref T` parameter of a `[ForEach]` method | Per-world singletons, no entity needed. |
-| `ISystem` / `SystemBase` with `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` | `[EcsSystem]` with `[OnCreate]` / `[OnUpdate]` / `[OnDestroy]` | Systems are stateless: state goes into components or singletons ([EECS007](/en/docs/guide/analyzer#eecs007)). |
+| `ISystem` / `SystemBase` with `OnCreate` / `OnUpdate` / `OnDestroy` | `[EcsSystem]` with `OnCreate` / `OnUpdate` / `OnDestroy` | Systems are stateless: state goes into components or singletons ([EECS007](/en/docs/guide/analyzer#eecs007)). |
 | `SystemAPI.Query<RefRW<A>, RefRO<B>>()` | a `[ForEach]` method taking `ref A`, `in B` | The generator writes the job; `ref` is a write, `in` a read. |
 | `IJobEntity` | a `[ForEach]` method (a generated struct job) | |
 | `ScheduleParallel` | `[ForEach(Parallel = true)]` | Chunks of rows on the thread pool; the analyzer rejects methods that would race ([EECS010](/en/docs/guide/analyzer#eecs010)). |
@@ -44,7 +44,7 @@ apply immediately. This page maps the concepts; it has no benchmarks against Uni
 | `IJobParallelFor` summing into a `NativeReference` (with `[NativeDisableParallelForRestriction]` and `Interlocked`, or a `NativeArray` per thread) | a `Reduce<T>` parameter of a parallel `[ForEach]` method | A partial result per chunk, no atomic per row, combined in row order into a singleton ([reductions](/en/docs/guide/threading#reductions)); EECS060 reports the shared-counter version. |
 | `ComponentLookup<T>` with `[ReadOnly]` in a job | a `Lookup<T>` parameter | `T` of any entity as it was before the pass, by id or by key; the system reads `T`, so it may run in parallel, and EECS059 rejects a method that also writes `T` ([lookups](/en/docs/guide/threading#lookups)). |
 | A `NativeList` allocated per job, or `[NativeSetThreadIndex]` and a list per thread | a `Scratch<T>` parameter | One `T` per method and thread, allocated once, cleared by the row ([scratch](/en/docs/guide/threading#scratch)). |
-| `EntityQuery` with `WithAll` / `WithNone` / `WithAny` | `[With<T>]`, `[Without<T>]`, `[WithAny<T>]`; `QueryFilter` for ad-hoc calls | |
+| `EntityQuery` with `WithAll` / `WithNone` / `WithAny` | `[With<T>]`, `[Without<T>]`, `[WithAny<T1, T2>]`; `QueryFilter` for ad-hoc calls | |
 | Change filter (`WithChangeFilter<T>`) | `ITracked` + `[Changed<T>]` | Per row, not per chunk, and opt-in per component type. |
 | Structural change events | `[Removed<T>]` | The entities that lost a tracked component since the system last ran. |
 | `EntityCommandBuffer` | none | `entity.Set`, `Remove`, `Destroy` apply at once, also mid-pass. |

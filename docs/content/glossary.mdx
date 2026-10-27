@@ -113,7 +113,7 @@ consecutive systems of one set with one call. See [Architecture](/en/docs/archit
 A struct implementing `ISystemGroup`. Systems marked `[UpdateInGroup<G>]` run only on `world.Update<G>()`, so input,
 simulation and persistence can run at their own cadence. Systems without the attribute are in the default group,
 which `world.Update()` runs. A group can filter the entities of all its systems: `[With<T>]`, `[Without<T>]` and
-`[WithAny<T>]` on the group struct, or `ISystemGroupWith<T>` / `ISystemGroupWithout<T>` implemented by the group or an interface
+`[WithAny<T1, T2>]` on the group struct, or `ISystemGroupWith<T>` / `ISystemGroupWithout<T>` implemented by the group or an interface
 it implements (the way a generic interface gives each actor type its own group). See
 [Systems](/en/docs/guide/systems#system-groups).
 
@@ -134,7 +134,7 @@ See [Threading](/en/docs/guide/threading#parallel-systems).
 What a system reads and writes, generated from its `[ForEach]` parameters: a `ref` component or singleton is a
 write, an `in` one a read, a `Mut<T>` parameter a write of `T`, and `[Changed<T>]` or `[Removed<T>]` reads `T`. Two systems conflict when one writes what
 the other reads or writes. A system that can reach the whole world (an `Entity` or `World` parameter, an
-`[OnUpdate]` method, a `[Consume]` method) runs alone. Only systems that do not conflict share a [stage](#stage). See
+`OnUpdate` method, a `[Consume]` method) runs alone. Only systems that do not conflict share a [stage](#stage). See
 [Threading](/en/docs/guide/threading#parallel-systems).
 
 ## Runner [#runner]

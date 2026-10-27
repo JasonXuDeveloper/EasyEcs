@@ -113,7 +113,7 @@ a `Span<T>` takes a run of rows at once; the generator builds the loop and the a
 ### Moving [#moving]
 
 `PlanningSystem` picks the waypoint each NPC heads for: the nearest one it has not reached. It creates the
-`Waypoints` singleton it plans with in `[OnCreate]` and removes it in `[OnDestroy]`. A plan need not be fresh every tick,
+`Waypoints` singleton it plans with in `OnCreate` and removes it in `OnDestroy`. A plan need not be fresh every tick,
 so `[ForEach(Slices = 4)]` spreads it over four runs: each run plans a quarter of the NPCs, and each NPC is planned
 every fourth tick, without a spike on any tick. Most plans end with the goal the NPC already had, and `Goal` is
 replicated, so the method takes a `Mut<Goal>` instead of a `ref Goal`: a `ref` parameter of a tracked component counts

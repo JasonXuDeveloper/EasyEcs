@@ -68,7 +68,7 @@ dotnet add package EasyEcs
 | `new QueryDescription().WithAll<A, B>()` | 方法的组件参数：`static void M(ref A a, in B b)` |
 | `.WithAll<Tag>()`（job 不读的标签） | `[With<Tag>]` |
 | `.WithNone<C>()` | `[Without<C>]` |
-| `.WithAny<C, D>()` | `[WithAny<C>, WithAny<D>]` |
+| `.WithAny<C, D>()` | `[WithAny<C, D>]` |
 | `struct J : IForEach<A>` + `world.InlineQuery<J, A>(in q, ref job)` | `[ForEach]` 方法；系统之外用 `world.ForEach<A, J>(ref job, in filter)`，实现 `IForEach<A>.Execute` |
 | `IForEachWithEntity<A>` + `InlineEntityQuery` | 一个 `Entity` 参数：`static void M(Entity e, ref A a)` |
 | chunk 遍历（`GetChunkIterator`、`chunk.GetSpan<T>()`） | 批量方法：`static void M(Span<A> a, ReadOnlySpan<B> b)` |
@@ -248,7 +248,6 @@ public ref struct LifetimeSystem
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.WorldStats.Tick++;
 }
 ```

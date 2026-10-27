@@ -239,7 +239,7 @@ source world, so readers there see the entities leave.
 ### Unloading a plugin's types [#remove-types]
 
 `world.RemoveTypes(assembly)` (or `RemoveTypes(context)` for every assembly of an `AssemblyLoadContext`) removes
-everything of the plugin from the world: its systems (their `[OnDestroy]` runs), singletons, indexes and groupings, and
+everything of the plugin from the world: its systems (their `OnDestroy` runs), singletons, indexes and groupings, and
 its components from every entity. The entities stay, without those components. Tables that had such a column are
 dropped with every cache naming them, so the world holds no reference to the assembly. Once every world removed it,
 the collectible context can unload; when it does, EasyEcs forgets the types' save ids and reuses their component

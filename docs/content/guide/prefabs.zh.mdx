@@ -209,11 +209,17 @@ public static class Raging
 [EcsSystem]
 public ref struct RageSystem
 {
-    [ForEach]
+    // 每个方法一种变更：各自跑向量循环
+    [ForEach, Without<Enraged>]
     static void Rage(Entity goblin, in Health health)
     {
         if (health.Value < 10) goblin.SetEnraged();          // 一个存在位：行不动
-        else goblin.RemoveEnraged();
+    }
+
+    [ForEach, With<Enraged>]
+    static void Calm(Entity goblin, in Health health)
+    {
+        if (health.Value >= 10) goblin.RemoveEnraged();
     }
 }
 ```

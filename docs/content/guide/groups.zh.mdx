@@ -35,13 +35,13 @@ icon: Boxes
 ### 标记组件 [#mark-the-component]
 
 `[Group]` 标出表示实体所属分区的成员，类型是 `int` 或以 `int` 为底层类型的枚举：生成器给组件加上 `IGroup`，并显式实现返回该成员的
-`Group`。类型上的 `[GroupBy]` 让每个 World 都按它分组。
+`Group`。换成 `[GroupBy]` 效果相同，并且让每个 World 都按它分组。
 
 <Tabs items={['你写的', '生成器写的']}>
 <Tab value="你写的">
 
 ```csharp
-[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
+public partial record struct Zone([GroupBy] int Id) : IComponent;
 ```
 
 </Tab>
@@ -77,7 +77,7 @@ public partial record struct Match([Group] int Id) : IComponent;   // 只在 Wor
 world.GroupBy<Match>();                                        // 只调用一次，最好在 World 填满之前
 ```
 
-`[GroupBy]` 标在不是 `IGroup` 组件的类型上，或 `[Group]` 标在不是 `int` 或 `int` 枚举的成员上，都会被报告
+`[GroupBy]` 标在不是组件的类型的成员上，或 `[Group]` 标在不是 `int` 或 `int` 枚举的成员上，都会被报告
 （[EECS068](/zh/docs/guide/analyzer#eecs068)、[EECS036](/zh/docs/guide/analyzer#eecs036)）。
 
 </Step>
@@ -129,7 +129,7 @@ walker.SetZone(2);                                             // 之后由 InGr
 
 ### 在系统里使用分组 [#in-systems]
 
-`[ForEach]` 的过滤条件是特性，写不进分组的值。一次只处理一个分组的系统，在 `[OnUpdate]` 方法里跑一个结构体 job，分组号从单例里读：
+`[ForEach]` 的过滤条件是特性，写不进分组的值。一次只处理一个分组的系统，在 `OnUpdate` 方法里跑一个结构体 job，分组号从单例里读：
 
 ```csharp
 public record struct ActiveZone(int Id) : ISingletonComponent;
@@ -142,7 +142,6 @@ public struct Regenerate : IForEach<Health>
 [EcsSystem]
 public ref struct RegenerateActiveZone
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var filter = QueryFilter.Create().InZone(world.ActiveZone.Id);
@@ -152,7 +151,7 @@ public ref struct RegenerateActiveZone
 }
 ```
 
-有 `[OnUpdate]` 方法的系统会单独占一个阶段。每次更新都新建过滤条件也很便宜：`QueryFilter` 不持有任何对象引用。
+有 `OnUpdate` 方法的系统会单独占一个阶段。每次更新都新建过滤条件也很便宜：`QueryFilter` 不持有任何对象引用。
 
 ### 哪些操作会遵守分组 [#what-follows]
 
@@ -178,7 +177,7 @@ public ref struct RegenerateActiveZone
 using EasyEcs;
 
 // [GroupBy]：每个 World 都把每个区域的实体放在各自的表里。
-[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;
+public partial record struct Zone([GroupBy] int Id) : IComponent;
 
 public record struct Health(int Value) : IComponent;
 
@@ -222,11 +221,10 @@ public struct SumHealth : IForEach<Health>
 using EasyEcs;
 
 // 只给活跃区域的单位回血。[ForEach] 的特性没法写出分组的值，
-// 所以系统在它的 [OnUpdate] 方法里用带 InGroup 过滤条件的结构体 job 来跑。
+// 所以系统在它的 OnUpdate 方法里用带 InGroup 过滤条件的结构体 job 来跑。
 [EcsSystem]
 public ref struct RegenerateActiveZone
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         int zone = world.ActiveZone.Id;

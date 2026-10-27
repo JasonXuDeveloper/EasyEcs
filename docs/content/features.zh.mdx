@@ -102,7 +102,7 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 ### 系统与 [ForEach] [#systems-and-foreach]
 
 系统是一个只有静态方法的 `[EcsSystem] ref struct`，只做一件事，从来不是对象。`[ForEach]` 方法就是它的整个循环，参数可以是组件（`ref` 写、`in` 读）、单例、`Entity` 和 `World`。
-生成器把每个方法编译成结构体 job，JIT 把它内联到行循环里。标了 `[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]` 的静态方法负责初始化和每次更新的额外工作；World 为每个系统保存一条记录
+生成器把每个方法编译成结构体 job，JIT 把它内联到行循环里。名为 `OnCreate`、`OnUpdate` 和 `OnDestroy` 的静态方法负责初始化和每次更新的额外工作；World 为每个系统保存一条记录
 （启用、错误、tick、统计），并给出指向它的 `SystemHandle`。
 
 - **适合：** 一个 tick 里所有逐实体的逻辑。
@@ -122,12 +122,12 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 
 ### 过滤条件 [#filters]
 
-`[With<T>]` 要求有某个不作为参数传入的组件，`[Without<T>]` 排除一个组件，`[WithAny<T>]` 要求几个里至少有一个，
+`[With<T>]` 要求有某个不作为参数传入的组件，`[Without<T>]` 排除一个组件，`[WithAny<T1, T2>]` 要求几个里至少有一个，
 `[Changed<T>]` 和 `[Removed<T>]` 按变更 tick 选择。临时代码里有同样的 `QueryFilter`。系统分组上可以写 `[With<T>]`、`[Without<T>]`、
-`[WithAny<T>]`，对分组里的所有系统生效；也可以让分组自己或它实现的接口实现 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`。
+`[WithAny<T1, T2>]`，对分组里的所有系统生效；也可以让分组自己或它实现的接口实现 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`。
 这样一个泛型接口就能给每种 actor 类型各配一个带过滤的分组，特性做不到这一点，因为特性里不能写类型参数。
 
-- **适合：** 状态（`[Without<Dead>]`）、角色（`[With<Player>]`）、多选一（`[WithAny<Frozen>, WithAny<Stunned>]`）。
+- **适合：** 状态（`[Without<Dead>]`）、角色（`[With<Player>]`）、多选一（`[WithAny<Frozen, Stunned>]`）。
 - **开销：** 匹配结果按查询形状缓存；不可能匹配的表只跳过一次，部分行缺组件的表按位字一次检测 64 行。
 - **指南：** [查询与过滤](/zh/docs/guide/queries)、[分组过滤](/zh/docs/guide/systems#group-filters)
 
@@ -322,7 +322,7 @@ public ref struct ReplicationSystem
 
 ```csharp
 public partial record struct Team([LookupKey] int Id) : IComponent;
-[GroupBy] public partial record struct Zone([Group] int Id) : IComponent;   // 每个 World 都按它分组
+public partial record struct Zone([GroupBy] int Id) : IComponent;   // 每个 World 都按它分组
 public partial record struct Account([UniqueKey] int Id) : IComponent;
 ```
 

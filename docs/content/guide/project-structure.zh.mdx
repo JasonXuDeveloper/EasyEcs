@@ -173,7 +173,6 @@ public record struct Census(int Entities) : ISingletonComponent;
 [EcsSystem, UpdateInterval(20)]
 public ref struct CensusSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world) => world.GetOrAddCensus().Entities = world.EntityCount;
 }
 ```
@@ -211,7 +210,6 @@ public record struct Inbox(ConcurrentQueue<FireCommand> Commands) : ISingletonCo
 [EcsSystem, UpdateInGroup<InputGroup>]
 public ref struct ReceiveCommandsSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var commands = world.Inbox.Commands;
@@ -365,7 +363,6 @@ namespace MyServer;
 [EcsSystem, UpdateInGroup<InputGroup>]
 public ref struct ReceiveCommandsSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var commands = world.Inbox.Commands;
@@ -411,7 +408,6 @@ namespace MyServer;
 [EcsSystem]
 public ref struct SpawnSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         ref readonly var spawner = ref world.Spawner;
@@ -486,12 +482,11 @@ using EasyEcs;
 
 namespace MyServer;
 
-// 每次更新把时钟推进一格。[OnUpdate] 每次更新执行一次，不是每个实体一次。
+// 每次更新把时钟推进一格。OnUpdate 每次更新执行一次，不是每个实体一次。
 // Game.AddSystems 最后才添加它，所以其他系统看到的都是这次更新开始时的 tick。
 [EcsSystem]
 public ref struct ClockSystem
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         world.Clock.Tick++;

@@ -36,7 +36,6 @@ copy.Value -= 10;
 ref var hp = ref entity.Health;        // a ref into the table
 hp.Value -= 10;
 entity.Health.Value -= 10;             // the same, inline
-entity.Get<Health>().Value -= 10;      // the same, through the generic API
 ```
 
 ### Why a `ref` expires [#why-a-ref-expires]
@@ -130,7 +129,6 @@ public record struct RedemptionInbox(ConcurrentQueue<PotionRedeemed> Queue) : IS
 [EcsSystem]
 public ref struct ApplyRedemptions
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var queue = world.RedemptionInbox.Queue;                              // filled by async code on any thread
@@ -248,7 +246,6 @@ public record struct RedemptionInbox(ConcurrentQueue<PotionRedeemed> Queue) : IS
 [EcsSystem]
 public ref struct ApplyRedemptions
 {
-    [OnUpdate]
     static void OnUpdate(World world)
     {
         var queue = world.RedemptionInbox.Queue;

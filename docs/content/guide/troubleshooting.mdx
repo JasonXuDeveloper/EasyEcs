@@ -71,7 +71,7 @@ the columns), or a job marked `INoStructuralChanges`. The analyzer reports the c
 helper or a handle it could not follow.
 
 **Fix:** record the change as data (a tag, a component, a request entity) and make it in a system or `[ForEach]`
-method that runs alone: one that takes `Entity` or `World`, or an `[OnUpdate]` method.
+method that runs alone: one that takes `Entity` or `World`, or an `OnUpdate` method.
 
 ## Why is my entity "not alive"? [#entity-not-alive]
 
@@ -294,7 +294,7 @@ Check, in this order:
 4. **Its interval is due:** with `[UpdateInterval(N)]`, it runs on every N-th update of its group, first on the N-th,
    shifted by its `Phase`.
 5. **Its filters match:** count what the method needs with `world.Count<T…>(filter)`. The group's filters apply to
-   every method of the group: `[With<T>]`, `[Without<T>]` and `[WithAny<T>]` on the group struct, and `ISystemGroupWith<T>`
+   every method of the group: `[With<T>]`, `[Without<T>]` and `[WithAny<T1, T2>]` on the group struct, and `ISystemGroupWith<T>`
    / `ISystemGroupWithout<T>` from the group or any interface it implements (a generic actor interface carries them). A
    disabled component counts as absent.
 6. **There was something to see:** a `[Changed<T>]` method visits only rows written since its system last ran, and a
@@ -313,7 +313,7 @@ under it, run only when the entity can take the work, and say `false`, without r
    it, unlike `Get`.
 2. **It lacks a component the method takes:** every `ref` or `in` component of the method (every type argument before
    `TJob` of a job) must be present, a disabled component counting as absent. Check with `entity.Has<T1, T2>()`.
-3. **It fails the filter:** a `[Without<T>]` it has, a `[WithAny<T>]` it misses, a `[Changed<T>]` it was not written
+3. **It fails the filter:** a `[Without<T>]` it has, a `[WithAny<T1, T2>]` it misses, a `[Changed<T>]` it was not written
    since, a group it is not in. Try once without the filter to tell this case from the others.
 
 **Fix:** treat `false` as the answer to the request (the actor is gone, the unit is dead) rather than an error, and
@@ -323,7 +323,7 @@ look up the entity again by its `EntityId` when it may have been replaced
 ## Why do my systems not run in parallel? [#not-parallel]
 
 With `ParallelSystems`, a system shares a stage only when its access is known and does not conflict. A system runs
-alone when it takes a `World` parameter or an `Entity` it uses for more than its identity, has an `[OnUpdate]`
+alone when it takes a `World` parameter or an `Entity` it uses for more than its identity, has an `OnUpdate`
 method, has a `[Consume]` method, or has no `[ForEach]` method. Two systems conflict when one writes what the
 other reads or writes, and a `ref` parameter counts as a write even when the body only reads it: use `in`
 ([parallel systems](/en/docs/guide/threading#parallel-systems)). An ordering (`[UpdateAfter<T>]`) also puts the later
@@ -399,10 +399,10 @@ on every run and for any thread count, though not bit for bit the total of the s
 
 ## Why does `EntityRandom` draw the same numbers? [#random-repeats]
 
-A draw is a pure function of (seed, entity, tick, stream). A tick that is not advanced draws the numbers of the last
-step again, and two draws of one stream for one entity in one step are equal
-([EECS088](/en/docs/guide/analyzer#eecs088)). **Fix:** advance `World.EntityRandom.Tick` once per step, in the system
-that advances the simulation's clock, and give each draw of a row its own stream
+A draw is a pure function of (seed, entity, tick, stream). Only `World.Update()` advances the tick: systems run by
+`Update<TGroup>()` alone draw the numbers of the last update again, and two draws of one stream for one entity in one
+step are equal ([EECS088](/en/docs/guide/analyzer#eecs088)). **Fix:** call `World.Update()` once per step (its default
+group may hold no system), and give each draw of a row its own stream
 ([random numbers](/en/docs/guide/threading#entity-random)).
 
 ## Why is a generated member missing? [#member-missing]
