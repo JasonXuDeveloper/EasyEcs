@@ -392,21 +392,21 @@ Docs to-dos (docs pass):
 ## feat-locality-core (L1 + L3 of locality.md: D137, D138; D135 went to WP0b, D136 may go to feat-arm-parity)
 - New guide page (or a section of high-performance.mdx + zh): ordered tables. That the order is inferred for pair
   methods (no attribute), `[OrderBy]` as the override (non-spatial keys), `Interval` / `Margin` (GROMACS's nstlist and
-  buffer), `SortRows<T>`, what a sort costs (RowOrderBenchmark: BenchTable), `world.Blocks<T>()` / `entities.Blocks` /
-  `RowBlocks.Pairs` for hand-written searches until the pair form ships, refs and handles ending at a sort (like any
+  buffer), `SortRows<T>`, what a sort costs (RowOrderBenchmark: BenchTable), `world.Clusters<T>()` / `entities.Clusters` /
+  `RowClusters.Pairs` for hand-written searches until the pair form ships, refs and handles ending at a sort (like any
   structural change), saves keeping the row order and redrawing the boxes at the next update.
 - refs-and-await.mdx + zh: a sort is a structural change at the start of an update (re-acquire refs after it).
 - saves.mdx + zh, snapshots.mdx + zh: the row order is kept, boxes redrawn (D137).
 - analyzer.mdx + zh: EECS104 (section, table row; EECS range) and EECS041's list (SortRows, OrderRows).
 - high-performance.mdx + zh: Lookup targets ordered by their target read near rows (LookupOrderBenchmark: Chase 2x,
   64-table gathers 4.6x at 1M); `Lanes.RowNumbers` for a row list from a mask; Compact on every ISA (NEON, SSSE3).
-- architecture.mdx + zh: RowOrder in the table diagram (Archetype.Order, Permute), the block side array.
-- glossary + zh: ordered table (有序表), block (块, not the parallel chunk), box (包围盒), margin (余量), cadence (节奏);
+- architecture.mdx + zh: RowOrder in the table diagram (Archetype.Order, Permute), the cluster side array.
+- glossary + zh: ordered table (有序表), cluster (簇, the unit of an ordered table; 块 is the parallel chunk), box (包围盒), margin (余量), cadence (节奏);
   tools/ApiDocs/zh/README.md glossary gets the same rows.
 - changelog / README What's new: ordered tables (the read path), Lanes.RowNumbers, Compact on ARM64.
 - Benchmarks into bench.json: RowOrder, LookupOrder, Pairs (Core*), Compress (CoreCompact) after the reference run.
 - skills/easyecs/SKILL.md (public skill): ordered tables (the order is inferred; `[OrderBy]` only for orders no pair
-  method implies; refs end at a sort), `Blocks` / `Pairs` for hand-written neighbor searches, `Lanes.RowNumbers`.
+  method implies; refs end at a sort), `Clusters` / `Pairs` for hand-written neighbor searches, `Lanes.RowNumbers`.
 - The Native AOT listing of `Lanes.Compact`'s loops on the owner's AOT check (the tables are RVA data now; no class-init
   check expected) and the M4 rerun of `CompressBenchmark` (the 128-bit TBL form against the prototypes' ShuffleTable).
 
@@ -420,10 +420,10 @@ branch (A = 0e206d8 + the NEON prototypes, B/F = this branch).
 
 <details><summary>D137 (en)</summary>
 
-## D137. Tables keep their rows in the order of a key, with a box per block of rows [#d137-ordered-rows]
+## D137. Tables keep their rows in the order of a key, with a box per cluster of rows [#d137-ordered-rows]
 
-**Decision.** A table can keep its rows sorted by a key and draw an axis-aligned box over each block of rows: the
-layout a pair kernel reads (a block of rows against a block, the pairs of blocks found from the boxes), and a side
+**Decision.** A table can keep its rows sorted by a key and draw an axis-aligned box over each cluster of rows: the
+layout a pair kernel reads (a cluster of rows against a cluster, the pairs of clusters found from the boxes), and a side
 effect for every pass that reads other entities: readers sorted by their targets read near records and rows.
 
 - **Who asks.** The order is normally inferred: the setup of a generated method that compares positions within a
@@ -439,13 +439,13 @@ effect for every pass that reads other entities: readers sorted by their targets
   the structural gate, bumping `StorageVersion`. Rows lacking the component sort last. It runs at the start of the
   default group's update every `interval` updates (GROMACS's `nstlist`), or at once with `SortRows<T>()`; both throw
   during a pass (EECS041 lists them). Refs, handles' cached rows and marked rows end at a sort as at any row move.
-- **Blocks.** 8 rows where `Vector256` is hardware, 4 otherwise (ARM64's NEON is 128 bits wide), or the power of two
-  up to 64 a request asks for, so a kernel's block is one register of floats per axis. The sort draws each block's box
-  over `axes` axes of `Point`, widened by the margin; a row that moves into a block between sorts widens that block's
+- **Clusters.** 8 rows where `Vector256` is hardware, 4 otherwise (ARM64's NEON is 128 bits wide), or the power of two
+  up to 64 a request asks for, so a kernel's cluster is one register of floats per axis. The sort draws each cluster's box
+  over `axes` axes of `Point`, widened by the margin; a row that moves into a cluster between sorts widens that cluster's
   box; rows created after the sort wait past `SortedRows` until the next one. The boxes live in a side array of the
-  order (bounded by the table's blocks, released by `TrimExcess`), never in a hot struct. `world.Blocks<T>()` and
-  `EntitySpan.Blocks` hand out `RowBlocks`: the boxes, a block's rows, read-only columns, ids, presence, and
-  `Pairs(reach, into)` / `Pairs(other, reach, into)`, the block pairs whose boxes come within reach (a sweep over the
+  order (bounded by the table's clusters, released by `TrimExcess`), never in a hot struct. `world.Clusters<T>()` and
+  `EntitySpan.Clusters` hand out `RowClusters`: the boxes, a cluster's rows, read-only columns, ids, presence, and
+  `Pairs(cutoff, into)` / `Pairs(other, cutoff, into)`, the cluster pairs whose boxes come within the cutoff (a sweep over the
   boxes sorted by their low side on the first axis, the other sides gathered into that order).
 - **Saves.** A restore or a load keeps the physical row order it finds (a save writes rows in table order) and drops
   the boxes; the next update sorts (rows already in order cost the keys and the boxes) and draws them. Writing the
@@ -470,8 +470,8 @@ about 10 % between A and B are noise. Every row allocates 0 B.
   3.50 / 3.61 against 3.40 / 3.50 ms: within 0-15 % of the copies, without the per-tick copies a live world would need
   (the prototype's `ClustersWithCopies10`). With the core's sort and the pair lists rebuilt every 10 ticks
   (`CoreClustersSort10`), against phase 0's grid read through lookups (its baseline, section 6.1 of the plan): crowd 10k 0.82 / 0.81 ms against 9.95 ms, 100k 9.9 / 10.3 ms against 153 ms (12-15 times); sparse 10k 0.43 / 0.42 ms against 2.15 ms, 100k 5.1 / 5.1 ms against 34.7 ms (5-7 times).
-  The block-pair search was the largest part of a rebuild: gathering the other sides into the sorted order once (instead of copying a table's sides per candidate) took the 100k rebuild from 11.0 / 11.3 to 9.9 / 10.3 ms in a crowd and from 5.77 / 5.75 to 5.08 / 5.14 ms sparse.
-- **Blocks of 16** (`CoreClusters16`, two 8-row blocks per 512-bit kernel step): within 5 % of 8 at 1k and 10k in a
+  The cluster-pair search was the largest part of a rebuild: gathering the other sides into the sorted order once (instead of copying a table's sides per candidate) took the 100k rebuild from 11.0 / 11.3 to 9.9 / 10.3 ms in a crowd and from 5.77 / 5.75 to 5.08 / 5.14 ms sparse.
+- **Clusters of 16** (`CoreClusters16`, two 8-row clusters per 512-bit kernel step): within 5 % of 8 at 1k and 10k in a
   crowd, 22-25 % slower at 1k sparse and at 100k. 8 (4 on ARM64) stays the size; a request can ask for another.
 - **Readers ordered by their targets** (`LookupOrderBenchmark`, round 1 / round 2, measured before the merge of the reworked LookupChase / LookupGather (the same passes, `Steer` then), one table of readers sorted once by
   the target's id): `Lookup` chases across 1M entities 15.7 / 17.8 ms → 7.60 / 7.34 ms; across 100k 890 / 819 →
@@ -485,13 +485,13 @@ about 10 % between A and B are noise. Every row allocates 0 B.
 - **A user-facing attribute as the main entry point**: users would name the key and the cell for every component a
   pair method reads; the generator sees the distance test and the cutoff already. `[OrderBy]` stays for orders no
   method implies.
-- **Hilbert keys**: better locality per block than Morton, more instructions per key; the boxes absorb Morton's jumps
+- **Hilbert keys**: better locality per cluster than Morton, more instructions per key; the boxes absorb Morton's jumps
   and the sort's cost is the permutation, not the keys.
 - **Sorting on every write, or a tree of rows**: GROMACS re-sorts on a cadence; the margin keeps the boxes valid
   between sorts, and a sort of rows already in order costs the keys and the boxes only.
-- **Blocks of 16 rows**: see the numbers.
+- **Clusters of 16 rows**: see the numbers.
 - **Moving only the rows out of order**: a random 1 % churn already moves most rows, so the sort moves every row once.
-- **A box tree for the block pairs** (the prototype's): one walk per block; the sweep over sorted low sides is
+- **A box tree for the cluster pairs** (the prototype's): one walk per cluster; the sweep over sorted low sides is
   simpler, needs no tree to keep, and is parallel-safe (it reads the boxes only).
 - **Saving the order and the boxes**: see Saves.
 
@@ -587,7 +587,7 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
 - **簇。** `Vector256` 有硬件支持时 8 行，否则 4 行（ARM64 的 NEON 宽 128 位），或要求指定的不超过 64 的 2 的幂，
   这样内核的一簇正好是每个轴一个浮点寄存器。排序在 `Point` 的 `axes` 个轴上画出每簇的包围盒，再加上余量；两次排序之间
   移进某簇的行会扩大那簇的包围盒；排序之后新建的行排在 `SortedRows` 之后，等下一次排序。包围盒放在顺序的旁路数组里
-  （以表的簇数为界，`TrimExcess` 释放），从不进热结构。`world.Blocks<T>()` 和 `EntitySpan.Blocks` 给出 `RowBlocks`：
+  （以表的簇数为界，`TrimExcess` 释放），从不进热结构。`world.Clusters<T>()` 和 `EntitySpan.Clusters` 给出 `RowClusters`：
   包围盒、一簇的行、只读列、id、存在位，以及 `Pairs(reach, into)` / `Pairs(other, reach, into)`：包围盒相距在 reach
   之内的簇对（按第一轴低边排序后扫描，其他边按这个顺序收集）。
 - **存档。** 恢复或读档保留它读到的物理行序（存档按表内顺序写行），丢掉包围盒；下一次更新会排序（已经有序的行只花键和包围盒的开销）
@@ -661,13 +661,13 @@ Docs pass:
   (`[Neighbor] in Quarry _` as the neighbors' filter, `[With<Hunter>]` on the rows), self included (exclude with
   `d2 == 0` or the entity), ties broken by the entity (lower index wins), the vector loop and when it stays one pair at
   a time (the neighbor's `Entity`, lookups, reductions, structural changes: Kernel's reasons), costs (O(n) boxes per
-  pass, a sweep of the windows when one left its box, the pairs within reach), pitfalls (no Parallel / Slices / change
+  pass, a sweep of the clusters when one left its box, the pairs within reach), pitfalls (no Parallel / Slices / change
   filters / [Consume]; the row's write must not be a component the neighbor reads), the "keep the current target"
   pattern (a [ForEach] with a Lookup before the pair method leaves a hint in the target component).
 - **Analyzer list**: EECS105 (Error), EECS106 (Warning), EECS107 (Info, no code fix and why) on the analyzer page,
   en + zh.
 - **api.mdx complexity rows**: `[Neighbor]` (a pass: O(rows + neighbors) to draw boxes, O(w log w) sweep when a
-  window left its box, O(pairs within reach + window pairs) per pass). `IPairJob`, `PairRun`, `World.ForPairs` are
+  cluster left its box, O(pairs within reach + cluster pairs) per pass). `IPairJob`, `PairRun`, `World.ForPairs` are
   EditorBrowsable(Never), so ApiDocs skips them (generated code calls them).
 - **example.mdx / BattleServer** (L4, finish phase): the battle server gains a pair method where it searches
   neighbors (the AOI or separation); keep its regions.
@@ -692,20 +692,121 @@ L4 (moved to the finish phase by the owner, 2026-10-26): what it needs from L2.
 Decision record drafts (numbered at merge, after the feat-prefetch-all drafts):
 - **D139 The pair form.** Decision: a `[ForEach]` method with `[Neighbor] in` parameters runs per pair within the
   cutoff its first test names; the generator reads the test (distance forms above, cutoff values) and writes the
-  order (Morton keys over the axes the test names, cell = the largest reach), the pair lists (windows of
+  order (Morton keys over the axes the test names, cell = the largest reach), the pair lists (clusters of
   `Vector<float>.Count` rows, boxes drawn every pass against the kept boxes widened by an adaptive margin, a sweep of
-  the A boxes widened by their windows' reach against raw B boxes when one left) and the vector loop (a window's rows
+  the A boxes widened by their clusters' reach against raw B boxes when one left) and the vector loop (a cluster's rows
   in lanes, each neighbor broadcast, the body masked: GROMACS's cluster pair with i in lanes). Why: users write what
   one pair does, as the owner's rule (locality.md 3.4) asks; every pair order per lane is the scalar order (B tables
   in query order, rows in order), so the vector loop and the method per pair are bit for bit equal and the pruning is
   invisible. Considered: lists per entity (Verlet lists; the 4 B per neighbor per entity, and no vector form), the
-  8 x 8 kernel over L1's blocks (CoreClusters: needs the blocks sorted every pass and lists cached by the caller; the
-  windows here are the table's own rows in order and need no sort to stay right), a grid of cells (the baseline), a
+  8 x 8 kernel over L1's clusters (CoreClusters: needs the clusters sorted every pass and lists cached by the caller; the
+  clusters here are the table's own rows in order and need no sort to stay right), a grid of cells (the baseline), a
   code fix from hand-written grids (EECS107 is Info without a fix: the grid's upkeep and its readers go with it, which
   a fix cannot see). Numbers: PairsBenchmark Generated / GeneratedRows vs GridLookups / CoreClusters (final report).
 - **D140 Ties and the nearest form.** The pair order is the tables' rows (not entities); a nearest search breaks ties
   by `EntityId.Index` so its result does not depend on the order; "keep the current target" is a hint in the
   component written by a pass before the pair method, never state in the system.
+
+## feat-pairs-2 (L2 leftovers: backlog item 1)
+
+What shipped (code), each with its tests and the analyzer's messages:
+- **Writes of the neighbor** (`[Neighbor] ref T`, 1cdc80f): the pairs run one at a time in the order of the tables'
+  rows (a pickup), the written neighbor rows stamped (`PairRun.StampOther`); EECS105 reports a neighbor component the
+  row reads or writes and one taken twice; EECS025 a `[Neighbor] ref` only read (fix: `in`).
+- **Parallel pair passes** (`[ForEach(Parallel = true)]` on a pair method that writes no neighbor, d105c5e):
+  `World.ForPairsParallel`, chunks of whole words of clusters, bit for bit the serial pass; `IPairJob.Stamp` stamps
+  the rows after the chunks. PairsBenchmark `GeneratedParallel` 1.7-2.6x the serial pass, 0 B (92e71e9).
+- **EECS107's fix** (356aa40, ef5f588): a mechanical neighbor search (candidate ids through `Lookup<T>`, or a walk of
+  `world.Read` / `Query` of other entities) rewritten as the pair method; Warning with the fix when mechanical, Info
+  otherwise.
+- **Lists of each row's neighbors** (Verlet lists, 0cad100, b355f64): a run may carry each row's list instead of its
+  cluster's ranges, picked by the estimated cost (`PairState.Lists`, internal, Auto by default); bit for bit the
+  ranges.
+- **`Reduce<T>` and `Mut<T>` in pair methods** (VoxelServer GA1, 93264a3): `ref Reduce<T>` (so `[Accumulate]`
+  totals) serial and parallel, each chunk's copy of the job combined in chunk order (`IPairJob.Merges` / `Merge`);
+  a component of the row as `Mut<T>` (`Mut<DynamicBuffer<T>>` included) next to `[Neighbor] ref` writes, stamping
+  only the rows it writes (`PairRun.MutRows`); a parallel pair method with a `Mut<T>` is EECS105 (take it by `ref`, or
+  drop Parallel). Both keep the pairs one at a time (EECS055 names the parameter).
+- **Renames** (owner-approved): the ordered table's block is a cluster (`RowClusters`, `ClusterPair`, `world.Clusters<T>()`,
+  `EntitySpan.Clusters`, `RowOrder.DefaultClusterSize`); the pair run's window is a cluster and
+  its reach the cutoff (`PairRun.ClusterSize`, `CutoffPerRow`, `CutoffSquared`, `CutoffsSquared`, `Cutoff`).
+
+Measured and not shipped (numbers in `locality.md` 6.6):
+- Lookup gathers under `SimdMode.Auto` (backlog item 1, the owner's 2026-10-26 call): still slower in several cases
+  with L1's order; they stay on request (D131 stands).
+- The hoist of the run's end into a local in the generated pair loops: a wash in two rounds; the 5-8 % serial
+  regression on sparse maps seen once is within the job's noise in four later runs.
+- The prefetch of the neighbors' clusters `PairRun.PrefetchDistance` (4) ahead behind a `CacheSizes` gate: slower
+  in every case of two rounds, the table past the 260 MiB last-level cache (16M rows, 512 MB) included; built in a
+  scratch worktree only, never on the branch.
+- The nearest search through a flat grid of clusters in rings (the prototype of 6.2): 1.4-1.5x the box tree on the
+  spread map, 1.1-1.2x slower packed; the tree stays, and the nearest form is the pair method anyway.
+
+Migration (the docs pass; pre-1.0 renames, no `[Obsolete]` aliases): `RowBlocks` -> `RowClusters`,
+`BlockPair` -> `ClusterPair`, `world.Blocks<T>()` -> `world.Clusters<T>()`, `EntitySpan.Blocks` ->
+`EntitySpan.Clusters`, `RowBlocks.Pairs(reach, ...)` -> `RowClusters.Pairs(cutoff, ...)`, `RowOrder.DefaultBlockRows`
+-> `DefaultClusterSize` (and the internal `OrderRows(..., blockRows)` -> `clusterSize`); the hidden `PairRun` members the generator calls (window -> cluster,
+reach -> cutoff) need no user change. The migration guide's section of the coming version, en + zh, and a changelog
+"needs code changes" entry linking it. `[GaussSeidel]` (formerly proposed as `[RedBlack]`) is the name to use in
+these notes and in any later page; nothing ships under it yet.
+
+Docs pass (guide/pairs.mdx + zh, the section listed under feat-locality-pairs, extended):
+- Writes of the neighbor: `[Neighbor] ref` for a pickup, the order (tables' rows), what EECS105 refuses and why, the
+  stamps of the written neighbors; no Parallel with it.
+- Parallel pair methods: when they pay (the parallel pass 1.7-2.6x), bit for bit the serial pass, no `[Neighbor]
+  ref`, no `Mut<T>`.
+- Results of a pair pass: `ref Reduce<T>` and `[Accumulate]` totals in a pair method; parallel results are combined in
+  chunk order, so an associative reduction gives the serial result; a float sum in parallel depends on the chunking
+  (as in other passes: FloatMode / ChunkRows, D125).
+- `Mut<T>` of the row in a pair method: only the rows written are stamped (against `ref`, which stamps every row the
+  pass runs for); not in parallel.
+- The vector loop stays one pair at a time with a `[Neighbor] ref`, the neighbor's `Entity`, `Reduce<T>` or `Mut<T>`
+  (EECS055's reasons).
+- Lists of neighbors: none to write; what the pass picks and why (ranges for the vector loop, lists where one pair at
+  a time runs on sparse maps), no setting.
+- analyzer.mdx + zh: EECS105's new cases (neighbor read and written, taken twice, Parallel with `[Neighbor] ref` or
+  `Mut<T>`), EECS107 Warning with its fix (the two searches it rewrites) or Info, EECS025 on a `[Neighbor] ref` only
+  read.
+- api.mdx: no new public user-facing name (the new members are on EditorBrowsable(Never) types the generator calls;
+  ApiDocs skips them).
+- The public skill: a neighbor search is a pair method; writes of the neighbor, results and `Mut<T>` in it.
+- VoxelServer `Pickup` (L4, finish phase): now buildable as a pair method writing `[Neighbor] ref` the item, the
+  inventory as `Mut<DynamicBuffer<ItemStack>>` (NeighborTests.AMutOfTheRowStampsOnlyTheRowsItWrites is that shape).
+
+Decision record drafts (numbered at merge, after D139 / D140):
+- **Pair methods write their neighbor one pair at a time.** Decision: `[Neighbor] ref T` runs the pairs in the order
+  of the tables' rows, never in lanes or chunks, and EECS105 refuses what would make a row's view depend on that
+  order. Why: a pickup has to decide who takes an item; the rows' order is the only order both forms share.
+  Considered: an Emit<T> record resolved by a second pass (more code for users, a frame of latency), lanes with
+  conflict detection (CUDA atomics: no ordering, nothing bit for bit).
+- **Parallel pair passes split the rows, not the pairs.** Decision: chunks of whole 64-row words of clusters, every
+  chunk reading all neighbors, each row written by its own chunk only; stamps after the chunks. Why: bit for bit the
+  serial pass with no atomics, no write conflicts. Considered: Newton's third law (half the pairs, a write to j:
+  conflicts and a different summation order), a chunk per pair of tables (too few chunks). Numbers: 92e71e9.
+- **Lists of neighbors are picked by their cost per pass.** Decision: ranges by default where the vector loop runs;
+  each row's list (Verlet) where one pair at a time runs and the list's entries cost less than the ranges'
+  candidates, estimated on 64 sampled clusters every 16th draw. Why: the 8-lane loop tests a cluster's neighbors in
+  one step, so lists (which hold rows, not clusters) never pay there; one pair at a time tests every candidate, so
+  lists pay on sparse maps. Numbers: `locality.md` 6.6. Considered: lists always (3-5x slower than the 8-lane loop),
+  every cluster counted at every draw (27 % of the pass at 100k), a setting for users (the pass knows its costs).
+- **Results of a parallel pair pass are combined in chunk order.** Decision: each chunk runs a copy of the job made
+  when the pass began and the copies are combined in chunk order after each pair of tables. Why: the same rule as
+  other passes' reductions (D125): the result depends on the code and the layout, never on the thread count.
+- **The pair pass does not prefetch the neighbors' clusters.** Decision: no prefetch of the clusters ahead, on any
+  gate. Why: the neighbors' clusters of a row cluster are the clusters next to it in the sorted table, which the
+  hardware prefetchers already stream; software prefetches only add instructions. Numbers (PairPrefetchBenchmark, ms,
+  rounds 1 / 2, Off against On): 1M crowd 105 / 96.5 against 125 / 122, 4M crowd 406 / 393 against 480 / 490, 16M
+  crowd (past the last-level cache) 1,620 against 1,947 (round 2), sparse alike. Considered: the L2 gate, the last-level
+  gate, another distance (each case slower at the distance tried; the gap does not shrink with size).
+- **Lookup gathers stay on request under `SimdMode.Auto`** (D131 measured again, with L1's ordered rows). Numbers
+  (LookupGatherBenchmark, one round, the vector loop's time over the rows', 1k / 100k / 1M rows, three bodies): one
+  table 0.48-0.85, four tables 0.48-0.88, 64 tables 0.93-1.53 (1.19-1.53 at 1M), 1,000 tables 0.90-1.43 (1.31-1.43 at
+  1M), dead targets 0.61-1.24 (slower at 1k), presence bits 0.89-1.32 (1.26-1.32 at 1M); LookupOrder's unordered 1M
+  gather 1.49x slower than per row, the ordered one 1.9x faster. A case slower, so the owner's condition (no case slower) is not met.
+
+Names for the owner (new public members, all on EditorBrowsable(Never) types the generator calls): `PairRun.First`,
+`End`, `StampOther`, `Listed`, `Near`, `MutRows`; `IPairJob.Stamp`, `Width`, `Merges`, `Merge<TSelf>`;
+`World.ForPairsParallel`; EECS107's fix title "Make it a pair method".
 
 ## feat-prefetch-all: every chase the generated code can prefetch, SVE's prefetch on ARM64, the core's id lists
 
