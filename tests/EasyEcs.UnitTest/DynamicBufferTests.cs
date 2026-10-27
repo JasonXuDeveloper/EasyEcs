@@ -664,11 +664,19 @@ public class DynamicBufferTests
             own = StoreOf(e);
         }
 
-        world.Capture(snapshot);                                          // captured again into the same copy
+        world.Capture(snapshot);                                          // captured again into the same copy, in sync:
+        world.Capture(snapshot);                                          // nothing written since, nothing copied or shared
+        Assert.That(StoreOf(e).Shares, Is.Zero);
+        Assert.That(StoreOf(e), Is.SameAs(own));
+        e.Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(4);         // written: the next capture copies the elements
         world.Capture(snapshot);
+        Assert.That(StoreOf(e), Is.SameAs(own));
+        e.Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(1);
+        world.Restore(snapshot);
+        Assert.That(Values(e), Is.EqualTo(new[] { 4, 2 }));
+        e.Get<DynamicBuffer<Stock>>().AsSpan()[0] = new Stock(1);
+        var second = world.Capture();                                     // a new snapshot shares the list
         Assert.That(StoreOf(e).Shares, Is.EqualTo(1));
-        var second = world.Capture();
-        Assert.That(StoreOf(e).Shares, Is.EqualTo(2));
         e.Get<DynamicBuffer<Stock>>().Clear();                            // a shared list is let go, not emptied
         Assert.That(e.Read<DynamicBuffer<Stock>>().Count, Is.Zero);
         world.Restore(second);

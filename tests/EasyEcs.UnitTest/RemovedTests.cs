@@ -157,7 +157,10 @@ public class RemovedTests
         world.Update();
         ulong since = world.ChangeTick;
         Assert.That(world.Count<Seen>(QueryFilter.Create().Removed<Armor>(since)), Is.Zero);
-        world.Restore(snapshot);                                     // like Changed: a restore re-sends everything
+        world.Restore(snapshot);                                     // in sync: nothing removed or added since
+        Assert.That(world.Count<Seen>(QueryFilter.Create().Removed<Armor>(since)), Is.Zero);
+        world.CreateEntity(new Armor(2), new Seen());                // a row more in its table: rewritten whole, and like
+        world.Restore(snapshot);                                     // Changed, every row re-sent
         Assert.That(world.Count<Seen>(QueryFilter.Create().Removed<Armor>(since)), Is.EqualTo(1));
     }
 
