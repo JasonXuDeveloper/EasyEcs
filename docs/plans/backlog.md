@@ -96,39 +96,35 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 5. [ ] **Generated code tuned for the machine** (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
        accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
        prefetch / streaming stores.
-6. [ ] **Prefetched lookup chases with a size gate** (built on `feat-prefetch-gate`: row and vector forms; left: the
-       owner's runs of `LookupChaseGateBenchmark` on a 32 MiB-LLC x86 box and the M4, then index probes `TryFind(key.F)`
-       (a prefetch helper per ValueIndex representation) and relation targets (a chase per buffer element), the
-       parallel row form (a twin that keeps ForEachParallel's per-row chunks), lambda passes and fused walks; see
-       `borrowed-ideas.md` 5) (decided by the owner's rule "a faster case ships, a slower one
-       never": 1.29-1.36x at 16M, slower in cache): the generated row and vector forms prefetch `k` rows ahead
-       (record, then row; k = 8 rows / 16 for vectors, from the screen) only when the target table's records and
-       column are past the last-level cache, so a world in cache runs today's code. .NET has no public API for the
-       cache size; read it once per process the way the runtime's own GC does for its gen0 budget
-       (`gcenv.windows.cpp` / `gcenv.unix.cpp`, GetLogicalProcessorCacheSizeFromOS): Windows
-       `GetLogicalProcessorInformationEx(RelationCache)`, Linux `/sys/devices/system/cpu/cpu0/cache/index*/size`
-       (then `sysconf(_SC_LEVEL3_CACHE_SIZE)`), macOS `sysctl hw.l3cachesize`, else `hw.perflevel0.l2cachesize`.
-       Anything unknown (WebAssembly, an OS not listed, a read that fails or returns 0) means off: today's code.
-       Prefetch runs only where `Sse.IsSupported` (x86); ARM64 has no prefetch intrinsic in .NET 10 (SVE only), so
-       the gate is off there and the read is never made. Not `GC.GetConfigurationVariables()["GCGen0MaxBudget"]`:
-       derived from the cache, but configurable and not a contract. Then relation targets and
-       `[ForEach]`-key index probes (`TryFind(key.F)`), the probe form scalar group prefetching won at 16M keys.
-       Proof: LookupChaseBenchmark 1k / 1M / 16M not slower anywhere, faster past the cache; the owner re-measures on
-       a 32 MiB-LLC machine and the M4. Generator files: after the ARM parity agent merges (SystemGenerator, Kernel.Lookups).
-   ARM64 (owner, 2026-10-26: "is there another instruction or the TLB instead?"): .NET 10 exposes no PRFM (only
-   SVE's PRFB/PRFD, and the M4 has no non-streaming SVE), so the candidate is a plain load issued ahead (record of row
-   i + k loaded into a small ring and used k rows later; the row touched from it k / 2 rows later): unlike PRFM it
-   holds retirement until it arrives, so it pays only if the M4's out-of-order window does not already overlap the
-   misses. A benchmark pair (`LookupChase` touch-ahead vs today) for the owner's M4; ships only if faster there and
-   not slower in cache. Not taken: a native PRFM stub (a native binary per RID in a managed package; a call per
-   prefetch), Apple's data-memory-dependent prefetcher (keys on pointer-like 64-bit values, which an `EntityId` is
-   not). TLB: macOS arm64 keeps 16 KiB pages with no user superpages; Linux arm64 and x86 get huge pages through
-   #164 (NativeMemory 2 MiB + madvise). The layout answer works everywhere: L1's readers ordered by target halved
-   the 1M chase without any prefetch.
+6. [ ] **Prefetched lookup chases with a size gate** (`feat-prefetch-gate`: row and vector forms; `feat-prefetch-all`,
+       ready to merge: index probes, relation targets, parallel row methods, fused walks and pairs, lambda passes,
+       `World.DestroyEntities`' id list, SVE's PRFB on ARM64; `borrowed-ideas.md` 5, item 1; decision drafts and docs
+       to-dos in `docs-todos.md`, "feat-prefetch-all"). The owner's rule "a faster case ships, a slower one never":
+       16M 1.28-1.77x across the forms (a shared key's Count 1.04-1.19x), in the cache today's code. A pass prefetches
+       `k` rows ahead (record, then row; a probe's slot or bucket, then entry; k = 8 rows / 16 for vectors) only when
+       the memory it reads is past the last-level cache (`LastLevelCache`, read once per process as the GC reads it:
+       Windows `GetLogicalProcessorInformationEx(RelationCache)`, Linux the largest sysfs `index*/size` then
+       `sysconf(_SC_LEVEL3_CACHE_SIZE)`, macOS `hw.l3cachesize` else `hw.perflevel0.l2cachesize`; unknown means off).
+       It reads and prefetches only where a prefetch exists (`Prefetching.IsSupported`: x86 SSE, ARM64 SVE).
+       Left, the owner's: `LookupChaseGateBenchmark` and the prefetch classes on a 32 MiB-LLC x86 box; the M4's
+       loads-ahead pair (`LookupChaseLoadAheadBenchmark`, below); approve the hidden names `LookupExtensions.Probes`
+       and `LookupExtensions.PrefetchKey`; a gate per form on the L2 (`owner-review.md`).
+   ARM64 without SVE (the M4; owner, 2026-10-26: "is there another instruction or the TLB instead?"): .NET 10 exposes
+   no PRFM (only SVE's PRFB/PRFD, and the M4 has SVE in streaming mode only), so the candidate is a plain load issued
+   ahead (`Locality/Chase.cs` `LoadAhead`: the record of row i + k loaded into a ring, the row touched from it k / 2
+   rows later). On x86 it is 1.7x slower than the plain rows at 16M (a load that misses holds retirement), so it is not
+   emitted; it ships only if the M4 shows it faster past the cache and not slower in it. The owner's run (zsh, the
+   filters an array):
+   `filters=('*LookupChaseLoadAheadBenchmark*' '*LookupChaseGateBenchmark*'); dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter "${filters[@]}"`.
+   Not taken: a native PRFM stub (a native binary per RID in a managed package; a call per prefetch), Apple's
+   data-memory-dependent prefetcher (keys on pointer-like 64-bit values, which an `EntityId` is not). TLB: macOS
+   arm64 keeps 16 KiB pages with no user superpages; Linux arm64 and x86 get huge pages through #164 (NativeMemory
+   2 MiB + madvise). The layout answer works everywhere: L1's readers ordered by target halved the 1M chase without
+   any prefetch.
 7. [ ] **Borrowed ideas** (`borrowed-ideas.md`): ghost rows between
        worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
        owner: records in the docs pass). Vertical batch probes dropped after the 16M re-measure (record in the docs
-       pass); scalar group prefetching of probes moves into item 6.
+       pass); scalar group prefetching of probes is built in item 6 (index probes).
 8. [ ] The rest of "Later" below.
 
 ## Done this round (for the record)

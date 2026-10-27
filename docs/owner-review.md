@@ -13,3 +13,15 @@ leave this file; it is not published on the site.
   sample (ChunkRead / ChunkSave). Would change: the same shape repeated in user code that is not a lesson.
 - **G11, a helper for the steady-state allocation check**: not done: it is test plumbing of one sample (Host/Steady.cs).
   Would change: a second sample or users asking for it.
+
+## Prefetch gates (2026-10-27, feat-prefetch-all, `docs/plans/borrowed-ideas.md` 5, item 1)
+
+- **A gate per form on the L2 instead of the last-level cache**: not done: one rule (the memory a pass reads past the
+  last-level cache) and this machine's L3 (260 MiB) is larger than any machine the gate would decide differently on.
+  Forced on at 1M, inside the L3, a prefetch still pays for a fused walk (18.1 against 11.5 ms), `DestroyEntities`
+  (3.96 / 3.02), a parallel probe (5.54 / 4.92) and a buffer chase (41.6 / 39.3), and costs for a probe (FindLogin
+  20.1 / 23.0, CountClan 12.4 / 14.4). Would change: the owner's 32 MiB-LLC x86 run of the prefetch classes showing
+  the walk and id-list forms faster with the gate forced on at sizes Auto leaves off, and no probe slower.
+- **Loads issued ahead on ARM64 without SVE** (the M4): not emitted: 1.7x slower than plain rows on x86 at 16M.
+  Would change: the owner's M4 run of `LookupChaseLoadAheadBenchmark` showing LoadAhead faster than Rows at 16M and
+  not slower at 1k (command in `backlog.md` item 6).
