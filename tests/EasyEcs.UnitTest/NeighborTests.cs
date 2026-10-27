@@ -18,6 +18,7 @@ public partial record struct PairReach(float Value) : ISingletonComponent;
 public partial record struct PairTarget(EntityId Id, float Distance, bool Held) : IComponent;
 public partial record struct PairLoot(bool Taken, int By, int Order) : IComponent, ITracked;
 public partial record struct PairBag(int Count) : IComponent;
+public partial record struct PairHeat(int Value) : IComponent, ITracked;
 
 /// <summary>Pair methods ([Neighbor]): what the tests run against the pairs a loop over both sides would visit.</summary>
 public static class Neighbors
@@ -136,6 +137,58 @@ public static class Neighbors
         bag.Count++;
     }
 
+    /// <summary><see cref="Separate"/> on several threads (the vector loop over each chunk's windows).</summary>
+    [ForEach(Parallel = true)]
+    public static void SeparateParallel(in PairSpot p, in PairDrift v, ref PairShove push, [Neighbor] in PairSpot q, [Neighbor] in PairDrift u)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= Range * Range || d2 == 0) return;
+        float w = Range * Range - d2;
+        push.X += w * (dx + Drag * (u.X - v.X));
+        push.Y += w * (dy + Drag * (u.Y - v.Y));
+    }
+
+    /// <summary><see cref="SeparateRows"/> on several threads (one pair at a time).</summary>
+    [ForEach(Parallel = true)]
+    public static void SeparateRowsParallel(in PairSpot p, in PairDrift v, ref PairShove push, [Neighbor] in PairSpot q, [Neighbor] in PairDrift u, [Neighbor] Entity other)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= Range * Range || d2 == 0 || other.Id.Index < 0) return;
+        float w = Range * Range - d2;
+        push.X += w * (dx + Drag * (u.X - v.X));
+        push.Y += w * (dy + Drag * (u.Y - v.Y));
+    }
+
+    /// <summary><see cref="Hunt"/> on several threads: a cutoff per row, the neighbor's entity.</summary>
+    [ForEach(Parallel = true)]
+    [With<PairHunter>]
+    public static void HuntParallel(in PairSpot p, in PairSight sight, ref PairPrey prey, [Neighbor] in PairSpot q, [Neighbor] in PairQuarry _, [Neighbor] Entity other)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= sight.Range * sight.Range || d2 > prey.Distance || d2 == prey.Distance && other.Id.Index >= prey.Index) return;
+        prey = new PairPrey(other.Id.Index, d2);
+    }
+
+    /// <summary><see cref="Count"/> on several threads: the cutoff from a singleton.</summary>
+    [ForEach(Parallel = true)]
+    public static void CountParallel(in PairSpot p, ref PairCount near, [Neighbor] in PairSpot q, in PairReach reach)
+    {
+        float dx = q.X - p.X;
+        float dy = q.Y - p.Y;
+        if (dx * dx + dy * dy < reach.Value * reach.Value) near.Value++;
+    }
+
+    /// <summary>A tracked component of the row written on several threads: every row the pass runs for is stamped.</summary>
+#pragma warning disable EECS053 // the point: a ref parameter stamps every row the pass runs for
+    [ForEach(Parallel = true)]
+    public static void Heat(in PairSpot p, ref PairHeat heat, [Neighbor] in PairSpot q)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y;
+        if (dx * dx + dy * dy >= Range * Range) return;
+        heat.Value++;
+    }
+#pragma warning restore EECS053
+
     [ForEach]
     public static void ResetLoot(ref PairLoot loot) => loot = default;
 
@@ -160,9 +213,9 @@ public static class Neighbors
 /// </summary>
 public class NeighborTests
 {
-    private static World Crowd(int count, float extent, int seed, bool tables = false)
+    private static World Crowd(int count, float extent, int seed, bool tables = false, int threads = 0)
     {
-        var world = new World();
+        var world = threads > 0 ? new World(new WorldOptions { MaxDegreeOfParallelism = threads }) : new World();
         var random = new Random(seed);
         world.Reserve<PairSpot, PairDrift, PairShove>(count);
         for (int i = 0; i < count; i++)
@@ -454,6 +507,110 @@ public class NeighborTests
             {
                 Neighbors.Reset(world);
                 Neighbors.Separate(world);
+                world.Update();
+            }
+        }), Is.EqualTo(0));
+    }
+
+    // Equal entry by entry: the first difference named (a large dictionary's mismatch message takes minutes).
+    private static void Same(Dictionary<EntityId, PairShove> got, Dictionary<EntityId, PairShove> expected, string what)
+    {
+        Assert.That(got.Count, Is.EqualTo(expected.Count), what);
+        int wrong = 0;
+        string first = "";
+        foreach (var (id, push) in expected)
+            if (!got.TryGetValue(id, out var other) || other != push)
+            {
+                if (wrong++ == 0) first = $"{id}: {other} instead of {push}";
+            }
+        Assert.That(wrong, Is.Zero, $"{what}: {wrong} rows differ, first {first}");
+    }
+
+    [TestCase(1, 30000, 60f)]
+    [TestCase(4, 30000, 60f)]
+    [TestCase(4, 20000, 6f)]   // dense: heavy windows
+    [TestCase(4, 900, 10f)]    // one chunk
+    public void ParallelPassesEqualTheSerialOnesBitForBit(int threads, int count, float extent)
+    {
+        using var world = Crowd(count, extent, count, tables: true, threads: threads);
+        for (int pass = 0; pass < 3; pass++)
+        {
+            Neighbors.Reset(world);
+            Neighbors.Separate(world);
+            var serial = Pushes(world);
+            Neighbors.Reset(world);
+            Neighbors.SeparateParallel(world);
+            Same(Pushes(world), serial, "the vector loop");
+            Neighbors.Reset(world);
+            Neighbors.SeparateRowsParallel(world);
+            Same(Pushes(world), serial, "one pair at a time");
+            foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + 0.2f, item.Component1.Y);
+            world.Update();
+        }
+    }
+
+    [Test]
+    public void ParallelCutoffsPerRowAndFromASingleton()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var random = new Random(12);
+        world.Reserve<PairSpot, PairQuarry>(20000);
+        world.Reserve<PairSpot, PairSight, PairPrey, PairHunter, PairCount>(12000);
+        for (int i = 0; i < 20000; i++)
+            world.CreateEntity(new PairSpot((float)random.NextDouble() * 80, (float)random.NextDouble() * 80), new PairQuarry());
+        for (int i = 0; i < 12000; i++)
+            world.CreateEntity(new PairSpot((float)random.NextDouble() * 80, (float)random.NextDouble() * 80),
+                new PairSight(0.5f + (float)random.NextDouble() * 3), new PairPrey(), new PairHunter(), new PairCount());
+        world.GetOrAddSingleton<PairReach>() = new PairReach(0.75f);
+        Neighbors.ResetPrey(world);
+        Neighbors.Hunt(world);
+        Neighbors.Count(world);
+        var serial = new Dictionary<EntityId, (PairPrey, PairCount)>();
+        foreach (var item in world.Query<PairPrey, PairCount>()) serial[item.Entity.Id] = (item.Component1, item.Component2);
+        Neighbors.ResetPrey(world);
+        Neighbors.ResetCount(world);
+        Neighbors.HuntParallel(world);
+        Neighbors.CountParallel(world);
+        foreach (var item in world.Query<PairPrey, PairCount>())
+            Assert.That((item.Component1, item.Component2), Is.EqualTo(serial[item.Entity.Id]));
+    }
+
+    [Test]
+    public void AParallelPassStampsEveryRowItRunsFor()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var random = new Random(13);
+        world.Reserve<PairSpot, PairHeat>(30000);
+        var all = new List<Entity>();
+        for (int i = 0; i < 30000; i++)
+            all.Add(world.CreateEntity(new PairSpot((float)random.NextDouble() * 60, (float)random.NextDouble() * 60), new PairHeat()));
+        Neighbors.Heat(world); // sorts
+        for (int i = 0; i < all.Count; i += 5) all[i].Disable<PairHeat>(); // absent rows: not run for, not stamped
+        world.Update();
+        ulong mark = world.ChangeTick;
+        var since = QueryFilter.Create().Changed<PairHeat>(mark);
+        Assert.That(world.Count<PairHeat>(since), Is.Zero);
+        Neighbors.Heat(world);
+        Assert.That(world.Count<PairHeat>(since), Is.EqualTo(world.Count<PairHeat>()));
+    }
+
+    [Test]
+    public void AParallelPassAllocatesNothingOnceWarm()
+    {
+        using var world = Crowd(30000, 60f, 6, tables: true, threads: 4);
+        for (int i = 0; i < 12; i++)
+        {
+            Neighbors.Reset(world);
+            Neighbors.SeparateParallel(world);
+            world.Update();
+        }
+
+        Assert.That(Allocations.Of(() =>
+        {
+            for (int i = 0; i < 20; i++)
+            {
+                Neighbors.Reset(world);
+                Neighbors.SeparateParallel(world);
                 world.Update();
             }
         }), Is.EqualTo(0));

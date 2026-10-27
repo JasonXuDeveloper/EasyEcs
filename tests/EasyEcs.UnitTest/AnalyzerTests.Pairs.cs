@@ -24,7 +24,6 @@ public partial class AnalyzerTests
     // [EcsSystem] ref struct S { ... } around each method
     private static string InSystem(string method) => "[EcsSystem] public ref struct S { " + method + " }";
 
-    [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++; }")]
     [TestCase("[ForEach, With<Near>] static void A(Entity e, [Neighbor] in Spot q, in Reach r) { if (q.X * q.X >= r.Value) return; }")]                                                    // no component of the row's
     [TestCase("[ForEach] static void A(ref Spot p, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; p.X += 1; }")]                        // writes what the neighbor reads
     [TestCase("[ForEach, Consume] static void A(in Spot p, ref Near n, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++; }")]
@@ -56,6 +55,7 @@ public partial class AnalyzerTests
     [TestCase("[ForEach] static void A(in At3 p, ref Near n, [Neighbor] in At3 q) { if (System.Numerics.Vector3.DistanceSquared(p.V, q.V) >= 4f) return; n.Value++; }")]
     [TestCase("[ForEach] static void A(in At3 p, ref Near n, [Neighbor] in At3 q) { if ((p.V - q.V).LengthSquared() < 4f) { n.Value++; } }")]
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1 || d.X > 0) return; d.X = 1; n.Value++; }")] // a write of the neighbor (a pickup)
+    [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, in Reach r) { float dx = p.X - q.X; if (dx * dx >= r.Value) return; n.Value++; }")] // on several threads
     [TestCase("[ForEach] static void A(in Spot p, ref Near n) { n.Value = (int)p.X; }")]                                                                         // no [Neighbor]: no pair rule
     public Task PairMethodsLeaveAlone(string method) => AssertClean(GeneratorTests.Components, PairParts, InSystem(method));
 
