@@ -89,7 +89,7 @@ regression in WorldSimulation, BattleServer and the feature's neighbors. A bench
 
 ## 7. Docs (`audit-docs`; written in the final docs pass)
 
-Before the docs pass, the exemplar pass (`audit-code`, its first step of Finish) rewrites every sample, the demo, the
+Before the docs pass, the exemplar pass (`audit-code`, after every feature is built, before the docs pass and the benchmark sync) rewrites every sample, the demo, the
 benchmark worlds, the usage tests and the docs' code examples with the most fitting forms, this feature's included:
 note in the backlog where the feature should appear so that pass finds it.
 

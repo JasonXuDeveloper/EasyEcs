@@ -60,7 +60,9 @@ shows the newest forms).
   tests that model usage (scenario and BattleServer tests, fixtures, feature tests written as users would write the
   feature), and every C# fence of `docs/content` (en + zh, the guide pages' full examples), the public skill and the
   README (with the docs pass when the page itself changes).
-- **When**: it is the first step of Finish, before the docs pass (owner, 2026-10-27: every sample, the demo, the
+- **When**: once every feature is built and the last gaps the generated-members scan found are code, and before the
+  docs pass and the benchmark sync, so docs and numbers are written once about the final code (owner, 2026-10-27:
+  "重构应该排在写文档和 benchmark 前吧，等所有功能先落实好"; and: every sample, the demo, the
   benchmarks, the unit tests and the docs' code examples use the most correct, most fitting features, new ones
   included). A sample far behind the newest forms (VoxelServer) gets a large rewrite, not a touch-up: plan it per
   system first, read-only; a line users would still write twice is a code gap, fixed in the library before the
