@@ -251,8 +251,8 @@ changes, so the output changes deterministically; the j-cluster prefetch never f
 | GA2 | Systems that only accumulate into one `[Accumulate]` singleton do not conflict (combined in registration order at the stage end) | Stats users share stages | build if `--schedule` shows a stage lost after step 2; else record |
 | GA3 | `MaxPooledLength` inferred for a tile's cell buffers from `ITileShape` (or `ReserveBuffers(prefab, count, length)`) | Program.cs:65-69 | build with item 11 / 12a |
 | GA4 | A symmetric pair (each unordered pair once, both sides written) | item merging, collisions | **build** (owner, Q3) |
-| GA5 | A bundle of `Lookup<T>` as one parameter | `Nearby` built 5 times (-5) | propose to decline (Q8) |
-| GA6 | Chebyshev / box cutoffs for pairs | AOI as pairs | decline (Q8) |
+| GA5 | A bundle of `Lookup<T>` as one parameter | `Nearby` built 5 times (-5) | declined (owner, Q8) |
+| GA6 | Chebyshev / box cutoffs for pairs | AOI as pairs | declined (owner, Q8) |
 | GA7 | EECS055 reason text: Chase prints `local 'cell' is a ??` (type name missing); Float says `LookupExtensions.TryFind, defined in another assembly` where a key probe has no vector form | correct reasons | **fix (a bug)** |
 | GA8 | `Slices` on pair methods (rows sliced, neighbors whole) | the target's look spread over ticks | not built (owner, Q1: every tick) |
 | GA9 | item 9's form carries a per-tick budget (`Rules.MaxRequests`) | the chunk cap kept | a requirement of item 9 |
@@ -318,8 +318,16 @@ Host/Steady.cs 0 B, VoxelServerTests, `--schedule` diff, no EECS055-bool / EECS0
 - Q2: the output changes are accepted; the README and page output blocks are rewritten once at the end.
 - Q3: item merging is added, as the symmetric pair that writes both sides: GA4 is built (backlog, with item 1).
 - Q4: `Target` stays (the nearest pair with the keep hint is the lesson).
+- Q5: Terrain generation becomes a Cell method with `out Block` after WP5 (the generator writes the SIMD); it
+  replaces the hand `Vector128` only if not slower.
+- Q6: if the plain `[GaussSeidel]` Cell form is slower than the hand doubling scan, that is a generator gap: the
+  generator learns to write code as fast, then the scent is rewritten (no hand scan kept, no slower form accepted).
+- Q7: ghost rows (item 7) get both examples: VoxelServer (two region worlds, `MoveEntities` at the border) and
+  MultiWorld.
+- Q8: GA5 (a bundle of lookups) and GA6 (box cutoffs) declined: decision records in the docs pass.
+- Q9: no larger benchmark parameter for prefetch; the sample stays at its scale (ordered rows are its lever).
 
-## 10. Open questions for the owner (still open: 5-9)
+## 10. The questions as asked
 
 1. Slices on the pair target: every zombie every tick, `[UpdateInterval(LookEvery)]`, or build GA8?
 2. Accept the output changes from pairs and ordered rows (and possibly the scent), blocks rewritten once at the end?

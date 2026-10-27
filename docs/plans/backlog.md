@@ -135,7 +135,8 @@ Read-only beside them (no slot): the VoxelServer plan refreshed (Finish step 2a)
    2 MiB + madvise). The layout answer works everywhere: L1's readers ordered by target halved the 1M chase without
    any prefetch.
 7. [ ] **Borrowed ideas** (`borrowed-ideas.md`): ghost rows between
-       worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
+       worlds as an example first (owner, 2026-10-27: "都做呗，voxelserver和multiworld都做": in MultiWorld and in
+       VoxelServer, two region worlds with `MoveEntities` at the border; VoxelServer's in Finish step 2a), streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
        owner: records in the docs pass). Vertical batch probes dropped after the 16M re-measure (record in the docs
        pass); scalar group prefetching of probes is built in item 6 (index probes).
 8. [x] **VoxelServer: zombies follow a distance field** (merged: step + commit form, the in-place form dropped for an
@@ -345,7 +346,9 @@ step starts before the earlier one is done, so docs and numbers are written once
       included (vector loops through plain `[ForEach]`, `[Accumulate]`, `[ForEachRecord]`, `Emit`, `Scratch`,
       `EntityRandom`, views, `[OrderBy]` / pairs, tiles with `[GaussSeidel]` and the ping-pong step, `IDirectMapped`,
       `ChunkSize` only where it pays, the least code the generator allows):
-      a. **VoxelServer, a large rewrite** (owner, 2026-10-26: every high-performance feature, the least user code;
+      a. **VoxelServer, a large rewrite** (owner answers in `voxel-rewrite.md` section 9: every zombie looks every
+         tick, output changes accepted, Target kept, item merging through symmetric pairs (8e), Terrain as a Cell
+         method after WP5, a slower generated scent is a generator gap, ghost rows of two region worlds) (owner, 2026-10-26: every high-performance feature, the least user code;
          2026-10-27: "需要大规模重构"): the plan is `voxel-rewrite.md`, made on 2515638 before L1 / L2, the call
          inliner, the generator gaps, the prefetch gates, the distance field and the tile items. It found ~7% to cut
          as line edits; the owner expects a restructure, so it is refreshed now on the tip against everything merged

@@ -1025,3 +1025,11 @@ changing rather than the field's systems: zombies hunt within 35 walking steps (
 circle) and hit less (334 hits against 459 at 50 players), so the worlds compared differ. Systems measured in the sample
 (MeasureSystems, 2,000 players): the two steps 0.6 ms on average; the chase 0.9 ms against 0.47 ms straight (a
 chunk lookup per zombie).
+
+## VoxelServer plan: decisions for the docs pass (owner, 2026-10-27)
+
+- decisions.mdx + .zh.mdx: "Not added: a bundle of lookups as one parameter" (GA5: saves about 5 lines in
+  VoxelServer's `Nearby`, a fifth parameter form to learn) and "Not added: box (Chebyshev) cutoffs for pair methods"
+  (GA6: the only user, an AOI of chunk squares, counts viewers per chunk in O(1) through an index; a pair method would
+  visit every pair within the view). Both declined by the owner.
+- The VoxelServer page says why its AOI counts instead of searching, and why an inventory is a buffer, not relations.
