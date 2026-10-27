@@ -13,7 +13,9 @@ namespace EasyEcs;
 /// method then runs for every pair of its entities and the entities holding the <c>[Neighbor]</c> components (the
 /// row's own entity included when it holds them, as a loop over both would), and the generator writes the search that
 /// skips the pairs the method's distance test turns away. A <c>[Neighbor]</c> parameter is a component taken by
-/// <c>in</c>, or the neighbor's <see cref="Entity"/>.
+/// <c>in</c>, one taken by <c>ref</c> to write it (a pickup marking its item taken; its pairs then run one at a time,
+/// in the order a loop over both tables would visit them, and no component of the row's is one it writes), or the
+/// neighbor's <see cref="Entity"/>.
 /// <code>
 /// [ForEach]
 /// static void Separate(in Position p, ref Push push, [Neighbor] in Position other)
@@ -174,6 +176,16 @@ public readonly ref struct PairRun
         ulong tick = _world.ChangeTick;
         for (int w = 0, words = (_table.Count + 63) >> 6; w < words; w++)
             if (_rows[w] != 0) _table.StampWord<T>(w, _rows[w], tick);
+    }
+
+    /// <summary>
+    /// Stamp row <paramref name="row"/> of the other table as written now (a tracked <typeparamref name="T"/> the
+    /// method writes of the neighbor, <c>[Neighbor] ref</c>; nothing for another). O(1).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void StampOther<T>(int row) where T : struct, IComponent
+    {
+        if (default(T) is ITracked) _other.Stamp<T>(row, _world.ChangeTick);
     }
 }
 

@@ -23,9 +23,10 @@ public static partial class EasyEcsAnalyzer
         Category, DiagnosticSeverity.Error, true,
         "A [ForEach] method with [Neighbor] parameters runs for every pair of its row and a neighbor within the cutoff its " +
         "body tests. The pass runs on one thread over every row: no Parallel, Slices, change filters or [Consume]. It takes " +
-        "components of its row, [Neighbor] components by 'in' (they say which entities are neighbors) and the neighbor's " +
-        "Entity, singletons and values; it writes no component it reads of the neighbor, so what a neighbor sees does not " +
-        "depend on the order of the pairs.",
+        "components of its row, [Neighbor] components (they say which entities are neighbors) by 'in', or by 'ref' to " +
+        "write them, each once, and the neighbor's Entity, singletons and values; it writes no component it reads of the " +
+        "neighbor and no component of the neighbor it reads of its row, so what either side sees does not depend on the " +
+        "order of the pairs.",
         helpLinkUri: Help("EECS105"));
 
     public static readonly DiagnosticDescriptor NoPairCutoff = new("EECS106", "A pair method without a cutoff test the generator reads",

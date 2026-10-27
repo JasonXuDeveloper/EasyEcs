@@ -806,8 +806,8 @@ internal static class Symbols
         /// </summary>
         Context,
         /// <summary>
-        /// <c>[Neighbor] in T</c> (a component of the other entity of a pair, read) or <c>[Neighbor] Entity</c> (the other
-        /// entity): the method runs per pair (PairForm).
+        /// <c>[Neighbor] in T</c> (a component of the other entity of a pair, read), <c>[Neighbor] ref T</c> (one it
+        /// writes) or <c>[Neighbor] Entity</c> (the other entity): the method runs per pair (PairForm).
         /// </summary>
         Neighbor,
         /// The first parameter of a [ForEachRecord] method, <c>in T</c>: the record of <c>Emitted&lt;T&gt;</c> it handles
@@ -1236,8 +1236,8 @@ internal static class Symbols
 
     public static ParamKind Classify(IParameterSymbol p)
     {
-        if (IsNeighbor(p)) // the other entity of a pair: read only
-            return p.RefKind == RefKind.In && p.Type.IsValueType && IsA(p.Type, Component) || p.RefKind == RefKind.None && Named(p.Type, Entity)
+        if (IsNeighbor(p)) // the other entity of a pair: its components read ('in') or written ('ref'), its Entity
+            return p.RefKind is RefKind.In or RefKind.Ref && p.Type.IsValueType && IsA(p.Type, Component) || p.RefKind == RefKind.None && Named(p.Type, Entity)
                 ? ParamKind.Neighbor : ParamKind.Invalid;
         if (ReduceElement(p.Type) is { } reduced) // by ref only: the pass's partial result, which the method writes
             return p.RefKind == RefKind.Ref && reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;

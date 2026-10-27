@@ -134,7 +134,7 @@ public sealed partial class SystemGenerator
         {
             Symbols.ParamKind.Component => $"{p.RefKind} {unsafeType}.Add(ref r{++column}, i)",
             Symbols.ParamKind.Neighbor when p.Type == "global::EasyEcs.Entity" => "run.Other(j)",
-            Symbols.ParamKind.Neighbor => $"in {unsafeType}.Add(ref o{i}, j)",
+            Symbols.ParamKind.Neighbor => $"{p.RefKind} {unsafeType}.Add(ref o{i}, j)",
             Symbols.ParamKind.Entity => "run.Entity((int)i)",
             Symbols.ParamKind.Singleton => $"{p.RefKind} s{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
@@ -171,7 +171,11 @@ public sealed partial class SystemGenerator
             sb.Append("                            float " + string.Join(", ", axes.Select((a, k) => $"d{k} = at.{a} - near.{a}")) + ";\n");
             sb.Append("                            if (" + string.Join(" + ", axes.Select((_, k) => $"d{k} * d{k}")) + " > reach2) continue;\n");
         }
-        sb.Append($"                            if (!skips || !run.Skip(j)) __ForEach{owner.TypeParameters}.{method.Name}_{number}({args});\n");
+        // A neighbor's component by ref stamps the neighbors the method ran for (one row of the other table per pair).
+        var stamps = method.Parameters.Where(p => p is { Kind: Symbols.ParamKind.Neighbor, RefKind: "ref" }).Select(p => p.Type).Distinct()
+            .Select(type => $" run.StampOther<{type}>(j);").ToArray();
+        string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}({args});";
+        sb.Append($"                            if (!skips || !run.Skip(j)) {(stamps.Length == 0 ? call : "{ " + call + string.Concat(stamps) + " }")}\n");
         sb.Append("                        }\n                }\n            }\n        }\n");
 
         if (pair.Simd is { } simd)

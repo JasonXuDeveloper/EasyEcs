@@ -23,9 +23,13 @@ internal sealed partial class Kernel
     /// <summary>The name the j loop gives neighbor parameter <paramref name="i"/> (a <c>ref readonly</c> to its row).</summary>
     internal static string Neighbor(int i) => NeighborPrefix + i;
 
-    /// <summary>Why a [Neighbor] parameter rules a vector loop out, or null: a component is a value per neighbor.</summary>
-    private static string? NeighborRefused(IParameterSymbol p) => Symbols.Named(p.Type, Symbols.Entity)
-        ? $"it takes the neighbor's Entity '{p.Name}': its pairs run one at a time"
+    /// <summary>
+    /// Why a [Neighbor] parameter rules a vector loop out, or null: a component read is a value per neighbor. A write of
+    /// the neighbor's is one row written by every lane of the window (a scatter whose lanes collide), so it runs per pair.
+    /// </summary>
+    private static string? NeighborRefused(IParameterSymbol p) =>
+        Symbols.Named(p.Type, Symbols.Entity) ? $"it takes the neighbor's Entity '{p.Name}': its pairs run one at a time"
+        : p.RefKind == RefKind.Ref ? $"it writes the neighbor's {p.Type.Name} ('{p.Name}', [Neighbor] ref): its pairs run one at a time"
         : null;
 
     /// <summary>

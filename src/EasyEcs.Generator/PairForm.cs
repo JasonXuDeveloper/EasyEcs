@@ -28,8 +28,10 @@ internal static class PairForm
     /// <summary>
     /// Why the declaration of pair method <paramref name="method"/> cannot run per pair (EECS105), or null. A pair
     /// pass runs on one thread over every row (no Parallel, Slices, change filters or [Consume]), takes components of
-    /// the row and of the neighbor, singletons and values, and writes no component the neighbor reads (a row's write
-    /// would reach the neighbors after it in one order and not in another).
+    /// the row and of the neighbor, singletons and values, and writes no component the other side of a pair reads: a
+    /// row's write would reach the neighbors after it in one order and not in another, and a write of the neighbor's
+    /// (<c>[Neighbor] ref T</c>) would reach the rows after it, or the row itself when it is its own neighbor. Each
+    /// component of the neighbor is taken once.
     /// </summary>
     public static string? Problem(IMethodSymbol method)
     {
@@ -45,16 +47,21 @@ internal static class PairForm
                 or Symbols.FilterKind.ChangedAny or Symbols.FilterKind.RemovedAny))
             return "filters by change: a pair pass visits every row";
         var written = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+        var rows = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
+        var neighbors = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
         bool row = false, neighbor = false;
         foreach (var p in method.Parameters)
             switch (Symbols.Classify(p, outside))
             {
                 case Symbols.ParamKind.Component:
                     row = true;
+                    rows.Add(p.Type);
                     if (p.RefKind == RefKind.Ref) written.Add(p.Type);
                     break;
                 case Symbols.ParamKind.Neighbor:
-                    neighbor |= !Symbols.Named(p.Type, Symbols.Entity);
+                    if (Symbols.Named(p.Type, Symbols.Entity)) break;
+                    neighbor = true;
+                    if (!neighbors.Add(p.Type)) return $"takes {p.Type.Name} of the neighbor twice ('{p.Name}'): take it once, by 'ref' to write it";
                     break;
                 case Symbols.ParamKind.Entity or Symbols.ParamKind.Singleton:
                     break;
@@ -63,15 +70,24 @@ internal static class PairForm
                 case Symbols.ParamKind.Invalid: // EECS002 reports it (a [Neighbor] one too)
                     break;
                 default:
-                    return $"takes '{p.Name}': a pair method takes components of its row, [Neighbor] components (by 'in') and the neighbor's Entity, singletons and values";
+                    return $"takes '{p.Name}': a pair method takes components of its row, [Neighbor] components (by 'in', or 'ref' to write them) and the neighbor's Entity, singletons and values";
             }
         if (!row) return "takes no component of its row";
         if (!neighbor) return "takes no [Neighbor] component: the neighbors are the entities holding them";
         foreach (var p in method.Parameters)
-            if (Symbols.Classify(p, outside) == Symbols.ParamKind.Neighbor && written.Contains(p.Type))
+        {
+            if (Symbols.Classify(p, outside) != Symbols.ParamKind.Neighbor) continue;
+            if (written.Contains(p.Type))
                 return $"writes {p.Type.Name}, which it reads of the neighbor ('{p.Name}'): what a neighbor sees would depend on the order of the pairs";
+            if (p.RefKind == RefKind.Ref && rows.Contains(p.Type))
+                return $"writes the neighbor's {p.Type.Name} ('{p.Name}'), which it reads of its row: what a row sees would depend on the order of the pairs";
+        }
         return null;
     }
+
+    /// <summary>The method writes a component of the neighbor (<c>[Neighbor] ref T</c>): its pairs run one at a time.</summary>
+    public static bool WritesNeighbor(IMethodSymbol method) =>
+        method.Parameters.Any(p => p.RefKind == RefKind.Ref && Symbols.Classify(p, Symbols.IsRunner(method)) == Symbols.ParamKind.Neighbor);
 
     /// <summary>
     /// The cutoff test of a pair method's body, or null with the reason none was found (EECS106: the pass then runs
