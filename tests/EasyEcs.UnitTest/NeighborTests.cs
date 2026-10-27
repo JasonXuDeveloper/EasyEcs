@@ -494,7 +494,7 @@ public class NeighborTests
     public void APassAllocatesNothingOnceWarm()
     {
         using var world = Crowd(5000, 50f, 6, tables: true);
-        for (int i = 0; i < 12; i++) // through one re-sort of the order's cadence (10 updates)
+        for (int i = 0; i < 200; i++) // through re-sorts of the order's cadence (10 updates), past tiering and OSR under every ISA
         {
             Neighbors.Reset(world);
             Neighbors.Separate(world);
@@ -598,7 +598,7 @@ public class NeighborTests
     public void AParallelPassAllocatesNothingOnceWarm()
     {
         using var world = Crowd(30000, 60f, 6, tables: true, threads: 4);
-        for (int i = 0; i < 12; i++)
+        for (int i = 0; i < 200; i++) // re-sorts, past tiering and OSR
         {
             Neighbors.Reset(world);
             Neighbors.SeparateParallel(world);
@@ -712,11 +712,188 @@ public class NeighborTests
         }
     }
 
+    // The lists of each row's neighbors (PairState.Lists: On builds them wherever they hold, Off never) visit the same
+    // pairs in the same order as the clusters' ranges: every pass equal bit for bit.
+    private static T WithLists<T>(PairState.ListMode mode, Func<T> pass)
+    {
+        var before = PairState.Lists;
+        PairState.Lists = mode;
+        try
+        {
+            return pass();
+        }
+        finally
+        {
+            PairState.Lists = before;
+        }
+    }
+
+    private static Dictionary<EntityId, PairShove> Separated(World world, PairState.ListMode mode, bool parallel = false, bool rows = false) =>
+        WithLists(mode, () =>
+        {
+            Neighbors.Reset(world);
+            if (parallel && rows) Neighbors.SeparateRowsParallel(world);
+            else if (parallel) Neighbors.SeparateParallel(world);
+            else if (rows) Neighbors.SeparateRows(world);
+            else Neighbors.Separate(world);
+            return Pushes(world);
+        });
+
+    [TestCase(2000, 40f, false)]
+    [TestCase(2000, 40f, true)]
+    [TestCase(3000, 8f, false)]  // dense
+    [TestCase(5, 4f, false)]     // one cluster
+    public void ListsOfNeighborsEqualTheRangesBitForBitAsRowsMove(int count, float extent, bool tables)
+    {
+        using var world = Crowd(count, extent, count, tables);
+        var random = new Random(3);
+        for (int tick = 0; tick < 30; tick++)
+        {
+            // Most rows drift less than the skin (the lists hold), a few jump (they are built again), some ticks none move.
+            if (tick % 4 != 3)
+                foreach (var item in world.Query<PairSpot>())
+                {
+                    ref var p = ref item.Component1;
+                    if (tick % 7 == 5 && random.Next(200) == 0) p = new PairSpot((float)random.NextDouble() * extent, (float)random.NextDouble() * extent);
+                    else p = new PairSpot(p.X + 0.01f * ((float)random.NextDouble() - 0.5f), p.Y + 0.004f);
+                }
+            if (tick % 3 == 0) world.Update(); // the order's cadence: a sort every 10 updates
+            var off = Separated(world, PairState.ListMode.Off);
+            Same(Separated(world, PairState.ListMode.On), off, $"tick {tick}: the lists");
+            Same(Separated(world, PairState.ListMode.On, rows: true), off, $"tick {tick}: the lists one pair at a time");
+            Same(Separated(world, PairState.ListMode.Auto), off, $"tick {tick}: the density's pick");
+        }
+    }
+
+    [Test]
+    public void ListsOfNeighborsFollowChurnNaNAndAbsentRows()
+    {
+        using var world = Crowd(1500, 20f, 17, tables: true);
+        var all = Entities<PairSpot>(world);
+        var random = new Random(5);
+        for (int pass = 0; pass < 12; pass++)
+        {
+            switch (pass % 4)
+            {
+                case 0: // destroyed rows leave tombstones, new rows grow the table
+                    for (int i = pass; i < all.Count; i += 13)
+                        if (all[i].IsAlive) all[i].Destroy();
+                    for (int i = 0; i < 40; i++)
+                        all.Add(world.CreateEntity(new PairSpot((float)random.NextDouble() * 20, (float)random.NextDouble() * 20), new PairDrift(), new PairShove()));
+                    break;
+                case 1: // a NaN point meets every row
+                    if (all[pass].IsAlive) all[pass].Get<PairSpot>() = new PairSpot(float.NaN, 3);
+                    break;
+                case 2: // absent rows fail both filters
+                    for (int i = pass; i < all.Count; i += 17)
+                        if (all[i].IsAlive && all[i].Has<PairDrift>()) all[i].Disable<PairDrift>();
+                    break;
+                default:
+                    foreach (var item in world.Query<PairSpot>())
+                        if (float.IsNaN(item.Component1.X)) item.Component1 = new PairSpot(1, 1);
+                    break;
+            }
+
+            var off = Separated(world, PairState.ListMode.Off);
+            Same(Separated(world, PairState.ListMode.On), off, $"pass {pass}");
+            Same(Separated(world, PairState.ListMode.On), off, $"pass {pass}, the list kept");
+            world.Update();
+        }
+    }
+
+    [Test]
+    public void ListsOfNeighborsWithACutoffPerRowAndWritesOfTheNeighbor()
+    {
+        using var hunt = new World();
+        var random = new Random(21);
+        for (int i = 0; i < 1500; i++)
+            hunt.CreateEntity(new PairSpot((float)random.NextDouble() * 40, (float)random.NextDouble() * 40), new PairQuarry());
+        for (int i = 0; i < 800; i++)
+            hunt.CreateEntity(new PairSpot((float)random.NextDouble() * 40, (float)random.NextDouble() * 40),
+                new PairSight(0.5f + (float)random.NextDouble() * (i % 10 == 0 ? 6 : 1.5f)), new PairPrey(), new PairHunter());
+        for (int pass = 0; pass < 6; pass++)
+        {
+            var preys = new Dictionary<PairState.ListMode, Dictionary<EntityId, PairPrey>>();
+            foreach (var mode in new[] { PairState.ListMode.Off, PairState.ListMode.On })
+                preys[mode] = WithLists(mode, () =>
+                {
+                    Neighbors.ResetPrey(hunt);
+                    Neighbors.Hunt(hunt);
+                    var result = new Dictionary<EntityId, PairPrey>();
+                    foreach (var item in hunt.Query<PairPrey>()) result[item.Entity.Id] = item.Component1;
+                    return result;
+                });
+            Assert.That(preys[PairState.ListMode.On], Is.EqualTo(preys[PairState.ListMode.Off]), $"pass {pass}");
+            foreach (var item in hunt.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + 0.02f, item.Component1.Y);
+            hunt.Update();
+        }
+
+        using var pickup = Pickup(400, 1200, 25f, 3, true);
+        for (int pass = 0; pass < 4; pass++)
+        {
+            var taken = new Dictionary<PairState.ListMode, List<(PairLoot, PairBag)>>();
+            foreach (var mode in new[] { PairState.ListMode.Off, PairState.ListMode.On })
+                taken[mode] = WithLists(mode, () =>
+                {
+                    ResetPickup(pickup);
+                    Neighbors.Pick(pickup);
+                    var result = new List<(PairLoot, PairBag)>();
+                    foreach (var item in pickup.Read<PairLoot>()) result.Add((item.Component1, default));
+                    foreach (var item in pickup.Read<PairBag>()) result.Add((default, item.Component1));
+                    return result;
+                });
+            Assert.That(taken[PairState.ListMode.On], Is.EqualTo(taken[PairState.ListMode.Off]), $"pass {pass}");
+            pickup.Update();
+        }
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void ParallelPassesOverListsEqualTheSerialRanges(bool rows)
+    {
+        using var world = Crowd(30000, 120f, 4, tables: true, threads: 4);
+        for (int pass = 0; pass < 4; pass++)
+        {
+            var off = Separated(world, PairState.ListMode.Off);
+            Same(Separated(world, PairState.ListMode.On, parallel: true, rows: rows), off, $"pass {pass}");
+            foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + 0.01f, item.Component1.Y);
+            world.Update();
+        }
+    }
+
+    [Test]
+    public void APassOverListsAllocatesNothingOnceWarm()
+    {
+        using var world = Crowd(5000, 100f, 6, tables: true);
+        WithLists(PairState.ListMode.On, () =>
+        {
+            for (int i = 0; i < 200; i++) // lists built, kept and built again through re-sorts, the margin settled, past tiering and OSR
+            {
+                Neighbors.Reset(world);
+                Neighbors.Separate(world);
+                foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + (i % 20 < 10 ? 0.01f : -0.01f), item.Component1.Y);
+                world.Update();
+            }
+
+            Assert.That(Allocations.Of(() =>
+            {
+                for (int i = 0; i < 20; i++)
+                {
+                    Neighbors.Reset(world);
+                    Neighbors.Separate(world);
+                    foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + (i % 20 < 10 ? 0.01f : -0.01f), item.Component1.Y);
+                    world.Update();
+                }
+            }), Is.EqualTo(0));
+            return 0;
+        });
+    }
+
     [Test]
     public void AWritingPassAllocatesNothingOnceWarm()
     {
         using var world = Pickup(1000, 3000, 40f, 6, true);
-        for (int i = 0; i < 12; i++)
+        for (int i = 0; i < 200; i++) // re-sorts, past tiering and OSR
         {
             ResetPickup(world);
             Neighbors.Pick(world);
