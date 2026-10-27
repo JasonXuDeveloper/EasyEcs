@@ -26,6 +26,7 @@
     <Project Path="tools/DocCheck/DocCheck.csproj" />
     <Project Path="tools/ApiDocs/ApiDocs.csproj" />
     <Project Path="tools/Inlining/Inlining.csproj" />
+    <Project Path="tools/LoopBound/LoopBound.csproj" />
   </Folder>
   <Folder Name="/templates/">
     <Project Path="templates/EasyEcs.Templates/EasyEcs.Templates.csproj" />
