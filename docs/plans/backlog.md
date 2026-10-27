@@ -149,7 +149,19 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        column's bytes are past `CacheSizes.LastLevel`. Measured in a real world with the next pass reading that column
        counted in; ships when faster in both rounds and never slower (StreamingStoreBenchmark: 1.47x past the cache,
        a tie inside).
-11. [ ] The rest of "Later" below.
+11. [ ] **Ping-pong steps instead of a commit copy** (owner, 2026-10-27: MPI's u / v buffers swapped after a sweep;
+       part of #157's "ping-pong buffer"). Today a tile shader writes `DynamicBuffer<NextX>` and a commit system copies
+       it into `DynamicBuffer<X>` (VoxelServer `WaterCommitSystem`, the grids page's `CommitHeatSystem`): one full copy
+       of every stepped tile per tick. Swap the two buffers' stores instead (O(1) per tile, under the gate; X marked
+       changed, so replication and `[Changed<X>]` see the write). Catch: the stencil skips zero rows (the row mask) and
+       relies on the copy making both buffers equal; after a swap the skipped rows hold the step before last. So the
+       swap either writes the rows the step skipped, or the generated step writes every row it skips as zero. Per the
+       owner's rule (`audit-generator`): users write the plain step and no commit system; the generator owns the step
+       buffer and the swap (a `Tile` parameter that steps in place in user code's eyes), with an analyzer rule and
+       code fix for a hand-written commit that is a plain copy. Proof: TileStencilBenchmark / TileActiveBenchmark and
+       VoxelServer's TickBenchmark before / after, two rounds, 0 B; the grids page and the VoxelServer page in the
+       docs pass.
+12. [ ] The rest of "Later" below.
 
 ## Done this round (for the record)
 
