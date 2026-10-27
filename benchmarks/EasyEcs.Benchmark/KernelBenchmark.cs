@@ -23,7 +23,8 @@ namespace EasyEcs.Benchmark;
 /// vector per field (Interleaved), in a world of their own. <c>Clamp</c> (Math.Clamp by a singleton's bounds, checked
 /// per vector), <c>Quantize</c> (float to int and back) and <c>Gate</c> (bool locals joined by &amp;&amp;, || and !, a
 /// pattern) are the calls, conversions and masks a vector loop takes. <c>Tally</c> (an int count, sum, Min and Max) and
-/// <c>Energy</c> (a float sum, FloatMode.Fast) reduce into a singleton: one accumulator per lane, folded in lane order;
+/// <c>Energy</c> (a float sum, FloatMode.Fast) and <c>Spread</c> (a float Min and Max) reduce into a singleton: one
+/// accumulator per lane, folded in lane order (the floats' two per lane, a chain each, in the loop over whole vectors);
 /// <c>Cycle</c> writes heat on both branches and counts one, over whole vectors and over <c>_holes</c> (masked words).
 /// <c>Ratio</c> divides ints by constants (8: shifts, 7: doubles) and a float by 2 (a product), <c>Share</c> by a divisor
 /// per row (doubles), over <c>_ratios</c>.
@@ -469,6 +470,17 @@ public partial class KernelBenchmark
     public void EnergyGenerated() => Kernels.Energy(_world);
 
     [Benchmark]
+    public void SpreadScalar()
+    {
+        var job = new SpreadRows { Spread = new Reduce<Spread> { Value = Spread.Identity } };
+        _world.ForEachBatch<Heat, SpreadRows>(ref job);
+        _world.GetOrAddSingleton<Spread>() = job.Spread.Value;
+    }
+
+    [Benchmark]
+    public void SpreadGenerated() => Kernels.Spread(_world);
+
+    [Benchmark]
     public void WealthScalar()
     {
         var job = new WealthRows { Wealth = new Reduce<Wealth> { Value = Wealth.Identity } };
@@ -598,6 +610,27 @@ public partial class KernelBenchmark
         [Sum] public int Sum;
         [Min] public int Low;
         [Max] public int High;
+    }
+
+    /// <summary>The lowest and highest float: exact in any order of the rows (IEEE 754:2019 minimum and maximum).</summary>
+    public partial struct Spread : ISingletonComponent
+    {
+        [Min] public float Low;
+        [Max] public float High;
+    }
+
+    private struct SpreadRows : IForEachBatch<Heat>
+    {
+        public Reduce<Spread> Spread;
+
+        public void Execute(EntitySpan entities, Span<Heat> heat)
+        {
+            var spread = Spread;
+            for (int i = 0; i < heat.Length; i++) Kernels.Spread(in heat[i], ref spread);
+            Spread = spread;
+        }
+
+        static int IForEachBatch<Heat>.WriteMask => 0;
     }
 
     /// <summary>A long sum of int rows: exact in any order, as a pair of long accumulators per vector of rows.</summary>
@@ -893,6 +926,14 @@ public partial class KernelBenchmark
             if ((ticks.Value & 1) == 0) tally.Value.Sum += ticks.Value;
             tally.Value.Low = Math.Min(tally.Value.Low, ticks.Value);
             tally.Value.High = Math.Max(tally.Value.High, ticks.Value);
+        }
+
+        // The extremes of a float column: a Min and a Max, exact under Precise, each a chain of 4 cycles per vector.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void Spread(in Heat heat, ref Reduce<Spread> spread)
+        {
+            spread.Value.Low = MathF.Min(spread.Value.Low, heat.Value);
+            spread.Value.High = MathF.Max(spread.Value.High, heat.Value);
         }
 
         // An int column summed into a long, and added to a column of longs: lanes of two sizes.
