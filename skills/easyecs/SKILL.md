@@ -145,7 +145,7 @@ available as Markdown: add `.md` to its URL.
   `Depth`, optional `Height` / `Faces` / `Halo` / `Neighborhood` / `Boundary`, a `Key`, `Beside(key, face)`, which
   wraps on a periodic grid) beside a `DynamicBuffer<TCell>`, shaded by a
   `[ForEach]` method with a `Tile<TCell, TTile>` parameter: `var p = tile.Pad(); foreach (var row in
-  p.Rows(TileReads.Layer)) { var c = p.At(row); ... c.Load128<T>(dx, dy, dz) ... }`, writing a second buffer that a
+  p.Rows(TileStencil.Layer)) { var c = p.At(row); ... c.Load128<T>(dx, dy, dz) ... }`, writing a second buffer that a
   later system commits (never the tile's own buffer, EECS059); never fetch neighbor buffers by hand. A stencil
   reaching r cells needs `Halo => r` (at most the tile, EECS072); a 9- or 27-point one needs
   `Neighborhood => TileNeighborhood.All`; one step per pass (several steps per load lose on a cached grid);

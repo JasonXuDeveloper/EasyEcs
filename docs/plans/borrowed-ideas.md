@@ -135,7 +135,7 @@ The owner's rule (a faster case ships, a slower one never) with a gate that keep
   `/sys/devices/system/cpu/cpu0/cache/index*/size`, then `sysconf(_SC_LEVEL3_CACHE_SIZE)`, macOS `hw.l3cachesize`, else
   `hw.perflevel0.l2cachesize`. Only where `Prefetching.IsSupported` (x86, ARM64 with SVE); any failure or 0 is
   unknown, which never prefetches. This machine reads 272,629,760 bytes (sysfs 266240K; sysconf agrees). A pass asks
-  `Lookup<T>.Prefetches(world)`: live entities x (16-byte record + size of T) past that size.
+  `Lookup<T>.PrefetchesPastLastLevel(world)`: live entities x (16-byte record + size of T) past that size.
 - **Row form** (no vector loop, one thread): the method keeps today's job; a twin `Job{i}Chases` (a run job: records of
   rows i + 16, rows of T of rows i + 8, the first 16 records before the loop, runs of 16 rows or fewer unprefetched) runs
   when the pass's call site finds the gate open. A first version replaced the job for every pass: LookupGather's parallel
@@ -273,7 +273,7 @@ neither (no prefetch). This machine: L2 2,097,152 bytes per core, LLC 272,629,76
 | Row form's entity chases: one thread, parallel (batch twin), fused walks, a buffer's elements, lambda passes | **L2** | `Lookup<T>.PrefetchesPastL2` |
 | `World.DestroyEntities`' id list | **L2** | `LookupLanes.PrefetchesIds` |
 | Index probes (one thread, parallel, lambda) | last level | `LookupExtensions.Probes` |
-| Vector loops' chases (`f{i}`, D131 gathers) | last level | `Lookup<T>.Prefetches` |
+| Vector loops' chases (`f{i}`, D131 gathers) | last level | `Lookup<T>.PrefetchesPastLastLevel` |
 
 Proof: `LookupChaseGateBenchmark`, `ChaseFormsPrefetchBenchmark`, `IdListPrefetchBenchmark`, `ProbePrefetchBenchmark`
 (Auto / Off / On in one binary, `EASYECS_BENCH_ENTITIES=32768,262144,1000000`; IdList adds 8,192, Probe 524,288 in

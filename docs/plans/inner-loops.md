@@ -51,10 +51,10 @@
   - One job copy per chunk, nothing merged back (D80). **The generator never sees `Execute` bodies.**
 - **Buffers** (`DynamicBuffer.cs`): `AsReadOnlySpan()`, `GetEnumerator()` (ReadOnlySpan enumerator), `AsSpan(this ref)` (unshares the copy-on-write store, D124), `SetCount` returns a Span.
 - **Tile** (`Tile.cs`):
-  - `Tile<TCell,TTile>`: Pad, Beside, Cells, ChangedEdges, Facing. `PaddedTile`: Rows(TileReads), At(row), this[x,y,z].
+  - `Tile<TCell,TTile>`: Pad, Beside, Cells, ChangedEdges, Facing. `PaddedTile`: Rows(TileStencil), At(row), this[x,y,z].
   - `TileCursor`: `Load128/256/LoadVector<TLane>(dx,dy,dz)`, `this[dx,dy,dz]`, `Offset` with halo checks. There is no `Load512`.
   - `TileRow.Index`, `TileRows` (TZCNT walk), `TileMemory` (ThreadStatic texture, `Blank(fill)`), `TileLayout` (internal: Row, Layer, Cells).
-  - `TileReads` doc: skipping quiet rows assumes f(0…)=0.
+  - `TileStencil` doc: skipping quiet rows assumes f(0…)=0.
   - Generator: `ParamKind.Tile`, `TileModel`, and `TileNeighbors.Of` per entity.
 
 ### 1.3 Inner loops users write by hand today
@@ -295,7 +295,7 @@ static void Step(Cell<Seed, LifePlot> s, out NextSeed next)
 How the method is read:
 - **Inputs:** `ParamKind.Cell` behaves like Tile for filters, access and EECS059, and shares neighbors per grid (`TileNeighbors.Of`).
 - **Output:** `out TOut` is a new `ParamKind.CellOut`. It writes the entity's `DynamicBuffer<TOut>`, with a filter `With<>` and one stamp per entity. If TOut is a Cell input's cell type, that is EECS059.
-- **Offsets** must be constants within `Halo`; otherwise the reason is fixable. `TileReads` is derived from them (dz≠0 → NorthSouth, dy>0 → Above, dy<0 → Below, both → Diagonals, always Self).
+- **Offsets** must be constants within `Halo`; otherwise the reason is fixable. `TileStencil` is derived from them (dz≠0 → NorthSouth, dy>0 → Above, dy<0 → Below, both → Diagonals, always Self).
 
 What the generator writes (one NoInlining routine per method, as the Tile accessor today):
 ```csharp
@@ -306,7 +306,7 @@ static void Step_0_Cells(Entity entity, in TileNeighbors n0, ref DynamicBuffer<N
     var into = next.SetCount(TileLayout-public.Cells);                  // the out buffer
     into.Fill(new NextWarmth(__f0));                                    // rows whose stencil reads only zeros: f(0…), see below
     ref float o = ref Unsafe.As<NextWarmth, float>(ref MemoryMarshal.GetReference(into));
-    foreach (var row in w.Rows(TileReads.Layer))                        // derived from the offsets
+    foreach (var row in w.Rows(TileStencil.Layer))                        // derived from the offsets
     {
         ref float c = ref Unsafe.As<Warmth, float>(ref w.RowStart(row)); // padded row, cell x = 0
         ref float d = ref Unsafe.Add(ref o, row.Index);

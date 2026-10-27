@@ -361,7 +361,7 @@ Docs to-dos (docs pass):
 - architecture page (generated code): the twin job beside a method's own job (as `Job{i}Rows` for vector tails).
 - public skill (skills/easyecs/SKILL.md): "a chase through `Lookup<T>` at an `in` component's id is prefetched when the
   world outgrows the cache: keep ids in `in` components".
-- `api.mdx`: nothing (`Lookup<T>.Prefetches` / `PrefetchAhead`, `LookupLanes.Prefetches` are hidden, for generated code).
+- `api.mdx`: nothing (`Lookup<T>.PrefetchesPastLastLevel` / `PrefetchAhead`, `LookupLanes.Prefetches` are hidden, for generated code).
 
 ## feat-call-inliner: vector loops inline the user's own calls
 
@@ -916,3 +916,18 @@ Docs pass:
   plumbing). The rule they were judged by: a gap is built when it saves users lines or thought (`audit-generator`).
 - G10 and gated streaming stores are code items (backlog "Next" 9, 10); EECS086 / EECS109 / EECS055's bool reason
   become Warnings with the VoxelServer rewrite.
+
+## Vocabulary renames (owner-approved naming popups, 2026-10-27; code applied)
+
+Each needs a migration entry (old -> new), a changelog line, a README "What's new" line and a decision record that
+names the field each term comes from (audit-naming, "The reference design's vocabulary"):
+- `QueryOptions.ParallelChunkRows` -> `MaxChunkRows` (released in 4.7: migration entry required), and the
+  `chunkRows` parameter of `world.ForParallel` -> `chunkSize` (OpenMP's `schedule(static, chunk_size)`).
+- `TileReads` -> `TileStencil` (the cells a tile method reads: a stencil, as in stencil codes).
+- `TileBoundary.Fill` -> `TileBoundary.Border`, and `Pad(from, to, fill, mask)` -> `Pad(from, to, border, mask)`
+  (a Dirichlet boundary; Clamp and Mirror unchanged).
+- `Lanes.Bits` -> `Lanes.Ballot` (CUDA's `__ballot_sync`: the lane mask as bits).
+- Hidden, no migration: `Lookup<T>.Prefetches` -> `PrefetchesPastLastLevel` (beside `PrefetchesPastL2`).
+- zh: Slice is 分帧 everywhere (was 分片, which reads as sharding); glossary row in `tools/ApiDocs/zh/README.md`.
+- Still to come: block -> cluster and `Pairs(reach)` -> `Pairs(cutoff)` (feat-pairs-2), `[RedBlack]` ->
+  `[GaussSeidel]` (feat-zombie-field), `Pad()` -> `ExchangeHalo()` with backlog item 12a.
