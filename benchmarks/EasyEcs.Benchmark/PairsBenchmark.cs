@@ -11,7 +11,8 @@ namespace EasyEcs.Benchmark;
 /// and a hand-written cluster-pair kernel over Morton-sorted rows in blocks of 8 (kernel only, the side arrays standing
 /// for the sorted columns, 8 lanes with hardware 256-bit vectors, else 4: ARM64's NEON; with the sort every 1, 10 and
 /// 20 ticks; and with the copies a user would add today), and that kernel on the core's order (L1: the table's own
-/// columns kept sorted, blocks of 8 or 16, the core's sort every 10 ticks). Each
+/// columns kept sorted, blocks of 8 or 16, the core's sort every 10 ticks), and the generated pair method (L2: Generated,
+/// GeneratedRows one pair at a time). Each
 /// invocation runs 20 ticks (OperationsPerInvoke), so a sort every k ticks is amortized exactly. One thread. Setup checks
 /// every version against a double-precision reference.
 /// </summary>
@@ -28,6 +29,9 @@ public class PairsBenchmark
     // (c) on the core's order: a world of the same crowd whose Position table the core keeps sorted (L1).
     private World _core;
     private readonly CoreClusters _clusters = new();
+
+    // The pair method (L2): a world of the same crowd the generated pass orders and pairs on its own.
+    private World _pairs;
 
     [GlobalSetup]
     public void Setup()
@@ -59,6 +63,20 @@ public class PairsBenchmark
         var sorted = Crowd.Reference(_core);
         CheckCore(sorted, nameof(CoreClusters), () => _clusters.Interact(_core));
         CheckCore(sorted, nameof(CoreClusters16), () => _clusters.Interact16(_core));
+
+        _pairs = Crowd.Create(Entities, Density);
+        CrowdPairs.Tick(_pairs);                              // the first pass sorts the tables: the reference after it
+        var paired = Crowd.Reference(_pairs);
+        CheckPairs(paired, nameof(Generated), () => CrowdPairs.Tick(_pairs));
+        CheckPairs(paired, nameof(GeneratedRows), () => CrowdPairs.TickRows(_pairs));
+    }
+
+    private void CheckPairs((double, double, double)[] expected, string name, Action tick)
+    {
+        tick();
+        tick();
+        int at = Crowd.FirstMismatch(Crowd.Pushes(_pairs), expected);
+        if (at >= 0) throw new InvalidOperationException($"{name} differs from the reference at row {at}");
     }
 
     private void CheckCore((double, double, double)[] expected, string name, Action tick)
@@ -82,6 +100,7 @@ public class PairsBenchmark
     {
         _world.Dispose();
         _core.Dispose();
+        _pairs.Dispose();
     }
 
     [Benchmark(Baseline = true, OperationsPerInvoke = Ticks)]
@@ -157,6 +176,21 @@ public class PairsBenchmark
             if (t % 10 == 0) _core.SortRows<Crowd.Position>();
             _clusters.Interact(_core);
         }
+    }
+
+    /// <summary>The pair method: the generated pass, its own order (re-sorted when rows leave their windows' boxes) and
+    /// pair lists (drawn again on its cadence), a vector of rows against each neighbor.</summary>
+    [Benchmark(OperationsPerInvoke = Ticks)]
+    public void Generated()
+    {
+        for (int t = 0; t < Ticks; t++) CrowdPairs.Tick(_pairs);
+    }
+
+    /// <summary>The same pass one pair at a time (the method takes the neighbor's entity).</summary>
+    [Benchmark(OperationsPerInvoke = Ticks)]
+    public void GeneratedRows()
+    {
+        for (int t = 0; t < Ticks; t++) CrowdPairs.TickRows(_pairs);
     }
 
     private void SortEvery(int ticks)
