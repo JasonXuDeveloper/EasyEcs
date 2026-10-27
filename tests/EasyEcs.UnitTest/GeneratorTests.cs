@@ -1028,7 +1028,7 @@ public class GeneratorTests
             "[EcsSystem] public ref struct VS { [ForEach] static void M(Vw v) => v.Add(1); }" +
             "[Prefab] public partial struct Kind { public P P = new() { V = 3 }; public Q Q; }" +
             "[EcsSystem] public ref struct F1 { [ForEach] static void Fa(ref Q q, Entity e) => q.V += e.Id.Index; [ForEach] static void Fb(ref Q q, Entity e) => q.V += 2 + e.Id.Index; } [EcsSystem] public ref struct F2 { [ForEach] static void Fc(ref Q q) => q.V++; }" +
-            "public struct Fp : IComponent { public float X, Y; } [EcsSystem] public ref struct Pr { [ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X, dy = p.Y - o.Y, d2 = dx * dx + dy * dy; if (d2 >= 4f) return; q.V++; } }";
+            "public struct Fp : IComponent { public float X, Y; } [EcsSystem] public ref struct Pr { [ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X, dy = p.Y - o.Y, d2 = dx * dx + dy * dy; if (d2 >= 4f) return; q.V++; } }" +
             "[Accumulate, Sum] public partial struct Tot : ISingletonComponent { public long N; } [EcsSystem] public ref struct Ac { [ForEach] static void T(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }" +
             "public record struct Hit(int V); [EcsSystem] public ref struct Rc { [ForEachRecord] static void H(in Hit h, ref Clock c) => c.Ticks += h.V; }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
