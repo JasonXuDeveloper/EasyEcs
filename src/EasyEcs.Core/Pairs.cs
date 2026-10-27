@@ -786,6 +786,12 @@ internal sealed class PairState
     /// <summary>A pick of the lists must save this share of the ranges' cost at least, against the error of its estimate.</summary>
     internal const float ListGain = 0.8f;
 
+    /// <summary>About how many clusters of a table the estimate of a list's entries tests (<see cref="Estimate"/>).</summary>
+    private const int Samples = 64;
+
+    /// <summary>The draws of a list's ranges between two counts of the share of its candidates within its radius.</summary>
+    private const int Resample = 16;
+
     /// <summary>
     /// Whether this pass of <paramref name="list"/>'s tables visits each row's list of neighbors (Verlet's list: the
     /// rows of the ranges within the reach plus the skin, the boxes' margin) instead of the clusters' ranges: the list
@@ -823,12 +829,16 @@ internal sealed class PairState
     }
 
     /// <summary>
-    /// The candidates of <paramref name="list"/>'s ranges (each cluster's rows times the rows of its ranges) and its
-    /// entries, counted on every eighth cluster (each one of a small table) and scaled. O(candidates / 8).
+    /// The candidates of <paramref name="list"/>'s ranges (each cluster's rows times the rows of its ranges, O(clusters))
+    /// and its entries: the candidates times the share of them within the list's radius, counted on 64 clusters spread
+    /// over the table (each one of a smaller table) at the first draw and every <see cref="Resample"/>th one after
+    /// (O(the candidates of 64 clusters)). Counting on every eighth cluster at each draw cost a moving crowd of 100,000
+    /// rows 27 % of its pass, and on 64 clusters at each draw 8 % of a sparse one of 10,000 (PairListsBenchmark).
     /// </summary>
     private void Estimate<T, TOrder>(PairList list, int bit, float skin) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
     {
         list.EstimatedDraw = list.Draws;
+        bool sample = list.Estimates++ % Resample == 0;
         list.Candidates = list.Entries = 0;
         Clusters own = list.Table, their = list.Other;
         var table = own.Table;
@@ -836,7 +846,7 @@ internal sealed class PairState
         if (a < 0 || b < 0) return;
         ref T rows = ref table.Data<T>(a);
         ref T others = ref their.Table.Data<T>(b);
-        int count = table.Count, size = own.Size, n = own.ClusterCount, step = n <= 64 ? 1 : 8;
+        int count = table.Count, size = own.Size, n = own.ClusterCount, step = sample ? Math.Max(1, n / Samples) : int.MaxValue;
         double candidates = 0, sampled = 0, entries = 0;
         for (int w = 0; w < n; w++)
         {
@@ -846,7 +856,12 @@ internal sealed class PairState
             candidates += (double)span * (end - first);
             if (w % step != 0) continue;
             float reach = own.KeptCutoff[w];
-            if (!float.IsFinite(reach)) return; // every pair of the cluster runs: no list
+            if (!float.IsFinite(reach)) // every pair of the cluster runs: no list
+            {
+                list.Share = float.NaN;
+                return;
+            }
+
             sampled += (double)span * (end - first);
             float r2 = Radius(reach, skin);
             for (int i = first; i < end; i++)
@@ -858,8 +873,9 @@ internal sealed class PairState
             }
         }
 
+        if (sample) list.Share = sampled > 0 ? (float)(entries / sampled) : 0;
         list.Candidates = (float)candidates;
-        list.Entries = sampled > 0 ? (float)(entries * candidates / sampled) : 0;
+        list.Entries = list.Share * list.Candidates; // NaN until a sample: no list
     }
 
     /// <summary>The square of a list's radius: the cutoff plus the skin, widened against the rounding of the method's own test.</summary>
@@ -1098,7 +1114,8 @@ internal sealed class PairState
         public int[] NearStarts = [], Near = [];
         public bool Listed;
         public int ListedDraw = -1, SaveA, SaveB, BuiltPass, Life = PairState.Interval, EstimatedDraw = -1;
-        public float Slack, Skin, Candidates, Entries;
+        public int Estimates;
+        public float Slack, Skin, Candidates, Entries, Share = float.NaN;
 
         public void Reserve(int clusters, int pairs)
         {
