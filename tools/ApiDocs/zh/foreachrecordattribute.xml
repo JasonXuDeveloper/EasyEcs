@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.ForEachRecordAttribute" source="50ee1c2feec1">
+  <member name="T:EasyEcs.ForEachRecordAttribute" source="8f2a0c272b8e">
     <summary>
       把遍历发出的每条记录（<see cref="T:EasyEcs.Emit`1" />）处理一次的静态方法：第一个参数是记录，<c>in T</c>；生成器写出一次遍历，
       按发出的顺序（每次遍历按行的顺序，遍历按运行的顺序）对 <see cref="T:EasyEcs.Emitted`1" /> 的每条记录运行它，然后清空，
