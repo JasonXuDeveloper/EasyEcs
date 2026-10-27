@@ -165,6 +165,15 @@ branch: padded storage, ping-pong, zero rows, edges found while stepping), 12c +
        code fix for a hand-written commit that is a plain copy. Proof: TileStencilBenchmark / TileActiveBenchmark and
        VoxelServer's TickBenchmark before / after, two rounds, 0 B; the grids page and the VoxelServer page in the
        docs pass.
+    **Two update forms, one user code** (owner, 2026-10-27): the plain tile step is Jacobi (default, no attribute):
+       each pass is one time step, every cell reads the step before; the generator owns the two buffers, swaps them
+       and writes skipped rows as zero. `[ForEach, RedBlack]` (approved name, a marker beside `[ForEach]` like
+       `[Consume]`) relaxes toward a settled field in place: one buffer, no commit, the colors inferred from the
+       stencil's offsets (5-point 2 colors, 9-point 4, 27-point 8), sweeps inside a tile until it settles, tiles in
+       color order, settled tiles sleep. Both deterministic and independent of the thread count; they differ in what
+       one pass means, which only the user knows, so the choice is declared. An Info rule suggests `[RedBlack]` for a
+       relaxation shape (`d = Min(neighbor + cost)`) whose per-pass value nothing else reads. The docs explain "Jacobi"
+       and "red-black" in one plain sentence each where first used (WRITING.md).
 12. [ ] **Fewer memory copies** (owner, 2026-10-27: "看看还有什么类似的能做的减少内存拷贝的做法"; a-e approved: "这些都可以做"). Each one measured
        (two rounds, 0 B, nothing slower) and done by the generator or the core where users would otherwise copy:
        a. **Tiles stored padded, halos exchanged** (MPI's ghost cells; the grids page's TODO(water overlap)): today
