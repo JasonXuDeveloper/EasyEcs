@@ -80,13 +80,18 @@ public readonly ref struct PairRun
     private readonly Archetype _table, _other;
     private readonly ulong[] _rows, _neighbors;
     private readonly int[] _starts, _ranges;
-    private readonly float[] _reach;
-    private readonly int _windows, _size;
+    private readonly float[] _reach, _otherLow, _otherHigh;
+    private readonly int _windows, _size, _otherCapacity, _axes;
 
     internal PairRun(World world, Archetype table, Archetype other, ulong[] rows, ulong[] neighbors, int[] starts,
-        int[] ranges, float[] reach, int windows, int size)
+        int[] ranges, float[] reach, int windows, int size, float[] otherLow = null, float[] otherHigh = null,
+        int otherCapacity = 0, int axes = 0)
     {
         _reach = reach;
+        _otherLow = otherLow;
+        _otherHigh = otherHigh;
+        _otherCapacity = otherCapacity;
+        _axes = axes;
         _world = world;
         _table = table;
         _other = other;
@@ -142,6 +147,28 @@ public readonly ref struct PairRun
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public float Reach(int window) => _reach[window];
+
+    /// <summary>
+    /// The squared distance from <paramref name="point"/> (a row's point, as the order computes it) to the box of the
+    /// other table's window <paramref name="window"/> this pass, over the order's axes: no row of that window is
+    /// nearer. 0 inside the box, for a NaN point and for a window of no point. O(axes).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public float Gap(int window, Vector3 point)
+    {
+        float sum = 0;
+        for (int k = 0; k < _axes; k++)
+        {
+            float x = k == 0 ? point.X : k == 1 ? point.Y : point.Z;
+            // The boxes hold Capacity windows per axis, and window is below the other table's window count.
+            float low = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_otherLow), k * _otherCapacity + window);
+            float high = Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_otherHigh), k * _otherCapacity + window);
+            float d = x < low ? low - x : x > high ? x - high : 0;
+            sum += d * d;
+        }
+
+        return sum;
+    }
 
     /// <summary>Some rows of the other table fail the neighbors' filter: <see cref="Skip"/> tells which.</summary>
     public bool Skips => _neighbors != null;
@@ -332,7 +359,8 @@ internal sealed class PairState
                 bool skips = otherMode == RowFilter.Test || other.Count != other.AliveCount;
                 if (skips) Passing(other, otherFilter, otherMode, ref _neighbors);
                 var list = ListOf(own, their);
-                job.Run(new PairRun(world, table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Reach, own.WindowCount, size));
+                job.Run(new PairRun(world, table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Reach, own.WindowCount, size,
+                    their.Drawn(out var high), high, their.Capacity, axes));
             }
         }
     }
@@ -602,6 +630,13 @@ internal sealed class PairState
         public long Version;
         public float[] Low = [], High = [], Reach = [], KeptReach = [];
         private float[] _low = [], _high = [];
+
+        /// <summary>This pass's boxes (not widened), <see cref="Capacity"/> windows per axis.</summary>
+        public float[] Drawn(out float[] high)
+        {
+            high = _high;
+            return _low;
+        }
 
         public void Reserve(int windows)
         {

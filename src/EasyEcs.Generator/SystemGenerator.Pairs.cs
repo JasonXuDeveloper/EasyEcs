@@ -142,7 +142,8 @@ public sealed partial class SystemGenerator
         }).Prepend(owner.AccessorArgument));
         // The test's distance from the row's point and the neighbor's, in float as the method computes it: a neighbor
         // past the window's reach (over every cutoff of its rows by a margin far above the rounding) fails the method's
-        // test, so it is skipped without a call. NaN never skips.
+        // test, so it is skipped without a call, and so is a whole window of neighbors whose box is past it. NaN never
+        // skips.
         int rowColumn = 0, rowPoint = 0, otherPoint = -1;
         foreach (var p in method.Parameters)
         {
@@ -162,17 +163,32 @@ public sealed partial class SystemGenerator
         if (prune) sb.Append("                float reach = run.Reach(w), reach2 = reach * reach;\n");
         sb.Append("                for (; lanes != 0; lanes &= lanes - 1)\n                {\n");
         sb.Append("                    nint i = (nint)w * size + global::System.Numerics.BitOperations.TrailingZeroCount(lanes);\n");
-        if (prune) sb.Append($"                    ref readonly {t} at = ref {unsafeType}.Add(ref r{rowPoint}, i);\n");
-        sb.Append("                    for (int k = 0; k < ranges.Length; k += 2)\n");
-        sb.Append("                        for (int j = ranges[k], end = ranges[k + 1]; j < end; j++)\n                        {\n");
+        string call = $"if (!skips || !run.Skip(j)) __ForEach{owner.TypeParameters}.{method.Name}_{number}({args});\n";
         if (prune)
         {
-            sb.Append($"                            ref readonly {t} near = ref {unsafeType}.Add(ref o{otherPoint}, j);\n");
-            sb.Append("                            float " + string.Join(", ", axes.Select((a, k) => $"d{k} = at.{a} - near.{a}")) + ";\n");
-            sb.Append("                            if (" + string.Join(" + ", axes.Select((_, k) => $"d{k} * d{k}")) + " > reach2) continue;\n");
+            sb.Append($"                    ref readonly {t} at = ref {unsafeType}.Add(ref r{rowPoint}, i);\n");
+            sb.Append($"                    var point = {method.Name}Order{number}.Point(in at);\n");
         }
-        sb.Append($"                            if (!skips || !run.Skip(j)) __ForEach{owner.TypeParameters}.{method.Name}_{number}({args});\n");
-        sb.Append("                        }\n                }\n            }\n        }\n");
+        sb.Append("                    for (int k = 0; k < ranges.Length; k += 2)\n");
+        if (prune)
+        {
+            sb.Append("                        for (int j = ranges[k], end = ranges[k + 1]; j < end;)\n                        {\n");
+            sb.Append("                            int stop = global::System.Math.Min(end, (j / size + 1) * size);\n");
+            sb.Append("                            if (run.Gap(j / size, point) > reach2)\n                            {\n");
+            sb.Append("                                j = stop;\n                                continue;\n                            }\n\n");
+            sb.Append("                            for (; j < stop; j++)\n                            {\n");
+            sb.Append($"                                ref readonly {t} near = ref {unsafeType}.Add(ref o{otherPoint}, j);\n");
+            sb.Append("                                float " + string.Join(", ", axes.Select((a, k) => $"d{k} = at.{a} - near.{a}")) + ";\n");
+            sb.Append("                                if (" + string.Join(" + ", axes.Select((_, k) => $"d{k} * d{k}")) + " > reach2) continue;\n");
+            sb.Append("                                " + call);
+            sb.Append("                            }\n                        }\n");
+        }
+        else
+        {
+            sb.Append("                        for (int j = ranges[k], end = ranges[k + 1]; j < end; j++)\n");
+            sb.Append("                            " + call);
+        }
+        sb.Append("                }\n            }\n        }\n");
 
         if (pair.Simd is { } simd)
         {
