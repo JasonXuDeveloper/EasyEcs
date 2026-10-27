@@ -66,6 +66,13 @@ public interface IPairJob
     void CutoffsSquared(in PairRun table, Span<double> into);
 
     /// <summary>
+    /// The rows of the method's table one step of <see cref="Run"/> handles at once when it runs cluster by cluster:
+    /// <c>Vector&lt;float&gt;.Count</c> where its vector loop runs, else 1. The pass weighs lists of each row's neighbors
+    /// (<see cref="PairRun.Listed"/>) against it.
+    /// </summary>
+    int Width { get; }
+
+    /// <summary>
     /// The rows of <see cref="PairRun"/>'s table against the rows of its other table, clusters
     /// <see cref="PairRun.First"/> to <see cref="PairRun.End"/> - 1 (all of them, or one chunk's of a parallel pass, which
     /// runs on several threads: each writes its clusters' rows only).
@@ -91,13 +98,15 @@ public readonly ref struct PairRun
     private readonly World _world;
     private readonly Archetype _table, _other;
     private readonly ulong[] _rows, _neighbors;
-    private readonly int[] _starts, _ranges;
+    private readonly int[] _starts, _ranges, _nearStarts, _near;
     private readonly float[] _reach;
     private readonly int _first, _end, _size;
 
     internal PairRun(World world, Archetype table, Archetype other, ulong[] rows, ulong[] neighbors, int[] starts,
-        int[] ranges, float[] reach, int first, int end, int size)
+        int[] ranges, float[] reach, int first, int end, int size, int[] nearStarts = null, int[] near = null)
     {
+        _nearStarts = nearStarts;
+        _near = near;
         _reach = reach;
         _world = world;
         _table = table;
@@ -152,6 +161,27 @@ public readonly ref struct PairRun
     }
 
     /// <summary>
+    /// The run carries a list of each row's neighbors (<see cref="Near"/>): the pass found them fewer than the rows of
+    /// the clusters' ranges by enough that visiting them one row at a time costs less (the density pick). The rows of
+    /// <see cref="Ranges"/> each row's list leaves out are farther than the cutoff from it.
+    /// </summary>
+    public bool Listed => _nearStarts != null;
+
+    /// <summary>
+    /// The rows of the other table near row <paramref name="row"/> of the method's table, ascending (only when
+    /// <see cref="Listed"/>): a subset of its cluster's <see cref="Ranges"/> that holds every row within the cluster's
+    /// <see cref="Cutoff"/> of it. O(1).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ReadOnlySpan<int> Near(int row)
+    {
+        // _nearStarts holds Count + 1 starts of the method's table, rising within _near: in bounds for every row.
+        ref int starts = ref MemoryMarshal.GetArrayDataReference(_nearStarts);
+        int start = Unsafe.Add(ref starts, row);
+        return MemoryMarshal.CreateReadOnlySpan(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(_near), start), Unsafe.Add(ref starts, row + 1) - start);
+    }
+
+    /// <summary>
     /// The cutoff of cluster <paramref name="cluster"/> this pass: the largest cutoff of its rows, a little over it (never
     /// below: a pair farther than it fails the method's test), infinity without a cutoff. The method per pair skips the
     /// neighbors past it without a call. O(1).
@@ -175,8 +205,8 @@ public readonly ref struct PairRun
     public ref T Others<T>() where T : struct, IComponent => ref _other.Data<T>(_other.ColumnIndex(ComponentType<T>.Bit));
 
     /// <summary>What a chunk of a parallel pass rebuilds the run from (its own clusters).</summary>
-    internal (World, Archetype, Archetype, ulong[], ulong[], int[], int[], float[]) Parts() =>
-        (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach);
+    internal (World, Archetype, Archetype, ulong[], ulong[], int[], int[], float[], int[], int[]) Parts() =>
+        (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, _nearStarts, _near);
 
     /// <summary>The entity of row <paramref name="row"/> of the method's table. O(1).</summary>
     public Entity Entity(int row) => new(_world, _table.Slots[row]);
@@ -308,14 +338,14 @@ public sealed partial class World
         private World _world;
         private Archetype _table, _other;
         private ulong[] _rows, _neighbors;
-        private int[] _starts, _ranges;
+        private int[] _starts, _ranges, _nearStarts, _near;
         private float[] _reach;
         private int _end, _size, _clusters;
 
         public void Set(TJob job, in PairRun run, int clusters)
         {
             _job = job;
-            (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach) = run.Parts();
+            (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, _nearStarts, _near) = run.Parts();
             _end = run.End;
             _size = run.ClusterSize;
             _clusters = clusters;
@@ -325,7 +355,7 @@ public sealed partial class World
         {
             var job = _job;
             int first = index * _clusters;
-            job.Run(new PairRun(_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, first, Math.Min(first + _clusters, _end), _size));
+            job.Run(new PairRun(_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, first, Math.Min(first + _clusters, _end), _size, _nearStarts, _near));
         }
 
         /// <summary>Drop the references of the last call until the next one.</summary>
@@ -335,7 +365,7 @@ public sealed partial class World
             _world = null;
             _table = _other = null;
             _rows = _neighbors = null;
-            _starts = _ranges = null;
+            _starts = _ranges = _nearStarts = _near = null;
             _reach = null;
         }
     }
@@ -494,7 +524,9 @@ internal sealed class PairState
             bool skips = otherMode == RowFilter.Test || other.Count != other.AliveCount;
             if (skips) Passing(other, otherFilter, otherMode, ref _neighbors);
             var list = ListOf(own, their);
-            run = new PairRun(world, own.Table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Cutoff, 0, own.ClusterCount, size);
+            bool listed = Listed<T, TOrder>(list, bit, job.Width);
+            run = new PairRun(world, own.Table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Cutoff, 0,
+                own.ClusterCount, size, listed ? list.NearStarts : null, listed ? list.Near : null);
             return true;
         }
     }
@@ -736,6 +768,199 @@ internal sealed class PairState
         starts[na] = at;
         list.Builds = a.Builds;
         list.OtherBuilds = b.Builds;
+        list.Draws++;
+    }
+
+    /// <summary>How a pass picks the lists of each row's neighbors: by their cost (Auto), never, or whenever they hold (On: tests, benchmarks).</summary>
+    internal enum ListMode { Auto, Off, On }
+
+    /// <summary>The pick of every pair pass of the process (benchmarks and tests set it).</summary>
+    internal static ListMode Lists = ListMode.Auto;
+
+    /// <summary>
+    /// What a list's entry costs, in steps of the clusters' ranges (a neighbor against a cluster): the entry's load, the
+    /// neighbor's row out of stride, the distance test (calibrated with PairsBenchmark).
+    /// </summary>
+    internal const float ListCost = 2;
+
+    /// <summary>A pick of the lists must save this share of the ranges' cost at least, against the error of its estimate.</summary>
+    internal const float ListGain = 0.8f;
+
+    /// <summary>
+    /// Whether this pass of <paramref name="list"/>'s tables visits each row's list of neighbors (Verlet's list: the
+    /// rows of the ranges within the reach plus the skin, the boxes' margin) instead of the clusters' ranges: the list
+    /// built (O(candidates)) or kept (O(rows): it holds while the rows of both tables together moved less than the skin
+    /// since it was built and the ranges were not drawn again). Auto builds one only where it costs less per pass than
+    /// the ranges for a method of <paramref name="width"/> rows per step, its build spread over the passes the last
+    /// one held: dense neighborhoods and wide vectors keep the ranges.
+    /// </summary>
+    private bool Listed<T, TOrder>(PairList list, int bit, int width) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
+    {
+        var mode = Lists;
+        if (mode == ListMode.Off) return false;
+        Clusters own = list.Table, their = list.Other;
+        float skin = float.IsFinite(_margin) ? _margin : 0;
+        if (list.Listed)
+        {
+            if (list.ListedDraw == list.Draws && list.SaveA == own.Saves && list.SaveB == their.Saves && list.Skin == skin &&
+                Moved<T, TOrder>(own, bit) + Moved<T, TOrder>(their, bit) + list.Slack <= skin * 0.99f)
+                return true;
+            list.Listed = false;
+            list.Life = Math.Max(1, _pass - list.BuiltPass);
+        }
+
+        if (mode == ListMode.Auto)
+        {
+            if (list.EstimatedDraw != list.Draws) Estimate<T, TOrder>(list, bit, skin);
+            // Per pass: the ranges' steps against the list's entries, its build (a test per candidate) spread over the
+            // passes the last one held, and the check of both tables' rows.
+            float ranges = list.Candidates / width;
+            float lists = list.Entries * ListCost + list.Candidates / list.Life + own.Table.Count + their.Table.Count;
+            if (!(lists < ranges * ListGain)) return false;
+        }
+
+        return Build<T, TOrder>(list, bit, skin);
+    }
+
+    /// <summary>
+    /// The candidates of <paramref name="list"/>'s ranges (each cluster's rows times the rows of its ranges) and its
+    /// entries, counted on every eighth cluster (each one of a small table) and scaled. O(candidates / 8).
+    /// </summary>
+    private void Estimate<T, TOrder>(PairList list, int bit, float skin) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
+    {
+        list.EstimatedDraw = list.Draws;
+        list.Candidates = list.Entries = 0;
+        Clusters own = list.Table, their = list.Other;
+        var table = own.Table;
+        int a = table.ColumnIndex(bit), b = their.Table.ColumnIndex(bit);
+        if (a < 0 || b < 0) return;
+        ref T rows = ref table.Data<T>(a);
+        ref T others = ref their.Table.Data<T>(b);
+        int count = table.Count, size = own.Size, n = own.ClusterCount, step = n <= 64 ? 1 : 8;
+        double candidates = 0, sampled = 0, entries = 0;
+        for (int w = 0; w < n; w++)
+        {
+            int first = w * size, end = Math.Min(first + size, count), at = list.Starts[w], to = list.Starts[w + 1];
+            long span = 0;
+            for (int k = at; k < to; k += 2) span += list.Ranges[k + 1] - list.Ranges[k];
+            candidates += (double)span * (end - first);
+            if (w % step != 0) continue;
+            float reach = own.KeptCutoff[w];
+            if (!float.IsFinite(reach)) return; // every pair of the cluster runs: no list
+            sampled += (double)span * (end - first);
+            float r2 = Radius(reach, skin);
+            for (int i = first; i < end; i++)
+            {
+                var point = TOrder.Point(in Unsafe.Add(ref rows, i));
+                for (int k = at; k < to; k += 2)
+                    for (int j = list.Ranges[k], stop = list.Ranges[k + 1]; j < stop; j++)
+                        if (!(Vector3.DistanceSquared(point, TOrder.Point(in Unsafe.Add(ref others, j))) > r2)) entries++;
+            }
+        }
+
+        list.Candidates = (float)candidates;
+        list.Entries = sampled > 0 ? (float)(entries * candidates / sampled) : 0;
+    }
+
+    /// <summary>The square of a list's radius: the cutoff plus the skin, widened against the rounding of the method's own test.</summary>
+    private static float Radius(float reach, float skin)
+    {
+        float radius = reach + skin;
+        return radius * radius * (1 + 1e-3f);
+    }
+
+    /// <summary>
+    /// Each row's list of <paramref name="list"/>: the rows of its cluster's ranges within the cluster's kept cutoff plus
+    /// <paramref name="skin"/> (a NaN distance too: the method's test lets it through), ascending, after saving the
+    /// points of a table whose rows moved past a quarter of the skin since its last save. False when a cluster has no
+    /// finite cutoff or a table no point. O(candidates).
+    /// </summary>
+    private bool Build<T, TOrder>(PairList list, int bit, float skin) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
+    {
+        Clusters own = list.Table, their = list.Other;
+        var table = own.Table;
+        int a = table.ColumnIndex(bit), b = their.Table.ColumnIndex(bit);
+        if (a < 0 || b < 0) return false;
+        float movedA = Moved<T, TOrder>(own, bit);
+        if (!(movedA <= skin * 0.25f)) movedA = Save<T, TOrder>(own, bit);
+        float movedB = Moved<T, TOrder>(their, bit); // the save of one table against itself counts twice, as checked
+        if (!(movedB <= skin * 0.25f)) movedB = Save<T, TOrder>(their, bit);
+        ref T rows = ref table.Data<T>(a);
+        ref T others = ref their.Table.Data<T>(b);
+        int count = table.Count, size = own.Size, n = own.ClusterCount, found = 0;
+        if (list.NearStarts.Length < count + 1) list.NearStarts = new int[Math.Max(count + 1, list.NearStarts.Length * 2)];
+        var starts = list.NearStarts;
+        var near = list.Near;
+        for (int w = 0; w < n; w++)
+        {
+            float reach = own.KeptCutoff[w];
+            if (!float.IsFinite(reach)) return false;
+            float r2 = Radius(reach, skin);
+            int first = w * size, end = Math.Min(first + size, count), at = list.Starts[w], to = list.Starts[w + 1];
+            for (int i = first; i < end; i++)
+            {
+                starts[i] = found;
+                var point = TOrder.Point(in Unsafe.Add(ref rows, i));
+                for (int k = at; k < to; k += 2)
+                    for (int j = list.Ranges[k], stop = list.Ranges[k + 1]; j < stop; j++)
+                        if (!(Vector3.DistanceSquared(point, TOrder.Point(in Unsafe.Add(ref others, j))) > r2))
+                        {
+                            if (found == near.Length) Array.Resize(ref near, Math.Max(64, found * 2)); // grows to the densest list
+                            near[found++] = j;
+                        }
+            }
+        }
+
+        starts[count] = found;
+        list.Near = near;
+        list.Listed = true;
+        list.ListedDraw = list.Draws;
+        list.SaveA = own.Saves;
+        list.SaveB = their.Saves;
+        list.Slack = movedA + movedB;
+        list.Skin = skin;
+        list.BuiltPass = _pass;
+        return true;
+    }
+
+    /// <summary>Save the points of <paramref name="clusters"/>' rows now, which later moves are measured from: 0, the move since. O(rows).</summary>
+    private float Save<T, TOrder>(Clusters clusters, int bit) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
+    {
+        var table = clusters.Table;
+        int count = table.Count;
+        if (clusters.Saved.Length < count) clusters.Saved = new Vector3[Math.Max(count, clusters.Saved.Length * 2)];
+        ref T rows = ref table.Data<T>(table.ColumnIndex(bit));
+        var saved = clusters.Saved;
+        for (int i = 0; i < count; i++) saved[i] = TOrder.Point(in Unsafe.Add(ref rows, i));
+        clusters.SavedCount = count;
+        clusters.Saves++;
+        clusters.MovedPass = _pass;
+        return clusters.Moved = 0;
+    }
+
+    /// <summary>
+    /// The farthest any row of <paramref name="clusters"/>' table moved since its points were saved (a little over it),
+    /// once per pass: infinity when the table's count changed, nothing was saved or a point is NaN. Absent and dead rows
+    /// are measured too: a list covers every row, whichever passes. O(rows).
+    /// </summary>
+    private float Moved<T, TOrder>(Clusters clusters, int bit) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
+    {
+        if (clusters.MovedPass == _pass) return clusters.Moved;
+        clusters.MovedPass = _pass;
+        var table = clusters.Table;
+        int count = table.Count, column = table.ColumnIndex(bit);
+        if (clusters.SavedCount != count || column < 0) return clusters.Moved = float.PositiveInfinity;
+        ref T rows = ref table.Data<T>(column);
+        ref Vector3 saved = ref MemoryMarshal.GetArrayDataReference(clusters.Saved); // SavedCount points
+        float most = 0;
+        for (int i = 0; i < count; i++)
+        {
+            float d2 = Vector3.DistanceSquared(TOrder.Point(in Unsafe.Add(ref rows, i)), Unsafe.Add(ref saved, i));
+            if (d2 > most) most = d2;
+            else if (float.IsNaN(d2)) return clusters.Moved = float.PositiveInfinity;
+        }
+
+        return clusters.Moved = MathF.Sqrt(most) * (1 + 1e-4f);
     }
 
     private void Add(ref int found, int first, int second)
@@ -763,6 +988,11 @@ internal sealed class PairState
         public int Count, Size, ClusterCount, Builds, Passes, Pass, Axes, Capacity;
         public long Version;
         public float[] Low = [], High = [], Cutoff = [], KeptCutoff = [];
+
+        // The points a list's moves are measured from (Saves counts the saves), and the farthest move this pass.
+        public Vector3[] Saved = [];
+        public int SavedCount = -1, Saves, MovedPass = -1;
+        public float Moved;
         private float[] _low = [], _high = [];
 
         public void Reserve(int clusters)
@@ -860,8 +1090,15 @@ internal sealed class PairState
     private sealed class PairList(Clusters table, Clusters other)
     {
         public readonly Clusters Table = table, Other = other;
-        public int Builds = -1, OtherBuilds = -1;
+        public int Builds = -1, OtherBuilds = -1, Draws;
         public int[] Starts = [], Ranges = [], Order = [];
+
+        // The list of each row's neighbors (Verlet's): its rows, the draw and saves it was built from, the moves it
+        // allows, how long the last one held, and the estimate of its cost for the current draw.
+        public int[] NearStarts = [], Near = [];
+        public bool Listed;
+        public int ListedDraw = -1, SaveA, SaveB, BuiltPass, Life = PairState.Interval, EstimatedDraw = -1;
+        public float Slack, Skin, Candidates, Entries;
 
         public void Reserve(int clusters, int pairs)
         {

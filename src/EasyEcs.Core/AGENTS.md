@@ -153,7 +153,9 @@ Pairs.cs                     [Neighbor] (a pair method's other entity) and the p
                              and ForPairsParallel (chunks of whole words of clusters on the chunk runner, the lists
                              drawn first on the calling thread; PairState.Next walks the pairs of tables) (the order requested once,
                              then PairState: cluster boxes drawn every pass and checked against the kept ones widened
-                             by an adaptive margin, a sweep of the boxes widened by the clusters' reach when one left)
+                             by an adaptive margin, a sweep of the boxes widened by the clusters' reach when one left;
+                             lists of each row's neighbors, Verlet's, where they cost less than the ranges for the
+                             method's width: PairRun.Listed / Near, kept while the rows moved less than the margin)
 World.Order.cs               OrderRows<T, TOrder> (the request generated setup makes), the cadence (SortDue from
                              World.Run), SortRows<T>, Clusters<T> (OrderedTables)
 Cleanup.cs                   ICleanupComponent + Retired tag (entities kept alive until their cleanup components go)

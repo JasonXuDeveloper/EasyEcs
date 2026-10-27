@@ -40,8 +40,9 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              locals (Locals counts them), else each in an AggressiveInlining method of the job (D135)
 SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): the pass (world.ForPairs), the order
                              struct (Morton key of the compared component over the axes the test names), the job
-                             (the cutoff from the test, per row or one; Rows: the method per pair; Vectors: a window's
-                             lanes against each neighbor through Kernel's pair mode, under its gate)
+                             (the cutoff from the test, per row or one; Width; Rows: the method per pair, over the row's
+                             list of neighbors when the run carries one; Vectors: a cluster's lanes against each
+                             neighbor through Kernel's pair mode, under its gate)
 PairForm.cs                  what a pair method is, read once for the generator and the analyzer: Problem (EECS105's
                              reason), Read (the distance test: dx * dx sums, DistanceSquared, LengthSquared, and the
                              cutoff: values, singletons, the row's in components; EECS106's reason), HandWritten
@@ -134,7 +135,7 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              rows sent to the method when they live in several, with a backoff; only for SimdMode.Require (D131);
                              the chases of the rows ahead prefetched behind the job's gate (Code.Prefetched);
                              Kernel.Neighbors.cs: a pair method's pair mode (a [Neighbor] component as uniform values
-                             broadcast per neighbor, the body masked by the window's passing lanes) and the cutoff's
+                             broadcast per neighbor, the body masked by the cluster's passing lanes) and the cutoff's
                              text (ScalarOf);
                              Kernel.Structural.cs: a structural change of the row's entity under a condition (marked
                              rows, applied in bulk after the pass: Code.StructuralChanges) and Emit<T> records of a

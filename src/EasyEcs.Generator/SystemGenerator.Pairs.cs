@@ -122,9 +122,16 @@ public sealed partial class SystemGenerator
             return text.ToString();
         }
 
+        // The vector loop's guard: a cluster per step where it holds, a row per step otherwise (Width, which the pass
+        // weighs each row's list of neighbors against; a run that carries the lists visits them a row at a time).
+        string? accelerated = pair.Simd is { } guarded
+            ? $"{vector}.IsHardwareAccelerated{(guarded.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "")}"
+            : null;
+        sb.Append(accelerated == null
+            ? "        public int Width => 1;\n\n"
+            : $"        public int Width => {accelerated} ? {vector}<float>.Count : 1;\n\n");
         sb.Append("        public void Run(in global::EasyEcs.PairRun run)\n        {\n");
-        if (pair.Simd is { } guarded)
-            sb.Append($"            if ({vector}.IsHardwareAccelerated && run.ClusterSize == {vector}<float>.Count{(guarded.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "")}) Vectors(in run);\n            else Rows(in run);\n");
+        if (accelerated != null) sb.Append($"            if (!run.Listed && {accelerated} && run.ClusterSize == {vector}<float>.Count) Vectors(in run);\n            else Rows(in run);\n");
         else sb.Append("            Rows(in run);\n");
         sb.Append("        }\n\n");
         sb.Append("        public void Stamp(in global::EasyEcs.PairRun run)\n        {\n");
@@ -159,7 +166,7 @@ public sealed partial class SystemGenerator
         bool prune = axes.Length > 0 && pair.Cutoff.Length > 0 && rowPoint > 0 && otherPoint >= 0;
         sb.Append("        private void Rows(in global::EasyEcs.PairRun run)\n        {\n");
         sb.Append(Columns("            "));
-        sb.Append("            bool skips = run.Skips;\n");
+        sb.Append("            bool skips = run.Skips, listed = run.Listed;\n");
         sb.Append("            for (int w = run.First, size = run.ClusterSize; w < run.End; w++)\n            {\n");
         sb.Append("                ulong lanes = run.Lanes(w);\n                if (lanes == 0) continue;\n");
         sb.Append("                var ranges = run.Ranges(w);\n");
@@ -167,19 +174,34 @@ public sealed partial class SystemGenerator
         sb.Append("                for (; lanes != 0; lanes &= lanes - 1)\n                {\n");
         sb.Append("                    nint i = (nint)w * size + global::System.Numerics.BitOperations.TrailingZeroCount(lanes);\n");
         if (prune) sb.Append($"                    ref readonly {t} at = ref {unsafeType}.Add(ref r{rowPoint}, i);\n");
-        sb.Append("                    for (int k = 0; k < ranges.Length; k += 2)\n");
-        sb.Append("                        for (int j = ranges[k], end = ranges[k + 1]; j < end; j++)\n                        {\n");
+        // One neighbor j of row i: the reach test, the neighbors' filter, the method (and the neighbor's stamps).
+        var pairBody = new StringBuilder();
         if (prune)
         {
-            sb.Append($"                            ref readonly {t} near = ref {unsafeType}.Add(ref o{otherPoint}, j);\n");
-            sb.Append("                            float " + string.Join(", ", axes.Select((a, k) => $"d{k} = at.{a} - near.{a}")) + ";\n");
-            sb.Append("                            if (" + string.Join(" + ", axes.Select((_, k) => $"d{k} * d{k}")) + " > reach2) continue;\n");
+            pairBody.Append($"ref readonly {t} near = ref {unsafeType}.Add(ref o{otherPoint}, j);\n");
+            pairBody.Append("float " + string.Join(", ", axes.Select((a, k) => $"d{k} = at.{a} - near.{a}")) + ";\n");
+            pairBody.Append("if (" + string.Join(" + ", axes.Select((_, k) => $"d{k} * d{k}")) + " > reach2) continue;\n");
         }
         // A neighbor's component by ref stamps the neighbors the method ran for (one row of the other table per pair).
         var stamps = method.Parameters.Where(p => p is { Kind: Symbols.ParamKind.Neighbor, RefKind: "ref" }).Select(p => p.Type).Distinct()
             .Select(type => $" run.StampOther<{type}>(j);").ToArray();
         string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}({args});";
-        sb.Append($"                            if (!skips || !run.Skip(j)) {(stamps.Length == 0 ? call : "{ " + call + string.Concat(stamps) + " }")}\n");
+        pairBody.Append($"if (!skips || !run.Skip(j)) {(stamps.Length == 0 ? call : "{ " + call + string.Concat(stamps) + " }")}\n");
+        void Pair()
+        {
+            foreach (var line in pairBody.ToString().Split('\n')) if (line.Length > 0) sb.Append("                            ").Append(line).Append('\n');
+        }
+        // The row's list of neighbors where the run carries them (the same pairs in the same order: a list is its
+        // cluster's ranges less rows past the cutoff), else the cluster's ranges.
+        sb.Append("                    if (listed)\n                    {\n");
+        sb.Append("                        var nearby = run.Near((int)i);\n");
+        sb.Append("                        for (int k = 0; k < nearby.Length; k++)\n                        {\n");
+        sb.Append("                            int j = nearby[k];\n");
+        Pair();
+        sb.Append("                        }\n\n                        continue;\n                    }\n\n");
+        sb.Append("                    for (int k = 0; k < ranges.Length; k += 2)\n");
+        sb.Append("                        for (int j = ranges[k], end = ranges[k + 1]; j < end; j++)\n                        {\n");
+        Pair();
         sb.Append("                        }\n                }\n            }\n        }\n");
 
         if (pair.Simd is { } simd)
