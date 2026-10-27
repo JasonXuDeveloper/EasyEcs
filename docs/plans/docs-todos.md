@@ -751,6 +751,11 @@ Pages to write in the docs pass (en + zh each; zh terms: 块 = a parallel chunk 
   `[ForEachRecord]`, `World.ReserveBuffers`, enum and bool lanes. No breaking change (EECS055's message for a component
   with a bool among several fields changed).
 
+- **BattleServer.cs (example.mdx)**: EECS086's total case reports Shoot, SendFire and SendFireOut (they add to the
+  `Battle` singleton row by row). Move `Battle`'s counters to `[Accumulate, Sum]` taken as `ref Reduce<Battle>` (Tick
+  stays assigned by its own system), update the page's walkthrough, then drop the EECS086 exception in
+  GeneratorBenchmark.Analyzed. Not done on this branch (BattleServer.cs was out of its scope).
+
 What each form replaces in the samples (VoxelServer rewrite, `voxel-rewrite.md` section 3; samples were not edited here):
 
 - G5: the four systems that reset nothing and add to a singleton row by row (`ref Totals t` then `t.X += ...`): each
