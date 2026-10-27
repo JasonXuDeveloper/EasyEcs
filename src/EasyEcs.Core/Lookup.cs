@@ -80,11 +80,21 @@ public readonly ref struct Lookup<T> where T : struct, IComponent
 
     /// <summary>
     /// Whether a pass reading <typeparamref name="T"/> of other entities of <paramref name="world"/> prefetches its
-    /// chases (<see cref="LookupLanes.Prefetches"/>: a prefetch on this machine, and the records and rows past the last-level cache). Generated
+    /// chases: a prefetch on this machine, and the records and rows past the last-level cache (the gate of a vector
+    /// loop's chases: just past the L2 its prefetches cost more than they hide, LookupChaseGateBenchmark). Generated
     /// code reads it once per pass.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public static bool Prefetches(World world) => LookupLanes.Prefetches(world, Unsafe.SizeOf<T>());
+    public static bool Prefetches(World world) => LookupLanes.Prefetches(world, Unsafe.SizeOf<T>(), CacheSizes.LastLevel);
+
+    /// <summary>
+    /// <see cref="Prefetches"/> past one core's L2 instead (the last-level cache when the L2 is unknown): the gate of
+    /// the row form's chases (at an id a row holds or a buffer's elements, on one thread, in parallel, in a fused walk),
+    /// which pay as soon as the records and rows leave the L2 (LookupChaseGateBenchmark, ChaseFormsPrefetchBenchmark).
+    /// Generated code reads it once per pass.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static bool PrefetchesPastL2(World world) => LookupLanes.Prefetches(world, Unsafe.SizeOf<T>(), CacheSizes.L2OrLastLevel);
 
     /// <summary>
     /// A vector loop's prefetches for the vector of <paramref name="count"/> rows at row <paramref name="i"/> of a run of
@@ -213,7 +223,16 @@ public static class LookupExtensions
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static bool Probes<T, TKey>(World world) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey> =>
-        LookupLanes.CanPrefetch && Unsafe.As<ValueIndex<T, TKey>>(Prepared<T, TKey>(world)).Probes();
+        LookupLanes.CanPrefetch && Unsafe.As<ValueIndex<T, TKey>>(Prepared<T, TKey>(world)).Probes(CacheSizes.LastLevel);
+
+    /// <summary>
+    /// <see cref="Probes{T, TKey}"/> past one core's L2 instead (the last-level cache when the L2 is unknown): the gate of
+    /// a parallel pass's probes, whose threads pay as soon as the index leaves the L2 (ProbePrefetchBenchmark); a probe
+    /// on one thread keeps the last-level gate, which it pays only past. Generated code reads it once per pass.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public static bool ProbesPastL2<T, TKey>(World world) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey> =>
+        LookupLanes.CanPrefetch && Unsafe.As<ValueIndex<T, TKey>>(Prepared<T, TKey>(world)).Probes(CacheSizes.L2OrLastLevel);
 
     /// <summary>
     /// Stage <paramref name="stage"/> (1 to 3) of a probe of <paramref name="key"/> in <paramref name="index"/> (what

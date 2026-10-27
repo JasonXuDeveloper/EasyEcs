@@ -12,7 +12,8 @@ namespace EasyEcs;
 // is in the cache: a direct-indexed key's slot (one stage); a relation key's slot by the target's index, then its list
 // of ids; a hashed key's bucket, then its entry (holding a unique key's entity, or a shared key's count and list). A
 // third stage for a shared key's list of ids was measured and dropped: finding its head is a second lookup per row
-// (ProbePrefetchBenchmark.CountClan at 16M keys: 2.4 times as slow). Past the last-level cache only (Probes).
+// (ProbePrefetchBenchmark.CountClan at 16M keys: 2.4 times as slow). Past the form's cache only (Probes: the last level
+// for a pass on one thread, the L2 for a parallel one).
 public sealed partial class ValueIndex<T, TKey>
 {
     // The hash's arrays as the gate found them, for the passes that prefetch (read once per pass by Probes, on the owner
@@ -24,13 +25,14 @@ public sealed partial class ValueIndex<T, TKey>
 
     /// <summary>
     /// Whether a pass probing this index prefetches its probes: where a prefetch exists, and when the index's lines a
-    /// probe lands on (slots, buckets and entries, lists of ids) are past the last-level cache; in the cache a prefetch
-    /// costs more than it hides (BatchProbeBenchmark: 1.3-1.6x at 1k and 100k keys). Reads the hash's arrays for
-    /// <see cref="Prefetch"/>. Once per pass, on the owner thread.
+    /// probe lands on (slots, buckets and entries, lists of ids) are past a cache of <paramref name="cache"/> bytes (the
+    /// form's gate, <see cref="CacheSizes"/>; 0, unknown: never); in the cache a prefetch costs more than it hides
+    /// (BatchProbeBenchmark: 1.3-1.6x at 1k and 100k keys). Reads the hash's arrays for <see cref="Prefetch"/>. Once
+    /// per pass, on the owner thread.
     /// </summary>
-    internal bool Probes()
+    internal bool Probes(long cache)
     {
-        if (!Prefetching.IsSupported || LastLevelCache.Bytes <= 0) return false;
+        if (!Prefetching.IsSupported || cache <= 0) return false;
         bool hashed = _heads.Count > 0 && HashSlots<TKey, IndexHead>.Works;
         int stride = hashed ? HashSlots<TKey, IndexHead>.Stride(_heads, out _probeBuckets, out _probeEntries, out _probeComparer) : 0;
         if (stride == 0) _probeBuckets = null;
@@ -39,7 +41,7 @@ public sealed partial class ValueIndex<T, TKey>
             + (long)_byTarget.Length * Unsafe.SizeOf<IndexHead>()
             + (long)_heads.Count * (sizeof(int) + Math.Max(stride, Unsafe.SizeOf<IndexHead>()))
             + (Unique ? 0 : (long)_nodes.Length * Unsafe.SizeOf<EntityId>()); // the lists of ids
-        return LookupLanes.PastCache(bytes, LastLevelCache.Bytes);
+        return LookupLanes.PastCache(bytes, cache);
     }
 
     /// <summary>

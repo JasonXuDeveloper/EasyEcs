@@ -79,20 +79,24 @@ public sealed partial class SystemGenerator
 
     /// <summary>
     /// Some method of the walk chases other entities (<see cref="ForEachModel.HasChaseTwin"/>): the walk has a twin
-    /// (<c>{name}Chases</c>) running their twin jobs, which the call site picks past the last-level cache.
+    /// (<c>{name}Chases</c>) running their twin jobs, which the call site picks past the L2 (<see cref="ChaseGate"/>).
     /// </summary>
     private static bool FusedChases(UpdateModel model, int start, int count) =>
         Enumerable.Range(start, count).Any(i => model.Methods[i].HasChaseTwin);
 
     /// <summary>
-    /// The call site's gate of a pass (or a walk) chasing other entities: true past the last-level cache for any of the
-    /// lookups its chases read (<c>Lookup&lt;T&gt;.Prefetches</c>, once per pass).
+    /// The call site's gate of a pass (or a walk) chasing other entities: true when any of the lookups its chases read
+    /// is past the cache of its form, once per pass. A gate per form (borrowed-ideas.md item 1): the row form's chases of
+    /// other entities (at an id a row holds or a buffer's elements, on one thread, in parallel, in a fused walk) and a
+    /// parallel pass's probes pay as soon as their data leaves one core's L2 (<c>Lookup&lt;T&gt;.PrefetchesPastL2</c>,
+    /// <c>LookupExtensions.ProbesPastL2</c>); a probe on one thread costs more than it hides until the index leaves the
+    /// last-level cache (<c>LookupExtensions.Probes</c>).
     /// </summary>
     private static string ChaseGate(IEnumerable<ForEachModel> methods, string world) =>
         string.Join(" || ", methods.SelectMany(m => m.Chases.Select(c => c.Kind == ChaseKind.Probe
                 // a probe: past the cache when its index is (the index sized by its representation)
-                ? $"global::EasyEcs.LookupExtensions.Probes<{m.Parameters[c.Lookup].Type}, {m.Parameters[c.Lookup].Key}>({world})"
-                : $"global::EasyEcs.Lookup<{m.Parameters[c.Lookup].Type}>.Prefetches({world})")).Distinct());
+                ? $"global::EasyEcs.LookupExtensions.Probes{(m.Parallel ? "PastL2" : "")}<{m.Parameters[c.Lookup].Type}, {m.Parameters[c.Lookup].Key}>({world})"
+                : $"global::EasyEcs.Lookup<{m.Parameters[c.Lookup].Type}>.PrefetchesPastL2({world})")).Distinct());
 
     /// <summary>
     /// The walk runs in blocks only from <c>SystemCode.FusedRows</c> rows (a check at run time); fewer rows run each pass
@@ -319,7 +323,7 @@ public sealed partial class SystemGenerator
             return;
         }
 
-        // Past the last-level cache (for any lookup its chases read), the twin walk, whose chasing methods prefetch.
+        // Past the cache of its chases' forms (for any lookup they read), the twin walk, whose chasing methods prefetch.
         var twin = new StringBuilder();
         var today = new StringBuilder();
         EmitFusedWalk(twin, model, start, count, chases: true);
@@ -335,7 +339,7 @@ public sealed partial class SystemGenerator
     /// <summary>
     /// One walk of <see cref="EmitFusedCall"/>: today's (where a walk too small to pay for its blocks runs each pass on
     /// its own), or its twin over the chasing methods' twin jobs (<paramref name="chases"/>), which runs only past the
-    /// last-level cache, where any walk is large enough for blocks.
+    /// L2 (<see cref="ChaseGate"/>), where any walk is large enough for blocks.
     /// </summary>
     private static void EmitFusedWalk(StringBuilder sb, UpdateModel model, int start, int count, bool chases)
     {
@@ -546,7 +550,7 @@ public sealed partial class SystemGenerator
 
         if (chases)
         {
-            // Past the last-level cache (for any lookup the chases read), the twin walk: its chasing methods prefetch.
+            // Past the cache of the chases' forms (for any lookup they read), the twin walk: its chasing methods prefetch.
             sb.Append($"        if ({ChaseGate(both.Methods, "world")})\n        {{\n");
             Walk(true, "            ");
             sb.Append("        }\n\n");
