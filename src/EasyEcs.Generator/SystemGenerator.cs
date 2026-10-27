@@ -1299,7 +1299,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     // One entity has no run of rows to vectorize; a system's loop is its implementation's (SystemLoops).
                     Simd = Symbols.IsForEntity(method) || !outside || PairForm.IsPairMethod(method) || record.Length > 0 ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
                     Scalar = scalar ?? "",
-                    Pair = outside && PairForm.IsPairMethod(method) ? PairModel.Create(method, syntax, model, ct) : null,
+                    Pair = outside && PairForm.IsPairMethod(method) ? PairModel.Create(method, syntax, model, parallel, ct) : null,
                     // Reads of other entities at the row's ids, by EntityId (a keyed lookup finds through its index).
                     Chases = Symbols.IsForEntity(method) || record.Length > 0 ? new([]) : Usable(Generator.Chases.Of(method, syntax, model, ct), parameters),
                     OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),

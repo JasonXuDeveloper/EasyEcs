@@ -27,7 +27,7 @@ internal static class PairForm
 
     /// <summary>
     /// Why the declaration of pair method <paramref name="method"/> cannot run per pair (EECS105), or null. A pair
-    /// pass runs on one thread over every row (no Parallel, Slices, change filters or [Consume]), takes components of
+    /// pass runs over every row, on several threads only when it writes no neighbor (no Slices, change filters or [Consume]), takes components of
     /// the row and of the neighbor, singletons and values, and writes no component the other side of a pair reads: a
     /// row's write would reach the neighbors after it in one order and not in another, and a write of the neighbor's
     /// (<c>[Neighbor] ref T</c>) would reach the rows after it, or the row itself when it is its own neighbor. Each
@@ -40,7 +40,8 @@ internal static class PairForm
         if (Symbols.IsForEntity(method)) return "is a [ForEntity] method: a pair runs over the world";
         if (!method.IsStatic) return "is an instance method: make it static";
         if (method.IsGenericMethod || method.ContainingType.IsGenericType) return "is generic: a pair method's order names its component";
-        if (Symbols.IsParallel(method)) return "runs in parallel: a pair pass runs on one thread for now";
+        if (Symbols.IsParallel(method) && method.Parameters.FirstOrDefault(p => p.RefKind == RefKind.Ref && Symbols.IsNeighbor(p)) is { } shared)
+            return $"runs in parallel and writes the neighbor's {shared.Type.Name} ('{shared.Name}'): rows of two threads would write one neighbor; drop Parallel";
         if (Symbols.Slices(method) > 1) return "visits slices of its rows: a pair pass visits every row";
         if (Symbols.IsConsume(method)) return "has [Consume]: a pair pass destroys nothing";
         if (Symbols.AttributeFilters(method).Any(f => f.Item1 is Symbols.FilterKind.Changed or Symbols.FilterKind.Removed

@@ -65,8 +65,18 @@ public interface IPairJob
     /// </summary>
     void CutoffsSquared(in PairRun table, Span<double> into);
 
-    /// <summary>The rows of <see cref="PairRun"/>'s table against the rows of its other table, window by window.</summary>
+    /// <summary>
+    /// The rows of <see cref="PairRun"/>'s table against the rows of its other table, windows
+    /// <see cref="PairRun.First"/> to <see cref="PairRun.End"/> - 1 (all of them, or one chunk's of a parallel pass, which
+    /// runs on several threads: each writes its windows' rows only).
+    /// </summary>
     void Run(in PairRun run);
+
+    /// <summary>
+    /// Stamp the rows of the method's table the run's windows ran for in the tracked components the method writes of
+    /// its row, after <see cref="Run"/> (after every chunk of a parallel pass, on the calling thread).
+    /// </summary>
+    void Stamp(in PairRun run);
 }
 
 /// <summary>
@@ -83,10 +93,10 @@ public readonly ref struct PairRun
     private readonly ulong[] _rows, _neighbors;
     private readonly int[] _starts, _ranges;
     private readonly float[] _reach;
-    private readonly int _windows, _size;
+    private readonly int _first, _end, _size;
 
     internal PairRun(World world, Archetype table, Archetype other, ulong[] rows, ulong[] neighbors, int[] starts,
-        int[] ranges, float[] reach, int windows, int size)
+        int[] ranges, float[] reach, int first, int end, int size)
     {
         _reach = reach;
         _world = world;
@@ -96,15 +106,19 @@ public readonly ref struct PairRun
         _neighbors = neighbors;
         _starts = starts;
         _ranges = ranges;
-        _windows = windows;
+        _first = first;
+        _end = end;
         _size = size;
     }
 
     /// <summary>Rows per window: a vector of floats (8 where 256-bit vectors are hardware, 4 on ARM64).</summary>
     public int Size => _size;
 
-    /// <summary>Windows of the method's table: row <c>w * Size</c> starts window w.</summary>
-    public int Windows => _windows;
+    /// <summary>The first window of the method's table this run covers: row <c>w * Size</c> starts window w.</summary>
+    public int First => _first;
+
+    /// <summary>The window after the last this run covers (the table's window count, or a chunk's end).</summary>
+    public int End => _end;
 
     /// <summary>The rows of the method's table (rows of the last window past it are none).</summary>
     public int Count => _table.Count;
@@ -160,6 +174,10 @@ public readonly ref struct PairRun
     /// <summary>Row 0 of the other table's column of <typeparamref name="T"/> (a component of the neighbors' filter). O(1).</summary>
     public ref T Others<T>() where T : struct, IComponent => ref _other.Data<T>(_other.ColumnIndex(ComponentType<T>.Bit));
 
+    /// <summary>What a chunk of a parallel pass rebuilds the run from (its own windows).</summary>
+    internal (World, Archetype, Archetype, ulong[], ulong[], int[], int[], float[]) Parts() =>
+        (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach);
+
     /// <summary>The entity of row <paramref name="row"/> of the method's table. O(1).</summary>
     public Entity Entity(int row) => new(_world, _table.Slots[row]);
 
@@ -167,15 +185,20 @@ public readonly ref struct PairRun
     public Entity Other(int row) => new(_world, _other.Slots[row]);
 
     /// <summary>
-    /// Stamp the rows the method runs for in the method's table as written now (a tracked <typeparamref name="T"/> it
-    /// writes; nothing for another). O(rows / 64).
+    /// Stamp the rows the method runs for in the run's windows of the method's table as written now (a tracked
+    /// <typeparamref name="T"/> it writes; nothing for another). O(rows / 64). Calling thread only.
     /// </summary>
     public void Stamp<T>() where T : struct, IComponent
     {
         if (default(T) is not ITracked) return;
         ulong tick = _world.ChangeTick;
-        for (int w = 0, words = (_table.Count + 63) >> 6; w < words; w++)
-            if (_rows[w] != 0) _table.StampWord<T>(w, _rows[w], tick);
+        int from = _first * _size, to = Math.Min(_end * _size, _table.Count);
+        for (int w = from >> 6, words = (to + 63) >> 6; w < words; w++)
+        {
+            ulong rows = _rows[w] & RowFilter.RowMask(w, to);
+            if (w == from >> 6) rows &= ulong.MaxValue << (from & 63);
+            if (rows != 0) _table.StampWord<T>(w, rows, tick);
+        }
     }
 
     /// <summary>
@@ -207,19 +230,113 @@ public sealed partial class World
     public void ForPairs<T, TOrder, TJob>(ref TJob job, in QueryFilter rows, in QueryFilter neighbors, int axes)
         where T : struct, IComponent where TOrder : struct, IRowOrder<T> where TJob : struct, IPairJob, allows ref struct
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(World));
-        var state = PairStateOf(PairJobs<TJob>.Id);
-        float reach = job.CutoffPerRow ? float.NaN : PairState.Reach(job.CutoffSquared);
-        // Every pair runs without a cutoff: no order helps.
-        if (!state.Ordered) state.Ordered = reach == float.PositiveInfinity || OrderPairs<T, TOrder>(axes, reach);
+        var state = BeginPairs<T, TOrder, TJob>(ref job, in rows, in neighbors, axes, out float reach);
         bool froze = Gate.FreezeAlone();
         try
         {
-            state.Run<T, TOrder, TJob>(this, ref job, in rows, in neighbors, axes, reach);
+            while (state.Next<T, TOrder, TJob>(this, ref job, axes, reach, out var run))
+            {
+                job.Run(in run);
+                job.Stamp(in run);
+            }
         }
         finally
         {
             if (froze) Gate.ThawAlone();
+        }
+    }
+
+    /// <summary>
+    /// <see cref="ForPairs{T, TOrder, TJob}"/> on several threads (a <c>[ForEach(Parallel = true)]</c> pair method that
+    /// writes no neighbor): the boxes and lists are drawn on the calling thread as there, then each table's windows are
+    /// cut into chunks of whole 64-row words (about four per thread, or by the windows' measured cost) that the chunk
+    /// runner's threads claim, each running a copy of the job over its windows' rows: a row is written by its own window
+    /// only, so the result is the serial pass's bit for bit. Stamps follow on the calling thread. Owner thread, outside
+    /// other passes; allocation-free after the first call per job type.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public void ForPairsParallel<T, TOrder, TJob>(ref TJob job, in QueryFilter rows, in QueryFilter neighbors, int axes)
+        where T : struct, IComponent where TOrder : struct, IRowOrder<T> where TJob : struct, IPairJob
+    {
+        var state = BeginPairs<T, TOrder, TJob>(ref job, in rows, in neighbors, axes, out float reach);
+        var work = WorkOf<PairChunks<TJob>>();
+        bool froze = Gate.FreezeAlone();
+        try
+        {
+            while (state.Next<T, TOrder, TJob>(this, ref job, axes, reach, out var run))
+            {
+                // Chunks of whole words of rows: a chunk's rows never share a presence or tick word with another's.
+                int perWord = 64 / run.Size, windows = run.End;
+                int size = ChunkRows(work, (long)windows * run.Size, 0) / run.Size;
+                size = (size + perWord - 1) / perWord * perWord;
+                work.Set(job, in run, size);
+                try
+                {
+                    RunChunks(work, (windows + size - 1) / size); // one chunk runs here, timed now and then as any pass
+                }
+                finally
+                {
+                    work.Release();
+                }
+
+                job.Stamp(in run);
+            }
+        }
+        finally
+        {
+            if (froze) Gate.ThawAlone();
+        }
+    }
+
+    /// <summary>The pair state of <typeparamref name="TJob"/>, its tables ordered (requested once), its pass begun.</summary>
+    private PairState BeginPairs<T, TOrder, TJob>(ref TJob job, in QueryFilter rows, in QueryFilter neighbors, int axes, out float reach)
+        where T : struct, IComponent where TOrder : struct, IRowOrder<T> where TJob : struct, IPairJob, allows ref struct
+    {
+        if (_disposed) throw new ObjectDisposedException(nameof(World));
+        var state = PairStateOf(PairJobs<TJob>.Id);
+        reach = job.CutoffPerRow ? float.NaN : PairState.Reach(job.CutoffSquared);
+        // Every pair runs without a cutoff: no order helps.
+        if (!state.Ordered) state.Ordered = reach == float.PositiveInfinity || OrderPairs<T, TOrder>(axes, reach);
+        state.Begin(this, in rows, in neighbors);
+        return state;
+    }
+
+    /// <summary>The chunks of a parallel pair pass over one table against one: chunk i is windows [i × Size, (i + 1) × Size).</summary>
+    private sealed class PairChunks<TJob> : ParallelWork where TJob : struct, IPairJob
+    {
+        private TJob _job;
+        private World _world;
+        private Archetype _table, _other;
+        private ulong[] _rows, _neighbors;
+        private int[] _starts, _ranges;
+        private float[] _reach;
+        private int _end, _size, _windows;
+
+        public void Set(TJob job, in PairRun run, int windows)
+        {
+            _job = job;
+            (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach) = run.Parts();
+            _end = run.End;
+            _size = run.Size;
+            _windows = windows;
+        }
+
+        public override void Run(int index)
+        {
+            var job = _job;
+            int first = index * _windows;
+            job.Run(new PairRun(_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, first, Math.Min(first + _windows, _end), _size));
+        }
+
+        /// <summary>Drop the references of the last call until the next one.</summary>
+        public void Release()
+        {
+            _job = default;
+            _world = null;
+            _table = _other = null;
+            _rows = _neighbors = null;
+            _starts = _ranges = null;
+            _reach = null;
         }
     }
 
@@ -317,35 +434,68 @@ internal sealed class PairState
         return float.IsFinite(reach) ? reach : float.PositiveInfinity;
     }
 
-    public void Run<T, TOrder, TJob>(World world, ref TJob job, in QueryFilter rows, in QueryFilter neighbors, int axes, float reach)
-        where T : struct, IComponent where TOrder : struct, IRowOrder<T> where TJob : struct, IPairJob, allows ref struct
+    // The pass's cursor: the tables of each side, the method's table being run (its windows) and the next neighbors' one.
+    private QueryMatch _mine, _theirs;
+    private Windows _own;
+    private int _a, _b;
+
+    /// <summary>A pass begins: its tables, the cursor before the first pair of tables (<see cref="Next"/>).</summary>
+    public void Begin(World world, in QueryFilter rows, in QueryFilter neighbors)
     {
         _pass++;
-        var mine = world.GetQueryEntry(default, in rows).Match;
-        var theirs = world.GetQueryEntry(default, in neighbors).Match;
+        _mine = world.GetQueryEntry(default, in rows).Match;
+        _theirs = world.GetQueryEntry(default, in neighbors).Match;
+        _own = null;
+        _a = 0;
+    }
+
+    /// <summary>
+    /// The next pair of tables of the pass (a table of rows, then each table of neighbors), its windows checked and
+    /// its lists drawn: all its windows into <paramref name="run"/>; false after the last.
+    /// </summary>
+    public bool Next<T, TOrder, TJob>(World world, scoped ref TJob job, int axes, float reach, out PairRun run)
+        where T : struct, IComponent where TOrder : struct, IRowOrder<T> where TJob : struct, IPairJob, allows ref struct
+    {
         int bit = ComponentType<T>.Bit;
         int size = Vector<float>.Count;
-        for (int a = 0; a < mine.Archetypes.Length; a++)
+        while (true)
         {
-            var table = mine.Archetypes[a];
-            var filter = new RowFilter(mine.Filters[a], 0);
-            int mode = filter.Mode(table);
-            if (table.AliveCount == 0 || mode == RowFilter.None) continue;
-            Passing(table, filter, mode, ref _rows);
-            var own = Refresh<T, TOrder>(table, bit, axes, size);
-            if (Reaches(world, ref job, own, reach)) Keep(own); // a cutoff grew past the one the lists were drawn for
-            for (int b = 0; b < theirs.Archetypes.Length; b++)
+            if (_own == null)
             {
-                var other = theirs.Archetypes[b];
-                var otherFilter = new RowFilter(theirs.Filters[b], 0);
-                int otherMode = otherFilter.Mode(other);
-                if (other.AliveCount == 0 || otherMode == RowFilter.None) continue;
-                var their = ReferenceEquals(other, table) ? own : Refresh<T, TOrder>(other, bit, axes, size);
-                bool skips = otherMode == RowFilter.Test || other.Count != other.AliveCount;
-                if (skips) Passing(other, otherFilter, otherMode, ref _neighbors);
-                var list = ListOf(own, their);
-                job.Run(new PairRun(world, table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Reach, own.WindowCount, size));
+                if (_a == _mine.Archetypes.Length)
+                {
+                    _mine = _theirs = null; // nothing held between passes
+                    run = default;
+                    return false;
+                }
+
+                var table = _mine.Archetypes[_a];
+                var filter = new RowFilter(_mine.Filters[_a++], 0);
+                int mode = filter.Mode(table);
+                if (table.AliveCount == 0 || mode == RowFilter.None) continue;
+                Passing(table, filter, mode, ref _rows);
+                _own = Refresh<T, TOrder>(table, bit, axes, size);
+                if (Reaches(world, ref job, _own, reach)) Keep(_own); // a cutoff grew past the one the lists were drawn for
+                _b = 0;
             }
+
+            if (_b == _theirs.Archetypes.Length)
+            {
+                _own = null;
+                continue;
+            }
+
+            var own = _own;
+            var other = _theirs.Archetypes[_b];
+            var otherFilter = new RowFilter(_theirs.Filters[_b++], 0);
+            int otherMode = otherFilter.Mode(other);
+            if (other.AliveCount == 0 || otherMode == RowFilter.None) continue;
+            var their = ReferenceEquals(other, own.Table) ? own : Refresh<T, TOrder>(other, bit, axes, size);
+            bool skips = otherMode == RowFilter.Test || other.Count != other.AliveCount;
+            if (skips) Passing(other, otherFilter, otherMode, ref _neighbors);
+            var list = ListOf(own, their);
+            run = new PairRun(world, own.Table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Reach, 0, own.WindowCount, size);
+            return true;
         }
     }
 
@@ -387,7 +537,7 @@ internal sealed class PairState
         else
         {
             if (_cutoffs.Length < count) _cutoffs = new double[Math.Max(count, _cutoffs.Length * 2)]; // warm-up only
-            job.CutoffsSquared(new PairRun(world, table, table, _rows, null, null, null, null, 0, size), _cutoffs.AsSpan(0, count));
+            job.CutoffsSquared(new PairRun(world, table, table, _rows, null, null, null, null, 0, 0, size), _cutoffs.AsSpan(0, count));
             for (int w = 0; w < n; w++)
             {
                 int first = w * size;

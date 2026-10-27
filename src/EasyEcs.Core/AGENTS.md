@@ -149,7 +149,9 @@ RowBlocks.cs                 RowBlocks: the read path of one ordered table (bloc
 Pairs.cs                     [Neighbor] (a pair method's other entity) and the pass of a pair method: IPairJob (the
                              generated job: the cutoff, per row or one, and its run over a table against another),
                              PairRun (one table against one: windows of Vector<float>.Count rows, their lane masks,
-                             the CSR row ranges of the neighbors' windows), World.ForPairs (the order requested once,
+                             the CSR row ranges of the neighbors' windows, a range of them per chunk), World.ForPairs
+                             and ForPairsParallel (chunks of whole words of windows on the chunk runner, the lists
+                             drawn first on the calling thread; PairState.Next walks the pairs of tables) (the order requested once,
                              then PairState: window boxes drawn every pass and checked against the kept ones widened
                              by an adaptive margin, a sweep of the boxes widened by the windows' reach when one left)
 World.Order.cs               OrderRows<T, TOrder> (the request generated setup makes), the cadence (SortDue from

@@ -26,7 +26,8 @@ public sealed partial class SystemGenerator
     /// <param name="NoCutoff">Why no cutoff was found (EECS106), or "".</param>
     private sealed record PairModel(string Position, EquatableArray<string> Axes, string Cutoff, bool PerRow, Kernel.Code? Simd, string Scalar, string NoCutoff)
     {
-        public static PairModel Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
+        /// <param name="parallel">The pass runs on several threads: the job's singletons are SingletonRef fields.</param>
+        public static PairModel Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, bool parallel, System.Threading.CancellationToken ct)
         {
             bool outside = Symbols.IsRunner(method);
             var shape = PairForm.Read(method, syntax, model, ct, out string? noCutoff);
@@ -38,7 +39,7 @@ public sealed partial class SystemGenerator
                     names[method.Parameters[i]] = Symbols.Classify(method.Parameters[i], outside) switch
                     {
                         Symbols.ParamKind.Component => $"global::System.Runtime.CompilerServices.Unsafe.Add(ref __k{i}, __r)",
-                        Symbols.ParamKind.Singleton => $"s{i}",
+                        Symbols.ParamKind.Singleton => parallel ? $"s{i}.Value" : $"s{i}",
                         _ => $"x{i}",
                     };
                 cutoff = Kernel.ScalarOf(shape.Cutoff, names, out string? why) ?? "";
@@ -54,7 +55,7 @@ public sealed partial class SystemGenerator
                 ?? method.Parameters.FirstOrDefault(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Neighbor && !Symbols.Named(p.Type, Symbols.Entity))?.Type.ToDisplayString(Symbols.Fqn)
                 ?? "global::EasyEcs.Entity";
             string? scalar = "the method cannot run per pair (EECS105)";
-            var simd = PairForm.Problem(method) == null ? ForEachModel.VectorLoop(method, syntax, model, false, ct, out scalar) : null;
+            var simd = PairForm.Problem(method) == null ? ForEachModel.VectorLoop(method, syntax, model, parallel, ct, out scalar) : null;
             return new PairModel(position, new EquatableArray<string>(shape?.Axes ?? []), cutoff, shape?.PerRow == true, simd,
                 simd == null ? scalar ?? "" : "", noCutoff ?? "");
         }
@@ -71,7 +72,7 @@ public sealed partial class SystemGenerator
         var pair = method.Pair!;
         string job = $"{forEach}.{method.Name}Job{i}";
         sb.Append($"{indent}var {local} = new {job}{Fields(method, world)};\n");
-        sb.Append($"{indent}{world}.ForPairs<{pair.Position}, {forEach}.{method.Name}Order{i}, {job}>(ref {local}, in {forEach}.{method.Name}Rows{i}, in {forEach}.{method.Name}Neighbors{i}, {System.Math.Max(1, pair.Axes.Length)});\n");
+        sb.Append($"{indent}{world}.ForPairs{(method.Parallel ? "Parallel" : "")}<{pair.Position}, {forEach}.{method.Name}Order{i}, {job}>(ref {local}, in {forEach}.{method.Name}Rows{i}, in {forEach}.{method.Name}Neighbors{i}, {System.Math.Max(1, pair.Axes.Length)});\n");
     }
 
     /// <summary>The order, the job and the filters of a pair method.</summary>
@@ -88,7 +89,8 @@ public sealed partial class SystemGenerator
         sb.Append($"        public static ulong Key(in {t} row, float cell) => global::EasyEcs.RowKeys.Morton(Point(row), {System.Math.Max(1, axes.Length)}, cell);\n\n");
         sb.Append($"        public static global::System.Numerics.Vector3 Point(in {t} row) => {point};\n    }}\n\n");
 
-        sb.Append($"    internal ref struct {method.Name}Job{number} : global::EasyEcs.IPairJob\n    {{\n");
+        // A parallel pass copies the job into each chunk's thread: no ref fields (JobField gives SingletonRefs).
+        sb.Append($"    internal {(method.Parallel ? "" : "ref ")}struct {method.Name}Job{number} : global::EasyEcs.IPairJob\n    {{\n");
         for (int i = 0; i < method.Parameters.Length; i++)
             if (JobField(method, i, "") is { } field)
                 foreach (var line in field.Declaration.Split('\n')) sb.Append("        ").Append(line).Append('\n');
@@ -124,6 +126,8 @@ public sealed partial class SystemGenerator
         if (pair.Simd is { } guarded)
             sb.Append($"            if ({vector}.IsHardwareAccelerated && run.Size == {vector}<float>.Count{(guarded.Interleaves ? " && global::EasyEcs.Interleaved.IsAccelerated" : "")}) Vectors(in run);\n            else Rows(in run);\n");
         else sb.Append("            Rows(in run);\n");
+        sb.Append("        }\n\n");
+        sb.Append("        public void Stamp(in global::EasyEcs.PairRun run)\n        {\n");
         foreach (var p in method.Parameters.Where(p => p is { Kind: Symbols.ParamKind.Component, RefKind: "ref" }).Select(p => p.Type).Distinct())
             sb.Append($"            run.Stamp<{p}>(); // the rows the method ran for, as a ref parameter stamps them\n");
         sb.Append("        }\n\n");
@@ -136,7 +140,7 @@ public sealed partial class SystemGenerator
             Symbols.ParamKind.Neighbor when p.Type == "global::EasyEcs.Entity" => "run.Other(j)",
             Symbols.ParamKind.Neighbor => $"{p.RefKind} {unsafeType}.Add(ref o{i}, j)",
             Symbols.ParamKind.Entity => "run.Entity((int)i)",
-            Symbols.ParamKind.Singleton => $"{p.RefKind} s{i}",
+            Symbols.ParamKind.Singleton => method.Parallel ? $"{p.RefKind} s{i}.Value" : $"{p.RefKind} s{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "default", // EECS105 reports the parameter
         }).Prepend(owner.AccessorArgument));
@@ -156,7 +160,7 @@ public sealed partial class SystemGenerator
         sb.Append("        private void Rows(in global::EasyEcs.PairRun run)\n        {\n");
         sb.Append(Columns("            "));
         sb.Append("            bool skips = run.Skips;\n");
-        sb.Append("            for (int w = 0, size = run.Size; w < run.Windows; w++)\n            {\n");
+        sb.Append("            for (int w = run.First, size = run.Size; w < run.End; w++)\n            {\n");
         sb.Append("                ulong lanes = run.Lanes(w);\n                if (lanes == 0) continue;\n");
         sb.Append("                var ranges = run.Ranges(w);\n");
         if (prune) sb.Append("                float reach = run.Reach(w), reach2 = reach * reach;\n");
@@ -188,7 +192,7 @@ public sealed partial class SystemGenerator
                 loop.Append($"ref {simd.Columns[k - 1]} e{k} = ref {unsafeType}.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
             loop.Append(simd.Setup);
             loop.Append("bool __skips = run.Skips;\n");
-            loop.Append("for (int __w = 0; __w < run.Windows; __w++)\n{\n");
+            loop.Append("for (int __w = run.First; __w < run.End; __w++)\n{\n");
             loop.Append("    ulong __lanes = run.Lanes(__w);\n    if (__lanes == 0) continue;\n");
             loop.Append($"    nint i = (nint)__w * {vector}<float>.Count;\n");
             loop.Append($"    var __pass = global::EasyEcs.Interleaved.Lanes32(__lanes, 0);\n");
