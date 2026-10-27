@@ -253,7 +253,7 @@ public class LocalityTests
             lookup.PrefetchRow(target);
         }
 
-        Assert.That(LookupLanes.CanPrefetch, Is.EqualTo(System.Runtime.Intrinsics.X86.Sse.IsSupported));
+        Assert.That(LookupLanes.CanPrefetch, Is.EqualTo(Prefetching.IsSupported));
     }
 
     // Streaming stores write what plain stores write, every length (whole vectors, pairs of them, a tail).

@@ -405,6 +405,40 @@ public class AllocationTests
         Assert.Throws<ArgumentOutOfRangeException>(() => DynamicBuffer<Grain>.FillPool(-1));
     }
 
+    public record struct Seed(byte Value); // the pools of these element types serve only the test below
+    public record struct Husk(int Value);
+
+    [Test]
+    public void ReservedBuffersOfAPrefabServeTheFirstWritesOfItsInstances()
+    {
+        // ReserveBuffers fills the pool of each buffer type the prefab holds with a list per instance: the instances'
+        // first writes (a copy of the prefab's shared list, a first list) take them instead of allocating.
+        DynamicBuffer<Seed>.MaxPooledLength = 64;
+        DynamicBuffer<Husk>.MaxPooledLength = 16;
+        using var world = new World();
+        var prefab = new Prefab().Set(new Position(1, 2)).SetBuffer(new Seed(1), new Seed(2), new Seed(3)).SetBuffer<Husk>();
+        // One instance lives its whole life first: the tables and the caches of the calls exist from then on.
+        var first = world.Instantiate(prefab);
+        first.Get<DynamicBuffer<Seed>>().Add(new Seed(0));
+        first.Get<DynamicBuffer<Husk>>().SetCount(16); // its list goes back to the pool at full length: the pool's lists count
+        first.Destroy();
+        world.Reserve(prefab, 300);
+        world.ReserveBuffers(prefab, 300);
+        Assert.That(Allocations.Of(() => world.ReserveBuffers(prefab, 300)), Is.Zero, "the pools hold enough: nothing to add");
+        var entities = new Entity[300];
+        long before = Allocations.Baseline();
+        for (int i = 0; i < entities.Length; i++) entities[i] = world.Instantiate(prefab);
+        long a1 = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < entities.Length; i++) entities[i].Get<DynamicBuffer<Seed>>().Add(new Seed((byte)i));
+        long a2 = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < entities.Length; i++) entities[i].Get<DynamicBuffer<Husk>>().SetCount(16).Fill(new Husk(i));
+        long a3 = GC.GetAllocatedBytesForCurrentThread();
+        Assert.That((a1 - before, a2 - a1, a3 - a2), Is.EqualTo((0L, 0L, 0L)));
+        Assert.That(entities[7].Read<DynamicBuffer<Seed>>().AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { new Seed(1), new Seed(2), new Seed(3), new Seed(7) }));
+        Assert.That(world.Instantiate(prefab).Read<DynamicBuffer<Seed>>().Count, Is.EqualTo(3), "the prefab's list is its own");
+        Assert.Throws<ArgumentOutOfRangeException>(() => world.ReserveBuffers(prefab, -1));
+    }
+
     [Test]
     public void ReservingAPrefabCoversItsIndexedKeysAndItsRetiredTable()
     {

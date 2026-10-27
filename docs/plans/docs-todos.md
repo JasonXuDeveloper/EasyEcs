@@ -743,19 +743,21 @@ Decision record drafts (en + zh, the next free D numbers at merge: D139 onward i
   n2, no libssl in the aarch64 sysroot on n1, which passed the first three tests), so the arm64 job is the first real
   test of the PRFB path; record its result before this ships. Considered: a native PRFM stub (a binary per RID, a call
   per prefetch), waiting for a PRFM intrinsic (none in .NET 10).
-- **ARM64 without SVE: loads issued ahead, not emitted** (LookupChaseLoadAheadBenchmark, Locality/Chase.cs
+- **ARM64 without SVE: loads issued ahead, dropped** (LookupChaseLoadAheadBenchmark, Locality/Chase.cs
   `LoadAhead`): the record of row i + k loaded (Has) into a ring, the row of row i + k / 2 touched through it, both
   consumed by row i. On this x86 machine 1.70-1.75x slower than the plain rows at 16M (1600-1643 ms against 930-984;
   prefetching 667-777) and 4-5x at 1k: a load that misses holds retirement, and the public API makes each stage a
-  whole lookup. The generator emits it only if the owner's M4 shows it faster past the cache and not slower in it.
+  whole lookup. The owner's M4 (2026-10-27) settles it: slower at every size, 1.7-1.9x at 16M (783-966 ms against
+  451-504), 2.3-3.0x at 1M (31-36 against 12.6-16.5 ms), 4.4-7.2x at 1k (8.9-13.6 against 1.9-2.2 us). Decision record
+  in the docs pass.
 - **macOS**: Apple silicon has no prefetch .NET issues, so its gates are off without a read; were one gated there,
   `hw.perflevel0.l2cachesize` (the performance cluster's L2, 16 MB on an M4) understates the cache the cores share
   (the system level cache is not exposed): a gate would open early, never late. Intel Macs read `hw.l3cachesize`.
 - **The core's id lists are prefetched past the cache**: `World.DestroyEntities(ReadOnlySpan<Entity>)` prefetches the
-  record 16 ids ahead when the world's records and a row line each are past the last-level cache
+  record 16 ids ahead when the world's records and a row line each are past the cache (the L2 since a gate per form)
   (`LookupLanes.PrefetchesIds`). DestroyAndCreate (a sixteenth of the world) at 16M 211 / 157 and 208 / 162 ms (1.34x,
-  1.28x), at 1M (gate off) 3.80 / 3.86 and 3.95 / 4.04 ms; forced on at 1M 3.02 against 3.96 (`owner-review.md`, a gate
-  on the L2).
+  1.28x), at 1M (gate off) 3.80 / 3.86 and 3.95 / 4.04 ms; forced on at 1M 3.02 against 3.96: past the L2 since
+  ("feat-prefetch-gate: a gate per form").
 - **Fix: a lambda pass finding a non-unique indexed component by key threw** ("This Lookup<T> holds no index"): the
   generator looked for the key calls in a method's body only, so a lambda's `Lookup<T>` got no index built before
   the pass. `Symbols.LookupKey` now reads the lambda's body too (LambdaPassTests.ALambdaFindsByAKeyOfANonUniqueIndex).
@@ -781,13 +783,103 @@ Docs to-dos (docs pass):
 - `api.mdx`: nothing; the new members are hidden for generated code (`LookupExtensions.Probes`,
   `LookupExtensions.PrefetchKey`: names for the owner to approve).
 
+## feat-prefetch-gate: a gate per form
+
+Decision record draft (decisions.mdx + .zh.mdx, next to the prefetch gate's record): **A prefetch gate per form.**
+Decision: each prefetching form reads the cache it pays past. The row form's chases of other entities (one thread,
+parallel, fused walks, a buffer's elements, lambda passes) and `World.DestroyEntities`' id list prefetch once their
+memory leaves one core's L2; index probes (on one thread and in parallel) and the vector loops' chases only past the
+last-level cache. The L2 is read like the last-level cache (Linux sysfs level-2 index then sysconf, Windows
+`GetLogicalProcessorInformationEx` level 2, macOS `hw.perflevel0.l2cachesize` / `hw.l2cachesize`), only where a prefetch
+exists; an unknown L2 uses the last-level gate. Why: between the L2 and the LLC (262,144 and 1M entities on a 2 MiB L2
+/ 260 MiB L3 x86) the row chases run 1.20-1.36x faster, the fused walk 1.44-2.0x, DestroyEntities 1.22-1.35x, the
+buffer chase 1.04-1.26x; inside the L2 the gate keeps today's code (forced on costs 1.12-1.6x). Considered: one gate on
+the L2 for every form (probes 1.13-1.6x slower forced on at 262,144, the vector loop 1.04-2.1x); parallel probes on the
+L2 (the owner's first list: a wash at 262,144, 1.16x slower at 524,288, faster only at 1M: kept on the last level); a
+multiple of the L2 (no form needed one: each that pays, pays from the first size past it). Numbers:
+`borrowed-ideas.md` item 1, "A gate per form".
+
+Docs to-dos (docs pass, en + zh):
+- guide page of `Lookup<T>` (the prefetch section written for feat-prefetch-all): "past the L2 for chases of other
+  entities, past the last-level cache for keyed lookups and vector loops"; the "What it costs" line of each.
+- performance / why-fast: the per-form BenchTable gains the 262,144 size (`tools/bench.sh ProbePrefetchBenchmark
+  ChaseFormsPrefetchBenchmark IdListPrefetchBenchmark LookupChaseGateBenchmark --sync`; the classes' default sizes are
+  now 1k / 262,144 / 1M / 16M).
+- introspection page: DescribeSchedule's scalar line reads "lookups prefetched past the cache" (the form decides which).
+- faq (ARM64 / other machines): the gate reads the L2 too; unknown L2 = the last-level gate.
+- `api.mdx`: nothing (the new `Lookup<T>.PrefetchesPastL2` is hidden for generated code, a name for the owner to see).
+
+## feat-generator-gaps (G0, G4, G5, G6; G7 not built)
+
+Pages to write in the docs pass (en + zh each; zh terms: 块 = a parallel chunk only, never 区块):
+
+- **guide/reductions (Reduce<T>)**: a section "A total across passes: `[Accumulate]`". When: a singleton every pass adds
+  to (kills this round, bytes sent). Form: `[Accumulate, Sum] public partial struct Stats : ISingletonComponent { long
+  Kills; long Hits; [Max] int Longest; }` and `ref Reduce<Stats>`; the struct-level `[Sum]` for the fields without an
+  attribute. Order: the world's value first, then the pass (a non-commutative `Combine` keeps run order). Costs:
+  AccumulateBenchmark (100k rows: hand-written `ref Singleton` scalar 232.6 us, `[Accumulate]` 8.3 us, parallel 6.6 us,
+  0 B). Pitfall: without `[Accumulate]` the pass replaces the value. EECS086's total case (Info until the singleton
+  reduces, then a Warning whose fix takes it as `Reduce<T>` and declares `[Accumulate]`).
+- **guide/emit (Emit<T>)**: a section "Handling the records: `[ForEachRecord]`". Form: `[ForEachRecord] static void
+  Send(in EntityUpdate u, ref Stats s, Lookup<Viewers> v, World w)`; runs in declaration order inside the system,
+  an entry point `Owner.Method(world, values...)` outside; records in emitted order, then cleared; a pass that throws
+  clears nothing; an `Emit<T>` of the same record type is refused (EECS108). Costs: RecordBenchmark (both tally into
+  a singleton: 100k records 284.1 us by hand, 278.9 us generated; 1k 2.44 / 2.52 us; 0 B). EECS109 (Info) and its fix
+  (a system's OnUpdate that is only the walk becomes the method).
+- **guide/systems#vector-loops**: enums are lanes (their integer's: compare, convert, set to a constant), and a bool
+  component of one field (one byte per row, read as a mask, written as 0 or 1); a bool among several fields keeps the
+  method scalar with the reason "is a bool among N fields: a vector loop takes a bool in a component of its own".
+  Costs: FlagLanesBenchmark, 100k rows, SimdMode.Off twin against the loop: enum 120.6 -> 3.07 us, bool written
+  110.2 -> 3.08 us, bool read 80.6 -> 2.93 us.
+- **guide/dynamic-buffers**: `world.ReserveBuffers(prefab, count)` next to `FillPool`: a list per instance and member
+  holding the buffer; lists of `MaxPooledLength` elements (set it first), process-wide, not cumulative across prefabs
+  sharing a type; when not to (a buffer that stays short: count x MaxPooledLength of memory).
+- **guide/analyzer**: EECS108 (Error) and EECS109 (Info, fix) entries; EECS086's total case; EECS055's new bool reason.
+- **api.mdx**: done on the branch (rows for `[Accumulate]`, `[ForEachRecord]`, `ReserveBuffers`, the record pass).
+- **migration / changelog / README "What's new"**: New: `[Accumulate]`, struct-level `[Sum]`..`[Any]`,
+  `[ForEachRecord]`, `World.ReserveBuffers`, enum and bool lanes. No breaking change (EECS055's message for a component
+  with a bool among several fields changed).
+
+- **BattleServer.cs (example.mdx)**: EECS086's total case reports Shoot, SendFire and SendFireOut (they add to the
+  `Battle` singleton row by row). Move `Battle`'s counters to `[Accumulate, Sum]` taken as `ref Reduce<Battle>` (Tick
+  stays assigned by its own system), update the page's walkthrough, then drop the EECS086 exception in
+  GeneratorBenchmark.Analyzed. Not done on this branch (BattleServer.cs was out of its scope).
+
+What each form replaces in the samples (VoxelServer rewrite, `voxel-rewrite.md` section 3; samples were not edited here):
+
+- G5: the four systems that reset nothing and add to a singleton row by row (`ref Totals t` then `t.X += ...`): each
+  becomes `ref Reduce<Totals>` plus `[Accumulate]` on the singleton (gets a vector loop, may run parallel).
+- G6: the three get / loop / clear blocks over `Emitted<T>` (VoxelServer SendPackets and two more): each becomes one
+  `[ForEachRecord]` method holding the loop's body (about 4 lines each).
+- G0: methods scalar only for an enum or a single-bool component now vectorize; Play (Body.OnGround), Expose and Out
+  (Exposure.Sunlit) stay scalar until those bools get components of their own (the new reason says so).
+- G4: Program.cs `DynamicBuffer<Block / Fluid / Surface / ItemStack>.FillPool(...)` become
+  `world.ReserveBuffers(prefabs.Chunk, capacity.Chunks)` and `world.ReserveBuffers(prefabs.Player, capacity.Players)`;
+  NextFluid keeps its own FillPool (Flowing, fewer than chunks), and the MaxPooledLength lines stay (process-wide).
+
+Decision-record drafts (for decisions.mdx + .zh.mdx):
+
+- **[Accumulate]: a total is a reduction combined into the world's value.** Why: the hand-written total is a
+  `ref Singleton` every row writes, so the pass is scalar and on one thread; as a reduction it gets a vector loop and
+  chunks, and one Combine more per pass. Considered: a new parameter type (`Total<T>`), a second interface; rejected:
+  the reduction already is the right form, only its end differs. Numbers: AccumulateBenchmark above.
+- **[ForEachRecord]: the records' walk is generated, one thread, the job copied to a local.** Why: get / loop / clear is
+  written once per record type; the job's refs reloaded per record cost 2x (first measurement: 286 vs 124 us when the
+  job was walked through its ref), a local copy keeps them in registers (equal). Considered: a parallel record pass
+  (order matters to most consumers: dropped), records as entities (structural cost per record: dropped).
+- **Enum and bool lanes.** An enum is its integer (enumeration conversions are the integer's); a bool component of one
+  field is a byte column read as a mask (`GreaterThan(bytes, 0)`) and written as `-mask` (0 or 1), which is what C#
+  stores. A bool among several fields would need a shuffle of 1-byte lanes, which the narrow loops do not have.
+- **ReserveBuffers is a call of its own, not part of Reserve(prefab).** Filling lists of MaxPooledLength elements for
+  every instance can cost count x 4 KB per buffer type by default; Reserve stays cheap and the caller opts in.
+- **G7 not built** (owner-review): a keyed read needs both lookups anyway.
+
 ## feat-microarch (M0-M3, `docs/plans/microarch.md` section 5)
 
 What shipped (code): two accumulator sets for floating-point reductions in the loop over whole vectors
 (`SystemGenerator.Paired`, `Kernel.Code.Chains`); the loops'
 tables initialized by a module initializer (`Interleaved.InitializeTables`, internal) so a runner compiled at Tier1
-before its table had holes reads them as constants; EECS055 / EECS056's reason for a bool field ends with the tag
-advice. Tools: `tools/loopbound.sh` (llvm-mca over the Tier1 loops). No new public name.
+before its table had holes reads them as constants. Tools: `tools/loopbound.sh` (llvm-mca over the Tier1 loops). No new public name.
 
 Decision drafts (numbers in microarch.md, "Numbers"):
 - **Floating-point reductions run two vectors per iteration into two sets of accumulators.** Why: a float `+`, `Min`
@@ -801,8 +893,6 @@ Decision drafts (numbers in microarch.md, "Numbers"):
   class-initialization helper per vector forever after (LateHoles numbers). Considered: vectors of literals (the AOT
   attempt reverted for the M4's numbers, backlog), reading the table into a local before the loop (more locals,
   still one helper call per run). Native AOT unchanged (its own item).
-- **A bool field's scalar reason says to make a state a tag**, instead of a new rule: the method is already reported
-  once by EECS055 / EECS056; the advice is the ECS principle (data instead of flags).
 - **Dropped:** the masked skip on the word's bits (fewer uops by llvm-mca, BattleServer 1.09-1.10x slower),
   unrolling loops without a chain, hoisting the broadcast reloads, branchless scalar rows (the JIT keeps
   a branch where PGO sees it biased; the generator does not rewrite users' statements), streaming stores and the
@@ -814,8 +904,6 @@ Docs pass:
   LateHolesBenchmark --sync`).
 - reductions guide page (`Reduce<T>`): FloatMode.Fast's sum order now also depends on whether a run has two whole
   vectors (still fixed by the code and the table's layout, never the thread count); Min / Max unchanged and exact;
-  en + zh.
-- analyzer page EECS055 / EECS056: the bool reason's new text in the example comment (the "(...)" form still fits);
   en + zh.
 - `audit-vector-loops` skill: `tools/loopbound.sh` as the way to read a loop's bound
   (the coordinator edits skills).

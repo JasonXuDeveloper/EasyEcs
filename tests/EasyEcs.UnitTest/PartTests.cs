@@ -56,6 +56,10 @@ public class PartTests
         "public partial interface IHolder\n{\n    public partial struct Census")]
     [TestCase("public partial record struct Census([Sum] int Alive, [Max] float Oldest) : ISingletonComponent;",
         "public static Census Combine(Census left, Census right) => new Census { Alive = left.Alive + right.Alive, Oldest = global::System.Math.Max(left.Oldest, right.Oldest) };")]
+    [TestCase("[Sum] public partial record struct Stats(long Kills, int Deaths, [Max] long Longest) : ISingletonComponent;",   // the struct's attribute: the default
+        "public static Stats Combine(Stats left, Stats right) => new Stats { Kills = left.Kills + right.Kills, Deaths = left.Deaths + right.Deaths, Longest = global::System.Math.Max(left.Longest, right.Longest) };")]
+    [TestCase("[Accumulate, Min] public partial struct Low : ISingletonComponent { public int A; public static int Shared; }",
+        "public static Low Identity => new Low { A = int.MaxValue };")]
     public void PartsGoInsideEveryContainingType(string source, string expected)
     {
         var (parts, output) = Generate(source);
@@ -106,6 +110,8 @@ public class PartTests
     [TestCase("public partial struct Census : ISingletonComponent { [Sum] public int Alive { get; } }", "EECS064")]                      // no setter
     [TestCase("public partial struct Census : ISingletonComponent { public int A; [Sum] public int Alive => A; }", "EECS064")]          // computed
     [TestCase("public partial struct Census : ISingletonComponent { [Sum] public string Name; }", "EECS064")]
+    [TestCase("[Sum, Max] public partial struct Census : ISingletonComponent { public int Alive; }", "EECS064")]                 // two on the struct
+    [TestCase("[Sum] public partial struct Census : ISingletonComponent { public int Alive; public string Name; }", "EECS064")]    // a field it cannot sum
     public async Task DeclarationsThePartCannotHoldAreReported(string source, string id)
     {
         Assert.That(await Ids(source), Is.EqualTo(new[] { id }), "one diagnostic, and no error of the generated code");
@@ -116,6 +122,7 @@ public class PartTests
     [TestCase("public partial record struct Census([Sum] int Alive, [property: Max] long Oldest) : ISingletonComponent;")]
     [TestCase("public partial struct Census : ISingletonComponent { [Sum] public int Alive { get; set; } public const int Cap = 4; public static int Shared; }")]
     [TestCase("public partial struct Census : ISingletonComponent, IReduction<Census> { [Sum] public int Alive; }")]  // the interface written too
+    [TestCase("[Accumulate, Sum] public partial struct Census : ISingletonComponent { public int Alive; [Max] public float Oldest; }")]
     public async Task ValidDeclarationsCompileWithoutDiagnostics(string source) =>
         Assert.That(await Ids(source), Is.Empty);
 

@@ -394,9 +394,10 @@ public ref struct LifeSystem
 }
 ```
 
-A tile takes one step per pass. A deeper halo that runs several steps per load (temporal blocking) was measured and
-dropped: each step also computes the halo cells the next one reads, and on grids whose cells fit the cache k plain
-passes were faster ([D77](/en/docs/decisions#d77-tiles)).
+A tile takes one step per pass. A deeper halo that runs several steps per load (temporal blocking) was built, measured
+and dropped: each step also computes the halo cells the next one reads, and on grids whose cells fit the cache k plain
+passes were faster ([D77](/en/docs/decisions#d77-tiles)). A game that runs one step per frame has nothing to fuse
+anyway; only grids far larger than the cache could gain from it, and none was measured.
 
 ### Sleep the quiet tiles [#sleep]
 
@@ -483,7 +484,13 @@ A key out of range or in a taken slot is still found, through the hash. The Voxe
 - **Red-black ordering (Gauss-Seidel).** Tag the tiles by the parity of their position (`Red`, `Black`) and run two
   steps per tick: the red tiles step and commit (`[With<Red>]` on both systems), then the black tiles step from the
   committed red ones (`[With<Black>]`). Each half reads the other color as updated this tick, so a relaxation
-  converges in fewer ticks than Jacobi, and each half is still one parallel pass.
+  converges in fewer ticks than Jacobi, and each half is still one parallel pass. Plain Gauss-Seidel, which updates
+  the cells in place in one sweep, reads cells another thread is writing: use red-black, or run it in a serial
+  system. Multigrid (relaxing coarser copies of the grid to cross it in fewer ticks) is not provided.
+- **Every tick, or fewer ticks.** A process players watch (heat spreading, water flowing cell by cell) steps once per
+  tick, and its speed is the cost of one step: tiles, rows, sleeping tiles. A field whose only output is its settled
+  result (a distance or flow field, a path-cost field, light propagation, the pressure of incompressible water)
+  needs as few ticks as possible to settle: that is where red-black ordering pays.
 - **Separable kernels as two systems.** A Gaussian blur along x then z is two systems: the first reads the tile
   along x (`TileReads.Self`) into an intermediate buffer, the second takes a `Tile` of that buffer and reads along z.
   Each pass is 2r + 1 samples instead of (2r + 1)², and the intermediate buffer is a cell type of its own.

@@ -26,7 +26,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS055", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "CS0234", "CS0246", "CS0305", "CS0592",
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "CS0234", "CS0246", "CS0305", "CS0592",
             "CS0200", "CS0272", "CS1501", "CS1729", "CS1739");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -135,6 +135,10 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     if (dropEntity != null && await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false)) dropEntity = null;
                     Register(context, diagnostic, "Consume its rows with [Consume]", root, method, Consumed(method, destroy, dropEntity));
                     break;
+                case "EECS109" when kind == "ForEachRecord" && node.FirstAncestorOrSelf<ForEachStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax hook } } records
+                                    && RecordMethod(root, hook, records, diagnostic.Properties) is { } handle:
+                    Register(context, diagnostic, "Handle each record in a [ForEachRecord] method", root, hook, handle);
+                    break;
                 case "EECS103" when kind == "PerRow" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
                                     && PerRow(root, method, diagnostic.Properties) is { } perRow
                                     && !await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false):
@@ -151,6 +155,11 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                       && diagnostic.Properties.TryGetValue("ViewFields", out var viewFields) && viewFields != null
                                       && ToViewParameter(owner, creation, viewName, viewType, viewFields) is { } withView:
                     Register(context, diagnostic, $"Take '{viewType} {viewName}' as a parameter", root, owner, withView);
+                    break;
+                case "EECS086" when kind == "Accumulate" && node.FirstAncestorOrSelf<ParameterSyntax>() is { Parent.Parent: MethodDeclarationSyntax } total
+                                    && diagnostic.Properties.TryGetValue("Singleton", out var singleton) && singleton != null:
+                    context.RegisterCodeFix(CodeAction.Create($"Take it as a Reduce<{singleton}>{(diagnostic.Properties.TryGetValue("Declare", out var declare) && declare == "Accumulate" ? $" and declare {singleton} [Accumulate]" : "")}",
+                        token => Accumulated(context.Document, diagnostic, total, token), diagnostic.Id + "Accumulate"), diagnostic);
                     break;
                 case "EECS080" when kind == "ForEntity":
                     context.RegisterCodeFix(CodeAction.Create("Write it as a [ForEntity] method",

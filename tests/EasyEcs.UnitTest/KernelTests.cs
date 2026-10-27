@@ -880,6 +880,60 @@ public record struct Sum16 : IComponent { public ushort V; }
 public record struct Rgba : IComponent { public byte R, G, B, A; }
 public record struct Tint4 : IComponent { public byte R, G, B, A; }
 
+// Enums and bools: an enum's lanes are its underlying integer's, a bool component's one byte per row read as a mask.
+public enum Mood : byte { Calm, Wary, Angry, Fled = 200 }
+public enum Stance { Idle, Walk = 3, Run = 7, Dead = -1 }
+public record struct Temper : IComponent { public Mood V; }
+public record struct Posture : IComponent { public Stance V; }
+public record struct Roused : IComponent { public bool V; }
+public record struct Spotted : IComponent { public bool V; }
+
+/// <summary>Kernels of enum lanes (compared, converted to and from their integer, set to a constant) and of bool components.</summary>
+public static class FlagKernels
+{
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Rage(ref Temper t, in Shade a, in Tone b)
+    {
+        if (a.V > b.V) t.V = Mood.Angry;
+        else if (t.V == Mood.Angry) t.V = Mood.Wary;
+        else if (t.V != Mood.Fled && b.V > 250) t.V = Mood.Fled;
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Cycle(ref Temper t, in Shade a, in Tone b) => t.V = (Mood)(((byte)t.V + a.V) & 3 | (b.V & 0x80));
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Step(ref Posture p, in Rank r, in Level l)
+    {
+        if (p.V == Stance.Dead) return;
+        p.V = r.Value > 100 ? Stance.Run : l.Value > 0.5f ? Stance.Walk : (Stance)((int)p.V & r.Value);
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Wake(ref Roused w, in Shade a, in Tone b) => w.V = a.V > b.V || w.V && b.V != 0;
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Toggle(ref Roused w, in Spotted s, in Shade a)
+    {
+        if (s.V) w.V = !w.V;
+        if (a.V == 0) w.V = true;
+        else if (a.V == 255) w.V = false;
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Paint(ref Ink o, in Roused w, in Shade a)
+    {
+        if (w.V) o.V = a.V;
+        else o.V = (byte)(o.V >> 1);
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Calm(ref Temper t, in Roused w, in Spotted s)
+    {
+        if (!w.V && !s.V) t.V = Mood.Calm;
+    }
+}
+
 /// <summary>Kernels of narrow lanes: wrap-around arithmetic, saturating Min / Max idioms, comparisons, shifts, locals.</summary>
 public static class NarrowKernels
 {
@@ -1263,6 +1317,48 @@ public class KernelTests
         CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Least, NarrowKernels.Least, "Least");
         CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Compound, NarrowKernels.Compound, "Compound");
         CheckNarrow(Pairs, holes, O, A, B, NarrowKernels.Distance, NarrowKernels.Distance, "Distance");
+    }
+
+    /// <summary>
+    /// Enum lanes over every pair of byte operands: compared with constants, converted to and from their integer, set to a
+    /// constant on some rows; an int enum against random ranks and levels with its early return.
+    /// </summary>
+    [TestCase(false), TestCase(true)]
+    public void EnumLanesMatchTheMethod(bool holes)
+    {
+        static Temper O(int i) => new() { V = (Mood)(i * 37 % 5 == 4 ? 200 : i * 37 % 5) };
+        static Shade A(int i) => new() { V = (byte)i };
+        static Tone B(int i) => new() { V = (byte)(i >> 8) };
+        CheckNarrow(Pairs, holes, O, A, B, FlagKernels.Rage, FlagKernels.Rage, "Rage");
+        CheckNarrow(Pairs, holes, O, A, B, FlagKernels.Cycle, FlagKernels.Cycle, "Cycle");
+        var random = new Random(7);
+        var ranks = new int[30000];
+        var levels = new float[30000];
+        for (int i = 0; i < ranks.Length; i++) (ranks[i], levels[i]) = (random.Next(-20, 140), random.NextSingle());
+        Stance[] stances = [Stance.Idle, Stance.Walk, Stance.Run, Stance.Dead, (Stance)12345];
+        CheckNarrow(30000, holes, i => new Posture { V = stances[i % stances.Length] }, i => new Rank { Value = ranks[i] }, i => new Level { Value = levels[i] },
+            FlagKernels.Step, FlagKernels.Step, "Step");
+    }
+
+    /// <summary>
+    /// Bool components over every pair of operands: a bool written from comparisons and itself, negated, set to a
+    /// constant, and read as the condition of byte and enum writes. A bool is stored as exactly 0 or 1.
+    /// </summary>
+    [TestCase(false), TestCase(true)]
+    public void BoolComponentsMatchTheMethod(bool holes)
+    {
+        CheckNarrow(Pairs, holes, i => new Roused { V = i % 3 == 0 }, i => new Shade { V = (byte)i }, i => new Tone { V = (byte)(i >> 8) },
+            FlagKernels.Wake, FlagKernels.Wake, "Wake");
+        CheckNarrow(Pairs, holes, i => new Roused { V = i % 3 == 1 }, i => new Spotted { V = (i >> 8) % 2 == 0 }, i => new Shade { V = (byte)i },
+            FlagKernels.Toggle, FlagKernels.Toggle, "Toggle");
+        CheckNarrow(Pairs, holes, i => new Ink { V = (byte)(i * 37) }, i => new Roused { V = i % 7 < 3 }, i => new Shade { V = (byte)(i >> 8) },
+            FlagKernels.Paint, FlagKernels.Paint, "Paint");
+        CheckNarrow(Pairs, holes, i => new Temper { V = (Mood)(i % 4) }, i => new Roused { V = i % 2 == 0 }, i => new Spotted { V = i % 3 == 0 },
+            FlagKernels.Calm, FlagKernels.Calm, "Calm");
+        using var world = new World();
+        var e = world.CreateEntity(new Roused(), new Shade { V = 9 }, new Tone { V = 2 });
+        FlagKernels.Wake(world);
+        Assert.That(MemoryMarshal.AsBytes(new ReadOnlySpan<Roused>(in e.Read<Roused>()))[0], Is.EqualTo(1), "a true bool is stored as 1");
     }
 
     /// <summary>Signed bytes over every pair: signed saturation, arithmetic shifts (counts past the lane), Abs of an int, compares.</summary>

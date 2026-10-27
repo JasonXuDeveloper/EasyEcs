@@ -176,6 +176,10 @@ Reading the output: build with `-p:EmitCompilerGeneratedFiles=true`, and read on
   for key, lookup or member calls reads the lambdas inside the body too (missing them made a lambda pass that found a
   non-unique key throw "holds no index").
 
+- **A ref-struct job called in a loop is copied to a local first**: through a `ref` the JIT reloads it every
+  iteration (that alone made `[ForEachRecord]` 2x slower than the hand-written walk).
+- **A new tracked stage needs input in GeneratorTests' code**, or its caching assertion has nothing to check.
+
 ## Speed: measure first
 
 `GeneratorBenchmark`: the four generators over the battle server plus 40 generated modules (components of every

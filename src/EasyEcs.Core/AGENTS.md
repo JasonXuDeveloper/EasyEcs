@@ -10,7 +10,8 @@ When you add, rename or delete a file here, update its line (`verify` checks eve
 ```
 Contracts.cs                 IComponent, ITracked, ISingletonComponent, INoStructuralChanges and the other markers
 Declarations.cs              attributes whose code the generators write: [Sum]/[Product]/[Min]/[Max]/[All]/[Any]
-                             (a reduction), [LookupKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
+                             (a reduction; on the struct, for its fields without one), [Accumulate] (a total: each pass
+                             combined into the world's value), [LookupKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
                              [GroupBy] (on the member: a group every world splits by), [OrderBy] (the order of the
                              tables, overriding an inferred one), [WhenTargetDestroyed], [NotSaved]
 Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/SetIfChanged/
@@ -34,7 +35,8 @@ EcsSystem.cs                 [EcsSystem] (a system: a ref struct of static membe
 ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkRows, SimdMode), [With<T>], [Without<T>], [Changed<T>],
                              [Removed<T>] ([WithAny<..>] / [ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
                              [Consume] (the visited rows destroyed after the pass), [ForEntity] (a static method run
-                             on one entity through a generated entry point)
+                             on one entity through a generated entry point), [ForEachRecord] (a static method run on
+                             each record of Emitted<T> in order, then the records cleared)
 Maybe.cs                     Maybe<T>: an optional component parameter of a [ForEach] method
 Mut.cs                       Mut<T>: a [ForEach] parameter stamped only on the rows it writes (Write, SetIfChanged);
                              Values.Same, the boxing-free equality of SetIfChanged
@@ -49,25 +51,29 @@ LookupLanes.cs               the reads of other entities in generated vector loo
                              PrefetchRecord / PrefetchRow (Lookup<T>.Prefetch / PrefetchRow: the two stages of a
                              prefetched chase; borrowed-ideas.md item 1), PrefetchAhead (a vector loop's
                              prefetches of the rows ahead), Prefetches (the gate a generated pass or vector loop reads once per pass:
-                             the records and rows past the last-level cache), PrefetchesIds (the gate of the core's
+                             the records and rows past its form's cache, CacheSizes), PrefetchesIds (the gate of the core's
                              loops over lists of ids: DestroyEntities)
 Prefetching.cs               the one software prefetch (Line): x86 PREFETCHT0, ARM64 with SVE a PRFB of one element
                              (the experimental SVE API, SYSLIB5003 suppressed at that call), nothing elsewhere (IsSupported)
 IndexPrefetch.cs             ValueIndex's probe prefetches (generated [ForEach] jobs finding by a key a row holds:
                              LookupExtensions.Probes / PrefetchKey): the stages by representation (a direct slot; a
                              relation's slot, then its ids; a hashed key's bucket, entry, then its ids), the gate (the
-                             index's memory past the last-level cache); HashSlots: a Dictionary's buckets and entries
-                             (UnsafeAccessor, reflection once per resize)
-LastLevelCache.cs            the last-level cache size, read once per process from the OS as the GC does (Windows
-                             GetLogicalProcessorInformationEx, Linux sysfs then sysconf, macOS sysctl), where a
-                             prefetch exists (Prefetching.IsSupported); 0 is unknown, which never prefetches
+                             index's memory past the last-level cache, in parallel too); HashSlots: a
+                             Dictionary's buckets and entries (UnsafeAccessor, reflection once per resize)
+CacheSizes.cs                the last-level cache and one core's L2, read once per process from the OS as the GC does
+                             (Windows GetLogicalProcessorInformationEx, Linux sysfs then sysconf, macOS sysctl), where a
+                             prefetch exists (Prefetching.IsSupported); 0 is unknown, which never prefetches. A gate per
+                             form: index probes and vector loops' chases past the last level; the row form's chases
+                             (parallel, fused walks and buffers too) and DestroyEntities' id list past the L2
+                             (L2OrLastLevel)
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                              Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
                              TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,
                              PaddedTile.Rows (TZCNT walk), TileCursor.Load128, ChangedEdges / Facing (sleeping tiles)
 Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
                              chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear);
-                             AddIds / AddLanes: a vector loop's passing lanes appended compacted, in row order
+                             AddIds / AddLanes: a vector loop's passing lanes appended compacted, in row order;
+                             Emitted<T>.Consume + IForEachRecord<T>: a [ForEachRecord] pass (the records walked, then cleared)
 EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
                              (four SplitMix64 finalizer rounds); a singleton (Seed, and a Tick the world adds one to
                              at the start of every update: World.Run) and static members
@@ -94,7 +100,8 @@ SystemStats.cs               per-system run counts, times, allocated bytes and v
 ScheduleInfo.cs              what World.DescribeSchedule returns (groups, stages, systems, waits, registration-only
                              pairs) and its ToString / ToMermaid
 World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration, Instantiate of a
-                             Prefab, with given components too, and Entity.Clone: one row copy, CloneRow)
+                             Prefab, with given components too, and Entity.Clone: one row copy, CloneRow; Reserve and
+                             ReserveBuffers of a prefab: its tables, and the pools of the buffer lists its instances take)
 World.Defaults.cs            TypeDefaults: the setup a type declares ([GroupBy], [WhenTargetDestroyed]), applied by
                              every world from its first table holding the type (rules pending until a destroy or
                              the index needs them); what a world set up itself is never overridden

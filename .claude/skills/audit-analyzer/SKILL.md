@@ -114,6 +114,17 @@ done. Each round checks coverage per rule, not in total:
 - **Exemplary code reports nothing**: a test compiles `samples/`, `BattleServer.cs` and the docs fences (DocCheck)
   with no EasyEcs warning.
 
+- **Ids are taken at merge, not on a branch**: two branches built at once both took EECS105-106 for different rules;
+  the second branch merged renumbers its rules (descriptor, code fix list, tests, docs-todos, owner-review, zh XML)
+  before it lands. A branch reports its new ids as provisional.
+- **Data flow follows ref locals** (`ref readonly var q = ref x.Read(id)`): a rule that tracks where a value comes
+  from misses hand-written code through them otherwise (EECS107's grid search, `PairForm.Path`).
+- **A test case triggers only its own rule**: write each case so neighboring rules stay quiet (EECS075 static,
+  EECS003 no component, EECS106 unread cutoff, EECS002 by-ref), or the test asserts on the wrong diagnostic.
+- **A new or widened case runs over BattleServer and the samples, Info included**: builds do not show Info, but
+  GeneratorBenchmark fails on any finding in its code. Fix the example (it must be exemplary), never add a filter
+  exception except as a tracked, temporary item.
+
 ## Done means
 
 - Tests: positive and negative cases per rule, the edge cases above that apply, false-positive guards, a code-fix test

@@ -73,6 +73,8 @@ public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
 
     readonly BufferStore IBuffer.Read(ref Reader reader, BufferStore reuse) => BufferStore<T>.Read(ref reader, reuse as BufferStore<T>);
 
+    readonly void IBuffer.FillPool(int lists) => BufferStore<T>.Fill(lists);
+
     readonly void IBuffer.Remap(ref BufferStore store, IdMap map)
     {
         if (store is not BufferStore<T> typed) return;
@@ -281,6 +283,9 @@ internal interface IBuffer
     /// earlier Load, grown when it lacks room), else into one from the pool; null for none and no store to reuse.
     /// </summary>
     BufferStore Read(ref Reader reader, BufferStore reuse);
+
+    /// <summary>Fill the pool of this type's lists until it holds <paramref name="lists"/> (<see cref="DynamicBuffer{T}.FillPool"/>).</summary>
+    void FillPool(int lists);
 
     /// <summary>
     /// Point the <see cref="EntityId"/> fields of the elements of <paramref name="store"/> at a migration's entities,

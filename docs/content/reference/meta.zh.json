@@ -3,6 +3,7 @@
   "icon": "Library",
   "pages": [
     "index",
+    "accumulateattribute",
     "allattribute",
     "anyattribute",
     "blockpair",
@@ -29,6 +30,7 @@
     "entityspan",
     "floatmode",
     "foreachattribute",
+    "foreachrecordattribute",
     "forentityattribute",
     "fusionmode",
     "groupattribute",
@@ -41,6 +43,7 @@
     "iforeachbatch",
     "iforeachentity",
     "iforeachmasked",
+    "iforeachrecord",
     "iforrange",
     "iforspan",
     "igroup",

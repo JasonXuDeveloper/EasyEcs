@@ -58,7 +58,7 @@ using (var healing = new World())
     Check(patient.Life.Value == 2, "a library's generic system runs on every second update");
 }
 
-// The prefetch gate reads the last-level cache from the operating system once per process (sysfs or sysconf,
+// The prefetch gates read the last-level cache and the L2 from the operating system once per process (sysfs or sysconf,
 // sysctl, GetLogicalProcessorInformationEx): in native code too. A world of 2 entities is in any cache.
 using (var small = new World())
 {
@@ -66,11 +66,13 @@ using (var small = new World())
     Check(!Lookup<Life>.Prefetches(small), "a world in the cache does not prefetch");
 }
 
-// The prefetching twins with the gate forced on (a last-level cache of 1 byte, as the unit tests set it): index probes
+// The prefetching twins with the gates forced on (caches of 1 byte, as the unit tests set them): index probes
 // (the dictionary's arrays read through UnsafeAccessor and reflection), a buffer's chases, a parallel probe; each
 // against the same pass with the gate off.
-var cache = Type.GetType("EasyEcs.LastLevelCache, EasyEcs.Core")!.GetField("Bytes", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
-long machine = (long)cache.GetValue(null)!;
+var sizes = Type.GetType("EasyEcs.CacheSizes, EasyEcs.Core")!;
+var caches = new[] { sizes.GetField("LastLevel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!, sizes.GetField("L2", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)! };
+var machine = caches.Select(c => (long)c.GetValue(null)!).ToArray();
+void SetCaches(long bytes) { foreach (var c in caches) c.SetValue(null, bytes); }
 using (var keyed = new World())
 {
     var badges = new Entity[300];
@@ -93,11 +95,11 @@ using (var keyed = new World())
         return got.ToArray();
     }
 
-    cache.SetValue(null, 0L);
+    SetCaches(0);
     var off = Run();
-    cache.SetValue(null, 1L);
+    SetCaches(1);
     var on = Run();
-    cache.SetValue(null, machine);
+    for (int c = 0; c < caches.Length; c++) caches[c].SetValue(null, machine[c]);
     Check(off.AsSpan().SequenceEqual(on) && off.Any(v => v != 0), "prefetched probes and buffer chases find what today's passes do");
 }
 
@@ -133,6 +135,27 @@ using (var flock = new World())
     }
 
     Check(right, "a pair method counts each row's neighbors");
+}
+
+// The generator gaps' forms: an [Accumulate] total, a [ForEachRecord] pass over Emitted<T>, vector loops of enum and
+// bool lanes, and the buffer pools a prefab's instances take.
+using (var forms = new World())
+{
+    var rows = new Entity[100];
+    forms.CreateEntities(rows, new Coin { Value = 2 }, new Mood { Value = Moods.Calm }, new Awake { Value = true });
+    Forms.Count(forms);
+    Forms.Count(forms);
+    Check(forms.Purse.Total == 400, "an [Accumulate] total adds each pass");
+    Forms.Calm(forms);
+    Check(rows[99].Mood.Value == Moods.Wary, "an enum lane");
+    forms.GetOrAddSingleton<Emitted<Hit>>().Items.Add(new Hit { Amount = 3 });
+    forms.GetOrAddSingleton<Emitted<Hit>>().Items.Add(new Hit { Amount = 4 });
+    long hits = 0;
+    Forms.Book(forms, ref hits);
+    Check(hits == 7 && forms.GetSingleton<Emitted<Hit>>().Items.Count == 0, "a [ForEachRecord] pass");
+    var prefab = new Prefab().Set(new Coin()).SetBuffer<Hit>();
+    forms.ReserveBuffers(prefab, 10);
+    forms.Instantiate(prefab).Get<DynamicBuffer<Hit>>().Add(new Hit { Amount = 1 });
 }
 
 Console.WriteLine($"AOT battle: {battle.Tick} ticks, {battle.Hits} hits, {battle.Deaths} deaths, {server.World.EntityCount} entities");
@@ -197,4 +220,32 @@ static class AotChases
 struct Life : EasyEcs.Aot.Library.ILife
 {
     public int Value { get; set; }
+}
+
+struct Coin : IComponent { public int Value; }
+
+enum Moods : byte { Calm, Wary }
+
+struct Mood : IComponent { public Moods Value; }
+
+struct Awake : IComponent { public bool Value; }
+
+struct Hit { public int Amount; }
+
+[Accumulate, Sum]
+partial struct Purse : ISingletonComponent { public long Total; }
+
+static class Forms
+{
+    [ForEach]
+    public static void Count(in Coin coin, ref Reduce<Purse> purse) => purse.Value.Total += coin.Value;
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    public static void Calm(ref Mood mood, in Awake awake)
+    {
+        if (awake.Value && mood.Value == Moods.Calm) mood.Value = Moods.Wary;
+    }
+
+    [ForEachRecord]
+    public static void Book(in Hit hit, ref long total) => total += hit.Amount;
 }

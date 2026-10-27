@@ -71,6 +71,12 @@ cases (`audit-analyzer`, "Tests: every rule, every edge").
   check there declares its keys (`[UniqueKey]` / `[LookupKey]`), marks unsaved data `[NotSaved]`, sets buffers in
   `CreateEntity`, and writes through the generated `Write*` methods.
 
+- **Allocation tests of a feature on a cadence** (a re-sort every n ticks) warm up past one full cadence before
+  asserting 0 B: the first re-sort grows a pooled buffer once (168 B under AVX=0).
+- **A test or benchmark type's name is unique in its assembly**: a clash silently suppresses the generated extension
+  members of one of them.
+- **A pass over a prefab's tables skips tables with Count 0**: instantiation passes through empty intermediate tables.
+
 ## 6. Benchmarks (`audit-perf` has the method)
 
 BenchmarkDotNet only: before and after, two rounds, A/B copies outside the repo tree, under `flock /tmp/bench.lock`

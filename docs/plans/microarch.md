@@ -185,12 +185,12 @@ A/B: base = bbd5c8a with this branch's benchmark commit, head = the branch, froz
   at Tier1 before its table had holes no longer calls `CORINFO_HELP_GET_GCSTATIC_BASE` per vector of a masked word
   (LateHoles: 0 such calls in the three runners' Tier1 code, from 6 per vector in Move2's). Native AOT is not
   changed by it (its preinitialization decides there): the backlog item stays open for AOT.
-- **M2 candidate 6, "make it a tag"**: no rule existed. A method testing a component's bool field already stays
-  scalar with EECS055 (Info) "field X is a bool, not a lane type"; that reason now ends ": a state of some rows is a
-  tag the method filters on (With<T> / Without<T>), a value a byte", the advice of the EECS056 example of the
-  analyzer page and of the ECS principles (data instead of flags). No new rule id: the method is reported once, by the
-  rule that already finds it. A rule for an `if` on an enum field was not added: an enum of a lane type vectorizes,
-  its test is a mask per vector, not a branch per row, and no frequency of change can be read from the code.
+- **M2 candidate 6, "make it a tag"**: no rule existed. This branch first appended the tag advice to EECS055's reason
+  for a bool field; feat-generator-gaps (merged meanwhile) made a bool component of one field a 1-byte lane read as
+  a mask (no branch per row) and gave a bool among several fields its own reason ("a vector loop takes a bool in a
+  component of its own"), so the advice was dropped at the merge: the method now gets a vector loop or the split, and
+  a tag remains the ECS principles' advice for a state few rows hold (the analyzer page's EECS056 example). No new
+  rule: no frequency of change can be read from the code, and an `if` on an enum or bool lane is a mask per vector.
 
 **Dropped (with the reason)**
 
@@ -213,7 +213,7 @@ A/B: base = bbd5c8a with this branch's benchmark commit, head = the branch, froz
   `if (hp.Value > hp.Max) hp.Value = hp.Max;`, `if (f.On) hp.Value += f.Bonus;` and even the ternary form all compile
   to a `jg` / `jne` with the store in a cold block (listing of a probe, 2026-10-27), which is the right code for
   predictable data. These shapes vectorize anyway (a select per vector) when their fields are lanes; a method that
-  stays scalar does so for another reason (a bool field: candidate 6, a call), which no branch rewrite changes.
+  stays scalar does so for another reason (a call, a bool among several fields), which no branch rewrite changes.
 - **M3 candidate 8, streaming stores** (prototype `Locality/Streams.cs`, `StreamingStoreBenchmark`): a write-only
   column `dst = src * k + c` with non-temporal stores against plain ones. Past the last-level cache (64M floats, two
   256 MB columns against 260 MB) they win 1.47x (49.3 -> 33.4 ms, default job); in the cache (1M floats) they tie

@@ -30,33 +30,16 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **L1 ordered rows + blocks, L3 compress** (`locality.md` section 5; worktree `agent-aef3c58e0c81ecff5`, branch
-      `feat-locality-core`): a declared key orders a table's rows, re-sorted on a cadence (radix sort, one permutation
-      of every column under the gate, `StorageVersion`), a box per block of 8 rows and a read path (`RowBlocks`) for
-      the generated pair form; compress (AVX-512 CompressStore / AVX2 table / ARM64 TBL) replaces `Lanes.Compact` in
-      the core's callers (M4: today's `Lanes.Compact` is 2-2.5x slower than the TBL table at >=50 %, `locality.md` 6.3; the helper must win every cell); the prototypes' Vector128 / NEON paths are merged (eedfeb0, pushed). L1 gives systems an order they request at
-      setup (3.4), not only `[OrderBy]`; L3's compress is one core helper the generated loops call too. New EECS id for an invalid key; decision records; naming candidates to the owner.
-      Status: built and handed back (merged the work branch at a69a7d6; full suite 2825 passed, the ISA subsets and the
-      AOT check pass); decision records D137 / D138 drafted in docs-todos.md; the M4 rerun of CompressBenchmark is the
-      owner's.
-- [x] **Lookup gathers always on: not possible, stay on request** (merged after 932913f): no form beats rows when a
-      vector's targets spread over many tables (walk, 64-bit pinned addresses, micro-adaptive choice all measured,
-      D131 rewritten with the widened table and ARM64: rows there).
+- [ ] **CI fixes** (worktree `/workspace/wt-cifix`, branch `fix-ci`): DocCheck 318 -> 0 done (7cb13db); the VoxelServer
+      steady-state allocation (bisected to the feat-views merge 63130a2) and the EECS033 findings remain.
+- [ ] **Generated code tuned for the machine** ("Next" item 5, branch `feat-microarch`): M1 paired float accumulators,
+      M2 masked skip, the Tier1 class-init fix and a streaming-store prototype committed; A/B round 2 running.
+- [ ] **L2 leftovers** ("Next" item 1, branch `feat-pairs-2`): the open list of item 1.
 
-- [x] **AMAC prefetch for lookup chases, then batch probes re-measured at 16M keys** (`borrowed-ideas.md` item 1,
-      `locality.md` 6.3; branch `feat-amac`): bar met at 16M only (1.29-1.36x), short at 1M (1.04-1.22x, the 1M world
-      sits in this machine's 260 MiB L3), 1.9-2.3x slower at 1k: not built into the generated code. Prototype and the
-      two hidden core helpers kept for a re-measure with a size gate on the owner's machines (owner's call). Batch
-      probes: vertical forms dropped again (1.25-1.63x slower at 16M); scalar group prefetching 1.33x at 16M keys,
-      1.3-1.6x slower in cache, no batch probe API to put it in.
-
-- [ ] **Vector loops through the user's own calls** (worktree agent, branch `feat-call-inliner`; "Next" item 3).
-
-- [x] **Prefetch with a cache-size gate + the 16-word locals bug** (branch `feat-prefetch-gate`, ready to merge; "Next"
-      item 6): the 16-word row's `__Loop512` within 32 locals (or the reason, `Kernel.FitLocals`); lookup chases
-      prefetched past the last-level cache (`LastLevelCache`, the row form's twin job `Job{i}Chases`, the vector loop's
-      `PrefetchAhead` behind `f{i}`): 16M rows 1.36-1.43x, gathers 1.27-1.34x, nothing slower in the cache
-      (`borrowed-ideas.md` 5, item 1). Docs to-dos and the decision draft in `docs-todos.md`.
+Merged since the last update: L1 ordered rows + L3 compress (`feat-locality-core`), the pair form
+(`feat-locality-pairs`), vector loops through the user's own calls (`feat-call-inliner`), the prefetch gate per form
+(`feat-prefetch-gate`, 216e29a: row chases, fused walks, buffer chases and `DestroyEntities` past the L2; probes and
+vector loops past the last-level cache).
 
 The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
 CI runs the unit tests on ARM64 (b1dbdb0).
@@ -75,12 +58,14 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        reach 2.5-3.4x: L2 ships clusters there too (faster is kept, owner) and optimizes: 4-row blocks and the
        neighbor-list form on ARM64, picked by density; never a slower case (no re-sort every tick on sparse maps).
        **Built on `feat-locality-pairs`** (`locality.md` 6.6): `[Neighbor]`, the pass, the generated order / job / vector
-       loop, EECS105-107, cutoff per row, two kinds of entity, ties and the keep-target hint. Open: the spread-map nearest
+       loop, EECS105-107, cutoff per row, two kinds of entity, ties and the keep-target hint (merged; `[Neighbor]` approved
+       by the owner, 2026-10-27). Open: the spread-map nearest
        re-measure, the ARM64 neighbor-list form by density, writes to j (Pickup), parallel pair passes, the EECS107 fix,
        nested-walk rewrites, Lookup gathers under Auto. L4 (examples) moved to the finish phase (docs-todos).
        Follow-up after L2 merges (owner, 2026-10-27: "cluster pairs + prefetch, faster?"): prefetch the j block of the
-       pair `k` pairs ahead (its rows' lines of every column the pair method reads) behind the same `LastLevelCache`
-       gate as item 6; i blocks are sequential and need none. Expected to pay only when the ordered table is past the
+       pair `k` pairs ahead (its rows' lines of every column the pair method reads) behind a `CacheSizes`
+       gate as item 6 (which one, L2 or last level, measured per form as item 6's gate per form was); i blocks are
+       sequential and need none. Expected to pay only when the ordered table is past the
        last-level cache (this machine's L3 is 260 MiB: PairsBenchmark at 4M-16M rows, plus a forced-on column just
        under the cache); ships only if faster there and never slower in the cache (`audit-perf`, two rounds, 0 B).
 2. [x] **ARM64 parity of the generated forms** (merged 186c84d): LD2-4 / ST2-4 for multi-field components, NEON TBL /
@@ -90,7 +75,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        strict: a rejected shape (the test's `Brake`, 8 words, 3 fields) gets a benchmark pair with the gate forced
        open, and the gate loosens if that form wins on the M4. Gathers stay rows (D131); compress comes with L3. The 16-word locals bug (a 3-field gather's
        `__Loop512` of 34 IL locals) is fixed on `feat-prefetch-gate` (the loop cut to 32; past it the 512 form is dropped).
-3. [ ] **Vector loops through the user's own calls** (running, see above) (owner: users should not have to avoid helpers): today a call
+3. [x] **Vector loops through the user's own calls** (merged, `feat-call-inliner`) (owner: users should not have to avoid helpers): today a call
        into user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX
        ...), Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated.
        Extend the view inliner to any callee whose source is in the compilation: static helpers, extension methods,
@@ -111,27 +96,30 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        to-dos in `docs-todos.md`, "feat-prefetch-all"). The owner's rule "a faster case ships, a slower one never":
        16M 1.28-1.77x across the forms (a shared key's Count 1.04-1.19x), in the cache today's code. A pass prefetches
        `k` rows ahead (record, then row; a probe's slot or bucket, then entry; k = 8 rows / 16 for vectors) only when
-       the memory it reads is past the last-level cache (`LastLevelCache`, read once per process as the GC reads it:
-       Windows `GetLogicalProcessorInformationEx(RelationCache)`, Linux the largest sysfs `index*/size` then
+       the memory it reads is past the last-level cache (`CacheSizes.LastLevel`; some forms past the L2 since, below;
+       read once per process as the GC reads it: Windows `GetLogicalProcessorInformationEx(RelationCache)`, Linux the largest sysfs `index*/size` then
        `sysconf(_SC_LEVEL3_CACHE_SIZE)`, macOS `hw.l3cachesize` else `hw.perflevel0.l2cachesize`; unknown means off).
        It reads and prefetches only where a prefetch exists (`Prefetching.IsSupported`: x86 SSE, ARM64 SVE).
-       Left, the owner's: `LookupChaseGateBenchmark` and the prefetch classes on a 32 MiB-LLC x86 box; the M4's
-       loads-ahead pair (`LookupChaseLoadAheadBenchmark`, below); approve the hidden names `LookupExtensions.Probes`
+       Left, the owner's: `LookupChaseGateBenchmark` and the prefetch classes on a 32 MiB-LLC x86 box; approve the hidden names `LookupExtensions.Probes`
        and `LookupExtensions.PrefetchKey`; a gate per form on the L2 (`owner-review.md`).
    The owner's answers (2026-10-27): the hidden names `LookupExtensions.Probes` / `PrefetchKey` stay; SVE's PRFB stays
    and the owner runs the CI workflow by hand on the work branch (its arm64 job is the proof; if it fails,
-   `Prefetching.IsSupported` keeps x86 only); **a gate per form now** (next code item, `audit-perf`): fused walks,
-   `DestroyEntities`' id list, parallel probes and buffer chases open past the L2 (forced on at 1M here: 18.1 -> 11.5,
-   3.96 -> 3.02, 5.54 -> 4.92, 41.6 -> 39.3 ms), plain probes keep the last-level gate (20.1 -> 23.0 ms forced on);
-   the L2 size read like the LLC (sysfs index2, `GetLogicalProcessorInformationEx`, `hw.perflevel0.l2cachesize`);
-   proven per form at the size between the L2 and the LLC, nothing slower in the L2.
+   `Prefetching.IsSupported` keeps x86 only).
+   - [x] **A gate per form** (branch `feat-prefetch-gate` at 850a6b1, worktree `/workspace/wt-gate`, ready to merge;
+     `borrowed-ideas.md` item 1, "A gate per form"; decision draft and docs to-dos in `docs-todos.md`,
+     "feat-prefetch-gate: a gate per form"): `CacheSizes` (was `LastLevelCache`) reads one core's L2 like the LLC
+     (sysfs level-2 index then sysconf, `GetLogicalProcessorInformationEx` level 2, `hw.perflevel0.l2cachesize` /
+     `hw.l2cachesize`; unknown: the LLC gate). Past the L2: the row form's chases (one thread, parallel, fused walks,
+     buffer elements, lambdas; `Lookup<T>.PrefetchesPastL2`) and `DestroyEntities`' id list: 1.08-2.0x at 262,144 and
+     1.2-1.57x at 1M, Auto equal to Off inside the L2. On the last level: probes (parallel ones too: the owner's list
+     had them on the L2, measured a wash or 1.16x slower at 262k-524k, reverted) and vector loops' chases. The owner's
+     machines: `EASYECS_BENCH_ENTITIES=<sizes between L2 and LLC>` over the prefetch classes.
    ARM64 without SVE (the M4; owner, 2026-10-26: "is there another instruction or the TLB instead?"): .NET 10 exposes
    no PRFM (only SVE's PRFB/PRFD, and the M4 has SVE in streaming mode only), so the candidate is a plain load issued
    ahead (`Locality/Chase.cs` `LoadAhead`: the record of row i + k loaded into a ring, the row touched from it k / 2
-   rows later). On x86 it is 1.7x slower than the plain rows at 16M (a load that misses holds retirement), so it is not
-   emitted; it ships only if the M4 shows it faster past the cache and not slower in it. The owner's run (zsh, the
-   filters an array):
-   `filters=('*LookupChaseLoadAheadBenchmark*' '*LookupChaseGateBenchmark*'); dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter "${filters[@]}"`.
+   rows later). Dropped: 1.7x slower than the plain rows on x86 at 16M, and the owner's M4 run (2026-10-27) is slower at
+   every size (1.7-1.9x at 16M, 2.3-3.0x at 1M, 4.4-7.2x at 1k; numbers in `borrowed-ideas.md`); its decision record
+   goes in with the docs pass. On the M4 the gate's Auto equals Off, as it should with no prefetch to issue.
    Not taken: a native PRFM stub (a native binary per RID in a managed package; a call per prefetch), Apple's
    data-memory-dependent prefetcher (keys on pointer-like 64-bit values, which an `EntityId` is not). TLB: macOS
    arm64 keeps 16 KiB pages with no user superpages; Linux arm64 and x86 get huge pages through #164 (NativeMemory
@@ -141,7 +129,15 @@ CI runs the unit tests on ARM64 (b1dbdb0).
        worlds as an example first, streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
        owner: records in the docs pass). Vertical batch probes dropped after the 16M re-measure (record in the docs
        pass); scalar group prefetching of probes is built in item 6 (index probes).
-8. [ ] The rest of "Later" below.
+8. [ ] **VoxelServer: zombies follow a distance field** (owner's question, 2026-10-27; proposal, ask before
+       building). Today a zombie walks the straight line to its target and sticks at walls and the bots' pits. One
+       field per chunk (`DynamicBuffer<PathCost>`, 16 x 16 over the surface height map, a step up of one block
+       walkable) seeded by the players' cells, relaxed as a tile shader: each step sweeps its own tile to settle
+       inside it, red-black tiles so the front crosses two chunks a tick, `ChangedEdges` sleep where no player
+       moved. All zombies read the gradient of one shared field (nearest player for free; ZombieTargetSystem keeps
+       the target for the attack). Proof: TickBenchmark before/after at 50 and 2,000 players, zombies stuck
+       before and not after, grids page and VoxelServer page sections.
+9. [ ] The rest of "Later" below.
 
 ## Done this round (for the record)
 
@@ -184,11 +180,12 @@ CI runs the unit tests on ARM64 (b1dbdb0).
       identity copies (`var __c1_0 = __s1_0`); per-width constants re-created (`__u1`, `this.v0 = default`);
       `__d0 = Zero; __d0 |= x` where `__d0 = x` would do. Users read this code (docs "The generator writes" tabs), so
       readability counts once the asm is equal.
-- [ ] **Generator gaps found by the VoxelServer plan** (`voxel-rewrite.md` section 3; code items, before Finish):
-  G0 bool / enum lanes in vector loops (`Kernel.cs:929` rejects them though `Kernel.Wide.cs` maps their sizes); G5
-  accumulating reductions (sums into singletons written by hand in four systems); G6 a generated consumer of
-  `Emitted<T>` (get, loop, clear written in three places); G4 `Reserve(prefab)` filling the buffer pools; G7 a keyed
-  read of the found entity (a second Lookup). G1 / G2 come with inner-loops WP5 / WP2; G8 / G9 with L2.
+- [x] **Generator gaps found by the VoxelServer plan** (`voxel-rewrite.md` section 3): built on feat-generator-gaps,
+  merged: G0 enum lanes and single-bool components in vector loops, G5 `[Accumulate]` totals (EECS086's
+  total case and fix), G6 `[ForEachRecord]` (EECS108, EECS109 and fix), G4 `World.ReserveBuffers(prefab, count)`; G7
+  not built (owner-review.md). Names approved by the owner (2026-10-27): `[Accumulate]`, `[ForEachRecord]` +
+  `IForEachRecord<T>`, `World.ReserveBuffers`. Docs pass: docs-todos.md "feat-generator-gaps". G1 / G2 come with inner-loops WP5 /
+  WP2; G8 / G9 with L2.
 - [ ] **A `using` alias to a system does not bind its generated entry point**: `using Alias = Hunters;` then
   `Alias.Hunt(world)` fails with CS7036 (found by feat-locality-core). Find whether the generator or the interceptor
   matches the call by the written name; fix it (an alias is ordinary C#), with a generator test, or have the
@@ -228,15 +225,18 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
       the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
-- [ ] Flaky under full-suite load with `DOTNET_EnableAVX2=0`: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate`
-      (1 failure in 2 runs, passes alone): find the measurement race (#166's kind).
+- [ ] Flaky under full-suite load: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate`
+      (1 failure in 2 runs with `DOTNET_EnableAVX2=0`; again in the normal run of the 216e29a merge gate; passes
+      alone, 5 of 5): find the measurement race (#166's kind).
 
 ## Finish
 
 Starts only when every code item of Next and Later is done (owner, 2026-10-26: "先把代码全改完").
 
 - [ ] **Exemplar pass** (#169, `audit-code`): VoxelServer / samples + templates + demo / benchmark worlds + usage
-      tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds.
+      tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds. BattleServer's Battle
+      singleton moves to [Accumulate], then GeneratorBenchmark's EECS086 filter exception is deleted (EECS086's total
+      case reports Shoot, SendFire and SendFireOut; a benchmark must not keep suppressing a rule our own example breaks).
 - [ ] **Directory restructure of the whole repository** (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only,
   after feat-prefetch-all and feat-locality-pairs merge; the layout plan (old → new per file, every path reference)
   goes to the owner first.

@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -125,7 +126,7 @@ public class FormTests
     [TestCase("[EcsSystem] public ref struct R { static void OnUpdate(World world) => world.SetPeak(0); }", true)]
     [TestCase("[EcsSystem] public ref struct R { static void OnUpdate(World world) => world.AddSingleton<Peak>(); }", true)]
     [TestCase("[EcsSystem] public ref struct R { [ForEach, With<Q>] static void B(ref Peak k) => k = default; }", true)]
-    [TestCase("", false)]                                                                                                   // a running total
+    [TestCase("", false)]                                                                                                   // a running total (EECS086's total report)
     [TestCase("[EcsSystem] public ref struct R { static void OnCreate(World world) => world.Peak = default; }", false)]       // set up once
     [TestCase("[EcsSystem] public ref struct R { static void OnUpdate(World world) => world.Peak.High = world.Peak.High / 2; }", false)] // not a constant
     [TestCase("public static class Host { public static void Step(World w) { w.Peak = default; w.Update(); } }", false)]  // not system code
@@ -133,11 +134,35 @@ public class FormTests
     {
         var diagnostics = await GeneratorTests.Analyze([Data + reset + "[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Peak k) => k.High += p.V; }"]);
         Assert.That(diagnostics.Where(d => d.Severity == Microsoft.CodeAnalysis.DiagnosticSeverity.Error), Is.Empty);
-        Assert.That(diagnostics.Count(d => d.Id == "EECS086"), Is.EqualTo(reported ? 1 : 0));
+        Assert.That(diagnostics.Count(d => d.Id == "EECS086" && d.GetMessage().Contains("replaces")), Is.EqualTo(reported ? 1 : 0));
+        Assert.That(diagnostics.Count(d => d.Id == "EECS086"), Is.EqualTo(1), "a reset singleton's report or a total's");
+    }
+
+    /// <summary>
+    /// A singleton nothing resets is a total: EECS086 advises [Accumulate], a Warning with a fix when the singleton
+    /// already combines with itself, a suggestion (Info) when its declaration must be rewritten.
+    /// </summary>
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Peak k) => k.High += p.V; }", DiagnosticSeverity.Info,
+        "Parameter 'k' of [ForEach] method 'A' adds to singleton Peak row by row (High: a sum), so the method runs on one thread and without a vector loop; declare Peak partial with [Accumulate, Sum] and take it as 'ref Reduce<Peak>': each chunk keeps a partial result, and the pass's result is combined into the total Peak holds")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Census c) => c.Alive += p.V; }", DiagnosticSeverity.Info,  // Low: summed, adding 0
+        "Parameter 'c' of [ForEach] method 'A' adds to singleton Census row by row (Alive: a sum), so the method runs on one thread and without a vector loop; declare Census partial with [Accumulate, Sum] and take it as 'ref Reduce<Census>': each chunk keeps a partial result, and the pass's result is combined into the total Census holds")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Peak k) { if (p.V > k.High) k.High = p.V; } }", DiagnosticSeverity.Info,
+        "Parameter 'k' of [ForEach] method 'A' adds to singleton Peak row by row (High: a maximum), so the method runs on one thread and without a vector loop; declare Peak partial with [Accumulate, Sum] and [Max] on High and take it as 'ref Reduce<Peak>': each chunk keeps a partial result, and the pass's result is combined into the total Peak holds")]
+    [TestCase("public static class R { [ForEach] static void A(in P p, ref Sum s) => s.N += p.V; }", DiagnosticSeverity.Warning,
+        "Parameter 's' of [ForEach] method 'A' adds to singleton Sum row by row (N: a sum), so the method runs on one thread and without a vector loop; declare Sum [Accumulate], take it as 'ref Reduce<Sum>' and accumulate into 's.Value': each chunk keeps a partial result, and the pass's result is combined into the total Sum holds")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Hand h) { if (p.V > 0) h.N++; } }", DiagnosticSeverity.Warning,
+        "Parameter 'h' of [ForEach] method 'A' adds to singleton Hand row by row (N: a sum), so the method runs on one thread and without a vector loop; declare Hand [Accumulate], take it as 'ref Reduce<Hand>' and accumulate into 'h.Value': each chunk keeps a partial result, and the pass's result is combined into the total Hand holds")]
+    [TestCase("[Accumulate] public partial struct Acc : ISingletonComponent { [Sum] public long N; } [EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Acc a) => a.N += p.V; }", DiagnosticSeverity.Warning,
+        "Parameter 'a' of [ForEach] method 'A' adds to singleton Acc row by row (N: a sum), so the method runs on one thread and without a vector loop; take it as 'ref Reduce<Acc>' and accumulate into 'a.Value': each chunk keeps a partial result, and the pass's result is combined into the total Acc holds")]
+    public async Task ATotalAccumulatedRowByRowIsReported(string source, DiagnosticSeverity severity, string message)
+    {
+        var diagnostics = (await GeneratorTests.Analyze([Data + source])).Where(d => d.Id == "EECS086").ToArray();
+        Assert.That(diagnostics.Select(d => d.GetMessage()), Is.EqualTo(new[] { message }));
+        Assert.That(diagnostics[0].Severity, Is.EqualTo(severity));
     }
 
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, ref Census c) { c.Alive++; c.Low = System.MathF.Min(c.Low, p.V); p.V = c.Alive; } }")] // reads the running value
-    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Census c) => c.Alive += p.V; }")]                      // Low would be reset
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Log l) => l.Count += p.V; }")]                         // Hits: no sum
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Peak k) { k.High += p.V; k.High = System.Math.Max(k.High, p.V); } }")] // two ways
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Peak k) => k.High += k.High; }")]                       // reads itself
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Peak k) { if (p.V > k.High) k.High = p.V + 1; } }")]    // not the value compared

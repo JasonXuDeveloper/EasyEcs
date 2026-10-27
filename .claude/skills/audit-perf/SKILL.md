@@ -124,9 +124,22 @@ its own worktree.
    - at a size where a gate is off, base and head run the same code: compare the gated form against `Off` inside one
      head binary (Auto vs Off), because base against head across processes moves 5-10% with where the setup lands in
      memory; and run one column with the gate forced on at the size just under the last-level cache, which shows
-     which forms would pay there (a per-form gate) and which would not;
+     which forms would pay there (a per-form gate) and which would not; a per-form gate measures every form that
+     prefetches, not only the ones a plan lists, with the gate forced on at two sizes just past the L2 (262,144 and
+     524,288 entities on a 2 MiB L2) as well as near the last-level cache (a parallel probe won only at 1M, a row chase
+     missing from the list won at every size), and checks "inside the L2" at a size inside that form's own estimate
+     (`DestroyEntities` counts a 64-byte line per entity, so its in-L2 size is 8,192, not 32,768);
+   - sizes that depend on one machine's caches come from an environment variable through a `ParamsSource`
+     (`EASYECS_BENCH_ENTITIES`), so a run can sit between that machine's L2 and last-level cache without changing the
+     class's defaults;
    - a multi-stage prefetch is measured one stage at a time: a stage whose address needs a second lookup (a shared
      key's list of ids) cost 2.4x at 16M keys;
+   - a pruning step that cuts work per item (a pair window skipped by its box) can lose to the tighter loop it
+     replaces: measure it, and when it loses, revert it with its numbers in the commit message;
+   - a benchmark whose first tick reorders the data (a pair pass sorts the table) takes its reference result after
+     that tick;
+   - long benchmark queues go in a resumable per-item script (one log per item, skipping done items): background
+     waits are killed after 2 h;
    - quote BenchmarkDotNet filters (`--filter '*Iterate*'`): an unquoted pattern expands into file names in the shell
      and the run measures nothing;
    - the feature's benchmark plus WorldSimulation, BattleServer, MultiWorld and the neighbors; 0 B in steady state;

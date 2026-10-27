@@ -148,7 +148,22 @@ internal sealed class Parts
 
     private void ReadReduction(List<Member> members)
     {
-        bool any = false;
+        // A reduction attribute on the struct is the op of every field that carries none of its own.
+        Op? all = null;
+        foreach (var attribute in Type.GetAttributes())
+        {
+            int index = ReductionIndex(attribute.AttributeClass);
+            if (index < 0) continue;
+            if (all != null)
+            {
+                Problems.Add(new Problem(Type, Rule.BadField, $"carries two reduction attributes ([{all}] and [{(Op)index}]): one for the fields without their own"));
+                break;
+            }
+
+            all = (Op)index;
+        }
+
+        bool any = all != null;
         foreach (var member in members)
         {
             Op? op = null;
@@ -167,6 +182,7 @@ internal sealed class Parts
                 op ??= (Op)index;
             }
 
+            if (op == null && member.Data) op = all;
             if (op is not { } found || twice) continue;
             if (!member.Data) Problems.Add(new Problem(member.Where, Rule.BadField, $"is a computed property, but [{found}] combines a field (or an auto-property)"));
             else if (Unsupported(found, member.Type) is { } why) Problems.Add(new Problem(member.Where, Rule.BadField, why));
@@ -177,7 +193,7 @@ internal sealed class Parts
         if (!any) return;
         // Every instance field takes part: an unattributed one would be dropped by every Combine.
         foreach (var member in members)
-            if (member.Data && !member.Attributes.Any(a => ReductionIndex(a.AttributeClass) >= 0))
+            if (all == null && member.Data && !member.Attributes.Any(a => ReductionIndex(a.AttributeClass) >= 0))
                 Problems.Add(new Problem(member.Where, Rule.BadField, "has no reduction attribute, and the generated Combine would drop it: give it one ([Sum], [Product], [Min], [Max], [All], [Any]) or write IReduction<T> by hand"));
         foreach (var name in new[] { "Identity", "Combine" })
             foreach (var own in Type.GetMembers(name))
