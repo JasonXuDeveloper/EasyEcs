@@ -25,7 +25,18 @@ public class AllocationTests
         world.AddSystem<ScratchTests.SumDigits>();
         world.AddSystem<LookupTests.SumFollowers>();
         for (int i = 0; i < 30; i++) world.Update();
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
+        // One update at a time: it fails once in many full-suite runs and never alone, so a failure names the update,
+        // its bytes and the helper threads the process had (another test's world may have started more).
+        long total = 0, first = 0;
+        int at = -1;
+        for (int i = 0; i < 100; i++)
+        {
+            long bytes = Allocations.Of(() => world.Update());
+            if (bytes != 0 && at < 0) (at, first) = (i, bytes);
+            total += bytes;
+        }
+
+        Assert.That(total, Is.Zero, $"update {at} allocated {first} B first, {total} B in all; {Workers.Count} helper threads");
         Assert.That(leader.Found.Followers, Is.EqualTo(World.ParallelChunkRows));
     }
 
