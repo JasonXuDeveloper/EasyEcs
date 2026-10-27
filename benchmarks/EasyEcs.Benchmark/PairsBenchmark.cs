@@ -69,6 +69,7 @@ public class PairsBenchmark
         var paired = Crowd.Reference(_pairs);
         CheckPairs(paired, nameof(Generated), () => CrowdPairs.Tick(_pairs));
         CheckPairs(paired, nameof(GeneratedRows), () => CrowdPairs.TickRows(_pairs));
+        CheckPairs(paired, nameof(GeneratedParallel), () => CrowdPairs.TickParallel(_pairs));
     }
 
     private void CheckPairs((double, double, double)[] expected, string name, Action tick)
@@ -191,6 +192,13 @@ public class PairsBenchmark
     public void GeneratedRows()
     {
         for (int t = 0; t < Ticks; t++) CrowdPairs.TickRows(_pairs);
+    }
+
+    /// <summary>The pair method on every thread the world allows (the machine's cores): chunks of windows.</summary>
+    [Benchmark(OperationsPerInvoke = Ticks)]
+    public void GeneratedParallel()
+    {
+        for (int t = 0; t < Ticks; t++) CrowdPairs.TickParallel(_pairs);
     }
 
     private void SortEvery(int ticks)

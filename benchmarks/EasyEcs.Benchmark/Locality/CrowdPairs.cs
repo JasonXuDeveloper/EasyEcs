@@ -23,8 +23,27 @@ public static class CrowdPairs
         CrowdPairs.SeparateRows(world);
     }
 
+    /// <summary>One tick of the vector loop on every thread the world allows.</summary>
+    public static void TickParallel(World world)
+    {
+        CrowdPairs.Reset(world);
+        CrowdPairs.SeparateParallel(world);
+    }
+
     [ForEach]
     public static void Reset(ref Crowd.Push push) => push = default;
+
+    /// <summary><see cref="Separate"/> on several threads: each chunk of windows writes its own rows.</summary>
+    [ForEach(Parallel = true)]
+    public static void SeparateParallel(in Crowd.Position p, in Crowd.Velocity v, ref Crowd.Push push,
+        [Neighbor] in Crowd.Position q, [Neighbor] in Crowd.Velocity u)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= Crowd.Range2 || d2 == 0) return;
+        float w = Crowd.Range2 - d2;
+        push.X += w * (dx + Crowd.Drag * (u.X - v.X));
+        push.Y += w * (dy + Crowd.Drag * (u.Y - v.Y));
+    }
 
     // #region pairs
     [ForEach]
