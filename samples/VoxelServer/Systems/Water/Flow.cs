@@ -38,7 +38,7 @@ public ref struct WaterFlowSystem
 
     // A few hundred chunks of 16 x 16 x 32 blocks: far under the 4,096 rows of a default chunk of a pass that writes a
     // tracked component, so the threads take 64 chunks at a time (OpenMP's schedule(dynamic, 64)) instead of one taking all.
-    [ForEach(Parallel = true, ChunkRows = 64), With<Flowing>]
+    [ForEach(Parallel = true, ChunkSize = 64), With<Flowing>]
     static void Flow(in FluidCount count, Lookup<FluidCount> counts, Tile<Fluid, Chunk> fluid, Tile<Block, Chunk> blocks,
         Mut<DynamicBuffer<NextFluid>> step, ref FluidStep summary)
     {

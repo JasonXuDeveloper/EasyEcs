@@ -10,7 +10,7 @@ namespace VoxelServer;
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct WaterCommitSystem
 {
-    [ForEach(Parallel = true, ChunkRows = 64), Changed<FluidStep>]
+    [ForEach(Parallel = true, ChunkSize = 64), Changed<FluidStep>]
     static void Commit(in FluidStep step, in DynamicBuffer<NextFluid> next, Mut<DynamicBuffer<Fluid>> fluid, ref FluidCount count,
         ref Reduce<Filled> filled)
     {

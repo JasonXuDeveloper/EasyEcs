@@ -18,10 +18,10 @@ public record struct BlockPos(int X, int Y, int Z);
 // and tag below and in Water.cs, so all chunks share one table whatever happens to them. It is also a tile of the
 // world's grid (ITile): 16 x 16 x 32 cells in its buffers, with a neighbor on each side, so the water shader takes a
 // Tile<Fluid, Chunk> and gets its water with the halo of its neighbors' (WaterFlowSystem).
-public partial record struct Chunk([UniqueKey] ChunkPos Pos) : IComponent, IDirectIndexed<ChunkPos>, ITile<ChunkPos>
+public partial record struct Chunk([UniqueKey] ChunkPos Pos) : IComponent, IDirectMapped<ChunkPos>, ITile<ChunkPos>
 {
-    static int IDirectIndexed<ChunkPos>.Slots => 64 * 64;
-    static int IDirectIndexed<ChunkPos>.SlotOf(ChunkPos pos) => (pos.Z & 63) * 64 + (pos.X & 63);
+    static int IDirectMapped<ChunkPos>.Slots => 64 * 64;
+    static int IDirectMapped<ChunkPos>.SlotOf(ChunkPos pos) => (pos.Z & 63) * 64 + (pos.X & 63);
     static int ITileShape.Width => Terrain.Size;
     static int ITileShape.Depth => Terrain.Size;
     static int ITileShape.Height => Terrain.Height;

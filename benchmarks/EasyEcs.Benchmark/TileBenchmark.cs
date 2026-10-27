@@ -42,15 +42,15 @@ public partial record struct BlurPlot([LookupKey] Plot Pos) : IComponent, ITile<
     static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
 }
 
-/// <summary>A plate of the blur whose key maps onto a slot of an array (IDirectIndexed): a neighbor is one array read.</summary>
-public partial record struct DirectPlot([UniqueKey] Plot Pos) : IComponent, ITile<Plot>, IDirectIndexed<Plot>
+/// <summary>A plate of the blur whose key maps onto a slot of an array (IDirectMapped): a neighbor is one array read.</summary>
+public partial record struct DirectPlot([UniqueKey] Plot Pos) : IComponent, ITile<Plot>, IDirectMapped<Plot>
 {
     static int ITileShape.Width => 16;
     static int ITileShape.Depth => 16;
     static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
     static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => p.Wrap(face);
-    static int IDirectIndexed<Plot>.Slots => Plot.Side * Plot.Side;
-    static int IDirectIndexed<Plot>.SlotOf(Plot p) => p.Z * Plot.Side + p.X;
+    static int IDirectMapped<Plot>.Slots => Plot.Side * Plot.Side;
+    static int IDirectMapped<Plot>.SlotOf(Plot p) => p.Z * Plot.Side + p.X;
 }
 
 /// <summary>A plate of the fourth-order Laplacian: five points along each axis, a halo of 2, faces only.</summary>
@@ -332,14 +332,14 @@ internal static class TileSystems
     [EcsSystem]
     public ref struct BlurSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 16)]
+        [ForEach(Parallel = true, ChunkSize = 16)]
         static void Step(Tile<Warmth, BlurPlot> warmth, Mut<DynamicBuffer<NextWarmth>> next) => Blur(warmth, next);
     }
 
     [EcsSystem]
     public ref struct BlurDirectSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 16)]
+        [ForEach(Parallel = true, ChunkSize = 16)]
         static void Step(Tile<Warmth, DirectPlot> warmth, Mut<DynamicBuffer<NextWarmth>> next) => Blur(warmth, next);
     }
 
@@ -348,7 +348,7 @@ internal static class TileSystems
     [EcsSystem]
     public ref struct WaveSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 16)]
+        [ForEach(Parallel = true, ChunkSize = 16)]
         static void Step(Tile<Warmth, WavePlot> warmth, Mut<DynamicBuffer<NextWarmth>> next)
         {
             var plate = warmth.Pad();
@@ -370,7 +370,7 @@ internal static class TileSystems
     [EcsSystem]
     public ref struct CommitWarmthSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Commit(in DynamicBuffer<NextWarmth> next, Mut<DynamicBuffer<Warmth>> warmth) =>
             next.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Warmth, NextWarmth>(warmth.Write().AsSpan()));
     }
@@ -382,7 +382,7 @@ internal static class TileSystems
     {
         const int Row = 18;
 
-        [ForEach(Parallel = true, ChunkRows = 16)]
+        [ForEach(Parallel = true, ChunkSize = 16)]
         static void Step(in HandPlot plot, in DynamicBuffer<Warmth> warmth, Lookup<HandPlot> plots,
             Lookup<DynamicBuffer<Warmth>> warmths, Mut<DynamicBuffer<NextWarmth>> next)
         {
@@ -431,7 +431,7 @@ internal static class TileSystems
     {
         const int Row = 20;
 
-        [ForEach(Parallel = true, ChunkRows = 16)]
+        [ForEach(Parallel = true, ChunkSize = 16)]
         static void Step(in HandPlot plot, in DynamicBuffer<Warmth> warmth, Lookup<HandPlot> plots,
             Lookup<DynamicBuffer<Warmth>> warmths, Mut<DynamicBuffer<NextWarmth>> next)
         {
@@ -504,7 +504,7 @@ internal static class TileSystems
     [EcsSystem]
     public ref struct LifeSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 16)]
+        [ForEach(Parallel = true, ChunkSize = 16)]
         static void Step(Tile<Seed, LifePlot> life, Mut<DynamicBuffer<NextSeed>> next)
         {
             var into = MemoryMarshal.Cast<NextSeed, byte>(next.Write().AsSpan());
@@ -516,7 +516,7 @@ internal static class TileSystems
     [EcsSystem]
     public ref struct CommitSeedSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 64)]
+        [ForEach(Parallel = true, ChunkSize = 64)]
         static void Commit(in DynamicBuffer<NextSeed> next, Mut<DynamicBuffer<Seed>> seeds) =>
             next.AsReadOnlySpan().CopyTo(MemoryMarshal.Cast<Seed, NextSeed>(seeds.Write().AsSpan()));
     }
@@ -524,7 +524,7 @@ internal static class TileSystems
     [EcsSystem]
     public ref struct SparseLifeSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 16), With<Awake>]
+        [ForEach(Parallel = true, ChunkSize = 16), With<Awake>]
         static void Step(Tile<Seed, LifePlot> life, Mut<DynamicBuffer<NextSeed>> next, ref SeedChange change)
         {
             var step = next.Write().AsSpan();
@@ -567,7 +567,7 @@ internal static class TileSystems
     [EcsSystem]
     public ref struct SearchSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 16)]
+        [ForEach(Parallel = true, ChunkSize = 16)]
         static void Find(Tile<Warmth, BlurPlot> warmth, ref Probe probe) =>
             probe = new Probe(warmth.Beside(TileFaces.North), warmth.Beside(1, 0, 1));
     }
@@ -575,7 +575,7 @@ internal static class TileSystems
     [EcsSystem]
     public ref struct SearchDirectSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 16)]
+        [ForEach(Parallel = true, ChunkSize = 16)]
         static void Find(Tile<Warmth, DirectPlot> warmth, ref Probe probe) =>
             probe = new Probe(warmth.Beside(TileFaces.North), warmth.Beside(1, 0, 1));
     }
@@ -598,7 +598,7 @@ internal static class TileSystems
     [EcsSystem]
     public ref struct CachedSystem
     {
-        [ForEach(Parallel = true, ChunkRows = 16)]
+        [ForEach(Parallel = true, ChunkSize = 16)]
         static void Find(in Around around, ref Probe probe) => probe = new Probe(around.Of[1], around.Of[7]);
     }
 }

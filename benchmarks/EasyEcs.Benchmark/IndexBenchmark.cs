@@ -196,11 +196,11 @@ public partial class IndexBenchmark
         public (int, int) Key => (X, Z);
     }
 
-    public record struct DirectChunk(int X, int Z) : IComponent, IDirectIndexed<(int, int)>
+    public record struct DirectChunk(int X, int Z) : IComponent, IDirectMapped<(int, int)>
     {
         public (int, int) Key => (X, Z);
-        static int IDirectIndexed<(int, int)>.Slots => 64 * 64;
-        static int IDirectIndexed<(int, int)>.SlotOf((int, int) key) => Slot(key);
+        static int IDirectMapped<(int, int)>.Slots => 64 * 64;
+        static int IDirectMapped<(int, int)>.SlotOf((int, int) key) => Slot(key);
         public static int Slot((int X, int Z) key) => (key.Z & 63) * 64 + (key.X & 63);
     }
 

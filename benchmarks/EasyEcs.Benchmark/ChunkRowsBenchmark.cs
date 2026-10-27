@@ -4,7 +4,7 @@ using BenchmarkDotNet.Attributes;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// The chunk size the runtime picks for a parallel [ForEach] that does not set ChunkRows: one parallel system over 1,000
+/// The chunk size the runtime picks for a parallel [ForEach] that does not set ChunkSize: one parallel system over 1,000
 /// to 1,000,000 entities with a light body (a vector loop: a position moved by its velocity), a heavy one (steering
 /// towards the nearest of 16 waypoints, scalar) and an uneven one (an eighth of the rows, all in one place, cost 64
 /// times the others), and an expensive one (a thousandth of the entities, 1 to 1,000 rows of tens of microseconds
