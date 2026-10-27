@@ -135,6 +135,11 @@ using (var flock = new World())
     }
 
     Check(right, "a pair method counts each row's neighbors");
+    // On several threads into a result of the pass: each chunk's copy of the job merged in chunk order (IPairJob.Merge).
+    int pairs = 0;
+    foreach (var item in flock.Query<Near>()) pairs += item.Near.Value;
+    Flock.Links(flock);
+    Check(flock.Links.Count == pairs, "a parallel pair method sums its pairs into a Reduce<T>");
 }
 
 // The generator gaps' forms: an [Accumulate] total, a [ForEachRecord] pass over Emitted<T>, vector loops of enum and
@@ -186,7 +191,18 @@ static class Flock
         if (d2 >= 1.5f * 1.5f || d2 == 0) return;
         near.Value++;
     }
+
+    [ForEach(Parallel = true)]
+    public static void Links(in Bird p, [Neighbor] in Bird q, ref Reduce<Links> links)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= 1.5f * 1.5f || d2 == 0) return;
+        links.Value.Count++;
+    }
 }
+
+[Sum]
+partial struct Links : ISingletonComponent { public int Count; }
 
 partial record struct Badge([UniqueKey] int Id) : IComponent;
 

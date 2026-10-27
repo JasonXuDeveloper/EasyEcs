@@ -33,7 +33,7 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                prototypes of docs/plans/locality.md and borrowed-ideas.md, benchmarks/EasyEcs.Benchmark/Locality
                                linked: each against its plain form, 0 B per tick); Fixtures.cs holds
                                the shared test components
-tests/EasyEcs.Aot/             the battle server (BattleServer.cs), an ordered table, a pair method, the prefetching twins (probes, buffer
+tests/EasyEcs.Aot/             the battle server (BattleServer.cs), an ordered table, a pair method (and a parallel one into a Reduce<T>), the prefetching twins (probes, buffer
                                chases, a parallel probe; the gate forced on against off) and the generated forms of an
                                [Accumulate] total, a [ForEachRecord] pass and enum / bool lanes published with Native AOT, warnings as errors, and
                                run by CI: no AOT warning and the native binary passes its checks
