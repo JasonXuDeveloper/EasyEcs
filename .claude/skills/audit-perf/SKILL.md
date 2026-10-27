@@ -160,7 +160,9 @@ its own worktree.
    A plan's bar (1.2x, 1.5x, 20 %) decides what to build and try first, not whether a measured change ships (owner,
    2026-10-27: "门槛不用严格卡，有收益就行"): faster beyond the job's noise in both rounds, 0 B, nothing slower ships
    even under its bar. A gain inside the noise is a wash, not a win.
-5. A kept change gets: tests (behaviour, 0 B allocation test, bit-identical at 1 and 4 threads, vector equals scalar),
+5. An idea borrowed from another field keeps that field's name for it, in code, plans and docs (`audit-naming`,
+   "The reference design's vocabulary").
+6. A kept change gets: tests (behaviour, 0 B allocation test, bit-identical at 1 and 4 threads, vector equals scalar),
    a benchmark for what was not covered, a decision record, changelog, and the docs' "How to use it fast" / "What it
    costs" sections and `api.mdx` complexity rows when they change.
 

@@ -110,6 +110,9 @@ While code is still changing, collect these as docs to-dos; pages are written on
 - `verify` runs before anything reaches master.
 - What the change taught (a rule, a technique, a check) is written into the skill it belongs to (AGENTS.md,
   Workflows).
+- A feature borrowed from another field (HPC, GPU, MPI, OpenMP, databases, numerical methods) is named with that
+  field's term where it behaves the same (`audit-naming`, "The reference design's vocabulary"), and the glossary maps
+  the term to its source.
 - Renames of released public API are reported first and applied after the owner's approval (`audit-naming`).
 - **Names**: every name the change adds (API, generated members, attributes, rule ids' titles, internal types,
   files, tests, benchmarks, examples, headings, Chinese terms) passes `audit-naming`'s questions before it merges;
