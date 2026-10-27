@@ -27,7 +27,7 @@ namespace VoxelServer;
 //
 // The stencil, as a GPU's early stencil test skips the fragments a mask rules out: while padding, the tile records
 // which rows of the texture hold water (with the halo block at each end); Rows visits the rows a step can wet, those
-// whose stencil (the row, the rows north and south, the row above: TileReads.Layer | Above) holds some, the next one
+// whose stencil (the row, the rows north and south, the row above: TileStencil.Layer | Above) holds some, the next one
 // found by counting trailing zeros. The others are not written at all: the step's buffer equals the water after every
 // commit (a moved step is copied into it, a settled one wrote back what was there), so a row whose stencil is dry is
 // already zero in it.
@@ -69,7 +69,7 @@ public ref struct WaterFlowSystem
         int filled = 0, wet = 0, first = Terrain.Height, last = 0;
         var edges = TileFaces.None;
         bool changed = false;
-        foreach (var row in water.Rows(TileReads.Layer | TileReads.Above))
+        foreach (var row in water.Rows(TileStencil.Layer | TileStencil.Above))
         {
             var w = water.At(row);
             var g = ground.At(row);

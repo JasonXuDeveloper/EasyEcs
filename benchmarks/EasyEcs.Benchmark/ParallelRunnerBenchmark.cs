@@ -49,9 +49,9 @@ public class ParallelRunnerBenchmark
 
         s_waypoints = waypoints;
         _job = new SteerJob { Waypoints = waypoints };
-        // World.ChunkRows: about four chunks per thread, a multiple of 64 rows, 1,024 to ParallelChunkRows.
+        // World.ChunkRows: about four chunks per thread, a multiple of 64 rows, 1,024 to MaxChunkRows.
         long share = Entities / (Environment.ProcessorCount * 4L);
-        s_chunkRows = (int)Math.Clamp((share + 63) & ~63L, 1024, World.ParallelChunkRows);
+        s_chunkRows = (int)Math.Clamp((share + 63) & ~63L, 1024, World.MaxChunkRows);
         s_chunks = (Entities + s_chunkRows - 1) / s_chunkRows;
         for (int i = 0; i < 20; i++) Runner(); // the runner's choice of helpers settles
     }

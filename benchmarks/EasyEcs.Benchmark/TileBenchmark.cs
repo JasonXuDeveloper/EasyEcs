@@ -318,7 +318,7 @@ internal static class TileSystems
     {
         var plate = warmth.Pad();
         var into = MemoryMarshal.Cast<NextWarmth, float>(next.Write().AsSpan());
-        foreach (var row in plate.Rows(TileReads.Layer))
+        foreach (var row in plate.Rows(TileStencil.Layer))
         {
             var c = plate.At(row);
             for (int x = 0; x < TTile.Width; x += 4)
@@ -353,7 +353,7 @@ internal static class TileSystems
         {
             var plate = warmth.Pad();
             var into = MemoryMarshal.Cast<NextWarmth, float>(next.Write().AsSpan());
-            foreach (var row in plate.Rows(TileReads.Layer))
+            foreach (var row in plate.Rows(TileStencil.Layer))
             {
                 var c = plate.At(row);
                 for (int x = 0; x < 16; x += 4)
@@ -489,7 +489,7 @@ internal static class TileSystems
     private static void Life(Tile<Seed, LifePlot> life, Span<byte> into)
     {
         var plate = life.Pad();
-        foreach (var row in plate.Rows(TileReads.Layer))
+        foreach (var row in plate.Rows(TileStencil.Layer))
         {
             var c = plate.At(row);
             var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)

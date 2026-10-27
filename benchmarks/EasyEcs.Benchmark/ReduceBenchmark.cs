@@ -79,9 +79,9 @@ public partial class ReduceBenchmark
             s_weights[row++] = item.Component2.X;
         }
 
-        // The chunks a parallel pass cuts (World.ChunkRows): about four per thread, 1,024 to ParallelChunkRows rows.
+        // The chunks a parallel pass cuts (World.ChunkRows): about four per thread, 1,024 to MaxChunkRows rows.
         long share = Entities / (Environment.ProcessorCount * 4L);
-        s_chunkRows = (int)Math.Clamp((share + 63) & ~63L, 1024, World.ParallelChunkRows);
+        s_chunkRows = (int)Math.Clamp((share + 63) & ~63L, 1024, World.MaxChunkRows);
         s_chunks = (Entities + s_chunkRows - 1) / s_chunkRows;
         s_totals = new long[s_chunks];
         s_masses = new float[s_chunks];
