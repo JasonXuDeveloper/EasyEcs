@@ -36,6 +36,13 @@ A name is the first doc a reader sees. This audit covers every name, not only th
      whether it throws? The convention: `Get` throws, `TryGet` returns false, `Find` enumerates.
    - **ECS vocabulary**: does it match DOTS, Bevy, Flecs, Arch and Friflo where the behavior is the same, and
      differ where the behavior differs?
+   - **The reference design's vocabulary** (owner, 2026-10-27): a feature borrowed from another field takes that
+     field's established term where the behavior is the same, as tiles took tile, halo and stencil from CUDA and
+     MPI: OpenMP (reduction, schedule, chunk), CUDA (shared memory, warp, block, stream compaction), MPI (halo
+     exchange, ghost cells, rank), Burst / ISPC (job, lanes), molecular dynamics (neighbor list, cluster pair,
+     cutoff, Verlet), numerical methods (Jacobi, red-black, Gauss-Seidel), databases (zone map, morsel), vLLM (paged
+     blocks). Differ only where the behavior differs, and say how in the doc comment. The glossary
+     (`glossary.mdx`) and the grids page's "names from CUDA and MPI" table map each term to its source.
    - **Call sites**: does it read well in `samples/`, `BattleServer.cs` and the guide examples?
 5. **Families**:
    - verbs: Set/Add/Create/Instantiate; Remove/Destroy/Unlink; Get/Read/TryGet/Find; Save/Load/Capture/Restore/Move;
