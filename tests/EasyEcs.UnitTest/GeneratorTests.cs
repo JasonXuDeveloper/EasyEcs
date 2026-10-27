@@ -158,13 +158,13 @@ public class GeneratorTests
         "[ForEach] static void A(Tile<byte, G> t, ref P p) => p.V = t.Cells.Length;",
         "public global::EasyEcs.TileNeighbors n0;", "(k0, entity, out n0);", "new global::EasyEcs.Tile<byte, global::G>(entity, in n0)")]
     // A pair method: the pass orders and pairs the neighbors' tables (2 axes), the cutoff read from its test, a vector loop
-    // of a window of rows against each neighbor; with the neighbor's entity, one pair at a time.
+    // of a window of rows against each neighbor; with the neighbor's entity, one pair at a time. The system runs alone.
     [TestCase("public struct Fp : IComponent { public float X, Y; }",
         "[ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X, dy = p.Y - o.Y, d2 = dx * dx + dy * dy; if (d2 >= 4f) return; q.V++; }",
-        "world.ForPairs<global::Fp, ", ", 2);", "public double CutoffSquared => (double)(4f);", "public bool CutoffPerRow => false;", "Vectors(in run);")]
+        "world.ForPairs<global::Fp, ", ", 2);", "public double CutoffSquared => (double)(4f);", "public bool CutoffPerRow => false;", "Vectors(in run);", "access.RunAlone();")]
     [TestCase("public struct Fp : IComponent { public float X, Y; } public struct Rg : IComponent { public float R; }",
         "[ForEach] static void N(in Fp p, in Rg r, ref Q q, [Neighbor] in Fp o, [Neighbor] Entity e) { float dx = p.X - o.X; if (dx * dx >= r.R * r.R || e.Id.Index < 0) return; q.V++; }",
-        "world.ForPairs<global::Fp, ", ", 1);", "public bool CutoffPerRow => true;", "Rows(in run);")]
+        "world.ForPairs<global::Fp, ", ", 1);", "public bool CutoffPerRow => true;", "Rows(in run);", "access.RunAlone();")]
     public void AccessIsDeclaredFromParametersBeside(string declarations, string members, params string[] expected)
         => AccessOf(declarations, members, expected);
 
