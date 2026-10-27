@@ -58,7 +58,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D41](#d41-instantiate-with-components) | 带组件的实例化一次拷贝直接落到最终的表 |
 | [D42](#d42-trimexcess-on-request-only) | 内存只在要求时归还：`TrimExcess` |
 | [D43](#d43-stats-and-schedule) | 系统报告分配了多少、访问了多少；调度是一份描述 |
-| [D44](#d44-slices) | 分片：按 64 行位字切分的过滤条件，由系统的运行次数选片 |
+| [D44](#d44-slices) | 分帧：按 64 行位字切分的过滤条件，由系统的运行次数选片 |
 | [D45](#d45-unique-keys) | 唯一键：标记接口、预先建好的索引、写入前先占键 |
 | [D46](#d46-mut-stamps-per-write) | `Mut<T>` 只给写了的行打 tick，行不会动时直接按行打 |
 | [D47](#d47-setifchanged-equality) | `SetIfChanged` 用 `IEquatable<T>` 比较，没有就比字节 |
@@ -854,25 +854,25 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **把匹配表的行数加起来：** 逐行测试的过滤条件（`Without`、`Changed`）下是错的。
 - **只数调用线程，或者用进程级计数器：** 前者漏掉并行辅助线程，后者把别的系统、别的 World 也算进来。
 
-## D44. 分片：按 64 行位字切分的过滤条件，由系统的运行次数选片 [#d44-slices]
+## D44. 分帧：按 64 行位字切分的过滤条件，由系统的运行次数选片 [#d44-slices]
 
 **决定。** `[ForEach(Slices = N)]` 传入 `QueryFilter.Slice(RunCount % N, N)`，其中 `SystemHandle.RunCount` 是系统已完成的运行次数。
-每张表从遍历开始时的行数出发，按 64 行的整数倍切分；匹配结果里的第 i 张表从第 (index + i) mod N 片开始。`ForEach` 系列调用遵守分片；
-`Query`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用遇到分片过的过滤条件直接抛异常。`[Changed<T>]` / `[Removed<T>]` 方法不能分片（EECS035）。
+每张表从遍历开始时的行数出发，按 64 行的整数倍切分；匹配结果里的第 i 张表从第 (index + i) mod N 片开始。`ForEach` 系列调用遵守分帧；
+`Query`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用遇到分帧过的过滤条件直接抛异常。`[Changed<T>]` / `[Removed<T>]` 方法不能分帧（EECS035）。
 
 **原因。**
 - **尖峰变成缓坡。** 处理大量实体的系统（重新给目标打分、扫描会话）每次更新只花约 1/N，而不是全压在一次更新上。
 - **按位字切保住快速路径。** 切在存在位字上，遍历用来跳过的 64 行测试和摘要不会被拆开；不足 64 行的表算一片，轮转则把很多小表分散到各片。
 - **状态是系统本来就有的数据。** 运行次数作为调度器的簿记放在系统上，不在用户代码里，也不在 World 里。
 - **只数一片的 `Count` 几乎从来不是想要的。** 需要全部行的调用直接抛异常，而不是只回答一片。
-- **测量**（`SlicesBenchmark`，100,000 个实体，Slices 取 1 和 4，0 B）：分片后的一次更新 72 µs，对比 287 µs（稳定遍历）；83 对比 322 µs（带实体句柄）；
-  36 对比 113 µs（并行）。把每行都访问一遍的四次更新要 295、319 和 127 µs：分片的代价分别是 3%、几乎为零和 12%。
+- **测量**（`SlicesBenchmark`，100,000 个实体，Slices 取 1 和 4，0 B）：分帧后的一次更新 72 µs，对比 287 µs（稳定遍历）；83 对比 322 µs（带实体句柄）；
+  36 对比 113 µs（并行）。把每行都访问一遍的四次更新要 295、319 和 127 µs：分帧的代价分别是 3%、几乎为零和 12%。
 
 **比较过。**
 - **精确到行的切分：** 位字被拆到两片里，只能逐行测试。
-- **每个 `ForEach` 加一个带分片参数的重载：** 为一个过滤条件字段多出一倍 API。
-- **把分片状态放在 World 里：** 分片方式不同的系统会共用它。
-- **让 `Count` 和 `Query` 也遵守分片：** 悄悄地只回答一部分。
+- **每个 `ForEach` 加一个带分帧参数的重载：** 为一个过滤条件字段多出一倍 API。
+- **把分帧状态放在 World 里：** 分帧方式不同的系统会共用它。
+- **让 `Count` 和 `Query` 也遵守分帧：** 悄悄地只回答一部分。
 - **允许 `Changed` / `Removed`：** 每次运行都推进系统的上次运行 tick，其他片的行会丢掉它们的变更。
 
 ## D45. 唯一键：标记接口、预先建好的索引、写入前先占键 [#d45-unique-keys]
@@ -936,7 +936,7 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
 
 ## D48. 并行写被追踪组件时按 4,096 行切块 [#d48-parallel-tracked-chunks]
 
-**决定。** 写被追踪组件的并行 `[ForEach]`（或 `ForEachParallel` job）按 4,096 行的整数倍切块，最少 4,096 行，每块都结束在表里块大小的整数倍处（分片也一样，分片可能从任意一个 64 行位字开始）；
+**决定。** 写被追踪组件的并行 `[ForEach]`（或 `ForEachParallel` job）按 4,096 行的整数倍切块，最少 4,096 行，每块都结束在表里块大小的整数倍处（分帧也一样，分帧可能从任意一个 64 行位字开始）；
 其他并行遍历仍按 64 行对齐、每块至少 1,024 行。
 
 **原因。**
@@ -1585,7 +1585,7 @@ EECS010 接受它出现在并行方法里。方法通过参数查询的值索引
 - **和手写的循环一样快。** `WaterTileBenchmark`（400 片地形走一步，手写系统对瓦片系统，输出逐片地形比较，两轮）：瓦片 482–513 µs，手写 516–524 µs（1 个线程；4 个线程为 263 µs 对 263–269 µs），
   两者都是 0 B。
 - **常见形状的加载有自己的循环。** 加上光环、邻域和边界之后，通用的加载（每个邻居槽位，每格一次填充或钳制）让水比第一版慢了最多 40 %。
-  三处改动把它拉了回来：缺失的邻居读一个填充值的空白数组（每格没有分支），行通过每行算一次的 ref 拷贝，光环为 1、只有面、填充边界
+  三处改动把它拉了回来：缺失的邻居读一个填充值的空白数组（每格没有分支），行通过每行算一次的 ref 拷贝，光环为 1、只有面、固定值边界
   （水和拉普拉斯算子）走自己的循环，由常量条件选中；面邻域的邻居查找按面展开。这个循环编译两份，带行掩码和不带（`Masked` / `Unmasked`，一个 `typeof` 常量），所以只被采样的瓦片
   （水的方块）不测试任何格子，光环格子在搬运它的寄存器里测试。水的瓦片在 1 个线程上从 566–585 µs 降到 482–513 µs；第一版是 528–547 µs。
   通用加载的行循环把向量留在寄存器里（没有溢出）。
@@ -1683,7 +1683,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 
 **决定。** `world.ForParallel(count, ref job)` 对下标运行 `IForRange` job（`Execute(start, end)`），`world.ForParallel(ref buffer, ref job)` 对一个
 `DynamicBuffer<T>`（`Emitted<T>` 的记录）的元素运行 `IForSpan<T>` job（`Execute(start, span)`），都在 World 的运行器上：并行 `[ForEach]` 的块
-（每个线程约四块，1,024 到 `ParallelChunkRows` 之间 64 的整数倍，或 `chunkRows`）、同样的认领和唤醒帮手线程的方式，调用期间结构被冻结。
+（每个线程约四块，1,024 到 `MaxChunkRows` 之间 64 的整数倍，或 `chunkRows`）、同样的认领和唤醒帮手线程的方式，调用期间结构被冻结。
 每块一个 job 副本，什么都不合并回来。EECS060 和 EECS061 检查这些 job。
 
 **原因。**
@@ -1778,7 +1778,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 - **永远逐行销毁：** 简单，但本可以一次释放整张表的地方也要付逐行的开销。
 - **记下访问过的 id 再销毁它们：** 对所有方法都精确，但要一个随遍历增长的缓冲区（每遍的内存没有上界），每个 id 还要查一次；而整批销毁不精确的那些方法，
   逐行销毁本来就是精确的。
-- **和 `Slices` 一起消费：** 每次销毁都会挪动其他分片的行，事件可能要等很多次运行。
+- **和 `Slices` 一起消费：** 每次销毁都会挪动其他分帧的行，事件可能要等很多次运行。
 
 ## D90. 向量循环覆盖并行方法、可选与窄通道、结构体值和宽行 [#d90-vector-loops-reach]
 
@@ -1935,7 +1935,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 **决定。** 在 [D64](#d64-names-of-4-7) 之外，4.8 发布前的命名复查重命名了 4.8 新增的名字：
 `TileNeighbourhood` / `ITileShape.Neighbourhood` / `TileNeighbours` → `TileNeighborhood` / `Neighborhood` /
 `TileNeighbors`，`tile.Load()` → `tile.Pad()`，`tile.Changes(next, out changed)` → `ChangedEdges`，
-`TileReads.Sides` → `NorthSouth`，`[ForEach(Simd = …)]` → `[ForEach(SimdMode = …)]`，`DynamicBuffer<T>.ReservePool` /
+`TileStencil.Sides` → `NorthSouth`，`[ForEach(Simd = …)]` → `[ForEach(SimdMode = …)]`，`DynamicBuffer<T>.ReservePool` /
 `PoolCapacity` → `FillPool` / `MaxPooledLength`，`[Key]` → `[IndexKey]`，`prefab.Absent<T>()` → `SetAbsent<T>()`，以及
 EECS083 的描述符（`BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind` 给出 `Entity`，
 和已发布的 `ValueIndex.TryFind` 一样。隐藏和内部的名字跟着改：`SavedTypes` → `TypeRegistry`（只有生成的代码调用）以及分析器的描述符字段。
@@ -1945,7 +1945,7 @@ EECS083 的描述符（`BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind
 - **统一拼写。** API 和分析器用美式英语（.NET 里的 `Color`、`Behavior`）；“neighbour”是唯一的英式拼写，搜“neighbor”找不到瓦片 API。
 - **动词说明做了什么。** `Load` 读起来像读存档（`World.Load`），这个调用其实是把瓦片连同光环填进纹理。`Changes` 读起来像一个集合，
   它其实是比较并返回边缘变了的面。`Absent<T>` 读起来像查询，它其实是设置一列但不带组件，和 `Set` 设置一列相对。
-- **名字说明它装的是什么。** `PoolCapacity` 是每个池化列表的长度，不是列表的个数；`ReservePool` 是往池里填列表。`TileReads` 的
+- **名字说明它装的是什么。** `PoolCapacity` 是每个池化列表的长度，不是列表的个数；`ReservePool` 是往池里填列表。`TileStencil` 的
   `Sides` 指的是两行，不是 `TileFaces.Sides` 的四个面。单独的 `[Key]` 读起来像任何一种键；`[IndexKey]` 点明是索引的键，和 `[UniqueKey]` 并列（[D129](#d129-lookup-key) 又把它改名为 `[LookupKey]`）。
 - **属性名就是它的类型。** `Simd = SimdMode.Off` 把同一个词用两种形式写了两遍；`SimdMode = SimdMode.Off` 和 `FloatMode` 的写法一致。
 - **节奏，不是调度。** `World.DescribeSchedule` 讲的是系统的顺序和阶段；一个系统多久跑一次是它的节奏（`[UpdateInterval]`），规则和消息都这么说。
@@ -2038,12 +2038,12 @@ EECS083 的描述符（`BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind
 ## D104. 生成的 job 的遍历按 job 类型找到查询 [#d104-one-query-per-job-type]
 
 **决定。** job 接口有 `static virtual bool OneQuery => false`。生成的 job 把它设为 true：生成方法的过滤条件是它声明里的常量，所以这个 job 类型的每次遍历
-用的都是同一个过滤条件（tick 和分片除外）。World 按 job 类型保存查询的缓存项（`TypeIndex<KeptQuery, TJob>`），遍历用两次读取加一次判空拿到匹配结果，
+用的都是同一个过滤条件（tick 和分帧除外）。World 按 job 类型保存查询的缓存项（`TypeIndex<KeptQuery, TJob>`），遍历用两次读取加一次判空拿到匹配结果，
 不再把过滤条件和备忘的各路逐一比较。保存的缓存项是一个不可变数组，用比较并交换发布，随备忘一起重置。手写的 job 设置 `OneQuery` 也能用上。
 
 **原因。**
 - **比较过滤条件占了小系统遍历的大头。** 对一个只有几行的系统做性能分析，备忘的 `SameQuery`（拿约 200 字节的过滤条件和每一路比较）排在处理行本身之前。
-- **键是安全的，因为它是常量。** `OneQuery` 是 job 类型在 JIT 时的常量；为 false 的 job 照旧走备忘。tick（`Since`）和分片每次运行都不同，但它们不属于匹配结果。
+- **键是安全的，因为它是常量。** `OneQuery` 是 job 类型在 JIT 时的常量；为 false 的 job 照旧走备忘。tick（`Since`）和分帧每次运行都不同，但它们不属于匹配结果。
 - **不需要新的失效逻辑。** 保存的缓存项就是备忘持有的那些，和备忘一起清空（`RemoveTypes`、`ClearArchetypes`），之后新增的表到达它们的方式和到达备忘一样。
 
 **比较过。**

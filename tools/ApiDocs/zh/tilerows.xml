@@ -1,7 +1,7 @@
 <doc>
   <member name="T:EasyEcs.TileRows`1" source="0c1b79f92d41">
     <summary>
-      带边分块的活跃行（<see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" />），用 <c>foreach</c> 遍历：
+      带边分块的活跃行（<see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" />），用 <c>foreach</c> 遍历：
       每层一个字，记着模板可能改变的行，然后每行一次尾零计数。
     </summary>
     <typeparam name="TTile">分块的组件和形状。</typeparam>

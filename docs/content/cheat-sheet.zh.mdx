@@ -259,7 +259,7 @@ public struct Shop : IActorGroup<Shop>;             // [UpdateInGroup<Shop>] 的
 | `Enabled` | 跳过这个系统；设回 `true` 会清掉 `Error` |
 | `Error` | 在 `SystemErrorPolicy.Disable` 下让它停用的那个异常 |
 | `LastRunTick` | 上次执行时的变更 tick |
-| `RunCount` | 本次之前已经运行的次数（分片方法访问第 `RunCount % N` 片） |
+| `RunCount` | 本次之前已经运行的次数（分帧方法访问第 `RunCount % N` 片） |
 | `Stats` | 打开 `MeasureSystems` 后的 `Runs`、`LastTime`、`TotalTime`、`AverageTime`、`LastAllocated` / `TotalAllocated`（字节）、`LastEntities` / `TotalEntities`（遍历开始时匹配的实体数） |
 
 系统不保存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)），也从不引用别的系统

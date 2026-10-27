@@ -25,7 +25,7 @@
     </summary>
   </member>
   <member name="P:EasyEcs.ITileShape.Boundary" source="154761b0d266">
-    <summary>没有邻居的地方 halo 里放什么（默认 <see cref="F:EasyEcs.TileBoundary.Fill" />）。</summary>
+    <summary>没有邻居的地方 halo 里放什么（默认 <see cref="F:EasyEcs.TileBoundary.Border" />）。</summary>
   </member>
   <member name="P:EasyEcs.ITileShape.Halo" source="4006f73cb086">
     <summary>

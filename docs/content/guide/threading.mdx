@@ -199,7 +199,7 @@ A parallel pass cuts its rows into chunks, and the threads claim them one at a t
 finish their last one, like OpenMP's `schedule(dynamic, n)`: a thread that drew cheap rows takes the next chunk while
 another is still busy, so uneven rows even out. By default a chunk is about a quarter of each thread's share of the
 matching rows, at least 1,024 (4,096 when the method writes a tracked component) and at most
-`World.ParallelChunkRows` (16,384). That suits many light rows. A few hundred rows that cost microseconds each (a
+`World.MaxChunkRows` (16,384). That suits many light rows. A few hundred rows that cost microseconds each (a
 chunk of terrain, a path search, a crowd cell) are then one chunk, run by one thread while the others wait.
 
 `ChunkRows = n` is the `n` of `schedule(dynamic, n)`: the rows a thread takes at a time.
@@ -828,7 +828,7 @@ public ref struct CriticalSystem
   [EECS060](/en/docs/guide/analyzer#eecs060).
 - **No structural change.** The world's structure is frozen while the job runs: a structural change throws. The list
   must not change while the call runs, and a chunk writes only its own elements or indexes.
-- **Chunks.** About four per thread, a multiple of 64 indexes between 1,024 and `World.ParallelChunkRows`; the last
+- **Chunks.** About four per thread, a multiple of 64 indexes between 1,024 and `World.MaxChunkRows`; the last
   argument, `chunkRows`, sets them for few heavy items, as [`ChunkRows`](#chunk-rows) does. Fewer than two chunks, or
   a runner already busy, run on the calling thread.
 - **Owner thread, allocation-free** after the first call per job type.

@@ -100,7 +100,7 @@ foreach (var system in measured.Systems)
 
 - **开始时匹配的数量，不是逐个访问的数量。** 会改结构的遍历里，这是个上限：轮到之前就被销毁或移走的实体算进去了，但没被访问。
 - **只算 `[ForEach]` 方法。** `[OnUpdate]` 里的查询和循环不算。
-- **分片的方法只报自己那一份。** `[ForEach(Slices = N)]` 方法报的是匹配数除以 N（[分片](/zh/docs/guide/systems#slices)）。
+- **分帧的方法只报自己那一份。** `[ForEach(Slices = N)]` 方法报的是匹配数除以 N（[分帧](/zh/docs/guide/systems#slices)）。
 
 ```csharp
 foreach (var system in measured.Systems)

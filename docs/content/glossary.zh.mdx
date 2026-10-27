@@ -63,7 +63,7 @@ EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解
 ## 过滤条件（Filter） [#filter]
 
 组件之外的查询条件：`With`、`Without`、`WithAny`、`Changed`、`Removed`、`ChangedAny`、`RemovedAny`、`InGroup` 和 `Slice`
-（一次遍历只访问一部分行，见[分片](#slice)）。写在 `[ForEach]` 方法上就是特性，
+（一次遍历只访问一部分行，见[分帧](#slice)）。写在 `[ForEach]` 方法上就是特性，
 在其他代码里就是存放在 `static readonly` 字段里的 `QueryFilter`。见[查询与过滤](/zh/docs/guide/queries#filters)。
 
 ## 查询缓存（Query cache） [#query-cache]
@@ -164,7 +164,7 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 生成器为组件有 1 到 4 个同样大小数值的逐行 `[ForEach]` 方法写出的 SIMD 循环（CPU 支持 AVX-512 时用 `Vector512`，之后用 `Vector<T>`）：一条指令按向量能装下的行数计算方法体，分支变成掩码，
 剩下的行调用方法本身。方法没有得到向量循环时，EECS055 说明原因。见[向量循环](/zh/docs/guide/systems#vector-loops)。
 
-## 分片（Slice） [#slice]
+## 分帧（Slice） [#slice]
 
 `[ForEach(Slices = N)]` 方法一次运行访问的那部分行：每张匹配表约 1/N 的行，按 64 行的位字切分，取系统运行次数的第 `RunCount % N` 片。
 每 N 次运行，每行恰好访问一次。见[系统](/zh/docs/guide/systems#slices)。

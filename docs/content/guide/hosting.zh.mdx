@@ -153,8 +153,8 @@ public ref struct ThinkSystem
 ```
 
 表按 64 行的字切开，很多小表也会分散到各片里，不用自己写轮转，每个 tick 的工作量就是均匀的。再加上 `[UpdateInterval(M)]`，每个
-实体每 N × M 次更新被访问一次。实体频繁变动时分片不是精确的（在表之间移动的实体，一轮里可能被跳过或访问两次）；
-`[Changed<T>]` / `[Removed<T>]` 方法不能分片（[EECS035](/zh/docs/guide/analyzer#eecs035)）。规则见[系统](/zh/docs/guide/systems#update-interval)。
+实体每 N × M 次更新被访问一次。实体频繁变动时分帧不是精确的（在表之间移动的实体，一轮里可能被跳过或访问两次）；
+`[Changed<T>]` / `[Removed<T>]` 方法不能分帧（[EECS035](/zh/docs/guide/analyzer#eecs035)）。规则见[系统](/zh/docs/guide/systems#update-interval)。
 
 ### 跟随主机启动和停止 [#hosted-service]
 

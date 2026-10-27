@@ -334,7 +334,7 @@ icon: RotateCcwClock
 - 只通过目标类型推断的创建（`Regen<Health> regen = new();`）或 `typeof` 闭合的泛型系统，代码要在运行时靠反射生成，
   Native AOT 下会失败；这两种写法现在在编译期就注册。
 - 并行 pass（并行 `[ForEach]`、`ForEachParallel`，或者并行系统的一个阶段）可能卡死，调用方一直自旋，同时某一块（或某个系统）被执行两次：
-  上一轮还没收尾的 helper 线程，会在下一轮任务更多时领走下一轮的任务。分片的并行 pass 每次运行的块数都不同，几秒内就会触发。
+  上一轮还没收尾的 helper 线程，会在下一轮任务更多时领走下一轮的任务。分帧的并行 pass 每次运行的块数都不同，几秒内就会触发。
   现在每一轮开始前先关闭上一轮的领取。见[多线程与并行](/zh/docs/guide/threading#parallel-foreach-methods)。
 - 写被追踪组件的并行 `[ForEach]` 可能漏打变更 tick：同一个 4,096 行的区段里的两个分块会争用这个区段的变更摘要，`[Changed<T>]` 读取方可能跳过被写过的行。
   这类遍历现在按 4,096 行的整数倍切块。见[决策 D48](/zh/docs/decisions#d48-parallel-tracked-chunks)。

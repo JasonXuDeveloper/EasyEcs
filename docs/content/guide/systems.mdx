@@ -571,7 +571,7 @@ A scalar loop over spans gains little over a per-entity method; write a batch me
 ### Parallel methods [#parallel-methods]
 
 `[ForEach(Parallel = true)]` cuts the matching rows into chunks (by default about four per thread, a multiple of 64
-rows, between 1,024 and `World.ParallelChunkRows` = 16,384) that the calling thread plus up to
+rows, between 1,024 and `World.MaxChunkRows` = 16,384) that the calling thread plus up to
 `WorldOptions.MaxDegreeOfParallelism - 1` thread-pool threads claim one at a time as they finish, like OpenMP's
 `schedule(dynamic, n)`. It is for heavy per-entity work (path finding, steering, AI scoring) over tens of thousands
 of entities, or over a few hundred rows that cost microseconds each with `ChunkRows`; for light work the hand-off

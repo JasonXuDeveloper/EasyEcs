@@ -38,7 +38,7 @@
   </member>
   <member name="P:EasyEcs.IForEachEntity`1.OneQuery" source="d9674044fbcd">
     <summary>
-      这个 job 类型的每次遍历都用同一个过滤条件（tick 和分片除外；默认 false）：World 按 job 类型保存查询的匹配结果，不比较过滤条件就能找到它。
+      这个 job 类型的每次遍历都用同一个过滤条件（tick 和分帧除外；默认 false）：World 按 job 类型保存查询的匹配结果，不比较过滤条件就能找到它。
       生成的 job 会设置它（它们的过滤条件是方法里的常量）。
     </summary>
   </member>

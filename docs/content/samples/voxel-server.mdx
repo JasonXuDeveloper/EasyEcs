@@ -284,7 +284,7 @@ microseconds, far under the 4,096 rows of a default chunk of a pass that writes 
 `ChunkRows = 64` and the threads take 64 chunks at a time ([chunk size](/en/docs/guide/threading#chunk-rows)). Byte
 lanes are integer arithmetic: the same water on every machine.
 
-Nothing is cleared that does not have to be. The stencil (`Rows(TileReads.Layer | TileReads.Above)`) visits only a row
+Nothing is cleared that does not have to be. The stencil (`Rows(TileStencil.Layer | TileStencil.Above)`) visits only a row
 with water in it, beside it or above it, and the others are not written: the step's buffer equals the water after
 every commit, so a dry row is zero in it already. The texture is allocated once per thread, and the load writes every
 texel the loop samples. `NextFluid` keeps its count from one step to the next, so `SetCount` neither allocates nor

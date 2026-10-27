@@ -26,7 +26,7 @@ faq: true
 | `X cannot run while a query or system iterates the world` | [要等遍历结束的调用](#during-a-pass) |
 | `Not an EasyEcs save`、`The size of X changed`、`The fields of X changed`、`X was saved as`、`Types of this process share the save id`、`A damaged save` | [存档加载不了](#save-refused) |
 | `X is unique: entity … has key … already`、`X is unique: key … would be given to several entities at once`、`The save holds key … of unique X twice`、`X is unique, but its module registered no index` | [唯一键已被占用](#unique-key-taken) |
-| `A sliced filter (QueryFilter.Slice) applies to ForEach passes only` | [在遍历之外用了分片过滤条件](#sliced-filter) |
+| `A sliced filter (QueryFilter.Slice) applies to ForEach passes only` | [在遍历之外用了分帧过滤条件](#sliced-filter) |
 | `The world keeps no destroy log` | [销毁日志没开就去读](#no-destroy-log) |
 | `The index of X by K is not built yet` | [在并行遍历里第一次查索引](#index-not-built) |
 | `This Lookup<X> holds no index by K` | [job 没有准备这个键的查找](#lookup-no-index) |
@@ -230,7 +230,7 @@ World 都保持原样。
 - **没有注册索引：**生成器会为它能看到的每个唯一组件注册索引。它看不到的类型（反射创建的，或者在没用生成器编译的程序集里）需要
   每个 World 在第一次写入前调一次 `world.Index<T, TKey>()`。
 
-## 为什么 `Count` 或 `Query` 遇到分片过滤条件会抛异常？ [#sliced-filter]
+## 为什么 `Count` 或 `Query` 遇到分帧过滤条件会抛异常？ [#sliced-filter]
 
 ```text
 ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes only: this call needs every matching row. (Parameter 'filter')
@@ -238,7 +238,7 @@ ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes
 
 `QueryFilter.Slice(index, of)` 把每张表切成几份，只有 `ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式会按份访问。
 `Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run`、`SetAll` 和其他批量调用需要所有匹配的行，所以拒绝它。**修法：**给这些
-调用传不带 `Slice` 的过滤条件；分片系统访问了多少，看 `system.Stats.LastEntities`（[分片](/zh/docs/guide/systems#slices)）。
+调用传不带 `Slice` 的过滤条件；分帧系统访问了多少，看 `system.Stats.LastEntities`（[分帧](/zh/docs/guide/systems#slices)）。
 
 ## 为什么 `DestroyedSince` 说没有销毁日志？ [#no-destroy-log]
 

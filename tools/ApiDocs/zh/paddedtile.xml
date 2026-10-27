@@ -2,7 +2,7 @@
   <member name="T:EasyEcs.PaddedTile`2" source="5247f082451a">
     <summary>
       带着 halo 拷入的分块各层（<see cref="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" />）：模板采样的纹理。
-      用 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" /> 遍历要计算的行（活跃的行，用尾零计数找到），
+      用 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" /> 遍历要计算的行（活跃的行，用尾零计数找到），
       用 <see cref="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" /> 在一行周围采样：离它 <see cref="P:EasyEcs.ITileShape.Halo" />
       个格子、行或层以内的样本都在纹理内，偏移不是常量时有检查，是常量时由 JIT 消掉。在线程再次加载这个分块类型之前有效。
     </summary>
@@ -21,16 +21,16 @@
       超出时抛出异常。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" source="129331d3cbae">
+  <member name="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" source="129331d3cbae">
     <summary>
       读 <paramref name="reads" /> 的模板在 From 到 To 层中必须计算的行，逐层、按顺序
-      （<c>foreach (var row in padded.Rows(TileReads.Layer))</c>）：它读的行里（最远到 halo 宽度）有不为零格子的那些。
+      （<c>foreach (var row in padded.Rows(TileStencil.Layer))</c>）：它读的行里（最远到 halo 宽度）有不为零格子的那些。
       每访问一行、每层 O(1)。加载时没有记录 mask 则抛出异常。
     </summary>
   </member>
   <member name="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" source="406b109f60da">
     <summary>
-      纹理中 <paramref name="row" />（From 到 To 层中的一行，来自这个分块的 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileReads)" />，
+      纹理中 <paramref name="row" />（From 到 To 层中的一行，来自这个分块的 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" />，
       或来自按相同层加载的另一个分块）第一个格子处的位置：它的样本。行在范围外时抛出异常。O(1)。
     </summary>
   </member>

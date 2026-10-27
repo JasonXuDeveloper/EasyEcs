@@ -8,7 +8,7 @@
   <member name="F:EasyEcs.TileBoundary.Clamp" source="dc85066fc645">
     <summary>重复分块自己的边缘格子：−k 处的 halo 格子是格子 0。</summary>
   </member>
-  <member name="F:EasyEcs.TileBoundary.Fill" source="c8bfe210ac9b">
+  <member name="F:EasyEcs.TileBoundary.Border" source="c8bfe210ac9b">
     <summary><see cref="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" /> 的填充值（默认零）：Dirichlet 边界。</summary>
   </member>
   <member name="F:EasyEcs.TileBoundary.Mirror" source="2577a7bea0f4">

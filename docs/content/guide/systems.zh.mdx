@@ -116,7 +116,7 @@ World 把它对一个系统的了解存成数据，`SystemHandle` 指向这份�
 | --- | --- |
 | `Enabled` | 设为 `false` 后，`Update()` 和 `Update<TGroup>()` 都会跳过它；设为 `true` 清掉 `Error` |
 | `LastRunTick` | 上次运行时的变更 tick（见[变更追踪](/zh/docs/guide/change-tracking#ticks)） |
-| `RunCount` | 在本次运行之前已经运行过的次数（第一次运行时为 0）；[分片](#slices)方法访问第 `RunCount % N` 片 |
+| `RunCount` | 在本次运行之前已经运行过的次数（第一次运行时为 0）；[分帧](#slices)方法访问第 `RunCount % N` 片 |
 | `Stats`、`Error` | [运行统计](#measuring-systems)和[让它停用的异常](#errors) |
 | `Name`、`Type`、`World` | 类型名（`Regen<Health>`）、类型本身、所在的 World |
 | `IsAlive` | 系统被移除或 World 释放后为 false，这时其他成员都会抛异常 |
@@ -216,7 +216,7 @@ internal readonly struct __SaveSystem_SystemCode : ISystemCode
 
 运行时才算出来的节奏写不成特性：把系统放进一个[系统分组](#system-groups)，到时候再更新这个分组。
 
-### 分片：每次运行只处理一部分行 [#slices]
+### 分帧：每次运行只处理一部分行 [#slices]
 
 `UpdateInterval` 是每 N 次更新把所有行处理一遍，开销集中在那一次，形成尖峰。`[ForEach(Slices = N)]` 则是系统每次运行都
 执行这个方法，但每张匹配的表只处理大约 1 / N 的行：N 次运行里每一行各访问一次，每次更新的开销是平的。适合每个实体隔一阵
@@ -240,17 +240,17 @@ public ref struct HungerSystem
   w × k / N 到 w × (k + 1) / N 个字，最后一片一直到最后一行。不足 64 行的表只有一片，N 次运行里只有一次会访问它。
 - **表之间错开：** 匹配到的第 i 张表从第 (k + i) mod N 片开始切，所以很多小表会分散到 N 次运行里，不会都挤在同一次。
 - **会移动的行：** 两次运行之间移动过的行（交换删除时用表的最后一行填洞、结构变更把实体搬到另一张表、表的行数跨过切点
-  增减）在一轮 N 次运行里可能被跳过，也可能被访问两次；下一轮还会看到它。只对容忍这一点的工作分片，每轮必须恰好处理一次
-  的工作不要分片。
+  增减）在一轮 N 次运行里可能被跳过，也可能被访问两次；下一轮还会看到它。只对容忍这一点的工作分帧，每轮必须恰好处理一次
+  的工作不要分帧。
 - **和间隔一起用：** `[UpdateInterval(M)]` 加上 `Slices = N`，每一行每 N × M 次更新访问一次。
 - **各种写法都支持：** 逐实体方法、[批处理方法](#batch-methods)（片内成段的行）和[并行方法](#parallel-methods)（把这一片
   再切成块）。
-- **不能和变化过滤一起用：** `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 都不能分片，`Slices`
+- **不能和变化过滤一起用：** `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 都不能分帧，`Slices`
   也不能小于 1（[EECS035](/zh/docs/guide/analyzer#eecs035)）：系统每次运行都会推进自己的 `LastRunTick`，其他片里的行
   发生的变化就丢了。
 
 在系统之外，[`QueryFilter.Slice(index, of)`](/zh/docs/guide/queries#filters) 给 `ForEach` 调用做同样的事；带
-`Slices = N` 的 [runner](#foreach-outside-systems)，入口在 World 之后接收要访问的分片。
+`Slices = N` 的 [runner](#foreach-outside-systems)，入口在 World 之后接收要访问的分帧。
 
 ### `[ForEach]` 方法 [#foreach-methods]
 
@@ -297,7 +297,7 @@ public ref struct HungerSystem
     },
     Slices: {
       type: 'int',
-      description: '每次运行访问约 1 / N 的行，每行每 N 次运行访问一次（见上文的分片）。不能和变更过滤一起用：EECS035。',
+      description: '每次运行访问约 1 / N 的行，每行每 N 次运行访问一次（见上文的分帧）。不能和变更过滤一起用：EECS035。',
       default: '1',
     },
     Simd: {
@@ -413,8 +413,8 @@ public ref struct Rally
 
 <Callout type="warn" title="不适合">
   方法处理完还要继续存在的实体（持续的 buff、飞行中的投射物）：`[Consume]` 会销毁它访问的每一行，这种实体在方法里按条件
-  `entity.Destroy()`。好几个系统都要读的事件：在最后一个系统里消费，用 `[UpdateAfter<T>]` 排好顺序。分片的方法：一个分片的销毁会挪动
-  其他分片的行（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
+  `entity.Destroy()`。好几个系统都要读的事件：在最后一个系统里消费，用 `[UpdateAfter<T>]` 排好顺序。分帧的方法：一个分帧的销毁会挪动
+  其他分帧的行（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
 </Callout>
 
 行怎么销毁取决于方法：
@@ -530,7 +530,7 @@ public ref struct DriftSystem
 ### 并行方法 [#parallel-methods]
 
 `[ForEach(Parallel = true)]` 把匹配的行切成块（默认每个线程大约四块，块大小是 64 行的倍数，介于 1,024 和
-`World.ParallelChunkRows` = 16,384 之间），调用线程加上最多 `WorldOptions.MaxDegreeOfParallelism - 1` 个线程池线程做完一块就领下一块，
+`World.MaxChunkRows` = 16,384 之间），调用线程加上最多 `WorldOptions.MaxDegreeOfParallelism - 1` 个线程池线程做完一块就领下一块，
 和 OpenMP 的 `schedule(dynamic, n)` 一样。它适合几万个实体、每个实体计算量都很重的工作（寻路、转向、AI 评分），或者配上 `ChunkRows`
 处理只有几百行、每行几微秒的活；计算很轻时，分发的开销比省下的还多。
 
@@ -1000,7 +1000,7 @@ Census.CountAlive<Health>(world, ref alive);      // 泛型 runner：先写类�
 
 - 方法必须是静态的（[EECS005](/zh/docs/guide/analyzer#eecs005)）；它可以是 private，入口在它引用的类型都公开时也是公开的。
 - 带 `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]` 或 `[RemovedAny<…>]` 时，入口要接收一个回看的起点 tick，因为
-  runner 没有自己的“上次运行”；带 `Slices = N` 时，入口接收要访问的分片（0 到 N - 1）。
+  runner 没有自己的“上次运行”；带 `Slices = N` 时，入口接收要访问的分帧（0 到 N - 1）。
 - runner 可以是泛型方法，也可以是泛型类型的成员：入口会接收类型参数。
 - [分组过滤](#group-filters)对 runner 不起作用：它不属于任何分组。
 - 批处理和并行 runner 遵循[批处理方法](#batch-methods)和[并行方法](#parallel-methods)的规则。
@@ -1225,8 +1225,8 @@ run order: MoveSystem
 | 通过 `in` 参数修改集合 | 被当成读来调度，也不会打 tick | [EECS011](/zh/docs/guide/analyzer#eecs011) |
 | 不带 `Entity` / `World` 的方法通过组件里的链接做结构变更 | 遍历拿着指向已搬走行的 ref | [EECS013](/zh/docs/guide/analyzer#eecs013) |
 | 间隔小于 1、相位不在 0 到 N - 1 之间 | 节奏无效 | [EECS083](/zh/docs/guide/analyzer#eecs083) |
-| `Slices` 小于 1，或和 `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 一起用 | 其他分片里的行发生的变化会丢失 | [EECS035](/zh/docs/guide/analyzer#eecs035) |
-| 指望分片方法每轮恰好访问每行一次 | 两次运行之间移动过的行可能被跳过或访问两次 | 代码审查：只对容忍这一点的工作分片 |
+| `Slices` 小于 1，或和 `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 一起用 | 其他分帧里的行发生的变化会丢失 | [EECS035](/zh/docs/guide/analyzer#eecs035) |
+| 指望分帧方法每轮恰好访问每行一次 | 两次运行之间移动过的行可能被跳过或访问两次 | 代码审查：只对容忍这一点的工作分帧 |
 | 批处理方法里用 `Mut<T>` 参数 | 批处理方法拿的是 span | [EECS009](/zh/docs/guide/analyzer#eecs009) |
 | 排序形成环，或跨分组排序 | `AddSystem` 时抛异常；排序不生效 | [EECS019](/zh/docs/guide/analyzer#eecs019)、[EECS020](/zh/docs/guide/analyzer#eecs020) |
 | 方法参数用了 private 类型 | 生成的 job 引用不到它 | [EECS022](/zh/docs/guide/analyzer#eecs022) |
@@ -1242,7 +1242,7 @@ run order: MoveSystem
 | 一次修改让热点方法丢了[向量循环](#vector-loops)（一个 `bool` 字段、条件之外的一次调用） | 一次一行，结果不变 | [EECS055](/zh/docs/guide/analyzer#eecs055)；`SimdMode = SimdMode.Require` 让它报 [EECS056](/zh/docs/guide/analyzer#eecs056) |
 | 要回放或对端要比较的状态用了 `FloatMode.Fast` | 不同机器之间末几位不同 | 代码审查：保持 `FloatMode.Exact`（[浮点结果](#float-mode)） |
 | `[ForEach]` 方法每条路径最后都 `entity.Destroy()` | 每行销毁一次，而不是每张表一次 | [EECS084](/zh/docs/guide/analyzer#eecs084)（带代码修复）：`[Consume]` |
-| `[Consume]` 没有配 `[ForEach]`，或配了 `Slices` | 编译错误：销毁一个分片会挪动其他分片的行，事件可能要等很多次运行 | [EECS085](/zh/docs/guide/analyzer#eecs085) |
+| `[Consume]` 没有配 `[ForEach]`，或配了 `Slices` | 编译错误：销毁一个分帧会挪动其他分帧的行，事件可能要等很多次运行 | [EECS085](/zh/docs/guide/analyzer#eecs085) |
 
 ## 相关页面 [#related]
 

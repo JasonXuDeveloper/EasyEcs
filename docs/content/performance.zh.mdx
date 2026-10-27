@@ -494,7 +494,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 | 动态缓冲 | `DynamicBufferTests` | `DynamicBufferBenchmark` | — |
 | 清理组件 | `CleanupTests` | `CleanupBenchmark` | — |
 | 系统顺序和分组 | `SystemTests` | `OrderingBenchmark` | — |
-| 分片（`[ForEach(Slices = N)]`） | `ForEachSystemTests` | `SlicesBenchmark` | — |
+| 分帧（`[ForEach(Slices = N)]`） | `ForEachSystemTests` | `SlicesBenchmark` | — |
 | 并行系统和 `[ForEach(Parallel = true)]` | `ParallelTests`、`ConcurrencyTests` | `ParallelSystemsBenchmark`、`ParallelForEachBenchmark` | [`ParallelSystemsComparison`](/zh/docs/comparison#parallel)、[`ParallelQueryComparison`](/zh/docs/comparison#parallel) |
 | 快照 | `SnapshotTests` | `SnapshotBenchmark`（`Capture`、`Restore`） | — |
 | 存档 | `SerializationTests` | `SnapshotBenchmark`（`Save`、`Load`、`SaveWithout`、`LoadKeeping`） | [`SaveComparison`](/zh/docs/comparison#saves) |
@@ -616,11 +616,11 @@ tick 一次、用 `[Changed<T>]` 和 `[Removed<T>]` 做的同步。`BattleServer
 参考机器只有 4 核，这次运行的并行数字误差很大：把它们理解为“多核下更快”，不要当成精确的加速比。`ParallelSystemsBenchmark`
 还分别在关闭和打开 `MeasureSystems` 时各跑一次（`Measure`）：这就是按系统统计耗时、字节和实体数的代价。
 
-### 分片 [#slices-benchmarks]
+### 分帧 [#slices-benchmarks]
 
 `SlicesBenchmark` 在 100,000 个 NPC 上跑一个 AI 思考步骤，分别写成 `[ForEach]`（`Slices=1`）和 `[ForEach(Slices = 4)]`，
 有逐实体的（`Stable`）、带实体句柄的（`Entity`，一种可能改结构的遍历）和并行的。`Update` 是一次更新，也就是一个 tick 要付的峰值；
-`Cycle` 是四次更新，两种写法都把每一行访问一遍，所以能看出分片本身的开销。
+`Cycle` 是四次更新，两种写法都把每一行访问一遍，所以能看出分帧本身的开销。
 
 <BenchChart bench="SlicesBenchmark" />
 

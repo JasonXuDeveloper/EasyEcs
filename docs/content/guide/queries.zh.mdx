@@ -109,7 +109,7 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | `ChangedAny<T1..Tn>(since)` | 自己拥有的被追踪组件中，至少一个在 `since` 及之后被写过的实体 | `[ChangedAny<T1, …, Tn>]` |
 | `RemovedAny<T1..Tn>(since)` | 在 `since` 及之后至少失去其中一个被追踪组件、且至今没有补回的实体 | `[RemovedAny<T1, …, Tn>]` |
 | `InGroup<T>(group)` | `T` 属于某一个[分组](/zh/docs/guide/groups)的实体 | 无；`IGroup` 组件 `Team` 会生成 `filter.InTeam(group)` |
-| `Slice(index, of)` | 每张匹配表的行切成 `of` 片，只取第 `index` 片，按 64 行的字切；只对 `ForEach`、`ForEachEntity`、`ForEachBatch` 及其 `Parallel` 版本有效 | `[ForEach(Slices = N)]`（[分片](/zh/docs/guide/systems#slices)） |
+| `Slice(index, of)` | 每张匹配表的行切成 `of` 片，只取第 `index` 片，按 64 行的字切；只对 `ForEach`、`ForEachEntity`、`ForEachBatch` 及其 `Parallel` 版本有效 | `[ForEach(Slices = N)]`（[分帧](/zh/docs/guide/systems#slices)） |
 | `Since(tick)` | 同一个过滤条件，把其中的 `Changed`、`Removed`、`ChangedAny`、`RemovedAny` 换到另一个 tick | |
 
 所有过滤都可以重复、可以组合。一个过滤条件里的 `ChangedAny` 并成一个集合，集合里任意一个组件满足就算通过（`RemovedAny`
@@ -134,8 +134,8 @@ int dirty = world.Count<Armor>(Replication.Dirty.Since(mark));
 
 `Slice(index, of)` 让一次遍历只处理每张表的一部分：index 从 0 到 `count - 1` 轮流跑一遍，每一行正好过一次。只有
 `ForEach` 系列认它；`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用（`SetAll`、`RemoveAll` 等）需要
-所有匹配的行，遇到分片过滤条件会抛 `ArgumentException`。在系统里，[`[ForEach(Slices = N)]`](/zh/docs/guide/systems#slices)
-会替你选好这一次的分片。
+所有匹配的行，遇到分帧过滤条件会抛 `ArgumentException`。在系统里，[`[ForEach(Slices = N)]`](/zh/docs/guide/systems#slices)
+会替你选好这一次的分帧。
 
 ### `Query`：foreach 循环 [#query-loop]
 
@@ -358,7 +358,7 @@ if (unit.Run<Health, ReadHealth>(ref read, Hits.Alive)) Console.WriteLine(read.V
 
 实现了 `INoStructuralChanges`、只写自己那一行的 job 可以在多个线程上跑。`ForEachParallel`（`IForEach` job）和
 `ForEachEntityParallel`（`IForEachEntity` job）把匹配的行切成块（默认每个线程大约四块，块大小是 64 行的倍数，介于 1,024 和
-`World.ParallelChunkRows` = 16,384 之间；job 的 `WriteMask` 里有被追踪组件时，块大小是 4,096 行的倍数、至少 4,096 行，这样不会
+`World.MaxChunkRows` = 16,384 之间；job 的 `WriteMask` 里有被追踪组件时，块大小是 4,096 行的倍数、至少 4,096 行，这样不会
 有两块共用同一个 4,096 行的区段的变更 tick 摘要）。调用线程加上最多 `WorldOptions.MaxDegreeOfParallelism - 1` 个线程池线程做完一块就领下一块，
 和 OpenMP 的 `schedule(dynamic, n)` 一样。每块跑在 job 的一份副本上，字段里累加的状态不会合并回来。不足两块时，直接在调用线程上跑。`ForEachBatchParallel`（`IForEachBatch` job）切出同样的块，把每块里连续的行段以 span 交给 job，和单线程的 `ForEachBatch` 一样：并行[归约](/zh/docs/guide/threading#reductions)就以这种形式运行，一段行的部分结果是局部变量。
 
@@ -614,7 +614,7 @@ sum of X: 11
 | 批处理 job 里做结构变更 | 抛 `InvalidOperationException`：span 指向表 | 运行时（`[ForEach]` 方法由 [EECS013](/zh/docs/guide/analyzer#eecs013) 检查） |
 | 并行 job 写单例组件或别的实体 | 块之间发生竞争 | 代码审查（`[ForEach]` 方法由 [EECS010](/zh/docs/guide/analyzer#eecs010) 检查） |
 | 一个过滤条件里 `Changed`、`Removed`、`ChangedAny` 或 `RemovedAny` 用了不同的 tick | 抛 `ArgumentException` | 运行时 |
-| 把分片过滤条件（`Slice`）传给 `Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run` 或批量调用 | 抛 `ArgumentException`：这些调用需要所有匹配的行 | [EECS044](/zh/docs/guide/analyzer#eecs044) |
+| 把分帧过滤条件（`Slice`）传给 `Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run` 或批量调用 | 抛 `ArgumentException`：这些调用需要所有匹配的行 | [EECS044](/zh/docs/guide/analyzer#eecs044) |
 | 在同一个 World 的查询循环里调用 `Update()` | 循环还在走表，所有系统就跑了一遍；更新还在循环底下填掉它的空洞：还没走到的行挪到了它身后，被漏掉 | [EECS051](/zh/docs/guide/analyzer#eecs051)；在系统里调用时由 [EECS034](/zh/docs/guide/analyzer#eecs034) 检查 |
 | `entity.Run` 的 job 没声明 `WriteMask` | 默认值 -1 会给 job 拿到的每个被追踪组件打 tick | 声明 `WriteMask`（只读的 job 写 `0`） |
 | 会改结构的 `Run` job 却实现了 `INoStructuralChanges` | 变更处抛 `InvalidOperationException` | 运行时 |

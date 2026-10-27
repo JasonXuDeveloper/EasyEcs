@@ -981,7 +981,7 @@ world.DestroyAll<Health>(QueryFilter.Create().With<Dead>());
 ```
 
 `[ForEach]` 方法的整个方法体只是对自己实体的这样一个调用时，它就是同一个循环，只是由生成器写出来。调用参数不用任何参数、
-方法的过滤条件都能放进 `QueryFilter`（没有 `[Changed<T>]` 或 `[Removed<T>]`，没有分片）时，规则会报告它。没有代码修复：
+方法的过滤条件都能放进 `QueryFilter`（没有 `[Changed<T>]` 或 `[Removed<T>]`，没有分帧）时，规则会报告它。没有代码修复：
 调用要挪进系统的 `[OnUpdate]`，方法本身删掉。
 
 ```csharp doccheck=expect-EECS030
@@ -1105,7 +1105,7 @@ while (running) world.Update();
 
 **无效的 `[ForEach(Slices = N)]`。** 错误。没有代码修复。
 
-分片的方法每次系统运行只访问每张匹配表的一片，所以每一行每 N 次运行被访问一次。`Slices` 至少为 1。`[Changed<T>]`、
+分帧的方法每次系统运行只访问每张匹配表的一片，所以每一行每 N 次运行被访问一次。`Slices` 至少为 1。`[Changed<T>]`、
 `[Removed<T>]`、`[ChangedAny<…>]` 或 `[RemovedAny<…>]` 方法选的是系统上次运行以来变过的行，而每次运行都会把这个 tick 往前推：
 这次没访问到的那几片里的行，变更就永远丢了。
 
@@ -1114,11 +1114,11 @@ while (running) world.Update();
 public ref struct SendFire
 {
     [ForEach(Slices = 4), Changed<Burning>]
-    static void Send(in Burning burning, ref Replica replica) => replica.Burning = burning.Ticks > 0;   // 四个分片里有三个会丢掉变化
+    static void Send(in Burning burning, ref Replica replica) => replica.Burning = burning.Ticks > 0;   // 四个分帧里有三个会丢掉变化
 }
 ```
 
-每次运行都读变更：变更过滤条件本来就只访问写过的行。要分片的是没有变更过滤条件、对每个实体都很重的逐行工作：
+每次运行都读变更：变更过滤条件本来就只访问写过的行。要分帧的是没有变更过滤条件、对每个实体都很重的逐行工作：
 
 ```csharp
 [EcsSystem]
@@ -1129,7 +1129,7 @@ public ref struct SendFire
 }
 ```
 
-切法和节奏见[分片](/zh/docs/guide/systems#slices)。
+切法和节奏见[分帧](/zh/docs/guide/systems#slices)。
 
 ## EECS036 [#eecs036]
 
@@ -2551,8 +2551,8 @@ public ref struct ApplyImpacts
 
 **无法生效的 `[Consume]`。** 错误。没有代码修复。
 
-`[Consume]` 在 `[ForEach]` 遍历结束时销毁它访问过的行。没有 `[ForEach]` 的方法没有遍历；分片的方法（`Slices > 1`）每次运行只访问
-一部分行，销毁它们会挪动其他分片的行，事件可能要等很多次运行。
+`[Consume]` 在 `[ForEach]` 遍历结束时销毁它访问过的行。没有 `[ForEach]` 的方法没有遍历；分帧的方法（`Slices > 1`）每次运行只访问
+一部分行，销毁它们会挪动其他分帧的行，事件可能要等很多次运行。
 
 ```csharp tab="报告" doccheck=expect-EECS085
 public record struct Damage(int Amount) : IComponent;              // 一个事件实体

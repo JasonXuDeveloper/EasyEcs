@@ -52,7 +52,7 @@ flowchart LR
 | [系统](/zh/docs/guide/systems)与过滤（`With`、`Without`、`WithAny`） | 所有系统；`AfflictionSystem` 用 `World.Count` 统计着火**或**冻住的单位 |
 | 并行 [`[ForEach]`](/zh/docs/guide/threading) | `SteeringSystem`；`NewRound` 里的 `Reports.HealFully` 和 `Reports.Scatter` |
 | 并行系统（`WorldOptions.ParallelSystems`）、[`DescribeSchedule`](/zh/docs/guide/diagnostics#schedule) | `PlanningSystem` 和 `ManaSystem`：数据互不相交；`Schedule()` 能看到这一点 |
-| [分片](/zh/docs/guide/systems#slices)（`[ForEach(Slices = N)]`、`RunCount`） | `PlanningSystem` 每次只规划四分之一的 NPC |
+| [分帧](/zh/docs/guide/systems#slices)（`[ForEach(Slices = N)]`、`RunCount`） | `PlanningSystem` 每次只规划四分之一的 NPC |
 | [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 与 [`SetIfChanged`](/zh/docs/guide/change-tracking#set-if-changed) | `PlanningSystem.Plan` 只在目标变了时才写；`CombatSystem` 和 `RegenerationSystem` 只在命中或回血时给 `Health` 打 tick |
 | 批处理方法（`Span<T>`）、SIMD | `MovementSystem`；`Reports.SumHealth` |
 | 系统之外的 `[ForEach]` runner | `Reports` |

@@ -48,6 +48,7 @@ The terms of the Chinese guide pages (`docs/content/glossary.zh.mdx`). Use these
 | presence bit | 存在位 |
 | run of rows | 一段连续的行 |
 | chunk (parallel) | 块 |
+| slice (`Slices`, a pass over 1/N of the rows) | 分帧 (never 分片, which reads as sharding) |
 | ordered table; block of an ordered table (GROMACS's cluster), block pair; box; margin | 有序表；簇，簇对；包围盒；余量 |
 | change-tick block (4,096 rows: `BlockTicks`), word (64 rows) | 区段、位字 |
 

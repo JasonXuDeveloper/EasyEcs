@@ -1981,7 +1981,7 @@ reports a shape a tile cannot hold, EECS073 two tiles of one cell type in one me
 - **The load of the common shape is its own loop.** With halos, neighborhoods and boundaries added, the general load
   (every neighbor slot, a fill or a clamp per cell) made the water up to 40 % slower than its first version. Three
   changes brought it back: a missing neighbor reads a blank array of the fill (no branch per cell), the rows are
-  copied through refs computed once per row, and a halo of 1 with faces only and a fill boundary (the water, the
+  copied through refs computed once per row, and a halo of 1 with faces only and a border boundary (the water, the
   Laplacian) takes a loop of its own, chosen by a condition of constants; the neighbor search is unrolled per face
   for the faces neighborhood. That loop is compiled twice, with and without the row masks (`Masked` / `Unmasked`, a
   `typeof` constant), so a tile only sampled (the water's blocks) tests no cell, and a halo cell is tested in the
@@ -2119,7 +2119,7 @@ and `new Random()` in a `[ForEach]` method; its fix draws from `EntityRandom` wi
 **Decision.** `world.ForParallel(count, ref job)` runs an `IForRange` job (`Execute(start, end)`) over indexes, and
 `world.ForParallel(ref buffer, ref job)` an `IForSpan<T>` job (`Execute(start, span)`) over the elements of a
 `DynamicBuffer<T>` (an `Emitted<T>`'s records), on the world's runner: the chunks of parallel `[ForEach]` (about four
-per thread, multiples of 64 between 1,024 and `ParallelChunkRows`, or `chunkRows`), the same claiming and helper
+per thread, multiples of 64 between 1,024 and `MaxChunkRows`, or `chunkRows`), the same claiming and helper
 waking, the structure frozen during the call. One job copy per chunk; nothing is merged back. EECS060 and EECS061
 cover the jobs.
 
@@ -2466,7 +2466,7 @@ the code calls `Save`, `SaveWithout` or `SaveEntities`. It is a warning for a si
 **Decision.** A naming review before 4.8 renames, beyond [D64](#d64-names-of-4-7), names that are new in 4.8:
 `TileNeighbourhood` / `ITileShape.Neighbourhood` / `TileNeighbours` → `TileNeighborhood` / `Neighborhood` /
 `TileNeighbors`, `tile.Load()` → `tile.Pad()`, `tile.Changes(next, out changed)` → `ChangedEdges`,
-`TileReads.Sides` → `NorthSouth`, `[ForEach(Simd = …)]` → `[ForEach(SimdMode = …)]`, `DynamicBuffer<T>.ReservePool` /
+`TileStencil.Sides` → `NorthSouth`, `[ForEach(Simd = …)]` → `[ForEach(SimdMode = …)]`, `DynamicBuffer<T>.ReservePool` /
 `PoolCapacity` → `FillPool` / `MaxPooledLength`, `[Key]` → `[IndexKey]`, `prefab.Absent<T>()` → `SetAbsent<T>()`, and
 the EECS083 descriptor (`BadUpdateInterval`). `Lookup<T>.TryFind`, new
 in 4.8, gives an `Entity`, as the released `ValueIndex.TryFind` does. Hidden and internal names follow: `SavedTypes` →
@@ -2480,7 +2480,7 @@ call changes.
   into a texture. `Changes` read like a collection; it compares and returns the faces whose edge changed. `Absent<T>`
   read like a query; it sets a column without the component, as `Set` does with one.
 - **A name says what it holds.** `PoolCapacity` was a length of each pooled list, not a number of lists;
-  `ReservePool` fills the pool with lists. `Sides` of `TileReads` named two rows, not the four sides of `TileFaces.Sides`.
+  `ReservePool` fills the pool with lists. `Sides` of `TileStencil` named two rows, not the four sides of `TileFaces.Sides`.
   `[Key]` alone read like any key; `[IndexKey]` says the index, next to `[UniqueKey]` ([D129](#d129-lookup-key) renamed it `[LookupKey]`).
 - **The property names its type.** `Simd = SimdMode.Off` repeated the word in two forms; `SimdMode = SimdMode.Off`
   reads like `FloatMode`.

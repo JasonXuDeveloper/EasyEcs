@@ -69,8 +69,8 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `IForRange`、`IForSpan<T>` | 接口 | `world.ForParallel` 的 job：`Execute(start, end)` 处理一段下标，`Execute(start, span)` 处理一个列表的元素。 |
 | `Lookup<T>`、`LookupExtensions` | ref struct、静态类 | `[ForEach]` 参数，读取任意实体的组件 `T`，调度为对 `T` 的读：`this[id]`、`Read(id)`、`Has(id)`；带索引的 `T` 还可按键查找：`TryFind(key, out entity)`、`Find(key)`、`Count(key)`。 |
 | `Lanes` | 静态类 | 批处理方法的流压缩：`Compact(source, mask, destination)` 把掩码选中的元素紧挨着写出；`Rows(mask, first, destination)` 写出选中的行号。 |
-| `Tile<TCell, TTile>`、`ITile<TKey>`、`ITileShape`、`TileFaces`、`TileNeighborhood`、`TileBoundary`、`TileIds` | ref struct、接口、枚举 | `[ForEach]` 参数：实体的 `DynamicBuffer<TCell>`，连同它在 `TTile` 网格中邻居的（`TTile` 是带索引的组件，带静态的形状、光环、邻域和边界，以及每个邻居的键），被调度为两者的读：`Pad(from, to, fill, mask)`、`Beside(face)`、`Beside(dx, dy, dz)`、`Cells`、`ChangedEdges(next, out changed)`、`Facing(edges)`。 |
-| `PaddedTile<TCell, TTile>`、`TileRows<TTile>`、`TileRow<TTile>`、`TileCursor<TCell, TTile>`、`TileReads` | ref struct、结构体、枚举 | 模板采样的层，外面带一圈 `Halo` 个格子的 halo：`Rows(reads)` 遍历活跃行，`At(row)` 在一行周围采样（`Load128`、`Load256`、`LoadVector`、`this[dx, dy, dz]`），`this[x, y, z]`。 |
+| `Tile<TCell, TTile>`、`ITile<TKey>`、`ITileShape`、`TileFaces`、`TileNeighborhood`、`TileBoundary`、`TileIds` | ref struct、接口、枚举 | `[ForEach]` 参数：实体的 `DynamicBuffer<TCell>`，连同它在 `TTile` 网格中邻居的（`TTile` 是带索引的组件，带静态的形状、光环、邻域和边界，以及每个邻居的键），被调度为两者的读：`Pad(from, to, border, mask)`、`Beside(face)`、`Beside(dx, dy, dz)`、`Cells`、`ChangedEdges(next, out changed)`、`Facing(edges)`。 |
+| `PaddedTile<TCell, TTile>`、`TileRows<TTile>`、`TileRow<TTile>`、`TileCursor<TCell, TTile>`、`TileStencil` | ref struct、结构体、枚举 | 模板采样的层，外面带一圈 `Halo` 个格子的 halo：`Rows(reads)` 遍历活跃行，`At(row)` 在一行周围采样（`Load128`、`Load256`、`LoadVector`、`this[dx, dy, dz]`），`this[x, y, z]`。 |
 | `ISystemGroup`、`ISystemGroupWith<T>`、`ISystemGroupWithout<T>`、`[UpdateInGroup<T>]`、`[UpdateBefore<T>]`、`[UpdateAfter<T>]`、`[UpdateInterval(n, Phase = p)]` | 接口、特性 | 系统分组（可通过接口加过滤条件）、排序与节奏。 |
 | `SystemErrorPolicy` | 枚举 | `Throw`（默认）或 `Disable`：系统抛异常时怎么办。 |
 | `SystemStats`、`SystemList` | readonly struct | 系统的运行次数、耗时、分配字节数和访问的实体数；`world.Systems`，零分配。 |
@@ -181,8 +181,8 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数) | 连续行的 span；不能做结构变更 |
 | 带向量循环的 `[ForEach]` 方法（生成的，[向量循环](/zh/docs/guide/systems#vector-loops)） | O(M + S / L + 段数)，L = 每个向量的行数（先 `Vector512`，再 `Vector<T>`；按通道大小和 CPU，2 到 64） | 行、结果（`FloatMode.Fast` 之外）、变更 tick 和读写都和逐行运行的方法相同；每段先广播一次统一值，不足 L 行的尾部由方法自己跑；单线程时按 `ForEachMasked` 运行（只有部分行通过的字，每 L 行一个带掩码的向量），并行时按 `ForEachBatchParallel` 跑每块里连续的行；2 到 4 个字段的组件每个向量多一次解交错加载和一次交错存储（没有 AVX2 或 AVX-512 时每行都由方法跑）；`Reduce<T>` 每条通道每个字段一个累加器，每段合并一次；零分配 |
 | `world.ForEachMasked<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数 + 部分通过的字数) | 同 `ForEachBatch`，但只有部分行通过的 64 行字整个交给 job，通过的行记成位（`IForEachMasked`），不再按每一段通过的行各调一次；全部通过的字并进连续段 |
-| `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` / `ForEachBatchParallel`（一块中连续行的 span） | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.ParallelChunkRows` 行（job 写被追踪组件时为 4,096 的整数倍），或 `chunkRows` 向上取整到 64（`[ForEach(ChunkRows = n)]`；这时遍历前打开 O(B) 个区段，B 为 4,096 行的区段数，每写 64 行一次原子 OR），每块一个 job 副本（job 做归约 `Reduce<T>` 时保留这些副本，按块的顺序合并，O(块数)）；只在划算时唤醒助手线程 |
-| `world.ForParallel<TJob>(count, ref job, chunkRows)` / `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)` | O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | 和 `ForEachParallel` 同一个运行器、同样的块（没有表：没有变更 tick，每块 1,024 到 `World.ParallelChunkRows`，或 `chunkRows` 向上取整到 64）；每块一个 job 副本，不合并回来；结构被冻结（结构变更抛异常）；每种 job 类型第一次调用之后 0 B |
+| `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkRows)` / `ForEachEntityParallel` / `ForEachBatchParallel`（一块中连续行的 span） | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.MaxChunkRows` 行（job 写被追踪组件时为 4,096 的整数倍），或 `chunkRows` 向上取整到 64（`[ForEach(ChunkRows = n)]`；这时遍历前打开 O(B) 个区段，B 为 4,096 行的区段数，每写 64 行一次原子 OR），每块一个 job 副本（job 做归约 `Reduce<T>` 时保留这些副本，按块的顺序合并，O(块数)）；只在划算时唤醒助手线程 |
+| `world.ForParallel<TJob>(count, ref job, chunkRows)` / `ForParallel<T, TJob>(ref buffer, ref job, chunkRows)` | O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | 和 `ForEachParallel` 同一个运行器、同样的块（没有表：没有变更 tick，每块 1,024 到 `World.MaxChunkRows`，或 `chunkRows` 向上取整到 64）；每块一个 job 副本，不合并回来；结构被冻结（结构变更抛异常）；每种 job 类型第一次调用之后 0 B |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | 指向行内的 ref：被追踪组件的每个被访问行都算写入；循环里不能 `await` |
 | `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | 指向行内的 `ref readonly`：不打 tick；其余同 `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M)，需要测位的表再加 S / 64 | 累加表计数，或数存在位（和 tick），AVX-512 下每步 8 个字 |
@@ -192,7 +192,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `filter.Removed<T>(since)` / `[Removed<T>]` | 同 `Changed` | 在 `since` 及之后失去被追踪的 `T`、且现在仍没有它的实体；已销毁的实体不报告（由销毁日志报告） |
 | `filter.ChangedAny<T1..Tn>(since)` / `[ChangedAny<T1..Tn>]` | 构建 O(n)；遍历时跳过集合里的列自 `since` 以来都没被写过的表，以及没有任何列写过的块和位字 | 2 到 9 个被追踪组件里至少有一个在 `since` 及之后被写过的行；一个过滤条件的所有 `ChangedAny` 调用合成一个集合，和其他条件按 AND 组合；每个过滤条件一个 tick |
 | `filter.RemovedAny<T1..Tn>(since)` / `[RemovedAny<T1..Tn>]` | 同 `ChangedAny` | 在 `since` 及之后至少失去其中一个、且现在仍没有它的实体 |
-| `filter.Slice(index, of)` / `[ForEach(Slices = N)]` | O(1)；一次遍历约访问 S / N 行，按 64 行位字切分 | 只用于 `ForEach` 系列调用（`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run(ref job, filter)` 和批量调用会抛 `ArgumentException`）；分片方法访问第 `RunCount % N` 片；不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035） |
+| `filter.Slice(index, of)` / `[ForEach(Slices = N)]` | O(1)；一次遍历约访问 S / N 行，按 64 行位字切分 | 只用于 `ForEach` 系列调用（`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run(ref job, filter)` 和批量调用会抛 `ArgumentException`）；分帧方法访问第 `RunCount % N` 片；不能和 `[Changed<T>]` / `[Removed<T>]` 一起用（EECS035） |
 | `filter.InGroup<T>(group)` | O(1)；遍历只走这个分组的表 | [分组](/zh/docs/guide/groups) |
 | `filter.Since(since)` | O(1) | 把 `Changed`、`Removed`、`ChangedAny` 和 `RemovedAny` 的 tick 换掉，不用重建过滤条件：一个过滤条件，带着每个客户端的 tick 跑 |
 
@@ -251,11 +251,11 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
 | 遍历中的每个实体 | O(邻居数) 次哈希探测：`Faces` 为 4 或 6，`FacesAndEdges` 为 8 或 18，`All` 为 8 或 26 | 生成的 job 按键找一次邻居，方法接收的同一网格的所有分块共用；网格的索引在遍历之前建好 |
-| `tile.Pad(from, to, fill, mask)` / `tile.Pad()` | O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝 | 把这些层拷进线程的纹理，外面一圈 r 个格子，上下各多 r 层（没有邻居处按形状的 `Boundary`：`fill`、钳制或镜像）；传 `mask` 时每层记一个活跃行的字；线程有了纹理之后不分配；形状无效（EECS072）、层超出 `0..Height - 1` 或缓冲比形状短时抛出异常 |
+| `tile.Pad(from, to, border, mask)` / `tile.Pad()` | O(层数 × (Width + 2r) × (Depth + 2r))，r 为 `Halo`；每行一到两次向量拷贝 | 把这些层拷进线程的纹理，外面一圈 r 个格子，上下各多 r 层（没有邻居处按形状的 `Boundary`：`border`、钳制或镜像）；传 `mask` 时每层记一个活跃行的字；线程有了纹理之后不分配；形状无效（EECS072）、层超出 `0..Height - 1` 或缓冲比形状短时抛出异常 |
 | `tile.Beside(face)` / `tile.Beside(dx, dy, dz)` / `tile.Cells` | O(1) | 邻居的 id（没有、或不在邻域内时为默认值）/ 实体的格子 |
 | `tile.ChangedEdges(next, out changed)` | O(格子数)，逐行按字节比较 | 这一步和格子是否不同，以及边缘（深 r 个格子）变了的面 |
 | `tile.Facing(edges)` | 每个邻居 O(1) | 把这些边缘读进光环的邻居，隔着面、棱和角 |
-| `padded.Rows(reads)` | 每层、每访问一行 O(1)：一次尾零计数 | 模板（`TileReads`，最远 r）读到不为零格子的行，逐层；加载时没传 `mask` 则抛出异常 |
+| `padded.Rows(reads)` | 每层、每访问一行 O(1)：一次尾零计数 | 模板（`TileStencil`，最远 r）读到不为零格子的行，逐层；加载时没传 `mask` 则抛出异常 |
 | `padded.At(row)` | O(1) | 这一行的第一个格子；检查行在范围内 |
 | `cursor.Load128<TLane>(dx, dy, dz)` / `Load256` / `LoadVector` / `cursor[dx, dy, dz]` | O(1)：一次非对齐加载 | 偏移在这一行的 r 个格子、行、层之内；每条轴一次无符号比较，常量时被消掉 |
 | `padded[x, y, z]` | O(1) | 纹理的任意格子，有检查 |

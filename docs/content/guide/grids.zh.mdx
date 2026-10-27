@@ -87,7 +87,7 @@ public partial record struct HeatPlate([LookupKey] PlatePos Pos) : IComponent, I
     Boundary: {
       type: 'static TileBoundary',
       description: '没有邻居处光环里放什么：Fill（一个值）、Clamp（重复边缘格子）或 Mirror（镜像）。',
-      default: 'TileBoundary.Fill',
+      default: 'TileBoundary.Border',
     },
   }}
 />
@@ -145,7 +145,7 @@ public ref struct DiffuseSystem
     {
         var plate = heat.Pad();
         var into = MemoryMarshal.Cast<NextTemperature, float>(next.Write().AsSpan());
-        foreach (var row in plate.Rows(TileReads.Layer))
+        foreach (var row in plate.Rows(TileStencil.Layer))
         {
             var cells = plate.At(row);
             for (int x = 0; x < 16; x += Vector128<float>.Count)
@@ -160,9 +160,9 @@ public ref struct DiffuseSystem
 }
 ```
 
-`TileReads` 说明模板在一行周围读什么（`Self`、`NorthSouth`、`Above`、`Below`、`Diagonals`，以及组合：2D 用 `Layer`，3D 七点模板用
+`TileStencil` 说明模板在一行周围读什么（`Self`、`NorthSouth`、`Above`、`Below`、`Diagonals`，以及组合：2D 用 `Layer`，3D 七点模板用
 `Cross`，还有 `All`）：读到的这些行里有不为零的格子，这一行才被访问。这适合“读到的全是零、结果也是零”的模板（冷处不会升温，水不会凭空流出）；
-带源项的模板用 `Rows(TileReads.All)` 或者遍历每一行。
+带源项的模板用 `Rows(TileStencil.All)` 或者遍历每一行。
 
 </Step>
 <Step>
@@ -282,7 +282,7 @@ public ref struct SpreadGasSystem
         var cube = gas.Pad();
         var into = MemoryMarshal.Cast<NextGas, float>(next.Write().AsSpan());
         // 七点模板读这一行、它的四边，以及上下层的行。
-        foreach (var row in cube.Rows(TileReads.Cross))
+        foreach (var row in cube.Rows(TileStencil.Cross))
         {
             var cells = cube.At(row);
             for (int x = 0; x < 16; x += Vector128<float>.Count)
@@ -300,8 +300,8 @@ public ref struct SpreadGasSystem
 
 - **只加载一部分层。** `tile.Pad(from, to)` 只加载第 `from` 到 `to` 层（连同它们的光环层），适合知道活在哪里的模板：地形里水到得了的层、
   波前经过的那一段。`Rows` 只遍历这些层，`row.Y` / `row.Z` 是行的位置；`row.Index` 是它在任何同布局缓冲里的第一个格子。
-- **自定义填充值。** `TileBoundary.Fill` 下，`Pad(from, to, fill)` 设置没有邻居时光环里的值：地图外的温度、洞穴四周的岩石。
-- **只采样的字段。** `Pad(from, to, fill, mask: false)` 不再逐格检查活跃行。方法遍历第一个字段的行、同时采样第二个字段时用它：
+- **自定义边界值。** `TileBoundary.Border` 下，`Pad(from, to, border)` 设置没有邻居时光环里的值：地图外的温度、洞穴四周的岩石。
+- **只采样的字段。** `Pad(from, to, border, mask: false)` 不再逐格检查活跃行。方法遍历第一个字段的行、同时采样第二个字段时用它：
   `At(row)` 接受用同样的层加载的另一块瓦片的行。没带掩码加载的瓦片调用 `Rows` 会抛出异常。
 - **单个格子。** `cursor[dx, dy, dz]` 读一行周围的一个格子，`padded[x, y, z]` 读纹理里的任意格子（含光环），`tile.Cells` 不加载就能读瓦片自己的格子。
   行足够宽时，`Load256` 和 `LoadVector` 读 32 字节或一个 `Vector<T>`。
@@ -316,7 +316,7 @@ public ref struct SpreadGasSystem
 - **`Neighborhood`**（默认 `Faces`）选择读进这一圈棱和角的瓦片：`Faces`（von Neumann：2D 4 块，3D 6 块）、`FacesAndEdges`（8 或 18 块）
   或 `All`（Moore：8 或 26 块）。九点模板（生命游戏、盒式模糊）需要 `All`；七点模板不读角，也就省下多出来的查找。
   `tile.Beside(dx, dy, dz)` 返回其中任意一块，`tile.Beside(face)` 返回某个面对面的那块。
-- **`Boundary`**（默认 `Fill`）是没有邻居处光环里放什么：`Pad(from, to, fill)` 的填充值（Dirichlet 边界）、重复瓦片的边缘格子（`Clamp`），
+- **`Boundary`**（默认 `Border`）是没有邻居处光环里放什么：`Pad(from, to, border)` 的边界值（Dirichlet 边界）、重复瓦片的边缘格子（`Clamp`），
   或在边缘镜像瓦片的格子（`Mirror`，零通量的 Neumann 边界）。周期网格不需要模式：它的 `Beside` 回绕，每块瓦片都有邻居。
 
 ```csharp
@@ -345,7 +345,7 @@ public static class LifeRule
     public static void Step(Tile<Alive, LifePlate> life, Span<byte> into)
     {
         var plate = life.Pad();
-        foreach (var row in plate.Rows(TileReads.Layer))
+        foreach (var row in plate.Rows(TileStencil.Layer))
         {
             var c = plate.At(row); // 一行 16 个格子就是一个 Vector128<byte>
             var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)
@@ -455,7 +455,7 @@ public partial record struct MapPlate([UniqueKey] PlatePos Pos)
   多重网格（在更粗的网格副本上松弛，用更少的 tick 穿过网格）不提供。
 - **每个 tick 都走，还是少走几个 tick。** 玩家看得见的过程（热量扩散、水一格一格地流）每个 tick 走一步，它的速度就是一步的开销：瓦片、行、休眠的瓦片。
   只用最终结果的字段（距离场或流场、寻路代价场、光照传播、不可压缩水的压力）要的是尽量少的 tick 收敛：红黑排序正是在这里划算。
-- **可分离核拆成两个系统。** 先沿 x 再沿 z 的高斯模糊是两个系统：第一个沿 x 读瓦片（`TileReads.Self`），写进中间缓冲；第二个接收那个缓冲的
+- **可分离核拆成两个系统。** 先沿 x 再沿 z 的高斯模糊是两个系统：第一个沿 x 读瓦片（`TileStencil.Self`），写进中间缓冲；第二个接收那个缓冲的
   `Tile`，沿 z 读。每遍 2r + 1 次采样，而不是 (2r + 1)²，中间缓冲是它自己的格子类型。
 - **每个字段一种格子类型。** 瓦片填充一个 `DynamicBuffer<TCell>`。有多个字段的网格（水和方块、温度和压力）每个字段一种格子类型，每个字段接收一个
   `Tile`（`Tile<Fluid, Chunk> water, Tile<Block, Chunk> blocks`）：每个字段各自填充，用同样的偏移采样。同一格子类型和网格的两个瓦片会共用线程的纹理
@@ -474,7 +474,7 @@ public partial record struct MapPlate([UniqueKey] PlatePos Pos)
 | `Halo` | apron | 幽灵格子的宽度（halo 深度） |
 | `tile.Pad()` | 把分块和 apron 载入共享内存 | 光环交换 |
 | `TileNeighborhood.Faces` / `All` | von Neumann / Moore 模板 | 只交换面 / 交换面、棱和角 |
-| `TileBoundary.Fill` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / 钳制 / Neumann 边界 |
+| `TileBoundary.Border` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / 钳制 / Neumann 边界 |
 | 回绕的 `Beside` | `cudaAddressModeWrap` | 带周期维度的 `MPI_Cart_create` |
 | 步进之后的提交系统 | 乒乓缓冲 | Jacobi 迭代的新旧两个数组 |
 
@@ -546,7 +546,7 @@ public ref struct StepSystem
         var plate = life.Pad();
 
         // 只访问有活格子或挨着这样一行的行。
-        foreach (var row in plate.Rows(TileReads.Layer))
+        foreach (var row in plate.Rows(TileStencil.Layer))
         {
             // 一行 16 个字节格子就是一个 Vector128<byte>。
             var c = plate.At(row);
@@ -683,13 +683,13 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
 | --- | --- | --- |
 | 每个格子用一次 `Lookup<T>` 读另一块瓦片的格子 | `Tile<TCell, TTile>` 参数和 `Pad()` | 每遍每条朝向的边只拷一次，之后采样没有边界情况 |
 | 每次 `Load` 一个格子 | 对一行格子用 `Load128` / `Load256` | 一行 16 个字节格子就是一条指令 |
-| 2D 五点模板用 `Rows(TileReads.All)` | `Rows(TileReads.Layer)`（3D 用 `Cross`） | 访问的行更少，结果相同 |
+| 2D 五点模板用 `Rows(TileStencil.All)` | `Rows(TileStencil.Layer)`（3D 用 `Cross`） | 访问的行更少，结果相同 |
 | 每块瓦片都步进 | `ChangedEdges`、`Facing` 和一个 `Awake` 标签 | 网格的开销只是活跃瓦片的开销 |
 | 通过哈希找邻居 | `IDirectIndexed<TKey>` 加 `[UniqueKey]` | 每个邻居一次数组读取 |
 | 一个 `byte` 就放得下的值用 `float` 格子 | 放得下的最窄的格子 | 每个向量多四倍的格子 |
 | 每遍都清空下一步的缓冲 | 写这一遍之后要读的每一行 | 不必把这一遍本来就要重写的内存整个写一遍 |
 | 高瓦片的活只在几层，却 `Pad()` 所有层 | 对有活的层 `Pad(from, to)` | 拷贝和遍历只覆盖这些层 |
-| 方法只采样的第二个字段也用 `Pad()` | `Pad(from, to, fill, mask: false)` | 不再为活跃行逐格检查 |
+| 方法只采样的第二个字段也用 `Pad()` | `Pad(from, to, border, mask: false)` | 不再为活跃行逐格检查 |
 
 `TileStencilBenchmark` 在 32 x 32 块、每块 16 x 16 个格子的板上跑九点模糊和四阶拉普拉斯算子，对比瓦片、直接映射的瓦片和手写版本
 （每个邻居一次 `Lookup`、栈上一张带填充的纹理）；`TileActiveBenchmark` 对比大部分安静的网格休眠与不休眠；`TileNeighborBenchmark`
@@ -718,7 +718,7 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
 | 光环比瓦片还宽 | 会越过旁边的瓦片 | [EECS072](/zh/docs/guide/analyzer#eecs072)，第一次加载时也会抛出异常 |
 | 一个方法里有同一格子类型和网格的两个瓦片 | 第二次 `Pad` 覆盖线程纹理里的第一次 | [EECS073](/zh/docs/guide/analyzer#eecs073)：每个字段一种格子类型 |
 | 一遍读到了同一遍里已更新的格子 | 结果取决于访问顺序和线程数 | 代码审查：写进下一步的缓冲，之后再提交 |
-| 读到的全是零时结果不为零的模板用 `Rows(reads)` | 跳过的行留着上一步的值 | 代码审查：`Rows(TileReads.All)` 或遍历每一行 |
+| 读到的全是零时结果不为零的模板用 `Rows(reads)` | 跳过的行留着上一步的值 | 代码审查：`Rows(TileStencil.All)` 或遍历每一行 |
 | 九点模板用默认的 `Neighborhood` | 光环的角放的是边界值，不是对角的瓦片 | 测试：`TileNeighborhood.All` |
 | 格子缓冲比形状的格子少 | `Pad` 抛出异常 | 创建时用 `SetCount` 定好两个缓冲的大小 |
 | `Pad(from, to)` 的层超出 `0` 到 `Height - 1`，或 `from` 大于 `to` | `Pad` 抛出 `ArgumentOutOfRangeException` | 代码审查：形状的层数 |

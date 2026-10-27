@@ -178,7 +178,7 @@ public ref struct RegenerateAll
 
 并行遍历把行切成块，线程做完手上的一块，就通过一个共享计数器再领下一块，和 OpenMP 的 `schedule(dynamic, n)` 一样：分到便宜行的线程
 接着领下一块，别的线程还在忙，不均匀的行就这样摊平了。默认一块约为每个线程份额的四分之一，至少 1,024 行（方法写被追踪组件时
-至少 4,096 行），至多 `World.ParallelChunkRows`（16,384）行。这适合大量轻量的行。如果只有几百行、每行要花几微秒（一块地形、一次寻路、
+至少 4,096 行），至多 `World.MaxChunkRows`（16,384）行。这适合大量轻量的行。如果只有几百行、每行要花几微秒（一块地形、一次寻路、
 一个人群格子），它们就只成一块，一个线程在跑，其他线程干等。
 
 `ChunkRows = n` 就是 `schedule(dynamic, n)` 里的 `n`：一个线程每次领多少行。
@@ -234,7 +234,7 @@ public ref struct CrowdPressure
 ```
 
 - **向上取整到 64。** 一个存在位字和变更 tick 字只归一个线程，所以 `ChunkRows = 10` 实际是 64。
-- **按表切。** 每张匹配的表各切各的，从第一行起按 `n` 的倍数切；一块不会跨两张表，表的最后一块装剩下的行。分片方法
+- **按表切。** 每张匹配的表各切各的，从第一行起按 `n` 的倍数切；一块不会跨两张表，表的最后一块装剩下的行。分帧方法
   （[`Slices`](/zh/docs/guide/systems#slices)）切的是它这次访问的那一片。
 - **被追踪的写入。** 写被追踪组件的方法，块可以切开一个 4,096 行的 tick 块：遍历开始前，它覆盖的 tick 块先按这次遍历的 tick 打开，
   共用一个 tick 块的线程用原子 OR 在摘要里置自己的位，每写 64 行一次（每次遍历本来就要付这次 OR）。不设 `ChunkRows` 时，这种方法每块都是整的 tick 块，不会有两个线程共用一个
@@ -730,7 +730,7 @@ public ref struct CriticalSystem
 - **每块一个 job 副本。** `Execute` 写进 job 字段的东西不会合并回来：总数用 `[ForEach]` 方法的 [`Reduce<T>`](#reductions)，调用之后读字段报
   [EECS061](/zh/docs/guide/analyzer#eecs061)。写所有块共享的内存报 [EECS060](/zh/docs/guide/analyzer#eecs060)。
 - **不做结构变更。** job 运行时 World 的结构是冻结的：结构变更会抛出异常。调用期间列表不能变，每块只写自己的元素或下标。
-- **块。** 大约每个线程四块，是 64 的倍数，在 1,024 和 `World.ParallelChunkRows` 之间；最后一个参数 `chunkRows` 给少量重活设块大小，作用和
+- **块。** 大约每个线程四块，是 64 的倍数，在 1,024 和 `World.MaxChunkRows` 之间；最后一个参数 `chunkRows` 给少量重活设块大小，作用和
   [`ChunkRows`](#chunk-rows) 一样。少于两块，或者运行器正忙时，在调用线程上运行。
 - **所有者线程，零分配**（每种 job 类型第一次调用之后）。
 

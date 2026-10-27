@@ -92,7 +92,7 @@ public partial record struct HeatPlate([LookupKey] PlatePos Pos) : IComponent, I
     Boundary: {
       type: 'static TileBoundary',
       description: 'What the halo holds where there is no neighbor: Fill (a value), Clamp (the edge cell repeated) or Mirror.',
-      default: 'TileBoundary.Fill',
+      default: 'TileBoundary.Border',
     },
   }}
 />
@@ -154,7 +154,7 @@ public ref struct DiffuseSystem
     {
         var plate = heat.Pad();
         var into = MemoryMarshal.Cast<NextTemperature, float>(next.Write().AsSpan());
-        foreach (var row in plate.Rows(TileReads.Layer))
+        foreach (var row in plate.Rows(TileStencil.Layer))
         {
             var cells = plate.At(row);
             for (int x = 0; x < 16; x += Vector128<float>.Count)
@@ -169,11 +169,11 @@ public ref struct DiffuseSystem
 }
 ```
 
-`TileReads` says what the stencil reads around a row (`Self`, `NorthSouth`, `Above`, `Below`, `Diagonals`, and the
+`TileStencil` says what the stencil reads around a row (`Self`, `NorthSouth`, `Above`, `Below`, `Diagonals`, and the
 sets `Layer` for 2D, `Cross` for a 3D seven-point stencil, `All`): a row is visited when one of those rows holds a
 cell that is not zero. That is right for a stencil whose result is zero wherever everything it reads is zero (heat
 that does not rise from cold, water that does not flow out of nothing); a stencil with a source term walks
-`Rows(TileReads.All)` or every row.
+`Rows(TileStencil.All)` or every row.
 
 </Step>
 <Step>
@@ -300,7 +300,7 @@ public ref struct SpreadGasSystem
         var cube = gas.Pad();
         var into = MemoryMarshal.Cast<NextGas, float>(next.Write().AsSpan());
         // The seven-point stencil reads the row, its sides and the rows above and below it.
-        foreach (var row in cube.Rows(TileReads.Cross))
+        foreach (var row in cube.Rows(TileStencil.Cross))
         {
             var cells = cube.At(row);
             for (int x = 0; x < 16; x += Vector128<float>.Count)
@@ -319,9 +319,9 @@ public ref struct SpreadGasSystem
 - **Part of the layers.** `tile.Pad(from, to)` loads layers `from` to `to` only (with their halo layers), for a stencil
   that knows where the work is: the layers a chunk's water reaches, the band a front crosses. `Rows` then walks those
   layers, and `row.Y` / `row.Z` say where a row is; `row.Index` is its first cell in any buffer of the tile's layout.
-- **A fill of your own.** `Pad(from, to, fill)` sets the value the halo holds where there is no neighbor under
-  `TileBoundary.Fill`: the temperature outside the map, solid rock around a cave.
-- **A field only sampled.** `Pad(from, to, fill, mask: false)` skips the test of every cell for the active rows. Use
+- **A border of your own.** `Pad(from, to, border)` sets the value the halo holds where there is no neighbor under
+  `TileBoundary.Border`: the temperature outside the map, solid rock around a cave.
+- **A field only sampled.** `Pad(from, to, border, mask: false)` skips the test of every cell for the active rows. Use
   it for a second field the method samples while it walks the rows of the first: `At(row)` takes a row of another
   tile loaded with the same layers. `Rows` of a tile loaded without its mask throws.
 - **Single cells.** `cursor[dx, dy, dz]` reads one cell around a row, `padded[x, y, z]` any cell of the texture
@@ -341,8 +341,8 @@ sizes:
   4 tiles in 2D, 6 in 3D), `FacesAndEdges` (8 or 18) or `All` (Moore: 8 or 26). A nine-point stencil (the Game of
   Life, a box blur) needs `All`; a seven-point one reads no corner, so it skips the extra searches.
   `tile.Beside(dx, dy, dz)` returns any of them, `tile.Beside(face)` the one across a face.
-- **`Boundary`** (default `Fill`) is what the halo holds where there is no neighbor: the fill value of
-  `Pad(from, to, fill)` (a Dirichlet boundary), the tile's edge cell repeated (`Clamp`) or its cells mirrored at the
+- **`Boundary`** (default `Border`) is what the halo holds where there is no neighbor: the border value of
+  `Pad(from, to, border)` (a Dirichlet boundary), the tile's edge cell repeated (`Clamp`) or its cells mirrored at the
   edge (`Mirror`, a zero-flux Neumann boundary). A periodic grid needs no mode: its `Beside` wraps around, so every
   tile has neighbors.
 
@@ -372,7 +372,7 @@ public static class LifeRule
     public static void Step(Tile<Alive, LifePlate> life, Span<byte> into)
     {
         var plate = life.Pad();
-        foreach (var row in plate.Rows(TileReads.Layer))
+        foreach (var row in plate.Rows(TileStencil.Layer))
         {
             var c = plate.At(row); // a row of 16 cells is one Vector128<byte>
             var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)
@@ -492,7 +492,7 @@ A key out of range or in a taken slot is still found, through the hash. The Voxe
   result (a distance or flow field, a path-cost field, light propagation, the pressure of incompressible water)
   needs as few ticks as possible to settle: that is where red-black ordering pays.
 - **Separable kernels as two systems.** A Gaussian blur along x then z is two systems: the first reads the tile
-  along x (`TileReads.Self`) into an intermediate buffer, the second takes a `Tile` of that buffer and reads along z.
+  along x (`TileStencil.Self`) into an intermediate buffer, the second takes a `Tile` of that buffer and reads along z.
   Each pass is 2r + 1 samples instead of (2r + 1)², and the intermediate buffer is a cell type of its own.
 - **One cell type per field.** A tile pads one `DynamicBuffer<TCell>`. A grid with several fields (water and blocks,
   temperature and pressure) keeps one cell type per field and takes one `Tile` per field
@@ -514,7 +514,7 @@ The terms come from CUDA and MPI, which solve the same problem on a GPU and acro
 | `Halo` | the apron | the ghost width (halo depth) |
 | `tile.Pad()` | the tile and its apron loaded into shared memory | a halo exchange |
 | `TileNeighborhood.Faces` / `All` | a von Neumann / Moore stencil | the face / face, edge and corner exchanges |
-| `TileBoundary.Fill` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / clamped / Neumann boundary |
+| `TileBoundary.Border` / `Clamp` / `Mirror` | `cudaAddressModeBorder` / `Clamp` / `Mirror` | Dirichlet / clamped / Neumann boundary |
 | a `Beside` that wraps | `cudaAddressModeWrap` | `MPI_Cart_create` with periodic dimensions |
 | a commit system after the step | ping-pong buffers | the old and new arrays of a Jacobi sweep |
 
@@ -587,7 +587,7 @@ public ref struct StepSystem
         var plate = life.Pad();
 
         // Only the rows that hold a live cell or lie beside one.
-        foreach (var row in plate.Rows(TileReads.Layer))
+        foreach (var row in plate.Rows(TileStencil.Layer))
         {
             // A row of 16 byte cells is one Vector128<byte>.
             var c = plate.At(row);
@@ -725,13 +725,13 @@ edge every other tick, and each plate keeps the other awake through `Facing`.
 | --- | --- | --- |
 | Reading another tile's cells through a `Lookup<T>` per cell | A `Tile<TCell, TTile>` parameter and `Pad()` | One copy of each facing edge per pass, then samples with no edge case |
 | One cell per `Load` | `Load128` / `Load256` over a row of cells | A row of 16 byte cells is one instruction |
-| `Rows(TileReads.All)` for a 2D five-point stencil | `Rows(TileReads.Layer)` (`Cross` in 3D) | Fewer rows visited, the same result |
+| `Rows(TileStencil.All)` for a 2D five-point stencil | `Rows(TileStencil.Layer)` (`Cross` in 3D) | Fewer rows visited, the same result |
 | Stepping every tile | `ChangedEdges`, `Facing` and an `Awake` tag | A grid costs what its active tiles cost |
 | Neighbors found through the hash | `IDirectIndexed<TKey>` with a `[UniqueKey]` | One array read per neighbor |
 | `float` cells where a `byte` holds the value | The narrowest cell that holds it | Four times the cells per vector |
 | Clearing the step buffer every pass | Writing every row the pass later reads | No full write of memory the pass rewrites anyway |
 | `Pad()` of every layer of a tall tile whose work is in a few | `Pad(from, to)` of the layers that hold it | The copy and the walk cover only those layers |
-| `Pad()` of a second field the method only samples | `Pad(from, to, fill, mask: false)` | No cell is tested for the active rows |
+| `Pad()` of a second field the method only samples | `Pad(from, to, border, mask: false)` | No cell is tested for the active rows |
 
 `TileStencilBenchmark` runs a nine-point blur and a fourth-order Laplacian over 32 x 32 plates of 16 x 16 cells, as
 tiles, as direct-indexed tiles and written by hand (a `Lookup` per neighbor, a padded texture on the stack);
@@ -766,7 +766,7 @@ search. The measured numbers of the water shader, by hand against the tile, are 
 | A halo wider than the tile | It would reach past the tile beside | [EECS072](/en/docs/guide/analyzer#eecs072), and an exception at the first load |
 | Two tiles of the same cell type and grid in one method | The second `Pad` replaces the first in the thread's texture | [EECS073](/en/docs/guide/analyzer#eecs073): one cell type per field |
 | A pass that reads cells it updated in the same pass | Results depend on the visit order and the thread count | Review: write into a step buffer, commit after |
-| `Rows(reads)` for a stencil whose result is not zero where everything it reads is zero | The rows it skips keep the last step's values | Review: `Rows(TileReads.All)` or every row |
+| `Rows(reads)` for a stencil whose result is not zero where everything it reads is zero | The rows it skips keep the last step's values | Review: `Rows(TileStencil.All)` or every row |
 | A nine-point stencil with the default `Neighborhood` | The corners of the halo hold the boundary, not the diagonal tiles | Tests: `TileNeighborhood.All` |
 | A cell buffer with fewer cells than the shape | `Pad` throws | Size both buffers with `SetCount` at creation |
 | `Pad(from, to)` with layers outside `0` to `Height - 1`, or `from` above `to` | `Pad` throws `ArgumentOutOfRangeException` | Review: the layers of the shape |

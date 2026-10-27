@@ -128,7 +128,7 @@ public QueryFilter Slice(int index, int of);
 
 表按 64 行的倍数切分（它的存在位字），按遍历开始时的行数切，所以少于 64 行的表只有一块；匹配中的第 i 张表从第 (`index` + i) mod `of` 片开始切，所以很多张小表也会分散到各片上。两次遍历之间移动了的行（交换删除用表的最后一行填空洞、结构变更把实体移到另一张表、表扩容或缩小跨过切分点）在 `of` 次遍历的一轮里可能被跳过，也可能被访问两次；下一轮会再看到它们。
 
-`ForEach`、`ForEachEntity`、`ForEachBatch` 以及它们的 `Parallel` 形式支持分片；需要所有匹配行的调用（`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run`、`SetAll` 和其他批量调用）遇到分片的过滤条件会抛 `ArgumentException`。分 1 片就是整张表。
+`ForEach`、`ForEachEntity`、`ForEachBatch` 以及它们的 `Parallel` 形式支持分帧；需要所有匹配行的调用（`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run`、`SetAll` 和其他批量调用）遇到分帧的过滤条件会抛 `ArgumentException`。分 1 片就是整张表。
 
 **异常**
 

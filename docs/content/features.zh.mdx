@@ -19,7 +19,7 @@ EasyEcs 的全部功能都在这一页，按它在服务器上承担的工作分
 
 | 用途 | 功能 |
 | --- | --- |
-| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、[生成的部分](#generated-parts)、系统与 [`[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[分片](#slices)、[立即生效的结构变更](#immediate-structural-changes)、[遍历后销毁的事件](#consume)、[临时查询](#ad-hoc-queries) |
+| [模拟](#simulate) | [World 与实体](#worlds-and-entities)、[组件与标签](#components-and-tags)、[生成成员](#generated-members)、[生成的部分](#generated-parts)、系统与 [`[ForEach]`](#systems-and-foreach)、[泛型系统](#generic-systems)、[过滤条件](#filters)、[可选组件](#optional-components)、[批量方法](#batch-methods)、[单例](#singletons)、[排序、分组与间隔](#system-groups-and-intervals)、[分帧](#slices)、[立即生效的结构变更](#immediate-structural-changes)、[遍历后销毁的事件](#consume)、[临时查询](#ad-hoc-queries) |
 | [响应变化](#react) | [变更追踪](#change-tracking)、[值变了才算写入](#write-only-when-changed)、[移除检测](#removal-detection)、[销毁日志](#destroy-log)、[清理组件](#cleanup-components)、[禁用与启用](#disable-and-enable) |
 | [查找](#find) | [值索引](#value-indexes)、[唯一键](#unique-keys)、[有序区间](#ordered-ranges)、[按值分表](#table-groups) |
 | [组织](#structure) | [关系](#relations)、[层级](#hierarchy)、[动态缓冲](#dynamic-buffers)、[预制体与克隆](#prefabs-and-cloning) |
@@ -186,17 +186,17 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 - **开销：** 除了系统本身没有额外开销；空分组的更新什么都不做。排序成环会编译失败（[EECS019](/zh/docs/guide/analyzer#eecs019)）。
 - **指南：** [系统](/zh/docs/guide/systems)
 
-### 分片 [#slices]
+### 分帧 [#slices]
 
 `[ForEach(Slices = N)]` 把一个方法要处理的行分摊到系统的 N 次运行里：每次只访问一片，约占每张匹配表的 1/N，按 64 行的位字切分，
-所以每 N 次运行每行恰好访问一次。`system.RunCount` 表示这是第几次运行（这次的分片是 `RunCount % N`）；结构体 job 用
+所以每 N 次运行每行恰好访问一次。`system.RunCount` 表示这是第几次运行（这次的分帧是 `RunCount % N`）；结构体 job 用
 `QueryFilter.Slice(index, of)` 做同样的事。
 
 - **适合：** 晚一点也无妨、但一个 tick 做完太贵的工作：重新给 AI 目标打分、扫描空闲会话、给大量实体做数值衰减。
 - **别用于：** `[Changed<T>]` / `[Removed<T>]` 方法，它们必须看到每一次变更（[EECS035](/zh/docs/guide/analyzer#eecs035)）；
   每个 tick 必须处理每一行的逻辑。两次运行之间搬动过的行，在一轮里可能被跳过或访问两次。
 - **开销：** 每次运行处理约 1/N 的行，外加遍历表的开销；配合 `[UpdateInterval(M)]`，每行每 N × M 次更新访问一次。
-  `Query`、`Count` 和批量调用不接受分片过的过滤条件。
+  `Query`、`Count` 和批量调用不接受分帧过的过滤条件。
 - **指南：** [系统](/zh/docs/guide/systems)
 
 ### 立即生效的结构变更 [#immediate-structural-changes]
@@ -215,7 +215,7 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 `[ForEach, Consume]` 在遍历结束时正好销毁这一遍访问过的行：处理事件或命令实体的方法每个只处理一次，方法体里不用写 `entity.Destroy()`。
 
 - **适合：** 伤害事件、客户端命令、请求：只活一遍的实体。
-- **别用于：** 比读它的系统活得更久的实体；分片的方法（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
+- **别用于：** 比读它的系统活得更久的实体；分帧的方法（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
 - **开销：** 没有结构变更的遍历之后，每张表一次 `DestroyAll`，而不是每行一次销毁（这时遍历抛异常就什么都不销毁）；所在的系统独自运行。
   手写的销毁由 [EECS084](/zh/docs/guide/analyzer#eecs084) 报告。
 - **指南：** [系统](/zh/docs/guide/systems#consume)

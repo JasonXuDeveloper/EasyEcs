@@ -424,7 +424,7 @@ else
 
 没有规则能发现。详见[销毁日志](/zh/docs/guide/change-tracking#destroy-log)。
 
-### 以为 `Count` 或 `Query` 会照顾分片 [#count-a-slice]
+### 以为 `Count` 或 `Query` 会照顾分帧 [#count-a-slice]
 
 ```csharp
 public struct Npc : IComponent;
@@ -435,19 +435,19 @@ var quarter = QueryFilter.Create().With<Npc>().Slice(0, 4);
 int thinking = world.Count<Position>(quarter);   // ArgumentException：Count 需要所有匹配的行
 ```
 
-分片是对每张表的切分，只有 `[ForEach]` 那类遍历（`ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式）认它。`Query`、
-`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用需要所有匹配的行，遇到分片的过滤条件会直接抛异常，而不是只回答一部分。
-计数时去掉分片；分片系统访问了多少，看它的统计：
+分帧是对每张表的切分，只有 `[ForEach]` 那类遍历（`ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式）认它。`Query`、
+`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用需要所有匹配的行，遇到分帧的过滤条件会直接抛异常，而不是只回答一部分。
+计数时去掉分帧；分帧系统访问了多少，看它的统计：
 
 ```csharp
-int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // 全部；一个分片大约 npcs / 4 个
+int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // 全部；一个分帧大约 npcs / 4 个
 ```
 
 打开 `MeasureSystems` 后，`[ForEach(Slices = N)]` 方法的 `system.Stats.LastEntities` 就是它那一份。过滤条件在同一个方法或类型里构造时由
 [EECS044](/zh/docs/guide/analyzer#eecs044) 发现，否则运行时报错。详见
-[分片](/zh/docs/guide/systems#slices)。
+[分帧](/zh/docs/guide/systems#slices)。
 
-### 给 `[Changed<T>]` 方法分片 [#slice-changed]
+### 给 `[Changed<T>]` 方法分帧 [#slice-changed]
 
 ```csharp doccheck=expect-EECS035
 [EcsSystem]
@@ -459,7 +459,7 @@ public ref struct SendGold
 ```
 
 `[Changed<T>]` 方法访问系统上次运行以来写过的行，而每次运行都会把这个标记往前推：一次运行跳过的那三片，变更就丢了。它本来就只访问
-变过的行，去掉 `Slices` 即可。如果重的是变更引发的工作，就把这份工作记成数据，再用一个没有变更过滤条件的分片方法去摊开：
+变过的行，去掉 `Slices` 即可。如果重的是变更引发的工作，就把这份工作记成数据，再用一个没有变更过滤条件的分帧方法去摊开：
 
 ```csharp
 [EcsSystem]
