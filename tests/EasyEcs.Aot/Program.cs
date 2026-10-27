@@ -82,6 +82,27 @@ using (var crowd = new World())
     Check(blocks > 0 && pairs >= blocks, "an ordered table's blocks and block pairs");
 }
 
+// The generator gaps' forms: an [Accumulate] total, a [ForEachRecord] pass over Emitted<T>, vector loops of enum and
+// bool lanes, and the buffer pools a prefab's instances take.
+using (var forms = new World())
+{
+    var rows = new Entity[100];
+    forms.CreateEntities(rows, new Coin { Value = 2 }, new Mood { Value = Moods.Calm }, new Awake { Value = true });
+    Forms.Count(forms);
+    Forms.Count(forms);
+    Check(forms.Purse.Total == 400, "an [Accumulate] total adds each pass");
+    Forms.Calm(forms);
+    Check(rows[99].Mood.Value == Moods.Wary, "an enum lane");
+    forms.GetOrAddSingleton<Emitted<Hit>>().Items.Add(new Hit { Amount = 3 });
+    forms.GetOrAddSingleton<Emitted<Hit>>().Items.Add(new Hit { Amount = 4 });
+    long hits = 0;
+    Forms.Book(forms, ref hits);
+    Check(hits == 7 && forms.GetSingleton<Emitted<Hit>>().Items.Count == 0, "a [ForEachRecord] pass");
+    var prefab = new Prefab().Set(new Coin()).SetBuffer<Hit>();
+    forms.ReserveBuffers(prefab, 10);
+    forms.Instantiate(prefab).Get<DynamicBuffer<Hit>>().Add(new Hit { Amount = 1 });
+}
+
 Console.WriteLine($"AOT battle: {battle.Tick} ticks, {battle.Hits} hits, {battle.Deaths} deaths, {server.World.EntityCount} entities");
 return 0;
 
@@ -101,4 +122,32 @@ partial record struct Spot(float X, float Y) : IComponent
 struct Life : EasyEcs.Aot.Library.ILife
 {
     public int Value { get; set; }
+}
+
+struct Coin : IComponent { public int Value; }
+
+enum Moods : byte { Calm, Wary }
+
+struct Mood : IComponent { public Moods Value; }
+
+struct Awake : IComponent { public bool Value; }
+
+struct Hit { public int Amount; }
+
+[Accumulate, Sum]
+partial struct Purse : ISingletonComponent { public long Total; }
+
+static class Forms
+{
+    [ForEach]
+    public static void Count(in Coin coin, ref Reduce<Purse> purse) => purse.Value.Total += coin.Value;
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    public static void Calm(ref Mood mood, in Awake awake)
+    {
+        if (awake.Value && mood.Value == Moods.Calm) mood.Value = Moods.Wary;
+    }
+
+    [ForEachRecord]
+    public static void Book(in Hit hit, ref long total) => total += hit.Amount;
 }
