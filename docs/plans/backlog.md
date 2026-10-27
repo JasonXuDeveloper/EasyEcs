@@ -51,7 +51,8 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 1. [ ] **L2: the generated pair form** (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
        the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
        (`NearestPlayer`, zombie targeting). Right after WP0b merges. Then L4: examples rewritten in it.
-       The owner's call on the spread map (nearest 1.06-1.31x, bar 1.5x): re-measure once L1 sorts on its cadence,
+       The spread map (nearest 1.06-1.31x, bar 1.5x; owner 2026-10-27: a bar is not a ship gate, a gain beyond the noise
+       with nothing slower ships): re-measure once L1 sorts on its cadence,
        with a flat grid of blocks searched in rings instead of the prototype's box tree; the nearest form stays in L2.
        The owner's call on Lookup gathers under `SimdMode.Auto` (2026-10-26): once L1 and WP0b have merged, re-measure
        the micro-adaptive choice (walk vs rows, D131 Considered) with L1's ordered rows and the lookup job under 32

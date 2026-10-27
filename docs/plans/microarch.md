@@ -253,7 +253,8 @@ Integrate 1.06 / 1.07, 1.02 / 0.95; Move2Gaps 0.97 / 0.92, 1.03 / 0.96; Move3 1.
 1.09, 0.94 / 1.09; Wealth 1.00 / 1.01, 0.97 / 1.04. No kernel slower in both rounds beyond the noise of the job
 (+-10 % at 1k rows); Move3 and Push at 1k (1.06-1.09) run the same 7-instruction loop on both sides (llvm-mca over
 both Tier1 listings: 2.1 c/it Ice Lake-SP, 1.6 Zen 4): the difference is outside the loop, in the runner's layout.
-Energy's 1.43-1.47x misses the plan's bar of 1.5x by a hair; Spread's 1.89x clears it.
+Energy's 1.43-1.47x misses the plan's bar of 1.5x by a hair and ships (owner, 2026-10-27: a measured gain with nothing
+slower ships under its bar); Spread's 1.89x clears it.
 The kernel rows above were measured with the masked skip still in (reverted after); the masked loops of Energy and
 Spread are not on their hot path (no holes).
 
