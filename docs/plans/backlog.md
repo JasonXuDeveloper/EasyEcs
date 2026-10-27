@@ -312,19 +312,29 @@ branch: padded storage, ping-pong, zero rows, edges found while stepping), 12c +
 
 Starts only when every code item of Next and Later is done (owner, 2026-10-26: "先把代码全改完").
 
-- [ ] **Exemplar pass** (#169, `audit-code`): VoxelServer / samples + templates + demo / benchmark worlds + usage
-      tests rewritten in the newest recommended forms, A/B on rewritten benchmark worlds. BattleServer's Battle
-      singleton moves to [Accumulate], then GeneratorBenchmark's EECS086 filter exception is deleted (EECS086's total
-      case reports Shoot, SendFire and SendFireOut; a benchmark must not keep suppressing a rule our own example breaks).
+- [ ] **Step 1 of Finish: the exemplar pass** (#169, `audit-code`; owner, 2026-10-27: "9 的第一步不是重构全部 sample demo
+      benchmark unit test 和文档里的代码例子吗，全用上最正确的最合适的功能（新功能也包含），尤其是 voxelserver 需要大规模重构").
+      Every piece of code users read or copy is rewritten in the most correct, most fitting form, new features
+      included (vector loops through plain `[ForEach]`, `[Accumulate]`, `[ForEachRecord]`, `Emit`, `Scratch`,
+      `EntityRandom`, views, `[OrderBy]` / pairs, tiles with `[GaussSeidel]` and the ping-pong step, `IDirectMapped`,
+      `ChunkSize` only where it pays, the least code the generator allows):
+      a. **VoxelServer, a large rewrite** (owner, 2026-10-26: every high-performance feature, the least user code):
+         its per-system plan is made first (read-only); gaps it exposes (lines users would write twice) become code
+         items before the rewrite, so the rewrite only uses what exists. Bools split (Body.OnGround, Exposure.Sunlit).
+      b. The other samples, `templates/`, the live demo (`demo/`, its page includes the files).
+      c. Benchmark worlds (`BattleServer.cs`: the Battle singleton moves to `[Accumulate]`, then GeneratorBenchmark's
+         EECS086 filter exception is deleted; `WorldSimulation.cs`), with an A/B on each rewritten world.
+      d. Unit tests that show usage (fixtures, scenario and feature tests: the forms users would copy), not the tests
+         that pin an old form on purpose (code fixes, analyzer negatives, migrations).
+      e. Every code example of the docs (`docs/content` fences en + zh, the guide pages' full examples, the public
+         skill `skills/easyecs/SKILL.md`, README), DocCheck at 0.
+      Proof: outputs and README / page output blocks match, 0 B steady state, tests three ways, A/B no slower.
 - [ ] **Directory restructure of the whole repository** (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only,
   after feat-prefetch-all and feat-locality-pairs merge; the layout plan (old → new per file, every path reference)
   goes to the owner first.
 - [ ] **EECS086, EECS109 and EECS055's "a bool among N fields" become Warnings** (owner, 2026-10-27) once the
       samples use `[Accumulate]` / `[ForEachRecord]` and VoxelServer splits its bools (Body.OnGround, Exposure.Sunlit):
       one line each in the analyzer (pass `true`, fixable, in Kernel.cs for EECS055), with the rewrite below.
-- [ ] **VoxelServer rewritten with every high-performance feature, the least user code** (owner, 2026-10-26): after
-  every code item; its per-system plan is made now (read-only), and the generator or feature gaps it exposes (lines
-  users would write twice) go into Later as code items, so the rewrite itself only uses what already exists.
 - [ ] **Generated-members scan before the release** (roadmap "Less code through the generator", D26,
       `audit-generator`): the API, the battle server and the guides scanned for lines users write twice.
 - [ ] **Docs pass** (#141): everything in `docs-todos.md`; DocCheck (296 problems) and ApiDocs (46) to 0; decision
