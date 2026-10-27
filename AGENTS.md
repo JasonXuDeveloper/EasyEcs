@@ -106,6 +106,9 @@ tools/agents.sh                writes the AGENTS.md indexes (directories, skills
                                is not @AGENTS.md and a source file of src/ missing from its file map (CI, verify)
 tools/jitdisasm.sh             the Tier1 machine code of a [ForEach] method's job (DOTNET_JitDisasm), to check a vector
                                loop: no call in the loop body, no needless range check
+tools/loopbound.sh             where each vector loop of a benchmark class is bound (ports, front end or a loop-carried
+                               chain): tools/LoopBound runs its methods past Tier1 under DOTNET_JitDisasm, and
+                               tools/loopbound.py runs llvm-mca (icelake-server, znver4) over each loop body
 tools/inlining.sh              every generated job a runner of the benchmark worlds does not inline, with the JIT's
                                reason (tools/Inlining: each benchmark method run once without tiering while an
                                EventListener reads the inliner's events); exit code 1 if there is one

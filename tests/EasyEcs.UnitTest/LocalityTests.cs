@@ -255,4 +255,26 @@ public class LocalityTests
 
         Assert.That(LookupLanes.CanPrefetch, Is.EqualTo(Prefetching.IsSupported));
     }
+
+    // Streaming stores write what plain stores write, every length (whole vectors, pairs of them, a tail).
+    [TestCase(0), TestCase(1), TestCase(15), TestCase(16), TestCase(33), TestCase(1000)]
+    public unsafe void StreamingStoresWriteWhatPlainStoresWrite(int n)
+    {
+        var src = (float*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)Math.Max(n, 1) * sizeof(float), 64);
+        var plain = (float*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)Math.Max(n, 1) * sizeof(float), 64);
+        var streamed = (float*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)Math.Max(n, 1) * sizeof(float), 64);
+        try
+        {
+            for (int i = 0; i < n; i++) src[i] = i * 0.37f - 5;
+            Streams.Plain(src, plain, n, 1.5f, 2f);
+            Streams.NonTemporal(src, streamed, n, 1.5f, 2f);
+            Assert.That(new ReadOnlySpan<float>(streamed, n).SequenceEqual(new ReadOnlySpan<float>(plain, n)), Is.True);
+        }
+        finally
+        {
+            System.Runtime.InteropServices.NativeMemory.AlignedFree(src);
+            System.Runtime.InteropServices.NativeMemory.AlignedFree(plain);
+            System.Runtime.InteropServices.NativeMemory.AlignedFree(streamed);
+        }
+    }
 }
