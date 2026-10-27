@@ -953,3 +953,10 @@ names the field each term comes from (audit-naming, "The reference design's voca
   terms (stencil, tile, halo).
 - fix-ci merged with Restore 66.6 -> 84.4 us, Rollback 141 -> 177 us (correctness: 0 B steady state); the owner
   wants that cost won back later: backlog item.
+
+## fix-ci merged (ae9d525): docs-pass leftovers from its report
+- decisions.mdx still shows the hook attributes; changelog still says `[IndexKey]`; some prose keeps the old WithAny
+  and GroupBy forms; EECS090 has no docs entry; copy-on-write snapshots have no decision record; snapshots.mdx still
+  says Capture copies buffer elements.
+- EECS055 gives circular "fixable" advice for a 2-field Emit record and a conditional Remove of an `in` component
+  (Info rather than Warning? owner); EECS033 suggests members a fence compiled alone does not get.
