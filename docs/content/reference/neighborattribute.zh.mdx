@@ -10,7 +10,7 @@ description: "把 [ForEach] 方法的一个参数标成一对中的另一个实�
 public sealed class NeighborAttribute : Attribute
 ```
 
-把 [[ForEach]](/zh/docs/reference/foreachattribute) 方法的一个参数标成一对中的另一个实体：方法对它的实体和持有 `[Neighbor]` 组件的实体的每一对运行一次（行自己的实体也持有这些组件时包括它自己，和对两边各写一层循环一样），生成器写出跳过方法的距离判断排除的那些对的搜索。`[Neighbor]` 参数是按 `in` 取的组件，或邻居的 [`Entity`](/zh/docs/reference/entity)。
+把 [[ForEach]](/zh/docs/reference/foreachattribute) 方法的一个参数标成一对中的另一个实体：方法对它的实体和持有 `[Neighbor]` 组件的实体的每一对运行一次（行自己的实体也持有这些组件时包括它自己，和对两边各写一层循环一样），生成器写出跳过方法的距离判断排除的那些对的搜索。`[Neighbor]` 参数是按 `in` 取的组件，按 `ref` 取来写入的组件（拾取时把物品标为已拾取；这时各对逐对运行，顺序和对两张表各写一层循环相同，且它写的组件不能是行自己的组件），或邻居的 [`Entity`](/zh/docs/reference/entity)。
 
 ```csharp
 [ForEach]
