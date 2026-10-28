@@ -171,7 +171,7 @@ public WorldSnapshot Capture();
 public WorldSnapshot Capture(WorldSnapshot into);
 ```
 
-把 [`World.Capture`](/zh/docs/reference/world#capture) 拍进 `into`（这个 World 的快照，传 null 则新建一个），覆盖原有内容并复用它的数组：数组够大之后，每个 tick 都拍快照（回滚、回放）也不分配内存。返回这个快照。
+把 [`World.Capture`](/zh/docs/reference/world#capture) 拍进 `into`（这个 World 的快照，传 null 则新建一个），覆盖原有内容并复用它的数组：数组够大之后，每个 tick 都拍快照（回滚、回放）也不分配内存。如果从 `into` 上次拍摄或恢复以来没有表改变过它的行，只复制之后写过的被追踪组件（[`ITracked`](/zh/docs/reference/itracked)、缓冲区）的行，未追踪组件整列复制：O(写过的行数 + 行数 × 未追踪组件数)。推进 [`World.ChangeTick`](/zh/docs/reference/world#changetick)，所以快照之后的写入比它新。返回这个快照。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -688,7 +688,7 @@ public void ForParallel<TJob>(int count, ref TJob job, int chunkSize = 0) where 
 public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>;
 ```
 
-对 `items`（一个 [`Emitted`](/zh/docs/reference/emitted) 单例的记录、某个单例的缓冲区）的元素运行 [`World.ForParallel`](/zh/docs/reference/world#forparallel)：每个块以 span 拿到自己的元素，可以写。调用运行期间列表不能改变。
+对 `items`（一个 [`Emitted`](/zh/docs/reference/emitted) 单例的记录、某个单例的缓冲区）的元素运行 [`World.ForParallel`](/zh/docs/reference/world#forparallel)：每个块以 span 拿到自己的元素，可以写。调用运行期间列表不能改变。并行遍历留在各块列表里的 [`Emitted`](/zh/docs/reference/emitted) 记录就地运行，按顺序，不先合并：一个块跨两个这样的列表时，每个列表调用一次，各自带自己的 `start`。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -1110,7 +1110,7 @@ public void ReserveBuffers(Prefab prefab, int count);
 public void Restore(WorldSnapshot snapshot);
 ```
 
-把 World 恢复到 `snapshot`（必须是从这个 World 拍的）。快照里存活的实体，句柄重新有效；其他句柄全部失效，包括快照之后创建的实体的句柄。快照之后创建的原型保留，但变成空的。单例沿用原来的存储（[`World.SingletonRef`](/zh/docs/reference/world#singletonref) 仍然可用），值换成快照里的；快照之后才添加的单例直接移除。O(实体数 × 组件数 + 原型数 + 单例数)。遍历进行中不能调用。
+把 World 恢复到 `snapshot`（必须是从这个 World 拍的）。快照里存活的实体，句柄重新有效；其他句柄全部失效，包括快照之后创建的实体的句柄。快照之后创建的原型保留，但变成空的。单例沿用原来的存储（[`World.SingletonRef`](/zh/docs/reference/world#singletonref) 仍然可用），值换成快照里的；快照之后才添加的单例直接移除。从快照上次拍摄或恢复以来行没变过的表，只拿回之后写过的被追踪组件的行（未追踪组件整列拿回），也只有这些行算作写过（[`ChangedAttribute`](/zh/docs/reference/changedattribute)）；其他表整张重写，每一行都算写过。推进 [`World.ChangeTick`](/zh/docs/reference/world#changetick)。O(实体数 × 组件数 + 原型数 + 单例数)，没有表改变过行时 O(写过的行数 + 行数 × 未追踪组件数)。遍历进行中不能调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数 + 表数 + 单例数)
 
@@ -1188,7 +1188,7 @@ public int SetAll<T>(in T value, in QueryFilter filter = default) where T : stru
 public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent;
 ```
 
-单例 `T` 的稳定句柄，单例没添加时抛异常：解析一次，之后直接读写 [`SingletonRef.Value`](/zh/docs/reference/singletonref#value)，不用再查找。生成的 `[ForEach]` job 每次遍历通过它把单例参数解析一次，所以单例一直没设置的系统，第一次运行就会报错。O(1)。
+单例 `T` 的稳定句柄，单例没添加时抛异常：解析一次，之后直接读写 [`SingletonRef.Value`](/zh/docs/reference/singletonref#value)，不用再查找。生成的 `[ForEach]` job 每次遍历通过它把单例参数解析一次，所以单例一直没设置的系统，第一次运行就会报错。O(1)；如果是 [`Emitted`](/zh/docs/reference/emitted)，而并行遍历把记录留在了各块的列表里，就是一次 O(记录数)：记录在这里、在拥有者线程上合并成一个列表，这样多线程读取它们的遍历拿到的是排好的记录。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 

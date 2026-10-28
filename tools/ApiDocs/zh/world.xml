@@ -78,10 +78,13 @@
       不克隆对象。遍历进行中不能调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Capture(EasyEcs.WorldSnapshot)" source="6524a1162ca4">
+  <member name="M:EasyEcs.World.Capture(EasyEcs.WorldSnapshot)" source="b64cf1c84261">
     <summary>
       把 <see cref="M:EasyEcs.World.Capture" /> 拍进 <paramref name="into" />（这个 World 的快照，传 null 则新建一个），
-      覆盖原有内容并复用它的数组：数组够大之后，每个 tick 都拍快照（回滚、回放）也不分配内存。返回这个快照。
+      覆盖原有内容并复用它的数组：数组够大之后，每个 tick 都拍快照（回滚、回放）也不分配内存。
+      如果从 <paramref name="into" /> 上次拍摄或恢复以来没有表改变过它的行，只复制之后写过的被追踪组件
+      （<see cref="T:EasyEcs.ITracked" />、缓冲区）的行，未追踪组件整列复制：O(写过的行数 + 行数 × 未追踪组件数)。
+      推进 <see cref="P:EasyEcs.World.ChangeTick" />，所以快照之后的写入比它新。返回这个快照。
     </summary>
   </member>
   <member name="M:EasyEcs.World.Children(EasyEcs.EntityId)" source="e0547b5ae89e">
@@ -324,11 +327,14 @@
       <see cref="M:EasyEcs.World.RemoveTypes(System.Reflection.Assembly)" />。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" source="081649a3c643">
+  <member name="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" source="ab7f139635c6">
     <summary>
       把 World 恢复到 <paramref name="snapshot" />（必须是从这个 World 拍的）。快照里存活的实体，句柄重新有效；其他句柄全部失效，
       包括快照之后创建的实体的句柄。快照之后创建的原型保留，但变成空的。单例沿用原来的存储（<see cref="M:EasyEcs.World.SingletonRef``1" />
-      仍然可用），值换成快照里的；快照之后才添加的单例直接移除。O(实体数 × 组件数 + 原型数 + 单例数)。遍历进行中不能调用。
+      仍然可用），值换成快照里的；快照之后才添加的单例直接移除。从快照上次拍摄或恢复以来行没变过的表，只拿回之后写过的被追踪组件的行
+      （未追踪组件整列拿回），也只有这些行算作写过（<see cref="T:EasyEcs.ChangedAttribute`1" />）；其他表整张重写，每一行都算写过。
+      推进 <see cref="P:EasyEcs.World.ChangeTick" />。O(实体数 × 组件数 + 原型数 + 单例数)，没有表改变过行时
+      O(写过的行数 + 行数 × 未追踪组件数)。遍历进行中不能调用。
     </summary>
   </member>
   <member name="M:EasyEcs.World.Save(System.Buffers.IBufferWriter{System.Byte})" source="2e18655bb4a4">
@@ -358,11 +364,12 @@
       O(匹配的表数 + 行数)；缺少 <typeparamref name="T" /> 的实体搬一次行。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.SingletonRef``1" source="11613cc9d6b0">
+  <member name="M:EasyEcs.World.SingletonRef``1" source="005eac78784d">
     <summary>
       单例 <typeparamref name="T" /> 的稳定句柄，单例没添加时抛异常：解析一次，之后直接读写
       <see cref="P:EasyEcs.SingletonRef`1.Value" />，不用再查找。生成的 <c>[ForEach]</c> job 每次遍历通过它把单例参数解析一次，
-      所以单例一直没设置的系统，第一次运行就会报错。O(1)。
+      所以单例一直没设置的系统，第一次运行就会报错。O(1)；如果是 <see cref="T:EasyEcs.Emitted`1" />，而并行遍历把记录留在了各块的列表里，
+      就是一次 O(记录数)：记录在这里、在拥有者线程上合并成一个列表，这样多线程读取它们的遍历拿到的是排好的记录。
     </summary>
   </member>
   <member name="M:EasyEcs.World.TryGetEntity(EasyEcs.EntityId,EasyEcs.Entity@)" source="03175b1283a8">
@@ -598,11 +605,12 @@
     </summary>
     <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="count" /> 为负数。</exception>
   </member>
-  <member name="M:EasyEcs.World.ForParallel``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" source="4133ce522ed5">
+  <member name="M:EasyEcs.World.ForParallel``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" source="050cfe35728f">
     <summary>
       对 <paramref name="items" />（一个 <see cref="T:EasyEcs.Emitted`1" /> 单例的记录、某个单例的缓冲区）的元素运行
       <see cref="M:EasyEcs.World.ForParallel``1(System.Int32,``0@,System.Int32)" />：每个块以 span 拿到自己的元素，可以写。
-      调用运行期间列表不能改变。
+      调用运行期间列表不能改变。并行遍历留在各块列表里的 <see cref="T:EasyEcs.Emitted`1" /> 记录就地运行，按顺序，不先合并：
+      一个块跨两个这样的列表时，每个列表调用一次，各自带自己的 <c>start</c>。
     </summary>
   </member>
   <member name="M:EasyEcs.World.HasSystem``1" source="2147025184ce">

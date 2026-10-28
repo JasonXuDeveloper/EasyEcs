@@ -28,8 +28,12 @@
       <see cref="M:EasyEcs.DynamicBufferExtensions.AsSpan``1(EasyEcs.DynamicBuffer{``0}@)" />）。
     </summary>
   </member>
-  <member name="M:EasyEcs.DynamicBuffer`1.AsReadOnlySpan" source="c1f9ffdace13">
-    <summary>全部元素，只读。</summary>
+  <member name="M:EasyEcs.DynamicBuffer`1.AsReadOnlySpan" source="3cdc30a00572">
+    <summary>
+      全部元素，只读。并行遍历留在各块列表里的 <see cref="T:EasyEcs.Emitted`1" /> 记录先合并成一个列表（O(记录数)，只做一次），
+      和写入时一样；<see cref="P:EasyEcs.DynamicBuffer`1.Count" /> 和 <see cref="M:EasyEcs.DynamicBufferExtensions.Clear``1(EasyEcs.DynamicBuffer{``0}@)" />
+      让它们留在原处。
+    </summary>
   </member>
   <member name="M:EasyEcs.DynamicBuffer`1.GetEnumerator" source="546a0591a584">
     <summary>枚举元素（只读，零分配）。</summary>
@@ -45,11 +49,13 @@
             <exception cref="T:System.ArgumentOutOfRangeException">值为负数。</exception>
         </member>
 
-  <member name="M:EasyEcs.DynamicBuffer`1.FillPool(System.Int32)" source="ec1573b0386c">
+  <member name="M:EasyEcs.DynamicBuffer`1.FillPool(System.Int32)" source="2f7ee8e1771d">
             <summary>
             往池里补列表，直到池里有 <paramref name="lists" /> 个，每个能放 <see cref="P:EasyEcs.DynamicBuffer`1.MaxPooledLength" /> 个元素，
             这么多个缓冲第一次写入时就从池里取列表，不用分配：知道自己峰值时要保留多少个 <typeparamref name="T" /> 缓冲（玩家周围的地形）的服务器，
-            在启动时一次付清，世界增长到峰值的过程中 tick 也不分配。和回收池一样对整个进程生效；池里已有的列表也算数。
+            在启动时一次付清，世界增长到峰值的过程中 tick 也不分配。并行遍历在辅助线程上写这些缓冲时，这个数也是准的：
+            池里还会补上每个线程可以自己留着的列表（64 个：线程每次取还 32 个；之后才启动的辅助线程到时再补自己的），
+            所以不会有线程因为别的线程留着它要的列表而取不到。和回收池一样对整个进程生效；池里已有的列表也算数。
             一次 O(<paramref name="lists" />) 次分配；池里已经够了就什么都不做。
             </summary>
             <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="lists" /> 为负数。</exception>

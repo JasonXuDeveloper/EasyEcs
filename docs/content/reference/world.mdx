@@ -171,7 +171,7 @@ Copy the entities, their components and the singletons. O(entities × components
 public WorldSnapshot Capture(WorldSnapshot into);
 ```
 
-[`World.Capture`](/en/docs/reference/world#capture) into `into` (a snapshot of this world, or null for a new one), overwriting it and reusing its arrays: capturing every tick (rollback, replays) allocates nothing once they are large enough. Returns the snapshot.
+[`World.Capture`](/en/docs/reference/world#capture) into `into` (a snapshot of this world, or null for a new one), overwriting it and reusing its arrays: capturing every tick (rollback, replays) allocates nothing once they are large enough. When no table changed its rows since `into` was last captured or restored, only the rows of tracked components ([`ITracked`](/en/docs/reference/itracked), buffers) written since are copied, and untracked components whole: O(rows written + rows × untracked components). Advances [`World.ChangeTick`](/en/docs/reference/world#changetick), so writes after the capture are newer than it. Returns the snapshot.
 
 **Complexity** ([API table](/en/docs/api)):
 
@@ -688,7 +688,7 @@ Run `job` over indexes 0 to `count` - 1 on several threads: the range is cut int
 public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>;
 ```
 
-[`World.ForParallel`](/en/docs/reference/world#forparallel) over the elements of `items` (an [`Emitted`](/en/docs/reference/emitted) singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The list must not change while the call runs.
+[`World.ForParallel`](/en/docs/reference/world#forparallel) over the elements of `items` (an [`Emitted`](/en/docs/reference/emitted) singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The list must not change while the call runs. The records of an [`Emitted`](/en/docs/reference/emitted) that parallel passes left in their chunks' lists are run where they are, in order, not joined first: a chunk that spans two of those lists gets one call per list, each with its own `start`.
 
 **Complexity** ([API table](/en/docs/api)):
 
@@ -1110,7 +1110,7 @@ Fill the pools of the [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) lists 
 public void Restore(WorldSnapshot snapshot);
 ```
 
-Put the world back to `snapshot` (taken from this world). Handles of entities alive in the snapshot are valid again; every other handle is stale, also handles of entities created after the capture. Archetypes created after the capture stay, empty. Singletons keep their boxes (a [`World.SingletonRef`](/en/docs/reference/world#singletonref) still works) and get the snapshot's values; singletons added after the capture are removed. O(entities × components + archetypes + singletons). Not while a pass iterates.
+Put the world back to `snapshot` (taken from this world). Handles of entities alive in the snapshot are valid again; every other handle is stale, also handles of entities created after the capture. Archetypes created after the capture stay, empty. Singletons keep their boxes (a [`World.SingletonRef`](/en/docs/reference/world#singletonref) still works) and get the snapshot's values; singletons added after the capture are removed. A table that kept its rows since the snapshot was last captured or restored gets back only the rows of tracked components written since (and untracked components whole), and only those count as written ([`ChangedAttribute`](/en/docs/reference/changedattribute)); any other table is rewritten, every row counting as written. Advances [`World.ChangeTick`](/en/docs/reference/world#changetick). O(entities × components + archetypes + singletons), or O(rows written + rows × untracked components) when no table changed its rows. Not while a pass iterates.
 
 **Complexity** ([API table](/en/docs/api)): O(entities × components + tables + singletons)
 
@@ -1188,7 +1188,7 @@ Give every alive entity matching `filter` component `T` = `value` (added, or rep
 public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent;
 ```
 
-Stable handle to singleton `T`; throws if it was not added: resolve it once, then read and write [`SingletonRef.Value`](/en/docs/reference/singletonref#value) without a lookup. Generated `[ForEach]` jobs resolve singleton parameters through it once per pass, so a system whose singleton was never set fails on its first run. O(1).
+Stable handle to singleton `T`; throws if it was not added: resolve it once, then read and write [`SingletonRef.Value`](/en/docs/reference/singletonref#value) without a lookup. Generated `[ForEach]` jobs resolve singleton parameters through it once per pass, so a system whose singleton was never set fails on its first run. O(1); for an [`Emitted`](/en/docs/reference/emitted) whose records parallel passes left in their chunks' lists, O(records) once: they are joined into one list here, on the owner thread, so a pass reading them on several threads finds them in place.
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 

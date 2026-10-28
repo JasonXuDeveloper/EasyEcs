@@ -68,7 +68,7 @@ The element at `index`, read-only (write through [`DynamicBufferExtensions.AsSpa
 public readonly ReadOnlySpan<T> AsReadOnlySpan();
 ```
 
-The elements, read-only.
+The elements, read-only. The records of an [`Emitted`](/en/docs/reference/emitted) that parallel passes left in their chunks' lists are joined into one list first (O(records), once), as a write does; [`DynamicBuffer.Count`](/en/docs/reference/dynamicbuffer#count) and [`DynamicBufferExtensions.Clear`](/en/docs/reference/dynamicbufferextensions#clear) leave them where they are.
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 
@@ -78,7 +78,7 @@ The elements, read-only.
 public static void FillPool(int lists);
 ```
 
-Fill the pool with lists until it holds `lists`, each of [`DynamicBuffer.MaxPooledLength`](/en/docs/reference/dynamicbuffer#maxpooledlength) elements, so the first writes of that many buffers take a list instead of allocating one: a server that knows how many buffers of `T` it keeps at its peak (the chunks around its players) pays for them at startup, and its ticks allocate nothing even while the world grows to that peak. Process-wide, like the pool; lists already in the pool count. O(`lists`) allocations once; nothing when the pool holds enough.
+Fill the pool with lists until it holds `lists`, each of [`DynamicBuffer.MaxPooledLength`](/en/docs/reference/dynamicbuffer#maxpooledlength) elements, so the first writes of that many buffers take a list instead of allocating one: a server that knows how many buffers of `T` it keeps at its peak (the chunks around its players) pays for them at startup, and its ticks allocate nothing even while the world grows to that peak. The count is exact, also when parallel passes write the buffers on the helper threads: the pool also gets the lists each thread may keep for itself (64: the threads take and give back lists 32 at a time; a helper thread started later adds its own then), so no thread runs out while others keep what it needs. Process-wide, like the pool; lists already in the pool count. O(`lists`) allocations once; nothing when the pool holds enough.
 
 **Exceptions**
 
