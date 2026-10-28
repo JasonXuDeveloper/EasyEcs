@@ -34,7 +34,7 @@ jobs:
           .github/scripts/check-sample.sh samples/HelloWorld
           dotnet run --no-build -c Release --project samples/GameLoop -- --ticks 30
           .github/scripts/check-sample.sh samples/SaveLoad
-          dotnet run --no-build -c Release --project samples/MultiWorld -- --updates 50
+          .github/scripts/check-sample.sh samples/MultiWorld
           .github/scripts/check-sample.sh samples/HotReload
           .github/scripts/check-sample.sh samples/Actors
           .github/scripts/check-sample.sh samples/VoxelServer
