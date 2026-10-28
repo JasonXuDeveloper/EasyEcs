@@ -65,7 +65,11 @@ CacheSizes.cs                the last-level cache and one core's L2, read once p
                              prefetch exists (Prefetching.IsSupported); 0 is unknown, which never prefetches. A gate per
                              form: index probes and vector loops' chases past the last level; the row form's chases
                              (parallel, fused walks and buffers too) and DestroyEntities' id list past the L2
-                             (L2OrLastLevel)
+                             (L2OrLastLevel); the last level also where a non-temporal store exists (StreamingStores)
+StreamingStores.cs           the non-temporal stores of generated vector loops (a column the method writes without
+                             reading, past the last-level cache): Pays (the gate, once per run: MinRows, the table's rows
+                             of the method's columns past CacheSizes.LastLevel), Head (the rows to the first aligned
+                             one), Store (AVX-512 / AVX / SSE2 VMOVNTPS where aligned, ARM64 STNP, plain otherwise), Fence
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                              Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
                              TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,

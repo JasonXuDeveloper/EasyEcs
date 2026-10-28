@@ -56,6 +56,17 @@ public sealed partial class SystemGenerator
         for (int k = 1; k <= components.Length; k++)
             columns.Append($"ref {simd.Columns[k - 1]} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
         var loops = flat != null ? FlatLoops(flat, simd) : VectorLoops(simd, components, call, masked, rows, split: false);
+        var names = new List<Scoped> { new("entities", "in global::EasyEcs.EntitySpan entities", "in entities") };
+        if (masked) names.Add(new("pass", "ulong pass", "pass"));
+        for (int k = 1; k <= components.Length; k++) names.Add(new($"r{k}", $"ref {components[k - 1]} r{k}", $"ref r{k}"));
+        names.Add(new("rows", "nint rows", "rows"));
+        if (flat != null) names.Add(new("lanes", "nint lanes", "lanes"));
+        names.Add(new("i", "nint i", "i"));
+        names.AddRange(scope);
+        // A run past the last-level cache streams the columns the method only writes (StreamingStores): a method of its
+        // own, called once per run, so the loops below and what the runner inlines stay as they are.
+        string streams = masked ? "" : StreamLoop(simd, flat, components, call, columns.ToString(), names, members);
+        head += streams;
 
         var inline = new StringBuilder();
         Indented(inline, indent, columns.ToString() + head);
@@ -74,13 +85,6 @@ public sealed partial class SystemGenerator
 
         // Split: Execute keeps the run's setup and the rows left; each loop is a method of its own.
         if (flat == null) loops = VectorLoops(simd, components, call, masked, rows, split: true);
-        var names = new List<Scoped> { new("entities", "in global::EasyEcs.EntitySpan entities", "in entities") };
-        if (masked) names.Add(new("pass", "ulong pass", "pass"));
-        for (int k = 1; k <= components.Length; k++) names.Add(new($"r{k}", $"ref {components[k - 1]} r{k}", $"ref r{k}"));
-        names.Add(new("rows", "nint rows", "rows"));
-        if (flat != null) names.Add(new("lanes", "nint lanes", "lanes"));
-        names.Add(new("i", "nint i", "i"));
-        names.AddRange(scope);
         Indented(sb, indent, head);
         string prefix = masked ? "__Masked" : "__";
         foreach (var loop in loops)
@@ -302,6 +306,72 @@ public sealed partial class SystemGenerator
         if (!split) tail.Append("i = rows;\n");
         return new("Tail", "i < rows", tail.Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue").Replace(Kernel.Row, "(int)__at").Replace(Kernel.V, Vector)
             .Replace(Kernel.LanesForm, "").ToString(), Tail: true);
+    }
+
+    /// <summary>
+    /// The streaming form of a loop over whole vectors that writes columns without reading them
+    /// (<see cref="Kernel.Code.Streamed"/>, <see cref="Kernel.FlatCode.Streamed"/>), as the statement Execute runs before
+    /// its loops ("" for none), and its method appended to <paramref name="members"/>: the rows up to the first one
+    /// whose address is a whole vector's run through the method (<c>StreamingStores.Head</c>), the loop with those
+    /// columns' loads dropped and their stores non-temporal (<c>StreamingStores.Store</c>, which also checks the
+    /// alignment), then the fence; it returns <c>i</c>, and the loops after it take the rows left as ever. Execute calls
+    /// it only for a run past the last-level cache (<c>StreamingStores.Pays</c>, the bytes per row of every column the
+    /// method takes), and the method is <c>NoInlining</c>: a run that pays is long (<c>StreamingStores.MinRows</c>), so
+    /// the call costs nothing there, and a pass in the cache keeps the code it had, with one test per run.
+    /// </summary>
+    private static string StreamLoop(Kernel.Code simd, Kernel.FlatCode? flat, string[] components, string call, string columns,
+        IReadOnlyList<Scoped> names, StringBuilder members)
+    {
+        var streamed = flat != null ? flat.Streamed : simd.Streamed;
+        if (streamed.Length == 0) return "";
+        // The rows are aligned on the narrowest streamed column (a pair's wider column is then aligned too; a store whose
+        // address is not aligned is a plain one all the same).
+        int align = streamed.FirstOrDefault(k => simd.Columns[k - 1] == simd.Lane) is var narrow and > 0 ? narrow : streamed[0];
+        var (body, stores) = Kernel.Streaming(flat != null ? flat.Body : simd.Body, flat != null ? flat.Stores : simd.Stores, simd.Columns, streamed);
+        var loop = new StringBuilder();
+        foreach (var line in (flat != null ? flat.Setup : simd.Setup).Split('\n')) if (line.Length > 0) loop.Append(line).Append('\n');
+        string vectorBytes = $"{Kernel.V}<byte>.Count";
+        if (flat != null)
+        {
+            // i counts lanes: the head is whole rows, run through the method, then lanes again.
+            loop.Append($"i /= {flat.Fields};\n");
+            loop.Append($"for (nint __end = i + global::EasyEcs.StreamingStores.Head(ref e{align}, i * {flat.Fields}, {flat.Fields}, {vectorBytes}); i < __end; i++)\n    {call}\n");
+            loop.Append($"i *= {flat.Fields};\n");
+            string count = $"{Kernel.V}<{simd.Lane}>.Count";
+            loop.Append($"for (nint end = lanes - (lanes - i) % ({count} * {flat.Fields}); i < end; i += {count})\n{{\n");
+        }
+        else
+        {
+            string vector = $"{Kernel.V}<{simd.Lane}>";
+            loop.Append($"for (nint __end = i + global::EasyEcs.StreamingStores.Head(ref e{align}, i, 1, {vectorBytes}); i < __end; i++)\n    {call}\n");
+            loop.Append($"for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{{\n");
+        }
+        foreach (var line in (body + stores).Split('\n')) if (line.Length > 0) loop.Append("    ").Append(line).Append('\n');
+        loop.Append("}\nglobal::EasyEcs.StreamingStores.Fence();\n");
+        Constants(loop);
+        string text = loop.Replace(Kernel.Visited, "ulong.MaxValue").Replace(Kernel.Row, "(int)i").ToString();
+        string wide = flat != null ? $"{Vector512}.IsHardwareAccelerated" : Wide(Hardware(simd), null);
+        string narrowGuard = flat != null ? $"{Vector}.IsHardwareAccelerated" : Narrow(Hardware(simd), null);
+        string wideText = flat != null ? text.Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512) : Wide(text, null);
+        string narrowText = flat != null ? text.Replace(Kernel.V, Vector) : Narrow(text, null);
+
+        var method = new StringBuilder();
+        method.Append($"if ({wide})\n{{\n");
+        Indented(method, "    ", wideText);
+        method.Append($"}}\nelse if ({narrowGuard})\n{{\n");
+        Indented(method, "    ", narrowText);
+        method.Append("}\n");
+        var used = Used(method.ToString(), names);
+        const string inner = "            ";
+        members.Append("\n        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]\n");
+        members.Append($"        private nint __Stream({string.Join(", ", used.Select(u => u.Parameter))})\n        {{\n");
+        string[] refs = columns.Split('\n');
+        for (int k = 1; k <= components.Length; k++)
+            if (Names(method.ToString(), $"e{k}")) members.Append(inner).Append(refs[k - 1]).Append('\n');
+        Indented(members, inner, method.ToString());
+        members.Append($"{inner}return i;\n        }}\n");
+        string bytes = string.Join(" + ", components.Select(c => $"global::System.Runtime.CompilerServices.Unsafe.SizeOf<{c}>()"));
+        return $"if (global::EasyEcs.StreamingStores.Pays(in entities, rows, {bytes})) i = __Stream({string.Join(", ", used.Select(u => u.Argument))});\n";
     }
 
     /// <summary>

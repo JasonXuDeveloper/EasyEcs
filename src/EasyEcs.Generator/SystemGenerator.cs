@@ -1155,6 +1155,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             }
             if (simd.Gathers) parts.Add("gathers (Lookup<T>)");
             if (simd.Prefetched.Length > 0) parts.Add("lookups prefetched past the last-level cache");
+            if (simd.Streams) parts.Add("write-only columns streamed past the last-level cache");
             if (Parallel) parts.Add("in parallel chunks");
             else parts.Add(simd.Size < 4 || simd.Wide != null ? "masked words scalar" : "masked words vector");
             if (simd.Cold != null) parts.Add($"cold branch ({simd.Cold})");
