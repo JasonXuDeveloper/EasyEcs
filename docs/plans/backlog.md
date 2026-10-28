@@ -56,7 +56,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 ## Next, in this order
 
 Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
-rows, edges found while stepping) and 8e (running), then 8f, 12e, 9, 10, 4, 7, Later, then Finish.
+rows, edges found while stepping) and 8e (running), then 8f, 8g, 12e, 9, 10, 4, 7, Later, then Finish.
 The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
 
 1. [x] **L2: the generated pair form** (merged e9c3db8, `feat-pairs-2`; open: the owner's M4 run of PairListsBenchmark) (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
@@ -180,6 +180,13 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        and `FusionSide.Of` still drop the project's output when they throw; each needs a safe fallback model (the
        method's plain job) and a reason, like Kernel. Also a clearer EECS055 reason for a switch expression over a
        struct call (VoxelServer's Chase reads "'new Nearby(...).Trail(cell.X, cell.Z) s...' is not supported").
+8g. [ ] **Positional constructors of another assembly** (found at the fix-kernel-foreign merge): a component in a
+       contracts assembly (HotReload's `Position(float X, float Y)`) makes `new Position(x, y)` an EECS055 warning,
+       because metadata has no constructor body; users with shared contracts would have to avoid an everyday idiom.
+       Proposal: the generator of the declaring assembly sees the source and records, in a hidden assembly-level
+       attribute (no `partial` needed), the components whose constructors only assign their parameters to fields in
+       order; the referencing assembly's Kernel reads it and treats those as in source. Proof: the HotReload sample's
+       old `new Position(...)` vectorizes without a warning; a hand-written constructor stays scalar.
 9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
        ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
        `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the
