@@ -317,6 +317,70 @@ public partial class TileTests
         Assert.That(plates[new TilePos(0, 0, 0)].Read<DynamicBuffer<Life>>().AsReadOnlySpan().ToArray().Count(c => c.Alive != 0), Is.LessThan(5), "it moved on");
     }
 
+    // A field that moves everywhere, then settles: the pass steps every tile unseen while nearly all change, and the
+    // tiles sleep again once it looks and finds them settled.
+
+    public record struct Flood(int Level);
+
+    public record struct FloodPlate(TilePos Pos) : IComponent, ITile<TilePos>
+    {
+        readonly TilePos IIndexed<TilePos>.Key => Pos;
+        static int ITileShape.Width => 16;
+        static int ITileShape.Depth => 16;
+        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Wrap(p, face);
+    }
+
+    [EcsSystem]
+    public ref struct FloodSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(ref Tile<Flood, FloodPlate> flood)
+        {
+            flood.ExchangeHalo();
+            foreach (var row in flood.Rows(TileStencil.Layer))
+            {
+                var c = flood.At(row);
+                var into = flood.Write(row);
+                for (int x = 0; x < 16; x++)
+                    into[x] = new Flood(Math.Max(Math.Max(Math.Max(c[x, 0, 0].Level, c[x - 1, 0, 0].Level), Math.Max(c[x + 1, 0, 0].Level, c[x, 0, -1].Level)), c[x, 0, 1].Level));
+            }
+        }
+    }
+
+    [TestCase(1)]
+    [TestCase(4)]
+    public void AFieldMovingEverywhereStepsAwakeThenSleepsWhenSettled(int threads)
+    {
+        const int cells = Torus * 16;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var random = new Random(5);
+        var plates = new Dictionary<TilePos, Entity>();
+        foreach (var place in Box(Torus, 1, Torus))
+        {
+            var plate = world.CreateEntity(new FloodPlate(place));
+            var levels = plate.GetOrAdd<DynamicBuffer<Flood>>().SetCount(256);
+            for (int i = 0; i < 256; i++) levels[i] = new Flood(random.Next(1_000_000));
+            plates.Add(place, plate);
+        }
+        world.AddSystem<FloodSystem>();
+        var grid = Whole(plates, 16, 16, (Entity e, int i) => e.Read<DynamicBuffer<Flood>>()[i].Level, Torus);
+        int stamped = 0;
+        for (int step = 0; step < 120; step++)
+        {
+            ulong before = world.ChangeTick;
+            world.Update();
+            stamped = world.Count<DynamicBuffer<Flood>>(QueryFilter.Create().Changed<DynamicBuffer<Flood>>(before + 1));
+            var next = new int[cells, cells];
+            for (int z = 0; z < cells; z++)
+            for (int x = 0; x < cells; x++)
+                next[x, z] = Math.Max(Math.Max(Math.Max(grid[x, z], grid[(x + cells - 1) % cells, z]), Math.Max(grid[(x + 1) % cells, z], grid[x, (z + cells - 1) % cells])), grid[x, (z + 1) % cells]);
+            grid = next;
+            Same(plates, 16, 16, grid, (Entity e, int i) => e.Read<DynamicBuffer<Flood>>()[i].Level, $"step {step}");
+            if (step == 0) Assert.That(stamped, Is.EqualTo(Torus * Torus), "every tile moves");
+        }
+        Assert.That(stamped, Is.Zero, "settled: no tile steps, none is stamped");
+    }
+
     // A 3D heat: cubes of 8 x 8 x 4 cells, neighbors on all six faces, a seven-point stencil.
 
     public record struct HeatCube(TilePos Pos) : IComponent, ITile<TilePos>
