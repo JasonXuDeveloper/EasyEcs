@@ -56,7 +56,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 ## Next, in this order
 
 Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
-rows, edges found while stepping) and 8e (running), then 8f, 8g, 12e, 9, 10, 4, 7, Later, then Finish.
+rows, edges found while stepping) and 8e (running), then 8f + 8g (one generator branch), 12e, 9, 10, 4, 7, Later, then Finish.
 The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
 
 1. [x] **L2: the generated pair form** (merged e9c3db8, `feat-pairs-2`; open: the owner's M4 run of PairListsBenchmark) (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
@@ -195,6 +195,13 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        call inliner's candidates: `Terrain.Cell`-like), its body, so the call inliner inlines helpers of other
        assemblies too. The referencing Kernel reads them (`compilation.GetAssemblyOrModuleSymbol(reference)
        .GetAttributes()`, cached per reference); an assembly built without them keeps today's fixable reason.
+       Members the recorded body names that the referencing assembly cannot see (a private backing field, an
+       internal helper, an internal type) are reached through generated `[UnsafeAccessor]` externs, as the systems'
+       private methods already are (owner, 2026-10-28: "还可以搭配 unsafe accessor 之类的吧"): `Field` kind returns a
+       `ref` the JIT turns into a plain load or store, `Method` / `StaticMethod` for calls, .NET 10's
+       `[UnsafeAccessorType]` names a type the caller cannot reference; the vector loop reads such fields as lanes at
+       their offsets like any other field. Checked on JIT x64, ARM64, Native AOT and the WebAssembly demo (Mono AOT),
+       with the Tier1 code showing direct field access and no call.
        Proof: the HotReload sample's old `new Position(...)` vectorizes with no warning; a hand-written constructor
        and an initializer-changed positional property stay scalar; a helper of a referenced assembly inlines bit for
        bit as from source; GeneratorBenchmark shows the attribute read costs nothing per keystroke.
