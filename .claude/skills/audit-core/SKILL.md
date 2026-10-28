@@ -58,6 +58,10 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
 - **Filters past bit 255**: a `QueryFilter` built per pass with a component bit past 255 allocates
   (`FilterOverflow.With`); cache filters per type (`ChangedSince<T>`). It shows only in the full suite, after other
   tests registered 300 types, so allocation tests that build filters must also run there (feat-tiles-pingpong).
+- **Attributing a 0 B failure**: read `GC.GetAllocatedBytesForCurrentThread` and
+  `JitInfo.GetCompiledMethodCount(currentThread: true)` around each part of the measured body (cheap; an
+  `EventListener` on JIT events shifted the timing and hid the failure); a compile on the measuring thread of a method
+  already running is OSR, confirmed by a rerun with `DOTNET_TC_OnStackReplacement=0` (fix-flaky-alloc).
 - **Ideas from elsewhere**: a loop a GPU, stencil, OpenMP or database technique would run faster (whole words, zone
   maps, halos, chunk claiming, column loads); a .NET 10 API that does the job cheaper. Report them to `audit-perf`
   (its list of fields to borrow from); build only with numbers.

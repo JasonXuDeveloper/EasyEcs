@@ -77,8 +77,10 @@ CS0122 errors appear, look for CS8785 first (a generator exception dropped every
 Behaviour; a regression test that fails before each bug fix; edge cases (stale and recycled ids, empty tables, structural changes mid-pass, retired entities,
 exceptions mid-pass); the allocation test (0 B in steady state, measured through `Allocations.Of` or from `Allocations.Baseline()`,
 which wait for a running background collection first, never from a raw first read; D128); after a copy-on-write capture the first replay starts from different rows than every later one, so a steady-state
-check rehearses twice before it measures; under `DOTNET_EnableAVX=0` on-stack replacement compiles a long loop on
-the measuring thread and allocates (168 B), so warm up past OSR (200 passes) before measuring; a reference
+check rehearses twice before it measures; on-stack replacement (OSR) compiles a job on the measuring thread and
+allocates (168 B), and how many runs tiering needs depends on the backlog earlier tests leave, so any fixed warm-up
+count races it: warm up through `Allocations.WarmUp(step, least)` (runs until no method compiled for 40 runs and
+0.5 s), never a fixed count; a reference
 implementation skips exactly what the method skips (a float reference over 16M random points meets exact
 duplicates, `d2 == 0`, which a pair method skips as the row itself); bit-identical results at 1 and 4 threads for
 parallel code; equivalence with the scalar method for vector loops; the AOT test when the feature reaches
