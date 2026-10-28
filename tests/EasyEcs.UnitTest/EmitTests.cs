@@ -453,20 +453,33 @@ public class EmitTests
                 Assert.That((hits.Count, hits.Capacity), Is.EqualTo((0, capacity))); // walked in place, then cleared
                 first ??= world.GetSingleton<Tally>();
                 Assert.That(world.GetSingleton<Tally>(), Is.EqualTo(first)); // bit-identical at 1 and 4 threads
-                void Ticks()
-                {
-                    for (int i = 0; i < 10; i++)
-                    {
-                        world.Update();
-                        Books.Book(world);
-                    }
-                }
-
-                // Warm-up: the pool of the chunks' lists, which both passes share, holds as many as an update holds at once,
-                // each grown to the largest chunk's records.
-                for (int i = 0; i < 3; i++) Ticks();
-                Assert.That(Allocations.Of(Ticks), Is.Zero);
             }
+        }
+    }
+
+    [Test]
+    public void ARecordPassOverSegmentsDoesNotAllocate()
+    {
+        // One emitter: every chunk's list ends at the size its chunk needs. (Emitters of one record type whose chunks
+        // differ in size share the pool, so a list keeps growing now and then until every list has served the larger
+        // chunks, for good: steady state comes, after a number of updates the threads decide.)
+        var (world, _) = Fight(20_000, 37, 4);
+        using (world)
+        {
+            world.GetOrAddSingleton<Tally>();
+            world.AddSystem<ParallelHeals>();
+            void Ticks()
+            {
+                for (int i = 0; i < 10; i++)
+                {
+                    world.Update();
+                    Books.Book(world);
+                }
+            }
+
+            for (int i = 0; i < 3; i++) Ticks();
+            Assert.That(Segmented(ref world.GetSingleton<Emitted<Hit>>().Items), Is.False); // cleared by the pass
+            Assert.That(Allocations.Of(Ticks), Is.Zero);
         }
     }
 
