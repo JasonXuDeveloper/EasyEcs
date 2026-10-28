@@ -18,6 +18,9 @@ part names the skill that audits it.
 - Structural changes go through the gate; `StorageVersion` is bumped where a pass must notice; per-entity state is
   `EntityMeta` only; id-keyed APIs validate the version.
 - Synchronization is `System.Threading.Lock` or CAS, never `lock (object)`.
+- A form that cannot run in parallel as written (scatter writes: symmetric pairs, histograms) gets the field's known
+  parallel solutions built and measured (HPC: per-chunk buffers reduced in a fixed order, coloring, boundary split;
+  never atomics on floats, which break determinism), not left serial on a per-core estimate (owner, 2026-10-28).
 - The feature is general (servers, Godot games, simulations) and off unless used: what it costs is paid only by
   worlds that use it.
 - It works on every platform EasyEcs runs on: x64 and arm64, Native AOT, WebAssembly (the demo: Mono AOT, no
