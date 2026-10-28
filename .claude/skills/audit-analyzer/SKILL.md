@@ -132,3 +132,9 @@ done. Each round checks coverage per rule, not in total:
 - Docs (to-dos for the docs pass): `analyzer.mdx` + `.zh` (section, table row, fix line), changelog, a decision for a
   new rule or a dropped idea, `skills/easyecs/SKILL.md` (the public skill), common-mistakes / troubleshooting if users meet it, the
   rule list and EECS range in `src/EasyEcs.Generator/AGENTS.md`.
+
+## Open findings
+
+- EECS031 suggests `Reserve(n)` with the inner loop's bound for nested creation loops (`Reserve(Side)` where
+  `Side * Side` rows are created) and fires only once that bound is not a constant (feat-tiles-pingpong): check the
+  product of nested bounds, or say nothing.

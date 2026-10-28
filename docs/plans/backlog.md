@@ -396,6 +396,8 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] **`[Accumulate]` users that do not conflict** (`voxel-rewrite.md` GA2): systems that only add into one
       `[Accumulate]` singleton share a stage, combined in registration order at the stage end. Built only if the
       VoxelServer rewrite's `--schedule` shows stages lost to its `Stats` (step 2 of that plan); otherwise a record.
+- [ ] **EECS031 on nested creation loops** (feat-tiles-pingpong): suggests `Reserve(inner bound)` where
+      `outer × inner` rows are created, and only once the bound is not a constant (`audit-analyzer`, "Open findings").
 - [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
 - [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
       push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with

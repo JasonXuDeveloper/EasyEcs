@@ -142,6 +142,9 @@ its own worktree.
      under the last-level cache; the gate counts every column the pass moves;
    - check `df -h /` before queuing a batch and delete A/B snapshots once their numbers are read: the shared disk
      filled to a few KB during feat-streaming-stores;
+   - to split time between methods, sample a scratch driver that loops one benchmark method with `dotnet-trace`
+     (`--profile dotnet-sampled-thread-time --format Speedscope`), stripping the CPU_TIME pseudo-frame (the
+     sampler's own `PollGCWorker` shows at 6-8 %); numbers still come from BDN only (feat-tiles-pingpong);
    - the lock is shared by every agent, so a queue is planned, not filled: benchmarks run in small batches (a class or
      a few methods), never hours queued at once; a branch whose code is done and only waits for its final checks goes
      first (the coordinator pauses the other queues' scripts with SIGSTOP and kills only their flock waiters that have

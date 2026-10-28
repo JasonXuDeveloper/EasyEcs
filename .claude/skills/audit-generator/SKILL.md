@@ -124,6 +124,19 @@ generators write does. Every generated form is checked for:
 - **An extra job per method skips methods in a fusion group**: they never run alone, so the twin is never built
   (CS0649 on its fields) and the method's schedule line would claim a form it does not run.
 
+Patterns the Tier1 listings of the tile passes found (feat-tiles-pingpong), each a helper call or an extra
+instruction per use:
+- a `static readonly` field of a generic class is read through a static-base helper (`call rax`) where the JIT does not
+  fold it: write a shape's constants as expression properties;
+- an InlineArray of object references on the stack stores through `CHECKED_ASSIGN_REF` each: keep the references in
+  ref locals;
+- `Unsafe.Add(ref, dx + constant)` with an `int` sign-extends per load: widen alone, `(nint)dx + constant`, so the
+  constant folds into the load's displacement;
+- a thread-static is a helper call on every read: read it once and pass the frame;
+- a `ref` into an element of `int[][]` (covariant arrays of arrays) adds `LDELEMA_REF`: take the ref only on growth;
+- an `[UnsafeAccessor]` stub runs at MinOpts (about 1 % in a profile; a call, not inlined).
+Tier1 listings of a benchmark method: `--inProcess` with `DOTNET_TC_CallCountingDelayMs=0`.
+
 How to see the bound without hardware counters (the VM has none): `llvm-mca` on the Tier1 loop
 (`tools/jitdisasm.sh`), then BenchmarkDotNet with controlled data (sorted against shuffled, 1k / 100k / 1M rows).
 The open work is `docs/plans/microarch.md`.
