@@ -784,7 +784,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             // step until one changes nothing (Sweep), then the step's change is recorded (Leave).
             var tile = method.Parameters[steps];
             string sweep = tile.Colors.Length > 0 ? $"do {call} while (p{steps}.Sweep({tileEntity})); " : call + " ";
-            call = $"if (p{steps}.Enter({tileEntity})) {{ {grids}var w{steps} = new global::EasyEcs.Tile<{tile.Cell}, {tile.Shape}>({tileEntity}, in n{method.GridOf(steps)}); {sweep}p{steps}.Leave({tileEntity}); }}";
+            call = $"if (p{steps}.Enter({tileEntity})) {{ {grids}var w{steps} = new global::EasyEcs.Tile<{tile.Cell}, {tile.Shape}>({tileEntity}, in n{method.GridOf(steps)}); {sweep}p{steps}.Leave({tileEntity}, in n{method.GridOf(steps)}); }}";
             if (runs) call = $"{{ {call} }}";
         }
         else if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;
@@ -896,9 +896,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         sb.Append($"\n        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.WriteMask => {writes};\n");
         sb.Append($"\n        static bool global::EasyEcs.{declaring}<{method.ComponentTypes}>.OneQuery => true; // the method's filter is a constant\n");
         if (own != 0) sb.Append($"        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.SelfStamped => {own};\n");
-        // Tracked components written through a Maybe: the parallel pass opens their blocks as it opens its own columns'.
+        // Tracked components written through a Maybe, and the cells of a stepping tile (its Leave stamps them on the
+        // chunk's thread): the parallel pass opens their blocks as it opens its own columns'.
         var optional = method.Parallel
-            ? method.Parameters.Where(p => p is { Kind: Symbols.ParamKind.Optional, RefKind: "ref", Tracked: true }).Select(p => p.Type).Distinct().ToArray()
+            ? method.Parameters.Where(p => p is { Kind: Symbols.ParamKind.Optional, RefKind: "ref", Tracked: true } or { Kind: Symbols.ParamKind.Tile, RefKind: "ref" })
+                .Select(p => p.Type).Distinct().ToArray()
             : [];
         if (optional.Length > 0)
         {

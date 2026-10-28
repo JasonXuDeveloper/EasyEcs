@@ -81,10 +81,13 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     private static readonly int Cells = TileLayout.Cells<TTile>();
     private static readonly ulong AllRows = TTile.Depth >= 64 ? ulong.MaxValue : (1UL << TTile.Depth) - 1; // a bit per row of a layer
     private static bool Jacobi => TColors.Count == 1;
+    private static readonly TileFaces AllEdges = TileFaces.North | TileFaces.South | TileFaces.West | TileFaces.East
+        | (TTile.Height > 1 ? TileFaces.Above | TileFaces.Below : TileFaces.None); // what RowEdges can find
 
     private struct Entry
     {
         public BufferStore<TCell> Next;  // a Jacobi step's second buffer, its Count the tile's cells; null until the first
+        public BufferStore<TCell> Front; // the cells' list when the tile's step changed it (Leave), for the swap (Next)
         public ulong[] FrontRows;        // per layer, the rows of the cells that may hold a cell that is not zero
         public ulong[] NextRows;         // ...and of Next
         public TKey Key;                 // where the tile was when it first stepped (its neighbors, when it leaves)
@@ -96,7 +99,8 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
 
     private readonly World _world;
     private Entry[] _entries = [];
-    private ulong[] _changed = [];       // the tiles whose step changed them in the color running, a bit per entity index
+    private ulong[] _changed = [];       // the tiles a Jacobi step changed, to swap after the pass, a bit per entity index
+    private ulong[] _woken = [];         // the tiles facing an edge a step of the color running changed, a bit per entity index
     private ValueIndex<TGrid, TKey> _index;
     private int _membership = -1;        // the index's membership count when the tiles were last checked
     private ulong _lastTick;             // the tick the pass stamped its writes with: later writes are others'
@@ -147,6 +151,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     {
         Array.Resize(ref _entries, Math.Max(capacity, _entries.Length * 2));
         Array.Resize(ref _changed, (_entries.Length + 63) >> 6);
+        Array.Resize(ref _woken, _changed.Length);
     }
 
     /// <summary>
@@ -364,7 +369,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     /// compared with the cells: a change and the edges it touched. Gauss-Seidel: the rows the sweeps wrote are compared
     /// with the cells and copied into them where they differ. A tile that changed is recorded for <see cref="Next"/>.
     /// </summary>
-    public void Leave(Entity tile)
+    public void Leave(Entity tile, in TileNeighbors around)
     {
         var frame = TileFrame<TCell, TTile>.Current;
         frame.Stepping = default;
@@ -374,8 +379,25 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         bool changed = Jacobi ? LeaveJacobi(ref entry, frame, ref buffer) : LeaveInPlace(ref entry, frame, ref buffer);
         frame.Next = null;
         if (!changed) return;
-        int i = tile.Index;
-        Interlocked.Or(ref _changed[i >> 6], 1UL << i);
+        // Stamped here, by the thread that owns the tile's rows in this pass (as a Mut<T> write), not in Next on the
+        // system's thread; the stamp carries the pass's tick either way.
+        Entity.Stamp<DynamicBuffer<TCell>>(tile);
+        if (Jacobi)
+        {
+            entry.Front = buffer.Store; // swapped in Next, after every tile stepped
+            Interlocked.Or(ref _changed[tile.Index >> 6], 1UL << tile.Index);
+            entry.Dirty = _sleeps; // one step of Jacobi is no fixed point: it steps again (no other thread reads it this pass)
+        }
+        if (!_sleeps) return;
+        // The tiles across the edges that changed wake after this color (Next): their ids are the ones the step's
+        // exchange read, so no lookup; a bit each, set atomically (several tiles face one).
+        for (uint slots = TileOffsets<TTile>.Facing(entry.Edges) & TileOffsets<TTile>.SlotMask; slots != 0; slots &= slots - 1)
+        {
+            var id = around[BitOperations.TrailingZeroCount(slots)];
+            if (id == default) continue;
+            int n = id.Index;
+            if ((_woken[n >> 6] & 1UL << n) == 0) Interlocked.Or(ref _woken[n >> 6], 1UL << n);
+        }
     }
 
     private bool LeaveJacobi(ref Entry entry, TileFrame<TCell, TTile> frame, ref DynamicBuffer<TCell> buffer)
@@ -387,18 +409,34 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         if (cells.Length < Cells) Tile<TCell, TTile>.ThrowCells(default, buffer.Count, Cells);
         var edges = TileFaces.None;
         bool changed = !_sleeps; // a pass that does not sleep swaps every tile it steps, unseen
-        for (int y = 0; y < TTile.Height; y++)
+        bool compare = _sleeps;
+        // The first and last layer first, and in each the last row first: once every face's edge changed, the other
+        // rows can tell nothing more (a field that moves everywhere compares a few rows per tile, not all of them).
+        for (int k = 0, height = TTile.Height; k < height; k++)
         {
+            int y = k == 0 ? 0 : k == 1 ? height - 1 : k - 1;
             ulong written = frame.Written[y];
             for (ulong stale = entry.NextRows[y] & ~written; stale != 0; stale &= stale - 1) // rows the step skipped: zero
                 new Span<TCell>(next, (y * depth + BitOperations.TrailingZeroCount(stale)) * width, width).Clear();
             entry.NextRows[y] = written;
-            if (!_sleeps) continue;
-            for (ulong rows = written | entry.FrontRows[y]; rows != 0; rows &= rows - 1)
+            if (!compare) continue;
+            ulong rows = written | entry.FrontRows[y];
+            if (rows == 0) continue;
+            int z = 63 - BitOperations.LeadingZeroCount(rows);
+            for (rows &= ~(1UL << z); ; rows &= rows - 1)
             {
-                int z = BitOperations.TrailingZeroCount(rows), at = (y * depth + z) * width;
+                int at = (y * depth + z) * width;
                 if (TileLayout.RowEdges<TCell, TTile>(new ReadOnlySpan<TCell>(cells, at, width), new ReadOnlySpan<TCell>(next, at, width), y, z, ref edges))
+                {
                     changed = true;
+                    if (edges == AllEdges)
+                    {
+                        compare = false;
+                        break;
+                    }
+                }
+                if (rows == 0) break;
+                z = BitOperations.TrailingZeroCount(rows);
             }
         }
         if (changed) entry.Edges = edges;
@@ -441,28 +479,32 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
 
     /// <summary>
     /// After the tiles of the color running stepped, on the system's thread: each tile that changed becomes its step
-    /// (Jacobi: its second buffer swapped with its cells, O(1); the old cells its second buffer, unless shared), its
-    /// cells are stamped as written, and the tiles across the edges that changed wake (with the tile itself, after a
-    /// Jacobi step). True while another color is to step; after the last, the next writes are newer than this pass's.
+    /// (Jacobi: its second buffer swapped with its cells, O(1); the old cells its second buffer, unless shared; Leave
+    /// stamped it), and the tiles across the edges that changed wake (Leave marked them). True while another color is to
+    /// step; after the last, the next writes are newer than this pass's.
     /// </summary>
     public bool Next()
     {
         var world = _world;
         var changed = _changed;
-        for (int word = 0; word < changed.Length; word++)
+        for (int word = 0; Jacobi && word < changed.Length; word++)
         {
             for (ulong bits = changed[word]; bits != 0; bits &= bits - 1)
             {
                 int i = word << 6 | BitOperations.TrailingZeroCount(bits);
-                ref var entry = ref _entries[i];
-                var tile = new Entity(world, i, entry.Version);
-                if (Jacobi) Swap(ref entry, ref tile.Find<DynamicBuffer<TCell>>(true));
-                Entity.Stamp<DynamicBuffer<TCell>>(tile);
-                if (!_sleeps) continue;
-                if (Jacobi) entry.Dirty = true; // one step of Jacobi is no fixed point: it steps again
-                if (entry.Edges != TileFaces.None) WakeAround(entry.Key, TileOffsets<TTile>.Facing(entry.Edges));
+                Swap(ref _entries[i], world, i);
             }
             changed[word] = 0;
+        }
+        var woken = _woken;
+        for (int word = 0; word < woken.Length; word++)
+        {
+            for (ulong bits = woken[word]; bits != 0; bits &= bits - 1)
+            {
+                ref var entry = ref _entries[word << 6 | BitOperations.TrailingZeroCount(bits)];
+                if (entry.Live) entry.Dirty = true; // a tile that has not stepped yet wakes as it joins
+            }
+            woken[word] = 0;
         }
 
         if (++_color < TColors.Count) return true;
@@ -473,17 +515,25 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         return false;
     }
 
-    private static void Swap(ref Entry entry, ref DynamicBuffer<TCell> buffer)
+    /// <summary>
+    /// The tile at index <paramref name="i"/> takes its step: the lists of its cells and of its second buffer trade their
+    /// arrays (the buffer keeps its list object, so no lookup of it), or, when its list is shared (a prefab's, a clone's, a
+    /// snapshot's) or sized otherwise, the buffer takes the second list and the next step a new one.
+    /// </summary>
+    private static void Swap(ref Entry entry, World world, int i)
     {
-        var cells = buffer.Store;
-        buffer.Store = entry.Next;
         (entry.FrontRows, entry.NextRows) = (entry.NextRows, entry.FrontRows);
-        if (cells is { Shares: 0 })
+        var cells = entry.Front;
+        var next = entry.Next;
+        entry.Front = null;
+        if (cells is { Shares: 0 } && cells.Count == next.Count)
         {
-            entry.Next = cells;
+            (cells.Items, next.Items) = (next.Items, cells.Items);
             return;
         }
-        // A list others share (a prefab's, a clone's, a snapshot's) is theirs to keep: the next step takes a new one.
+        ref var buffer = ref new Entity(world, i, entry.Version).Find<DynamicBuffer<TCell>>(true);
+        buffer.Store = next;
+        // A list others share is theirs to keep: the next step takes a new one.
         cells?.Recycle();
         entry.Next = null;
     }

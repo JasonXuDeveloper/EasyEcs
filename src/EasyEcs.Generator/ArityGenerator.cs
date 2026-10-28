@@ -449,9 +449,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
             static virtual int SelfStamped => 0;
 
             /// <summary>
-            /// Tracked components the job writes besides its own (through a <see cref="Maybe{T}"/>; default none): a
-            /// parallel pass opens their change-tick blocks with those of <see cref="WriteMask"/>, so chunks splitting a
-            /// block share it. Generated parallel jobs set their <see cref="Maybe{T}"/> writes.
+            /// Tracked components the job writes besides its own (through a <see cref="Maybe{T}"/>, the cells of a tile it
+            /// steps; default none): a parallel pass opens their change-tick blocks with those of <see cref="WriteMask"/>,
+            /// so chunks splitting a block share it. Generated parallel jobs set their <see cref="Maybe{T}"/> writes and
+            /// stepping tiles.
             /// </summary>
             static virtual ComponentSet OptionalWrites => default;
 
