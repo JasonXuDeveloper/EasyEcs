@@ -312,11 +312,17 @@ internal struct TileSources<TCell>
 /// </summary>
 /// <typeparam name="TCell">The cell: the element of the entity's <c>DynamicBuffer&lt;TCell&gt;</c>.</typeparam>
 /// <typeparam name="TTile">The tile's shape: the component that places the entity in the grid, or <see cref="Columns{TTile}"/> of it.</typeparam>
-public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
+public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
 {
     private readonly Entity _entity;
     private readonly ref readonly TileNeighbors _around;
     private readonly TileFrame<TCell, TTile> _frame;
+
+    // What ExchangeHalo left in this thread's texture, kept in the tile itself (registers in a stencil's row loop): the
+    // texture at cell (0, from, 0), and the layers exchanged. Null until this tile (this copy of it) exchanged its halo:
+    // reads then go through the frame, which checks that the texture is this tile's.
+    private ref TCell _origin;
+    private int _from, _to;
 
     /// <summary>The tile of <paramref name="entity"/>, whose neighbors are <paramref name="around"/>. Generated code calls this.</summary>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -328,7 +334,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     }
 
     /// <summary>The tile's own cells, in the layout of <see cref="ITileShape"/>. O(1).</summary>
-    public ReadOnlySpan<TCell> Cells
+    public readonly ReadOnlySpan<TCell> Cells
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _entity.Find<DynamicBuffer<TCell>>(true).AsReadOnlySpan();
@@ -339,14 +345,14 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// <typeparamref name="TTile"/> declares no neighbor on that face: read its other components through a
     /// <see cref="Lookup{T}"/>. O(1).
     /// </summary>
-    public EntityId Beside(TileFaces face) => _around[TileOffsets<TTile>.Slot(face)];
+    public readonly EntityId Beside(TileFaces face) => _around[TileOffsets<TTile>.Slot(face)];
 
     /// <summary>
     /// The neighbor at offset (<paramref name="dx"/>, <paramref name="dy"/>, <paramref name="dz"/>), each −1 to 1 (the
     /// tile across a face, an edge or a corner), or default when there is none or the shape's neighborhood leaves it
     /// out. O(1).
     /// </summary>
-    public EntityId Beside(int dx, int dy, int dz)
+    public readonly EntityId Beside(int dx, int dy, int dz)
     {
         if ((uint)(dx + 1) > 2u || (uint)(dy + 1) > 2u || (uint)(dz + 1) > 2u) TileLayout.ThrowOffset();
         return _around[TileOffsets<TTile>.Slot(dx, dy, dz)];
@@ -384,6 +390,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
         if (frame.Sweep > 0) // a Gauss-Seidel sweep after the first: the texture is the tile as the sweeps left it
         {
             if (frame.From != from || frame.To != to || frame.Masked != mask) TileFrame<TCell, TTile>.ThrowSweepLayers();
+            Keep(frame);
             return;
         }
         frame.Loaded = default; // a copy that throws leaves no texture behind
@@ -399,9 +406,19 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
         frame.To = to;
         frame.Masked = mask;
         frame.Loaded = _entity.Id;
+        Keep(frame);
     }
 
-    private void LoadAny(TileFrame<TCell, TTile> frame, int from, int to, TCell border, bool mask)
+    /// <summary>The texture's place and layers, kept in the tile for <see cref="At"/> and the indexer.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void Keep(TileFrame<TCell, TTile> frame)
+    {
+        _origin = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(frame.Texels), frame.Texel(0, frame.From, 0));
+        _from = frame.From;
+        _to = frame.To;
+    }
+
+    private readonly void LoadAny(TileFrame<TCell, TTile> frame, int from, int to, TCell border, bool mask)
     {
         int width = TTile.Width, depth = TTile.Depth, height = TTile.Height, r = TTile.Halo, hy = height > 1 ? r : 0;
         int row = width + 2 * r, layer = row * (depth + 2 * r), cells = width * depth * height;
@@ -474,7 +491,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// and masks. <typeparamref name="TMask"/> is <see cref="Masked"/> or <see cref="Unmasked"/>: the JIT compiles a
     /// loop for each, and the unmasked one (the blocks a stencil only samples) tests no cell.
     /// </summary>
-    private void LoadFaces<TMask>(TileFrame<TCell, TTile> frame, int from, int to, TCell border) where TMask : struct
+    private readonly void LoadFaces<TMask>(TileFrame<TCell, TTile> frame, int from, int to, TCell border) where TMask : struct
     {
         bool mask = typeof(TMask) == typeof(Masked);
         int width = TTile.Width, depth = TTile.Depth, height = TTile.Height, hy = height > 1 ? 1 : 0;
@@ -542,7 +559,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// rows it reads, up to the halo away. O(1) per row visited and per layer. Throws when the method did not
     /// exchange the tile's halo first, or exchanged it without its mask.
     /// </summary>
-    public TileRows<TTile> Rows(TileStencil reads = TileStencil.All)
+    public readonly TileRows<TTile> Rows(TileStencil reads = TileStencil.All)
     {
         var frame = Exchanged();
         if (!frame.Masked) TileLayout.ThrowNoMask();
@@ -555,7 +572,16 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// method did not exchange the tile's halo first. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TileCursor<TCell, TTile> At(TileRow<TTile> row)
+    public readonly TileCursor<TCell, TTile> At(TileRow<TTile> row)
+    {
+        if (Unsafe.IsNullRef(ref _origin)) return AtFrame(row);
+        if ((uint)(row.Y - _from) > (uint)(_to - _from) || (uint)row.Z >= (uint)TTile.Depth) TileLayout.ThrowOffset();
+        return new TileCursor<TCell, TTile>(ref Unsafe.Add(ref _origin, (row.Y - _from) * TileLayout.Layer<TTile>() + row.Z * TileLayout.Row<TTile>()));
+    }
+
+    /// <summary><see cref="At"/> of a copy of the tile that did not exchange its halo itself: through the frame, checked.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private readonly TileCursor<TCell, TTile> AtFrame(TileRow<TTile> row)
     {
         var frame = Exchanged();
         if ((uint)(row.Y - frame.From) > (uint)(frame.To - frame.From) || (uint)row.Z >= (uint)TTile.Depth) TileLayout.ThrowOffset();
@@ -567,17 +593,30 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// and r under and over them (those layers alone for a 2D tile), r the halo. Throws outside, or when the method did
     /// not exchange the tile's halo first. O(1).
     /// </summary>
-    public ref readonly TCell this[int x, int y, int z]
+    public readonly ref readonly TCell this[int x, int y, int z]
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            var frame = Exchanged();
+            if (Unsafe.IsNullRef(ref _origin)) return ref CellFrame(x, y, z);
             int r = TTile.Halo, hy = TTile.Height > 1 ? r : 0;
             if ((uint)(x + r) >= (uint)(TTile.Width + 2 * r) || (uint)(z + r) >= (uint)(TTile.Depth + 2 * r)
-                || (uint)(y - frame.From + hy) > (uint)(frame.To - frame.From + 2 * hy))
+                || (uint)(y - _from + hy) > (uint)(_to - _from + 2 * hy))
                 TileLayout.ThrowOffset();
-            return ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(frame.Texels), frame.Texel(x, y, z));
+            return ref Unsafe.Add(ref _origin, (y - _from) * TileLayout.Layer<TTile>() + z * TileLayout.Row<TTile>() + x);
         }
+    }
+
+    /// <summary>The indexer of a copy of the tile that did not exchange its halo itself: through the frame, checked.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private readonly ref readonly TCell CellFrame(int x, int y, int z)
+    {
+        var frame = Exchanged();
+        int r = TTile.Halo, hy = TTile.Height > 1 ? r : 0;
+        if ((uint)(x + r) >= (uint)(TTile.Width + 2 * r) || (uint)(z + r) >= (uint)(TTile.Depth + 2 * r)
+            || (uint)(y - frame.From + hy) > (uint)(frame.To - frame.From + 2 * hy))
+            TileLayout.ThrowOffset();
+        return ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(frame.Texels), frame.Texel(x, y, z));
     }
 
     /// <summary>
@@ -588,7 +627,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// zero after it. O(1); throws for a tile taken by value.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Span<TCell> Write(TileRow<TTile> row)
+    public readonly Span<TCell> Write(TileRow<TTile> row)
     {
         var frame = _frame;
         if ((uint)row.Y >= (uint)TTile.Height || (uint)row.Z >= (uint)TTile.Depth) TileLayout.ThrowOffset();
@@ -603,7 +642,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
 
     /// <summary>The frame, once this tile's halo is in it.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private TileFrame<TCell, TTile> Exchanged()
+    private readonly TileFrame<TCell, TTile> Exchanged()
     {
         var frame = _frame;
         if (frame.Loaded != _entity.Id) TileFrame<TCell, TTile>.ThrowNotExchanged();
@@ -612,7 +651,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
 
     /// <summary>The cells of the neighbor in <paramref name="slot"/>, or the blank.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private TCell[] Beside(int slot, int cells, TCell[] blank) =>
+    private readonly TCell[] Beside(int slot, int cells, TCell[] blank) =>
         (TileOffsets<TTile>.SlotMask >> slot & 1) != 0 && Of(_around[slot], cells) is { } there ? there : blank;
 
     /// <summary>
@@ -645,7 +684,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// <param name="next">The step: at least the tile's cells.</param>
     /// <param name="changed">Whether any cell changed.</param>
     /// <returns>The faces whose edge changed (<see cref="TileFaces.Below"/> and <see cref="TileFaces.Above"/> only for a tile of more than one layer).</returns>
-    public TileFaces ChangedEdges(ReadOnlySpan<TCell> next, out bool changed)
+    public readonly TileFaces ChangedEdges(ReadOnlySpan<TCell> next, out bool changed)
     {
         int width = TTile.Width, depth = TTile.Depth, height = TTile.Height;
         var own = Cells;
@@ -670,7 +709,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     /// tile across each face, and, in the shape's neighborhood, across each edge and corner of two or three of those
     /// faces; the tiles there are (<c>foreach (var id in tile.Facing(edges))</c>). O(1) per neighbor.
     /// </summary>
-    public TileIds Facing(TileFaces edges)
+    public readonly TileIds Facing(TileFaces edges)
     {
         uint slots = 0;
         for (uint all = TileOffsets<TTile>.Facing(edges); all != 0; all &= all - 1)
@@ -744,7 +783,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
         return 0;
     }
 
-    private TCell[] Own(int cells)
+    private readonly TCell[] Own(int cells)
     {
         var own = _entity.Find<DynamicBuffer<TCell>>(true).Store;
         int count = own?.Count ?? 0;
@@ -753,7 +792,7 @@ public readonly ref struct Tile<TCell, TTile> where TCell : unmanaged where TTil
     }
 
     /// <summary>The cells of <paramref name="id"/>: null when there is no such tile, or it has no cells.</summary>
-    private TCell[] Of(EntityId id, int cells)
+    private readonly TCell[] Of(EntityId id, int cells)
     {
         if (id == default) return null;
         ref var buffer = ref new Entity(_entity.World, id).Find<DynamicBuffer<TCell>>(false);
