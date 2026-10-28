@@ -1201,3 +1201,13 @@ chunk lookup per zombie).
   `[ForEachRecord]` pass 10k 29.1 -> 23.0 / 24.5, 100k 241.5 -> 192.4, 232.5 -> 203.8 us; WorldSimulation, BattleServer,
   ParallelForEach, ForParallel, Record, DynamicBuffer, StructuralLoop within noise.
   zh: **Emitted<T> 把各块的列表留作分段。** 单例的列表（`EmitStore<T>`）按块的顺序直接接收每个块的列表作为一个分段，每块 O(1)；`Count`、`Clear`、`[ForEachRecord]` 遍历和 `World.ForParallel` 就地使用；按一个 span 读、写入、`World.SingletonRef`、快照、存档和加载先合并一次。记录仍按块的顺序，任何线程数下逐位相同；用户代码和生成器不变。考虑过：在 `Items` 旁加 `Count`/`Clear`（用户要改代码）、访问时合并的 ref 属性 `Items`（`Count`/`Clear` 也会合并）、给每个 `BufferStore<T>` 加分段字段（每个实体缓冲多 8 字节）。选定：子类加负的 `Shares` 标记；写入本来就按它分支，span 读多一次比较；最多 64 个分段，再追加就先合并。
+
+## Naming: [ForEachRecord] -> [Drain] (owner, 2026-10-28)
+
+- Decision record (naming): `[Drain]`, after Rust's `Vec::drain`, Go's channel drain and Bevy's `Events::drain`: each
+  record of `Emitted<T>` handled once, then cleared. Why not `[ForEachRecord]`: one suffix from `[ForEach]` for a pass
+  that walks records, not entities, runs on one thread and clears what it walked; "record" also reads as C#'s `record`
+  types. Considered: `[ForEachEmitted]` (pairs with Emit but says nothing of the clear), `[Handle]` (too general).
+  `[ForEntity]` kept (D82: a callable on one entity, not a pass). zh: 排空.
+- Pages: the threading page's Emit section and every example use `[Drain]`; the glossary entry "Emitted records"
+  names it.

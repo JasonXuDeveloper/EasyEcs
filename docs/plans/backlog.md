@@ -60,6 +60,13 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Next, in this order
 
+**Rename `[ForEachRecord]` -> `[Drain]`** (owner, 2026-10-28, naming audit: "[ForEach] 和 [ForEachRecord] 太像但做的事不一样";
+unreleased, so no migration): right after the tile branch merges (it edits SystemGenerator.cs too). With it
+`IForEachRecord<T>` -> `IDrain<T>`, the analyzer and code-fix strings, `Symbols`, tests (RecordTests names), the
+benchmarks' method names (EmitBenchmark, RecordBenchmark: site keys unaffected, not synced yet), zh ApiDocs files
+(`foreachrecordattribute.xml` -> `drainattribute.xml`, `iforeachrecord.xml`), the reference regenerated, plans, file
+maps and skills. Glossary: drain = 排空 (each record handled once, then cleared). `[ForEntity]` stays (D82; owner).
+
 Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
 rows, edges found while stepping), 8e running (now with both parallel designs); 12e merged; 8f + 8g (one generator branch) start once 8e and the tile branch merged (they edit Kernel.cs,
 SystemGenerator.cs and Symbols.cs too), then 9, 10, 4, 7, Later, then Finish.
