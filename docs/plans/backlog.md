@@ -34,6 +34,14 @@ names the skill:
 - [ ] **Fewer copies c + d** ("Next" items 12c and 12d, branch `feat-fewer-copies`): Permute swaps columns with a spare,
       incremental Capture / Restore, and fix-ci's restore cost won back.
 - [ ] **Generator crash on components from another assembly** ("Next" items 8b + 8d, branch `fix-kernel-foreign`).
+- [ ] **Stepping tiles** ("Next" items 11, 12a, 12b, 8c's tile parts, GA10 / GA3 / GA12; branch
+      `feat-tiles-pingpong`, ready for triage): `ref Tile` steps (Jacobi ping-pong: the second buffer, the zero rows and
+      the swap owned by the pass) and `[ForEach, GaussSeidel]` (colors from the key's parity, sweeps until settled),
+      sleeping tiles owned by the pass, edges found while stepping (12b), buffers sized from the shape and
+      `MaxPooledLength` inferred, `Columns<TTile>`, `Pad()` -> `ExchangeHalo()` with `PaddedTile` folded into the tile,
+      EECS115-117. 12a (padded storage) measured and dropped (1.36x slower at 4 threads). Open: the ping-pong form
+      ties step + commit by hand and loses 1.7x in a sparse field at 1 thread (`docs/owner-review.md`); docs to-dos in
+      `docs-todos.md`. Not in it: 8c's `FillPool` (with 12d) and the VoxelServer rewrite.
 
 Merged since the last update: the L2 leftovers (`feat-pairs-2`: parallel pairs, `[Neighbor] ref`, nested-walk
 rewrites, neighbor lists by cost, `Reduce<T>` / `Mut<T>` in pair methods, the cluster renames; the owner's M4 run of
