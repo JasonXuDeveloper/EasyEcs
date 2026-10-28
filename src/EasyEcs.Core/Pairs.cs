@@ -803,8 +803,11 @@ internal sealed class PairState
                 int q = _ids[j];
                 if ((q >= 0) == (p >= 0)) continue; // two boxes of one side
                 if (low1[j] > h1 || l1 > high1[j] || low2[j] > h2 || l2 > high2[j]) continue;
-                (int row, int neighbor) = p >= 0 ? (p, ~q) : (q, ~p);
-                if (!half || neighbor >= row) Add(ref found, row, neighbor);
+                if (p >= 0)
+                {
+                    if (!half || ~q >= p) Add(ref found, p, ~q);
+                }
+                else if (!half || ~p >= q) Add(ref found, q, ~p);
             }
         }
 
@@ -990,8 +993,9 @@ internal sealed class PairState
             {
                 starts[i] = found;
                 var point = TOrder.Point(in Unsafe.Add(ref rows, i));
+                int after = half ? i + 1 : 0; // a half list's neighbors come after the row (ranges are never negative)
                 for (int k = at; k < to; k += 2)
-                    for (int j = half ? Math.Max(list.Ranges[k], i + 1) : list.Ranges[k], stop = list.Ranges[k + 1]; j < stop; j++)
+                    for (int j = Math.Max(list.Ranges[k], after), stop = list.Ranges[k + 1]; j < stop; j++)
                         if (!(Vector3.DistanceSquared(point, TOrder.Point(in Unsafe.Add(ref others, j))) > r2))
                         {
                             if (found == near.Length) Array.Resize(ref near, Math.Max(64, found * 2)); // grows to the densest list
