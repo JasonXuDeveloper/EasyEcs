@@ -76,7 +76,8 @@ TileSteps.cs                 a stepping tile's pass (ref Tile, TileSteps<TCell, 
                              world and method): the second buffer of a Jacobi step swapped in after the pass, the rows
                              it skipped zeroed; [GaussSeidel]'s sweeps in place, color by color (ITileColors,
                              TileColoring); sleeping tiles, woken by the edges that changed, by others' writes of the
-                             cells (and of what else the method reads), by tiles that left the grid
+                             cells (and of what else the method reads), by tiles that left the grid, queued by color so
+                             a sleeping pass walks only them (StepWoken over the generated job's ITileStep.Step)
 Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
                              chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear);
                              AddIds / AddLanes: a vector loop's passing lanes appended compacted, in row order;

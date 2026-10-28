@@ -62,6 +62,30 @@ public sealed partial class World
         RunRange(work, store.Count, chunkSize);
     }
 
+    /// <summary>
+    /// <see cref="ForParallel{TJob}"/> in chunks of exactly <paramref name="size"/> indexes, for heavy items that are no
+    /// rows of a table (no presence-bit word to keep whole): a stepping tile pass's woken tiles
+    /// (<see cref="TileSteps{TCell, TTile, TGrid, TKey, TColors}.StepWokenParallel{TJob}"/>), where chunks of 64 tiles
+    /// would leave most threads idle.
+    /// </summary>
+    internal void ForParallelChunks<TJob>(int count, ref TJob job, int size) where TJob : struct, IForRange
+    {
+        if (count == 0) return;
+        var work = WorkOf<RangeChunks<TJob>>();
+        work.Job = job;
+        work.Items = 0; // cut by the caller's size, never by cost
+        work.Count = count;
+        work.Size = size;
+        try
+        {
+            RunChunks(work, (count + size - 1) / size);
+        }
+        finally
+        {
+            work.Release();
+        }
+    }
+
     private void RunRange(RangeWork work, int count, int chunkSize)
     {
         int size = ChunkRows(work, count, chunkSize);

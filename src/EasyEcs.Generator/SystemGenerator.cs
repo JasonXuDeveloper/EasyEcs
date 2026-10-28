@@ -320,7 +320,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     sb.Append(wake.StartsWith("cells:", System.StringComparison.Ordinal)
                         ? $"{at}{local}.p{s}.WakeOnCells<{wake.Substring(6)}>();\n"
                         : $"{at}{local}.p{s}.WakeOn<{wake.Substring(10)}>();\n");
-                sb.Append($"{at}do {world}.{m.ForEach}<{m.ComponentTypes}, {name}>(ref {local}{filter}{m.Chunks});\n{at}while ({local}.p{s}.Next());\n");
+                string walk = $"{world}.{m.ForEach}<{m.ComponentTypes}, {name}>(ref {local}{filter}{m.Chunks});";
+                // A sleeping pass walks the tiles that woke, when its queues are complete; else the query (every tile).
+                if (m.WalksWoken)
+                    walk = $"{{ if (!{local}.p{s}.{(m.Parallel ? $"StepWokenParallel(ref {local}, {m.ChunkSize})" : $"StepWoken(ref {local})")}) {walk} }}";
+                sb.Append($"{at}do {walk}\n{at}while ({local}.p{s}.Next());\n");
             }
             else sb.Append($"{at}{world}.{m.ForEach}<{m.ComponentTypes}, {name}>(ref {local}{filter}{m.Chunks});\n");
             EmitReductions(sb, m, world, local, at);
@@ -751,6 +755,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         // A ref struct holds each singleton as a ref field, a register in the row loop: a SingletonRef's box would be
         // null-checked on every row. Parallel jobs are copied into work items on the heap, so they hold SingletonRefs.
         string kind = method.Parallel ? "struct" : "ref struct";
+        bool woken = suffix.Length == 0 && method.WalksWoken;
+        if (woken) marker += ", global::EasyEcs.ITileStep";
         sb.Append($"    internal {kind} {job} : global::EasyEcs.{iface}<{method.ComponentTypes}>{marker}{method.Constraints}\n    {{\n");
         // Only when the method takes the World: an unused field would still be copied into the row loop, where it
         // holds a callee-saved register a job that calls out (a structural change) needs for its loop state.
@@ -892,6 +898,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.View && p.Fields.Any(f => f.Type == components[k] && f.Access == "mut")))
                 own |= 1 << k;
         }
+        if (woken) // a woken tile, run as the query's walk would run it (its components, the filter)
+            sb.Append($"\n        public void Step(global::EasyEcs.Entity tile) => tile.Run<{method.ComponentTypes}, {job}>(ref this, in __ForEach{owner.TypeParameters}.{method.Name}Filter{number});\n");
         string declaring = method.Simd != null ? "IForEachBatch" : iface; // IForEachMasked declares no masks of its own
         sb.Append($"\n        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.WriteMask => {writes};\n");
         sb.Append($"\n        static bool global::EasyEcs.{declaring}<{method.ComponentTypes}>.OneQuery => true; // the method's filter is a constant\n");
@@ -1055,7 +1063,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <param name="Wakes">What else wakes a stepping tile: "cells:T" (another tile of the grid, its buffer of T) or "component:T" (a tracked component of the entity).</param>
     private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false, string Key = "",
         string Cell = "", string Grid = "", EquatableArray<ViewFieldModel> Fields = default, bool Accumulates = false, string Shape = "",
-        string Colors = "", int Sweeps = 0, bool Sleeps = false, EquatableArray<string> Wakes = default);
+        string Colors = "", int Sweeps = 0, bool Sleeps = false, EquatableArray<string> Wakes = default, bool Woken = false);
 
     /// <summary>A view's component field: its name, its component, and "ref" (written) or "in" (read).</summary>
     /// <summary>A view's field: its name, component, and how the job sets it: "ref", "in" (ref readonly) or "mut" (a Mut&lt;T&gt;).</summary>
@@ -1082,6 +1090,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public string ForEach => Loop + (Parallel ? "Parallel" : "");
 
         public bool HasFilter => With.Length + Without.Length + WithAny.Length > 0 || Since;
+
+        /// <summary>A stepping tile whose sleeping pass may walk only the tiles that woke (its job is an ITileStep).</summary>
+        public bool WalksWoken => Steps >= 0 && Parameters[Steps].Woken && Loop == "ForEachEntity" && !IsChaseTwin;
 
         /// <summary>Filters rows by change tick ([Changed&lt;T&gt;] / [Removed&lt;T&gt;] / [ChangedAny&lt;…&gt;] / [RemovedAny&lt;…&gt;]).</summary>
         public bool Since => Changed.Length + Removed.Length + ChangedAny.Length + RemovedAny.Length > 0;
@@ -1472,7 +1483,10 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             }
         }
         var copy = (ParamModel[])parameters.Clone();
-        copy[stepping] = tile with { Sleeps = sleeps, Wakes = new EquatableArray<string>(sleeps ? wakes.ToArray() : new string[0]) };
+        // A pass that sleeps walks only the tiles that woke when its rows pass no filter but the tile's: a filter would
+        // leave a woken tile out of a walk without the pass knowing it (TileSteps.StepWoken).
+        bool woken = sleeps && !Symbols.AttributeFilters(method).Any() && !Symbols.GroupFilters(method).Any();
+        copy[stepping] = tile with { Sleeps = sleeps, Wakes = new EquatableArray<string>(sleeps ? wakes.ToArray() : new string[0]), Woken = woken };
         return copy;
     }
 

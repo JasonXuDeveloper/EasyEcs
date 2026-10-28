@@ -22,7 +22,7 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              the filter after a pass without structural changes, a destroy per row otherwise;
                              [ForEntity] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
                              over entity.Run; [ForEachRecord] -> an IForEachRecord<T> job run by
-                             Emitted<T>.Consume (stage RecordMethods, joined to the methods of the updates); a ref Tile -> a stepping pass (the method's colors struct, TileSteps.Of per pass, Enter / the sweeps / Leave per tile, a walk per color until Next, the wakes of what else it reads; a write of its cells); [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
+                             Emitted<T>.Consume (stage RecordMethods, joined to the methods of the updates); a ref Tile -> a stepping pass (the method's colors struct, TileSteps.Of per pass, Enter / the sweeps / Leave per tile, a walk per color until Next: the tiles that woke when the pass sleeps and the method has no filter of its own, through the job's ITileStep.Step, else the query; the wakes of what else it reads; a write of its cells); [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
                              methods in declaration order; [UpdateInterval] -> its Interval / Phase), and per
                              assembly the set __EasyEcsSystems: one Add per system and per closed generic system any
                              API names (AddSystem<G<P>>, [UpdateAfter<G<P>>], ...), a switch per hook; no system
