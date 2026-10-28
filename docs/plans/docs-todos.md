@@ -1329,3 +1329,17 @@ threads; float sums differ from the serial pass's in the last bits (another orde
 - guide/parallel (or the pair page): `Parallel = true` on a method writing both sides is deterministic across thread
   counts but not bit for bit with the same method on one thread's serial pass; small tables (< 4 chunks of 256 rows)
   run the serial pass.
+
+## feat-streaming-stores (merged 1b1aa12)
+
+- Decision record (en + zh): text in the agent's final report, kept in the scratchpad
+  (`feat-streaming-stores/decision.md`); gate counts every column the pass moves, not only the written one.
+- `docs/plans/microarch.md`: candidate 8 from "Dropped" to "Shipped" with the numbers; `owner-review.md`: remove the
+  streaming entry; roadmap item; changelog + README "What's new" (Performance).
+- Guide page on vector loops (en + zh): what streams and when (write-only column, no blocks, past the LLC, >= 1,024
+  rows), the schedule line "write-only columns streamed past the last-level cache", pitfall: `+=` or a conditional
+  write keeps plain stores.
+- Public skill: writing a column whole (`x = new X(...)`) instead of `+=` lets a pass past the cache stream it.
+- No api.mdx row (`StreamingStores` is EditorBrowsable Never). Not measured on ARM64: ask the owner for an M4 run of
+  StreamingStoreGateBenchmark.
+

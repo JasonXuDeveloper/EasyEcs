@@ -31,8 +31,6 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Streaming stores in generated loops, gated** ("Next" item 10, branch `feat-streaming-stores`; Kernel and core,
-      off the tile branch's files).
 - [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
       `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
       branch (12d).
@@ -254,7 +252,8 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        drain. Analyzer rule and code fix for the hand-written form; proof: VoxelServer lines before / after, tests,
        0 B steady state. The form carries a per-tick budget (`voxel-rewrite.md` GA9: VoxelServer caps requests per
        tick, `Rules.MaxRequests`; the owner wants the cap kept).
-10. [ ] **Streaming stores in generated loops, gated** (owner, 2026-10-27; `microarch.md` M3, prototype
+10. [x] **Streaming stores in generated loops, gated** (merged 1b1aa12: Predict 0.86-0.94x, Mix 0.90-0.92x past the
+       cache with the reader counted in, gate off inside; ARM64 STNP unmeasured) (owner, 2026-10-27; `microarch.md` M3, prototype
        `Locality/Streams.cs`): non-temporal stores for a column the method writes without reading, only when the
        column's bytes are past `CacheSizes.LastLevel`. Measured in a real world with the next pass reading that column
        counted in; ships when faster in both rounds and never slower (StreamingStoreBenchmark: 1.47x past the cache,
