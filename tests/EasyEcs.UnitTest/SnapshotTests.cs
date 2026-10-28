@@ -179,6 +179,7 @@ public class SnapshotTests
         world.AddSystem<SnapshotWear>();
         world.AddSystem<SnapshotWearParallel>();
         var entities = new Entity[9_000];
+        world.Reserve<Position, Armor, DynamicBuffer<int>>(entities.Length);
         for (int i = 0; i < entities.Length; i++)
         {
             entities[i] = world.CreateEntity(new Position(i, 0), new Armor(i), new DynamicBuffer<int>());
