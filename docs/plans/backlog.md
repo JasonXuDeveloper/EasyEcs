@@ -249,6 +249,11 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        with 1 component on sorted rows, but 0.92-1.09x with 1 component on scattered rows (MultiWorld's case), and
        `Border.cs` grows by 5 lines instead of shrinking. Fails "never slower" and "less code"; what would change the
        verdict is in `owner-review.md`.
+8i. [ ] **MoveEntities 0.82-0.86x from the ArriveRows changes of feat-copy-entities** (8h's regression A/B, 4 rounds,
+       every round faster): take the shared ArriveRows part (run copies per source table, `Archetype.CopyRun`, the
+       column-by-bit map, `Gather`) without CopyEntities onto its own branch, A/B Migration / Prefab / WorldSimulation
+       / BattleServer again (8h saw WorldSimulation 10k +1-6 % and SaveRecord +3 % in every round, unexplained), ship if
+       Move keeps its gain and nothing else moves.
 9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
        ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
        `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the

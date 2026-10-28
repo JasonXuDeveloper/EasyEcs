@@ -112,6 +112,9 @@ BenchmarkDotNet only: before and after, two rounds, A/B copies outside the repo 
 on a quiet machine; Tier1 asm of new hot loops (`tools/jitdisasm.sh`). Ships only as a net win at 0 B with no
 regression in WorldSimulation, BattleServer and the feature's neighbors. A benchmark for anything not covered yet.
 
+A feature proposed to remove code is checked on its sample before any benchmark round: write the sample with it
+first (8h: `CopyEntities` grew MultiWorld's Border from 9 lines to 14, so it failed "less code" before its numbers).
+
 ## 7. Docs (`audit-docs`; written in the final docs pass)
 
 Before the docs pass, the exemplar pass (`audit-code`, after every feature is built, before the docs pass and the benchmark sync) rewrites every sample, the demo, the

@@ -145,6 +145,9 @@ its own worktree.
    - to split time between methods, sample a scratch driver that loops one benchmark method with `dotnet-trace`
      (`--profile dotnet-sampled-thread-time --format Speedscope`), stripping the CPU_TIME pseudo-frame (the
      sampler's own `PollGCWorker` shows at 6-8 %); numbers still come from BDN only (feat-tiles-pingpong);
+   - a bulk copy of rows given by id wins only when it reads them in order: grouping ids per source table beat one
+     run per row (1.4-2.7x slower before), but with one narrow component the scattered reads cost what the copy saves
+     (0.92-1.09x of a create loop over a query in order; feat-copy-entities);
    - the lock is shared by every agent, so a queue is planned, not filled: benchmarks run in small batches (a class or
      a few methods), never hours queued at once; a branch whose code is done and only waits for its final checks goes
      first (the coordinator pauses the other queues' scripts with SIGSTOP and kills only their flock waiters that have
