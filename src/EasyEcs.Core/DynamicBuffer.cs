@@ -53,8 +53,11 @@ public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
     /// Fill the pool with lists until it holds <paramref name="lists"/>, each of <see cref="MaxPooledLength"/> elements, so
     /// the first writes of that many buffers take a list instead of allocating one: a server that knows how many
     /// buffers of <typeparamref name="T"/> it keeps at its peak (the chunks around its players) pays for them at
-    /// startup, and its ticks allocate nothing even while the world grows to that peak. Process-wide, like the pool;
-    /// lists already in the pool count. O(<paramref name="lists"/>) allocations once; nothing when the pool holds enough.
+    /// startup, and its ticks allocate nothing even while the world grows to that peak. The count is exact, also when
+    /// parallel passes write the buffers on the helper threads: the pool also gets the lists each thread may keep for
+    /// itself (64: the threads take and give back lists 32 at a time; a helper thread started later adds its own then),
+    /// so no thread runs out while others keep what it needs. Process-wide, like the pool; lists already in the pool
+    /// count. O(<paramref name="lists"/>) allocations once; nothing when the pool holds enough.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="lists"/> is negative.</exception>
     public static void FillPool(int lists)
@@ -411,7 +414,18 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     // the helper threads too. Bounded like a table's rows: the pools hold at most as many stores as died while none
     // were taken (the peak a table's capacity keeps too), each with at most MaxPooledLength elements (a list that grew
     // larger is left to the GC; DynamicBuffer<T>.MaxPooledLength sets it).
+    //
+    // A filled pool (Fill: FillPool, World.ReserveBuffers) is exact: a thread keeps at most 2 × Batch stores of its own
+    // (a refill only when it has none, a spill at 2 × Batch), which the other threads cannot take, so Fill adds that
+    // share for every thread with stores of its own, and a thread set up later adds its share then (a helper thread
+    // starts in the first parallel pass, before a server's steady state). A thread then finds none only when more
+    // lists than the filled count are held (or kept by threads from before the fill, which it did not count). Taking
+    // fewer at a time instead (one list, or 8, per lock) cost a parallel pass taking 100k lists on the helpers 5x or
+    // 1.5x its time (ParallelBufferChurnBenchmark): the share costs memory, never time.
     internal static int MaxPooledLength = 4096 / Unsafe.SizeOf<T>();
+
+    private static bool s_filled;  // Fill ran: a thread set up from then on adds its share (under s_gate)
+    private static int s_threads;  // the threads with stores of their own (under s_gate)
 
     private const int Batch = 32;
 
@@ -446,9 +460,13 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         var free = t_free ?? Own(); // this thread's own list (and every helper thread's): a first refill allocates nothing
         using (new SpinScope(ref s_gate))
         {
-            int missing = count - s_freeCount - free.Count;
+            s_filled = true;
+            int target = count + s_threads * 2 * Batch;
+            int missing = target - s_freeCount - free.Count;
             if (missing <= 0) return;
-            if (s_freeCount + missing > s_free.Length) Array.Resize(ref s_free, Math.Max(s_freeCount + missing, s_free.Length * 2));
+            // Room for every store that may come back: the target and the stores each thread kept from before.
+            int room = target + s_threads * 2 * Batch;
+            if (room > s_free.Length) Array.Resize(ref s_free, Math.Max(room, s_free.Length * 2));
             for (int i = 0; i < missing; i++) s_free[s_freeCount++] = new BufferStore<T>(MaxPooledLength);
         }
     }
@@ -459,8 +477,26 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static Free Own()
     {
-        ThreadSetup.Add(ref _ownSetUp, static () => t_free ??= new Free(), typeof(BufferStore<T>));
-        return t_free ??= new Free();
+        ThreadSetup.Add(ref _ownSetUp, static () => t_free ??= Joined(), typeof(BufferStore<T>));
+        return t_free ??= Joined();
+    }
+
+    // A new thread's own list of stores; once the pool is filled, the share it may keep joins the shared pool.
+    private static Free Joined()
+    {
+        var free = new Free();
+        using (new SpinScope(ref s_gate))
+        {
+            s_threads++;
+            if (s_filled)
+            {
+                int room = s_freeCount + 4 * Batch; // its share and what may come back with it
+                if (room > s_free.Length) Array.Resize(ref s_free, Math.Max(room, s_free.Length * 2));
+                for (int i = 0; i < 2 * Batch; i++) s_free[s_freeCount++] = new BufferStore<T>(MaxPooledLength);
+            }
+        }
+
+        return free;
     }
 
     // This thread's stores ran out: take up to Batch from the shared pool (null when it has none).
