@@ -12,8 +12,10 @@ namespace EasyEcs.Benchmark;
 /// pass writes without it: the hand-written "write a component, then scan it" (a parallel pass writes a pending hit
 /// into each attacker's row, a serial query collects them in row order), a shared <see cref="ConcurrentQueue{T}"/>
 /// (records in the order threads happen to add them), and an <see cref="Interlocked"/> cursor into a preallocated
-/// array (the same, without the queue's segments). Every variant ends with the records in one list and clears it, as
-/// the applying system would. Half the attackers hit (the others are out of range).
+/// array (the same, without the queue's segments). Every variant ends with the records collected (Emit: the chunks'
+/// lists handed to Emitted, in order) and clears them, as the applying system would. Half the attackers hit (the others are out of range). <c>EmitParallelThenRead</c> and
+/// <c>EmitParallelThenRecords</c> also walk the records: as one span (the chunks' lists joined), and through a
+/// <c>[ForEachRecord]</c> pass (walked where the chunks left them).
 /// </summary>
 [MemoryDiagnoser]
 public class EmitBenchmark
@@ -39,6 +41,8 @@ public class EmitBenchmark
         _array.Value = new Hit[Attackers];
         _collected.Capacity = Attackers;
         _world.GetOrAddSingleton<Emitted<Hit>>().Items.EnsureCapacity(Attackers);
+        _world.GetOrAddSingleton<Damage>();
+        if (EmitParallelThenRecords() != EmitParallelThenRead()) throw new System.InvalidOperationException("the two walks differ");
     }
 
     [GlobalCleanup]
@@ -62,6 +66,28 @@ public class EmitBenchmark
         int count = hits.Count;
         hits.Clear();
         return count;
+    }
+
+    /// <summary>The parallel pass, then the records walked as one span (<c>AsReadOnlySpan</c>) and cleared.</summary>
+    [Benchmark]
+    public long EmitParallelThenRead()
+    {
+        Strikes.Emitting(_world);
+        ref var hits = ref _world.GetSingleton<Emitted<Hit>>().Items;
+        long total = 0;
+        foreach (ref readonly var hit in hits.AsReadOnlySpan()) total += hit.Amount;
+        hits.Clear();
+        return total;
+    }
+
+    /// <summary>The parallel pass, then a <c>[ForEachRecord]</c> pass over the records (which clears them).</summary>
+    [Benchmark]
+    public long EmitParallelThenRecords()
+    {
+        Strikes.Emitting(_world);
+        _world.GetSingleton<Damage>().Total = 0;
+        Strikes.Apply(_world);
+        return _world.GetSingleton<Damage>().Total;
     }
 
     [Benchmark]
@@ -101,6 +127,11 @@ public class EmitBenchmark
     public record struct PendingHit(EntityId Target, int Amount) : IComponent;
     public record struct Hit(EntityId Target, int Amount);
 
+    public struct Damage : ISingletonComponent
+    {
+        public long Total;
+    }
+
     public static class Strikes
     {
         [ForEach(Parallel = true, SimdMode = SimdMode.Off)]
@@ -114,6 +145,9 @@ public class EmitBenchmark
         {
             if (attack.Range < 25) hits.Add(new Hit(aim.Target, attack.Power));
         }
+
+        [ForEachRecord]
+        public static void Apply(in Hit hit, ref Damage damage) => damage.Total += hit.Amount;
 
         [ForEach(Parallel = true)]
         public static void Pending(in Attack attack, in Aim aim, ref PendingHit pending) =>
