@@ -31,8 +31,8 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Generator: body stages catch, other assemblies' constructors and helpers** ("Next" items 8f + 8g, branch
-      `feat-foreign-bodies`).
+- [ ] **Emitted<T> without the join copy** ("Next" item 12e, branch `feat-emit-segments`; core first, generator
+      changes only in a new partial file).
 - [ ] **Symmetric pair methods** ("Next" item 8e, branch `feat-symmetric-pairs`).
 - [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
       `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
@@ -59,7 +59,8 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 ## Next, in this order
 
 Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
-rows, edges found while stepping), 8e and 8f + 8g (one generator branch) running, then 12e, 9, 10, 4, 7, Later, then Finish.
+rows, edges found while stepping), 8e and 12e running; 8f + 8g (one generator branch) start once 8e and the tile branch merged (they edit Kernel.cs,
+SystemGenerator.cs and Symbols.cs too), then 9, 10, 4, 7, Later, then Finish.
 The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
 
 1. [x] **L2: the generated pair form** (merged e9c3db8, `feat-pairs-2`; open: the owner's M4 run of PairListsBenchmark) (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
