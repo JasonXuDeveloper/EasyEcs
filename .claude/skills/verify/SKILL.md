@@ -16,7 +16,6 @@ dotnet run --project tools/ApiDocs               # reference pages + Chinese ent
 (cd docs && bun run check && bun run build)      # links, anchors, icons, zh terms; SEO and search expectations
 .github/scripts/check-sample.sh samples/HelloWorld   # and SaveLoad, MultiWorld, HotReload, Actors, VoxelServer (output == README + docs page)
 dotnet run --no-build -c Release --project samples/GameLoop -- --ticks 30
-dotnet run --no-build -c Release --project samples/MultiWorld -- --updates 50
 bash templates/smoke.sh                          # dotnet new templates pack, build, run, test
 tools/agents.sh --check                          # AGENTS.md indexes current, CLAUDE.md = @AGENTS.md, every source file in its map
 npx -y skills add . --list                       # lists only `easyecs`: every development skill has metadata.internal: true
