@@ -229,3 +229,24 @@ public sealed class ChangedAttribute<T> : Attribute where T : struct, IComponent
 /// </summary>
 [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
 public sealed class RemovedAttribute<T> : Attribute where T : struct, IComponent, ITracked;
+
+/// <summary>
+/// On a <c>[ForEach]</c> method stepping a tile (a <c>ref Tile&lt;TCell, TTile&gt;</c> parameter): Gauss-Seidel instead
+/// of Jacobi. The step writes the tile's cells in place, so a row it writes is what the next rows read, and the method,
+/// one sweep, runs again on the tile until a sweep changes nothing (at most <see cref="MaxSweeps"/>). The tiles step
+/// color by color, colored by the parity of their keys (two colors for a stencil of the faces, four for a 9-point one,
+/// eight for 27 points): no two tiles of one color are neighbors, so the tiles of a color step at once, in parallel,
+/// and read the cells the colors before them left, which is the same on any number of threads. A tile whose sweep
+/// changed nothing sleeps until a tile beside it changes the edge it reads. For relaxations that settle
+/// (<c>d = Min(neighbor + cost)</c>: distance fields, flood fills, scents), one pass instead of one per cell crossed.
+/// <code>
+/// [ForEach(Parallel = true), GaussSeidel]
+/// static void Spread(ref Tile&lt;Scent, Ground&gt; scent) { scent.ExchangeHalo(); foreach (var row in scent.Rows()) ... scent.Write(row) ... }
+/// </code>
+/// </summary>
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class GaussSeidelAttribute : Attribute
+{
+    /// <summary>The sweeps a tile makes at most in one pass (0, the default: its cell count); one that has not settled sweeps on in the next.</summary>
+    public int MaxSweeps { get; set; }
+}

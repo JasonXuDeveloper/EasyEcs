@@ -18,7 +18,7 @@ public static partial class EasyEcsAnalyzer
     /// <summary>A new instance of every analyzer of EasyEcs, one per area (what a host loading the package runs).</summary>
     public static ImmutableArray<DiagnosticAnalyzer> All => ImmutableArray.Create<DiagnosticAnalyzer>(
         new DeclarationAnalyzer(), new SystemAnalyzer(), new PerformanceAnalyzer(), new UsageAnalyzer(), new ParallelAnalyzer(),
-        new PartAnalyzer(), new FormAnalyzer(), new LambdaPassAnalyzer(), new ViewAnalyzer(), new RecordAnalyzer(), new FusionAnalyzer(), new PairAnalyzer());
+        new PartAnalyzer(), new FormAnalyzer(), new LambdaPassAnalyzer(), new ViewAnalyzer(), new RecordAnalyzer(), new FusionAnalyzer(), new PairAnalyzer(), new TileAnalyzer());
 
     /// <summary>The analyzer of one area: the settings every area shares, then its own registrations.</summary>
     public abstract class Area : DiagnosticAnalyzer
@@ -40,7 +40,7 @@ public static partial class EasyEcsAnalyzer
         Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS002"));
 
     public static readonly DiagnosticDescriptor ComponentCount = new("EECS003", "Invalid component count",
-        "{0} must take between 1 and 9 components, or none with a [With<T>] or [Changed<T>] filter", Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS003"));
+        "{0} must take between 1 and 9 components, or none with a [With<T>] or [Changed<T>] filter or a Tile", Category, DiagnosticSeverity.Error, true, helpLinkUri: Help("EECS003"));
 
     public static readonly DiagnosticDescriptor Generic = new("EECS004", "Generic [ForEach] method in a system",
         "[ForEach] method '{0}' of a system is generic, and nothing gives it type arguments: make the system generic instead ([EcsSystem] ref struct Regen<T>)",
@@ -225,14 +225,16 @@ public static partial class EasyEcsAnalyzer
         "A tile (ITileShape) is Width x Depth x Height cells, Depth 1 to 64 (a layer's active rows are one 64-bit " +
         "word), with a halo of 1 or more cells. A halo reads the cells of the tile beside, so it is at most the tile's " +
         "extent along every axis with neighbors (its Faces), and along every axis when the boundary mirrors: like an " +
-        "MPI ghost width, never wider than the subdomain. Tile.Pad throws for such a shape; widen the tile or narrow " +
+        "MPI ghost width, never wider than the subdomain. Tile.ExchangeHalo throws for such a shape; widen the tile or narrow " +
         "the halo.", helpLinkUri: Help("EECS072"));
 
     public static readonly DiagnosticDescriptor SharedTile = new("EECS073", "Two tiles of the same cells and grid",
         "[ForEach] method '{0}' takes '{1}' and '{2}', both Tile<{3}>: they load into one texture and read one buffer",
         Category, DiagnosticSeverity.Error, true,
         "A Tile<TCell, TTile> loads into the running thread's texture for TCell and TTile, and both parameters read the " +
-        "same DynamicBuffer<TCell> of the same entity: the second load replaces the first while it is still sampled. " +
+        "same DynamicBuffer<TCell> of the same entity (a Tile<TCell, Columns<TTile>> as well, which the buffer cannot " +
+        "be the cells of too; one taken by ref as well, whose step writes the buffer the other reads): the second load " +
+        "replaces the first while it is still sampled. " +
         "Take one tile per field: one cell type (one struct, one buffer) per field the stencil reads, each its own " +
         "Tile<TCell, TTile>.", helpLinkUri: Help("EECS073"));
 
@@ -336,7 +338,7 @@ public static partial class EasyEcsAnalyzer
 
     /// <summary>
     /// EECS072: a tile shape whose static members are constants (expression-bodied, or left to their defaults) and
-    /// that Tile.Pad would reject: the checks of TileShapeCheck&lt;TTile&gt;.Validate, read at build time.
+    /// that Tile.ExchangeHalo would reject: the checks of TileShapeCheck&lt;TTile&gt;.Validate, read at build time.
     /// </summary>
     private static void AnalyzeTileShape(SyntaxNodeAnalysisContext context)
     {
@@ -787,7 +789,7 @@ public static partial class EasyEcsAnalyzer
                     Symbols.ByValueData(p) ? ImmutableDictionary<string, string?>.Empty.Add(ByValue, "") : null, p.Name, Symbols.Describe(method)));
             }
             else if (kind == Symbols.ParamKind.Tile && method.Parameters.FirstOrDefault(other => other.Ordinal < p.Ordinal
-                         && SymbolEqualityComparer.Default.Equals(other.Type, p.Type)) is { } first)
+                         && SameCells(other.Type, p.Type)) is { } first)
                 context.ReportDiagnostic(Diagnostic.Create(SharedTile, p.Locations.FirstOrDefault(), method.Name, first.Name, p.Name,
                     string.Join(", ", ((INamedTypeSymbol)p.Type).TypeArguments.Select(t => t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)))));
             else if (kind is Symbols.ParamKind.Lookup or Symbols.ParamKind.Tile
@@ -878,6 +880,11 @@ public static partial class EasyEcsAnalyzer
 
     private static string Started(IMethodSymbol starter) =>
         starter.ContainingType.Name + (starter.MethodKind == MethodKind.Constructor ? "" : "." + starter.Name);
+
+    /// <summary>Two Tile types of one cell type over one grid (EECS073): they read the same buffer of each entity, whatever their shapes.</summary>
+    private static bool SameCells(ITypeSymbol a, ITypeSymbol b) =>
+        Symbols.TileElements(a) is { } x && Symbols.TileElements(b) is { } y
+        && SymbolEqualityComparer.Default.Equals(x.Cell, y.Cell) && SymbolEqualityComparer.Default.Equals(x.Grid, y.Grid);
 
     private static IMethodSymbol? Starter(IOperation handoff) => handoff switch
     {

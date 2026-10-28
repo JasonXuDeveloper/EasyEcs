@@ -20,7 +20,7 @@ namespace VoxelServer;
 // The shader. Shade computes one block's next level from its own and its six neighbors', nothing else, and runs on
 // 16 blocks at once (a row of the chunk, one Vector128<byte>). Each chunk first loads its tile and the halo around it,
 // as a CUDA block loads its tile and halo into shared memory: a Tile<Fluid, Chunk> parameter is the chunk's water with
-// its neighbors' (Chunk is a tile of the grid, ITile), and Pad copies the layers in reach into a texture with a ring of
+// its neighbors' (Chunk is a tile of the grid, ITile), and ExchangeHalo copies the layers in reach into a texture with a ring of
 // one block around each layer, from the facing row or column of each neighbor (read as they were before the pass, so
 // the method stays parallel, and only NextFluid is written), and a layer under and over them. The loop then has no
 // edge cases. Byte lanes are integer arithmetic: the same water on every machine.
@@ -60,8 +60,8 @@ public ref struct WaterFlowSystem
         }
         // The textures: the water with its stencil, the blocks (only sampled). Above the world's top, no chunk holds a
         // layer: it is no water and no block, as a neighbor that is not loaded.
-        var water = fluid.Pad(from, to);
-        var ground = blocks.Pad(from, to, mask: false);
+        fluid.ExchangeHalo(from, to);
+        blocks.ExchangeHalo(from, to, mask: false);
 
         // The rows the stencil keeps, 16 blocks at a time, written straight into the step. The layers outside hold no
         // water before the step or after it, so the buffer keeps its count between steps.
@@ -69,10 +69,10 @@ public ref struct WaterFlowSystem
         int filled = 0, wet = 0, first = Terrain.Height, last = 0;
         var edges = TileFaces.None;
         bool changed = false;
-        foreach (var row in water.Rows(TileStencil.Layer | TileStencil.Above))
+        foreach (var row in fluid.Rows(TileStencil.Layer | TileStencil.Above))
         {
-            var w = water.At(row);
-            var g = ground.At(row);
+            var w = fluid.At(row);
+            var g = blocks.At(row);
             var here = w.Load128<byte>();
             // (dx, dy, dz) from the row: the row above, west and east (with the block under each), north and south, its blocks.
             var level = Shade(here, w.Load128<byte>(0, 1, 0),

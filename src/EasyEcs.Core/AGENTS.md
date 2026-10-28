@@ -67,9 +67,16 @@ CacheSizes.cs                the last-level cache and one core's L2, read once p
                              (parallel, fused walks and buffers too) and DestroyEntities' id list past the L2
                              (L2OrLastLevel)
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
-                             Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
-                             TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,
-                             PaddedTile.Rows (TZCNT walk), TileCursor.Load128, ChangedEdges / Facing (sleeping tiles)
+                             Columns<TTile> (a 2D tile of a 3D grid's key), Tile<TCell, TTile> (a [ForEach] parameter:
+                             up to 26 neighbors found by generated code, TileNeighbors), ExchangeHalo into the thread's
+                             TileFrame (a texture padded with the halo, a row mask per layer, the state of the tile it
+                             steps), Rows (TZCNT walk), At / the indexer, Write (a stepped tile's row), TileCursor.Load128,
+                             ChangedEdges / Facing (sleeping tiles written by hand)
+TileSteps.cs                 a stepping tile's pass (ref Tile, TileSteps<TCell, TTile, TGrid, TKey, TColors>, one per
+                             world and method): the second buffer of a Jacobi step swapped in after the pass, the rows
+                             it skipped zeroed; [GaussSeidel]'s sweeps in place, color by color (ITileColors,
+                             TileColoring); sleeping tiles, woken by the edges that changed, by others' writes of the
+                             cells (and of what else the method reads), by tiles that left the grid
 Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
                              chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear);
                              AddIds / AddLanes: a vector loop's passing lanes appended compacted, in row order;

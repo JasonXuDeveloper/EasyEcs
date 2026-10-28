@@ -48,6 +48,7 @@ internal static class Symbols
     public const string Cleanup = "EasyEcs.ICleanupComponent";
     public const string EntityId = "EasyEcs.EntityId";
     public const string TileShape = "EasyEcs.ITileShape";
+    public const string GaussSeidelAttribute = "EasyEcs.GaussSeidelAttribute";
     public const string UpdateBeforeAttribute = "EasyEcs.UpdateBeforeAttribute<TSystem>";
     public const string UpdateAfterAttribute = "EasyEcs.UpdateAfterAttribute<TSystem>";
     public const string UpdateInGroupAttribute = "EasyEcs.UpdateInGroupAttribute<TGroup>";
@@ -1192,9 +1193,12 @@ internal static class Symbols
                 ParamKind.Mutable => true,
                 ParamKind.ComponentSpan => Named(p.Type.OriginalDefinition, "System.Span<T>"),
                 ParamKind.Optional => !IsReadOnlyMaybe(p.Type),
+                // A Jacobi step writes its second buffer, read by no one until the pass ends; a Gauss-Seidel step writes
+                // its cells in place while the tiles of its color, anywhere in the grid, step on other threads.
+                ParamKind.Tile => IsSteppingTile(p) && IsGaussSeidel(method) && !SymbolEqualityComparer.Default.Equals(p, lookup),
                 _ => false,
             };
-            var written = kind == ParamKind.Optional ? MaybeElement(p.Type) : QueriedComponent(p);
+            var written = kind == ParamKind.Optional ? MaybeElement(p.Type) : kind == ParamKind.Tile ? LookedUp(p).FirstOrDefault() : QueriedComponent(p);
             if (writes && SymbolEqualityComparer.Default.Equals(written, target))
                 return $"the method writes through parameter '{p.Name}'";
             if (kind == ParamKind.View && Views.IsValid(p.Type))
@@ -1241,6 +1245,8 @@ internal static class Symbols
                 ? ParamKind.Neighbor : ParamKind.Invalid;
         if (ReduceElement(p.Type) is { } reduced) // by ref only: the pass's partial result, which the method writes
             return p.RefKind == RefKind.Ref && reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;
+        if (p.RefKind == RefKind.Ref && TileElements(p.Type) is { } stepped) // the method steps the tile
+            return stepped.Grid.IsValueType && TileKey(stepped.Grid) != null && stepped.Shape.IsValueType ? ParamKind.Tile : ParamKind.Invalid;
         if (p.RefKind is RefKind.Ref or RefKind.In or RefKind.RefReadOnlyParameter)
             return !p.Type.IsValueType ? ParamKind.Invalid
                 : IsA(p.Type, Component) ? ParamKind.Component
@@ -1258,7 +1264,7 @@ internal static class Symbols
         if (LookupElement(p.Type) is { } looked)
             return looked.IsValueType && IsA(looked, Component) ? ParamKind.Lookup : ParamKind.Invalid;
         if (TileElements(p.Type) is { } tile)
-            return tile.Grid.IsValueType && TileKey(tile.Grid) != null ? ParamKind.Tile : ParamKind.Invalid;
+            return tile.Grid.IsValueType && TileKey(tile.Grid) != null && tile.Shape.IsValueType ? ParamKind.Tile : ParamKind.Invalid;
         if (Views.IsView(p.Type)) return ParamKind.View;
         return Named(p.Type, Entity) ? ParamKind.Entity
             : Named(p.Type, EntitySpan) ? ParamKind.Entities
@@ -1366,11 +1372,85 @@ internal static class Symbols
             ? named.TypeArguments[0]
             : null;
 
-    /// <summary>The cell type and the tile component of a <c>Tile&lt;TCell, TTile&gt;</c>, else null.</summary>
-    public static (ITypeSymbol Cell, ITypeSymbol Grid)? TileElements(ITypeSymbol type) =>
-        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Tile<TCell, TTile>")
-            ? (named.TypeArguments[0], named.TypeArguments[1])
-            : null;
+    /// <summary>
+    /// The cell type, the shape and the grid's tile component of a <c>Tile&lt;TCell, TTile&gt;</c>, else null: the shape is
+    /// the tile component, or <c>Columns&lt;T&gt;</c> of the grid's T.
+    /// </summary>
+    public static (ITypeSymbol Cell, ITypeSymbol Shape, ITypeSymbol Grid)? TileElements(ITypeSymbol type)
+    {
+        if (type is not INamedTypeSymbol { IsGenericType: true } named || !Named(named.ConstructedFrom, "EasyEcs.Tile<TCell, TTile>")) return null;
+        var shape = named.TypeArguments[1];
+        var grid = shape is INamedTypeSymbol { IsGenericType: true } columns && Named(columns.ConstructedFrom, "EasyEcs.Columns<TTile>")
+            ? columns.TypeArguments[0] : shape;
+        return (named.TypeArguments[0], shape, grid);
+    }
+
+    /// <summary>A <c>ref Tile&lt;TCell, TTile&gt;</c> parameter: the method steps the tile (a write of its cells).</summary>
+    public static bool IsSteppingTile(IParameterSymbol p) => p.RefKind == RefKind.Ref && TileElements(p.Type) != null;
+
+    /// <summary>The method has [GaussSeidel].</summary>
+    public static bool IsGaussSeidel(IMethodSymbol method) => method.GetAttributes().Any(a => Named(a.AttributeClass, GaussSeidelAttribute));
+
+    /// <summary>[GaussSeidel(MaxSweeps = N)]'s N (0 without it).</summary>
+    public static int MaxSweeps(IMethodSymbol method) => method.GetAttributes()
+        .Where(a => Named(a.AttributeClass, GaussSeidelAttribute)).SelectMany(a => a.NamedArguments)
+        .Where(n => n.Key == "MaxSweeps" && n.Value.Value is int).Select(n => (int)n.Value.Value!).FirstOrDefault();
+
+    /// <summary>
+    /// Why a method's tile step cannot be generated (EECS115), or null: a pass steps one grid of cells after its
+    /// method ran on every tile (the swap of a Jacobi step, the colors of a Gauss-Seidel one), so it takes one tile by
+    /// ref, over the whole grid, and [GaussSeidel] needs that tile and keys of integer fields to color the tiles by.
+    /// </summary>
+    public static string? StepProblem(IMethodSymbol method)
+    {
+        var stepped = method.Parameters.Where(IsSteppingTile).ToArray();
+        bool gaussSeidel = IsGaussSeidel(method);
+        if (stepped.Length == 0)
+            return gaussSeidel ? "has [GaussSeidel] but takes no tile by ref: the attribute steps the tile the method takes as 'ref Tile<TCell, TTile>'" : null;
+        if (stepped.Length > 1)
+            return $"takes '{stepped[0].Name}' and '{stepped[1].Name}' by ref: a pass steps one tile of each entity, take the others by value";
+        if (IsForEntity(method))
+            return $"takes '{stepped[0].Name}' by ref, but runs on one entity: a step swaps or sweeps the whole grid after its tiles stepped (make it a [ForEach] method)";
+        if (Slices(method) > 1)
+            return $"takes '{stepped[0].Name}' by ref, but runs on a slice of the grid: a step reads every neighbor's cells as the pass before left them (drop Slices)";
+        if (IsConsume(method))
+            return $"takes '{stepped[0].Name}' by ref, but destroys the tiles it visits ([Consume])";
+        if (gaussSeidel && MaxSweeps(method) < 0)
+            return "has [GaussSeidel(MaxSweeps)] below 0 (0 is the tile's cell count)";
+        if (gaussSeidel && TileElements(stepped[0].Type) is { } tile && TileKey(tile.Grid) is { } key && KeyParities(key, "key") == null)
+            return $"has [GaussSeidel], but the key of {tile.Grid.Name}, {key.Name}, has members that are not integers: the tiles are colored by the parity of the key's integer fields";
+        return null;
+    }
+
+    /// <summary>
+    /// The integer members of a grid's key a [GaussSeidel] step colors its tiles by (the parity of each), as C#
+    /// expressions over a value named <paramref name="key"/>: the key itself when it is an integer, else its public
+    /// instance fields and properties (each of an integer type); null when it has another member, or none.
+    /// </summary>
+    public static IReadOnlyList<string>? KeyParities(ITypeSymbol key, string name)
+    {
+        static bool Integer(ITypeSymbol t) => t.SpecialType is SpecialType.System_Int32 or SpecialType.System_Int64 or SpecialType.System_Int16
+            or SpecialType.System_SByte or SpecialType.System_Byte or SpecialType.System_UInt16 or SpecialType.System_UInt32 or SpecialType.System_UInt64;
+        if (Integer(key)) return [name];
+        var members = new List<string>();
+        foreach (var member in key.GetMembers())
+        {
+            if (member.IsStatic) continue;
+            switch (member)
+            {
+                case IFieldSymbol { AssociatedSymbol: null } field: // a backing field is its property's
+                    if (field.DeclaredAccessibility != Accessibility.Public || !Integer(field.Type)) return null;
+                    members.Add($"{name}.{field.Name}");
+                    break;
+                case IPropertySymbol { IsIndexer: false, GetMethod: not null } property when property.Name != "EqualityContract":
+                    if (property.DeclaredAccessibility != Accessibility.Public) continue; // a private one is computed, or kept by a public one
+                    if (!Integer(property.Type)) return null;
+                    members.Add($"{name}.{property.Name}");
+                    break;
+            }
+        }
+        return members.Count > 0 ? members : null;
+    }
 
     /// <summary>The key type of a tile component (<c>ITile&lt;TKey&gt;</c>), else null.</summary>
     public static ITypeSymbol? TileKey(ITypeSymbol grid) =>
@@ -1423,6 +1503,7 @@ internal static class Symbols
         if (IsForEachRecord(method)) // a pass over records: no components, no filter (EECS108 says why not)
             return RecordProblem(method) == null && Unnameable(method) == null && (outside ? !EntryPointCollides(method) : IsValidSystem(type));
         if (IsForEntity(method) ? ForEntityProblem(method) != null : ConsumeProblem(method) != null) return false;
+        if (StepProblem(method) != null) return false;
         if (!method.IsStatic || outside && EntryPointCollides(method)) return false;
         if (!outside && !IsValidSystem(type)) return false; // EECS074: no system code
         if (method.IsGenericMethod && !outside || Unnameable(method) != null) return false; // a system's method gets no type arguments
@@ -1462,10 +1543,11 @@ internal static class Symbols
 
     /// <summary>
     /// 1..9 component (or component span) parameters, or none when a [With&lt;T&gt;] or [Changed&lt;T&gt;] filter names the
-    /// queried component (a method that only needs the entity, e.g. [With&lt;Dead&gt;] static void Remove(Entity e)).
+    /// queried component (a method that only needs the entity, e.g. [With&lt;Dead&gt;] static void Remove(Entity e)) or a
+    /// Tile does (its grid's component: a tile stepped through <c>ref Tile</c> alone).
     /// </summary>
     public static bool ComponentCountValid(IMethodSymbol method, int components) =>
-        components is >= 1 and <= MaxComponents || components == 0 && HasWith(method);
+        components is >= 1 and <= MaxComponents || components == 0 && (HasWith(method) || method.Parameters.Any(p => TileElements(p.Type) != null));
 
     public static bool HasWith(IMethodSymbol method) => AttributeFilters(method).Any(f => f.Kind is FilterKind.With or FilterKind.Changed);
 
