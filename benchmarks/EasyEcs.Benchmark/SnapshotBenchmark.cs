@@ -73,3 +73,70 @@ public class SnapshotBenchmark
     [Benchmark]
     public void LoadKeeping() => _world.LoadKeeping(_save, in Kept);
 }
+
+/// <summary>
+/// Rollback netcode over <see cref="Entities"/> bodies: a tick writes <see cref="Writes"/> of them (the players' inputs
+/// and what they hit) and captures the world into a ring of <see cref="Ring"/> snapshots, one per tick (<c>Tick</c>); a
+/// late input restores the snapshot of <see cref="Depth"/> ticks ago and replays those ticks, capturing each again
+/// (<c>Rollback</c>). The state is tracked (<see cref="ITracked"/>): a capture or restore copies the rows written since,
+/// where an untracked column would be copied whole.
+/// </summary>
+[MemoryDiagnoser]
+public class RollbackBenchmark
+{
+    public const int Ring = 8;
+    public const int Depth = 4;
+
+    [Params(100_000)] public int Entities;
+    [Params(16, 256)] public int Writes;
+
+    private World _world;
+    private readonly WorldSnapshot[] _ring = new WorldSnapshot[Ring];
+    private Entity[] _entities;
+    private int _tick = Ring;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _entities = new Entity[Entities];
+        _world.CreateEntities(_entities, new Body(), new Life(100));
+        for (int i = 0; i < Ring; i++) _ring[i] = _world.Capture();
+        for (int i = 0; i < 2 * Ring; i++)
+        {
+            Tick();
+            Rollback();
+        }
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark]
+    public int Tick() => Step(_tick++);
+
+    [Benchmark]
+    public int Rollback()
+    {
+        _world.Restore(_ring[(_tick - Depth) & (Ring - 1)]);
+        int alive = 0;
+        for (int t = _tick - Depth + 1; t <= _tick; t++) alive += Step(t);
+        return alive;
+    }
+
+    private int Step(int tick)
+    {
+        for (int i = 0; i < Writes; i++)
+        {
+            var e = _entities[(int)(((long)tick * 7_919 + (long)i * 104_729) % Entities)];
+            e.Get<Body>().X += 1;
+            e.Get<Life>().Value -= 1;
+        }
+
+        return _world.Capture(_ring[tick & (Ring - 1)]).EntityCount;
+    }
+
+    public record struct Body(float X, float Y, float VX, float VY) : IComponent, ITracked;
+
+    public record struct Life(int Value) : IComponent, ITracked;
+}

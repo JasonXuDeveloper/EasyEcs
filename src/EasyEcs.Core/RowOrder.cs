@@ -211,7 +211,7 @@ internal abstract class RowOrder
     /// order, then the boxes drawn. Returns whether rows moved. Inside the structural gate, outside passes, on a dense
     /// table. O(rows × (key bytes + columns)).
     /// </summary>
-    public abstract bool Sort(Archetype table, EntityMeta[] meta);
+    public abstract bool Sort(Archetype table, EntityMeta[] meta, ColumnSpares spares);
 
     /// <summary>Widen the box of the cluster of row <paramref name="row"/> (in the table's column) to hold the row.</summary>
     protected abstract void Widen(Archetype table, int row);
@@ -275,10 +275,10 @@ internal abstract class RowOrder
 internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, float margin, int clusterSize)
     : RowOrder(ComponentType<T>.Bit, axes, cell, interval, margin, clusterSize) where T : struct, IComponent where TOrder : struct, IRowOrder<T>
 {
-    public override bool Sort(Archetype table, EntityMeta[] meta)
+    public override bool Sort(Archetype table, EntityMeta[] meta, ColumnSpares spares)
     {
         int column = table.ColumnIndex(Bit);
-        bool moved = TOrder.KeyBytes <= 4 ? Order<uint>(table, column, meta) : Order<ulong>(table, column, meta);
+        bool moved = TOrder.KeyBytes <= 4 ? Order<uint>(table, column, meta, spares) : Order<ulong>(table, column, meta, spares);
         Draw(table, column);
         Sorted(table.Count);
         return moved;
@@ -289,7 +289,7 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
     /// in the same pass, then one stable scatter per key byte whose values differ (a byte every row shares is skipped:
     /// a Morton key of a small map sorts in its low bytes only), ping-ponging between two buffers of the array pool.
     /// </summary>
-    private bool Order<TBits>(Archetype table, int column, EntityMeta[] meta)
+    private bool Order<TBits>(Archetype table, int column, EntityMeta[] meta, ColumnSpares spares)
         where TBits : unmanaged, IBinaryInteger<TBits>, IUnsignedNumber<TBits>
     {
         int n = table.Count, bytes = Math.Clamp(TOrder.KeyBytes, 1, Unsafe.SizeOf<TBits>());
@@ -351,7 +351,7 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
             (fromRows, toRows) = (toRows, fromRows);
         }
 
-        table.Permute(fromRows.AsSpan(0, n), meta);
+        table.Permute(fromRows.AsSpan(0, n), meta, spares);
         ArrayPool<TBits>.Shared.Return(keys);
         ArrayPool<TBits>.Shared.Return(keys2);
         ArrayPool<int>.Shared.Return(rows);

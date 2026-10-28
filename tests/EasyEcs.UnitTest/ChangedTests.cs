@@ -463,19 +463,27 @@ public class ChangedTests
     }
 
     [Test]
-    public void RestoreCountsEveryRowAsChanged()
+    public void RestoreCountsTheRowsItMayChangeAsChanged()
     {
         using var world = new World();
         world.AddSystem<ArmorWatch>();
         var e = world.CreateEntity(new Armor(1), new Seen());
+        var other = world.CreateEntity(new Armor(1), new Seen());
         world.Update();
         var snapshot = world.Capture();
         world.Update();
         Assert.That(SeenCount(e), Is.EqualTo(1));
 
-        world.Restore(snapshot); // restored values may differ from what any system last saw
+        e.Get<Armor>().Value = 2;
         world.Update();
-        Assert.That(SeenCount(e), Is.EqualTo(2));
+        world.Restore(snapshot); // in sync: the restored value differs from what the system last saw
+        world.Update();
+        Assert.That((SeenCount(e), SeenCount(other)), Is.EqualTo((2, 1))); // Seen came back to 1; the row it did not change keeps its tick
+
+        world.CreateEntity(new Armor(3), new Seen());
+        world.Restore(snapshot); // a structural change of the table since: it is rewritten, every row counts as changed
+        world.Update();
+        Assert.That((SeenCount(e), SeenCount(other)), Is.EqualTo((2, 2)));
     }
 
     [Test]

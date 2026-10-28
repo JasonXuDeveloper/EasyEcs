@@ -1076,6 +1076,7 @@ internal sealed class Archetype
     /// <summary>
     /// The rows of a table at one moment (<see cref="Capture"/>): entities, columns (unmanaged ones as plain bytes),
     /// presence bits. The arrays may be longer than <see cref="Count"/> rows: a capture into an older copy reuses them.
+    /// Change-tick columns are not copied: a restore stamps or clears every row's ticks itself.
     /// </summary>
     internal sealed class TableCopy(Archetype table)
     {
@@ -1087,6 +1088,17 @@ internal sealed class Archetype
         public readonly ulong[][] Present = new ulong[table.Columns.Length][];
         public readonly int[] Absent = new int[table.Columns.Length];
         private readonly ulong[][] _spare = new ulong[table.Columns.Length][]; // presence bits dropped, kept for reuse
+
+        /// <summary>
+        /// The change tick the copy and its table were last made equal at (a capture into it, a restore from it), 0 when
+        /// they never were or no longer can be compared (a load's copy). While the table holds the same rows
+        /// (<see cref="SameRows"/>), a row of a tracked column whose change tick is below it still holds the copy's value:
+        /// every write since stamped its row at this tick or later. Untracked columns carry no ticks and are copied whole.
+        /// </summary>
+        public ulong Synced;
+
+        /// <summary>The world's <see cref="World.Rewrites"/> at <see cref="Synced"/>: a load since rewrote rows without stamping them.</summary>
+        public int Rewrites;
 
         /// <summary>Column <paramref name="c"/> has every row present again; its bits are kept for <see cref="TakeBits"/>.</summary>
         public void DropBits(int c)
@@ -1104,23 +1116,62 @@ internal sealed class Archetype
             bits.AsSpan().Clear();
             return bits;
         }
+
+        /// <summary>
+        /// Whether the table holds the rows the copy does: the same entities in the same rows, the same presence bits and
+        /// absent counts. Then only the values differ, and only where written since <see cref="Synced"/>. O(rows / 8)
+        /// vector compares; the check of a world that made a structural change since (else the answer is yes).
+        /// </summary>
+        public bool SameRows()
+        {
+            var table = Table;
+            int count = Count;
+            if (table.Count != count) return false;
+            if (!MemoryMarshal.Cast<EntityId, long>(table.Slots.AsSpan(0, count)).SequenceEqual(MemoryMarshal.Cast<EntityId, long>(Slots.AsSpan(0, count))))
+                return false;
+            int words = (count + 63) >> 6;
+            for (int c = 0; c < Columns.Length; c++)
+            {
+                if (table.Absent[c] != Absent[c]) return false;
+                var bits = table.Present[c];
+                var saved = Present[c];
+                // A column that gained bits since but has every row present again compares as different: the full copy
+                // that follows makes both sides hold bits, and the next check finds them equal.
+                if ((bits == null) != (saved == null)) return false;
+                if (bits != null && !bits.AsSpan(0, words).SequenceEqual(saved.AsSpan(0, words))) return false;
+            }
+
+            return true;
+        }
     }
 
     /// <summary>
     /// Copy the rows (a dense table: outside passes) into <paramref name="into"/> (an earlier copy, its arrays reused
-    /// when large enough, if it is of this table) or a new copy. O(rows × columns). Inside the structural gate.
+    /// when large enough, if it is of this table) or a new copy, made equal to the table at change tick
+    /// <paramref name="tick"/> (<see cref="TableCopy.Synced"/>). When the copy was made equal to the table before and
+    /// the table holds the same rows (<paramref name="same"/>: no structural change in the world since, else
+    /// <see cref="TableCopy.SameRows"/>), only the words of tracked columns written since are copied, and untracked
+    /// columns whole: O(rows written × columns + rows × untracked columns). Else O(rows × columns). Inside the
+    /// structural gate.
     /// </summary>
-    public TableCopy Capture(TableCopy into)
+    public TableCopy Capture(TableCopy into, ulong tick, int rewrites, bool same)
     {
         int count = Count;
         if (into?.Table != this) into = null;
+        if (into != null && InSync(into, rewrites, same))
+        {
+            CopyWritten(into, 0);
+            into.Synced = tick;
+            return into;
+        }
+
         var rows = into ?? new TableCopy(this);
-        if (rows.Slots.Length < count) rows.Slots = new EntityId[count];
-        Slots.AsSpan(0, count).CopyTo(rows.Slots);
+        bool kept = into != null && Kept(into, rewrites); // its rows' lists may still match: see CopyChangedLists
         for (int c = 0; c < Columns.Length; c++)
         {
             var info = _infos[c];
             ref var column = ref rows.Columns[c];
+            if (info.Owner >= 0) continue; // change ticks: a restore stamps or clears them
             if (info.Size < 0)
             {
                 int old = into?.Count ?? 0;
@@ -1129,9 +1180,11 @@ internal sealed class Archetype
                 {
                     if (column != null) info.Discard(column, 0, old);
                     column = info.Create(count);
+                    old = 0;
                 }
                 else if (old > count) info.Discard(column, count, old - count); // no stale references kept alive
-                info.CopyRows(Columns[c], column, count);
+                if (kept && info.IsBuffer) CopyChangedLists(c, rows, count, Math.Min(old, count), into.Synced, toCopy: true);
+                else info.CopyRows(Columns[c], column, count);
             }
             else
             {
@@ -1150,20 +1203,255 @@ internal sealed class Archetype
             else rows.DropBits(c);
         }
 
+        if (rows.Slots.Length < count) rows.Slots = new EntityId[count];
+        Slots.AsSpan(0, count).CopyTo(rows.Slots); // after the columns: CopyChangedLists compares the old slots
         Absent.CopyTo(rows.Absent, 0);
         rows.Count = count;
+        rows.Synced = tick;
+        rows.Rewrites = rewrites;
+        return rows;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="rows"/> was made equal to this table and no load rewrote rows since, so a row holding the
+    /// entity the copy holds in that row, its tracked column not written since <see cref="TableCopy.Synced"/>, holds
+    /// the copy's value, though other rows changed (<see cref="CopyChangedLists"/>).
+    /// </summary>
+    private static bool Kept(TableCopy rows, int rewrites) => rows.Synced != 0 && rows.Rewrites == rewrites;
+
+    /// <summary>
+    /// Copy the lists of buffer column <paramref name="c"/>, rows [0, <paramref name="count"/>), between the table and
+    /// <paramref name="rows"/> (a copy <see cref="Kept"/>, of other rows than the table's now: the full path), into the
+    /// copy (<paramref name="toCopy"/>) or back: a row below <paramref name="kept"/> (rows both sides held before) that
+    /// holds the same entity on both sides and was not written since <paramref name="since"/> (the copy's
+    /// <see cref="TableCopy.Synced"/>) holds equal elements on both sides and is skipped; every other row gets copies in
+    /// a list of the target's own (<see cref="BufferStore.AssignOwn"/>). Before either side's slots are overwritten.
+    /// O(rows + elements copied).
+    /// </summary>
+    private void CopyChangedLists(int c, TableCopy rows, int count, int kept, ulong since, bool toCopy)
+    {
+        var info = _infos[c];
+        int ticks = ColumnIndex(info.Companion);
+        ref ulong tick = ref Unsafe.As<RowTick, ulong>(ref Data<RowTick>(ticks));
+        ref long mine = ref Unsafe.As<EntityId, long>(ref MemoryMarshal.GetArrayDataReference(Slots));
+        ref long theirs = ref Unsafe.As<EntityId, long>(ref MemoryMarshal.GetArrayDataReference(rows.Slots));
+        for (int first = 0; first < count; first += 64)
+        {
+            int end = Math.Min(64, count - first);
+            ulong copy = 0;
+            for (int i = 0; i < end; i++)
+            {
+                int row = first + i;
+                // Below kept: rows of both sides' slots and of the ticks column (the table's capacity covers them).
+                if (row >= kept || Unsafe.Add(ref mine, row) != Unsafe.Add(ref theirs, row) || Unsafe.Add(ref tick, row) >= since)
+                    copy |= 1UL << i;
+            }
+
+            if (copy == 0) continue;
+            if (toCopy) info.CopyWritten(Columns[c], rows.Columns[c], first, copy);
+            else info.CopyWritten(rows.Columns[c], Columns[c], first, copy);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="rows"/> (a copy of this table) differs from it only in rows written since its
+    /// <see cref="TableCopy.Synced"/>: it was made equal to the table, no load rewrote rows since, and the table holds
+    /// the same rows (<paramref name="same"/>, else compared).
+    /// </summary>
+    private static bool InSync(TableCopy rows, int rewrites, bool same) =>
+        rows.Synced != 0 && rows.Rewrites == rewrites && (same || rows.SameRows());
+
+    /// <summary>
+    /// Copy the rows written since <paramref name="rows"/>' <see cref="TableCopy.Synced"/> between the table and the
+    /// copy, which hold the same rows: into the copy (<paramref name="stamp"/> 0), else back into the table, the rows
+    /// copied back stamped at change tick <paramref name="stamp"/> (a restore counts as a write of the rows it changes).
+    /// Per tracked column, the 64-row words its change ticks say were written (the column's latest tick and the
+    /// 4,096-row blocks skip the rest): an unmanaged word whole (its other rows hold the same bytes on both sides), a
+    /// buffer's rows each into a list of the target's own (<see cref="BufferStore.AssignOwn"/>: no list is shared
+    /// afterwards, so the next write of either side is in place); untracked columns whole, as they carry no ticks.
+    /// Slots, presence bits and absent counts are equal already.
+    /// </summary>
+    private void CopyWritten(TableCopy rows, ulong stamp)
+    {
+        int count = Count;
+        int words = (count + 63) >> 6;
+        ulong since = rows.Synced;
+        bool toCopy = stamp == 0;
+        for (int c = 0; c < Columns.Length; c++)
+        {
+            var info = _infos[c];
+            if (info.Owner >= 0) continue; // change ticks: never kept by a copy
+            var copy = rows.Columns[c];
+            int ticks = info.Companion >= 0 ? ColumnIndex(info.Companion) : -1;
+            if (ticks < 0)
+            {
+                // Untracked: the table's rows may have been written through refs without a trace.
+                if (info.Size >= 0) CopyBytes(c, copy, 0, count, toCopy);
+                else if (toCopy) info.CopyRows(Columns[c], copy, count); // never a buffer: buffers are tracked
+                else info.CopyRows(copy, Columns[c], count);
+                continue;
+            }
+
+            if (LastWrite[ticks] < since) continue; // no row written since
+            // Stamping a word raises its summaries to a tick at or above since: the walk, forward, still finds the next.
+            for (int w = NextWritten(ticks, since, 0, words); w >= 0; w = NextWritten(ticks, since, w + 1, words))
+            {
+                int first = w << 6, rowCount = Math.Min(64, count - first);
+                ulong written = WrittenRows(ticks, w, since) & (rowCount == 64 ? ulong.MaxValue : (1UL << rowCount) - 1);
+                if (info.Size >= 0)
+                {
+                    // A few rows one by one (scattered writes: a row each), else the whole word in one copy, its rows
+                    // not written since holding the same bytes on both sides.
+                    if (BitOperations.PopCount(written) > SparseRows) CopyBytes(c, copy, first, rowCount, toCopy);
+                    else
+                        for (ulong left = written; left != 0; left &= left - 1)
+                            CopyBytes(c, copy, first + BitOperations.TrailingZeroCount(left), 1, toCopy);
+                }
+                else if (toCopy) info.CopyWritten(Columns[c], copy, first, written);
+                else info.CopyWritten(copy, Columns[c], first, written);
+                if (!toCopy && written != 0) StampWritten(ticks, first, written, stamp);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The most written rows of a 64-row word an incremental capture or restore copies one by one; more, and it copies the
+    /// word whole. A row's copy is a few instructions, the word's a memmove of 64 rows.
+    /// </summary>
+    private const int SparseRows = 8;
+
+    /// <summary>
+    /// Rows <paramref name="rows"/> (bit i: row <paramref name="first"/> + i, one 64-row word) of change-tick column
+    /// <paramref name="column"/> get <paramref name="tick"/>, the world's current one.
+    /// </summary>
+    private void StampWritten(int column, int first, ulong rows, ulong tick)
+    {
+        ref ulong ticks = ref Unsafe.Add(ref Unsafe.As<RowTick, ulong>(ref Data<RowTick>(column)), first);
+        for (ulong left = rows; left != 0; left &= left - 1) Unsafe.Add(ref ticks, BitOperations.TrailingZeroCount(left)) = tick;
+        NoteWord(column, first, rows, tick);
+    }
+
+    /// <summary>
+    /// Rows [<paramref name="first"/>, <paramref name="first"/> + <paramref name="count"/>) of unmanaged column
+    /// <paramref name="c"/> copied into <paramref name="copy"/> (a copy's bytes of it), or back from it.
+    /// </summary>
+    private void CopyBytes(int c, Array copy, int first, int count, bool toCopy)
+    {
+        int size = _infos[c].Size;
+        ref byte table = ref Unsafe.Add(ref Aligned(Columns[c]), (nint)first * size);
+        ref byte saved = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(copy)), (nint)first * size);
+        if (count == 1 && size != 0) // one row without a memmove call (CopyBytes: two arrays, no overlap)
+        {
+            if (toCopy) CopyBytes(ref table, ref saved, size);
+            else CopyBytes(ref saved, ref table, size);
+        }
+        else if (toCopy) Unsafe.CopyBlockUnaligned(ref saved, ref table, (uint)(count * size));
+        else Unsafe.CopyBlockUnaligned(ref table, ref saved, (uint)(count * size));
+    }
+
+    /// <summary>
+    /// The first word at or after <paramref name="word"/> (below <paramref name="words"/>) of change-tick column
+    /// <paramref name="column"/> with a row written at <paramref name="since"/> or later, or -1: blocks older than it
+    /// are skipped whole, and in a block whose other words are older (<see cref="BlockTicks.Rest"/>) only its latest
+    /// words are looked at (one bit scan).
+    /// </summary>
+    private int NextWritten(int column, ulong since, int word, int words)
+    {
+        var blocks = Blocks[column];
+        var summaries = Words[column];
+        while (word < words)
+        {
+            int b = word >> 6;
+            ref readonly var block = ref blocks[b];
+            if (block.Latest >= since)
+            {
+                ulong candidates = (block.Rest >= since ? ulong.MaxValue : block.Words) & ulong.MaxValue << word; // shift is mod 64
+                for (; candidates != 0; candidates &= candidates - 1)
+                {
+                    int w = (b << 6) + BitOperations.TrailingZeroCount(candidates);
+                    if (w >= words) return -1;
+                    if (summaries[w].Write >= since) return w;
+                }
+            }
+
+            word = (b + 1) << 6;
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// The rows of word <paramref name="word"/> of change-tick column <paramref name="column"/> written at
+    /// <paramref name="since"/> or later (one bit each): the word's latest rows when every other row is older, else
+    /// read from the rows' ticks.
+    /// </summary>
+    private ulong WrittenRows(int column, int word, ulong since)
+    {
+        ref readonly var summary = ref Words[column][word];
+        if (summary.Write < since) return 0;
+        if (summary.Rest < since) return summary.Rows;
+        ref ulong ticks = ref Unsafe.Add(ref Unsafe.As<RowTick, ulong>(ref Data<RowTick>(column)), word << 6);
+        int end = Math.Min(64, Slots.Length - (word << 6)); // the ticks column has the table's capacity
+        return RowsAtOrAfter(ref ticks, end, since);
+    }
+
+    /// <summary>
+    /// The ticks of <paramref name="ticks"/>[0, <paramref name="count"/>) (at most 64) at <paramref name="since"/> or
+    /// later, one bit each: a vector compare per 4 (256-bit) or 2 (128-bit) ticks and its sign bits, then the rest one
+    /// by one. Ticks never reach 2^63, so a signed compare orders them.
+    /// </summary>
+    private static ulong RowsAtOrAfter(ref ulong ticks, int count, ulong since)
+    {
+        ulong rows = 0;
+        int i = 0;
+        if (Vector256.IsHardwareAccelerated)
+        {
+            var bound = Vector256.Create((long)since - 1);
+            for (; i + 4 <= count; i += 4)
+            {
+                var v = Vector256.LoadUnsafe(ref Unsafe.As<ulong, long>(ref Unsafe.Add(ref ticks, i)));
+                rows |= (ulong)Vector256.GreaterThan(v, bound).ExtractMostSignificantBits() << i;
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated)
+        {
+            var bound = Vector128.Create((long)since - 1);
+            for (; i + 2 <= count; i += 2)
+            {
+                var v = Vector128.LoadUnsafe(ref Unsafe.As<ulong, long>(ref Unsafe.Add(ref ticks, i)));
+                rows |= (ulong)Vector128.GreaterThan(v, bound).ExtractMostSignificantBits() << i;
+            }
+        }
+
+        for (; i < count; i++)
+            if (Unsafe.Add(ref ticks, i) >= since) rows |= 1UL << i;
         return rows;
     }
 
     /// <summary>
     /// Put the rows of <paramref name="rows"/> back (null: empty the table). The entity records are restored by the
-    /// world. With <paramref name="swap"/> the lists of buffer columns change sides, else a row written since the
-    /// capture takes copies of the snapshot's elements (see <see cref="ComponentInfo.CopyRows"/>). O(rows × columns).
-    /// Inside the structural gate, outside passes, on a dense table (no tombstones: World.Restore fills the holes first).
+    /// world. When the copy is in sync with the table (<see cref="Capture"/>'s <paramref name="same"/>), only the rows
+    /// written since its <see cref="TableCopy.Synced"/> are copied back, stamped at <paramref name="tick"/> (and
+    /// untracked columns whole): true, nothing moved. Else every row is copied (O(rows × columns)), with
+    /// <paramref name="swap"/> the lists of buffer columns changing sides, else a row written since the capture taking
+    /// copies of the snapshot's elements (see <see cref="ComponentInfo.CopyRows"/>), and the change ticks are the
+    /// caller's to stamp or clear: false. Inside the structural gate, outside passes, on a dense table (no tombstones:
+    /// World.Restore fills the holes first).
     /// </summary>
-    public void Restore(TableCopy rows, bool swap = false)
+    public bool Restore(TableCopy rows, int rewrites, bool same, ulong tick, bool swap = false)
     {
+        if (!swap && rows != null && InSync(rows, rewrites, same))
+        {
+            CopyWritten(rows, tick);
+            Order?.Reset(); // values came back: the blocks are drawn again by the next update
+            return true;
+        }
+
+        bool kept = !swap && rows != null && Kept(rows, rewrites); // its rows' lists may still match: see CopyChangedLists
+        ulong since = rows?.Synced ?? 0;
+        if (rows != null) rows.Synced = 0; // the caller syncs it again once the table holds its rows (not a load's)
         int count = rows?.Count ?? 0;
+        int before = Math.Min(Count, count); // rows both sides held
         if (_hasManaged && Count > count)
         {
             // The rows past the restored ones are gone: their buffers' lists go back to their pool. Dense, so each list
@@ -1175,14 +1463,17 @@ internal sealed class Archetype
         Reserve(count);
         if (rows != null)
         {
-            rows.Slots.AsSpan(0, count).CopyTo(Slots);
             for (int c = 0; c < Columns.Length; c++)
             {
-                if (_infos[c].Size < 0) _infos[c].CopyRows(rows.Columns[c], Columns[c], count, swap, own: !swap);
+                if (_infos[c].Owner >= 0) continue; // change ticks: stamped or cleared by the caller
+                if (kept && _infos[c].IsBuffer) CopyChangedLists(c, rows, count, before, since, toCopy: false);
+                else if (_infos[c].Size < 0) _infos[c].CopyRows(rows.Columns[c], Columns[c], count, swap, own: !swap);
                 else
                     Unsafe.CopyBlockUnaligned(ref Aligned(Columns[c]), ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(rows.Columns[c])),
                         (uint)(count * _infos[c].Size));
             }
+
+            rows.Slots.AsSpan(0, count).CopyTo(Slots); // after the columns: CopyChangedLists compares the old slots
         }
 
         foreach (ref var row in Slots.AsSpan(count, Math.Max(Count - count, 0))) row = new EntityId(Tombstone, row.Version);
@@ -1199,6 +1490,7 @@ internal sealed class Archetype
         _holeCount = 0;
         Dirty = false;
         Order?.Reset(); // the rows come back in the order they were saved in; the clusters are drawn again by the next update
+        return false;
     }
 
     /// <summary>
@@ -1236,18 +1528,35 @@ internal sealed class Archetype
     /// presence bits, its change ticks (the word and block summaries rebuilt exactly from them) and its id, and the
     /// moved entities' slots rewritten. The re-sort of an ordered table (<see cref="RowOrder"/>); the other sanctioned
     /// way, beside <see cref="FillHoles"/>, to rewrite rows and slots. Absent counts and <see cref="LastWrite"/> stay
-    /// (a permutation changes neither). Inside the structural gate, outside passes, on a dense table. O(rows × columns),
-    /// allocation-free in steady state (the gathers go through buffers of the shared array pools).
+    /// (a permutation changes neither). Each column and the slots are gathered into a spare of their shape from
+    /// <paramref name="spares"/> and swapped in, the old ones becoming the spares (no copy back); the caller bumps the
+    /// world's StorageVersion, since columns change. Inside the structural gate, outside passes, on a dense table.
+    /// O(rows × columns), allocation-free in steady state (one spare per shape, made by the first sort).
     /// </summary>
-    public void Permute(ReadOnlySpan<int> order, EntityMeta[] meta)
+    public void Permute(ReadOnlySpan<int> order, EntityMeta[] meta, ColumnSpares spares)
     {
         int n = Count;
         if (order.Length != n || AliveCount != n) throw new InvalidOperationException("A permutation covers every row of a dense table");
         for (int c = 0; c < Columns.Length; c++)
         {
             var info = _infos[c];
-            if (info.Managed) info.Permute(Columns[c], order);
-            else PermuteBytes(ref Aligned(Columns[c]), info.Size, order);
+            if (info.Size == 0) continue; // a tag: no values to move
+            var old = Columns[c];
+            var into = spares.Take(old) ?? info.Create(Slots.Length);
+            if (info.Managed) info.Permute(old, into, order);
+            else
+            {
+                GatherBytes(ref Aligned(old), ref Aligned(into), info.Size, order);
+                // Change ticks past the rows stay: the summaries cover the table's capacity. Other columns' rows past
+                // Count hold nothing a reader uses (a new row writes its values).
+                if (info.Owner >= 0)
+                    Unsafe.CopyBlockUnaligned(ref Unsafe.Add(ref Aligned(into), (nint)n * info.Size), ref Unsafe.Add(ref Aligned(old), (nint)n * info.Size),
+                        (uint)((Slots.Length - n) * info.Size));
+            }
+
+            Columns[c] = into;
+            ByBit[Components[c]].Set(into, info.Managed);
+            spares.Give(old);
         }
 
         foreach (short c in _bitColumns) PermuteBits(Present[c], order);
@@ -1255,23 +1564,23 @@ internal sealed class Archetype
             for (int c = 0; c < Words.Length; c++)
                 if (Words[c] != null) RebuildTicks(c, order);
 
-        var slots = System.Buffers.ArrayPool<EntityId>.Shared.Rent(n);
+        // The slots too, the versions of the rows past Count with them (a tombstone keeps its version).
+        var slots = spares.Take(Slots) as EntityId[] ?? new EntityId[Slots.Length];
         Gather(ref Unsafe.As<EntityId, long>(ref MemoryMarshal.GetArrayDataReference(Slots)), ref Unsafe.As<EntityId, long>(ref slots[0]), order);
-        slots.AsSpan(0, n).CopyTo(Slots);
-        System.Buffers.ArrayPool<EntityId>.Shared.Return(slots);
+        Slots.AsSpan(n).CopyTo(slots.AsSpan(n));
+        spares.Give(Slots);
+        Slots = slots;
         // Rows of a dense table hold live entities, whose ids are valid meta indices.
         ref var records = ref MemoryMarshal.GetArrayDataReference(meta);
         for (int i = 0; i < n; i++) Unsafe.Add(ref records, Slots[i].Index).Slot = i;
     }
 
-    /// <summary>Rows [0, order.Length) of an unmanaged column of <paramref name="size"/>-byte rows in the new order.</summary>
-    private static void PermuteBytes(ref byte rows, int size, ReadOnlySpan<int> order)
+    /// <summary>Rows [0, order.Length) of an unmanaged column of <paramref name="size"/>-byte rows gathered into <paramref name="into"/> in the new order.</summary>
+    private static void GatherBytes(ref byte rows, ref byte into, int size, ReadOnlySpan<int> order)
     {
-        int bytes = order.Length * size;
-        var scratch = System.Buffers.ArrayPool<byte>.Shared.Rent(bytes);
-        ref byte into = ref MemoryMarshal.GetArrayDataReference(scratch);
         switch (size) // one loop per common size: a load and a store per row, no copy call
         {
+            case 0: break;
             case 1: Gather(ref rows, ref into, order); break;
             case 2: Gather(ref Unsafe.As<byte, short>(ref rows), ref Unsafe.As<byte, short>(ref into), order); break;
             case 4: Gather(ref Unsafe.As<byte, int>(ref rows), ref Unsafe.As<byte, int>(ref into), order); break;
@@ -1282,9 +1591,6 @@ internal sealed class Archetype
                     CopyBytes(ref Unsafe.Add(ref rows, (nint)order[i] * size), ref Unsafe.Add(ref into, (nint)i * size), size);
                 break;
         }
-
-        Unsafe.CopyBlockUnaligned(ref rows, ref into, (uint)bytes);
-        System.Buffers.ArrayPool<byte>.Shared.Return(scratch);
     }
 
     /// <summary>
@@ -1672,5 +1978,55 @@ internal sealed class Transition
         foreach (ref readonly var step in _plan.AsSpan())
             if (!Source.Has(step.From, slot))
                 Target.MarkAbsent(step.To, targetSlot, keep: true); // a removed managed value was cleared already; a disabled one stays
+    }
+}
+
+/// <summary>
+/// The spare columns of a world's re-sorts (<see cref="Archetype.Permute"/>): a sort gathers each column into a spare of
+/// its shape (array type and length) and swaps it in, and the old column becomes the spare, so the rows move once and
+/// nothing is copied back. One spare per shape (unmanaged columns are pinned byte arrays, so tables of one capacity and
+/// row size share one), managed ones cleared (they keep nothing alive): the memory of one column per shape of the
+/// ordered tables, given back by <see cref="World.TrimExcess"/>. Owner thread, inside the structural gate.
+/// </summary>
+internal sealed class ColumnSpares
+{
+    private Array[] _spares = [];
+    private int _count;
+
+    /// <summary>
+    /// The spare of <paramref name="like"/>'s type and length, taken out (its contents meaningless, null references for a
+    /// managed one); null when none.
+    /// </summary>
+    public Array Take(Array like)
+    {
+        for (int i = 0; i < _count; i++)
+        {
+            var spare = _spares[i];
+            if (spare.Length != like.Length || spare.GetType() != like.GetType()) continue;
+            _spares[i] = _spares[--_count];
+            _spares[_count] = null;
+            return spare;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Keep <paramref name="column"/> (a column or slots a sort replaced; a managed one cleared by the caller) as the
+    /// spare of its shape, unless one is kept already (then it goes to the GC: one spare per shape).
+    /// </summary>
+    public void Give(Array column)
+    {
+        for (int i = 0; i < _count; i++)
+            if (_spares[i].Length == column.Length && _spares[i].GetType() == column.GetType()) return;
+        if (_count == _spares.Length) Array.Resize(ref _spares, Math.Max(4, _count * 2));
+        _spares[_count++] = column;
+    }
+
+    /// <summary>Let every spare go (<see cref="World.TrimExcess"/>).</summary>
+    public void Clear()
+    {
+        _spares = [];
+        _count = 0;
     }
 }

@@ -247,7 +247,9 @@ public class PrefabBufferChurnBenchmark
 /// <summary>
 /// Mailboxes filled by a parallel <c>[ForEach]</c>: <see cref="Actors"/> actors are created with empty mailboxes, a
 /// parallel system posts <see cref="Mail"/> messages to each (the first write of each mailbox, on whichever thread
-/// runs its rows), and the actors are destroyed on the owner thread, which takes their lists back.
+/// runs its rows), and the actors are destroyed on the owner thread, which takes their lists back. With
+/// <see cref="Reserved"/>, the pool is filled for the peak first (<c>FillPool</c>): every list then goes through the
+/// pool all threads share, one at a time (a process per case, so the other case's pool stays as it was).
 /// </summary>
 [MemoryDiagnoser]
 public class ParallelBufferChurnBenchmark
@@ -255,6 +257,8 @@ public class ParallelBufferChurnBenchmark
     public const int Mail = 4;
 
     [Params(100_000)] public int Actors;
+
+    [Params(false, true)] public bool Reserved;
 
     private World _world;
     private Entity[] _actors;
@@ -264,6 +268,7 @@ public class ParallelBufferChurnBenchmark
     {
         _world = new World(new WorldOptions { InitialEntityCapacity = Actors });
         _world.AddSystem<PostSystem>();
+        if (Reserved) DynamicBuffer<long>.FillPool(Actors);
         _actors = new Entity[Actors];
         for (int i = 0; i < 20; i++) LoadPostUnload();
     }

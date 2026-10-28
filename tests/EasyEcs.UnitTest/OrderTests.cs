@@ -355,15 +355,16 @@ public class OrderTests
     }
 
     [Test]
-    public void ARefTakenBeforeASortIsReadAgainAfterIt()
+    public void ARefTakenBeforeASortIsAcquiredAgainAfterIt()
     {
         using var world = new World();
         var a = world.CreateEntity(new Walker(900, 900), new Health(1), new Name("a"));
         var b = world.CreateEntity(new Walker(1, 1), new Health(2), new Name("b"));
         ref var health = ref a.Get<Health>();
         Assert.That(health.Value, Is.EqualTo(1));
-        world.SortRows<Walker>(); // b's key is lower: the rows swap
-        Assert.That(health.Value, Is.EqualTo(2), "the old ref now reads the row's new entity");
+        world.SortRows<Walker>(); // b's key is lower: the rows swap, into a column of their own
+        Assert.That(System.Runtime.CompilerServices.Unsafe.AreSame(ref health, ref a.Get<Health>()), Is.False,
+            "the old ref is no longer a's row");
         Assert.That(a.Get<Health>().Value, Is.EqualTo(1), "re-acquired, it is a's again");
         Assert.That(b.Get<Health>().Value, Is.EqualTo(2));
     }
@@ -756,5 +757,53 @@ public class OrderTests
 
         for (int i = 0; i < 5; i++) Tick();
         Assert.That(Allocations.Of(Tick), Is.Zero);
+    }
+
+    // In a method of its own: a reference it reads dies with its frame (the JIT may keep one in a slot of the caller's).
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void AssertCargo(Entity[] entities, WeakReference[] weak, int round)
+    {
+        for (int i = 0; i < entities.Length; i++)
+            Assert.That((entities[i].Read<Armor>().Value, entities[i].Read<Name>().Value, ReferenceEquals(entities[i].Read<OrderCargo>().Value, weak[i].Target)),
+                Is.EqualTo((i, "n" + i, true)), $"round {round}, entity {i}");
+    }
+
+    /// <summary>A reference a sorted row holds (the spare a sort leaves must not keep it alive).</summary>
+    public record struct OrderCargo(object Value) : IComponent;
+
+    [Test]
+    public void ASortsSpareColumnsKeepNoReferenceAndTheRowsMoveRight()
+    {
+        using var world = new World();
+        var random = new Random(15);
+        var entities = new Entity[300];
+        var weak = new WeakReference[entities.Length];
+        void Fill()
+        {
+            for (int i = 0; i < entities.Length; i++)
+            {
+                var cargo = new object();
+                weak[i] = new WeakReference(cargo);
+                entities[i] = world.CreateEntity(RandomWalker(random), new Armor(i), new OrderCargo(cargo), new Name("n" + i));
+            }
+        }
+
+        Fill();
+        for (int round = 0; round < 3; round++)                          // the second sort swaps the first one's spares back in
+        {
+            foreach (var item in world.Query<Walker>()) item.Component1 = RandomWalker(random);
+            world.SortRows<Walker>();
+            CheckOrdered(world);
+            AssertCargo(entities, weak, round);
+        }
+
+        foreach (var entity in entities) entity.Destroy();
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
+        Assert.That(Enumerable.Range(0, weak.Length).Where(i => weak[i].IsAlive), Is.Empty, "no column, spare or not, holds a destroyed row's reference");
+        Fill();                                                         // rows past the count were left as before
+        world.SortRows<Walker>();
+        CheckOrdered(world);
     }
 }

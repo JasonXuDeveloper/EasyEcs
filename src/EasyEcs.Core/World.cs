@@ -22,8 +22,8 @@ public sealed partial class World : IDisposable
     private int _entityCount;
 
     // Change tick: stamped into the rows of tracked components (ITracked) on every write. Grows by one per system
-    // stage, once after each update and once per index catch-up outside a pass that found written rows; 64 bits never
-    // wrap.
+    // stage, once after each update, once per capture and restore (writes after them are newer than the snapshot) and
+    // once per index catch-up outside a pass that found written rows; 64 bits never wrap.
     private ulong _changeTick = 1;
 
     /// <summary>
