@@ -1155,18 +1155,34 @@ writes both sides of each unordered pair once (Newton's third law, MD codes' hal
 the form is inferred from the parameters. The neighbors are the rows (the method's filter); a table against itself
 runs its pairs (a, b > a), two tables each pair once (the draw keeps the neighbor's cluster at or after the row's, a
 built list keeps j > i, the Rows loop starts after the row). Each side's writes are stamped by its own table (no
-StampOther). One pair at a time, serial (ForPairsParallel falls back to ForPairs; a Parallel method is EECS105).
+StampOther). One pair at a time; with `Parallel = true` the pass runs in chunks of 256 rows (PairHalves.ChunkRows,
+never chosen by the thread count) colored greedily at distance two over the clusters each chunk writes, the colors one
+after another with a barrier, a color's chunks in parallel (World.ForPairHalves; the colors cached per draw of the
+list, PairSchedule); a table of fewer than 4 chunks runs the serial pass. The result is the same on any number of
+threads; float sums differ from the serial pass's in the last bits (another order of the pairs), integer sums are equal.
 
 - guide page of pair methods (the one documenting `[Neighbor]`; today only api.mdx and reference/ name it) + zh:
   a section "Writing both sides": when to choose it (forces, contacts, merges: half the pairs of the full pass), what
-  it runs (each unordered pair once, one pair at a time, serial), what it refuses (EECS105 below), a full example
+  it runs (each unordered pair once, one pair at a time; in parallel, colored chunks), what it refuses (EECS105 below), a full example
   (repulsion: `ref Force f, [Neighbor] ref Force g`, `f.X += dx; g.X -= dx;`) and item merging (the lower EntityId
   survives: `SymmetricPairTests.Merge` / the VoxelServer form). Costs from the A/B below: against the full vector pass
   (Generated) it wins on sparse worlds and small crowds, loses about 1.2-1.3x on dense crowds of 10k-100k; against
   the per-pair full pass (GeneratedRows) it always wins (2-2.8x).
+  Parallel (PairHalvesBenchmark, AVX-512, 20 ticks per op, two rounds; serial = the same method on one thread):
+  4 threads: 10k crowd 542 / 596 us against 1,039 / 1,037 serial (0.52-0.58), 100k crowd 5,115 / 5,244 against
+  10,784 / 10,892 (0.48), 10k sparse 124 / 153 against 217 / 183, 100k sparse 1,604 / 1,494 against 2,724 / 2,674
+  (0.56-0.59). On 1 thread the colored pass costs 0-15 % over the serial one (10k sparse 1.15, crowds 1.02-1.03): the
+  price of one result on any thread count, so the guide says to keep Parallel off where the world runs one thread.
+  Against the parallel full pass writing its row only (Full, vector loop over every ordered pair): Full is faster on
+  dense crowds (10k 296 / 339 us, 100k 3,263 / 3,503 at 4 threads), the symmetric pass on sparse worlds (Full 143-177
+  and 1,696-1,769): pick the symmetric form for contacts/merges and sparse worlds, the full vector pass for dense
+  force sums. 0 B per pass after warm-up (every Parallel row "-").
 - guide/analyzer.mdx + zh:
   - EECS105's symmetric reasons: the neighbors are not the rows (filters on the neighbor side), a component by `ref`
-    of one side only ("to write both sides of each pair once, take it by 'ref' of the row too"), a Mut<T>, Parallel.
+    of one side only ("to write both sides of each pair once, take it by 'ref' of the row too"), a Mut<T>. Parallel is
+    no longer refused for this form (the EECS105 description says so: "on several threads (Parallel) when it writes
+    no neighbor or writes both sides of each pair (its chunks colored apart, the same result on any number of
+    threads)").
   - EECS106: the compared component written on both sides (the test would read moved positions).
   - EECS107's fix: a query walk with the half skip (`if (o.Entity.Id.Index <= self.Id.Index) continue;`) writing
     both sides becomes the symmetric pair method (skip and the unused `Entity self` dropped).
@@ -1180,15 +1196,51 @@ StampOther). One pair at a time, serial (ForPairsParallel falls back to ForPairs
     that writes the neighbor's component it reads of its row was refused before, so no method changes meaning.
   - Half lists over a sorted cluster grid (pairs a < b; a cluster's neighbor clusters at or after it), as GROMACS /
     LAMMPS `newton on`.
-  - Serial: red/black or per-thread force buffers (LAMMPS's reverse communication) were not built; the single-thread
-    form is already faster than the parallel full pass would be per core, and both forms cost a merge or a second
-    color pass. What would change it: a VoxelServer profile where the symmetric pass dominates a tick.
+  - Parallel by spatial coloring (LAMMPS / GROMACS): chunks of a fixed number of rows (256; never by the thread count,
+    so one result on any number of threads), colored greedily at distance two over the clusters each chunk writes
+    (its own and those its ranges reach), the colors run one after another with a barrier, a color's chunks in
+    parallel; chunks past 64 colors run alone. The colors are worked out once per draw of the list (PairSchedule;
+    without the cache 100-190 us per pass). A table of fewer than 4 chunks runs the serial pass.
+  - Not bit for bit with the serial half pass: no parallel order of float additions into a row equals the serial
+    order (a "levels" order that would keep it serializes, since neighboring Morton chunks always conflict). What
+    holds: the same bits at 1 and 4 threads (fixed chunks, fixed color order, a color's chunks write disjoint rows),
+    integer sums equal to the half walk's, float sums within rounding of it (tests: SymmetricPairParallelTests).
+  - Dropped: the boundary split with per-chunk buffers (GROMACS nbnxm / LAMMPS USER-OMP reverse communication), built
+    and measured against the colors in the same benchmark (decision text below).
+  - Atomics excluded by the owner (float order not deterministic).
   - Dropped: the vector loop of the symmetric form, measured in two shapes (PairsBenchmark --dev screens, AVX-512,
     10k/100k crowd and sparse): the cluster's lanes summed into the neighbor in lane order (bit for bit) ran 1.4-2.3x
     slower than the pairs one at a time (10k crowd 1,499 us against 1,059; 100k sparse 5,662 against 2,500), and the
     FloatMode.Fast tree sum into the neighbor 1.1-2.3x slower (100k sparse 4,582 against 2,442; 10k crowd 1,173
     against 977). Why: a horizontal reduction per neighbor costs more than the halved j count saves, and the half
     list's diagonal cluster needs a masked prefix per j.
-- roadmap.mdx + zh: GA4 done (symmetric pair methods); dropped: their vector loop (the decision).
+- Decision text for the dropped per-chunk buffers (decisions.mdx + zh, its own D or a section of the decision above):
+  "A parallel pair method writing both sides colors its chunks; per-chunk buffers were dropped". Built: every chunk
+  at once, rows of its own chunk written in place, rows of other chunks (only the clusters it reaches) written into a
+  buffer owned by the chunk (not the thread), zeroed at its start, added into the rows after every chunk in chunk
+  order (a generated Gather), the far clusters cached per draw. It needs a method whose writes of the neighbor only add
+  (`g.F += / -=`, `++ / --` as a statement, on float, double, int or long fields), so merges and other bodies would
+  still need the colors. Measured (PairHalvesBenchmark, two rounds, AVX-512, 0 B both): 1 thread 1.18-1.25x the serial
+  pass on crowds (10k 1,195 / 1,252 us against 982 / 1,054; 100k 13,071 / 13,713 against 10,499 / 11,621), 1.00-1.16x
+  sparse, where the colors cost 1.02-1.03x on crowds; 4 threads 0-9 % ahead of the colors on crowds (10k 500 / 526
+  against 542 / 596; 100k 4,673 / 5,262 against 5,115 / 5,244), behind on sparse worlds (10k 142 / 163 against
+  124 / 153; 100k 1,572 / 1,574 against 1,604 / 1,494). Why not: a second form for a subset of bodies, a 20 % loss on
+  one thread, a generated reduction and per-chunk memory, for a gain within the noise at 4 threads. What would change
+  it: many cores (16+) where the colors' barriers idle threads (more colors than chunks per thread), measured on
+  PairHalvesBenchmark with Threads 16.
+- roadmap.mdx + zh: GA4 done (symmetric pair methods, serial and parallel); dropped: their vector loop and the
+  per-chunk buffers (the decisions).
 - changelog + README "What's new": pair methods writing both sides of each unordered pair once.
-- No migration entry: a method EECS105 refused now compiles; nothing that compiled changes.
+- Existing forms against base (5b8f926), BDN two rounds each, AVX-512, after the parallel form (head 9cc3362):
+  PairListsBenchmark 24 cases within -9..+8 % per round with no case slower in both rounds by more than 6 % (10k crowd
+  GeneratedRows Auto +5.8 / +4.3 %, Generated On +4.4 / +5.1 %; most others change sign between rounds);
+  PairsBenchmark Generated / GeneratedRows / GeneratedParallel within -16..+9 %, except GeneratedParallel at 1k crowd
+  (a 30 us pass): +16 / +14 % in the two rounds and +3 / +11 % in a re-check (q1, q2), against a standard deviation of
+  4-5 us (13-15 %); older rounds of the same case went -7 / +8 %. The only change on that path is one more field of
+  PairRun and a predictable `half` branch in the sweep, so it reads as noise: rerun PairsBenchmark --filter
+  '*GeneratedParallel*' on a quiet machine before merging (verify).
+- No migration entry: a method EECS105 refused now compiles (both sides, and both sides with Parallel); nothing that
+  compiled changes.
+- guide/parallel (or the pair page): `Parallel = true` on a method writing both sides is deterministic across thread
+  counts but not bit for bit with the same method on one thread's serial pass; small tables (< 4 chunks of 256 rows)
+  run the serial pass.
