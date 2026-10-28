@@ -43,15 +43,19 @@ SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): t
                              (the cutoff from the test, per row or one; Width; Rows: the method per pair, over the row's
                              list of neighbors when the run carries one, a Mut<T> over the run's change-tick column;
                              Vectors: a cluster's lanes against each neighbor through Kernel's pair mode, under its
-                             gate; Reduce<T> results after the pass, a parallel job's Merges / Merge of its chunks)
+                             gate; Reduce<T> results after the pass, a parallel job's Merges / Merge of its chunks; a
+                             method writing both sides, IsSymmetric: each unordered pair once, the half of a table
+                             against itself, IPairJob.Symmetric)
 PairForm.cs                  what a pair method is, read once for the generator and the analyzer: Problem (EECS105's
-                             reason), Read (the distance test: dx * dx sums, DistanceSquared, LengthSquared, and the
+                             reason; IsSymmetric / BothSides: a component by 'ref' of the row and of the neighbor, the
+                             method writing both sides of each unordered pair, and what that form refuses), Read (the distance test: dx * dx sums, DistanceSquared, LengthSquared, and the
                              cutoff: values, singletons, the row's in components; EECS106's reason), HandWritten
                              (EECS107: a loop over other entities, read through a Lookup<T> of the row's component or walked as a query of the World,
                              testing their squared distance)
 PairRewrite.cs               EECS107's fix, read once for the analyzer and its code fix: a search over candidate ids
                              read through Lookup<T> or a walk of world.Read / Query rewritten as the pair method ([Neighbor] parameters, the cutoff
-                             test returning), only when mechanical (the search is the whole body, the pair reads
+                             test returning; a walk of the candidates after the row writing both sides as the method
+                             writing both sides), only when mechanical (the search is the whole body, the pair reads
                              nothing of it, the generator reads its test)
 Fusion.cs                    the fusion rule read once for the generator and the analyzer (FusionSide: what a method
                              reads, writes, filters and blocks it; Fusion.Problem: why two passes cannot share a walk)
@@ -136,8 +140,9 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              rows sent to the method when they live in several, with a backoff; only for SimdMode.Require (D131);
                              the chases of the rows ahead prefetched behind the job's gate (Code.Prefetched);
                              Kernel.Neighbors.cs: a pair method's pair mode (a [Neighbor] component as uniform values
-                             broadcast per neighbor, the body masked by the cluster's passing lanes) and the cutoff's
-                             text (ScalarOf);
+                             broadcast per neighbor, the body masked by the cluster's passing lanes; a method writing
+                             both sides: each sum into a neighbor field added from the lanes in order, PairRun.AddLanes,
+                             WritesNeighbor) and the cutoff's text (ScalarOf);
                              Kernel.Structural.cs: a structural change of the row's entity under a condition (marked
                              rows, applied in bulk after the pass: Code.StructuralChanges) and Emit<T> records of a
                              lane or the entity's id (Code.VectorTail: every row takes the vector form)

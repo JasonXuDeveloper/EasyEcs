@@ -24,7 +24,8 @@ public sealed partial class SystemGenerator
     /// <param name="Simd">The vector loop of one neighbor against a cluster (Kernel.Neighbors.cs), or null.</param>
     /// <param name="Scalar">Why the pairs run one at a time, when they do.</param>
     /// <param name="NoCutoff">Why no cutoff was found (EECS106), or "".</param>
-    private sealed record PairModel(string Position, EquatableArray<string> Axes, string Cutoff, bool PerRow, Kernel.Code? Simd, string Scalar, string NoCutoff)
+    /// <param name="Symmetric">The method writes both sides of its pairs (<see cref="PairForm.IsSymmetric"/>): each unordered pair once.</param>
+    private sealed record PairModel(string Position, EquatableArray<string> Axes, string Cutoff, bool PerRow, Kernel.Code? Simd, string Scalar, string NoCutoff, bool Symmetric)
     {
         /// <param name="parallel">The pass runs on several threads: the job's singletons are SingletonRef fields.</param>
         public static PairModel Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, bool parallel, System.Threading.CancellationToken ct)
@@ -64,12 +65,12 @@ public sealed partial class SystemGenerator
                 scalar = $"'{kept.Name}' is a {(Symbols.Classify(kept, outside) == Symbols.ParamKind.Reduction ? "Reduce<T>" : "Mut<T>")}, which the pair mode of the vector loop does not take";
             }
             return new PairModel(position, new EquatableArray<string>(shape?.Axes ?? []), cutoff, shape?.PerRow == true, simd,
-                simd == null ? scalar ?? "" : "", noCutoff ?? "");
+                simd == null ? scalar ?? "" : "", noCutoff ?? "", PairForm.IsSymmetric(method));
         }
 
         /// <summary>The line of SystemInfo.Loops: the cutoff and the loop.</summary>
         public string Describe(string name) =>
-            $"{name}: pairs {(Cutoff.Length == 0 ? "of every row and neighbor (no cutoff test: " + NoCutoff + ")" : PerRow ? "within each row's cutoff" : "within the cutoff")}, "
+            $"{name}: {(Symmetric ? "each unordered pair once, both sides written, " : "")}pairs {(Cutoff.Length == 0 ? "of every row and neighbor (no cutoff test: " + NoCutoff + ")" : PerRow ? "within each row's cutoff" : "within the cutoff")}, "
             + (Simd != null ? "a cluster of rows against each neighbor (vector)" : $"one pair at a time ({Scalar})");
     }
 
@@ -179,7 +180,8 @@ public sealed partial class SystemGenerator
         for (int i = 0; i < method.Parameters.Length; i++) // a Mut<T>'s stamps per write: the run's change-tick column, found once
             if (method.Parameters[i].Kind == Symbols.ParamKind.Mutable)
                 sb.Append($"            var m{i} = run.MutRows<{method.Parameters[i].Type}>();\n");
-        sb.Append("            bool skips = run.Skips, listed = run.Listed;\n");
+        // A symmetric job's run of a table against itself visits the rows after the row only (its lists hold only those).
+        sb.Append(pair.Symmetric ? "            bool skips = run.Skips, listed = run.Listed, half = run.Same;\n" : "            bool skips = run.Skips, listed = run.Listed;\n");
         sb.Append("            for (int w = run.First, size = run.ClusterSize; w < run.End; w++)\n            {\n");
         sb.Append("                ulong lanes = run.Lanes(w);\n                if (lanes == 0) continue;\n");
         sb.Append("                var ranges = run.Ranges(w);\n");
@@ -195,8 +197,9 @@ public sealed partial class SystemGenerator
             pairBody.Append("float " + string.Join(", ", axes.Select((a, k) => $"d{k} = at.{a} - near.{a}")) + ";\n");
             pairBody.Append("if (" + string.Join(" + ", axes.Select((_, k) => $"d{k} * d{k}")) + " > reach2) continue;\n");
         }
-        // A neighbor's component by ref stamps the neighbors the method ran for (one row of the other table per pair).
-        var stamps = method.Parameters.Where(p => p is { Kind: Symbols.ParamKind.Neighbor, RefKind: "ref" }).Select(p => p.Type).Distinct()
+        // A neighbor's component by ref stamps the neighbors the method ran for (one row of the other table per pair). A
+        // symmetric job's neighbors are its rows, each stamped by its own table's run (Stamp) as a row taken by ref is.
+        var stamps = pair.Symmetric ? System.Array.Empty<string>() : method.Parameters.Where(p => p is { Kind: Symbols.ParamKind.Neighbor, RefKind: "ref" }).Select(p => p.Type).Distinct()
             .Select(type => $" run.StampOther<{type}>(j);").ToArray();
         string call = $"__ForEach{owner.TypeParameters}.{method.Name}_{number}({args});";
         pairBody.Append($"if (!skips || !run.Skip(j)) {(stamps.Length == 0 ? call : "{ " + call + string.Concat(stamps) + " }")}\n");
@@ -213,7 +216,9 @@ public sealed partial class SystemGenerator
         Pair();
         sb.Append("                        }\n\n                        continue;\n                    }\n\n");
         sb.Append("                    for (int k = 0; k < ranges.Length; k += 2)\n");
-        sb.Append("                        for (int j = ranges[k], end = ranges[k + 1]; j < end; j++)\n                        {\n");
+        sb.Append(pair.Symmetric
+            ? "                        for (int j = half ? global::System.Math.Max(ranges[k], (int)i + 1) : ranges[k], end = ranges[k + 1]; j < end; j++)\n                        {\n"
+            : "                        for (int j = ranges[k], end = ranges[k + 1]; j < end; j++)\n                        {\n");
         Pair();
         sb.Append("                        }\n                }\n            }\n        }\n");
 
@@ -226,19 +231,34 @@ public sealed partial class SystemGenerator
             for (int k = 1; k <= components.Length; k++)
                 loop.Append($"ref {simd.Columns[k - 1]} e{k} = ref {unsafeType}.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
             loop.Append(simd.Setup);
-            loop.Append("bool __skips = run.Skips;\n");
+            // A symmetric job's run of a table against itself (half): its ranges start at the cluster's own rows, of which a
+            // neighbor j meets the cluster's lanes before it only (__dj: j's lane, whose value the cluster's vectors hold).
+            loop.Append(pair.Symmetric ? "bool __skips = run.Skips, __half = run.Same;\n" : "bool __skips = run.Skips;\n");
             loop.Append("for (int __w = run.First; __w < run.End; __w++)\n{\n");
             loop.Append("    ulong __lanes = run.Lanes(__w);\n    if (__lanes == 0) continue;\n");
             loop.Append($"    nint i = (nint)__w * {vector}<float>.Count;\n");
-            loop.Append($"    var __pass = global::EasyEcs.Interleaved.Lanes32(__lanes, 0);\n");
+            loop.Append($"    var {(pair.Symmetric ? "__rows" : "__pass")} = global::EasyEcs.Interleaved.Lanes32(__lanes, 0);\n");
             foreach (var line in simd.Body.Split('\n')) if (line.Length > 0) loop.Append("    ").Append(line).Append('\n');
             loop.Append("    var __ranges = run.Ranges(__w);\n");
             loop.Append("    for (int __k = 0; __k < __ranges.Length; __k += 2)\n");
             loop.Append("        for (int j = __ranges[__k], __end = __ranges[__k + 1]; j < __end; j++)\n        {\n");
             loop.Append("            if (__skips && run.Skip(j)) continue;\n");
+            if (pair.Symmetric)
+            {
+                // The half list's ranges of a table against itself start at the cluster (j >= i): a j of the cluster meets
+                // its lanes before it, in its own lane of the cluster's vectors.
+                loop.Append("            var __pass = __rows;\n");
+                loop.Append("            int __dj = j - (int)i;\n");
+                loop.Append($"            if (__half && __dj < {vector}<float>.Count)\n            {{\n");
+                loop.Append("                ulong __before = __lanes & ((1UL << __dj) - 1);\n");
+                loop.Append("                if (__before == 0) continue;\n");
+                loop.Append("                __pass = global::EasyEcs.Interleaved.Lanes32(__before, 0);\n");
+                loop.Append("            }\n");
+                loop.Append("            else __dj = -1;\n");
+            }
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (method.Parameters[i] is { Kind: Symbols.ParamKind.Neighbor } p && p.Type != "global::EasyEcs.Entity" && simd.MaskedBody.Contains(Kernel.Neighbor(i)))
-                    loop.Append($"            ref readonly {p.Type} {Kernel.Neighbor(i)} = ref {unsafeType}.Add(ref o{i}, j);\n");
+                    loop.Append($"            ref {(p.RefKind == "ref" ? "" : "readonly ")}{p.Type} {Kernel.Neighbor(i)} = ref {unsafeType}.Add(ref o{i}, j);\n");
             foreach (var line in simd.MaskedBody.Split('\n')) if (line.Length > 0) loop.Append("            ").Append(line).Append('\n');
             loop.Append("        }\n");
             foreach (var line in simd.MaskedStores.Split('\n')) if (line.Length > 0) loop.Append("    ").Append(line).Append('\n');
@@ -261,11 +281,17 @@ public sealed partial class SystemGenerator
             sb.Append("        }\n");
         }
 
+        // Each unordered pair of the rows once (the pass reads the rows' filter for both sides).
+        if (pair.Symmetric) sb.Append("\n        static bool global::EasyEcs.IPairJob.Symmetric => true;\n");
+
         sb.Append("    }\n\n");
         EmitFilter(sb, method, number);
-        // The rows: the method's filter and components; the neighbors: the entities holding the [Neighbor] components.
+        // The rows: the method's filter and components; the neighbors: the entities holding the [Neighbor] components (a
+        // symmetric job's: its rows).
         sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Rows{number} = {FilterChain(method)}{string.Concat(method.Query.Select(q => $".With<{q}>()"))};\n\n");
         var neighbors = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Neighbor && p.Type != "global::EasyEcs.Entity").Select(p => p.Type).Distinct();
-        sb.Append($"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Neighbors{number} = global::EasyEcs.QueryFilter.Create(){string.Concat(neighbors.Select(q => $".With<{q}>()"))};\n\n");
+        sb.Append(pair.Symmetric
+            ? $"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Neighbors{number} = {method.Name}Rows{number};\n\n"
+            : $"    internal static readonly global::EasyEcs.QueryFilter {method.Name}Neighbors{number} = global::EasyEcs.QueryFilter.Create(){string.Concat(neighbors.Select(q => $".With<{q}>()"))};\n\n");
     }
 }

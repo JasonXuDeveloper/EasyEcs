@@ -371,7 +371,7 @@ internal sealed partial class Kernel
         }
 
         var lane = new Lane(method, Symbols.IsRunner(declaration), Symbols.IsParallel(declaration), Symbols.FastFloats(declaration), model, stable, declaration)
-            { Pairs = PairForm.IsPairMethod(declaration) }; // a pair method's loop is the body of its j loop (Kernel.Neighbors.cs)
+            { Pairs = PairForm.IsPairMethod(declaration), Symmetric = PairForm.IsSymmetric(declaration) }; // a pair method's loop is the body of its j loop (Kernel.Neighbors.cs)
         var code = Vectorize(lane, root, fieldOf, ct, out reason);
         // Gathers win where a vector's targets share a table and lose a little where they spread over many (D131): where
         // they live is the data's, not the code's, so the loop that gathers is the method's to ask for.
@@ -445,6 +445,9 @@ internal sealed partial class Kernel
     {
         /// <summary>A pair method ([Neighbor] parameters): the loop is the body of one neighbor against a cluster of rows (Kernel.Neighbors.cs).</summary>
         public bool Pairs { get; init; }
+
+        /// <summary>A pair method that writes both sides of its pairs (<see cref="PairForm.IsSymmetric"/>): the neighbor's writes are reduced over the lanes.</summary>
+        public bool Symmetric { get; init; }
     }
 
     /// <summary>
@@ -567,7 +570,7 @@ internal sealed partial class Kernel
         Symbols.ParamKind.Mutable => $"it takes a Mut<{Symbols.MutElement(p.Type)?.Name}>",
         Symbols.ParamKind.Scratch => $"it takes a Scratch<{Element(p.Type)}>: working memory a row at a time, not one per lane",
         Symbols.ParamKind.Lookup => null, // its reads decide (Kernel.Lookups.cs)
-        Symbols.ParamKind.Neighbor => NeighborRefused(p), // Kernel.Neighbors.cs
+        Symbols.ParamKind.Neighbor => NeighborRefused(p, p.ContainingSymbol is IMethodSymbol owner && PairForm.IsSymmetric(owner)), // Kernel.Neighbors.cs
         _ =>$"parameter '{p.Name}' is not a component, a singleton, a Reduce<T> or a value",
     };
 
@@ -622,7 +625,7 @@ internal sealed partial class Kernel
                     optionals.Add(Lanes(Symbols.MaybeElement(p.Type)!));
                     break;
                 case Symbols.ParamKind.Neighbor when lane.Pairs: // a value per neighbor, broadcast in its j loop
-                    if (NeighborRefused(p) is { } refusedNeighbor) throw new Unsupported(refusedNeighbor);
+                    if (NeighborRefused(p, lane.Symmetric) is { } refusedNeighbor) throw new Unsupported(refusedNeighbor);
                     break;
                 default:
                     if (Refused(p, kind, lane.Parallel) is { } refused) throw new Unsupported(refused);
@@ -699,7 +702,9 @@ internal sealed partial class Kernel
                 }
                 if (kind == Symbols.ParamKind.Neighbor)
                 {
-                    made._uniformParams[p] = Neighbor(i); // the job's j loop declares it (Kernel.Neighbors.cs)
+                    // A read is a value per neighbor; a write of a symmetric method's neighbor adds its lanes into it.
+                    if (p.RefKind == RefKind.Ref) made._neighborWrites[p] = i;
+                    else made._uniformParams[p] = Neighbor(i); // the job's j loop declares it (Kernel.Neighbors.cs)
                     continue;
                 }
                 string name = $"__p{i}";
@@ -851,7 +856,7 @@ internal sealed partial class Kernel
         foreach (var (names, text) in columns)
             if (names.Any(n => n.Length == 0 || uses.Contains(n))) read.Append(text);
         if (kernel._wideOf.Count > 0) kernel.FitLocals(kernel._setup.ToString() + prologue + read + hold + kernel._body + stores);
-        var flat = Flat(kernel, root, () => Make(false));
+        var flat = lane.Pairs ? null : Flat(kernel, root, () => Make(false)); // a pair loop has no flat form
         // Narrow lanes have no shuffles: a component of several fields takes the flat loop or none.
         if (kernel._narrow && flat == null && kernel._components.FirstOrDefault(c => c.Value.Fields.Length > 1 && !kernel._doubled.Contains(c.Value.Index)) is { Key: { } narrow, Value.Fields: { } several })
         {
@@ -1240,6 +1245,7 @@ internal sealed partial class Kernel
         }
         if (!pair && _half >= 0) throw new Unsupported($"'{Text(op)}' writes lanes of two sizes in one statement");
         if (Reduces(op, mask)) return;
+        if (WritesNeighbor(op, mask)) return; // Kernel.Neighbors.cs
         IOperation target;
         string value;
         switch (op)
@@ -1697,6 +1703,7 @@ internal sealed partial class Kernel
             return Broadcast(scalar, op.Type!);
         }
         if (PairExpr(op) is { } pair) return pair;
+        if (_neighborWrites.Count > 0) ReadsWrittenNeighbor(op); // Kernel.Neighbors.cs
         if (_entity != null && (IsEntity(Chain(op).Root ?? op) || op is IInvocationOperation { Instance: { } receiver } && IsEntity(receiver))) throw EntityUse(op);
 
         switch (op)

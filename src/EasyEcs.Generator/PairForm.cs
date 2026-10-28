@@ -19,6 +19,36 @@ internal static class PairForm
     public static bool IsPairMethod(IMethodSymbol method) => method.Parameters.Any(Symbols.IsNeighbor);
 
     /// <summary>
+    /// The pair method writes both sides of its pairs: it takes one component by <c>ref</c> of its row and of its
+    /// neighbor (<c>ref Force f, [Neighbor] ref Force g</c>). It then runs once for each unordered pair of its rows (the
+    /// row the earlier one in the tables' order), never for a row with itself, and its neighbors are its rows
+    /// (<see cref="Problem"/> holds it to that: <see cref="SymmetricProblem"/>).
+    /// </summary>
+    public static bool IsSymmetric(IMethodSymbol method)
+    {
+        bool outside = Symbols.IsRunner(method);
+        foreach (var p in method.Parameters)
+            if (p.RefKind == RefKind.Ref && Symbols.Classify(p, outside) == Symbols.ParamKind.Neighbor && !Symbols.Named(p.Type, Symbols.Entity))
+                foreach (var q in method.Parameters)
+                    if (q.RefKind == RefKind.Ref && Symbols.Classify(q, outside) == Symbols.ParamKind.Component && SymbolEqualityComparer.Default.Equals(p.Type, q.Type))
+                        return true;
+        return false;
+    }
+
+    /// <summary>
+    /// The components a symmetric pair method writes of both sides (<see cref="IsSymmetric"/>): each type its row and its
+    /// neighbor take by <c>ref</c>.
+    /// </summary>
+    public static IEnumerable<ITypeSymbol> BothSides(IMethodSymbol method)
+    {
+        bool outside = Symbols.IsRunner(method);
+        foreach (var p in method.Parameters)
+            if (p.RefKind == RefKind.Ref && Symbols.Classify(p, outside) == Symbols.ParamKind.Neighbor
+                && method.Parameters.Any(q => q.RefKind == RefKind.Ref && Symbols.Classify(q, outside) == Symbols.ParamKind.Component && SymbolEqualityComparer.Default.Equals(p.Type, q.Type)))
+                yield return p.Type;
+    }
+
+    /// <summary>
     /// What the generator writes from a pair method's body: the component compared (<paramref name="Position"/>, the
     /// row's parameter <paramref name="Row"/>), the paths of its float fields that are the axes (1 to 3), the cutoff as
     /// symbols (an operation of uniform values, or of the row's components when <paramref name="PerRow"/>).
@@ -86,14 +116,43 @@ internal static class PairForm
             }
         if (!row) return "takes no component of its row";
         if (!neighbor) return "takes no [Neighbor] component: the neighbors are the entities holding them";
+        if (IsSymmetric(method)) return SymmetricProblem(method, outside, rows);
         foreach (var p in method.Parameters)
         {
             if (Symbols.Classify(p, outside) != Symbols.ParamKind.Neighbor) continue;
             if (written.Contains(p.Type))
-                return $"writes {p.Type.Name}, which it reads of the neighbor ('{p.Name}'): what a neighbor sees would depend on the order of the pairs";
+                return $"writes {p.Type.Name}, which it reads of the neighbor ('{p.Name}'): what a neighbor sees would depend on the order of the pairs; "
+                    + "to write both sides of each pair once, take it by 'ref' of the row and of the neighbor";
             if (p.RefKind == RefKind.Ref && rows.Contains(p.Type))
-                return $"writes the neighbor's {p.Type.Name} ('{p.Name}'), which it reads of its row: what a row sees would depend on the order of the pairs";
+                return $"writes the neighbor's {p.Type.Name} ('{p.Name}'), which it reads of its row: what a row sees would depend on the order of the pairs; "
+                    + "to write both sides of each pair once, take it by 'ref' of the row too";
         }
+        return null;
+    }
+
+    /// <summary>
+    /// Why a pair method that writes both sides (<see cref="IsSymmetric"/>) cannot run each unordered pair once, or
+    /// null: its neighbors are its rows, so each [Neighbor] component is one its row takes too; and each component it
+    /// writes (by <c>ref</c>) it writes of both sides, since a write of one side only would see half of its pairs.
+    /// Parallel is refused before (a write of the neighbor), and so is a Mut&lt;T&gt; of the component written.
+    /// </summary>
+    private static string? SymmetricProblem(IMethodSymbol method, bool outside, HashSet<ITypeSymbol> rows)
+    {
+        var both = new HashSet<ITypeSymbol>(BothSides(method), SymbolEqualityComparer.Default);
+        string sides = string.Join(", ", both.Select(t => t.Name).OrderBy(n => n, System.StringComparer.Ordinal));
+        foreach (var p in method.Parameters)
+            switch (Symbols.Classify(p, outside))
+            {
+                case Symbols.ParamKind.Neighbor when !Symbols.Named(p.Type, Symbols.Entity) && !rows.Contains(p.Type):
+                    return $"writes both sides of its pairs ({sides}), so its neighbors are its rows: take {p.Type.Name} of the row too, or drop '{p.Name}'";
+                case Symbols.ParamKind.Neighbor when p.RefKind == RefKind.Ref && !both.Contains(p.Type):
+                    return $"writes the neighbor's {p.Type.Name} ('{p.Name}'), which it reads of its row: take it by 'ref' of the row too";
+                case Symbols.ParamKind.Component when p.RefKind == RefKind.Ref && !both.Contains(p.Type):
+                    return $"writes both sides of its pairs ({sides}) and {p.Type.Name} of its row only ('{p.Name}'): each pair runs once, so the row would see half of its pairs; "
+                        + $"write it of both sides ([Neighbor] ref {p.Type.Name}) or read it ('in')";
+                case Symbols.ParamKind.Mutable:
+                    return $"writes both sides of its pairs ({sides}) and takes '{p.Name}' as a Mut<T>: each pair runs once and both sides are stamped as written; take it by 'ref' of both sides or 'in'";
+            }
         return null;
     }
 
@@ -108,7 +167,8 @@ internal static class PairForm
     /// differences (<c>dx * dx + dy * dy</c>, locals followed to their one value) of float fields of the same path of a
     /// row's component and of the neighbor's (or <c>Vector2/3.DistanceSquared</c> of a vector field), r2 a value of
     /// constants, readonly statics, singletons and values (the cutoff of the pass), or of the row's components by
-    /// <c>in</c> too (a cutoff per row).
+    /// <c>in</c> too (a cutoff per row; of a symmetric method, the row's: the earlier of the pair). A symmetric method
+    /// that writes the compared component has none.
     /// </summary>
     public static Shape? Read(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct, out string? reason)
     {
@@ -140,7 +200,16 @@ internal static class PairForm
 
         var reader = new Reader(method, block);
         foreach (var term in returns ? Terms(test.Condition, BinaryOperatorKind.ConditionalOr) : Terms(test.Condition, BinaryOperatorKind.ConditionalAnd))
-            if (reader.Cutoff(term, far: returns) is { } shape) return shape;
+            if (reader.Cutoff(term, far: returns) is { } shape)
+            {
+                // Both sides' points written during the pass: the clusters' boxes would not hold for the pairs after.
+                if (IsSymmetric(method) && BothSides(method).Contains(shape.Position, SymbolEqualityComparer.Default))
+                {
+                    reason = $"it writes {shape.Position.Name} of both sides, which its test compares: the points move during the pass, so no box holds";
+                    return null;
+                }
+                return shape;
+            }
         reason = returns
             ? "no term of the test is the squared distance at or past a cutoff ('d2 >= r2' of a sum of squared differences of a row's field and the neighbor's)"
             : "no term of the test is the squared distance within a cutoff ('d2 < r2' of a sum of squared differences of a row's field and the neighbor's)";
