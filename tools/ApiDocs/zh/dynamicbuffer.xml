@@ -45,11 +45,13 @@
             <exception cref="T:System.ArgumentOutOfRangeException">值为负数。</exception>
         </member>
 
-  <member name="M:EasyEcs.DynamicBuffer`1.FillPool(System.Int32)" source="ec1573b0386c">
+  <member name="M:EasyEcs.DynamicBuffer`1.FillPool(System.Int32)" source="2f7ee8e1771d">
             <summary>
             往池里补列表，直到池里有 <paramref name="lists" /> 个，每个能放 <see cref="P:EasyEcs.DynamicBuffer`1.MaxPooledLength" /> 个元素，
             这么多个缓冲第一次写入时就从池里取列表，不用分配：知道自己峰值时要保留多少个 <typeparamref name="T" /> 缓冲（玩家周围的地形）的服务器，
-            在启动时一次付清，世界增长到峰值的过程中 tick 也不分配。和回收池一样对整个进程生效；池里已有的列表也算数。
+            在启动时一次付清，世界增长到峰值的过程中 tick 也不分配。并行遍历在 helper 线程上写这些缓冲时，这个数也是准的：
+            池里还会补上每个线程可能自留的列表（64 个：线程每次取还 32 个列表；之后才启动的 helper 线程会补上自己的那份），
+            所以不会有线程因为别的线程留着它需要的列表而用完。和回收池一样对整个进程生效；池里已有的列表也算数。
             一次 O(<paramref name="lists" />) 次分配；池里已经够了就什么都不做。
             </summary>
             <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="lists" /> 为负数。</exception>

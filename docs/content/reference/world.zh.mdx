@@ -171,7 +171,7 @@ public WorldSnapshot Capture();
 public WorldSnapshot Capture(WorldSnapshot into);
 ```
 
-把 [`World.Capture`](/zh/docs/reference/world#capture) 拍进 `into`（这个 World 的快照，传 null 则新建一个），覆盖原有内容并复用它的数组：数组够大之后，每个 tick 都拍快照（回滚、回放）也不分配内存。返回这个快照。
+把 [`World.Capture`](/zh/docs/reference/world#capture) 拍进 `into`（这个 World 的快照，传 null 则新建一个），覆盖原有内容并复用它的数组：数组够大之后，每个 tick 都拍快照（回滚、回放）也不分配内存。自 `into` 上次拍摄或恢复以来没有任何表改变过行时，只复制之后写过的追踪组件（[`ITracked`](/zh/docs/reference/itracked)、缓冲）的行，未追踪的组件整列复制：O(写过的行数 + 行数 × 未追踪组件数)。会推进 [`World.ChangeTick`](/zh/docs/reference/world#changetick)，所以拍摄之后的写入都比它新。返回这个快照。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -1110,7 +1110,7 @@ public void ReserveBuffers(Prefab prefab, int count);
 public void Restore(WorldSnapshot snapshot);
 ```
 
-把 World 恢复到 `snapshot`（必须是从这个 World 拍的）。快照里存活的实体，句柄重新有效；其他句柄全部失效，包括快照之后创建的实体的句柄。快照之后创建的原型保留，但变成空的。单例沿用原来的存储（[`World.SingletonRef`](/zh/docs/reference/world#singletonref) 仍然可用），值换成快照里的；快照之后才添加的单例直接移除。O(实体数 × 组件数 + 原型数 + 单例数)。遍历进行中不能调用。
+把 World 恢复到 `snapshot`（必须是从这个 World 拍的）。快照里存活的实体，句柄重新有效；其他句柄全部失效，包括快照之后创建的实体的句柄。快照之后创建的原型保留，但变成空的。单例沿用原来的存储（[`World.SingletonRef`](/zh/docs/reference/world#singletonref) 仍然可用），值换成快照里的；快照之后才添加的单例直接移除。自快照上次拍摄或恢复以来行没有变过的表，只取回之后写过的追踪组件的行（未追踪的组件整列取回），也只有这些行算作写过（[`ChangedAttribute`](/zh/docs/reference/changedattribute)）；其他表整表重写，每一行都算作写过。会推进 [`World.ChangeTick`](/zh/docs/reference/world#changetick)。O(实体数 × 组件数 + 原型数 + 单例数)；没有表改变过行时为 O(写过的行数 + 行数 × 未追踪组件数)。遍历进行中不能调用。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数 + 表数 + 单例数)
 

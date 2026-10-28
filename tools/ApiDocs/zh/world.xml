@@ -78,10 +78,12 @@
       不克隆对象。遍历进行中不能调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Capture(EasyEcs.WorldSnapshot)" source="6524a1162ca4">
+  <member name="M:EasyEcs.World.Capture(EasyEcs.WorldSnapshot)" source="b64cf1c84261">
     <summary>
       把 <see cref="M:EasyEcs.World.Capture" /> 拍进 <paramref name="into" />（这个 World 的快照，传 null 则新建一个），
-      覆盖原有内容并复用它的数组：数组够大之后，每个 tick 都拍快照（回滚、回放）也不分配内存。返回这个快照。
+      覆盖原有内容并复用它的数组：数组够大之后，每个 tick 都拍快照（回滚、回放）也不分配内存。
+      自 <paramref name="into" /> 上次拍摄或恢复以来没有任何表改变过行时，只复制之后写过的追踪组件（<see cref="T:EasyEcs.ITracked" />、缓冲）的行，
+      未追踪的组件整列复制：O(写过的行数 + 行数 × 未追踪组件数)。会推进 <see cref="P:EasyEcs.World.ChangeTick" />，所以拍摄之后的写入都比它新。返回这个快照。
     </summary>
   </member>
   <member name="M:EasyEcs.World.Children(EasyEcs.EntityId)" source="e0547b5ae89e">
@@ -324,11 +326,13 @@
       <see cref="M:EasyEcs.World.RemoveTypes(System.Reflection.Assembly)" />。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" source="081649a3c643">
+  <member name="M:EasyEcs.World.Restore(EasyEcs.WorldSnapshot)" source="ab7f139635c6">
     <summary>
       把 World 恢复到 <paramref name="snapshot" />（必须是从这个 World 拍的）。快照里存活的实体，句柄重新有效；其他句柄全部失效，
       包括快照之后创建的实体的句柄。快照之后创建的原型保留，但变成空的。单例沿用原来的存储（<see cref="M:EasyEcs.World.SingletonRef``1" />
-      仍然可用），值换成快照里的；快照之后才添加的单例直接移除。O(实体数 × 组件数 + 原型数 + 单例数)。遍历进行中不能调用。
+      仍然可用），值换成快照里的；快照之后才添加的单例直接移除。自快照上次拍摄或恢复以来行没有变过的表，只取回之后写过的追踪组件的行
+      （未追踪的组件整列取回），也只有这些行算作写过（<see cref="T:EasyEcs.ChangedAttribute`1" />）；其他表整表重写，每一行都算作写过。
+      会推进 <see cref="P:EasyEcs.World.ChangeTick" />。O(实体数 × 组件数 + 原型数 + 单例数)；没有表改变过行时为 O(写过的行数 + 行数 × 未追踪组件数)。遍历进行中不能调用。
     </summary>
   </member>
   <member name="M:EasyEcs.World.Save(System.Buffers.IBufferWriter{System.Byte})" source="2e18655bb4a4">

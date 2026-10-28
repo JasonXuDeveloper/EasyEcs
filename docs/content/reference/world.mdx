@@ -171,7 +171,7 @@ Copy the entities, their components and the singletons. O(entities × components
 public WorldSnapshot Capture(WorldSnapshot into);
 ```
 
-[`World.Capture`](/en/docs/reference/world#capture) into `into` (a snapshot of this world, or null for a new one), overwriting it and reusing its arrays: capturing every tick (rollback, replays) allocates nothing once they are large enough. Returns the snapshot.
+[`World.Capture`](/en/docs/reference/world#capture) into `into` (a snapshot of this world, or null for a new one), overwriting it and reusing its arrays: capturing every tick (rollback, replays) allocates nothing once they are large enough. When no table changed its rows since `into` was last captured or restored, only the rows of tracked components ([`ITracked`](/en/docs/reference/itracked), buffers) written since are copied, and untracked components whole: O(rows written + rows × untracked components). Advances [`World.ChangeTick`](/en/docs/reference/world#changetick), so writes after the capture are newer than it. Returns the snapshot.
 
 **Complexity** ([API table](/en/docs/api)):
 
@@ -1110,7 +1110,7 @@ Fill the pools of the [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) lists 
 public void Restore(WorldSnapshot snapshot);
 ```
 
-Put the world back to `snapshot` (taken from this world). Handles of entities alive in the snapshot are valid again; every other handle is stale, also handles of entities created after the capture. Archetypes created after the capture stay, empty. Singletons keep their boxes (a [`World.SingletonRef`](/en/docs/reference/world#singletonref) still works) and get the snapshot's values; singletons added after the capture are removed. O(entities × components + archetypes + singletons). Not while a pass iterates.
+Put the world back to `snapshot` (taken from this world). Handles of entities alive in the snapshot are valid again; every other handle is stale, also handles of entities created after the capture. Archetypes created after the capture stay, empty. Singletons keep their boxes (a [`World.SingletonRef`](/en/docs/reference/world#singletonref) still works) and get the snapshot's values; singletons added after the capture are removed. A table that kept its rows since the snapshot was last captured or restored gets back only the rows of tracked components written since (and untracked components whole), and only those count as written ([`ChangedAttribute`](/en/docs/reference/changedattribute)); any other table is rewritten, every row counting as written. Advances [`World.ChangeTick`](/en/docs/reference/world#changetick). O(entities × components + archetypes + singletons), or O(rows written + rows × untracked components) when no table changed its rows. Not while a pass iterates.
 
 **Complexity** ([API table](/en/docs/api)): O(entities × components + tables + singletons)
 
