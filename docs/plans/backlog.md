@@ -243,11 +243,12 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        Proof: the HotReload sample's old `new Position(...)` vectorizes with no warning; a hand-written constructor
        and an initializer-changed positional property stay scalar; a helper of a referenced assembly inlines bit for
        bit as from source; GeneratorBenchmark shows the attribute read costs nothing per keystroke.
-8h. [ ] **`CopyEntities<TTag>` prototype + benchmark** (owner, 2026-10-28: "做原型+基准"; `owner-review.md`, "Ghost
-       rows between worlds"): copy rows with a `ComponentSet` plus a tag into another world, EntityIds pointing outside
-       the copy set to null. BDN: 500-5,000 border rows a tick, `CreateEntity` loop vs `SaveEntitiesWith` +
-       `LoadEntities` vs the prototype; ships if faster or less code and never slower, then MultiWorld's Border uses
-       it. Touches `ArriveRows` (core); runs in a free slot that does not overlap the tile branch.
+8h. [x] **`CopyEntities<TTag>` prototype + benchmark: measured, not shipped** (owner, 2026-10-28: "做原型+基准";
+       `owner-review.md`, "Ghost rows between worlds"). The prototype is on branch `feat-copy-entities` (unmerged,
+       `GhostCopyBenchmark`, `CopyEntitiesTests`): 0.63-0.92x of the `CreateEntity` loop with 3 components, 0.82-1.00x
+       with 1 component on sorted rows, but 0.92-1.09x with 1 component on scattered rows (MultiWorld's case), and
+       `Border.cs` grows by 5 lines instead of shrinking. Fails "never slower" and "less code"; what would change the
+       verdict is in `owner-review.md`.
 9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
        ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
        `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the

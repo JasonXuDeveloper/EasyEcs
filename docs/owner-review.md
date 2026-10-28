@@ -44,6 +44,28 @@ int CopyEntities<TTag>(World target, ReadOnlySpan<EntityId> ids, in ComponentSet
 // with GhostRows = ComponentSet.Create().With<Position>(), the components a ghost carries named once.
 ```
 
+**Prototype measured (backlog 8h, 2026-10-28): not shipped.** Branch `feat-copy-entities` keeps the code: the API
+above on `ArriveRows` (a gather per source table, links into the set remapped, links out of it nulled, ticks
+stamped like `CreateEntity`, unique keys claimed before anything is copied), `CopyEntitiesTests`, the AOT check and
+`GhostCopyBenchmark` (20,000 units, 500 / 1,000 / 5,000 border rows a tick, 1 or 3 components, scattered or sorted
+ids, `DestroyAll<Ghost>` every tick; 0 B in all three ways). Copy / `CreateEntity` loop over five rounds:
+
+| Rows | 1 component, scattered | 1 component, sorted | 3 components, scattered | 3 components, sorted |
+| --- | --- | --- | --- | --- |
+| 500 | 0.96-1.09 | 0.82-0.99 | 0.82-0.90 | 0.72-0.80 |
+| 1,000 | 0.96-1.07 | 0.86-0.92 | 0.81-0.92 | 0.71-0.88 |
+| 5,000 | 0.92-1.08 | 0.85-1.00 | 0.75-0.87 | 0.63-0.79 |
+
+`SaveEntitiesWith` + `LoadEntities` costs 1.4-4.3x of the loop. With one component on scattered rows the copy reads
+the source's metadata, slots and column at strided addresses where the loop reads its query's rows in order, so the
+gather saves nothing; MultiWorld's ghosts are that case (one `Position`, rows in query order but the band picked by
+a test), and its `Border.cs` grows from 9 to 14 lines (an id list per neighbor plus the set). What would change the
+verdict: ghosts that carry several components in a sample (VoxelServer's region worlds), a form that also picks the
+band (a filter or a query instead of an id list, so the copy reads rows in order and the user writes no list), or
+a measured sequential path for ids that come from one query in order. Before any merge of the branch, two classes
+that do not call the copy need a look: `WorldSimulationBenchmark` Tick(10,000) ran 1.01-1.06x of the base in four
+rounds and `MigrationBenchmark.SaveRecord` 1.03x (`MoveEntities` gains from the shared `ArriveRows` changes: 0.82-0.86x).
+
 What it removes: the per-component copy lines (the ghost's components named once in a set) and the per-row create.
 What it costs: a new public method (an addition, no migration), the `ComponentSet` path in `ArriveRows` (today it
 copies every column), EntityId fields of copied rows that point outside the copy (rewrite to null, as `LoadEntities`
