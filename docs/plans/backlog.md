@@ -31,14 +31,17 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Fewer copies c + d** ("Next" items 12c and 12d, branch `feat-fewer-copies`): Permute swaps columns with a spare,
-      incremental Capture / Restore, and fix-ci's restore cost won back.
+- [ ] **Generator: body stages catch, other assemblies' constructors and helpers** ("Next" items 8f + 8g, branch
+      `feat-foreign-bodies`).
 - [ ] **Symmetric pair methods** ("Next" item 8e, branch `feat-symmetric-pairs`).
 - [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
       `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
-      branch (12d).
+)      branch (12d).
 
-Merged since the last update: the generator crash and reason texts (`fix-kernel-foreign`: metadata backing
+Merged since the last update: fewer copies (`feat-fewer-copies`, 837c956: incremental Capture / Restore, Rollback
+with 16 writes 3.2 ms -> 36 us and BufferSnapshot Restore 78 -> 1.2 us; sorts gather into a spare column and swap it in,
+1M wide rows 77-88 -> 71-81 ms; `FillPool` exact on helper threads, so VoxelServer fills its field buffers once, not
+twice), the generator crash and reason texts (`fix-kernel-foreign`: metadata backing
 fields read as their properties, a translation exception becomes the method's reason), the L2 leftovers (`feat-pairs-2`: parallel pairs, `[Neighbor] ref`, nested-walk
 rewrites, neighbor lists by cost, `Reduce<T>` / `Mut<T>` in pair methods, the cluster renames; the owner's M4 run of
 PairListsBenchmark is open), the zombies' distance field (`feat-zombie-field`, 9c73602), CI fixes (`fix-ci`, ae9d525: Restore gives rows written since the capture their own
@@ -56,7 +59,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 ## Next, in this order
 
 Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
-rows, edges found while stepping) and 8e (running), then 8f + 8g (one generator branch), 12e, 9, 10, 4, 7, Later, then Finish.
+rows, edges found while stepping), 8e and 8f + 8g (one generator branch) running, then 12e, 9, 10, 4, 7, Later, then Finish.
 The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
 
 1. [x] **L2: the generated pair form** (merged e9c3db8, `feat-pairs-2`; open: the owner's M4 run of PairListsBenchmark) (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
@@ -167,7 +170,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        an Error where a checkerboard makes the write safe (goes with `[GaussSeidel]`); `PaddedTile` read-only (settling
        in a tile copies it into a stackalloc by hand; no halo-row or lane-shift helper; 12a's padded storage may
        answer it); `FillPool` ignores the up to 64 lists each thread parks (a likely cause of the in-place form's
-       allocation; with 12d).
+       allocation; done in 12d: `Fill` counts 64 lists per thread with lists of its own).
 8e. [ ] **Symmetric pair methods** (`voxel-rewrite.md` GA4; owner, 2026-10-27: "加，做 GA4"): each unordered pair
        visited once and both sides written (Newton's third law in MD codes: half neighbor lists), for item merging in
        VoxelServer and collisions; today a pair writing the neighbor's component it also reads of its row is refused.
@@ -256,10 +259,10 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        b. **Changed edges found while stepping**: `ChangedEdges` reads the cells and the step again after the step
           (O(cells), both buffers). The generated step compares each row it writes with the row it read (one vector
           compare per row it already holds in registers) and returns the faces, so no second pass.
-       c. **Re-sorts swap columns instead of copying back**: `Archetype.Permute` writes each column into a rented
+       c. [x] **Re-sorts swap columns instead of copying back**: `Archetype.Permute` writes each column into a rented
           scratch and copies it back (and the slots, the presence bits). Write into a spare pinned column and swap it
           in; the old column becomes the spare (one spare per column size per world, kept for the next sort).
-       d. **Incremental Capture / Restore**: `Capture(into)` copies every table every time. Copy only the columns
+       d. [x] **Incremental Capture / Restore**: `Capture(into)` copies every table every time. Copy only the columns
           (or 4,096-row blocks, `BlockTicks`) written since `into` was last captured from this world with no structural
           change between (`StorageVersion`, `LastWrite`); Restore copies back only what changed since the capture.
           Rollback netcode captures every tick with few writes per tick.

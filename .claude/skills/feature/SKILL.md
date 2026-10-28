@@ -83,6 +83,9 @@ cases (`audit-analyzer`, "Tests: every rule, every edge").
 - **A test or benchmark type's name is unique in its assembly**: a clash silently suppresses the generated extension
   members of one of them.
 - **A pass over a prefab's tables skips tables with Count 0**: instantiation passes through empty intermediate tables.
+- **A weak-reference test** ("the spare keeps no reference"): the JIT can keep an object alive in a stack slot of a
+  method with a loop and `using` / `try`; read the referenced values in a `NoInlining` helper before asserting that the
+  object was collected.
 
 ## 6. Benchmarks (`audit-perf` has the method)
 

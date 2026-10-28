@@ -53,6 +53,8 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
   its own pool, and a list freed on another thread goes to that thread's pool, so helpers allocate while the owner's
   pool fills (Restore after Capture, 2026-10-27). A shared list reports full capacity: a `Capacity` guard does not show
   sharing.
+- **Change ticks and snapshots**: a Capture or Restore that does not advance the change tick makes every incremental
+  copy conservative (everything ever written counts as written since); a restore stamps only the rows it copies back.
 - **Ideas from elsewhere**: a loop a GPU, stencil, OpenMP or database technique would run faster (whole words, zone
   maps, halos, chunk claiming, column loads); a .NET 10 API that does the job cheaper. Report them to `audit-perf`
   (its list of fields to borrow from); build only with numbers.

@@ -1147,3 +1147,33 @@ chunk lookup per zombie).
   positional (a guess: a body may compute the field), reading IL (Roslyn exposes none). Any exception translating one
   method becomes its reason, since a throwing generator loses all its output. An inlined target-typed value carries
   the callee's return type (`new T(...)`, `default(T)`); a cast binds as a conversion Kernel does not take.
+
+## feat-fewer-copies (12c, 12d, 8c FillPool; merged 837c956)
+
+- Behaviour changes (migration, changelog, README "What's new"):
+  - an in-sync Restore marks as written or removed only the rows it copies back, not every row (`Changed<T>`,
+    `Removed<T>` see fewer rows);
+  - Capture and Restore advance `ChangeTick`;
+  - after a sort, a `ref` taken before it reads the old column (it already was not the moved row; say it plainly);
+  - a world that calls `FillPool` holds about 64 more lists per thread for that type.
+- zh ApiDocs entries to refresh: Capture, Restore, `DynamicBuffer<T>.FillPool` (their English XML docs changed).
+- Snapshots page and the rollback example: Capture(into) every tick is cheap when little is written; RollbackBenchmark
+  and BufferSnapshotBenchmark.RollbackSpawning on the site (new classes, bench sync).
+- VoxelServer page: the capacity region no longer fills the field buffers twice; check the walkthrough's prose.
+- Decision records (agent's text, en + zh, in the scratchpad report `tasks/a0d6c60ebd81b8ba4.output`, also copied here):
+  - **Incremental snapshots.** Capture(into) and Restore copy only what was written since the copy was last in sync:
+    columns by LastWrite, 4,096-row blocks and 64-row words by their ticks, single rows when a word has at most 8
+    written rows. In sync = same StorageVersion, no load in between, same rows; otherwise the table is copied whole,
+    except buffer rows that still hold the same entity and were not written. Buffers get their own lists on both
+    sides, so writes after a restore stay in place. Why: rollback netcode restores often and writes little. Numbers:
+    Rollback with 16 writes per tick 3.2 ms -> 36 us; BufferSnapshot Restore 78 -> 1.2 us. Rejected: per-row dirty
+    lists (memory per entity), lists kept shared (the fix-ci cost).
+    zh: 增量快照。Capture(into) 与 Restore 只复制自上次同步以来写过的部分：按 LastWrite 选列，按 tick 选 4,096 行的区段和 64 行的字，一个字内写过的行不超过 8 行时逐行复制。同步的条件是 StorageVersion 相同、其间没有 Load、行相同；否则整表复制，但仍持有同一实体且未写过的缓冲行除外。缓冲在两侧各有自己的列表，恢复之后的写入原地进行。原因：回滚网络同步恢复频繁、写入很少。考虑后放弃：按行记录脏列表（每实体占内存）、保持列表共享（fix-ci 的代价）。
+  - **Sort spares.** A re-sort gathers each column into a spare of the same type and length and swaps it in; the old
+    column becomes the spare; one spare per shape per world, managed spares cleared, TrimExcess releases them. Why:
+    rows move once, not twice. Numbers: Reverse 1M wide rows 77-88 -> 71-81 ms; small tables unchanged; 0 B.
+    zh: 排序备用列。重排时把每列聚集到同类型、同长度的备用列再换入，旧列成为备用列；每个世界每种形状一个，托管备用列会清空，TrimExcess 释放。原因：行只移动一次而不是两次。
+  - **Exact buffer pool.** FillPool(n) fills to n plus 64 lists per thread with lists of its own, and a thread set up
+    later adds its 64; a thread allocates only when more than n lists are held. Taking 1 or 8 lists per lock instead
+    cost the parallel churn 5x or 1.5x its time.
+    zh: 精确的缓冲池。FillPool(n) 填到 n，再为每个持有自有列表的线程加 64 个，之后建立的线程补上自己的 64 个；只有持有的列表超过 n 时线程才会分配。改为每次加锁取 1 个或 8 个列表，会让并行 churn 慢 5 倍或 1.5 倍。

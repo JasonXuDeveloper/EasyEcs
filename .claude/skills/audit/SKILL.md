@@ -58,6 +58,8 @@ what it left undone, which goes on the same list (nothing is dropped silently).
   with Monitor or an until-loop. An agent that ends its turn early stalls until it is messaged again.
 - Two agents whose files overlap (a file both edit, such as `GeneratorTests.cs` or `Kernel.cs`) do not run at once;
   a purely mechanical change to a shared file (a split, a rename) waits until the other branches merged.
+- A worktree-isolated agent's shell refuses compound git commands and `sed` on shell variables: tell it to run one
+  plain command per call and keep multi-step logic in scratch scripts (feat-fewer-copies).
 
 ## While they run
 

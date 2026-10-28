@@ -174,6 +174,11 @@ its own worktree.
   34-57 ms per 100 ticks, VoxelServer's distance field, 2026-10-27).
 - **Relaxed fields** (distance, flow): a step starts from zero, not from the last field; starting from the last one
   counts down through stale values ("count to infinity": 7.5 sweeps with a long tail against 2.7).
+- **BenchmarkDotNet's 40-90 B on millisecond cases** (`MemoryDiagnoser`) appear even on code a change cannot reach
+  (a hand-written sort that never calls `Permute`, feat-fewer-copies): confirm a 0 B claim with an `Allocations.Of`
+  test, never from one stray reading.
+- **A thread-cached pool made exact**: count each thread's largest cache into the fill; shrinking the batch moves the
+  cost into contention (1 list per lock cost the parallel churn 5x, 8 per lock 1.5x; `DynamicBuffer.Fill`).
 
 ## Report
 
