@@ -105,6 +105,42 @@ public partial class TileTests
         float At(int x, int z) => x < 0 || z < 0 || x >= cells || z >= cells || !plates.ContainsKey(new TilePos(x / 16, 0, z / 16)) ? 0 : grid[x, z];
     }
 
+    [TestCase(1)]
+    [TestCase(4)]
+    public void PingPongStepsLeaveSnapshotsAsTheyWere(int threads)
+    {
+        // A snapshot shares each tile's list until it is written: the swap of a shared list's array would change the
+        // snapshot too, so a shared list goes to the buffer whole and the next step takes another.
+        var (world, plates) = PingHeatWorld(threads, 6, [], []);
+        var (twin, twinPlates) = PingHeatWorld(threads, 6, [], []);
+        using var a = world;
+        using var b = twin;
+        for (int i = 0; i < 10; i++)
+        {
+            world.Update();
+            twin.Update();
+        }
+        var snapshot = world.Capture();
+        var captured = Cells(plates);
+        for (int i = 0; i < 10; i++) world.Update();
+        world.Restore(snapshot);
+        Assert.That(Cells(plates), Is.EqualTo(captured), "the snapshot keeps the cells it captured");
+        for (int i = 0; i < 10; i++)
+        {
+            world.Update();
+            twin.Update();
+        }
+        Assert.That(Cells(plates), Is.EqualTo(Cells(twinPlates)), "the steps after a restore are the steps of a world never restored");
+
+        static float[] Cells(Dictionary<TilePos, Entity> plates)
+        {
+            var all = new List<float>();
+            foreach (var (_, plate) in plates.OrderBy(p => p.Key.X).ThenBy(p => p.Key.Z))
+                foreach (var heat in plate.Read<DynamicBuffer<Heat>>()) all.Add(heat.T);
+            return all.ToArray();
+        }
+    }
+
     /// <summary>The blur of <see cref="Blur{TTile}"/>, stepped into the tile's second buffer.</summary>
     private static void PingBlur<TTile>(ref Tile<Heat, TTile> heat) where TTile : struct, ITileShape
     {
