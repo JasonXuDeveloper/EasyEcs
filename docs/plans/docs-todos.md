@@ -1211,3 +1211,7 @@ chunk lookup per zombie).
   `[ForEntity]` kept (D82: a callable on one entity, not a pass). zh: 排空.
 - Pages: the threading page's Emit section and every example use `[Drain]`; the glossary entry "Emitted records"
   names it.
+- Also renamed (owner, 2026-10-28): `[ForEntity]` -> `[EntityMethod]` (rewrite D82: the name says it is a method
+  called on one entity, not a pass; "method" as `[ForEach]` method and pair method; zh 实体方法) and
+  `world.ForParallel` -> `world.ParallelFor` (.NET `Parallel.For`, OpenMP `parallel for`, TBB/Kokkos `parallel_for`;
+  zh keeps 并行 for). The threading page's range-for section and api.mdx rows use the new names.

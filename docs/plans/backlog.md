@@ -65,7 +65,13 @@ unreleased, so no migration): right after the tile branch merges (it edits Syste
 `IForEachRecord<T>` -> `IDrain<T>`, the analyzer and code-fix strings, `Symbols`, tests (RecordTests names), the
 benchmarks' method names (EmitBenchmark, RecordBenchmark: site keys unaffected, not synced yet), zh ApiDocs files
 (`foreachrecordattribute.xml` -> `drainattribute.xml`, `iforeachrecord.xml`), the reference regenerated, plans, file
-maps and skills. Glossary: drain = 排空 (each record handled once, then cleared). `[ForEntity]` stays (D82; owner).
+maps and skills. Glossary: drain = 排空 (each record handled once, then cleared).
+In the same pass (owner, 2026-10-28, all unreleased): **`[ForEntity]` -> `[EntityMethod]`** (a callable on one entity,
+not a pass; "method" as the docs say `[ForEach]` method and pair method; zh 实体方法; D82 rewritten, EECS080's fix
+title, `Symbols`, the code fixes) and **`world.ForParallel` -> `world.ParallelFor`** (.NET `Parallel.For`, OpenMP
+`parallel for`, TBB / Kokkos `parallel_for`; `IForRange` / `IForSpan` unchanged). `[GaussSeidel]` stays (renamed
+from `[RedBlack]` on 2026-10-27). Grep every old name afterwards (code, tests, benchmarks, samples, plans, skills,
+zh ApiDocs; history pages only may keep them).
 
 Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
 rows, edges found while stepping), 8e running (now with both parallel designs); 12e merged; 8f + 8g (one generator branch) start once 8e and the tile branch merged (they edit Kernel.cs,
