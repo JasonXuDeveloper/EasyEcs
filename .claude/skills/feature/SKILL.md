@@ -50,6 +50,9 @@ part names the skill that audits it.
 - Models are equatable and symbol-free, a tracking name per stage, a caching assertion and a generated-output test
   in `GeneratorTests`; generators report no diagnostics; partial and nested types are handled (the declaring chain
   is partial or reported).
+- A form with a coloring or a schedule inferred from a key checks its limits: an All neighborhood on a 3-field key
+  needs 8 Gauss-Seidel colors; a torus with an odd tile count per axis cannot be 2-colored and throws (a test and a
+  clear message for each).
 
 ## 3. Analyzer (`audit-analyzer`)
 

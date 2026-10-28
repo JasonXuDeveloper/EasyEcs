@@ -126,6 +126,14 @@ its own worktree.
    - rows that moved on code the change does not run (contended hand-written baselines such as InterlockedCursor,
      ConcurrentQueue; BattleServer swings about 10% between rounds) are re-run in extra interleaved rounds before they
      count as a regression or a win;
+   - dev runs on the shared VM swing 10-40 %: nothing under about 15 % is decided there; use four or more interleaved
+     rounds, or the reference machine (feat-tiles-pingpong);
+   - a parallel pass's serial end step (Next) is where lookups hurt: index lookups there dominate a parallel tile
+     pass, so keep the neighbor ids from the step instead; stamping change ticks from chunk threads shares the 64-row
+     word summary's cache lines between chunks (about 25 % at 4 threads), so stamps stay in the serial step;
+   - a new owned form (the pass owns what users wrote by hand) is measured against the hand-written form it replaces,
+     sparse and dense, 1 and 4 threads: visiting every unit for a test the hand-written form skips (sleeping tiles) is
+     the usual gap; keep a work set filled by the step that wakes it (feat-tiles-pingpong);
    - the lock is shared by every agent, so a queue is planned, not filled: benchmarks run in small batches (a class or
      a few methods), never hours queued at once; a branch whose code is done and only waits for its final checks goes
      first (the coordinator pauses the other queues' scripts with SIGSTOP and kills only their flock waiters that have
