@@ -39,7 +39,8 @@ namespace EasyEcs;
 /// it runs once for each unordered pair of its rows, never for a row with itself, in the order of the tables' rows (the
 /// row is the earlier of the two; half the pairs of a loop over both sides, MD codes' half neighbor lists). Its
 /// neighbors are then its rows: each <c>[Neighbor]</c> component is one the row takes too, and every component it
-/// writes it writes of both sides.
+/// writes it writes of both sides. On several threads (<c>Parallel = true</c>) its rows run in chunks of a fixed size
+/// colored so that chunks running at once write no row in common: the same result on any number of threads.
 /// </para>
 /// </summary>
 [AttributeUsage(AttributeTargets.Parameter)]
@@ -112,7 +113,8 @@ public interface IPairJob
     /// neighbors are its rows (the neighbors' filter is not read); the tables' pairs are each table against itself and
     /// against the tables after it, and against itself only the rows after the row: cluster w against clusters w and on,
     /// and in cluster w the rows after the row (<see cref="PairRun.Same"/> marks the run that needs that skip; each row's
-    /// list, <see cref="PairRun.Near"/>, holds only rows after it). Never parallel.
+    /// list, <see cref="PairRun.Near"/>, holds only rows after it). In parallel, chunks of a fixed number of rows, so the
+    /// result is the same on any number of threads (<see cref="World.ForPairsParallel{T, TOrder, TJob}"/>).
     /// </summary>
     static virtual bool Symmetric => false;
 }
@@ -132,6 +134,13 @@ public readonly ref struct PairRun
     private readonly int[] _starts, _ranges, _nearStarts, _near;
     private readonly float[] _reach;
     private readonly int _first, _end, _size;
+
+    // A symmetric job's: what its parallel pass works out once per draw of the list (its colors).
+    private readonly PairSchedule _schedule;
+
+    internal PairRun(World world, Archetype table, Archetype other, ulong[] rows, ulong[] neighbors, int[] starts,
+        int[] ranges, float[] reach, int first, int end, int size, int[] nearStarts, int[] near, PairSchedule schedule)
+        : this(world, table, other, rows, neighbors, starts, ranges, reach, first, end, size, nearStarts, near) => _schedule = schedule;
 
     internal PairRun(World world, Archetype table, Archetype other, ulong[] rows, ulong[] neighbors, int[] starts,
         int[] ranges, float[] reach, int first, int end, int size, int[] nearStarts = null, int[] near = null)
@@ -245,6 +254,9 @@ public readonly ref struct PairRun
     /// <summary>Row 0 of the other table's column of <typeparamref name="T"/> (a component of the neighbors' filter). O(1).</summary>
     public ref T Others<T>() where T : struct, IComponent => ref _other.Data<T>(_other.ColumnIndex(ComponentType<T>.Bit));
 
+    /// <summary>A symmetric job's schedule of its list (the run of a pass, not of a chunk).</summary>
+    internal PairSchedule Schedule => _schedule;
+
     /// <summary>What a chunk of a parallel pass rebuilds the run from (its own clusters).</summary>
     internal (World, Archetype, Archetype, ulong[], ulong[], int[], int[], float[], int[], int[]) Parts() =>
         (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, _nearStarts, _near);
@@ -319,7 +331,7 @@ public sealed partial class World
 
     /// <summary>
     /// <see cref="ForPairs{T, TOrder, TJob}"/> on several threads (a <c>[ForEach(Parallel = true)]</c> pair method that
-    /// writes no neighbor): the boxes and lists are drawn on the calling thread as there, then each table's clusters are
+    /// writes no neighbor; one writing both sides runs as <see cref="IPairJob.Symmetric"/> says): the boxes and lists are drawn on the calling thread as there, then each table's clusters are
     /// cut into chunks of whole 64-row words (about four per thread, or by the clusters' measured cost) that the chunk
     /// runner's threads claim, each running a copy of the job over its clusters' rows: a row is written by its own cluster
     /// only, so the result is the serial pass's bit for bit. Stamps follow on the calling thread. Owner thread, outside
@@ -329,9 +341,9 @@ public sealed partial class World
     public void ForPairsParallel<T, TOrder, TJob>(ref TJob job, in QueryFilter rows, in QueryFilter neighbors, int axes)
         where T : struct, IComponent where TOrder : struct, IRowOrder<T> where TJob : struct, IPairJob
     {
-        if (TJob.Symmetric) // a write of both sides would reach a row another chunk writes: never parallel (EECS105)
+        if (TJob.Symmetric) // a write of both sides reaches rows of other chunks
         {
-            ForPairs<T, TOrder, TJob>(ref job, in rows, in neighbors, axes);
+            ForPairHalves<T, TOrder, TJob>(ref job, in rows, in neighbors, axes);
             return;
         }
 
@@ -594,8 +606,10 @@ internal sealed class PairState
             if (skips) Passing(other, otherFilter, otherMode, ref _neighbors);
             var list = ListOf(own, their);
             bool listed = Listed<T, TOrder>(list, bit, job.Width);
+            PairSchedule schedule = null;
+            if (_half) (schedule = list.Schedule ??= new PairSchedule()).Drawn(list.Draws); // warm-up: one per list
             run = new PairRun(world, own.Table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Cutoff, 0,
-                own.ClusterCount, size, listed ? list.NearStarts : null, listed ? list.Near : null);
+                own.ClusterCount, size, listed ? list.NearStarts : null, listed ? list.Near : null, schedule);
             return true;
         }
     }
@@ -993,9 +1007,8 @@ internal sealed class PairState
             {
                 starts[i] = found;
                 var point = TOrder.Point(in Unsafe.Add(ref rows, i));
-                int after = half ? i + 1 : 0; // a half list's neighbors come after the row (ranges are never negative)
                 for (int k = at; k < to; k += 2)
-                    for (int j = Math.Max(list.Ranges[k], after), stop = list.Ranges[k + 1]; j < stop; j++)
+                    for (int j = list.Ranges[k], stop = list.Ranges[k + 1]; j < stop; j++)
                         if (!(Vector3.DistanceSquared(point, TOrder.Point(in Unsafe.Add(ref others, j))) > r2))
                         {
                             if (found == near.Length) Array.Resize(ref near, Math.Max(64, found * 2)); // grows to the densest list
@@ -1005,6 +1018,7 @@ internal sealed class PairState
         }
 
         starts[count] = found;
+        if (half) Halve(starts, near, count);
         list.Near = near;
         list.Listed = true;
         list.ListedDraw = list.Draws;
@@ -1014,6 +1028,25 @@ internal sealed class PairState
         list.Skin = skin;
         list.BuiltPass = _pass;
         return true;
+    }
+
+    /// <summary>
+    /// A half list (a table against itself, <see cref="PairList.Half"/>): each row's list of <paramref name="count"/>
+    /// rows keeps the rows after it only (a prefix of the ascending list goes), in place. O(entries).
+    /// Apart from the build's loop, so the full lists' loop stays as it is.
+    /// </summary>
+    private static void Halve(int[] starts, int[] near, int count)
+    {
+        int kept = 0;
+        for (int i = 0; i < count; i++)
+        {
+            int from = starts[i], to = starts[i + 1]; // starts[i + 1] is read before row i + 1 rewrites it
+            starts[i] = kept;
+            for (int k = from; k < to; k++)
+                if (near[k] > i) near[kept++] = near[k];
+        }
+
+        starts[count] = kept;
     }
 
     /// <summary>Save the points of <paramref name="clusters"/>' rows now, which later moves are measured from: 0, the move since. O(rows).</summary>
@@ -1188,6 +1221,9 @@ internal sealed class PairState
         public bool Half;
         public int Builds = -1, OtherBuilds = -1, Draws;
         public int[] Starts = [], Ranges = [], Order = [];
+
+        /// <summary>A symmetric job's: what its parallel pass works out once per draw (made by its first pass).</summary>
+        public PairSchedule Schedule;
 
         // The list of each row's neighbors (Verlet's): its rows, the draw and saves it was built from, the moves it
         // allows, how long the last one held, and the estimate of its cost for the current draw.

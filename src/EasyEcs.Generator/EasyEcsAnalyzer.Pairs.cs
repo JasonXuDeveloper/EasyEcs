@@ -22,8 +22,9 @@ public static partial class EasyEcsAnalyzer
         "Pair method '{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
         "A [ForEach] method with [Neighbor] parameters runs for every pair of its row and a neighbor within the cutoff its " +
-        "body tests. The pass runs over every row, on several threads (Parallel) only when it writes no neighbor: no " +
-        "Slices, change filters or [Consume]. It takes " +
+        "body tests. The pass runs over every row, on several threads (Parallel) when it writes no neighbor or writes both " +
+        "sides of each pair (its chunks colored apart, the same result on any number of threads): no Slices, change filters " +
+        "or [Consume]. It takes " +
         "components of its row (by 'in', 'ref', or Mut<T> on one thread: only the rows it writes are stamped), [Neighbor] " +
         "components (they say which entities are neighbors) by 'in', or by 'ref' to write them, each once, the " +
         "neighbor's Entity, singletons, values and Reduce<T> results (each chunk's combined in chunk order); it writes no component it reads of the " +

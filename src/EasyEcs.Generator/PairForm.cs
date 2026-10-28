@@ -57,7 +57,7 @@ internal static class PairForm
 
     /// <summary>
     /// Why the declaration of pair method <paramref name="method"/> cannot run per pair (EECS105), or null. A pair
-    /// pass runs over every row, on several threads only when it writes no neighbor (no Slices, change filters or [Consume]), takes components of
+    /// pass runs over every row, on several threads only when it writes no neighbor or writes both sides (<see cref="IsSymmetric"/>; no Slices, change filters or [Consume]), takes components of
     /// the row (by <c>in</c>, <c>ref</c> or <c>Mut&lt;T&gt;</c>, a Mut&lt;T&gt; on one thread only: its stamps per write
     /// are the row's) and of the neighbor, singletons, values and <c>Reduce&lt;T&gt;</c> results (each chunk's combined
     /// in chunk order), and writes no component the other side of a pair reads: a
@@ -72,7 +72,7 @@ internal static class PairForm
         if (Symbols.IsForEntity(method)) return "is a [ForEntity] method: a pair runs over the world";
         if (!method.IsStatic) return "is an instance method: make it static";
         if (method.IsGenericMethod || method.ContainingType.IsGenericType) return "is generic: a pair method's order names its component";
-        if (Symbols.IsParallel(method) && method.Parameters.FirstOrDefault(p => p.RefKind == RefKind.Ref && Symbols.IsNeighbor(p)) is { } shared)
+        if (Symbols.IsParallel(method) && !IsSymmetric(method) && method.Parameters.FirstOrDefault(p => p.RefKind == RefKind.Ref && Symbols.IsNeighbor(p)) is { } shared)
             return $"runs in parallel and writes the neighbor's {shared.Type.Name} ('{shared.Name}'): rows of two threads would write one neighbor; drop Parallel";
         if (Symbols.IsParallel(method) && method.Parameters.FirstOrDefault(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Mutable) is { } mutable)
             return $"runs in parallel and takes '{mutable.Name}' as a Mut<T>: its stamps per write would share the change ticks of the chunks' rows; take it by 'ref' (every row the pass runs for is stamped) or drop Parallel";
@@ -134,7 +134,7 @@ internal static class PairForm
     /// Why a pair method that writes both sides (<see cref="IsSymmetric"/>) cannot run each unordered pair once, or
     /// null: its neighbors are its rows, so each [Neighbor] component is one its row takes too; and each component it
     /// writes (by <c>ref</c>) it writes of both sides, since a write of one side only would see half of its pairs.
-    /// Parallel is refused before (a write of the neighbor), and so is a Mut&lt;T&gt; of the component written.
+    /// A Mut&lt;T&gt; is refused (both sides are stamped as written).
     /// </summary>
     private static string? SymmetricProblem(IMethodSymbol method, bool outside, HashSet<ITypeSymbol> rows)
     {
