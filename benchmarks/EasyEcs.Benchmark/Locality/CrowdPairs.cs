@@ -37,13 +37,6 @@ public static class CrowdPairs
         CrowdPairs.SeparateBoth(world);
     }
 
-    /// <summary>The same one pair at a time.</summary>
-    public static void TickBothRows(World world)
-    {
-        CrowdPairs.Reset(world);
-        CrowdPairs.SeparateBothRows(world);
-    }
-
     /// <summary>
     /// How far a row moves per tick at full speed, as a share of the cutoff: a crowd walking (GROMACS's steps move
     /// about as far against its cutoff), so lists of neighbors hold a few ticks.
@@ -96,25 +89,10 @@ public static class CrowdPairs
 
     /// <summary>
     /// <see cref="Separate"/> writing both sides (Newton's third law: the pair's term is the row's push and minus the
-    /// neighbor's), each unordered pair once: half the pairs, the lanes' terms added into the neighbor in order.
+    /// neighbor's), each unordered pair once: half the pairs, one at a time.
     /// </summary>
     [ForEach]
     public static void SeparateBoth(in Crowd.Position p, in Crowd.Velocity v, ref Crowd.Push push,
-        [Neighbor] in Crowd.Position q, [Neighbor] in Crowd.Velocity u, [Neighbor] ref Crowd.Push back)
-    {
-        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
-        if (d2 >= Crowd.Range2 || d2 == 0) return;
-        float w = Crowd.Range2 - d2;
-        float x = w * (dx + Crowd.Drag * (u.X - v.X)), y = w * (dy + Crowd.Drag * (u.Y - v.Y));
-        push.X += x;
-        push.Y += y;
-        back.X -= x;
-        back.Y -= y;
-    }
-
-    /// <summary><see cref="SeparateBoth"/> one pair at a time.</summary>
-    [ForEach(SimdMode = SimdMode.Off)]
-    public static void SeparateBothRows(in Crowd.Position p, in Crowd.Velocity v, ref Crowd.Push push,
         [Neighbor] in Crowd.Position q, [Neighbor] in Crowd.Velocity u, [Neighbor] ref Crowd.Push back)
     {
         float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
