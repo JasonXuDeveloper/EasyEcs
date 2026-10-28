@@ -31,10 +31,12 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
+- [ ] **Ghost rows in MultiWorld** ("Next" item 7, branch `feat-ghost-rows`): the sample only, with a verdict on a
+      core feature (proposal to `owner-review.md`, nothing built); VoxelServer's ghost rows wait for Finish step 2a.
 - [ ] **Symmetric pair methods** ("Next" item 8e, branch `feat-symmetric-pairs`).
 - [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
       `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
-)      branch (12d).
+      branch (12d).
 
 Merged since the last update: Emitted<T>'s segments (`feat-emit-segments`, 4925b09: the chunks' lists kept as
 segments, joined only for a span read or a write; EmitParallel 1.4-2x, a `[ForEachRecord]` reader about 1.2x, 0 B;
