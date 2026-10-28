@@ -180,13 +180,24 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        and `FusionSide.Of` still drop the project's output when they throw; each needs a safe fallback model (the
        method's plain job) and a reason, like Kernel. Also a clearer EECS055 reason for a switch expression over a
        struct call (VoxelServer's Chase reads "'new Nearby(...).Trail(cell.X, cell.Z) s...' is not supported").
-8g. [ ] **Positional constructors of another assembly** (found at the fix-kernel-foreign merge): a component in a
-       contracts assembly (HotReload's `Position(float X, float Y)`) makes `new Position(x, y)` an EECS055 warning,
-       because metadata has no constructor body; users with shared contracts would have to avoid an everyday idiom.
-       Proposal: the generator of the declaring assembly sees the source and records, in a hidden assembly-level
-       attribute (no `partial` needed), the components whose constructors only assign their parameters to fields in
-       order; the referencing assembly's Kernel reads it and treats those as in source. Proof: the HotReload sample's
-       old `new Position(...)` vectorizes without a warning; a hand-written constructor stays scalar.
+8g. [ ] **Constructors and helpers of another assembly, read from what its generator recorded** (found at the
+       fix-kernel-foreign merge; owner, 2026-10-28: "有没有别的办法解决这种问题呢"): a component in a contracts
+       assembly (HotReload's `Position(float X, float Y)`) makes `new Position(x, y)` an EECS055 warning, because
+       metadata has no constructor body; users with shared contracts would have to avoid an everyday idiom.
+       Ways checked: reading the IL fails where it matters (a ProjectReference compiles against the project's
+       reference assembly, whose bodies are `throw null`; NuGet packages may ship `ref/` only; a generator does no
+       file IO); guessing from metadata (a record's `Deconstruct` and properties named like the parameters) is wrong
+       when a positional property has its own initializer, and a wrong guess is a wrong vector loop.
+       Chosen: the EasyEcs generator runs in the declaring assembly anyway (it references EasyEcs for IComponent),
+       sees the source and records the facts as hidden assembly-level attributes, which reference assemblies keep
+       (as the compiler records nullability or tuple names): per constructor of a component, the field each
+       parameter is assigned to when the body is only that; per small static helper a vector loop may call (the
+       call inliner's candidates: `Terrain.Cell`-like), its body, so the call inliner inlines helpers of other
+       assemblies too. The referencing Kernel reads them (`compilation.GetAssemblyOrModuleSymbol(reference)
+       .GetAttributes()`, cached per reference); an assembly built without them keeps today's fixable reason.
+       Proof: the HotReload sample's old `new Position(...)` vectorizes with no warning; a hand-written constructor
+       and an initializer-changed positional property stay scalar; a helper of a referenced assembly inlines bit for
+       bit as from source; GeneratorBenchmark shows the attribute read costs nothing per keystroke.
 9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
        ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
        `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the
