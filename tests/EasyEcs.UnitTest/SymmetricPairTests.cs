@@ -28,7 +28,10 @@ public static class SymmetricPairs
     public const float Range = 1f;
     public const float MergeRange = 0.6f;
 
-    /// <summary>Newton's third law: what the row is pushed by, the neighbor is pushed back by. A vector loop.</summary>
+    /// <summary>
+    /// Newton's third law: what the row is pushed by, the neighbor is pushed back by. Each unordered pair once, one at a
+    /// time (a write of the neighbor keeps the pairs one at a time).
+    /// </summary>
     [ForEach]
     public static void Repel(in BodyAt p, ref BodyForce f, [Neighbor] in BodyAt q, [Neighbor] ref BodyForce g)
     {
@@ -41,7 +44,30 @@ public static class SymmetricPairs
         g.Y -= w * dy;
     }
 
-    /// <summary>The same, one pair at a time: bit for bit the vector loop.</summary>
+    /// <summary>
+    /// Counts of both sides, weighted by the side of the pair, under the default SimdMode (<see cref="MeetRows"/> with
+    /// SimdMode.Off): the same pass.
+    /// </summary>
+    [ForEach]
+    public static void Meet(in BodyAt p, ref BodyContacts c, [Neighbor] in BodyAt q, [Neighbor] ref BodyContacts k)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y;
+        if (dx * dx + dy * dy >= Range * Range) return;
+        c.Count += dx > 0 ? 3 : 1;
+        k.Count += dx > 0 ? 1 : 2;
+    }
+
+    /// <summary><see cref="Meet"/> one pair at a time.</summary>
+    [ForEach(SimdMode = SimdMode.Off)]
+    public static void MeetRows(in BodyAt p, ref BodyContacts c, [Neighbor] in BodyAt q, [Neighbor] ref BodyContacts k)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y;
+        if (dx * dx + dy * dy >= Range * Range) return;
+        c.Count += dx > 0 ? 3 : 1;
+        k.Count += dx > 0 ? 1 : 2;
+    }
+
+    /// <summary>The same, one pair at a time.</summary>
     [ForEach(SimdMode = SimdMode.Off)]
     public static void RepelRows(in BodyAt p, ref BodyForce f, [Neighbor] in BodyAt q, [Neighbor] ref BodyForce g)
     {
@@ -252,11 +278,38 @@ public class SymmetricPairTests
     {
         using var world = Bodies(count, extent, count, tables);
         SymmetricPairs.Repel(world); // sorts the rows: the reference walks them in that order
-        var vector = Repelled(world, rows: false);
-        Same(vector, Reference(world), "vector loop");
-        Same(Repelled(world, rows: true), vector, "one pair at a time");
+        var auto = Repelled(world, rows: false);
+        Same(auto, Reference(world), "SimdMode.Auto");
+        Same(Repelled(world, rows: true), auto, "SimdMode.Off");
         // Newton's third law: the forces cancel (up to rounding).
-        Assert.That(Math.Abs(vector.Values.Sum(f => (double)f.X)), Is.LessThan(1e-2 * Math.Max(1, count)));
+        Assert.That(Math.Abs(auto.Values.Sum(f => (double)f.X)), Is.LessThan(1e-2 * Math.Max(1, count)));
+    }
+
+    /// <summary>Integer sums into both sides: the half walk's, under either SimdMode.</summary>
+    [TestCase(7, 2f, false)]
+    [TestCase(2000, 8f, false)]
+    [TestCase(3000, 30f, true)]
+    public void IntegerSumsOfBothSidesAreExact(int count, float extent, bool tables)
+    {
+        using var world = Bodies(count, extent, count + 5, tables, sight: true);
+        SymmetricPairs.Meet(world); // sorted
+        var t = Tables<BodyAt, BodyContacts>(world);
+        var expected = t.SelectMany(x => x).ToDictionary(e => e.Id, _ => new BodyContacts());
+        HalfWalk(t, (e, o) =>
+        {
+            var (c, k) = (expected[e.Id], expected[o.Id]);
+            SymmetricPairs.Meet(e.Read<BodyAt>(), ref c, o.Read<BodyAt>(), ref k);
+            (expected[e.Id], expected[o.Id]) = (c, k);
+        });
+        foreach (var rows in new[] { false, true })
+        {
+            SymmetricPairs.ResetContacts(world);
+            if (rows) SymmetricPairs.MeetRows(world);
+            else SymmetricPairs.Meet(world);
+            var got = new Dictionary<EntityId, BodyContacts>();
+            foreach (var item in world.Read<BodyContacts>()) got[item.Entity.Id] = item.Component1;
+            Same(got, expected, rows ? "SimdMode.Off" : "SimdMode.Auto");
+        }
     }
 
     [Test]
@@ -285,9 +338,9 @@ public class SymmetricPairTests
             if (all[i].IsAlive) all[i].Disable<BodyForce>(); // fails the filter: neither side of a pair
         for (int pass = 0; pass < 3; pass++)
         {
-            var vector = Repelled(world, rows: false);
-            Same(vector, Reference(world), $"pass {pass}");
-            Same(Repelled(world, rows: true), vector, $"pass {pass}, one pair at a time");
+            var auto = Repelled(world, rows: false);
+            Same(auto, Reference(world), $"pass {pass}");
+            Same(Repelled(world, rows: true), auto, $"pass {pass}, SimdMode.Off");
         }
     }
 
@@ -306,9 +359,9 @@ public class SymmetricPairTests
                 else p = new BodyAt(p.X + 0.05f * ((float)random.NextDouble() - 0.5f), p.Y + 0.05f);
             }
             world.Update();
-            var vector = Repelled(world, rows: false);
-            Same(vector, Reference(world), $"tick {tick}");
-            Same(Repelled(world, rows: true), vector, $"tick {tick}, one pair at a time");
+            var auto = Repelled(world, rows: false);
+            Same(auto, Reference(world), $"tick {tick}");
+            Same(Repelled(world, rows: true), auto, $"tick {tick}, SimdMode.Off");
         }
     }
 
@@ -346,9 +399,9 @@ public class SymmetricPairTests
             break;
         }
         SymmetricPairs.Repel(world);
-        var vector = Repelled(world, rows: false);
-        Same(vector, Reference(world), "vector loop");
-        Same(Repelled(world, rows: true), vector, "one pair at a time");
+        var auto = Repelled(world, rows: false);
+        Same(auto, Reference(world), "SimdMode.Auto");
+        Same(Repelled(world, rows: true), auto, "SimdMode.Off");
     }
 
     [TestCase(800, 6f, false)]
@@ -377,8 +430,8 @@ public class SymmetricPairTests
             var counted = new Dictionary<EntityId, BodyContacts>();
             foreach (var item in world.Read<BodyForce, BodyContacts>())
                 (got[item.Entity.Id], counted[item.Entity.Id]) = (item.Component1, item.Component2);
-            Same(got, forces, form ? "one pair at a time" : "vector loop");
-            Same(counted, contacts, form ? "contacts, one pair at a time" : "contacts, vector loop");
+            Same(got, forces, form ? "SimdMode.Off" : "SimdMode.Auto");
+            Same(counted, contacts, form ? "contacts, SimdMode.Off" : "contacts, SimdMode.Auto");
         }
     }
 
@@ -537,6 +590,7 @@ public class SymmetricPairTests
             SymmetricPairs.ResetForce(world);
             SymmetricPairs.Repel(world);
             SymmetricPairs.RepelRows(world);
+            SymmetricPairs.Meet(world);
             SymmetricPairs.Sense(world);
             SymmetricPairs.Touch(world);
             world.Update();
@@ -552,8 +606,7 @@ public class SymmetricPairTests
         world.AddSystem<SymmetricRules>();
         var lines = world.DescribeSchedule().Groups[0].Stages[0].Systems[0].Loops;
         string push = lines.Single(l => l.StartsWith("Push:")), merge = lines.Single(l => l.StartsWith("Gather:"));
-        Assert.That(push, Does.Contain("each unordered pair once, both sides written"));
-        if (System.Numerics.Vector.IsHardwareAccelerated) Assert.That(push, Does.Contain("(vector)"));
+        Assert.That(push, Does.Contain("each unordered pair once, both sides written").And.Contain("one pair at a time (it writes both sides of its pairs"));
         Assert.That(merge, Does.Contain("each unordered pair once").And.Contain("one pair at a time"));
     }
 }

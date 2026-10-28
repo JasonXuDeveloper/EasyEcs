@@ -153,8 +153,8 @@ public class LocalityTests
     }
 
     /// <summary>
-    /// The crowd's pair method writing both sides (PairsBenchmark.GeneratedBoth): the reference's sums, the vector loop
-    /// bit for bit the method one pair at a time, 0 B.
+    /// The crowd's pair method writing both sides (PairsBenchmark.GeneratedBoth): the reference's sums, each unordered
+    /// pair once, 0 B.
     /// </summary>
     [TestCase(3_000, Density.Crowd)]
     [TestCase(3_000, Density.Sparse)]
@@ -164,10 +164,7 @@ public class LocalityTests
         CrowdPairs.TickBoth(world); // the first pass sorts the tables: the reference after it
         var expected = Crowd.Reference(world);
         CrowdPairs.TickBoth(world);
-        var vector = Crowd.Pushes(world);
-        Assert.That(Crowd.FirstMismatch(vector, expected), Is.EqualTo(-1));
-        CrowdPairs.TickBothRows(world);
-        Assert.That(Crowd.Pushes(world), Is.EqualTo(vector), "one pair at a time");
+        Assert.That(Crowd.FirstMismatch(Crowd.Pushes(world), expected), Is.EqualTo(-1));
         Assert.That(Allocations.Of(() => CrowdPairs.TickBoth(world)), Is.Zero);
     }
 

@@ -54,20 +54,15 @@ public partial class AnalyzerTests
         Assert.That(found.Single(d => d.Id == "EECS105").GetMessage(), Is.EqualTo(message));
     }
 
-    // A method writing both sides keeps a vector loop while each neighbor field is a sum it never reads (EECS056 says why
-    // not under SimdMode.Require; EECS055 leaves pair methods alone).
-    [TestCase("f.X += dx; g.X -= dx;", null)]
-    [TestCase("f.X += dx; g.X++; g.Y--;", null)]
-    [TestCase("f.X += g.X; g.X -= dx;", "it reads the neighbor's Drift it writes ('g.X')")]
-    [TestCase("f.X += dx; g.X = dx;", "writes the neighbor's Drift otherwise than by a sum into a field")]
-    [TestCase("f.X += dx; g.X -= dx; g.X -= dx;", "it writes the neighbor's 'g.X' twice")]
-    public async Task BothSidesKeepAVectorLoop(string body, string? reason)
+    // A method writing both sides runs its pairs one at a time (a vector loop's sums into the neighbor lost to them):
+    // EECS056 says so under SimdMode.Require; EECS055 leaves pair methods alone.
+    [Test]
+    public async Task BothSidesWrittenRunOnePairAtATime()
     {
-        var costs = await GeneratorTests.Analyze([GeneratorTests.Components, PairParts,
-            InSystem("[ForEach(SimdMode = SimdMode.Require)] static void A(in Spot p, ref Drift f, [Neighbor] in Spot q, [Neighbor] ref Drift g) { float dx = p.X - q.X; if (dx * dx >= 1) return; " + body + " }")]);
-        var scalar = costs.Where(d => d.Id == "EECS056").Select(d => d.GetMessage()).ToArray();
-        if (reason == null) Assert.That(scalar, Is.Empty);
-        else Assert.That(scalar.Single(), Does.Contain(reason));
+        var found = await GeneratorTests.Analyze([GeneratorTests.Components, PairParts,
+            InSystem("[ForEach(SimdMode = SimdMode.Require)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++; m.Value++; }")]);
+        Assert.That(found.Single(d => d.Id == "EECS056").GetMessage(),
+            Does.Contain("it writes both sides of its pairs ('m', [Neighbor] ref): each unordered pair runs once, one at a time"));
     }
 
     [Test]
