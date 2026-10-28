@@ -68,7 +68,7 @@ The element at `index`, read-only (write through [`DynamicBufferExtensions.AsSpa
 public readonly ReadOnlySpan<T> AsReadOnlySpan();
 ```
 
-The elements, read-only.
+The elements, read-only. The records of an [`Emitted`](/en/docs/reference/emitted) that parallel passes left in their chunks' lists are joined into one list first (O(records), once), as a write does; [`DynamicBuffer.Count`](/en/docs/reference/dynamicbuffer#count) and [`DynamicBufferExtensions.Clear`](/en/docs/reference/dynamicbufferextensions#clear) leave them where they are.
 
 **Complexity** ([API table](/en/docs/api)): O(1)
 

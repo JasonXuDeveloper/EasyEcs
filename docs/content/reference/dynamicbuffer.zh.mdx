@@ -68,7 +68,7 @@ public readonly ref readonly T this[int index] { get; }
 public readonly ReadOnlySpan<T> AsReadOnlySpan();
 ```
 
-全部元素，只读。
+全部元素，只读。并行遍历留在各块列表里的 [`Emitted`](/zh/docs/reference/emitted) 记录先合并成一个列表（O(记录数)，只做一次），和写入时一样；[`DynamicBuffer.Count`](/zh/docs/reference/dynamicbuffer#count) 和 [`DynamicBufferExtensions.Clear`](/zh/docs/reference/dynamicbufferextensions#clear) 让它们留在原处。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)
 

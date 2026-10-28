@@ -51,11 +51,15 @@ public sealed partial class World
     /// <summary>
     /// <see cref="ForParallel{TJob}"/> over the elements of <paramref name="items"/> (an <see cref="Emitted{T}"/>
     /// singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The
-    /// list must not change while the call runs.
+    /// list must not change while the call runs. The records of an <see cref="Emitted{T}"/> that parallel passes left in
+    /// their chunks' lists are run where they are, in order, not joined first: a chunk that spans two of those lists
+    /// gets one call per list, each with its own <c>start</c>.
     /// </summary>
     public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>
     {
-        if (DynamicBufferExtensions.Own(ref items) is not { Count: > 0 } store) return; // the chunks write it: its own
+        var store = items.Store;
+        if (store is not { Shares: BufferStore.Segmented }) // an Emitted<T>'s list in segments is its own already
+            if ((store = DynamicBufferExtensions.Own(ref items)) is not { Count: > 0 }) return; // the chunks write it: its own
         var work = WorkOf<SpanChunks<T, TJob>>();
         work.Job = job;
         work.Store = store;
@@ -116,7 +120,20 @@ public sealed partial class World
         protected override void Execute(int start, int end)
         {
             var job = Job;
-            job.Execute(start, new Span<T>(Store.Items, start, end - start));
+            var store = Store;
+            if (store.Shares != BufferStore.Segmented)
+            {
+                job.Execute(start, new Span<T>(store.Items, start, end - start));
+                return;
+            }
+
+            while (start < end) // the chunk's runs, one per segment it spans
+            {
+                var run = store.Run(start, end);
+                if (run.IsEmpty) return; // the list changed under the call
+                job.Execute(start, run);
+                start += run.Length;
+            }
         }
 
         public override void Release()

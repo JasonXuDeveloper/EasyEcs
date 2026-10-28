@@ -28,8 +28,12 @@
       <see cref="M:EasyEcs.DynamicBufferExtensions.AsSpan``1(EasyEcs.DynamicBuffer{``0}@)" />）。
     </summary>
   </member>
-  <member name="M:EasyEcs.DynamicBuffer`1.AsReadOnlySpan" source="c1f9ffdace13">
-    <summary>全部元素，只读。</summary>
+  <member name="M:EasyEcs.DynamicBuffer`1.AsReadOnlySpan" source="3cdc30a00572">
+    <summary>
+      全部元素，只读。并行遍历留在各块列表里的 <see cref="T:EasyEcs.Emitted`1" /> 记录先合并成一个列表（O(记录数)，只做一次），
+      和写入时一样；<see cref="P:EasyEcs.DynamicBuffer`1.Count" /> 和 <see cref="M:EasyEcs.DynamicBufferExtensions.Clear``1(EasyEcs.DynamicBuffer{``0}@)" />
+      让它们留在原处。
+    </summary>
   </member>
   <member name="M:EasyEcs.DynamicBuffer`1.GetEnumerator" source="546a0591a584">
     <summary>枚举元素（只读，零分配）。</summary>

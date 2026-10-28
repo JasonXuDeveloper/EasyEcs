@@ -65,10 +65,24 @@ public sealed partial class World
     /// <summary>
     /// Stable handle to singleton <typeparamref name="T"/>; throws if it was not added: resolve it once, then read and
     /// write <see cref="SingletonRef{T}.Value"/> without a lookup. Generated <c>[ForEach]</c> jobs resolve singleton
-    /// parameters through it once per pass, so a system whose singleton was never set fails on its first run. O(1).
+    /// parameters through it once per pass, so a system whose singleton was never set fails on its first run. O(1); for
+    /// an <see cref="Emitted{T}"/> whose records parallel passes left in their chunks' lists, O(records) once: they are
+    /// joined into one list here, on the owner thread, so a pass reading them on several threads finds them in place.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent => new(AddedBox<T>());
+    public SingletonRef<T> SingletonRef<T>() where T : struct, ISingletonComponent
+    {
+        var box = AddedBox<T>();
+        if (default(T) is IBuffer) Settle(ref box.Value); // a JIT-time constant: Emitted<T> only
+        return new(box);
+    }
+
+    // The records of an Emitted<T> (a list singleton: its only field is a DynamicBuffer, whose only field is its store)
+    // side by side (BufferStore.Segmented).
+    private static void Settle<T>(ref T value)
+    {
+        if (Unsafe.As<T, BufferStore>(ref value) is { Shares: BufferStore.Segmented } store) store.Settle();
+    }
 
     /// <summary>
     /// Add <typeparamref name="T"/> unless another thread did first (systems of one parallel stage may resolve the same

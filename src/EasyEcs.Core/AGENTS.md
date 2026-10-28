@@ -70,8 +70,10 @@ Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo
                              Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
                              TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,
                              PaddedTile.Rows (TZCNT walk), TileCursor.Load128, ChangedEdges / Facing (sleeping tiles)
-Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), joined in
-                             chunk order into singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear);
+Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), handed in
+                             chunk order to singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear) as
+                             segments, not copied: EmitStore (BufferStore.Segmented) joins them only when read as one
+                             span or written; Count, Clear, [ForEachRecord] and ForParallel take them in place (Run);
                              AddIds / AddLanes: a vector loop's passing lanes appended compacted, in row order;
                              Emitted<T>.Consume + IForEachRecord<T>: a [ForEachRecord] pass (the records walked, then cleared)
 EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
@@ -164,7 +166,8 @@ Disabled.cs                  Disabled<T> tag (the value kept, the component hidd
                              non-generic DisabledTag per component (ComponentInfo.DisablerOf)
 DynamicBuffer.cs             DynamicBuffer<T> (a list per entity as a tracked component; writes are ref-this extensions)
                              and its BufferStore: shared by prefab instances, clones and snapshots until written
-                             (copy-on-write, Shares; a prefab's uncounted)
+                             (copy-on-write, Shares; a prefab's uncounted; an Emitted<T>'s in segments: Segmented,
+                             joined by Settle before a read as one span or a write)
 Prefab.cs                    a recipe of component values outside any world (one row of a private world)
 World.Snapshots.cs           Capture / Restore, incremental while in sync (WorldSnapshot.cs holds the copies)
 World.Serialization.cs       Save / Load of a whole world (SaveWithout(output, exclude) / LoadKeeping(input, keep) for a restart);

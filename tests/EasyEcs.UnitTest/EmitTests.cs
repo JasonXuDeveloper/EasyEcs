@@ -303,6 +303,275 @@ public class EmitTests
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }, () => strikes.Stats.TotalAllocated), Is.Zero);
     }
 
+    // Segments: a parallel pass hands its chunks' lists to Emitted<T> (BufferStore.Segmented), joined only when the
+    // records are read as one span or written; Count, Clear, [ForEachRecord] passes and ForParallel take them in place.
+
+    /// <summary>A trap under every eleventh attacker: an emitter on one thread between two parallel ones.</summary>
+    [EcsSystem, UpdateAfter<ParallelStrikes>]
+    public ref struct SerialTraps
+    {
+        [ForEach(SimdMode = SimdMode.Off)]
+        static void Trap(in Attack attack, in Aim aim, Emit<Hit> hits)
+        {
+            if (attack.Power % 11 == 0) hits.Add(new Hit(aim.Target, 11));
+        }
+    }
+
+    /// <summary>Heals from every seventh attacker: a second parallel emitter of the same records.</summary>
+    [EcsSystem, UpdateAfter<SerialTraps>]
+    public ref struct ParallelHeals
+    {
+        [ForEach(Parallel = true, SimdMode = SimdMode.Off)]
+        static void Heal(in Attack attack, in Aim aim, Emit<Hit> hits)
+        {
+            if (attack.Power % 7 == 0) hits.Add(new Hit(aim.Target, -attack.Power));
+        }
+    }
+
+    /// <summary>Reads the records on several threads after a parallel emitter: the pass resolving Emitted joins them first.</summary>
+    [EcsSystem, UpdateAfter<ParallelStrikes>]
+    public ref struct ParallelLastHit
+    {
+        [ForEach(Parallel = true, SimdMode = SimdMode.Off)]
+        static void Read(ref Hp hp, in Emitted<Hit> hits) => hp.Value = hits.Items[hits.Items.Count - 1].Amount + hits.Items.AsReadOnlySpan()[0].Amount;
+    }
+
+    public struct Tally : ISingletonComponent
+    {
+        public long Total;
+        public long Order;
+    }
+
+    public static class Books
+    {
+        [ForEachRecord]
+        public static void Book(in Hit hit, ref Tally tally)
+        {
+            tally.Total += hit.Amount;
+            tally.Order = tally.Order * 31 + hit.Amount;
+        }
+    }
+
+    private struct Number : IForSpan<Hit>
+    {
+        public void Execute(int start, Span<Hit> items)
+        {
+            for (int i = 0; i < items.Length; i++) items[i] = items[i] with { Amount = start + i };
+        }
+    }
+
+    /// <summary>The records of a pass whose attacker n emits <paramref name="hit"/>(n, target) when it is not null.</summary>
+    private static Hit[] Rows(int attackers, Entity[] targets, Func<int, EntityId, Hit?> hit)
+    {
+        var hits = new System.Collections.Generic.List<Hit>();
+        for (int n = 0; n < attackers; n++)
+            if (hit(n, targets[n % targets.Length].Id) is { } h)
+                hits.Add(h);
+        return hits.ToArray();
+    }
+
+    private static bool Segmented(ref DynamicBuffer<Hit> hits) => hits.Store is { Shares: BufferStore.Segmented };
+
+    [Test]
+    public void PassesOfOneUpdateKeepTheirOrderInSegments()
+    {
+        const int attackers = 20_000;
+        foreach (int threads in new[] { 1, 4 })
+        {
+            var (world, targets) = Fight(attackers, 37, threads);
+            using (world)
+            {
+                world.AddSystem<ParallelStrikes>(); // ChunkSize = 64: more chunks than segments a list holds
+                world.AddSystem<SerialTraps>();     // joins the strikes' segments, then appends in place
+                world.AddSystem<ParallelHeals>();   // its chunks' lists stay segments
+                var expected = Expected(attackers, targets)
+                    .Concat(Rows(attackers, targets, (n, t) => n % 11 == 0 ? new Hit(t, 11) : null))
+                    .Concat(Rows(attackers, targets, (n, t) => n % 7 == 0 ? new Hit(t, -n) : null)).ToArray();
+                for (int run = 0; run < 5; run++)
+                {
+                    world.Update();
+                    ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
+                    Assert.That(Segmented(ref hits), Is.True, $"{threads} threads");
+                    Assert.That(hits.Count, Is.EqualTo(expected.Length));
+                    Assert.That(hits[expected.Length - 1], Is.EqualTo(expected[^1]));
+                    Assert.That(Segmented(ref hits), Is.False); // the indexer joined them
+                    Assert.That(hits.AsReadOnlySpan().SequenceEqual(expected), Is.True, $"{threads} threads, run {run}");
+                    hits.Clear();
+                }
+            }
+        }
+    }
+
+    [Test]
+    public void CountAndClearLeaveTheSegmentsUncopied()
+    {
+        const int attackers = 20_000;
+        var (world, targets) = Fight(attackers, 37, 4);
+        using (world)
+        {
+            int expected = Rows(attackers, targets, (n, t) => n % 7 == 0 ? new Hit(t, -n) : null).Length;
+            world.AddSystem<ParallelHeals>();
+            void Ticks()
+            {
+                for (int i = 0; i < 20; i++)
+                {
+                    world.Update();
+                    ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
+                    if (!Segmented(ref hits) || hits.Count != expected) throw new AssertionException($"{hits.Count} hits");
+                    hits.Clear();
+                }
+            }
+
+            Ticks();
+            Assert.That(Allocations.Of(Ticks), Is.Zero);
+            Assert.That(world.GetSingleton<Emitted<Hit>>().Items.Capacity, Is.LessThan(expected)); // never joined
+        }
+    }
+
+    [Test]
+    public void ARecordPassWalksTheSegmentsInOrder()
+    {
+        const int attackers = 20_000;
+        Tally? first = null;
+        foreach (int threads in new[] { 1, 4 })
+        {
+            var (world, targets) = Fight(attackers, 37, threads);
+            using (world)
+            {
+                world.GetOrAddSingleton<Tally>();
+                world.AddSystem<ParallelStrikes>();
+                world.AddSystem<ParallelHeals>();
+                var expected = new Tally();
+                foreach (var hit in Expected(attackers, targets).Concat(Rows(attackers, targets, (n, t) => n % 7 == 0 ? new Hit(t, -n) : null)))
+                    Books.Book(in hit, ref expected);
+                world.Update();
+                ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
+                Assert.That(Segmented(ref hits), Is.True);
+                int capacity = hits.Capacity;
+                Books.Book(world);
+                Assert.That(world.GetSingleton<Tally>(), Is.EqualTo(expected));
+                Assert.That((hits.Count, hits.Capacity), Is.EqualTo((0, capacity))); // walked in place, then cleared
+                first ??= world.GetSingleton<Tally>();
+                Assert.That(world.GetSingleton<Tally>(), Is.EqualTo(first)); // bit-identical at 1 and 4 threads
+            }
+        }
+    }
+
+    [Test]
+    public void ARecordPassOverSegmentsDoesNotAllocate()
+    {
+        // One emitter: every chunk's list ends at the size its chunk needs. (Emitters of one record type whose chunks
+        // differ in size share the pool, so a list keeps growing now and then until every list has served the larger
+        // chunks, for good: steady state comes, after a number of updates the threads decide.)
+        var (world, _) = Fight(20_000, 37, 4);
+        using (world)
+        {
+            world.GetOrAddSingleton<Tally>();
+            world.AddSystem<ParallelHeals>();
+            void Ticks()
+            {
+                for (int i = 0; i < 10; i++)
+                {
+                    world.Update();
+                    Books.Book(world);
+                }
+            }
+
+            for (int i = 0; i < 3; i++) Ticks();
+            Assert.That(Segmented(ref world.GetSingleton<Emitted<Hit>>().Items), Is.False); // cleared by the pass
+            Assert.That(Allocations.Of(Ticks), Is.Zero);
+        }
+    }
+
+    [Test]
+    public void ForParallelRunsTheSegmentsInPlace()
+    {
+        const int attackers = 20_000;
+        var (world, _) = Fight(attackers, 37, 4);
+        using (world)
+        {
+            world.AddSystem<ParallelHeals>();
+            world.Update();
+            ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
+            Assert.That(Segmented(ref hits), Is.True);
+            int count = hits.Count;
+            var job = new Number();
+            world.ForParallel(ref hits, ref job, chunkSize: 64); // chunks that span two segments: one call per segment
+            Assert.That(Segmented(ref hits), Is.True);
+            var numbered = hits.AsReadOnlySpan();
+            Assert.That(numbered.Length, Is.EqualTo(count));
+            for (int i = 0; i < numbered.Length; i++) Assert.That(numbered[i].Amount, Is.EqualTo(i));
+        }
+    }
+
+    [Test]
+    public void APassReadingTheRecordsOnSeveralThreadsFindsThemJoined()
+    {
+        const int attackers = 20_000;
+        var (world, targets) = Fight(attackers, 37, 4);
+        using (world)
+        {
+            world.AddSystem<ParallelStrikes>();
+            world.AddSystem<ParallelLastHit>();
+            var expected = Expected(attackers, targets);
+            world.Update();
+            foreach (var target in targets) Assert.That(target.Hp.Value, Is.EqualTo(expected[^1].Amount + expected[0].Amount));
+            Assert.That(Segmented(ref world.GetSingleton<Emitted<Hit>>().Items), Is.False);
+        }
+    }
+
+    [Test]
+    public void SnapshotsAndSavesCopyTheSegments()
+    {
+        const int attackers = 20_000;
+        var (world, targets) = Fight(attackers, 37, 4);
+        using (world)
+        {
+            world.AddSystem<ParallelHeals>();
+            var once = Rows(attackers, targets, (n, t) => n % 7 == 0 ? new Hit(t, -n) : null);
+            world.Update();
+            Assert.That(Segmented(ref world.GetSingleton<Emitted<Hit>>().Items), Is.True);
+            var snapshot = world.Capture();
+            var output = new NinoArrayBufferWriter();
+            world.Update();
+            Assert.That(Segmented(ref world.GetSingleton<Emitted<Hit>>().Items), Is.True);
+            world.Save(output);
+            using var loaded = new World();
+            loaded.Load(output.WrittenSpan);
+            Assert.That(loaded.GetSingleton<Emitted<Hit>>().Items.AsReadOnlySpan().SequenceEqual(once.Concat(once).ToArray()), Is.True);
+            world.Update(); // segments again, which the restore drops
+            world.Restore(snapshot);
+            Assert.That(world.GetSingleton<Emitted<Hit>>().Items.AsReadOnlySpan().SequenceEqual(once), Is.True);
+            world.Load(output.WrittenSpan);
+            Assert.That(world.GetSingleton<Emitted<Hit>>().Items.AsReadOnlySpan().SequenceEqual(once.Concat(once).ToArray()), Is.True);
+        }
+    }
+
+    [Test]
+    public void WritesJoinTheSegmentsFirst()
+    {
+        const int attackers = 20_000;
+        var (world, targets) = Fight(attackers, 37, 4);
+        using (world)
+        {
+            world.AddSystem<ParallelHeals>();
+            var once = Rows(attackers, targets, (n, t) => n % 7 == 0 ? new Hit(t, -n) : null);
+            world.Update();
+            ref var hits = ref world.GetSingleton<Emitted<Hit>>().Items;
+            hits.Add(new Hit(default, 5));
+            Assert.That(hits.AsReadOnlySpan().SequenceEqual(once.Append(new Hit(default, 5)).ToArray()), Is.True);
+            world.Update();
+            Assert.That(Segmented(ref hits), Is.True);
+            hits.AsSpan()[0] = new Hit(default, 6); // a write: joined first
+            Assert.That(hits[0], Is.EqualTo(new Hit(default, 6)));
+            Assert.That(hits[once.Length], Is.EqualTo(new Hit(default, 5)));
+            Assert.That(hits.AsReadOnlySpan()[(once.Length + 1)..].SequenceEqual(once), Is.True);
+            hits.SetCount(1);
+            hits.TrimExcess();
+            Assert.That(hits.AsReadOnlySpan().ToArray(), Is.EqualTo(new[] { new Hit(default, 6) }));
+        }
+    }
+
     // EECS092: records nothing clears. The test compilation is a library, so the record types are internal: a public
     // one could be cleared by another assembly.
     private const string Strikes = """

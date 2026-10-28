@@ -362,11 +362,12 @@
       O(匹配的表数 + 行数)；缺少 <typeparamref name="T" /> 的实体搬一次行。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.SingletonRef``1" source="11613cc9d6b0">
+  <member name="M:EasyEcs.World.SingletonRef``1" source="005eac78784d">
     <summary>
       单例 <typeparamref name="T" /> 的稳定句柄，单例没添加时抛异常：解析一次，之后直接读写
       <see cref="P:EasyEcs.SingletonRef`1.Value" />，不用再查找。生成的 <c>[ForEach]</c> job 每次遍历通过它把单例参数解析一次，
-      所以单例一直没设置的系统，第一次运行就会报错。O(1)。
+      所以单例一直没设置的系统，第一次运行就会报错。O(1)；如果是 <see cref="T:EasyEcs.Emitted`1" />，而并行遍历把记录留在了各块的列表里，
+      就是一次 O(记录数)：记录在这里、在拥有者线程上合并成一个列表，这样多线程读取它们的遍历拿到的是排好的记录。
     </summary>
   </member>
   <member name="M:EasyEcs.World.TryGetEntity(EasyEcs.EntityId,EasyEcs.Entity@)" source="03175b1283a8">
@@ -602,11 +603,12 @@
     </summary>
     <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="count" /> 为负数。</exception>
   </member>
-  <member name="M:EasyEcs.World.ForParallel``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" source="4133ce522ed5">
+  <member name="M:EasyEcs.World.ForParallel``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" source="050cfe35728f">
     <summary>
       对 <paramref name="items" />（一个 <see cref="T:EasyEcs.Emitted`1" /> 单例的记录、某个单例的缓冲区）的元素运行
       <see cref="M:EasyEcs.World.ForParallel``1(System.Int32,``0@,System.Int32)" />：每个块以 span 拿到自己的元素，可以写。
-      调用运行期间列表不能改变。
+      调用运行期间列表不能改变。并行遍历留在各块列表里的 <see cref="T:EasyEcs.Emitted`1" /> 记录就地运行，按顺序，不先合并：
+      一个块跨两个这样的列表时，每个列表调用一次，各自带自己的 <c>start</c>。
     </summary>
   </member>
   <member name="M:EasyEcs.World.HasSystem``1" source="2147025184ce">
