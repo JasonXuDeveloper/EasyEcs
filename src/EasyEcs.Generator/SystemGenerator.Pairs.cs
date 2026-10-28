@@ -231,34 +231,19 @@ public sealed partial class SystemGenerator
             for (int k = 1; k <= components.Length; k++)
                 loop.Append($"ref {simd.Columns[k - 1]} e{k} = ref {unsafeType}.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
             loop.Append(simd.Setup);
-            // A symmetric job's run of a table against itself (half): its ranges start at the cluster's own rows, of which a
-            // neighbor j meets the cluster's lanes before it only (__dj: j's lane, whose value the cluster's vectors hold).
-            loop.Append(pair.Symmetric ? "bool __skips = run.Skips, __half = run.Same;\n" : "bool __skips = run.Skips;\n");
+            loop.Append("bool __skips = run.Skips;\n");
             loop.Append("for (int __w = run.First; __w < run.End; __w++)\n{\n");
             loop.Append("    ulong __lanes = run.Lanes(__w);\n    if (__lanes == 0) continue;\n");
             loop.Append($"    nint i = (nint)__w * {vector}<float>.Count;\n");
-            loop.Append($"    var {(pair.Symmetric ? "__rows" : "__pass")} = global::EasyEcs.Interleaved.Lanes32(__lanes, 0);\n");
+            loop.Append($"    var __pass = global::EasyEcs.Interleaved.Lanes32(__lanes, 0);\n");
             foreach (var line in simd.Body.Split('\n')) if (line.Length > 0) loop.Append("    ").Append(line).Append('\n');
             loop.Append("    var __ranges = run.Ranges(__w);\n");
             loop.Append("    for (int __k = 0; __k < __ranges.Length; __k += 2)\n");
             loop.Append("        for (int j = __ranges[__k], __end = __ranges[__k + 1]; j < __end; j++)\n        {\n");
             loop.Append("            if (__skips && run.Skip(j)) continue;\n");
-            if (pair.Symmetric)
-            {
-                // The half list's ranges of a table against itself start at the cluster (j >= i): a j of the cluster meets
-                // its lanes before it, in its own lane of the cluster's vectors.
-                loop.Append("            var __pass = __rows;\n");
-                loop.Append("            int __dj = j - (int)i;\n");
-                loop.Append($"            if (__half && __dj < {vector}<float>.Count)\n            {{\n");
-                loop.Append("                ulong __before = __lanes & ((1UL << __dj) - 1);\n");
-                loop.Append("                if (__before == 0) continue;\n");
-                loop.Append("                __pass = global::EasyEcs.Interleaved.Lanes32(__before, 0);\n");
-                loop.Append("            }\n");
-                loop.Append("            else __dj = -1;\n");
-            }
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (method.Parameters[i] is { Kind: Symbols.ParamKind.Neighbor } p && p.Type != "global::EasyEcs.Entity" && simd.MaskedBody.Contains(Kernel.Neighbor(i)))
-                    loop.Append($"            ref {(p.RefKind == "ref" ? "" : "readonly ")}{p.Type} {Kernel.Neighbor(i)} = ref {unsafeType}.Add(ref o{i}, j);\n");
+                    loop.Append($"            ref readonly {p.Type} {Kernel.Neighbor(i)} = ref {unsafeType}.Add(ref o{i}, j);\n");
             foreach (var line in simd.MaskedBody.Split('\n')) if (line.Length > 0) loop.Append("            ").Append(line).Append('\n');
             loop.Append("        }\n");
             foreach (var line in simd.MaskedStores.Split('\n')) if (line.Length > 0) loop.Append("    ").Append(line).Append('\n');

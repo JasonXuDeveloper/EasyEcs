@@ -140,9 +140,9 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              rows sent to the method when they live in several, with a backoff; only for SimdMode.Require (D131);
                              the chases of the rows ahead prefetched behind the job's gate (Code.Prefetched);
                              Kernel.Neighbors.cs: a pair method's pair mode (a [Neighbor] component as uniform values
-                             broadcast per neighbor, the body masked by the cluster's passing lanes; a method writing
-                             both sides: each sum into a neighbor field added from the lanes in order, PairRun.AddLanes,
-                             WritesNeighbor) and the cutoff's text (ScalarOf);
+                             broadcast per neighbor, the body masked by the cluster's passing lanes; a write of the
+                             neighbor, a method writing both sides included, keeps the pairs one at a time) and the
+                             cutoff's text (ScalarOf);
                              Kernel.Structural.cs: a structural change of the row's entity under a condition (marked
                              rows, applied in bulk after the pass: Code.StructuralChanges) and Emit<T> records of a
                              lane or the entity's id (Code.VectorTail: every row takes the vector form)

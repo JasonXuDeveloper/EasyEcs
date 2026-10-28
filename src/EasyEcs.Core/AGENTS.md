@@ -158,8 +158,7 @@ Pairs.cs                     [Neighbor] (a pair method's other entity) and the p
                              lists of each row's neighbors, Verlet's, where they cost less than the ranges for the
                              method's width: PairRun.Listed / Near, kept while the rows moved less than the margin;
                              a job writing both sides, IPairJob.Symmetric: each pair of tables once, a table against
-                             itself by half, PairList.Half; PairRun.AddLanes / SubtractLanes, its lanes' sums into the
-                             neighbor in lane order; serial)
+                             itself by half, PairList.Half; one pair at a time, serial)
 World.Order.cs               OrderRows<T, TOrder> (the request generated setup makes), the cadence (SortDue from
                              World.Run), SortRows<T>, Clusters<T> (OrderedTables)
 Cleanup.cs                   ICleanupComponent + Retired tag (entities kept alive until their cleanup components go)

@@ -281,44 +281,6 @@ public readonly ref struct PairRun
     {
         if (default(T) is ITracked) _other.Stamp<T>(row, _world.ChangeTick);
     }
-
-    /// <summary>
-    /// Add the lanes of <paramref name="values"/> that <paramref name="lanes"/> selects (all bits set) into
-    /// <paramref name="into"/>, one at a time from lane 0 up: what the method per pair adds to a neighbor for each row
-    /// of a cluster, in the order it runs them (a symmetric pair method's vector loop, GROMACS's j reduction kept in
-    /// order, so the sum is the per-pair one bit for bit), returned. O(lanes).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static T AddLanes<T>(T into, Vector<T> values, Vector<int> lanes) where T : unmanaged, INumberBase<T>
-    {
-        for (ulong bits = global::EasyEcs.Lanes.Ballot(lanes); bits != 0; bits &= bits - 1) into += values[BitOperations.TrailingZeroCount(bits)];
-        return into;
-    }
-
-    /// <summary><see cref="AddLanes{T}(T, Vector{T}, Vector{int})"/>, subtracting each lane (<c>g.X -= value</c>).</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static T SubtractLanes<T>(T into, Vector<T> values, Vector<int> lanes) where T : unmanaged, INumberBase<T>
-    {
-        for (ulong bits = global::EasyEcs.Lanes.Ballot(lanes); bits != 0; bits &= bits - 1) into -= values[BitOperations.TrailingZeroCount(bits)];
-        return into;
-    }
-
-    /// <summary>
-    /// <see cref="AddLanes{T}(T, Vector{T}, Vector{int})"/> into lane <paramref name="lane"/> of
-    /// <paramref name="into"/>: the neighbor is a row of the cluster itself, whose value the loop holds in that lane. O(lanes).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Vector<T> AddLanes<T>(Vector<T> into, int lane, Vector<T> values, Vector<int> lanes) where T : unmanaged, INumberBase<T>
-    {
-        return Vector.WithElement(into, lane, AddLanes(into[lane], values, lanes));
-    }
-
-    /// <summary><see cref="AddLanes{T}(Vector{T}, int, Vector{T}, Vector{int})"/>, subtracting each lane.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static Vector<T> SubtractLanes<T>(Vector<T> into, int lane, Vector<T> values, Vector<int> lanes) where T : unmanaged, INumberBase<T>
-    {
-        return Vector.WithElement(into, lane, SubtractLanes(into[lane], values, lanes));
-    }
 }
 
 public sealed partial class World
