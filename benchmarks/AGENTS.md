@@ -21,7 +21,7 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                Prefab, Record (a [ForEachRecord] pass against the hand-written walk and Clear of Emitted<T>), Relation, RowOrder (the core's re-sort: narrow and wide tables, 1k-1M rows,
                                reversed / 1 % churn / sorted), Runner, SingleEntity, Slices, Snapshot (+ SaveWithout / LoadKeeping),
                                Sparse, StructuralLoop (a tag set under a condition: vector loop + marked rows against the
-                               scalar method, a command buffer and SetAll), SystemDispatch (what a system costs per update apart from its rows), Trim,
+                               scalar method, a command buffer and SetAll), SystemDispatch (what a system costs per update apart from its rows), Tile (TileStencil: a 9-point blur and a Laplacian wave over tiles, read through the tile, its neighbors directly, by hand, and stepped by ref: ping-pong; TileActive: a field where few tiles change, every tile stepping against sleeping ones by hand and stepped by ref; TileNeighbor: the tiles around one found per pass or cached), TileHalo (item 12a's prototype: the halo copied into a texture per step against tiles stored padded with only the ring copied), Trim,
                                Unload, View (a pass taking a [View] against the refs it stands for, vector and scalar, and AsX against Get / Read)) + MicroBenchmarks.
                                Phase 0 of docs/plans/locality.md (hand-written prototypes that decide what gets built;
                                their code in Locality/, linked into the unit tests by LocalityTests): Pairs (sums over
