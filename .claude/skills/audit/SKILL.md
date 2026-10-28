@@ -60,8 +60,9 @@ what it left undone, which goes on the same list (nothing is dropped silently).
   a purely mechanical change to a shared file (a split, a rename) waits until the other branches merged.
 - A worktree-isolated agent's shell refuses compound git commands (`cd X && git ...`), heredocs, `sed` on shell
   variables, inline `$PATH` before `flock`, and any command line containing "github" (a BenchmarkDotNet
-  `*-report-github.md`): tell it to run one plain command per call and write multi-step logic as scripts with the Write
-  tool (feat-fewer-copies, feat-emit-segments).
+  `*-report-github.md`), `sh -c` and piped awk: tell it to run one plain command per call and write multi-step logic
+  as scripts with the Write tool, Python scripts taking the worktree path as an argument working best
+  (feat-fewer-copies, feat-emit-segments, feat-symmetric-pairs).
 - Every agent runs ApiDocs (0 problems) and the Release build (0 warnings) before it reports: a branch that changed a
   public XML doc without its zh entry stops the zh pages of that type from being regenerated (fewer-copies left 3).
 

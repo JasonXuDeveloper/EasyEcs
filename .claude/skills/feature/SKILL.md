@@ -21,6 +21,11 @@ part names the skill that audits it.
 - A form that cannot run in parallel as written (scatter writes: symmetric pairs, histograms) gets the field's known
   parallel solutions built and measured (HPC: per-chunk buffers reduced in a fixed order, coloring, boundary split;
   never atomics on floats, which break determinism), not left serial on a per-core estimate (owner, 2026-10-28).
+  Its chunks never come from the thread count (fixed rows per chunk, fixed color or reduction order), so the result
+  is the same on any number of threads; a scatter pass cannot match the serial order's float bits (any parallel
+  order of additions into a row differs), so its proof is equal bits at 1 and 4 threads, equal integer sums and float
+  sums within rounding of the serial pass, and the 1-thread cost is documented, not avoided by a serial fallback on
+  one thread (which would change the bits; symmetric pairs: 0-15 %).
 - The feature is general (servers, Godot games, simulations) and off unless used: what it costs is paid only by
   worlds that use it.
 - It works on every platform EasyEcs runs on: x64 and arm64, Native AOT, WebAssembly (the demo: Mono AOT, no

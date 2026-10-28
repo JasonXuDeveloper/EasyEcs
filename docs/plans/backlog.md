@@ -31,12 +31,15 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Symmetric pair methods** ("Next" item 8e, branch `feat-symmetric-pairs`).
 - [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
       `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
       branch (12d).
 
-Merged since the last update: ghost rows in MultiWorld (`feat-ghost-rows`: 4 zones side by side, border units
+Merged since the last update: symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
+`ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
+at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
+vector loop measured and dropped; PairsBenchmark GeneratedParallel 1k crowd +3..+16 % to rerun on a quiet machine
+before the bench sync), ghost rows in MultiWorld (`feat-ghost-rows`: 4 zones side by side, border units
 copied as `Ghost` rows each update, crossings moved with `MoveEntities`, checked against one world; a
 `CopyEntities<TTag>` proposal in `owner-review.md`, not built; CI now checks the sample's output), Emitted<T>'s segments (`feat-emit-segments`, 4925b09: the chunks' lists kept as
 segments, joined only for a span read or a write; EmitParallel 1.4-2x, a `[ForEachRecord]` reader about 1.2x, 0 B;
@@ -74,7 +77,7 @@ from `[RedBlack]` on 2026-10-27). Grep every old name afterwards (code, tests, b
 zh ApiDocs; history pages only may keep them).
 
 Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
-rows, edges found while stepping), 8e running (now with both parallel designs); 12e merged; 8f + 8g (one generator branch) start once 8e and the tile branch merged (they edit Kernel.cs,
+rows, edges found while stepping), 8e and 12e merged; 8f + 8g (one generator branch) start once the tile branch merged (they edit Kernel.cs,
 SystemGenerator.cs and Symbols.cs too), then 9, 10, 4, 7, Later, then Finish.
 The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
 

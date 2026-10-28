@@ -183,6 +183,8 @@ its own worktree.
 - **BenchmarkDotNet's 40-90 B on millisecond cases** (`MemoryDiagnoser`) appear even on code a change cannot reach
   (a hand-written sort that never calls `Permute`, feat-fewer-copies): confirm a 0 B claim with an `Allocations.Of`
   test, never from one stray reading.
+- **A per-pass schedule** (colors of chunks, far clusters, a pair list's halves) is cached per draw of what it is
+  computed from: recomputing the colors cost 100-190 us a pass (symmetric pairs).
 - **A thread-cached pool made exact**: count each thread's largest cache into the fill; shrinking the batch moves the
   cost into contention (1 list per lock cost the parallel churn 5x, 8 per lock 1.5x; `DynamicBuffer.Fill`).
 
