@@ -1,75 +1,100 @@
 ---
-title: "MultiWorld: one world per thread"
+title: "MultiWorld: one world per thread, ghost rows at the borders"
 navTitle: MultiWorld
-seoTitle: "One ECS World per Thread in C#: MultiWorld Sample"
-description: "Split a C# game server into zones, one EasyEcs world per thread: every core busy, nothing shared, no locks. A runnable sample with its output."
+seoTitle: "One ECS World per Thread in C#: Zones and Ghost Rows"
+description: "Split a C# server's map into zones, one EasyEcs world per thread, and let units see across borders through ghost rows exchanged between updates."
 icon: Layers
 ---
 
-import { Cpu, RefreshCw, Server, Workflow } from 'lucide-react';
+import { Cpu, LayoutGrid, RefreshCw, Workflow } from 'lucide-react';
 
-A server splits its game into zones (maps, rooms, matches) that share nothing, and gives each zone a world of its
-own on a thread of its own. Here every zone is the same small game of 20,000 units, and there is one zone per
-processor, all updated at once. Every code block on this page is included from
+A server splits its map into zones and gives each zone a world of its own on a thread of its own: every core busy,
+nothing shared, no locks. But a map has borders, and a unit standing next to one must still see the units beyond it.
+Here four zones lie side by side along a strip of 8,000 units. Between two updates the zones exchange their border
+rows: each unit within sight of a border is copied into the neighbor zone as a read-only **ghost row**, and each unit
+that walked over a border moves to the zone it now stands in. The program then runs the same map as one world and
+checks that the zones counted the same sightings. Every code block on this page is included from
 [`samples/MultiWorld`](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/MultiWorld), which CI builds
 and runs.
+
+<Callout type="info" title="Ghost rows and halos">
+  The idea comes from MPI codes that split a grid over processes: each process keeps a copy of the cells along its
+  neighbors' edges (**ghost cells**, the **halo**) and refreshes them by a **halo exchange** between two steps. A
+  ghost row is the same for entities: a copy of a neighbor's row, read here, written only by its owner.
+</Callout>
 
 ## Run it [#run-it]
 
 ```bash
-dotnet run -c Release --project samples/MultiWorld                    # 1000 updates per zone
-dotnet run -c Release --project samples/MultiWorld -- --updates 200
+dotnet run -c Release --project samples/MultiWorld                    # 200 updates
+dotnet run -c Release --project samples/MultiWorld -- --updates 50
 ```
 
 ## The data [#data]
 
-Three components of a unit and the zone's `Tally` [singleton](/en/docs/guide/singletons): singletons are per world,
-so each zone counts the deaths of its own world only.
+A unit is a `Position` and a `Velocity`. A ghost is a `Position` and the `Ghost` tag, nothing more: it carries what the
+neighbors read and no `Velocity`, so the systems that move units never write it. The zone's `Tally`
+[singleton](/en/docs/guide/singletons) counts the sightings of its own world only.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/MultiWorld/Components.cs</include>
 
 ## The systems [#systems]
 
-Units move by their velocity; those farther than the safe radius from the centre lose one health per tick, and the
-dead come back at the centre. Each [system](/en/docs/guide/systems) has one job and reads and writes components only,
-so the same three systems serve every zone. `MoveSystem` is the hot loop of every zone, so it is a
-[batch method](/en/docs/guide/systems#batch-methods): one call per run of rows, the positions and velocities read as
-`Vector<float>` lanes.
+`SightSystem` counts, for every unit of the zone, the units within sight. It is a pair method: its `[Neighbor]`
+parameter makes the generator write the neighbor search from the distance test, and the neighbors are every entity
+with a `Position`, so the ghosts are seen like the zone's own units. `[Without<Ghost>]` keeps the ghosts from
+looking: what a ghost sees is counted by the zone that owns it. `MoveSystem` and `BounceSystem` read and write units
+only, by their `Velocity`. Each [system](/en/docs/guide/systems) has one job and knows nothing of zones, so the same
+three serve every zone and the map as one world.
 
 <include lang="csharp" meta='title="Systems.cs"'>../../../samples/MultiWorld/Systems.cs</include>
 
-## One zone [#zone]
+## The map and one zone [#zone]
 
-`Zone.Run` is everything one thread does: build a world, create the units with one `world.CreateEntities` call,
-update it, report a `ZoneResult`, and dispose the world. No other thread ever sees it, so nothing is locked and
-nothing is shared ([one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)).
+`Map` says where the zones are and where each unit starts. `Zone.Create` builds one zone's world with the three
+systems, sight first so that it reads what the last exchange left; `Zone.Run` updates it and waits at the exchange
+after every update. Between two exchanges only its thread touches the world
+([one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)).
 
 <include lang="csharp" meta='title="Zone.cs"'>../../../samples/MultiWorld/Zone.cs</include>
 
+## The border [#border]
+
+`Border.Exchange` runs while every zone waits, so the one thread that runs it may touch every world; it is host code,
+since a system belongs to one world and the border to two. It throws away the last ghosts (`DestroyAll<Ghost>`),
+moves each unit that crossed into the zone it stands in with
+[`MoveEntities`](/en/docs/guide/migration-and-unload#move-entities) (every component goes with it), then copies each
+unit within sight of a border into the neighbor zone as a ghost. The ghosts are new entities at every exchange: hold
+on to a ghost's position, never to its id.
+
+<include lang="csharp" meta='title="Border.cs"'>../../../samples/MultiWorld/Border.cs</include>
+
 ## The program [#program]
 
-One thread per processor, each running one zone and writing only its own slot of the results; the main thread waits
-for all of them and prints.
+One thread per zone. A `Barrier` stops them after each update and runs the exchange on the last thread to arrive,
+then lets them all go on. The main thread waits for them, prints each zone, then runs the map as one world.
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/MultiWorld/Program.cs</include>
 
 ## Output [#output]
 
-On a 4-core machine. The deaths are the same on every run; the times and the throughput depend on the machine.
+The same on every run and every machine: the zones and the one world count the same sightings, and the process exits
+with 1 if they do not.
 
 ```text
-zone  0: 20,000 units,  51,430 deaths,  169.3 ms
-zone  1: 20,000 units,  51,428 deaths,  188.4 ms
-zone  2: 20,000 units,  51,429 deaths,  165.6 ms
-zone  3: 20,000 units,  51,426 deaths,  150.6 ms
-4 worlds on 4 threads, 80,000 units, 1000 updates each
-253 ms, 316.2 M entity-updates/s
+zone 0: 1,803 units,  79 ghosts,   357 arrivals,  3,377,596 sightings
+zone 1: 1,999 units, 158 ghosts,   915 arrivals,  3,795,928 sightings
+zone 2: 1,998 units, 161 ghosts,   914 arrivals,  3,806,712 sightings
+zone 3: 2,200 units,  81 ghosts,   558 arrivals,  4,163,422 sightings
+4 zones on 4 threads: 15,143,658 sightings in 200 updates
+one world:            15,143,658 sightings
+the zones saw what one world sees
 ```
 
-The zones differ only by their starting directions, so their deaths differ by a few; the time of the whole run is
-close to the time of one zone, because the zones run side by side. This is a demonstration, not a measurement: CI
-runs the sample without comparing its output, and the numbers come from the BenchmarkDotNet suite
-(`MultiWorldBenchmark`, see [performance](/en/docs/performance)).
+The middle zones hold about twice the ghosts of the end ones, since they have two borders. Without the ghosts the
+zones would miss the sightings across a border, and the last line would say so. This is a demonstration, not a
+measurement: the speed of worlds side by side comes from the BenchmarkDotNet suite (`MultiWorldBenchmark`, see
+[performance](/en/docs/performance)).
 
 ## Related [#related]
 
@@ -77,11 +102,11 @@ runs the sample without comparing its output, and the numbers come from the Benc
   <Card icon={<Cpu />} title="Threading" href="/en/docs/guide/threading">
     One world per thread, parallel systems and parallel [ForEach] methods.
   </Card>
-  <Card icon={<Server />} title="Hosting" href="/en/docs/guide/hosting">
-    Give a world one owner in a real server: a fixed step, requests, saves.
-  </Card>
   <Card icon={<Workflow />} title="Migration and unload" href="/en/docs/guide/migration-and-unload">
-    Move a player from one zone's world to another.
+    MoveEntities: entities and what they own to another world.
+  </Card>
+  <Card icon={<LayoutGrid />} title="Grid tiles" href="/en/docs/guide/grids">
+    Halos inside one world: tiles of cells that read their neighbors' edges.
   </Card>
   <Card icon={<RefreshCw />} title="HotReload sample" href="/en/docs/samples/hot-reload">
     The next sample: replace game logic while the world runs.
