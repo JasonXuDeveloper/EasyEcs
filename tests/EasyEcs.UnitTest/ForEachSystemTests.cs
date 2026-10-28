@@ -651,7 +651,7 @@ public class ForEachSystemTests
         world.AddSystem<SlicedBatch>();
         world.AddSystem<SlicedParallel>();
         world.AddSystem<SlicedArmor>();
-        for (int i = 0; i < 24; i++) world.Update(); // warm-up: every slice of every system, query caches, JIT
+        Allocations.WarmUp(world.Update, 24); // every slice of every system, query caches, until the JIT settles
         long before = Allocations.Baseline();
         for (int i = 0; i < 120; i++) world.Update();
         Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);

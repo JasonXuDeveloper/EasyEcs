@@ -201,7 +201,7 @@ public class PrefetchTests
                 LookupKernels.Steer(world);
             }
 
-            for (int i = 0; i < 50; i++) Frame();
+            Allocations.WarmUp(Frame, 50);
             Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) Frame(); }), Is.Zero);
         });
     }

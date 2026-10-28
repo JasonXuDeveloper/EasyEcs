@@ -63,7 +63,7 @@ public class MoveTests
             (from, to) = (to, from);
         }
 
-        for (int i = 0; i < 10; i++) Round(); // warm-up: tables, edges, buffers, JIT
+        Allocations.WarmUp(Round, 10); // tables, edges, buffers, until the JIT settles
         long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Round();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);

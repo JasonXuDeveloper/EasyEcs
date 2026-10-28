@@ -114,7 +114,7 @@ public class AllocationTests
             _ = probe.Run<Health, Heal>(ref heal) && probe.Run<Health, Heal>(ref heal, QueryFilter.Create().With<Frozen>());
         }
 
-        for (int i = 0; i < 10; i++) Frame(); // warm-up: query caches, edges, JIT
+        Allocations.WarmUp(Frame, 10); // query caches, edges, until the JIT settles
         long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
@@ -189,7 +189,7 @@ public class AllocationTests
             _ = world.Any<Armor>(changed);
         }
 
-        for (int i = 0; i < 200; i++) Frame(); // warm-up: every kid replaced, query caches, JIT
+        Allocations.WarmUp(Frame, 200); // every kid replaced, query caches, until the JIT settles
         long before = Allocations.Baseline();
         for (int i = 0; i < 500; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
@@ -256,7 +256,7 @@ public class AllocationTests
             leaf.Remove<Lease>();
         }
 
-        for (int i = 0; i < 3000; i++) Frame(); // warm-up: keys sorted, buffers, links, stacks and tables grown, JIT
+        Allocations.WarmUp(Frame, 3000); // keys sorted, buffers, links, stacks and tables grown, until the JIT settles
         long before = Allocations.Baseline();
         for (int i = 0; i < 500; i++) Frame();
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, world.EntityCount), Is.EqualTo((0L, players.Length + walkers.Length)));
@@ -296,7 +296,7 @@ public class AllocationTests
             }
         }
 
-        for (int i = 0; i < 50; i++) Frame(); // warm-up: query caches, JIT
+        Allocations.WarmUp(Frame, 50); // query caches, until the JIT settles
         long before = Allocations.Baseline();
         for (int i = 0; i < 300; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);

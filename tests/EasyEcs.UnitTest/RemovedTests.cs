@@ -401,7 +401,7 @@ public class RemovedTests
             if (!world.DestroyedSince(mark, into, out int count) || count != churned.Length + 3) wrong++;
         }
 
-        for (int i = 0; i < 10; i++) Frame(); // warm-up: tables, edges, JIT
+        Allocations.WarmUp(Frame, 10); // tables, edges, until the JIT settles
         long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Frame();
         Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, wrong), Is.EqualTo((0L, 0)));

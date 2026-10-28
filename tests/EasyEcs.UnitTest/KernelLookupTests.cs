@@ -281,7 +281,7 @@ public class KernelLookupTests
             LookupKernels.SteerParallel(world);
         }
 
-        for (int i = 0; i < 50; i++) Frame(); // warm-up: the query cache, JIT tiers
+        Allocations.WarmUp(Frame, 50); // the query cache, until the JIT settles
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) Frame(); }), Is.Zero);
     }
 }
