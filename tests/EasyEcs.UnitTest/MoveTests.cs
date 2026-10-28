@@ -64,10 +64,11 @@ public class MoveTests
         }
 
         Allocations.WarmUp(Round, 10); // tables, edges, buffers, until the JIT settles
+        arrived = 0;
         long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Round();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
-        Assert.That(arrived, Is.EqualTo(110 * 4));
+        Assert.That(arrived, Is.EqualTo(100 * 4));
         Assert.That((moved[0].Read<Health>().Value, moved[1].Read<ChildOf>().Parent), Is.EqualTo((7, moved[0].Id)));
     }
 
