@@ -51,6 +51,26 @@ public static class TileColoring
         TShape.Neighborhood == TileNeighborhood.Faces ? sum : bits;
 }
 
+/// <summary>When a sleeping pass walks the woken tiles of a color, not every tile of the grid (<see cref="TileSteps{TCell, TTile, TGrid, TKey, TColors}.StepWoken{TJob}"/>).</summary>
+internal static class TileWalk
+{
+    /// <summary>
+    /// A color whose woken tiles are at least one in <see cref="Share"/> of the grid's walks every tile instead
+    /// (TileWokenBenchmark, 2 to 75 % of the plates awake: the walks tie up to a quarter; past it the walk of every tile
+    /// wins at 4 threads, its chunks whole runs of rows, by up to a fifth, and costs up to a tenth at 1 thread).
+    /// Internal and writable for the benchmarks and tests: 0 always walks the woken, <see cref="int.MaxValue"/> every
+    /// tile once one woke.
+    /// </summary>
+    internal static int Share = 4;
+
+    /// <summary>
+    /// The tiles (entity indexes) from which the swaps of a Jacobi pass that does not sleep run on every thread: a few
+    /// microseconds of dispatch against tens of nanoseconds a swap (TileStencilBenchmark measures 1,024 and 262,144
+    /// tiles, both past it). Internal and writable for the tests: 0 always on every thread.
+    /// </summary>
+    internal static int Swaps = 256;
+}
+
 /// <summary>
 /// The state of a stepping tile pass (a <c>[ForEach]</c> method taking <c>ref Tile&lt;TCell, TTile&gt;</c>), one per
 /// world and method, kept across passes: per tile of the grid (by entity index, opt-in like a value index's nodes), the
@@ -79,10 +99,12 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     where TCell : unmanaged where TTile : struct, ITileShape where TGrid : struct, IComponent, ITile<TKey>
     where TKey : IEquatable<TKey> where TColors : struct, ITileColors<TKey>
 {
-    private static readonly int Cells = TileLayout.Cells<TTile>();
-    private static readonly ulong AllRows = TTile.Depth >= 64 ? ulong.MaxValue : (1UL << TTile.Depth) - 1; // a bit per row of a layer
+    // Constants of the shape, written as expressions of its static members (not static readonly fields of this generic
+    // class, which the JIT reads through a helper call per use where it does not fold them).
+    private static int Cells => TileLayout.Cells<TTile>();
+    private static ulong AllRows => TTile.Depth >= 64 ? ulong.MaxValue : (1UL << TTile.Depth) - 1; // a bit per row of a layer
     private static bool Jacobi => TColors.Count == 1;
-    private static readonly TileFaces AllEdges = TileFaces.North | TileFaces.South | TileFaces.West | TileFaces.East
+    private static TileFaces AllEdges => TileFaces.North | TileFaces.South | TileFaces.West | TileFaces.East
         | (TTile.Height > 1 ? TileFaces.Above | TileFaces.Below : TileFaces.None); // what RowEdges can find
 
     private struct Entry
@@ -285,10 +307,10 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         if (!_sleeps || entry.Queued) return; // a pass that steps every tile keeps no queue (the next one walks them all)
         entry.Queued = true;
         int color = ColorOf(in entry);
-        ref var queue = ref _queues[color];
+        var queue = _queues[color];
         int count = _queued[color];
-        if (count == queue.Length) Array.Resize(ref queue, Math.Max(16, count * 2));
-        queue[count] = index;
+        if (count == queue.Length) Array.Resize(ref _queues[color], Math.Max(16, count * 2)); // cold: the covariance check of a ref into int[][] once per growth
+        _queues[color][count] = index;
         _queued[color] = count + 1;
     }
 
@@ -320,7 +342,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         var frame = TileFrame<TCell, TTile>.Current;
         frame.Stepping = tile.Id;
         frame.Sweep = 0;
-        frame.Written.AsSpan().Clear();
+        Clear(frame.Written);
         if (Jacobi)
         {
             var next = entry.Next;
@@ -336,13 +358,21 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         else
         {
             frame.Next = null;
-            frame.Touched.AsSpan().Clear();
+            Clear(frame.Touched);
         }
         return true;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ColorOf(in Entry entry) => Jacobi ? 0 : TColors.Of(entry.Key);
+
+    /// <summary>A row set per layer cleared: one store for a 2D tile (no call into the span helpers).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Clear(ulong[] layers)
+    {
+        if (TTile.Height == 1) layers[0] = 0;
+        else Array.Clear(layers);
+    }
 
     /// <summary>
     /// A walk of the tiles of the color running that woke (<see cref="ITileStep.Step"/> on each, on this thread), when
@@ -419,6 +449,10 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
             entry.Queued = false;
             if (entry.Live && entry.Dirty) _walk[walked++] = new EntityId(i, entry.Version);
         }
+        // Many woken: the walk of every tile in table order (its rows read in place, a skipped tile one test, chunks of
+        // whole runs of rows) against a lookup per woken tile (TileWalk.Share); Enter steps only the woken (Dirty), and
+        // Settle queues the next wakes either way.
+        if ((long)walked * TileWalk.Share >= _world.Count<DynamicBuffer<TCell>, TGrid>()) return false;
         _walked = walked;
         return true;
     }
@@ -632,17 +666,25 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         if (_walked >= 0)
         {
             var walk = _walk;
-            for (int n = 0; n < _walked; n++) Settle(walk[n].Index, ref count);
+            for (int n = 0; n < _walked; n++) Settle(walk[n].Index, ref count, false);
         }
         else
         {
+            // A Jacobi pass of every tile that does not sleep changed every tile: their swaps (each its own tile's
+            // state and lists, the pool per thread) run on every thread, the stamps (rows of shared words) after.
+            bool swapped = Jacobi && !_sleeps && world.ChunkThreads > 1 && _entries.Length >= TileWalk.Swaps;
+            if (swapped)
+            {
+                var run = new SwapRun { Steps = this };
+                world.ForParallelChunks((_entries.Length + 63) >> 6, ref run, 4);
+            }
             var blocks = _blocks;
             for (int b = 0; b < blocks.Length; b++)
             {
                 for (ulong bits = blocks[b]; bits != 0; bits &= bits - 1)
                 {
                     int first = (b << 12) | (BitOperations.TrailingZeroCount(bits) << 6), end = Math.Min(first + 64, _entries.Length);
-                    for (int i = first; i < end; i++) Settle(i, ref count);
+                    for (int i = first; i < end; i++) Settle(i, ref count, swapped);
                 }
                 blocks[b] = 0;
             }
@@ -665,7 +707,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     /// buffer swapped in; stamped; the tiles across the edges that changed woken) or ran out of sweeps (it wakes).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Settle(int i, ref int count)
+    private void Settle(int i, ref int count, bool swapped)
     {
         ref var entry = ref _entries[i];
         if (entry.Rewake)
@@ -677,17 +719,49 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         entry.Changed = false;
         count++;
         var tile = new Entity(_world, i, entry.Version);
-        if (Jacobi)
+        if (Jacobi && !swapped)
         {
             Swap(ref entry, tile);
             Wake(ref entry, i); // one step of Jacobi is no fixed point: it steps again
         }
-        Entity.Stamp<DynamicBuffer<TCell>>(tile);
+        // Stamped where it lives, read from its meta (no lookup through the handle): a tile that stepped is alive with its
+        // cells unless a serial method changed structure since, which the version and the table's mask catch (no stamp
+        // then, as Entity.Stamp: a destroyed tile or cells removed).
+        ref var meta = ref _world.MetaRef(i);
+        if (meta.Version == entry.Version && meta.Archetype is { } table && table.ComponentMask.HasBit(ComponentType<DynamicBuffer<TCell>>.Bit))
+            table.Stamp<DynamicBuffer<TCell>>(meta.Slot, _world.ChangeTick);
         if (!_sleeps) return;
         for (uint slots = TileOffsets<TTile>.Facing(entry.Edges) & TileOffsets<TTile>.SlotMask; slots != 0; slots &= slots - 1)
         {
             var id = entry.Around[BitOperations.TrailingZeroCount(slots)];
             if (id != default) Wake(id); // a tile that has not stepped yet wakes as it joins
+        }
+    }
+
+    /// <summary>
+    /// The tiles of the 64-index groups [start, end) that changed take their step (<see cref="Swap"/>, woken: a pass that
+    /// does not sleep keeps no queue), for a Jacobi pass that does not sleep on every thread; Settle stamps them after.
+    /// </summary>
+    private struct SwapRun : IForRange
+    {
+        public TileSteps<TCell, TTile, TGrid, TKey, TColors> Steps;
+
+        public void Execute(int start, int end)
+        {
+            var entries = Steps._entries;
+            var blocks = Steps._blocks;
+            var world = Steps._world;
+            for (int g = start; g < end; g++)
+            {
+                if ((blocks[g >> 6] & (1UL << g)) == 0) continue; // shift is mod 64
+                for (int i = g << 6, last = Math.Min(i + 64, entries.Length); i < last; i++)
+                {
+                    ref var entry = ref entries[i];
+                    if (!entry.Changed) continue;
+                    Swap(ref entry, new Entity(world, i, entry.Version));
+                    entry.Dirty = true; // Wake in a pass that keeps no queue
+                }
+            }
         }
     }
 

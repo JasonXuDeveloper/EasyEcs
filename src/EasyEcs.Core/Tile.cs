@@ -193,6 +193,23 @@ public struct TileNeighbors
             Face<TShape, TGrid, TKey>(grid, key, TileFaces.Above, 22, ref around);
             return;
         }
+        if ((TileOffsets<TShape>.SlotMask & ~TileOffsets<TShape>.PlaneSlots) == 0)
+        {
+            // A plane (a constant): each corner one Beside from the key across its west or east face (KeyAt's order, x
+            // then z), unrolled with constant slots; 8 Besides for 8 neighbors instead of 12 and the slot arithmetic.
+            // Beside only across a face the shape has (constant tests: slots 9, 12, 15 lie west, 11, 14, 17 east).
+            var west = (TileOffsets<TShape>.SlotMask & 0b1001001u << 9) != 0 ? TGrid.Beside(key, TileFaces.West) : key;
+            var east = (TileOffsets<TShape>.SlotMask & 0b1001001u << 11) != 0 ? TGrid.Beside(key, TileFaces.East) : key;
+            Slot<TShape, TGrid, TKey>(grid, west, 12, ref around);
+            Slot<TShape, TGrid, TKey>(grid, east, 14, ref around);
+            Face<TShape, TGrid, TKey>(grid, key, TileFaces.North, 10, ref around);
+            Face<TShape, TGrid, TKey>(grid, key, TileFaces.South, 16, ref around);
+            Face<TShape, TGrid, TKey>(grid, west, TileFaces.North, 9, ref around);
+            Face<TShape, TGrid, TKey>(grid, east, TileFaces.North, 11, ref around);
+            Face<TShape, TGrid, TKey>(grid, west, TileFaces.South, 15, ref around);
+            Face<TShape, TGrid, TKey>(grid, east, TileFaces.South, 17, ref around);
+            return;
+        }
         for (uint slots = TileOffsets<TShape>.SlotMask; slots != 0; slots &= slots - 1)
         {
             int slot = BitOperations.TrailingZeroCount(slots);
@@ -207,6 +224,13 @@ public struct TileNeighbors
         if ((TileOffsets<TShape>.SlotMask >> slot & 1) != 0 && grid.TryFindId(TGrid.Beside(key, face), out var found)) around[slot] = found;
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void Slot<TShape, TGrid, TKey>(ValueIndex<TGrid, TKey> grid, TKey at, int slot, ref TileNeighbors around)
+        where TShape : struct, ITileShape where TGrid : struct, IComponent, ITile<TKey> where TKey : IEquatable<TKey>
+    {
+        if ((TileOffsets<TShape>.SlotMask >> slot & 1) != 0 && grid.TryFindId(at, out var found)) around[slot] = found;
+    }
+
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static ValueIndex<TTile, TKey> Unprepared<TTile, TKey>() where TTile : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey> =>
         throw new ArgumentException($"The index passed is not the built index of {typeof(TTile).Name} by {typeof(TKey).Name}");
@@ -217,6 +241,9 @@ internal static class TileOffsets<TTile> where TTile : struct, ITileShape
 {
     /// <summary>The slots of the neighbors the shape has (its faces' axes, its neighborhood), not the tile's own (13).</summary>
     public static readonly uint SlotMask = Compute();
+
+    /// <summary>The slots of the plane of the tile's own layer (dy = 0): 9 to 17, the tile's own (13) left out.</summary>
+    public const uint PlaneSlots = 0b111_101_111u << 9;
 
     /// <summary>The key of the tile at <paramref name="slot"/> from the one at <paramref name="key"/>: one face at a time, x first, then z, then y.</summary>
     public static TKey KeyAt<TGrid, TKey>(TKey key, int slot) where TGrid : ITile<TKey> where TKey : IEquatable<TKey>
@@ -230,9 +257,22 @@ internal static class TileOffsets<TTile> where TTile : struct, ITileShape
 
     /// <summary>
     /// The slots of the neighbors that read an edge of <paramref name="edges"/> into their halo: the tile across each
-    /// face, and, in the shape's neighborhood, across each edge and corner of two or three of those faces.
+    /// face, and, in the shape's neighborhood, across each edge and corner of two or three of those faces. A table of
+    /// the 64 sets of faces: a stepping pass reads it per tile that changed.
     /// </summary>
-    public static uint Facing(TileFaces edges)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static uint Facing(TileFaces edges) => FacingSlots[(int)edges & 63];
+
+    private static readonly uint[] FacingSlots = ComputeFacing();
+
+    private static uint[] ComputeFacing()
+    {
+        var table = new uint[64];
+        for (int edges = 0; edges < 64; edges++) table[edges] = FacingOf((TileFaces)edges);
+        return table;
+    }
+
+    private static uint FacingOf(TileFaces edges)
     {
         uint slots = 0;
         for (uint all = SlotMask; all != 0; all &= all - 1)
@@ -401,6 +441,12 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
             if (mask) LoadFaces<Masked>(frame, from, to, border);
             else LoadFaces<Unmasked>(frame, from, to, border);
         }
+        // A 2D tile with a border (a blur, a wave, Life): its own loop, with no table of the 27 sources.
+        else if (TTile.Height == 1 && TTile.Boundary == TileBoundary.Border && TTile.Halo <= TTile.Width && TTile.Halo <= TTile.Depth)
+        {
+            if (mask) LoadPlane<Masked>(frame, border);
+            else LoadPlane<Unmasked>(frame, border);
+        }
         else LoadAny(frame, from, to, border, mask);
         frame.From = from;
         frame.To = to;
@@ -483,6 +529,66 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
 
             if (mask) Unsafe.Add(ref masks, t) = TileMask.Of<TTile>(rows, bands);
         }
+    }
+
+    /// <summary>
+    /// <see cref="ExchangeHalo(int, int, TCell, bool)"/> of a 2D shape with a border boundary and a halo of at most its
+    /// extent, of any neighborhood: the nine buffers in locals (the general load keeps them in a table of 27, whose
+    /// stores the JIT compiles as checked write barriers, one call each, since it cannot see the table is on the stack),
+    /// each row one copy of Width cells and of the r cells on each side, the bands north and south with their corners
+    /// (the tiles across the corners, or the border where the neighborhood has none). The same texture and masks.
+    /// </summary>
+    private readonly void LoadPlane<TMask>(TileFrame<TCell, TTile> frame, TCell border) where TMask : struct
+    {
+        bool mask = typeof(TMask) == typeof(Masked);
+        int width = TTile.Width, depth = TTile.Depth, r = TTile.Halo, row = width + 2 * r, cells = width * depth;
+        bool zero = TileLayout.IsZero(border);
+        TCell[] blank = TileMemory<TCell, TTile>.Blank(border, zero);
+        ref TCell s = ref MemoryMarshal.GetArrayDataReference(Own(cells));
+        ref TCell n = ref MemoryMarshal.GetArrayDataReference(Beside(10, cells, blank));
+        ref TCell so = ref MemoryMarshal.GetArrayDataReference(Beside(16, cells, blank));
+        ref TCell w = ref MemoryMarshal.GetArrayDataReference(Beside(12, cells, blank));
+        ref TCell e = ref MemoryMarshal.GetArrayDataReference(Beside(14, cells, blank));
+        ref TCell nw = ref MemoryMarshal.GetArrayDataReference(Beside(9, cells, blank));
+        ref TCell ne = ref MemoryMarshal.GetArrayDataReference(Beside(11, cells, blank));
+        ref TCell sw = ref MemoryMarshal.GetArrayDataReference(Beside(15, cells, blank));
+        ref TCell se = ref MemoryMarshal.GetArrayDataReference(Beside(17, cells, blank));
+        ref TCell at = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(frame.Texels), r * row + r); // the texture's cell (0, 0)
+
+        // The bounds: every read is inside a buffer of at least `cells` (Own and Beside checked it, the blank has
+        // `cells`): row z < Depth (r <= Depth for the bands), cells x < Width (r <= Width for the sides); every write is
+        // inside the texture's one layer of (Depth + 2r) rows of (Width + 2r) cells.
+        ulong rows = 0;
+        for (int z = 0; z < depth; z++)
+        {
+            int source = z * width;
+            ref TCell into = ref Unsafe.Add(ref at, z * row);
+            bool any = TileLayout.Copy(ref into, ref Unsafe.Add(ref s, source), width);
+            any |= TileLayout.Copy(ref Unsafe.Add(ref into, -r), ref Unsafe.Add(ref w, source + width - r), r);
+            any |= TileLayout.Copy(ref Unsafe.Add(ref into, width), ref Unsafe.Add(ref e, source), r);
+            if (mask && any) rows |= 1UL << z;
+        }
+
+        // Halo row −k is row Depth − k of the tiles north (and its corners of those north-west and north-east), halo
+        // row Depth − 1 + k row k − 1 of those south. Bit z + r of each that is not zero, where the texture's rows fit
+        // a word (TileMask.Of).
+        ulong bands = 0;
+        for (int k = 1; k <= r; k++)
+        {
+            int source = (depth - k) * width;
+            ref TCell into = ref Unsafe.Add(ref at, -k * row);
+            bool any = TileLayout.Copy(ref into, ref Unsafe.Add(ref n, source), width);
+            any |= TileLayout.Copy(ref Unsafe.Add(ref into, -r), ref Unsafe.Add(ref nw, source + width - r), r);
+            any |= TileLayout.Copy(ref Unsafe.Add(ref into, width), ref Unsafe.Add(ref ne, source), r);
+            if (any) bands |= depth + 2 * r <= 64 ? 1UL << (r - k) : 1;
+            source = (k - 1) * width;
+            into = ref Unsafe.Add(ref at, (depth - 1 + k) * row);
+            any = TileLayout.Copy(ref into, ref Unsafe.Add(ref so, source), width);
+            any |= TileLayout.Copy(ref Unsafe.Add(ref into, -r), ref Unsafe.Add(ref sw, source + width - r), r);
+            any |= TileLayout.Copy(ref Unsafe.Add(ref into, width), ref Unsafe.Add(ref se, source), r);
+            if (any) bands |= depth + 2 * r <= 64 ? 1UL << (depth - 1 + k + r) : 2;
+        }
+        if (mask) MemoryMarshal.GetArrayDataReference(frame.Masks) = TileMask.Of<TTile>(rows, bands);
     }
 
     /// <summary>
@@ -1049,7 +1155,7 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
     /// their bounds check.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int Offset(int dx, int dy, int dz, int bytes)
+    private static nint Offset(int dx, int dy, int dz, int bytes)
     {
         int size = Unsafe.SizeOf<TCell>(), r = TTile.Halo;
         // The last first cell a load of `bytes` may start at, counted from the row's first halo cell: a constant, so
@@ -1061,7 +1167,9 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
             || (TTile.Height > 1 ? (uint)(dy + r) > (uint)(2 * r) : dy != 0))
             TileLayout.ThrowOffset();
         if ((uint)(dx + r) > (uint)last) TileLayout.ThrowOffset();
-        return dx + dy * TileLayout.Layer<TTile>() + dz * TileLayout.Row<TTile>();
+        // dx widened alone, the rows' and layers' part (a constant in a stencil) added after: it folds into each load's
+        // displacement, so the loads of one column share one sign extension instead of one each.
+        return (nint)dx + (dy * TileLayout.Layer<TTile>() + dz * TileLayout.Row<TTile>());
     }
 }
 
