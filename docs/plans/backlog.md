@@ -31,14 +31,14 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Ghost rows in MultiWorld** ("Next" item 7, branch `feat-ghost-rows`): the sample only, with a verdict on a
-      core feature (proposal to `owner-review.md`, nothing built); VoxelServer's ghost rows wait for Finish step 2a.
 - [ ] **Symmetric pair methods** ("Next" item 8e, branch `feat-symmetric-pairs`).
 - [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
       `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
       branch (12d).
 
-Merged since the last update: Emitted<T>'s segments (`feat-emit-segments`, 4925b09: the chunks' lists kept as
+Merged since the last update: ghost rows in MultiWorld (`feat-ghost-rows`: 4 zones side by side, border units
+copied as `Ghost` rows each update, crossings moved with `MoveEntities`, checked against one world; a
+`CopyEntities<TTag>` proposal in `owner-review.md`, not built; CI now checks the sample's output), Emitted<T>'s segments (`feat-emit-segments`, 4925b09: the chunks' lists kept as
 segments, joined only for a span read or a write; EmitParallel 1.4-2x, a `[ForEachRecord]` reader about 1.2x, 0 B;
 generator unchanged), fewer copies (`feat-fewer-copies`, 837c956: incremental Capture / Restore, Rollback
 with 16 writes 3.2 ms -> 36 us and BufferSnapshot Restore 78 -> 1.2 us; sorts gather into a spare column and swap it in,
@@ -161,7 +161,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
    arm64 keeps 16 KiB pages with no user superpages; Linux arm64 and x86 get huge pages through #164 (NativeMemory
    2 MiB + madvise). The layout answer works everywhere: L1's readers ordered by target halved the 1M chase without
    any prefetch.
-7. [ ] **Borrowed ideas** (`borrowed-ideas.md`): ghost rows between
+7. [ ] **Borrowed ideas** (`borrowed-ideas.md`): ghost rows between (MultiWorld done, feat-ghost-rows)
        worlds as an example first (owner, 2026-10-27: "都做呗，voxelserver和multiworld都做": in MultiWorld and in
        VoxelServer, two region worlds with `MoveEntities` at the border; VoxelServer's in Finish step 2a), streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
        owner: records in the docs pass). Vertical batch probes dropped after the 16M re-measure (record in the docs

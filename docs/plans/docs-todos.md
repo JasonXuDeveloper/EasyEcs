@@ -1215,3 +1215,15 @@ chunk lookup per zombie).
   called on one entity, not a pass; "method" as `[ForEach]` method and pair method; zh 实体方法) and
   `world.ForParallel` -> `world.ParallelFor` (.NET `Parallel.For`, OpenMP `parallel for`, TBB/Kokkos `parallel_for`;
   zh keeps 并行 for). The threading page's range-for section and api.mdx rows use the new names.
+
+## feat-ghost-rows (MultiWorld, merged)
+
+- Samples index (`samples/README.md`, `docs/content/samples/index.mdx` + `.zh.mdx`, `docs/content/README.md`): the
+  MultiWorld row mentions ghost rows and `MoveEntities` at the borders.
+- Glossary (`glossary.mdx` + `.zh.mdx`): "ghost row" (幽灵行) and "halo exchange" (光环交换) beside "Tile and halo";
+  `tools/ApiDocs/zh/README.md` halo row gains ghost rows = 幽灵行.
+- Threading guide: a world may pass between threads through a `Barrier` post-phase action (the sample's exchange);
+  `MoveEntities`' "both worlds owned by the calling thread" says the same.
+- Plans: `borrowed-ideas.md` item 4 notes the MultiWorld part is done and the verdict is in owner-review.
+- Run `bun run lint:seo` on the sample's pages (en seoTitle 52 chars, description 144).
+- Decision depends on the owner: the `CopyEntities<TTag>(target, ids, set)` proposal (owner-review.md).

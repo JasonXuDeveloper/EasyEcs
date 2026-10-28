@@ -14,7 +14,7 @@ dotnet test                                      # all NUnit tests, generator ca
 dotnet run -c Release --project tools/DocCheck   # every C# fence of the docs compiles: "0 problems"
 dotnet run --project tools/ApiDocs               # reference pages + Chinese entries: "0 problem(s)"
 (cd docs && bun run check && bun run build)      # links, anchors, icons, zh terms; SEO and search expectations
-.github/scripts/check-sample.sh samples/HelloWorld   # and SaveLoad, HotReload, Actors, VoxelServer (output == README + docs page)
+.github/scripts/check-sample.sh samples/HelloWorld   # and SaveLoad, MultiWorld, HotReload, Actors, VoxelServer (output == README + docs page)
 dotnet run --no-build -c Release --project samples/GameLoop -- --ticks 30
 dotnet run --no-build -c Release --project samples/MultiWorld -- --updates 50
 bash templates/smoke.sh                          # dotnet new templates pack, build, run, test

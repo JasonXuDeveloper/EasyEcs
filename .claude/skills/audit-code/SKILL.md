@@ -75,6 +75,8 @@ shows the newest forms).
 - **What stays**: a benchmark or test whose job is a specific form (hand-written vs generated, old vs new, a
   low-level API's own tests, the comparison projects' forms per library) keeps it; say so in a comment if a reader
   could take it for an old form.
+- **A sample checked by `check-sample.sh`** prints nothing that depends on timing or the processor count: a fixed
+  number of worlds or threads, counts instead of times (throughput belongs to a benchmark).
 - **Proof**: samples' outputs still match their README (`check-sample.sh`), the templates' smoke test, the demo
   builds and runs, `dotnet test`; a rewritten benchmark world is A/B-measured against the old one (it must not be
   slower; a slower recommended form is a finding for the generator or the docs, not a reason to keep the old form
