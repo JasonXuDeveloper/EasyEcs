@@ -91,9 +91,10 @@ public class TileSettleBenchmark
     {
         var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         var plates = new Dictionary<Plot, Entity>();
-        for (int z = 0; z < Plot.Side; z++)
-        for (int x = 0; x < Plot.Side; x++)
+        world.Reserve<ReachPlot>(Plot.Side * Plot.Side);
+        for (int n = 0; n < Plot.Side * Plot.Side; n++)
         {
+            int x = n % Plot.Side, z = n / Plot.Side;
             var plate = world.CreateEntity(new ReachPlot(new Plot(x, z)));
             plate.GetOrAdd<DynamicBuffer<Reach>>().SetCount(256);
             if (hand)
@@ -110,7 +111,7 @@ public class TileSettleBenchmark
     /// <summary>Each source a cell further along its diagonal: the cell it left cleared, the one it reached pinned.</summary>
     private void Move(Dictionary<Plot, Entity> plates, int tick)
     {
-        const int cells = Plot.Side * 16;
+        int cells = Plot.Side * 16;
         int step = cells * cells / Sources;
         for (int s = 0; s < Sources; s++)
         {

@@ -19,7 +19,7 @@ public class TileHaloBenchmark
 {
     [Params(1, 4)] public int Threads;
 
-    private const int Side = Plot.Side, Plates = Side * Side, W = 16, P = W + 2;
+    private const int Side = Plot.Default, Plates = Side * Side, W = 16, P = W + 2;
 
     private World _world;
     private float[][] _cells, _next;     // Exchange: 16 x 16 per plate

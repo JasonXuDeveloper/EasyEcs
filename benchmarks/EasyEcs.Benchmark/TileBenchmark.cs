@@ -6,13 +6,17 @@ using BenchmarkDotNet.Attributes;
 
 namespace EasyEcs.Benchmark;
 
-// Stencils over a torus of 32 x 32 plates of 16 x 16 cells (262,144 cells): what Tile<TCell, TTile> costs against the
-// same stencil written by hand (a Lookup per neighbor, a padded texture on the stack), what sleeping tiles save, and
-// what finding the neighbors costs in a pass.
+// Stencils over a torus of 32 x 32 plates of 16 x 16 cells (262,144 cells, 1 MiB a buffer: in cache), or of 512 x 512
+// (67 million cells, 256 MiB a buffer: past the last-level cache): what Tile<TCell, TTile> costs against the same
+// stencil written by hand (a Lookup per neighbor, a padded texture on the stack), what sleeping tiles save, and what
+// finding the neighbors costs in a pass.
 
 public record struct Plot(int X, int Z)
 {
-    public const int Side = 32;
+    /// <summary>The plots along each side of the torus: <see cref="Default"/>, or a benchmark's [Params] set before its worlds are made.</summary>
+    public static int Side = Default;
+
+    public const int Default = 32;
 
     /// <summary>The plot beside this one across a face, around the torus.</summary>
     public Plot Wrap(TileFaces face) => face switch
@@ -101,11 +105,14 @@ public class TileStencilBenchmark
 {
     [Params(1, 4)] public int Threads;
 
+    [Params(Plot.Default, 512)] public int Side;
+
     private World _blurTile, _blurDirect, _blurHand, _blurPingPong, _waveTile, _waveHand, _wavePingPong;
 
     [GlobalSetup]
     public void Setup()
     {
+        Plot.Side = Side;
         _blurTile = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p));
         _blurTile.AddSystem<TileSystems.BlurSystem>();
         _blurTile.AddSystem<TileSystems.CommitWarmthSystem>();
@@ -164,7 +171,7 @@ public class TileStencilBenchmark
 }
 
 /// <summary>
-/// A quiet Game of Life: 16 blinkers on 1,024 plates. Always on steps every plate (each skipping its empty rows);
+/// A quiet Game of Life: a blinker on every 64th plate (16 of 1,024, or 4,096 of 262,144). Always on steps every plate (each skipping its empty rows);
 /// Sparse steps the plates that are awake (the 16, which never change their edges) and lets the others sleep, by hand
 /// (an Awake tag, a commit, a sleep and a wake system); PingPong steps each plate through ref Tile, the pass keeping its
 /// second buffer and letting the plates that cannot change sleep.
@@ -174,11 +181,14 @@ public class TileActiveBenchmark
 {
     [Params(1, 4)] public int Threads;
 
+    [Params(Plot.Default, 512)] public int Side;
+
     private World _always, _sparse, _pingPong;
 
     [GlobalSetup]
     public void Setup()
     {
+        Plot.Side = Side;
         _always = TileWorlds.Blinkers(Threads, awake: false);
         _always.AddSystem<TileSystems.LifeSystem>();
         _always.AddSystem<TileSystems.CommitSeedSystem>();
@@ -195,7 +205,7 @@ public class TileActiveBenchmark
             Sparse();
             PingPong();
         }
-        if (_sparse.Count<Awake>(QueryFilter.Create()) != 16) throw new InvalidOperationException("16 plates stay awake");
+        if (_sparse.Count<Awake>(QueryFilter.Create()) != Side / 8 * (Side / 8)) throw new InvalidOperationException("the plates with a blinker stay awake");
         TileWorlds.SameSeeds(_always, _sparse);
         TileWorlds.SameSeeds(_always, _pingPong);
     }
@@ -263,9 +273,10 @@ internal static class TileWorlds
     {
         var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         var random = new Random(7);
-        for (int z = 0; z < Plot.Side; z++)
-        for (int x = 0; x < Plot.Side; x++)
+        world.Reserve<TPlot>(Plot.Side * Plot.Side);
+        for (int n = 0; n < Plot.Side * Plot.Side; n++)
         {
+            int x = n % Plot.Side, z = n / Plot.Side;
             var plate = world.CreateEntity(make(new Plot(x, z)));
             var warmth = plate.GetOrAdd<DynamicBuffer<Warmth>>().SetCount(256);
             for (int i = 0; i < 256; i++) warmth[i] = new Warmth(random.Next(1000));
@@ -275,17 +286,18 @@ internal static class TileWorlds
         return world;
     }
 
-    /// <summary>A torus of empty Life plates with a blinker in the middle of every 64th.</summary>
-    public static World Blinkers(int threads, bool awake, bool next = true)
+    /// <summary>A torus of empty Life plates with a blinker in the middle of every 64th (8 by 8), or of <paramref name="percent"/> percent of them, spread evenly in creation order.</summary>
+    public static World Blinkers(int threads, bool awake, bool next = true, int percent = 0)
     {
         var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
-        for (int z = 0; z < Plot.Side; z++)
-        for (int x = 0; x < Plot.Side; x++)
+        world.Reserve<LifePlot>(Plot.Side * Plot.Side);
+        for (int n = 0; n < Plot.Side * Plot.Side; n++)
         {
+            int x = n % Plot.Side, z = n / Plot.Side;
             var plate = world.CreateEntity(new LifePlot(new Plot(x, z)));
             var seeds = plate.GetOrAdd<DynamicBuffer<Seed>>().SetCount(256);
             if (next) plate.GetOrAdd<DynamicBuffer<NextSeed>>().SetCount(256);
-            if (x % 8 == 3 && z % 8 == 5)
+            if (percent > 0 ? n * percent / 100 != (n + 1) * percent / 100 : x % 8 == 3 && z % 8 == 5)
                 for (int i = 7; i <= 9; i++) seeds[8 * 16 + i] = new Seed(1);
             if (awake)
             {
