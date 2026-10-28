@@ -86,6 +86,35 @@ public static class Allocations
         return System.GC.GetAllocatedBytesForCurrentThread();
     }
 
+    /// <summary>
+    /// Run <paramref name="step"/>, the code a test then measures, <paramref name="least"/> times, then until the JIT has
+    /// settled: no method compiled anywhere in the process during the last <see cref="QuietRuns"/> runs and the last
+    /// half second. A loop still running Tier0 code compiles its on-stack replacement on the thread that runs it, once
+    /// its patchpoints have been hit often enough, and that compile can allocate on that thread (168 B for each of
+    /// PrefetchTests' probe jobs): inside a measurement, a failure. Tiering moves a method on only after 30 calls, a
+    /// 100 ms delay and a compile on its background thread, which in the full suite waits behind the methods of every
+    /// test before: a fixed warm-up that is enough alone measures Tier0 loops there.
+    /// </summary>
+    public static void WarmUp(System.Action step, int least)
+    {
+        for (int i = 0; i < least; i++) step();
+        long quiet = System.Diagnostics.Stopwatch.Frequency / 2;
+        long start = System.Diagnostics.Stopwatch.GetTimestamp(), since = start;
+        long compiled = System.Runtime.JitInfo.GetCompiledMethodCount();
+        for (int runs = 0; ;)
+        {
+            step();
+            long now = System.Diagnostics.Stopwatch.GetTimestamp(), count = System.Runtime.JitInfo.GetCompiledMethodCount();
+            if (count != compiled) (compiled, since, runs) = (count, now, 0);
+            else if (++runs >= QuietRuns && now - since >= quiet) return;
+            // A JIT that never settles (a step compiling new code every run): the measurement shows what allocates.
+            if (now - start > 60 * System.Diagnostics.Stopwatch.Frequency) return;
+        }
+    }
+
+    /// <summary>Runs without a compile that end a warm-up: past the 30 calls after which tiering promotes a method.</summary>
+    private const int QuietRuns = 40;
+
     // Waits for a running background collection (a blocking gen2 request does) and its finalizers.
     private static void Settle()
     {

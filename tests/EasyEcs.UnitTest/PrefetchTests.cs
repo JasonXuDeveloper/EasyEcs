@@ -531,7 +531,7 @@ public class PrefetchTests
                     c = beacons.Has(t.Target) ? new Course(beacons.Read(t.Target).X - b.X, b.Y) : default);
             }
 
-            for (int i = 0; i < 50; i++) Frame();
+            Allocations.WarmUp(Frame, 50); // until the JIT is done with the jobs' loops (none compiles in the window)
             Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) Frame(); }), Is.Zero);
         });
     }
