@@ -119,33 +119,19 @@ public readonly ref struct Emit<T> where T : struct
     }
 
     /// <summary>
-    /// Append the records of a chunk's list <paramref name="chunk"/> to <paramref name="into"/> and give the list back to
-    /// the pool. Called in chunk order when the pass ends, on the thread that started it. Generated code calls this.
+    /// Hand the records of a chunk's list <paramref name="chunk"/> to <paramref name="into"/>, after those it holds:
+    /// the list itself, not a copy of its records (a segment the singleton's list joins only when it is read as one span
+    /// or written, <see cref="EmitStore{T}"/>). Called in chunk order when the pass ends, on the thread that started it.
+    /// O(1). Generated code calls this.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public static void Join(SingletonRef<Emitted<T>> into, ref DynamicBuffer<T> chunk)
     {
-        var part = chunk.Store;
-        if (part == null) return;
+        if (chunk.Store is not { } part) return;
         chunk.Store = null;
         ref var items = ref into.Value.Items;
-        if (items.Store is not { } target)
-        {
-            // The singleton's first records: the chunk's list becomes its list. Later passes copy into that list, which
-            // keeps the largest size the records needed (a list taken from a chunk each pass would grow every pass, and
-            // every list of the pool would end up the size of all the records).
-            items.Store = part;
-            return;
-        }
-
-        if (part.Count != 0)
-        {
-            if (target.Count + part.Count > target.Items.Length) target.Grow(target.Count + part.Count);
-            Array.Copy(part.Items, 0, target.Items, target.Count, part.Count);
-            target.Count += part.Count;
-        }
-
-        EmitPool<T>.Return(part);
+        if (items.Store == null) items.Store = part; // the singleton's first records: the chunk's list becomes its list
+        else EmitStore<T>.Of(ref items).Append((EmitStore<T>)part); // chunks' lists come from EmitPool
     }
 }
 
@@ -153,7 +139,10 @@ public readonly ref struct Emit<T> where T : struct
 /// The records the passes with an <see cref="Emit{T}"/> parameter appended, in row order of each pass and in the order
 /// the passes ran: a singleton, added by the first pass that emits. The system that applies the records reads
 /// <see cref="Items"/> (<c>foreach</c>, <c>AsReadOnlySpan</c>, <see cref="World.ForParallel{T, TJob}"/>) and clears it.
-/// Snapshots and saves copy the records like a buffer component's.
+/// A parallel pass hands over its chunks' lists, not copies of their records: <c>Count</c>, <c>Clear</c>, a
+/// <see cref="ForEachRecordAttribute"/> pass and <see cref="World.ForParallel{T, TJob}"/> take the records where they
+/// are, and the first read as one span (<c>foreach</c>, <c>AsReadOnlySpan</c>, the indexer) or write joins them into one
+/// list, O(records) once. Snapshots and saves copy the records like a buffer component's.
 /// </summary>
 /// <typeparam name="T">The record.</typeparam>
 public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
@@ -188,10 +177,20 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
         if (!world.HasSingleton<Emitted<T>>()) return;
         ref var items = ref world.GetSingleton<Emitted<T>>().Items; // a box of its own: the ref outlives other singletons' adds
         if (items.Store is not { } store) return;
-        var records = new ReadOnlySpan<T>(store.Items, 0, store.Count); // a list that grows while the job runs is a new array
         // A local copy: the JIT keeps its refs in registers instead of reloading them through 'job' for every record.
         var local = job;
-        for (int i = 0; i < records.Length; i++) local.Execute(in records[i]);
+        // The records side by side in runs: the list's own, then those of the chunks' lists parallel passes handed it,
+        // walked where they are. Each run is found again from the records walked, so a job that makes the list join its
+        // runs or grow (a write of Emitted<T>) leaves the walk on the same records: a list that grows is a new array.
+        int total = store.Count;
+        for (int done = 0; done < total;)
+        {
+            var records = store.Run(done, total);
+            if (records.IsEmpty) break; // the job removed records
+            for (int i = 0; i < records.Length; i++) local.Execute(in records[i]);
+            done += records.Length;
+        }
+
         job = local; // what the job keeps (the records of its Emit<T> parameters) goes back to the pass
         items.Clear();
     }
@@ -225,30 +224,210 @@ public interface IForEachRecord<T> where T : struct
 }
 
 /// <summary>
+/// The list of an <see cref="Emitted{T}"/> singleton, or of a chunk of a pass emitting <typeparamref name="T"/>
+/// (<see cref="EmitPool{T}"/>), which becomes the singleton's when it holds none. A parallel pass hands it each chunk's
+/// list in chunk order (<see cref="Append"/>) instead of copying their records in (MPI's gather without the copy, a
+/// rope's segments): its records are then its own (<c>Items[0, head)</c>) followed by those of its segments in order,
+/// <see cref="BufferStore{T}.Count"/> counts them all, and <see cref="BufferStore.Shares"/> reads
+/// <see cref="BufferStore.Segmented"/>. Count, Clear (the segments back to the pool), a [ForEachRecord] pass and
+/// <see cref="World.ForParallel{T, TJob}"/> take the records where they are (<see cref="BufferStore{T}.Run"/>); a read
+/// as one span, a write, a pass resolving the singleton (<see cref="World.SingletonRef{T}"/>, which an emitting pass on
+/// one thread does too), a capture and a save join them first (<see cref="Settle"/>), once: O(records), the copy the
+/// pass no longer makes. The list keeps the largest size the joined records needed; the segments, those their chunks needed.
+/// </summary>
+internal sealed class EmitStore<T>(int capacity) : BufferStore<T>(capacity)
+{
+    // Past this many segments an append joins them first: a list nobody reads or clears holds a bounded number of
+    // segments (its records grow as a list's would), and a read walks at most this many.
+    private const int MaxSegments = 64;
+
+    private EmitStore<T>[] _segments = [];
+    private int _segmentCount;
+    private int _head;     // the records in Items while Segmented; Count counts the segments' too
+    private SpinGate _gate; // a join reached from several threads at once (a hand-written parallel job reading the records)
+
+    /// <summary>
+    /// The list of <paramref name="items"/> (an <see cref="Emitted{T}"/>'s, which has one), as one that takes segments:
+    /// a list the singleton got elsewhere (a write, a load, a restore) trades its array for one of the pool's (no copy),
+    /// once. Owner thread.
+    /// </summary>
+    public static EmitStore<T> Of(ref DynamicBuffer<T> items)
+    {
+        if (items.Store is EmitStore<T> store) return store;
+        return Adopt(ref items);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static EmitStore<T> Adopt(ref DynamicBuffer<T> items)
+    {
+        var plain = items.Store;
+        if (plain.Shares != 0) plain = plain.Unshare(); // a singleton's list is its own; never wrong to make sure
+        var store = EmitPool<T>.Rent();
+        (store.Items, plain.Items) = (plain.Items, store.Items);
+        (store.Count, plain.Count) = (plain.Count, 0);
+        items.Store = store;
+        plain.Recycle();
+        return store;
+    }
+
+    /// <summary>
+    /// Hold the records of <paramref name="segment"/> (a chunk's list) after the ones held: the list itself, given
+    /// back to the pool when the records are joined or cleared. O(1) (an empty one goes straight back). Owner thread.
+    /// </summary>
+    public void Append(EmitStore<T> segment)
+    {
+        if (segment.Count == 0)
+        {
+            EmitPool<T>.Return(segment);
+            return;
+        }
+
+        if (Shares != Segmented)
+        {
+            _head = Count;
+            Shares = Segmented;
+        }
+
+        if (_segmentCount == _segments.Length) Room();
+
+        _segments[_segmentCount++] = segment;
+        Count += segment.Count;
+    }
+
+    // No room for a segment: a larger array (warm-up), or past MaxSegments the records joined first.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void Room()
+    {
+        if (_segments.Length < MaxSegments)
+        {
+            Array.Resize(ref _segments, Math.Max(16, _segments.Length * 2));
+            return;
+        }
+
+        Settle();
+        _head = Count;
+        Shares = Segmented;
+    }
+
+    /// <summary>The records from <paramref name="start"/> on that lie side by side in one segment, up to <paramref name="end"/>.</summary>
+    public Span<T> SegmentRun(int start, int end)
+    {
+        int first = _head; // the index of the segment's first record
+        if (start < first) return Items.AsSpan(start, Math.Min(first, end) - start);
+        for (int i = 0; i < _segmentCount; i++)
+        {
+            var segment = _segments[i];
+            int next = first + segment.Count;
+            if (start < next) return segment.Items.AsSpan(start - first, Math.Min(next, end) - start);
+            first = next;
+        }
+
+        return default;
+    }
+
+    /// <summary>
+    /// Copy the segments' records after the list's own and give the segments back to the pool: the records side by side
+    /// in <c>Items</c>, the list no longer <see cref="BufferStore.Segmented"/>. O(records); allocates only when the list
+    /// grows past its largest size. Under a gate: two threads reading the records at once join them once.
+    /// </summary>
+    public override void Settle()
+    {
+        using (new SpinScope(ref _gate))
+        {
+            if (Shares != Segmented) return;
+            int count = Count;
+            if (Items.Length < count)
+            {
+                var grown = new T[Math.Max(count, Items.Length * 2)];
+                Array.Copy(Items, grown, _head);
+                Items = grown;
+            }
+
+            int at = _head;
+            for (int i = 0; i < _segmentCount; i++)
+            {
+                var segment = _segments[i];
+                _segments[i] = null;
+                segment.Items.AsSpan(0, segment.Count).CopyTo(Items.AsSpan(at));
+                at += segment.Count;
+                EmitPool<T>.Return(segment);
+            }
+
+            _segmentCount = 0;
+            Volatile.Write(ref Shares, 0); // after the records: a thread that sees 0 reads them in place
+        }
+    }
+
+    /// <summary>Remove the records: the segments back to the pool, uncopied; the list keeps its capacity.</summary>
+    public override void Empty()
+    {
+        if (Shares == Segmented)
+        {
+            for (int i = 0; i < _segmentCount; i++)
+            {
+                EmitPool<T>.Return(_segments[i]);
+                _segments[i] = null;
+            }
+
+            _segmentCount = 0;
+            Count = _head;
+            Shares = 0;
+        }
+
+        base.Empty();
+    }
+
+    public override void Recycle()
+    {
+        Empty();
+        if (Shares != 0) Release(); // shared by a row that copied it by hand (EECS012): the other holder keeps it
+        else EmitPool<T>.Return(this);
+    }
+
+    public override bool CopyFrom(BufferStore source)
+    {
+        if (Shares == Segmented) Empty(); // the records it copies replace these
+        return base.CopyFrom(source);
+    }
+
+    public override BufferStore Share()
+    {
+        Settle();
+        return base.Share();
+    }
+
+    public override BufferStore Copy()
+    {
+        Settle();
+        return base.Copy();
+    }
+}
+
+/// <summary>
 /// The lists of the chunks of passes emitting <typeparamref name="T"/>: taken by a chunk's first record (on any thread),
-/// given back when the pass joins it (on the thread that started the pass). Unlike the buffer pool, a list keeps its
-/// size whatever it grew to: a chunk emits about as many records each tick. Bounded: the pool holds at most as many
-/// lists as chunks emitted at once, each of the largest size a chunk needed. One lock per list taken or given back,
-/// once per chunk of at least 1,024 rows.
+/// given back when the records the chunk's list holds as a segment of an <see cref="Emitted{T}"/> are joined or cleared
+/// (on the owner thread). Unlike the buffer pool, a list keeps its size whatever it grew to: a chunk emits about as many
+/// records each tick. Bounded: the pool holds at most as many lists as segments held at once, each of the largest size a
+/// chunk needed. One lock per list taken or given back, once per chunk of at least 1,024 rows.
 /// </summary>
 internal static class EmitPool<T>
 {
     private static SpinGate Gate; // chunks on several threads rent and return at once (D128)
-    private static BufferStore<T>[] _free = [];
+    private static EmitStore<T>[] _free = [];
     private static int _count;
 
-    public static BufferStore<T> Rent()
+    public static EmitStore<T> Rent()
     {
         using (new SpinScope(ref Gate))
         {
-            if (_count == 0) return new BufferStore<T>(16);
+            if (_count == 0) return new EmitStore<T>(16);
             var store = _free[--_count];
             _free[_count] = null;
             return store;
         }
     }
 
-    public static void Return(BufferStore<T> store)
+    public static void Return(EmitStore<T> store)
     {
         if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(store.Items, 0, store.Count);
         store.Count = 0;

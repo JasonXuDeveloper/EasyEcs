@@ -104,12 +104,22 @@ public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
         {
             var store = Store;
             if (store == null || (uint)index >= (uint)store.Count) ThrowIndex();
+            if (store.Shares == BufferStore.Segmented) store.Settle(); // an Emitted<T>'s records in its passes' lists
             return ref store.Items[index];
         }
     }
 
-    /// <summary>The elements, read-only.</summary>
-    public readonly ReadOnlySpan<T> AsReadOnlySpan() => Store is { } store ? new ReadOnlySpan<T>(store.Items, 0, store.Count) : default;
+    /// <summary>
+    /// The elements, read-only. The records of an <see cref="Emitted{T}"/> that parallel passes left in their chunks'
+    /// lists are joined into one list first (O(records), once), as a write does; <see cref="Count"/> and
+    /// <see cref="DynamicBufferExtensions.Clear{T}"/> leave them where they are.
+    /// </summary>
+    public readonly ReadOnlySpan<T> AsReadOnlySpan()
+    {
+        if (Store is not { } store) return default;
+        if (store.Shares == BufferStore.Segmented) store.Settle();
+        return new ReadOnlySpan<T>(store.Items, 0, store.Count);
+    }
 
     /// <summary>Enumerates the elements (read-only, no allocation).</summary>
     public readonly ReadOnlySpan<T>.Enumerator GetEnumerator() => AsReadOnlySpan().GetEnumerator();
@@ -208,6 +218,12 @@ public static class DynamicBufferExtensions
         if (buffer.Store is not { } store) return;
         if (store.Shares != 0)
         {
+            if (store.Shares == BufferStore.Segmented) // an Emitted<T>'s: its passes' lists go back to their pool, uncopied
+            {
+                store.Empty();
+                return;
+            }
+
             // A shared list is left to its other owners, uncopied: the buffer holds none, as one never written.
             buffer.Store = null;
             store.Release();
@@ -227,6 +243,7 @@ public static class DynamicBufferExtensions
     public static void TrimExcess<T>(this ref DynamicBuffer<T> buffer)
     {
         if (buffer.Store is not { } store) return;
+        if (store.Shares == BufferStore.Segmented) store.Settle(); // an Emitted<T>'s records, side by side first
         if (store.Count == 0)
         {
             buffer.Store = null;
@@ -311,8 +328,16 @@ internal abstract class BufferStore
     public const int Uncounted = int.MinValue;
 
     /// <summary>
+    /// The value of <see cref="Shares"/> of an <see cref="Emitted{T}"/>'s list holding records still in the lists of the
+    /// chunks that emitted them (<see cref="EmitStore{T}"/>): its own, never counted (negative, as a prefab's), read
+    /// whole only once <see cref="Settle"/> joined them.
+    /// </summary>
+    public const int Segmented = int.MinValue + 1;
+
+    /// <summary>
     /// How many buffers hold this list besides one: 0 when it is its buffer's own (written in place), more when it is
-    /// shared (the next write of each holder copies it), <see cref="Uncounted"/> (any negative value) for a prefab's.
+    /// shared (the next write of each holder copies it), <see cref="Uncounted"/> for a prefab's, <see cref="Segmented"/>
+    /// for an <see cref="Emitted{T}"/>'s whose records are not side by side yet (negative values are never counted).
     /// Counted lists stay in one world (its rows and its snapshots: an arrival copies them, IBuffer.Remap): counted
     /// up by structural changes on the owner thread, down by them and by first writes, plain on the owner thread and
     /// atomic inside a parallel pass, whose chunks may each copy a list they share (<see cref="Release"/>).
@@ -350,6 +375,12 @@ internal abstract class BufferStore
 
     /// <summary>Remove the elements; the store stays its owner's, with its capacity (a singleton's: never shared).</summary>
     public abstract void Empty();
+
+    /// <summary>
+    /// Put the elements side by side in <c>Items</c>: what a <see cref="Segmented"/> list does before it is read as one
+    /// span or written (<see cref="EmitStore{T}"/>); nothing for any other list.
+    /// </summary>
+    public virtual void Settle() { }
 
     /// <summary>
     /// <paramref name="target"/> (a store its owner replaces, or null) made a copy of <paramref name="source"/>: it shares
@@ -401,7 +432,7 @@ internal abstract class BufferStore
     }
 }
 
-internal sealed class BufferStore<T>(int capacity) : BufferStore
+internal class BufferStore<T>(int capacity) : BufferStore
 {
     public T[] Items = capacity == 0 ? [] : new T[capacity];
     public int Count;
@@ -555,6 +586,18 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
         Count = 0;
     }
 
+    /// <summary>
+    /// The elements from <paramref name="start"/> on that lie side by side, up to <paramref name="end"/> (and the
+    /// count): all of them for a list, the rest of one segment for a <see cref="BufferStore.Segmented"/> one (an
+    /// <see cref="EmitStore{T}"/>'s, walked where its records are); empty past the count.
+    /// </summary>
+    public Span<T> Run(int start, int end)
+    {
+        if (Shares == Segmented) return Unsafe.As<EmitStore<T>>(this).SegmentRun(start, Math.Min(end, Count));
+        end = Math.Min(end, Count);
+        return start < end ? Items.AsSpan(start, end - start) : default;
+    }
+
     /// <summary>Grow to hold at least <paramref name="needed"/> elements (doubling, at least 4).</summary>
     public void Grow(int needed) => Resize(Math.Max(needed, Math.Max(4, Items.Length * 2)));
 
@@ -571,6 +614,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     {
         var from = Unsafe.As<BufferStore<T>>(source);
         if (from == null || from.Count == 0) return false;
+        if (from.Shares == Segmented) from.Settle(); // a capture of an Emitted<T> whose records are in its passes' lists
         if (Items.Length < from.Count) Resize(from.Count);
         if (RuntimeHelpers.IsReferenceOrContainsReferences<T>() && Count > from.Count) Array.Clear(Items, from.Count, Count - from.Count);
         Array.Copy(from.Items, Items, from.Count);
@@ -595,6 +639,12 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     [MethodImpl(MethodImplOptions.NoInlining)]
     public BufferStore<T> Unshare()
     {
+        if (Shares == Segmented) // an Emitted<T>'s own list, its records in its passes' lists: joined, then written in place
+        {
+            Settle();
+            return this;
+        }
+
         var copy = Copied();
         Release();
         return copy;
@@ -613,6 +663,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     /// <summary>Write the count, then the elements: raw rows when <typeparamref name="T"/> is unmanaged, else Nino values.</summary>
     public static void Write(ref Writer writer, BufferStore<T> store)
     {
+        if (store is { Shares: Segmented }) store.Settle();
         int count = store?.Count ?? 0;
         writer.Write(count);
         if (count == 0) return;
@@ -633,6 +684,7 @@ internal sealed class BufferStore<T>(int capacity) : BufferStore
     {
         int count = reader.ReadLength(Math.Max(1, TypeRegistry.RowSize<T>()));
         if (count < 0) throw new System.IO.InvalidDataException("A damaged save: a buffer longer than its bytes");
+        if (reuse is { Shares: Segmented }) reuse.Empty(); // an Emitted<T>'s: its passes' lists back to their pool
         if (reuse is { Shares: not 0 })
         {
             reuse.Release(); // a list others hold (a snapshot's, a prefab's) is never refilled: theirs stays
