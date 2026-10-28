@@ -276,4 +276,8 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   One body for both widths needs a generic vector abstraction: `ISimdVector<TSelf, T>` is internal in .NET 10, so it
   would be our own static-abstract wrapper, adopted only if BenchmarkDotNet and the Tier1 code show no loss.
 
+- **A written column's load stays in the loop even when its value is dead**: the JIT keeps a byref load that may
+  fault, so it still reads the line. A form that must not touch the line (streaming stores) drops the load itself
+  (`default(V<T>)` in place of the column's load).
+
 Each lesson becomes a form with its proof (above) or an entry in `docs/owner-review.md` with the measurement.

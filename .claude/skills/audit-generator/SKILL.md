@@ -122,6 +122,10 @@ How to see the bound without hardware counters (the VM has none): `llvm-mca` on 
 (`tools/jitdisasm.sh`), then BenchmarkDotNet with controlled data (sorted against shuffled, 1k / 100k / 1M rows).
 The open work is `docs/plans/microarch.md`.
 
+- **An out-of-line method of the job** (a `NoInlining` loop such as the streaming loop) that takes a ref struct of
+  the run (`in MaybeColumn<T>`) together with `ref` column arguments fails CS8350 (ref safety): exclude `Maybe<T>`
+  from such a method, or pass what it needs differently.
+
 ## The generated text (rules for every template; read it every round)
 
 Generated code is code users read: Go To Definition opens it, the docs' "The generator writes" tabs show it, and its

@@ -134,6 +134,14 @@ its own worktree.
    - a new owned form (the pass owns what users wrote by hand) is measured against the hand-written form it replaces,
      sparse and dense, 1 and 4 threads: visiting every unit for a test the hand-written form skips (sleeping tiles) is
      the usual gap; keep a work set filled by the step that wakes it (feat-tiles-pingpong);
+   - rows of unchanged code that trend one way across rounds are settled by a control build: base plus only the
+     change's non-loop parts (feat-streaming-stores: base + Core), interleaved with base and head; identical code
+     moved ±13 % there, so the trend was noise;
+   - a form gated by a size (the cache, a row count) checks the gate's measure against the prototype's winning case:
+     gating streaming stores on the written column alone would never have fired for the 1.47x case, whose column was
+     under the last-level cache; the gate counts every column the pass moves;
+   - check `df -h /` before queuing a batch and delete A/B snapshots once their numbers are read: the shared disk
+     filled to a few KB during feat-streaming-stores;
    - the lock is shared by every agent, so a queue is planned, not filled: benchmarks run in small batches (a class or
      a few methods), never hours queued at once; a branch whose code is done and only waits for its final checks goes
      first (the coordinator pauses the other queues' scripts with SIGSTOP and kills only their flock waiters that have
