@@ -12,16 +12,18 @@ namespace EasyEcs;
 /// past the L2 a prefetch costs them more than it hides); the forms that pay as soon as the data leaves the L2 (the
 /// row form's chases of other entities, on one thread, in parallel, in fused walks and over a buffer's elements; the
 /// core's lists of ids) past <see cref="L2OrLastLevel"/>.
-/// Read only where a prefetch exists (<see cref="Prefetching.IsSupported"/>: x86, ARM64 with SVE): other ARM64 and
-/// WebAssembly never read them. 0 means unknown: an operating system not listed, a read that fails or returns nothing.
+/// A generated vector loop streams a column it only writes past <see cref="LastLevel"/> (<see cref="StreamingStores"/>).
+/// Read only where a prefetch exists (<see cref="Prefetching.IsSupported"/>: x86, ARM64 with SVE), the last level also
+/// where a non-temporal store does (every ARM64): WebAssembly never reads them. 0 means unknown: an operating system not listed, a read that fails or returns nothing.
 /// </summary>
 internal static partial class CacheSizes
 {
     /// <summary>
-    /// The last-level cache in bytes, 0 when unknown (never past it: no prefetch). Settable by tests and the
-    /// benchmarks' forced gates; nothing else writes it.
+    /// The last-level cache in bytes, 0 when unknown (never past it: no prefetch, no streaming store). Read where a
+    /// prefetch or a non-temporal store exists (<see cref="StreamingStores.IsSupported"/> adds ARM64 without SVE);
+    /// each gate checks its own form first. Settable by tests and the benchmarks' forced gates; nothing else writes it.
     /// </summary>
-    internal static long LastLevel = Prefetching.IsSupported ? ReadLastLevel() : 0;
+    internal static long LastLevel = Prefetching.IsSupported || StreamingStores.IsSupported ? ReadLastLevel() : 0;
 
     /// <summary>
     /// One core's L2 in bytes (the largest data or unified level-2 cache, so a hybrid processor's larger one), 0 when

@@ -103,6 +103,17 @@ internal sealed partial class Kernel
         public EquatableArray<int> Prefetched { get; init; } = new([]);
 
         /// <summary>
+        /// The job columns (1-based) the loop over whole vectors writes without reading (Kernel.Streams.cs): a run past
+        /// the last-level cache streams them (<c>StreamingStores.Pays</c>, once per run). Only for a loop that runs every
+        /// vector alike: no bail, gather, wide component, marked rows, records, reduction or Maybe&lt;T&gt; (its column is
+        /// a ref struct of the run, which a method of the job cannot take with the column refs).
+        /// </summary>
+        public EquatableArray<int> Streamed { get; init; } = new([]);
+
+        /// <summary>The loop streams a column past the last-level cache: its own, or its flat loop's.</summary>
+        public bool Streams => Streamed.Length > 0 || Flat is { Streamed.Length: > 0 };
+
+        /// <summary>
         /// A wide component's AVX-512 form pays (its lines start with <see cref="Mark512"/>): the Vector512 loop runs it
         /// where <c>Avx512F.IsSupported</c>.
         /// </summary>
@@ -131,7 +142,11 @@ internal sealed partial class Kernel
     /// <param name="Body">Loads (one vector per component) and the method's statements for one field.</param>
     /// <param name="Stores">The stores of the components the method writes.</param>
     /// <param name="Fields">The fields of every component: lanes per row.</param>
-    internal sealed record FlatCode(string Setup, string Body, string Stores, int Fields);
+    internal sealed record FlatCode(string Setup, string Body, string Stores, int Fields)
+    {
+        /// <summary>The columns the flat loop writes without reading (<see cref="Code.Streamed"/>).</summary>
+        public EquatableArray<int> Streamed { get; init; } = new([]);
+    }
 
     /// <summary>
     /// The vector type the loop names, as a token: <c>SystemGenerator.VectorLoops</c> writes the Vector512 loop and the
@@ -878,6 +893,8 @@ internal sealed partial class Kernel
             Written = new EquatableArray<int>(kernel._written.OrderBy(k => k).ToArray()),
             Gathers = kernel._lookups.Count > 0,
             Prefetched = new EquatableArray<int>(kernel._prefetched.OrderBy(i => i).ToArray()),
+            Streamed = new(kernel._bails || kernel._lookups.Count > 0 || kernel._wideOf.Count > 0 || kernel._change != null || kernel._emits.Count > 0 || kernel._reductions.Count > 0 || kernel._optionals.Count > 0
+                ? [] : WriteOnly(prologue + read + hold + kernel._body, kernel._written.Where(k => kernel._components.Values.First(c => c.Index == k).Fields.Length == 1))),
             Chains = new EquatableArray<string>(kernel._reductions.Values.OrderBy(r => r.Index)
                 .SelectMany(r => Enumerable.Range(0, r.Fields.Length).Where(f => IsFloat(r.Fields[f].Type))
                     .SelectMany(f => Suffixes(kernel.IsDoubled(r.Fields[f].Type)).Select(h => $"__a{r.Index}_{f}{h}|{r.Ops[f]}")))
@@ -966,7 +983,7 @@ internal sealed partial class Kernel
             loads.Append($"var __c{index}_0 = {V}.LoadUnsafe(ref e{index}, (nuint)i);\n");
             if (first._written.Contains(index)) stores.Append($"{V}.StoreUnsafe(__c{index}_0, ref e{index}, (nuint)i);\n");
         }
-        return new FlatCode(setup!, loads + body, stores.ToString(), fields);
+        return new FlatCode(setup!, loads + body, stores.ToString(), fields) { Streamed = new(WriteOnly(loads + body, first._written)) };
     }
 
     /// <summary>
