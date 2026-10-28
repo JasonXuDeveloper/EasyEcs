@@ -1147,3 +1147,48 @@ chunk lookup per zombie).
   positional (a guess: a body may compute the field), reading IL (Roslyn exposes none). Any exception translating one
   method becomes its reason, since a throwing generator loses all its output. An inlined target-typed value carries
   the callee's return type (`new T(...)`, `default(T)`); a cast binds as a conversion Kernel does not take.
+
+## feat-symmetric-pairs (8e, voxel-rewrite.md GA4)
+
+What shipped: a pair method that takes a component by `ref` of the row and by `[Neighbor] ref` (PairForm.IsSymmetric)
+writes both sides of each unordered pair once (Newton's third law, MD codes' half neighbor lists). No new attribute:
+the form is inferred from the parameters. The neighbors are the rows (the method's filter); a table against itself
+runs its pairs (a, b > a), two tables each pair once (the draw keeps the neighbor's cluster at or after the row's, a
+built list keeps j > i, the Rows loop starts after the row). Each side's writes are stamped by its own table (no
+StampOther). One pair at a time, serial (ForPairsParallel falls back to ForPairs; a Parallel method is EECS105).
+
+- guide page of pair methods (the one documenting `[Neighbor]`; today only api.mdx and reference/ name it) + zh:
+  a section "Writing both sides": when to choose it (forces, contacts, merges: half the pairs of the full pass), what
+  it runs (each unordered pair once, one pair at a time, serial), what it refuses (EECS105 below), a full example
+  (repulsion: `ref Force f, [Neighbor] ref Force g`, `f.X += dx; g.X -= dx;`) and item merging (the lower EntityId
+  survives: `SymmetricPairTests.Merge` / the VoxelServer form). Costs from the A/B below: against the full vector pass
+  (Generated) it wins on sparse worlds and small crowds, loses about 1.2-1.3x on dense crowds of 10k-100k; against
+  the per-pair full pass (GeneratedRows) it always wins (2-2.8x).
+- guide/analyzer.mdx + zh:
+  - EECS105's symmetric reasons: the neighbors are not the rows (filters on the neighbor side), a component by `ref`
+    of one side only ("to write both sides of each pair once, take it by 'ref' of the row too"), a Mut<T>, Parallel.
+  - EECS106: the compared component written on both sides (the test would read moved positions).
+  - EECS107's fix: a query walk with the half skip (`if (o.Entity.Id.Index <= self.Id.Index) continue;`) writing
+    both sides becomes the symmetric pair method (skip and the unused `Entity self` dropped).
+  - EECS056 under SimdMode.Require: "it writes both sides of its pairs ('g', [Neighbor] ref): each unordered pair
+    runs once, one at a time". EECS053 is not reported for these refs (both are written).
+- api.mdx + zh: `IPairJob.Symmetric` (static virtual, generated; complexity row: half the pairs of ForPairs), the
+  PairRun.Same doc (a symmetric run of a table against itself starts after the row). Chinese entry for the new XML doc
+  in tools/ApiDocs/zh.
+- decisions.mdx + zh, next free D: "A pair method writing both sides runs each unordered pair once".
+  - Inferred, no attribute: `ref` of the row plus `[Neighbor] ref` of the same component already says it; a method
+    that writes the neighbor's component it reads of its row was refused before, so no method changes meaning.
+  - Half lists over a sorted cluster grid (pairs a < b; a cluster's neighbor clusters at or after it), as GROMACS /
+    LAMMPS `newton on`.
+  - Serial: red/black or per-thread force buffers (LAMMPS's reverse communication) were not built; the single-thread
+    form is already faster than the parallel full pass would be per core, and both forms cost a merge or a second
+    color pass. What would change it: a VoxelServer profile where the symmetric pass dominates a tick.
+  - Dropped: the vector loop of the symmetric form, measured in two shapes (PairsBenchmark --dev screens, AVX-512,
+    10k/100k crowd and sparse): the cluster's lanes summed into the neighbor in lane order (bit for bit) ran 1.4-2.3x
+    slower than the pairs one at a time (10k crowd 1,499 us against 1,059; 100k sparse 5,662 against 2,500), and the
+    FloatMode.Fast tree sum into the neighbor 1.1-2.3x slower (100k sparse 4,582 against 2,442; 10k crowd 1,173
+    against 977). Why: a horizontal reduction per neighbor costs more than the halved j count saves, and the half
+    list's diagonal cluster needs a masked prefix per j.
+- roadmap.mdx + zh: GA4 done (symmetric pair methods); dropped: their vector loop (the decision).
+- changelog + README "What's new": pair methods writing both sides of each unordered pair once.
+- No migration entry: a method EECS105 refused now compiles; nothing that compiled changes.

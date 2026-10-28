@@ -172,6 +172,9 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        VoxelServer and collisions; today a pair writing the neighbor's component it also reads of its row is refused.
        With or after item 1 (the pair agent), `feature` + `audit-vector-loops`: bit for bit against the per-pair walk,
        deterministic order, parallel only where the halves cannot race, 0 B, analyzer reasons and naming (`audit-naming`).
+       Status: built on branch `feat-symmetric-pairs` (from 5b8f926), waiting for merge: inferred from `ref` +
+       `[Neighbor] ref` of one component (`IPairJob.Symmetric`), half lists, one pair at a time, serial; its vector loop
+       measured and dropped (docs-todos "feat-symmetric-pairs"). Parallel (red/black or per-thread buffers) not built.
 8d. [x] **Bug: EECS055 reason text** (`voxel-rewrite.md` GA7): VoxelServer's Chase reports `local 'cell' is a ??`
        (the type name missing); Float reports `LookupExtensions.TryFind, defined in another assembly` where the reason is
        that a key probe has no vector form. Fix the text, a test per case.
