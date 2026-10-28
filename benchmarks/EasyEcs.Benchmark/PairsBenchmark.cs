@@ -12,7 +12,7 @@ namespace EasyEcs.Benchmark;
 /// for the sorted columns, 8 lanes with hardware 256-bit vectors, else 4: ARM64's NEON; with the sort every 1, 10 and
 /// 20 ticks; and with the copies a user would add today), and that kernel on the core's order (L1: the table's own
 /// columns kept sorted, clusters of 8 or 16, the core's sort every 10 ticks), and the generated pair method (L2: Generated,
-/// GeneratedRows one pair at a time). Each
+/// GeneratedRows one pair at a time; GeneratedBoth writing both sides of each unordered pair once, one at a time). Each
 /// invocation runs 20 ticks (OperationsPerInvoke), so a sort every k ticks is amortized exactly. One thread. Setup checks
 /// every version against a double-precision reference.
 /// </summary>
@@ -70,6 +70,7 @@ public class PairsBenchmark
         CheckPairs(paired, nameof(Generated), () => CrowdPairs.Tick(_pairs));
         CheckPairs(paired, nameof(GeneratedRows), () => CrowdPairs.TickRows(_pairs));
         CheckPairs(paired, nameof(GeneratedParallel), () => CrowdPairs.TickParallel(_pairs));
+        CheckPairs(paired, nameof(GeneratedBoth), () => CrowdPairs.TickBoth(_pairs));
     }
 
     private void CheckPairs((double, double, double)[] expected, string name, Action tick)
@@ -199,6 +200,13 @@ public class PairsBenchmark
     public void GeneratedParallel()
     {
         for (int t = 0; t < Ticks; t++) CrowdPairs.TickParallel(_pairs);
+    }
+
+    /// <summary>The pair method writing both sides: each unordered pair once, one at a time.</summary>
+    [Benchmark(OperationsPerInvoke = Ticks)]
+    public void GeneratedBoth()
+    {
+        for (int t = 0; t < Ticks; t++) CrowdPairs.TickBoth(_pairs);
     }
 
     private void SortEvery(int ticks)

@@ -18,7 +18,10 @@ namespace EasyEcs.Generator;
 /// the pair's statements read nothing of the search (no cell, no index), and their first test after the local
 /// declarations skips the candidates past a cutoff the generator reads. The pair method then visits every entity
 /// holding the neighbor's components within that cutoff (the search's candidates were a superset of them, or the same
-/// set for a query walk, in the order of the tables' rows: a sum over a grid may differ in its last bits).
+/// set for a query walk, in the order of the tables' rows: a sum over a grid may differ in its last bits). A query walk
+/// of the candidates after the row (<c>if (o.Entity.Id.Index &lt;= self.Id.Index) continue;</c>) that writes the
+/// candidate's components the row takes by <c>ref</c> meets each unordered pair once and writes both sides: it becomes
+/// the pair method writing both sides (<c>[Neighbor] ref</c>, PairForm.IsSymmetric), its pairs in the tables' order.
 /// </summary>
 internal static class PairRewrite
 {
@@ -102,8 +105,10 @@ internal static class PairRewrite
         var neighborOfLocal = new Dictionary<ILocalSymbol, ITypeSymbol>(SymbolEqualityComparer.Default);
         var removed = new List<StatementSyntax>();
         var edits = new List<(TextSpan Span, string Text)>();
-        bool entity = false;
+        bool entity = false, half = false;
+        IParameterSymbol? halfSelf = null; // the row's Entity the half walk compares, dropped when nothing else reads it
         var usedInPair = new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
+        var written = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default); // the neighbor's components a half walk writes
         IParameterSymbol? self = null;
         void Neighbor(ITypeSymbol type)
         {
@@ -120,6 +125,15 @@ internal static class PairRewrite
             {
                 if (self != null) return null;
                 self = entityParameter;
+                removed.Add(statement);
+                continue;
+            }
+
+            // if (o.Entity.Id.Index <= self.Id.Index) continue;: each unordered pair once, the pair method writing both sides.
+            if (at < 0 && !half && self == null && HalfSkip(statement, candidate, model, ct) is { } compared)
+            {
+                half = true;
+                halfSelf = compared;
                 removed.Add(statement);
                 continue;
             }
@@ -158,7 +172,12 @@ internal static class PairRewrite
             if (!removed.Any(r => r.Span.Contains(node.Span)) && !reads.Any(r => r.Read.Span.Contains(node.Span))
                 && candidate.Read(node) is { } read)
             {
-                if (WrittenThrough(node)) return null; // a write of the neighbor: [Neighbor] ref, the fix stays out of it
+                if (WrittenThrough(node))
+                {
+                    // A write of the neighbor: only both sides of a half walk ([Neighbor] ref of the row's ref component).
+                    if (!half) return null;
+                    written.Add(read.Type);
+                }
                 reads.Add((node, read.Type, read.Name));
                 Neighbor(read.Type);
             }
@@ -226,11 +245,18 @@ internal static class PairRewrite
         edits.Add((test.Statement.Span, "return;"));
         if (self != null) usedInPair.Add(self);
 
-        // The row writes no component it reads of the neighbor (EECS105).
+        // The row writes no component it reads of the neighbor (EECS105); a half walk writes both sides of each of its
+        // row's ref components and of no other, and its neighbors hold only components of its rows (PairForm.Problem).
+        var rowTypes = new HashSet<ITypeSymbol>(SymbolEqualityComparer.Default);
         foreach (var p in method.Parameters)
-            if (p.RefKind == RefKind.Ref && Symbols.Classify(p, outside) == Symbols.ParamKind.Component
-                && neighbors.Any(t => SymbolEqualityComparer.Default.Equals(t, p.Type)))
+        {
+            if (Symbols.Classify(p, outside) != Symbols.ParamKind.Component) continue;
+            rowTypes.Add(p.Type);
+            bool both = written.Contains(p.Type);
+            if (p.RefKind == RefKind.Ref ? half != both || !half && neighbors.Any(t => SymbolEqualityComparer.Default.Equals(t, p.Type)) : both)
                 return null;
+        }
+        if (half && (written.Count == 0 || neighbors.Any(t => !rowTypes.Contains(t)))) return null;
 
         // The parameter list: the method's, without what only the search reads (the world, lookups, singletons),
         // then the [Neighbor] components and the neighbor's Entity.
@@ -240,6 +266,7 @@ internal static class PairRewrite
             if (model.GetDeclaredSymbol(p, ct) is not { } symbol) return null;
             var kind = Symbols.Classify(symbol, outside);
             if (kind is Symbols.ParamKind.World or Symbols.ParamKind.Lookup or Symbols.ParamKind.Singleton && !usedInPair.Contains(symbol)) continue;
+            if (SymbolEqualityComparer.Default.Equals(symbol, halfSelf) && !usedInPair.Contains(symbol)) continue;
             parameters.Add(p.ToString());
         }
 
@@ -247,7 +274,7 @@ internal static class PairRewrite
             ? syntax.ParameterList.Parameters[method.Parameters.IndexOf(handle)].Type!.ToString()
             : "Entity";
         foreach (var type in neighbors)
-            parameters.Add($"[Neighbor] in {type.ToMinimalDisplayString(model, syntax.SpanStart)} {names[type]}");
+            parameters.Add($"[Neighbor] {(written.Contains(type) ? "ref" : "in")} {type.ToMinimalDisplayString(model, syntax.SpanStart)} {names[type]}");
         if (entity || self != null) parameters.Add($"[Neighbor] {entityType} {otherName}");
 
         return new Result(string.Join(", ", parameters), Text(syntax.SyntaxTree, pair, removed, edits, ct));
@@ -377,6 +404,27 @@ internal static class PairRewrite
             || model.GetSymbolInfo(selfId.Expression, ct).Symbol is not IParameterSymbol entity || !Symbols.Named(entity.Type, Symbols.Entity))
             return null;
         return entity;
+    }
+
+    /// <summary>
+    /// <c>if (o.Entity.Id.Index &lt;= self.Id.Index) continue;</c> (or <c>self.Id.Index &gt;= ...</c>; the candidate's id
+    /// as <paramref name="candidate"/> names it): the walk keeps only the candidates after the row, each unordered pair
+    /// once, which a pair method writing both sides does: the row's Entity parameter, or null.
+    /// </summary>
+    private static IParameterSymbol? HalfSkip(StatementSyntax statement, Candidate candidate, SemanticModel model, System.Threading.CancellationToken ct)
+    {
+        if (statement is not IfStatementSyntax { Else: null, Condition: BinaryExpressionSyntax compare } skip || !Continues(skip.Statement)) return null;
+        static ExpressionSyntax? Index(ExpressionSyntax e) => e is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Index" } m ? m.Expression : null;
+        (var them, var us) = compare.Kind() switch
+        {
+            SyntaxKind.LessThanOrEqualExpression => (Index(compare.Left), Index(compare.Right)),
+            SyntaxKind.GreaterThanOrEqualExpression => (Index(compare.Right), Index(compare.Left)),
+            _ => (null, null),
+        };
+        return them != null && us is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Id" } selfId && candidate.IsId(them)
+            && model.GetSymbolInfo(selfId.Expression, ct).Symbol is IParameterSymbol entity && Symbols.Named(entity.Type, Symbols.Entity)
+            ? entity
+            : null;
     }
 
     private static bool Continues(StatementSyntax s) => s is ContinueStatementSyntax || s is BlockSyntax { Statements.Count: 1 } block && block.Statements[0] is ContinueStatementSyntax;

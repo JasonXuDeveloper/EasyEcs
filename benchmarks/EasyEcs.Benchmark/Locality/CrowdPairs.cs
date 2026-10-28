@@ -30,6 +30,20 @@ public static class CrowdPairs
         CrowdPairs.SeparateParallel(world);
     }
 
+    /// <summary>One tick of the method writing both sides (each unordered pair once): the pushes reset, then summed.</summary>
+    public static void TickBoth(World world)
+    {
+        CrowdPairs.Reset(world);
+        CrowdPairs.SeparateBoth(world);
+    }
+
+    /// <summary>One tick of the method writing both sides on the threads the world allows (chunks of a fixed size).</summary>
+    public static void TickBothParallel(World world)
+    {
+        CrowdPairs.Reset(world);
+        CrowdPairs.SeparateBothParallel(world);
+    }
+
     /// <summary>
     /// How far a row moves per tick at full speed, as a share of the cutoff: a crowd walking (GROMACS's steps move
     /// about as far against its cutoff), so lists of neighbors hold a few ticks.
@@ -79,6 +93,42 @@ public static class CrowdPairs
         push.Y += w * (dy + Crowd.Drag * (u.Y - v.Y));
     }
     // #endregion pairs
+
+    /// <summary>
+    /// <see cref="Separate"/> writing both sides (Newton's third law: the pair's term is the row's push and minus the
+    /// neighbor's), each unordered pair once: half the pairs, one at a time.
+    /// </summary>
+    [ForEach]
+    public static void SeparateBoth(in Crowd.Position p, in Crowd.Velocity v, ref Crowd.Push push,
+        [Neighbor] in Crowd.Position q, [Neighbor] in Crowd.Velocity u, [Neighbor] ref Crowd.Push back)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= Crowd.Range2 || d2 == 0) return;
+        float w = Crowd.Range2 - d2;
+        float x = w * (dx + Crowd.Drag * (u.X - v.X)), y = w * (dy + Crowd.Drag * (u.Y - v.Y));
+        push.X += x;
+        push.Y += y;
+        back.X -= x;
+        back.Y -= y;
+    }
+
+    /// <summary>
+    /// <see cref="SeparateBoth"/> on several threads: chunks of rows, kept off each other's rows by colors or by buffers
+    /// of the neighbors of other chunks (its writes of the neighbor only add).
+    /// </summary>
+    [ForEach(Parallel = true)]
+    public static void SeparateBothParallel(in Crowd.Position p, in Crowd.Velocity v, ref Crowd.Push push,
+        [Neighbor] in Crowd.Position q, [Neighbor] in Crowd.Velocity u, [Neighbor] ref Crowd.Push back)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= Crowd.Range2 || d2 == 0) return;
+        float w = Crowd.Range2 - d2;
+        float x = w * (dx + Crowd.Drag * (u.X - v.X)), y = w * (dy + Crowd.Drag * (u.Y - v.Y));
+        push.X += x;
+        push.Y += y;
+        back.X -= x;
+        back.Y -= y;
+    }
 
     [ForEach]
     public static void SeparateRows(in Crowd.Position p, in Crowd.Velocity v, ref Crowd.Push push,

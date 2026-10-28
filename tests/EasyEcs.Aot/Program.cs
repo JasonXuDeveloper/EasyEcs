@@ -140,6 +140,34 @@ using (var flock = new World())
     foreach (var item in flock.Query<Near>()) pairs += item.Near.Value;
     Flock.Links(flock);
     Check(flock.Links.Count == pairs, "a parallel pair method sums its pairs into a Reduce<T>");
+    // Both sides written: each unordered pair once, the lanes' counts added into the neighbor (PairRun.AddLanes).
+    var counted = new System.Collections.Generic.Dictionary<EntityId, int>();
+    foreach (var item in flock.Query<Near>())
+    {
+        counted[item.Entity.Id] = item.Near.Value;
+        item.Near = default;
+    }
+    Flock.Both(flock);
+    bool same = true;
+    foreach (var item in flock.Read<Near>()) same &= item.Near.Value == counted[item.Entity.Id];
+    Check(same, "a pair method writing both sides counts each row's neighbors");
+}
+
+// Both sides written on several threads: a table of many chunks of 256 rows, the chunks run color by color.
+using (var crowd = new World())
+{
+    for (int i = 0; i < 4000; i++) crowd.CreateEntity(new Bird(i % 100, i / 100), new Near());
+    Flock.Count(crowd);
+    var counted = new System.Collections.Generic.Dictionary<EntityId, int>();
+    foreach (var item in crowd.Query<Near>())
+    {
+        counted[item.Entity.Id] = item.Near.Value;
+        item.Near = default;
+    }
+    Flock.BothParallel(crowd);
+    bool same = true;
+    foreach (var item in crowd.Read<Near>()) same &= item.Near.Value == counted[item.Entity.Id];
+    Check(same, "a parallel pair method writing both sides counts each row's neighbors");
 }
 
 // The generator gaps' forms: an [Accumulate] total, a [ForEachRecord] pass over Emitted<T>, vector loops of enum and
@@ -190,6 +218,24 @@ static class Flock
         float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
         if (d2 >= 1.5f * 1.5f || d2 == 0) return;
         near.Value++;
+    }
+
+    [ForEach]
+    public static void Both(in Bird p, ref Near near, [Neighbor] in Bird q, [Neighbor] ref Near other)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= 1.5f * 1.5f || d2 == 0) return;
+        near.Value++;
+        other.Value++;
+    }
+
+    [ForEach(Parallel = true)]
+    public static void BothParallel(in Bird p, ref Near near, [Neighbor] in Bird q, [Neighbor] ref Near other)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= 1.5f * 1.5f || d2 == 0) return;
+        near.Value++;
+        other.Value++;
     }
 
     [ForEach(Parallel = true)]

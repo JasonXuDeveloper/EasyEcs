@@ -33,6 +33,15 @@ namespace EasyEcs;
 /// method qualifies. The pairs of a row run in the order of the tables' rows (not of the entities): a method that keeps
 /// the nearest neighbor breaks ties by the entity (the lower <see cref="EntityId.Index"/>), so its result is the same
 /// whatever the order.
+/// <para>
+/// A method that takes one component by <c>ref</c> of its row and of its neighbor (<c>ref Force f, [Neighbor] ref Force
+/// g</c>) writes both sides of its pairs (Newton's third law: <c>f += push; g -= push;</c>, or two items merged into one):
+/// it runs once for each unordered pair of its rows, never for a row with itself, in the order of the tables' rows (the
+/// row is the earlier of the two; half the pairs of a loop over both sides, MD codes' half neighbor lists). Its
+/// neighbors are then its rows: each <c>[Neighbor]</c> component is one the row takes too, and every component it
+/// writes it writes of both sides. On several threads (<c>Parallel = true</c>) its rows run in chunks of a fixed size
+/// colored so that chunks running at once write no row in common: the same result on any number of threads.
+/// </para>
 /// </summary>
 [AttributeUsage(AttributeTargets.Parameter)]
 public sealed class NeighborAttribute : Attribute;
@@ -97,6 +106,17 @@ public interface IPairJob
     /// type; <see cref="Merges"/>). Generated parallel jobs with <see cref="Reduce{T}"/> parameters implement it.
     /// </summary>
     static virtual void Merge<TSelf>(ref TSelf job, in TSelf chunk) where TSelf : struct { }
+
+    /// <summary>
+    /// The method writes both sides of its pairs (a component by <c>ref</c> of its row and of its neighbor; default false):
+    /// the pass visits each unordered pair of its rows once, the row the earlier of the two in the tables' order. Its
+    /// neighbors are its rows (the neighbors' filter is not read); the tables' pairs are each table against itself and
+    /// against the tables after it, and against itself only the rows after the row: cluster w against clusters w and on,
+    /// and in cluster w the rows after the row (<see cref="PairRun.Same"/> marks the run that needs that skip; each row's
+    /// list, <see cref="PairRun.Near"/>, holds only rows after it). In parallel, chunks of a fixed number of rows, so the
+    /// result is the same on any number of threads (<see cref="World.ForPairsParallel{T, TOrder, TJob}"/>).
+    /// </summary>
+    static virtual bool Symmetric => false;
 }
 
 /// <summary>
@@ -114,6 +134,13 @@ public readonly ref struct PairRun
     private readonly int[] _starts, _ranges, _nearStarts, _near;
     private readonly float[] _reach;
     private readonly int _first, _end, _size;
+
+    // A symmetric job's: what its parallel pass works out once per draw of the list (its colors).
+    private readonly PairSchedule _schedule;
+
+    internal PairRun(World world, Archetype table, Archetype other, ulong[] rows, ulong[] neighbors, int[] starts,
+        int[] ranges, float[] reach, int first, int end, int size, int[] nearStarts, int[] near, PairSchedule schedule)
+        : this(world, table, other, rows, neighbors, starts, ranges, reach, first, end, size, nearStarts, near) => _schedule = schedule;
 
     internal PairRun(World world, Archetype table, Archetype other, ulong[] rows, ulong[] neighbors, int[] starts,
         int[] ranges, float[] reach, int first, int end, int size, int[] nearStarts = null, int[] near = null)
@@ -145,7 +172,10 @@ public readonly ref struct PairRun
     /// <summary>The rows of the method's table (rows of the last cluster past it are none).</summary>
     public int Count => _table.Count;
 
-    /// <summary>The neighbors' table is the method's own: a row meets itself in its own cluster.</summary>
+    /// <summary>
+    /// The neighbors' table is the method's own: a row meets itself in its own cluster (a symmetric job's,
+    /// <see cref="IPairJob.Symmetric"/>: only the rows after it).
+    /// </summary>
     public bool Same => ReferenceEquals(_table, _other);
 
     /// <summary>
@@ -224,6 +254,9 @@ public readonly ref struct PairRun
     /// <summary>Row 0 of the other table's column of <typeparamref name="T"/> (a component of the neighbors' filter). O(1).</summary>
     public ref T Others<T>() where T : struct, IComponent => ref _other.Data<T>(_other.ColumnIndex(ComponentType<T>.Bit));
 
+    /// <summary>A symmetric job's schedule of its list (the run of a pass, not of a chunk).</summary>
+    internal PairSchedule Schedule => _schedule;
+
     /// <summary>What a chunk of a parallel pass rebuilds the run from (its own clusters).</summary>
     internal (World, Archetype, Archetype, ulong[], ulong[], int[], int[], float[], int[], int[]) Parts() =>
         (_world, _table, _other, _rows, _neighbors, _starts, _ranges, _reach, _nearStarts, _near);
@@ -298,7 +331,7 @@ public sealed partial class World
 
     /// <summary>
     /// <see cref="ForPairs{T, TOrder, TJob}"/> on several threads (a <c>[ForEach(Parallel = true)]</c> pair method that
-    /// writes no neighbor): the boxes and lists are drawn on the calling thread as there, then each table's clusters are
+    /// writes no neighbor; one writing both sides runs as <see cref="IPairJob.Symmetric"/> says): the boxes and lists are drawn on the calling thread as there, then each table's clusters are
     /// cut into chunks of whole 64-row words (about four per thread, or by the clusters' measured cost) that the chunk
     /// runner's threads claim, each running a copy of the job over its clusters' rows: a row is written by its own cluster
     /// only, so the result is the serial pass's bit for bit. Stamps follow on the calling thread. Owner thread, outside
@@ -308,6 +341,12 @@ public sealed partial class World
     public void ForPairsParallel<T, TOrder, TJob>(ref TJob job, in QueryFilter rows, in QueryFilter neighbors, int axes)
         where T : struct, IComponent where TOrder : struct, IRowOrder<T> where TJob : struct, IPairJob
     {
+        if (TJob.Symmetric) // a write of both sides reaches rows of other chunks
+        {
+            ForPairHalves<T, TOrder, TJob>(ref job, in rows, in neighbors, axes);
+            return;
+        }
+
         var state = BeginPairs<T, TOrder, TJob>(ref job, in rows, in neighbors, axes, out float reach);
         var work = WorkOf<PairChunks<TJob>>();
         var start = job; // what each chunk's copy starts from: partial results at Identity
@@ -350,7 +389,7 @@ public sealed partial class World
         reach = job.CutoffPerRow ? float.NaN : PairState.Reach(job.CutoffSquared);
         // Every pair runs without a cutoff: no order helps.
         if (!state.Ordered) state.Ordered = reach == float.PositiveInfinity || OrderPairs<T, TOrder>(axes, reach);
-        state.Begin(this, in rows, in neighbors);
+        state.Begin(this, in rows, in neighbors, TJob.Symmetric);
         return state;
     }
 
@@ -502,19 +541,28 @@ internal sealed class PairState
     private Clusters _own;
     private int _a, _b;
 
-    /// <summary>A pass begins: its tables, the cursor before the first pair of tables (<see cref="Next"/>).</summary>
-    public void Begin(World world, in QueryFilter rows, in QueryFilter neighbors)
+    // The job writes both sides of its pairs (IPairJob.Symmetric): each unordered pair once, its lists of one table
+    // against itself halves (the clusters at or after a cluster, the rows after a row).
+    private bool _half;
+
+    /// <summary>
+    /// A pass begins: its tables (a symmetric job's neighbors are its rows), the cursor before the first pair of tables
+    /// (<see cref="Next"/>).
+    /// </summary>
+    public void Begin(World world, in QueryFilter rows, in QueryFilter neighbors, bool symmetric)
     {
         _pass++;
+        _half = symmetric;
         _mine = world.GetQueryEntry(default, in rows).Match;
-        _theirs = world.GetQueryEntry(default, in neighbors).Match;
+        _theirs = symmetric ? _mine : world.GetQueryEntry(default, in neighbors).Match;
         _own = null;
         _a = 0;
     }
 
     /// <summary>
-    /// The next pair of tables of the pass (a table of rows, then each table of neighbors), its clusters checked and
-    /// its lists drawn: all its clusters into <paramref name="run"/>; false after the last.
+    /// The next pair of tables of the pass (a table of rows, then each table of neighbors; of a symmetric job, the table
+    /// itself, then each table after it), its clusters checked and its lists drawn: all its clusters into
+    /// <paramref name="run"/>; false after the last.
     /// </summary>
     public bool Next<T, TOrder, TJob>(World world, scoped ref TJob job, int axes, float reach, out PairRun run)
         where T : struct, IComponent where TOrder : struct, IRowOrder<T> where TJob : struct, IPairJob, allows ref struct
@@ -539,7 +587,7 @@ internal sealed class PairState
                 Passing(table, filter, mode, ref _rows);
                 _own = Refresh<T, TOrder>(table, bit, axes, size);
                 if (Reaches(world, ref job, _own, reach)) Keep(_own); // a cutoff grew past the one the lists were drawn for
-                _b = 0;
+                _b = _half ? _a - 1 : 0; // each unordered pair of tables once: the table itself, then the ones after it
             }
 
             if (_b == _theirs.Archetypes.Length)
@@ -558,8 +606,10 @@ internal sealed class PairState
             if (skips) Passing(other, otherFilter, otherMode, ref _neighbors);
             var list = ListOf(own, their);
             bool listed = Listed<T, TOrder>(list, bit, job.Width);
+            PairSchedule schedule = null;
+            if (_half) (schedule = list.Schedule ??= new PairSchedule()).Drawn(list.Draws); // warm-up: one per list
             run = new PairRun(world, own.Table, other, _rows, skips ? _neighbors : null, list.Starts, list.Ranges, own.Cutoff, 0,
-                own.ClusterCount, size, listed ? list.NearStarts : null, listed ? list.Near : null);
+                own.ClusterCount, size, listed ? list.NearStarts : null, listed ? list.Near : null, schedule);
             return true;
         }
     }
@@ -694,7 +744,7 @@ internal sealed class PairState
         if (list == null)
         {
             if (_listCount == _lists.Length) Array.Resize(ref _lists, _listCount * 2);
-            _lists[_listCount++] = list = new PairList(table, other);
+            _lists[_listCount++] = list = new PairList(table, other) { Half = _half && ReferenceEquals(table, other) };
         }
 
         if (list.Builds != table.Builds || list.OtherBuilds != other.Builds) Draw(list);
@@ -706,8 +756,9 @@ internal sealed class PairState
     /// reach meets the other's kept box on every axis (a sweep over both sets of boxes sorted by their low side on axis
     /// 0, as <see cref="RowClusters.Pairs(float, Span{ClusterPair})"/>), then per cluster of the table the other's clusters
     /// in row order, as row ranges (neighboring clusters merged). One table against itself sweeps its boxes twice, once
-    /// widened, once not, so a cluster meets itself and each direction of a pair is tested with its own reach.
-    /// O(clusters log clusters + pairs).
+    /// widened, once not, so a cluster meets itself and each direction of a pair is tested with its own reach; a half
+    /// list (a symmetric job's, <see cref="PairList.Half"/>) keeps the clusters at or after each cluster, tested with its
+    /// reach. O(clusters log clusters + pairs).
     /// </summary>
     private void Draw(PairList list)
     {
@@ -756,6 +807,7 @@ internal sealed class PairState
         }
 
         int found = 0;
+        bool half = list.Half;
         for (int i = 0; i < m; i++)
         {
             int p = _ids[i];
@@ -765,8 +817,11 @@ internal sealed class PairState
                 int q = _ids[j];
                 if ((q >= 0) == (p >= 0)) continue; // two boxes of one side
                 if (low1[j] > h1 || l1 > high1[j] || low2[j] > h2 || l2 > high2[j]) continue;
-                if (p >= 0) Add(ref found, p, ~q);
-                else Add(ref found, q, ~p);
+                if (p >= 0)
+                {
+                    if (!half || ~q >= p) Add(ref found, p, ~q);
+                }
+                else if (!half || ~p >= q) Add(ref found, q, ~p);
             }
         }
 
@@ -920,7 +975,8 @@ internal sealed class PairState
 
     /// <summary>
     /// Each row's list of <paramref name="list"/>: the rows of its cluster's ranges within the cluster's kept cutoff plus
-    /// <paramref name="skin"/> (a NaN distance too: the method's test lets it through), ascending, after saving the
+    /// <paramref name="skin"/> (a NaN distance too: the method's test lets it through; of a half list, the rows after
+    /// the row only), ascending, after saving the
     /// points of a table whose rows moved past a quarter of the skin since its last save. False when a cluster has no
     /// finite cutoff or a table no point. O(candidates).
     /// </summary>
@@ -937,6 +993,7 @@ internal sealed class PairState
         ref T rows = ref table.Data<T>(a);
         ref T others = ref their.Table.Data<T>(b);
         int count = table.Count, size = own.Size, n = own.ClusterCount, found = 0;
+        bool half = list.Half;
         if (list.NearStarts.Length < count + 1) list.NearStarts = new int[Math.Max(count + 1, list.NearStarts.Length * 2)];
         var starts = list.NearStarts;
         var near = list.Near;
@@ -961,6 +1018,7 @@ internal sealed class PairState
         }
 
         starts[count] = found;
+        if (half) Halve(starts, near, count);
         list.Near = near;
         list.Listed = true;
         list.ListedDraw = list.Draws;
@@ -970,6 +1028,25 @@ internal sealed class PairState
         list.Skin = skin;
         list.BuiltPass = _pass;
         return true;
+    }
+
+    /// <summary>
+    /// A half list (a table against itself, <see cref="PairList.Half"/>): each row's list of <paramref name="count"/>
+    /// rows keeps the rows after it only (a prefix of the ascending list goes), in place. O(entries).
+    /// Apart from the build's loop, so the full lists' loop stays as it is.
+    /// </summary>
+    private static void Halve(int[] starts, int[] near, int count)
+    {
+        int kept = 0;
+        for (int i = 0; i < count; i++)
+        {
+            int from = starts[i], to = starts[i + 1]; // starts[i + 1] is read before row i + 1 rewrites it
+            starts[i] = kept;
+            for (int k = from; k < to; k++)
+                if (near[k] > i) near[kept++] = near[k];
+        }
+
+        starts[count] = kept;
     }
 
     /// <summary>Save the points of <paramref name="clusters"/>' rows now, which later moves are measured from: 0, the move since. O(rows).</summary>
@@ -1139,8 +1216,14 @@ internal sealed class PairState
     private sealed class PairList(Clusters table, Clusters other)
     {
         public readonly Clusters Table = table, Other = other;
+
+        /// <summary>A symmetric job's list of a table against itself: each cluster's ranges start at its own, each row's list after it.</summary>
+        public bool Half;
         public int Builds = -1, OtherBuilds = -1, Draws;
         public int[] Starts = [], Ranges = [], Order = [];
+
+        /// <summary>A symmetric job's: what its parallel pass works out once per draw (made by its first pass).</summary>
+        public PairSchedule Schedule;
 
         // The list of each row's neighbors (Verlet's): its rows, the draw and saves it was built from, the moves it
         // allows, how long the last one held, and the estimate of its cost for the current draw.

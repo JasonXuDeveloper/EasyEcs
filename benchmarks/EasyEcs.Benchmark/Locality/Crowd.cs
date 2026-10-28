@@ -103,12 +103,16 @@ public static partial class Crowd
     }
 
     /// <summary>A crowd of <paramref name="entities"/> on a square map sized for <paramref name="density"/>, uniform
-    /// positions, velocities in [-1, 1].</summary>
-    public static World Create(int entities, Density density, int seed = 42)
+    /// positions, velocities in [-1, 1]; parallel passes on <paramref name="threads"/> threads (0: every core).</summary>
+    public static World Create(int entities, Density density, int seed = 42, int threads = 0)
     {
         float neighbors = density == Density.Crowd ? 24 : 2;
         float extent = MathF.Sqrt(entities * MathF.PI * Range2 / neighbors);
-        var world = new World(new WorldOptions { InitialEntityCapacity = entities + 16 });
+        var world = new World(new WorldOptions
+        {
+            InitialEntityCapacity = entities + 16,
+            MaxDegreeOfParallelism = threads > 0 ? threads : Environment.ProcessorCount,
+        });
         world.AddSingleton<Map>() = new Map(extent);
         world.AddSingleton<RowGrid>().Cells.Reserve(entities, extent, Range);
         ref var lists = ref world.AddSingleton<ListGrid>();

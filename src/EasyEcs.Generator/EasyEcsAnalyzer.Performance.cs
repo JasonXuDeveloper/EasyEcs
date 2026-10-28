@@ -442,9 +442,10 @@ public static partial class EasyEcsAnalyzer
             if (Symbols.IsIndexed(type)) continue; // EECS015 says it
             if (references.Any(Uses.MayWrite))
             {
-                // EECS053: a tracked component a per-entity method writes on some rows only.
+                // EECS053: a tracked component a per-entity method writes on some rows only. A method writing both sides
+                // of its pairs takes no Mut<T> (each side is a row of some pair): its rows are stamped.
                 if (byRef && kind == Symbols.ParamKind.Component && spans == 0 && !entitySpan && type is not ITypeParameterSymbol
-                    && Symbols.Implements(type, Symbols.TrackChanges))
+                    && Symbols.Implements(type, Symbols.TrackChanges) && !PairForm.IsSymmetric(method))
                     WrittenOnSomeRows(context.ReportDiagnostic, context.GetControlFlowGraph(body), p, type, references, described, one, body.SemanticModel!,
                         !Symbols.SharesSignature(method) && method.PartialDefinitionPart == null && method.PartialImplementationPart == null);
                 continue;

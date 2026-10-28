@@ -152,6 +152,22 @@ public class LocalityTests
         Assert.That(Allocations.Of(() => clusters.Interact(world)), Is.Zero);
     }
 
+    /// <summary>
+    /// The crowd's pair method writing both sides (PairsBenchmark.GeneratedBoth): the reference's sums, each unordered
+    /// pair once, 0 B.
+    /// </summary>
+    [TestCase(3_000, Density.Crowd)]
+    [TestCase(3_000, Density.Sparse)]
+    public void PairsWrittenOnBothSidesMatchTheReference(int entities, Density density)
+    {
+        using var world = Crowd.Create(entities, density);
+        CrowdPairs.TickBoth(world); // the first pass sorts the tables: the reference after it
+        var expected = Crowd.Reference(world);
+        CrowdPairs.TickBoth(world);
+        Assert.That(Crowd.FirstMismatch(Crowd.Pushes(world), expected), Is.EqualTo(-1));
+        Assert.That(Allocations.Of(() => CrowdPairs.TickBoth(world)), Is.Zero);
+    }
+
     [TestCase(10)]
     [TestCase(50)]
     [TestCase(90)]

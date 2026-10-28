@@ -158,7 +158,14 @@ Pairs.cs                     [Neighbor] (a pair method's other entity) and the p
                              then PairState: cluster boxes drawn every pass and checked against the kept ones widened
                              by an adaptive margin, a sweep of the boxes widened by the clusters' reach when one left;
                              lists of each row's neighbors, Verlet's, where they cost less than the ranges for the
-                             method's width: PairRun.Listed / Near, kept while the rows moved less than the margin)
+                             method's width: PairRun.Listed / Near, kept while the rows moved less than the margin;
+                             a job writing both sides, IPairJob.Symmetric: each pair of tables once, a table against
+                             itself by half, PairList.Half; one pair at a time, in parallel through PairHalves.cs)
+PairHalves.cs                the parallel pass of a job writing both sides (World.ForPairHalves): each table's clusters
+                             cut into chunks of PairHalves.ChunkRows rows (never by the threads: one result on any
+                             number of threads), colored greedily at distance two over the clusters they write, the
+                             colors run one after another with a barrier, a color's chunks in parallel (PairHalves<TJob>);
+                             PairSchedule keeps the colors per draw of the list; fewer than Least chunks: the serial pass
 World.Order.cs               OrderRows<T, TOrder> (the request generated setup makes), the cadence (SortDue from
                              World.Run), SortRows<T>, Clusters<T> (OrderedTables)
 Cleanup.cs                   ICleanupComponent + Retired tag (entities kept alive until their cleanup components go)

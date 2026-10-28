@@ -26,9 +26,14 @@ internal sealed partial class Kernel
     /// <summary>
     /// Why a [Neighbor] parameter rules a vector loop out, or null: a component read is a value per neighbor. A write of
     /// the neighbor's is one row written by every lane of the cluster (a scatter whose lanes collide), so it runs per pair.
+    /// A method writing both sides (PairForm.IsSymmetric) runs each unordered pair once, one at a time: a vector loop that
+    /// summed the cluster's lanes into the neighbor (in lane order, bit for bit, or as a vector sum under FloatMode.Fast)
+    /// ran 1.1-4x slower than these pairs one at a time in PairsBenchmark, so it was dropped (the decision record).
     /// </summary>
     private static string? NeighborRefused(IParameterSymbol p) =>
         Symbols.Named(p.Type, Symbols.Entity) ? $"it takes the neighbor's Entity '{p.Name}': its pairs run one at a time"
+        : p.RefKind == RefKind.Ref && p.ContainingSymbol is IMethodSymbol owner && PairForm.IsSymmetric(owner)
+            ? $"it writes both sides of its pairs ('{p.Name}', [Neighbor] ref): each unordered pair runs once, one at a time"
         : p.RefKind == RefKind.Ref ? $"it writes the neighbor's {p.Type.Name} ('{p.Name}', [Neighbor] ref): its pairs run one at a time"
         : null;
 
