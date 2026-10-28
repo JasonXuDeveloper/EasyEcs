@@ -50,6 +50,8 @@ copies every column), EntityId fields of copied rows that point outside the copy
 does for a missing parent), and tests and docs. It is general (read replicas of a world, an area of interest copied to
 a per-client world, previews), as the feature checklist asks (servers, games, simulations).
 
+**Owner (2026-10-28): build the prototype and the benchmark** (backlog item 8h).
+
 What would change the verdict: a BenchmarkDotNet case (exchange of 500 to 5,000 border rows a tick: `CreateEntity`
 loop vs `SaveEntitiesWith` + `LoadEntities` vs a prototype `CopyEntities`) showing the per-row path costing a
 noticeable share of a tick, or a second sample (VoxelServer's two region worlds) writing the same copy loop.
