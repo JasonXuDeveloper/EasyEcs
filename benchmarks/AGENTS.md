@@ -40,7 +40,9 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                Locality/Operators.cs), TimerWheel
                                (borrowed-ideas.md item 2: scans of wake ticks against a timer wheel; Locality/Timers.cs), StreamingStore
                                (borrowed-ideas.md item 5: a write-only column with plain against non-temporal stores, in and past
-                               the last-level cache; Locality/Streams.cs).
+                               the last-level cache; Locality/Streams.cs) and StreamingStoreGate (the generated loops'
+                               streaming stores in two worlds, a write-only pass with and without the pass reading its
+                               column, in and past the last-level cache, the gate Auto / Off / On).
                                Every kernel picks 8 lanes when Vector256.IsHardwareAccelerated, else 4 (ARM64's NEON),
                                and guards each intrinsic; Locality/Isa.cs names the ISA (printed by setup), IsaColumn.cs
                                shows it as a column ([IsaColumn]).

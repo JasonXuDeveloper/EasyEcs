@@ -37,7 +37,9 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              so an IDE typing never binds the bodies of the method and its helpers;
                              SystemGenerator.Loops.cs: the loops of a job's Execute Kernel translated (each width's
                              vector loop, the flat loops, the vector tail), in Execute while it declares at most 32 IL
-                             locals (Locals counts them), else each in an AggressiveInlining method of the job (D135)
+                             locals (Locals counts them), else each in an AggressiveInlining method of the job (D135);
+                             StreamLoop: a NoInlining method of the job (__Stream) streaming the write-only columns,
+                             called once per run past the last-level cache (StreamingStores.Pays)
 SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): the pass (world.ForPairs), the order
                              struct (Morton key of the compared component over the axes the test names), the job
                              (the cutoff from the test, per row or one; Width; Rows: the method per pair, over the row's
@@ -145,7 +147,10 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              cutoff's text (ScalarOf);
                              Kernel.Structural.cs: a structural change of the row's entity under a condition (marked
                              rows, applied in bulk after the pass: Code.StructuralChanges) and Emit<T> records of a
-                             lane or the entity's id (Code.VectorTail: every row takes the vector form)
+                             lane or the entity's id (Code.VectorTail: every row takes the vector form);
+                             Kernel.Streams.cs: the columns a loop writes without reading (WriteOnly, read off the
+                             loop's text: Code.Streamed, FlatCode.Streamed) and the streaming loop's text (Streaming:
+                             their loads dropped, their stores StreamingStores.Store)
 EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045 and EECS047-051: calls and declarations that compile but do not
                              do what they say (a job's WriteMask, a dropped copy, SetIfChanged that cannot compare, calls
                              a pass refuses, an index added to while walked, a record key that prints itself, a sliced
