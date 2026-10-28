@@ -8,7 +8,11 @@ When you add, rename or delete a file here, update its line (`verify` checks eve
 
 An allocation check measures through `Allocations.Of(...)` or starts from `Allocations.Baseline()` (Fixtures.cs), never
 from a raw `GC.GetAllocatedBytesForCurrentThread()`: a background collection ending in the window adds the unused
-rest of the thread's allocation context to the count although nothing was allocated (D128).
+rest of the thread's allocation context to the count although nothing was allocated (D128). A warm-up before a 0 B
+check runs through `Allocations.WarmUp(step, least)`, which goes on until the JIT has settled: in the full suite a loop
+can still run Tier0 code after a fixed warm-up, and its on-stack replacement compiles (and allocates) on the measuring
+thread (fix-flaky-alloc). The fixed warm-ups left in KernelTests, KernelLookupTests, HelperLoopTests and
+AllocationTests race the same way.
 
 ```
 tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System (and stats),

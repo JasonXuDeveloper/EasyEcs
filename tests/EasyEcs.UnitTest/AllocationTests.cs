@@ -24,7 +24,7 @@ public class AllocationTests
         world.AddSystem<ReduceTests.ParallelCensus>();
         world.AddSystem<ScratchTests.SumDigits>();
         world.AddSystem<LookupTests.SumFollowers>();
-        for (int i = 0; i < 30; i++) world.Update();
+        Allocations.WarmUp(world.Update, 30); // until the JIT is done with the jobs' loops (none compiles in the window)
         // One update at a time: it fails once in many full-suite runs and never alone, so a failure names the update,
         // its bytes and the helper threads the process had (another test's world may have started more).
         long total = 0, first = 0;

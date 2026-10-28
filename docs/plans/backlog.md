@@ -63,10 +63,12 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Next, in this order
 
-**Flaky: `PrefetchingProbesBuffersWalksAndLambdasAllocateNothing`** failed in the full suite under load twice
-(fewer-copies' runs, the 8e merge gate; passes alone 3/3): find the measurement race as D128 did for the parallel
-reductions (a background thread allocating in the window, an OSR compile, a pool growing), fix the cause or the
-measurement's setup only. With the next agent that touches prefetching or tests.
+- [x] **Flaky: `PrefetchingProbesBuffersWalksAndLambdasAllocateNothing`** (fix-flaky-alloc): on-stack replacement
+  compiles on the measuring thread. In the full suite the tiering backlog keeps the four probe jobs' loops at Tier0
+  past the 50 warm-up frames; their OSR compiles land in the window, 168 B each (one compile per job, 672 B in every
+  failing run; 6 failures in 10 instrumented AVX2=0 runs, 1 in 2 normal runs), and none happens with
+  `DOTNET_TC_OnStackReplacement=0` (3 of 3 clean). Fix: `Allocations.WarmUp` runs until the JIT has settled (no
+  compile in the process for 40 runs and 0.5 s). Decision draft in `docs-todos.md`, "fix-flaky-alloc".
 
 **Rename `[ForEachRecord]` -> `[Drain]`** (owner, 2026-10-28, naming audit: "[ForEach] 和 [ForEachRecord] 太像但做的事不一样";
 unreleased, so no migration): right after the tile branch merges (it edits SystemGenerator.cs too). With it
@@ -365,11 +367,13 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
   `Alias.Hunt(world)` fails with CS7036 (found by feat-locality-core). Find whether the generator or the interceptor
   matches the call by the written name; fix it (an alias is ordinary C#), with a generator test, or have the
   analyzer say so if it cannot be fixed.
-- [ ] **Flaky: `ParallelReductionsScratchAndLookupsDoNotAllocate`** fails about once per full Release run (seen on
-  45feeeb; 1 in 2 runs with `DOTNET_EnableAVX2=0`; in the normal run of the 216e29a merge gate), passes 5 of 5 alone
-  on the tip and on the base before the call inliner. The parallel allocation
-  checks' measurement race (#166's fix) has another path when the whole suite runs: find it and fix the cause or
-  the measurement, never loosen the 0 B check.
+- [x] **Flaky: `ParallelReductionsScratchAndLookupsDoNotAllocate`** (fix-flaky-alloc): the same path as the
+  prefetching test. Its window saw OSR compiles on the measuring thread (updates 53, 62 and 81, in 2 of 4 instrumented
+  full runs; none with OSR off); the other paths were ruled out (the measuring thread made its `Scratch` list during
+  the warm-up in every run; `Allocations.Of` settles background collections; a filter built per pass past bit 255
+  would allocate on every update, and the instrumented runs measured 0 B on the others). Its own failure did not
+  reproduce in 15 full runs before the fix (13 with AVX2 off), so the cause is the shared one by evidence, not by a
+  caught failure. Fix: `Allocations.WarmUp`.
 - [ ] **Native AOT: no class-initialization check per iteration for a loop's tables** (owner's find, 2026-10-26):
       under Native AOT a loop reading a `static readonly` vector built by code (`Interleaved.Tables*`, `Masks`, the
       generated `__permN`) tests the class's initialization every iteration and spills around the helper call. The
