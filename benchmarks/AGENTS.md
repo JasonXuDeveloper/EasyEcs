@@ -28,7 +28,7 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                neighbors within a cutoff: a grid read through lookups, a grid of copies, neighbor lists,
                                the cluster-pair kernel over Morton-sorted clusters with its sort every 1 / 10 / 20 ticks;
                                Locality/Crowd.cs; the same kernel on the core's order and clusters, 8, 4 or 16 wide:
-                               Locality/CoreClusters.cs; the generated pair method, vector loop and one pair at a time: Locality/CrowdPairs.cs), PairLists (the generated pair method over a moving crowd, lists of
+                               Locality/CoreClusters.cs; the generated pair method, vector loop and one pair at a time, and writing both sides of each unordered pair once: Locality/CrowdPairs.cs), PairLists (the generated pair method over a moving crowd, lists of
                                each row's neighbors picked by cost, never or always), NearestZombie / NearestPlayer (the samples' nearest searches against a
                                search of sorted clusters; Locality/Nearest.cs, Locality/SortedClusters.cs: the Morton sort,
                                clusters of 8 with boxes, the box tree), Compress (a mask to a row list: branch, branchless,
