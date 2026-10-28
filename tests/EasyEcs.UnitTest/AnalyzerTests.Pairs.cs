@@ -30,11 +30,45 @@ public partial class AnalyzerTests
     [TestCase("[ForEach, Consume] static void A(in Spot p, ref Near n, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++; }")]
     [TestCase("[ForEach, Changed<Seen>] static void A(in Spot p, in Seen s, ref Near n, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++; }")]
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] ref Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; q.X += 1; }")]   // writes of the neighbor what the row reads
-    [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; }")] // the row's Near
+    [TestCase("[ForEach] static void A(in Spot p, in Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; }")] // the row's Near, read
+    // Both sides written: the neighbors are the rows, every row ref written of both sides, no Mut<T>, one thread.
+    [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m, [Neighbor] in Drift d) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; n.Value++; }")]
+    [TestCase("[ForEach] static void A(in Spot p, ref Near n, ref Drift w, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; w.X++; }")]
+    [TestCase("[ForEach] static void A(in Spot p, Mut<Seen> s, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; s.Write().V++; }")]
+    [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; n.Value++; }")]
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] in Drift d, [Neighbor] ref Drift e) { float dx = p.X - q.X; if (dx * dx >= 1) return; e.X = d.X; }")] // twice
     [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1) return; d.X++; }")]
     [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, Mut<Seen> s, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; s.Write().V++; }")] // a Mut<T> in parallel
     public Task BadPairMethodsReport(string method) => AssertReports("EECS105", GeneratorTests.Components, PairParts, InSystem(method));
+
+    [TestCase("in Near n", "[Neighbor] ref Near m", "m.Value++;",
+        "Pair method 'A' writes the neighbor's Near ('m'), which it reads of its row: what a row sees would depend on the order of the pairs; to write both sides of each pair once, take it by 'ref' of the row too")]
+    [TestCase("ref Near n", "[Neighbor] ref Near m, [Neighbor] in Drift d", "m.Value++; n.Value++;",
+        "Pair method 'A' writes both sides of its pairs (Near), so its neighbors are its rows: take Drift of the row too, or drop 'd'")]
+    [TestCase("ref Near n, ref Drift w", "[Neighbor] ref Near m", "m.Value++; w.X++;",
+        "Pair method 'A' writes both sides of its pairs (Near) and Drift of its row only ('w'): each pair runs once, so the row would see half of its pairs; write it of both sides ([Neighbor] ref Drift) or read it ('in')")]
+    public async Task BothSidesWrittenSayWhy(string row, string neighbor, string body, string message)
+    {
+        var found = await GeneratorTests.Analyze([GeneratorTests.Components, PairParts,
+            InSystem($"[ForEach] static void A(in Spot p, {row}, [Neighbor] in Spot q, {neighbor}) {{ float dx = p.X - q.X; if (dx * dx >= 1) return; {body} }}")]);
+        Assert.That(found.Single(d => d.Id == "EECS105").GetMessage(), Is.EqualTo(message));
+    }
+
+    // A method writing both sides keeps a vector loop while each neighbor field is a sum it never reads (EECS056 says why
+    // not under SimdMode.Require; EECS055 leaves pair methods alone).
+    [TestCase("f.X += dx; g.X -= dx;", null)]
+    [TestCase("f.X += dx; g.X++; g.Y--;", null)]
+    [TestCase("f.X += g.X; g.X -= dx;", "it reads the neighbor's Drift it writes ('g.X')")]
+    [TestCase("f.X += dx; g.X = dx;", "writes the neighbor's Drift otherwise than by a sum into a field")]
+    [TestCase("f.X += dx; g.X -= dx; g.X -= dx;", "it writes the neighbor's 'g.X' twice")]
+    public async Task BothSidesKeepAVectorLoop(string body, string? reason)
+    {
+        var costs = await GeneratorTests.Analyze([GeneratorTests.Components, PairParts,
+            InSystem("[ForEach(SimdMode = SimdMode.Require)] static void A(in Spot p, ref Drift f, [Neighbor] in Spot q, [Neighbor] ref Drift g) { float dx = p.X - q.X; if (dx * dx >= 1) return; " + body + " }")]);
+        var scalar = costs.Where(d => d.Id == "EECS056").Select(d => d.GetMessage()).ToArray();
+        if (reason == null) Assert.That(scalar, Is.Empty);
+        else Assert.That(scalar.Single(), Does.Contain(reason));
+    }
 
     [Test]
     public async Task AParallelMutOfThePairsRowSaysWhy()
@@ -70,6 +104,9 @@ public partial class AnalyzerTests
     [TestCase("[ForEach] static void A(in Spot p, [Neighbor] in Spot q, ref Reduce<Tally> t) { float dx = p.X - q.X; if (dx * dx >= 1) return; t.Value.N++; }")] // a result of the pass
     [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, [Neighbor] in Spot q, ref Reduce<Tally> t) { float dx = p.X - q.X; if (dx * dx >= 1) return; t.Value.N++; }")] // each chunk's
     [TestCase("[ForEach] static void A(in Spot p, Mut<Seen> s, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1 || d.X > 0) return; d.X = 1; s.Write().V++; }")] // a Mut<T> of the row
+    [TestCase("[ForEach] static void A(in Spot p, ref Drift f, [Neighbor] in Spot q, [Neighbor] ref Drift g) { float dx = p.X - q.X; if (dx * dx >= 1) return; f.X += dx; g.X -= dx; }")] // both sides written
+    [TestCase("[ForEach] static void A(Entity e, in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m, [Neighbor] Entity o) { float dx = p.X - q.X; if (dx * dx >= 1 || n.Value == 0) return; if (e.Id.Index < o.Id.Index) (n.Value, m.Value) = (n.Value + m.Value, 0); }")] // a merge
+    [TestCase("[ForEach] static void A(in Spot p, in Sight s, ref Near n, ref Seen t, [Neighbor] in Spot q, [Neighbor] ref Near m, [Neighbor] ref Seen u) { float dx = p.X - q.X; if (dx * dx >= s.Range * s.Range) return; n.Value++; m.Value++; if (dx > 0) { t.V++; u.V++; } }")] // tracked, written on some pairs: no Mut<T>
     [TestCase("[ForEach] static void A(in Spot p, ref Near n) { n.Value = (int)p.X; }")]                                                                         // no [Neighbor]: no pair rule
     public Task PairMethodsLeaveAlone(string method) => AssertClean(GeneratorTests.Components, PairParts, InSystem(method));
 
@@ -79,6 +116,7 @@ public partial class AnalyzerTests
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q) { n.Value++; float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value--; }")] // a statement before the test
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q) { float dx = p.X - q.Y; if (dx * dx >= 1) return; n.Value++; }")]            // two different fields
     [TestCase("[ForEach] static void A(in Spot p, ref Sight s, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= s.Range) return; s.Range++; }")] // a cutoff of a component the row writes
+    [TestCase("[ForEach] static void A(ref Spot p, [Neighbor] ref Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; p.X += dx; q.X -= dx; }")] // both sides of what the test compares: no box holds
     public Task UnreadCutoffsReport(string method) => AssertReports("EECS106", GeneratorTests.Components, PairParts, InSystem(method));
 
     [Test]
@@ -140,6 +178,22 @@ public partial class AnalyzerTests
         Assert.That(found, Has.Length.EqualTo(1));
         Assert.That(found[0].Severity, Is.EqualTo(fixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info), found[0].GetMessage());
         Assert.That(found[0].Properties.ContainsKey("PairBody"), Is.EqualTo(fixable));
+    }
+
+    // A walk of the entities after the row (by index) writing both sides: each unordered pair once, the pair method
+    // writing both sides; any other walk writing the neighbor keeps no fix.
+    [TestCase("if (o.Entity.Id.Index <= self.Id.Index) continue; float dx = p.X - o.Component1.X; if (dx * dx >= 1) continue; f.X += dx; o.Component2.X -= dx;", true)]
+    [TestCase("if (self.Id.Index >= o.Entity.Id.Index) { continue; } float dx = p.X - o.Component1.X; if (dx * dx >= 1) continue; f.X += dx; o.Component2.X -= dx;", true)]
+    [TestCase("if (o.Entity.Id == self.Id) continue; float dx = p.X - o.Component1.X; if (dx * dx >= 1) continue; f.X += dx; o.Component2.X -= dx;", false)] // every ordered pair: twice each
+    [TestCase("if (o.Entity.Id.Index < self.Id.Index) continue; float dx = p.X - o.Component1.X; if (dx * dx >= 1) continue; f.X += dx; o.Component2.X -= dx;", false)] // meets itself
+    [TestCase("if (o.Entity.Id.Index <= self.Id.Index) continue; float dx = p.X - o.Component1.X; if (dx * dx >= 1) continue; f.X += dx;", false)] // half its pairs, one side
+    public async Task HalfWalksWarnWithTheirFixWhenTheyWriteBothSides(string body, bool fixable)
+    {
+        string source = "[EcsSystem] public ref struct S { [ForEach] static void A(Entity self, in Spot p, ref Drift f, World world) { foreach (var o in world.Query<Spot, Drift>()) { "
+                        + body + " } } }";
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, PairParts, source])).Where(d => d.Id == "EECS107").ToArray();
+        Assert.That(found, Has.Length.EqualTo(1));
+        Assert.That(found[0].Properties.ContainsKey("PairBody"), Is.EqualTo(fixable), found[0].GetMessage());
     }
 
     [TestCase("foreach (var id in g.Ids) { ref readonly var q = ref drifts.Read(id); float dx = p.X - q.X; if (dx * dx >= 1) continue; n.Value++; }")] // another component's read

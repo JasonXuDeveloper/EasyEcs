@@ -165,6 +165,11 @@ public class GeneratorTests
     [TestCase("public struct Fp : IComponent { public float X, Y; } public struct Rg : IComponent { public float R; }",
         "[ForEach] static void N(in Fp p, in Rg r, ref Q q, [Neighbor] in Fp o, [Neighbor] Entity e) { float dx = p.X - o.X; if (dx * dx >= r.R * r.R || e.Id.Index < 0) return; q.V++; }",
         "world.ForPairs<global::Fp, ", ", 1);", "public bool CutoffPerRow => true;", "Rows(in run);", "float d0 = at.X - near.X;", "if (d0 * d0 > reach2) continue;", "access.RunAlone();")]
+    // Both sides written: each unordered pair once (the neighbors are the rows), the lanes' sums into the neighbor in order.
+    [TestCase("public struct Fp : IComponent { public float X, Y; }",
+        "[ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o, [Neighbor] ref Q r) { float dx = p.X - o.X; if (dx * dx >= 4f) return; q.V++; r.V++; }",
+        "static bool global::EasyEcs.IPairJob.Symmetric => true;", "Vectors(in run);", "global::EasyEcs.PairRun.AddLanes(", "NNeighbors0 = NRows0;",
+        "half ? global::System.Math.Max(ranges[k], (int)i + 1) : ranges[k]", "access.RunAlone();")]
     public void AccessIsDeclaredFromParametersBeside(string declarations, string members, params string[] expected)
         => AccessOf(declarations, members, expected);
 
