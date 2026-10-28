@@ -2,8 +2,24 @@ using EasyEcs;
 
 namespace MultiWorld;
 
-// Moves every unit by its velocity. The method is written for one unit, and the generator runs it as a vector loop
-// over the position and velocity columns: two floats in, two floats out, several units per instruction.
+// Every unit of the zone counts the units within sight: the zone's own and the ghosts of its neighbors' border rows,
+// so a unit near the border sees across it. [Neighbor] makes it a pair method: the generator writes the neighbor
+// search from the distance test (rows kept in space order, only the clusters within sight compared).
+[EcsSystem]
+public ref struct SightSystem
+{
+    // Ghosts are seen, they do not look: their own zone counts what they see.
+    [ForEach, Without<Ghost>]
+    static void See(in Position position, [Neighbor] in Position other, ref Reduce<Tally> tally)
+    {
+        float dx = position.X - other.X, dy = position.Y - other.Y, distanceSquared = dx * dx + dy * dy;
+        if (distanceSquared >= Map.Sight * Map.Sight || distanceSquared == 0) return; // 0: the unit itself
+        tally.Value.Sightings++;
+    }
+}
+
+// Moves every unit by its velocity: a vector loop over the position and velocity columns. Ghosts have no velocity,
+// so they never move here.
 [EcsSystem]
 public ref struct MoveSystem
 {
@@ -14,45 +30,14 @@ public ref struct MoveSystem
     }
 }
 
-// The zone's hazard: units farther than SafeRadius from the centre lose one health per tick.
+// Units that walked off the map turn back. Only the map's edges: the borders between zones are open.
 [EcsSystem]
-public ref struct DamageSystem
-{
-    const float SafeRadius = 500;
-
-    // ref Reduce<Tally>: the deaths of this pass, counted in a register and stored in the Tally singleton when the
-    // pass ends, so no singleton is written per unit and the method is a vector loop too.
-    [ForEach]
-    static void Hurt(in Position position, ref Health health, ref Reduce<Tally> tally)
-    {
-        // Compare squared distances: no square root needed.
-        float distanceSquared = position.X * position.X + position.Y * position.Y;
-        if (distanceSquared < SafeRadius * SafeRadius)
-        {
-            return;
-        }
-
-        health.Value--;
-        if (health.Value == 0)
-        {
-            tally.Value.Deaths++;
-        }
-    }
-}
-
-// The dead come back at the centre with full health.
-[EcsSystem]
-public ref struct RespawnSystem
+public ref struct BounceSystem
 {
     [ForEach]
-    static void Respawn(ref Position position, ref Health health)
+    static void Bounce(in Position position, ref Velocity velocity)
     {
-        if (health.Value > 0)
-        {
-            return;
-        }
-
-        position = new Position(0, 0);
-        health = new Health(100);
+        if (position.X < 0 || position.X >= Map.Width) velocity.X = -velocity.X;
+        if (position.Y < 0 || position.Y >= Map.Height) velocity.Y = -velocity.Y;
     }
 }
