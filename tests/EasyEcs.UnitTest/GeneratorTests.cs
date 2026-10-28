@@ -171,6 +171,10 @@ public class GeneratorTests
         "[ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o, [Neighbor] ref Q r) { float dx = p.X - o.X; if (dx * dx >= 4f) return; q.V++; r.V++; }",
         "static bool global::EasyEcs.IPairJob.Symmetric => true;", "Rows(in run);", "NNeighbors0 = NRows0;",
         "half ? global::System.Math.Max(ranges[k], (int)i + 1) : ranges[k]", "access.RunAlone();")]
+    // In parallel: the colored chunks of the core's pass (ForPairHalves), the same job.
+    [TestCase("public struct Fp : IComponent { public float X, Y; }",
+        "[ForEach(Parallel = true)] static void N(in Fp p, ref Q q, [Neighbor] in Fp o, [Neighbor] ref Q r) { float dx = p.X - o.X; if (dx * dx >= 4f) return; q.V++; r.V += 2; }",
+        "world.ForPairsParallel<global::Fp, ", "static bool global::EasyEcs.IPairJob.Symmetric => true;", "access.RunAlone();")]
     public void AccessIsDeclaredFromParametersBeside(string declarations, string members, params string[] expected)
         => AccessOf(declarations, members, expected);
 

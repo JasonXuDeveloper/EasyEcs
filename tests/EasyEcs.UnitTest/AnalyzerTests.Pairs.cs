@@ -31,11 +31,10 @@ public partial class AnalyzerTests
     [TestCase("[ForEach, Changed<Seen>] static void A(in Spot p, in Seen s, ref Near n, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; n.Value++; }")]
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] ref Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; q.X += 1; }")]   // writes of the neighbor what the row reads
     [TestCase("[ForEach] static void A(in Spot p, in Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; }")] // the row's Near, read
-    // Both sides written: the neighbors are the rows, every row ref written of both sides, no Mut<T>, one thread.
+    // Both sides written: the neighbors are the rows, every row ref written of both sides, no Mut<T>.
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m, [Neighbor] in Drift d) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; n.Value++; }")]
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, ref Drift w, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; w.X++; }")]
     [TestCase("[ForEach] static void A(in Spot p, Mut<Seen> s, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; s.Write().V++; }")]
-    [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; n.Value++; }")]
     [TestCase("[ForEach] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] in Drift d, [Neighbor] ref Drift e) { float dx = p.X - q.X; if (dx * dx >= 1) return; e.X = d.X; }")] // twice
     [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1) return; d.X++; }")]
     [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, Mut<Seen> s, [Neighbor] in Spot q) { float dx = p.X - q.X; if (dx * dx >= 1) return; s.Write().V++; }")] // a Mut<T> in parallel
@@ -100,6 +99,8 @@ public partial class AnalyzerTests
     [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, [Neighbor] in Spot q, ref Reduce<Tally> t) { float dx = p.X - q.X; if (dx * dx >= 1) return; t.Value.N++; }")] // each chunk's
     [TestCase("[ForEach] static void A(in Spot p, Mut<Seen> s, [Neighbor] in Spot q, [Neighbor] ref Drift d) { float dx = p.X - q.X; if (dx * dx >= 1 || d.X > 0) return; d.X = 1; s.Write().V++; }")] // a Mut<T> of the row
     [TestCase("[ForEach] static void A(in Spot p, ref Drift f, [Neighbor] in Spot q, [Neighbor] ref Drift g) { float dx = p.X - q.X; if (dx * dx >= 1) return; f.X += dx; g.X -= dx; }")] // both sides written
+    [TestCase("[ForEach(Parallel = true)] static void A(in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m) { float dx = p.X - q.X; if (dx * dx >= 1) return; m.Value++; n.Value++; }")] // on several threads
+    [TestCase("[ForEach(Parallel = true)] static void A(Entity e, in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m, [Neighbor] Entity o) { float dx = p.X - q.X; if (dx * dx >= 1 || n.Value == 0) return; if (e.Id.Index < o.Id.Index) (n.Value, m.Value) = (n.Value + m.Value, 0); }")] // a merge on several threads
     [TestCase("[ForEach] static void A(Entity e, in Spot p, ref Near n, [Neighbor] in Spot q, [Neighbor] ref Near m, [Neighbor] Entity o) { float dx = p.X - q.X; if (dx * dx >= 1 || n.Value == 0) return; if (e.Id.Index < o.Id.Index) (n.Value, m.Value) = (n.Value + m.Value, 0); }")] // a merge
     [TestCase("[ForEach] static void A(in Spot p, in Sight s, ref Near n, ref Seen t, [Neighbor] in Spot q, [Neighbor] ref Near m, [Neighbor] ref Seen u) { float dx = p.X - q.X; if (dx * dx >= s.Range * s.Range) return; n.Value++; m.Value++; if (dx > 0) { t.V++; u.V++; } }")] // tracked, written on some pairs: no Mut<T>
     [TestCase("[ForEach] static void A(in Spot p, ref Near n) { n.Value = (int)p.X; }")]                                                                         // no [Neighbor]: no pair rule
