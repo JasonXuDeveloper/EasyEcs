@@ -31,6 +31,8 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
+- [ ] **Streaming stores in generated loops, gated** ("Next" item 10, branch `feat-streaming-stores`; Kernel and core,
+      off the tile branch's files).
 - [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
       `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
       branch (12d).
