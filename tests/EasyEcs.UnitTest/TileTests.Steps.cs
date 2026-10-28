@@ -317,6 +317,99 @@ public partial class TileTests
         Assert.That(plates[new TilePos(0, 0, 0)].Read<DynamicBuffer<Life>>().AsReadOnlySpan().ToArray().Count(c => c.Alive != 0), Is.LessThan(5), "it moved on");
     }
 
+    // A sleeping pass walks only the tiles that woke: a blinker in one plate of a quiet torus steps that plate alone,
+    // through a tile leaving the grid and another joining it.
+
+    public record struct QuietPlate(TilePos Pos) : IComponent, ITile<TilePos>
+    {
+        readonly TilePos IIndexed<TilePos>.Key => Pos;
+        static int ITileShape.Width => 16;
+        static int ITileShape.Depth => 16;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
+        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Wrap(p, face);
+    }
+
+    /// <summary>The steps <see cref="QuietLifeSystem"/> made: what the test reads, not state of the system.</summary>
+    public static class QuietSteps
+    {
+        public static int Count;
+    }
+
+    [EcsSystem]
+    public ref struct QuietLifeSystem
+    {
+        [ForEach]
+        static void Step(ref Tile<Life, QuietPlate> life)
+        {
+            QuietSteps.Count++;
+            life.ExchangeHalo();
+            foreach (var row in life.Rows(TileStencil.Layer))
+            {
+                var c = life.At(row);
+                var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)
+                    + c.Load128<byte>(-1) + c.Load128<byte>(1)
+                    + c.Load128<byte>(-1, 0, 1) + c.Load128<byte>(0, 0, 1) + c.Load128<byte>(1, 0, 1);
+                var born = Vector128.Equals(count, Vector128.Create((byte)3));
+                var stays = Vector128.Equals(count, Vector128.Create((byte)2)) & c.Load128<byte>();
+                ((born | stays) & Vector128<byte>.One).CopyTo(MemoryMarshal.Cast<Life, byte>(life.Write(row)));
+            }
+        }
+    }
+
+    [Test]
+    public void ASleepingPassStepsOnlyTheTilesThatWoke()
+    {
+        using var world = new World();
+        var plates = new Dictionary<TilePos, Entity>();
+        foreach (var place in Box(Torus, 1, Torus))
+        {
+            var plate = world.CreateEntity(new QuietPlate(place));
+            plate.GetOrAdd<DynamicBuffer<Life>>().SetCount(256);
+            plates.Add(place, plate);
+        }
+        var blinking = plates[new TilePos(1, 0, 1)];
+        for (int x = 7; x <= 9; x++) blinking.GetOrAdd<DynamicBuffer<Life>>().AsSpan()[8 * 16 + x] = new Life(1);
+        world.AddSystem<QuietLifeSystem>();
+        for (int i = 0; i < 4; i++) world.Update(); // every plate steps once, then only the blinker's is awake
+
+        void Steady(string when)
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                int before = QuietSteps.Count;
+                world.Update();
+                Assert.That(QuietSteps.Count - before, Is.EqualTo(1), $"{when}, update {i}: one plate changes, one steps");
+                var cells = blinking.Read<DynamicBuffer<Life>>().AsReadOnlySpan();
+                bool across = cells[8 * 16 + 7].Alive == 1; // the blinker turns a quarter each step
+                for (int z = 0; z < 16; z++)
+                for (int x = 0; x < 16; x++)
+                {
+                    bool alive = across ? z == 8 && x is >= 7 and <= 9 : x == 8 && z is >= 7 and <= 9;
+                    Assert.That(cells[z * 16 + x].Alive, Is.EqualTo(alive ? 1 : 0), $"{when}: cell ({x}, {z})");
+                }
+            }
+            foreach (var (place, plate) in plates)
+                if (plate != blinking && place != new TilePos(3, 0, 3))
+                    Assert.That(plate.Read<DynamicBuffer<Life>>().AsReadOnlySpan().ToArray().Any(c => c.Alive != 0), Is.False, $"{when}: the plate at {place} stays empty");
+        }
+
+        Steady("settled");
+        var gone = plates[new TilePos(3, 0, 3)];
+        plates.Remove(new TilePos(3, 0, 3));
+        gone.Destroy();
+        world.Update(); // the plates around it wake, step once and sleep
+        world.Update();
+        Steady("a plate left");
+        var block = world.CreateEntity(new QuietPlate(new TilePos(3, 0, 3)));
+        var still = block.GetOrAdd<DynamicBuffer<Life>>().SetCount(256);
+        foreach (int at in new[] { 7 * 16 + 7, 7 * 16 + 8, 8 * 16 + 7, 8 * 16 + 8 }) still[at] = new Life(1); // a still life
+        plates.Add(new TilePos(3, 0, 3), block);
+        world.Update(); // it joins and steps with the plates around it, unchanged
+        world.Update();
+        Steady("a plate joined");
+        Assert.That(block.Read<DynamicBuffer<Life>>().AsReadOnlySpan().ToArray().Count(c => c.Alive != 0), Is.EqualTo(4), "the block stays");
+    }
+
     // A field that moves everywhere, then settles: the pass steps every tile unseen while nearly all change, and the
     // tiles sleep again once it looks and finds them settled.
 
