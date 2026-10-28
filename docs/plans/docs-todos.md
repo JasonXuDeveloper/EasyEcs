@@ -1177,3 +1177,27 @@ chunk lookup per zombie).
     later adds its 64; a thread allocates only when more than n lists are held. Taking 1 or 8 lists per lock instead
     cost the parallel churn 5x or 1.5x its time.
     zh: 精确的缓冲池。FillPool(n) 填到 n，再为每个持有自有列表的线程加 64 个，之后建立的线程补上自己的 64 个；只有持有的列表超过 n 时线程才会分配。改为每次加锁取 1 个或 8 个列表，会让并行 churn 慢 5 倍或 1.5 倍。
+
+## feat-emit-segments (12e, merged 4925b09)
+
+- Threading page (Emit), "What it costs" / "How to use it fast": a parallel pass no longer copies records; Count,
+  Clear, `[ForEachRecord]` and ForParallel take them where they are; a span read (`foreach`, `AsReadOnlySpan`, the
+  indexer), a write or `SingletonRef<Emitted<T>>` joins once (O(records)); prefer `[ForEachRecord]` / ForParallel.
+- `IForSpan` docs: one `Execute` per segment inside a chunk over segmented records.
+- `api.mdx` rows: Emit join O(1) per chunk; `Emitted.Items.Count` O(1); `Clear` O(segments); first span read or write
+  after a parallel pass O(records); `SingletonRef<Emitted<T>>` O(records) once.
+- Behaviour notes (changelog): `Items.Capacity` can be below `Count` until joined; a `[ForEachRecord]` job removing
+  records of the same `Emitted<T>` stops at the new count; EmitPool keeps chunks' lists until joined or cleared (at most
+  64 segments per `Emitted<T>`); `BufferStore<T>` unsealed (internal).
+- Glossary: segment = 分段 (added to tools/ApiDocs/zh/README.md).
+- Decision record (agent's text): **Emitted<T> keeps the chunks' lists as segments.** The singleton's list
+  (`EmitStore<T>`) takes each chunk's list, in chunk order, as a segment at O(1); Count, Clear, `[ForEachRecord]` and
+  `World.ForParallel` use them in place; a span read, a write, `World.SingletonRef`, capture, save and load join first,
+  once. Records stay in chunk order, bit-identical at any thread count; users and the generator unchanged. Considered:
+  a `Count`/`Clear` beside `Items` (users change code), a joining ref property `Items` (joins for Count/Clear too), a
+  segments field on every `BufferStore<T>` (8 bytes per entity buffer). Chosen: a subclass flagged by a negative
+  `Shares`; writes already branch on it, span reads gain one compare; at most 64 segments before an append joins.
+  Numbers (two rounds, 0 B): EmitParallel 10k 16.3 -> 11.1 / 12.3 us, 100k 98.1 -> 50.4, 81.4 -> 52.9 us; then a
+  `[ForEachRecord]` pass 10k 29.1 -> 23.0 / 24.5, 100k 241.5 -> 192.4, 232.5 -> 203.8 us; WorldSimulation, BattleServer,
+  ParallelForEach, ForParallel, Record, DynamicBuffer, StructuralLoop within noise.
+  zh: **Emitted<T> 把各块的列表留作分段。** 单例的列表（`EmitStore<T>`）按块的顺序直接接收每个块的列表作为一个分段，每块 O(1)；`Count`、`Clear`、`[ForEachRecord]` 遍历和 `World.ForParallel` 就地使用；按一个 span 读、写入、`World.SingletonRef`、快照、存档和加载先合并一次。记录仍按块的顺序，任何线程数下逐位相同；用户代码和生成器不变。考虑过：在 `Items` 旁加 `Count`/`Clear`（用户要改代码）、访问时合并的 ref 属性 `Items`（`Count`/`Clear` 也会合并）、给每个 `BufferStore<T>` 加分段字段（每个实体缓冲多 8 字节）。选定：子类加负的 `Shares` 标记；写入本来就按它分支，span 读多一次比较；最多 64 个分段，再追加就先合并。

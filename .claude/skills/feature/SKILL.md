@@ -89,6 +89,9 @@ cases (`audit-analyzer`, "Tests: every rule, every edge").
 - **A weak-reference test** ("the spare keeps no reference"): the JIT can keep an object alive in a stack slot of a
   method with a loop and `using` / `try`; read the referenced values in a `NoInlining` helper before asserting that the
   object was collected.
+- **A 0 B test over a pool shared by passes of different chunk sizes** (EmitPool across two emitters of one record
+  type) sees a list grow now and then until each list has served the largest chunk, at a time the threads decide:
+  measure one emitter or uniform chunks rather than a longer warm-up.
 
 ## 6. Benchmarks (`audit-perf` has the method)
 

@@ -120,6 +120,12 @@ its own worktree.
      /tmp/bench.lock <cmd>`, so a stream of agents testing cannot starve a waiting benchmark. Builds also set
      `MSBUILDDISABLENODEREUSE=1 DOTNET_CLI_USE_MSBUILD_SERVER=0` and `-p:UseSharedCompilation=false` (no server left
      running to load the machine; `dotnet build-server shutdown` stops one);
+   - a flock queue is not fair: an A/B script chaining benchmark steps back to back holds the gate and starves the
+     builds and tests waiting behind it; sleep about 20 s between steps, or run the tests before queuing the A/B
+     (feat-emit-segments);
+   - rows that moved on code the change does not run (contended hand-written baselines such as InterlockedCursor,
+     ConcurrentQueue; BattleServer swings about 10% between rounds) are re-run in extra interleaved rounds before they
+     count as a regression or a win;
    - the lock is shared by every agent, so a queue is planned, not filled: benchmarks run in small batches (a class or
      a few methods), never hours queued at once; a branch whose code is done and only waits for its final checks goes
      first (the coordinator pauses the other queues' scripts with SIGSTOP and kills only their flock waiters that have

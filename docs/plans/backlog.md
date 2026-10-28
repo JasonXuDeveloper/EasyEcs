@@ -31,14 +31,14 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Emitted<T> without the join copy** ("Next" item 12e, branch `feat-emit-segments`; core first, generator
-      changes only in a new partial file).
 - [ ] **Symmetric pair methods** ("Next" item 8e, branch `feat-symmetric-pairs`).
 - [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
       `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
 )      branch (12d).
 
-Merged since the last update: fewer copies (`feat-fewer-copies`, 837c956: incremental Capture / Restore, Rollback
+Merged since the last update: Emitted<T>'s segments (`feat-emit-segments`, 4925b09: the chunks' lists kept as
+segments, joined only for a span read or a write; EmitParallel 1.4-2x, a `[ForEachRecord]` reader about 1.2x, 0 B;
+generator unchanged), fewer copies (`feat-fewer-copies`, 837c956: incremental Capture / Restore, Rollback
 with 16 writes 3.2 ms -> 36 us and BufferSnapshot Restore 78 -> 1.2 us; sorts gather into a spare column and swap it in,
 1M wide rows 77-88 -> 71-81 ms; `FillPool` exact on helper threads, so VoxelServer fills its field buffers once, not
 twice), the generator crash and reason texts (`fix-kernel-foreign`: metadata backing
@@ -59,7 +59,7 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 ## Next, in this order
 
 Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
-rows, edges found while stepping), 8e and 12e running; 8f + 8g (one generator branch) start once 8e and the tile branch merged (they edit Kernel.cs,
+rows, edges found while stepping), 8e running (now with both parallel designs); 12e merged; 8f + 8g (one generator branch) start once 8e and the tile branch merged (they edit Kernel.cs,
 SystemGenerator.cs and Symbols.cs too), then 9, 10, 4, 7, Later, then Finish.
 The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
 
@@ -274,7 +274,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
           copies of the snapshot's elements on the owner thread (BufferSnapshotBenchmark Restore 66.6 -> 84.4 us,
           Rollback 141 -> 177 us, 0 B), so the first parallel write after a restore does not copy on a helper thread.
           Bar: back to the old times or better with the 0 B steady state kept.
-       e. **Emitted<T> without the join copy**: `Emit<T>.Join` copies every chunk's list into the singleton's list.
+       e. [x] **Emitted<T> without the join copy**: `Emit<T>.Join` copies every chunk's list into the singleton's list.
           Keep the chunks' lists in order as segments: `[ForEachRecord]` and `ForParallel` walk the segments (users
           see no change); a contiguous span is joined only when user code asks for one.
 13. [ ] The rest of "Later" below.

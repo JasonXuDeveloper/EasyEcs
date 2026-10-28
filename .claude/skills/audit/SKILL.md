@@ -58,8 +58,12 @@ what it left undone, which goes on the same list (nothing is dropped silently).
   with Monitor or an until-loop. An agent that ends its turn early stalls until it is messaged again.
 - Two agents whose files overlap (a file both edit, such as `GeneratorTests.cs` or `Kernel.cs`) do not run at once;
   a purely mechanical change to a shared file (a split, a rename) waits until the other branches merged.
-- A worktree-isolated agent's shell refuses compound git commands and `sed` on shell variables: tell it to run one
-  plain command per call and keep multi-step logic in scratch scripts (feat-fewer-copies).
+- A worktree-isolated agent's shell refuses compound git commands (`cd X && git ...`), heredocs, `sed` on shell
+  variables, inline `$PATH` before `flock`, and any command line containing "github" (a BenchmarkDotNet
+  `*-report-github.md`): tell it to run one plain command per call and write multi-step logic as scripts with the Write
+  tool (feat-fewer-copies, feat-emit-segments).
+- Every agent runs ApiDocs (0 problems) and the Release build (0 warnings) before it reports: a branch that changed a
+  public XML doc without its zh entry stops the zh pages of that type from being regenerated (fewer-copies left 3).
 
 ## While they run
 
