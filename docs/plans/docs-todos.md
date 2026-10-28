@@ -1324,3 +1324,28 @@ threads; float sums differ from the serial pass's in the last bits (another orde
 - guide/parallel (or the pair page): `Parallel = true` on a method writing both sides is deterministic across thread
   counts but not bit for bit with the same method on one thread's serial pass; small tables (< 4 chunks of 256 rows)
   run the serial pass.
+
+## fix-flaky-alloc (decision draft, a record after D135)
+- **Decision draft.** The tests' 0 B checks of code run many times warm up with `Allocations.WarmUp(step, least)`:
+  `least` runs, then until the JIT has settled (no method compiled in the process during the last 40 runs and the
+  last 0.5 s, `JitInfo.GetCompiledMethodCount`), before `Allocations.Of` measures. No change to the core.
+- **Why.** `PrefetchingProbesBuffersWalksAndLambdasAllocateNothing` failed in the full suite (6 of 10 instrumented runs
+  with AVX2 off, 1 of 2 normal), never alone. Measured per probe job inside the window: each of the four jobs of
+  `ProbeAll` allocated 168 B once, in the frame where `JitInfo.GetCompiledMethodCount(currentThread: true)` grew by
+  one, frames 4 to 9 after the 50 warm-up frames, while 10 to 27 methods compiled elsewhere (the tiering backlog of
+  the suite's earlier tests). A compile on the thread running an old method is an on-stack replacement: with
+  `DOTNET_TC_OnStackReplacement=0` no compile happened on the measuring thread and the test passed 3 of 3. In a run
+  where the four compiles came at warm-up frames 48 and 49, the test passed: the fixed warm-up raced the tiering.
+  `ParallelReductionsScratchAndLookupsDoNotAllocate` had OSR compiles on its measuring thread inside its window too
+  (updates 53, 62, 81 of 100, in 2 of 4 instrumented runs; 0 B those times; none with OSR off); its own failure did not
+  reproduce in 15 runs before the fix. Ruled out for both: a background collection (settled, D128), helper threads
+  (not counted), the measuring thread's `Scratch` list (made during the warm-up in every run), a filter past bit 255
+  (it would allocate on every pass).
+- **Numbers.** After the fix, full Release suite, 0 failures in every run: AVX2 off 5 of 5 in a row, normal 1, AVX
+  off 1, AVX-512 off 1 (3,178-3,179 tests each; the suite took 4 m 23 s to 4 m 48 s, 4 m 36 s to 5 m 5 s before).
+- **Considered.** A longer fixed warm-up (the feature skill's "200 passes past OSR"): how many runs the tiering needs
+  depends on the backlog the earlier tests leave, so any fixed count races it. `TieredCompilation` or
+  `TC_OnStackReplacement` off for the test project: the tests would run other code than users do (no Tier0, no PGO).
+  Retrying a measurement: it loosens the check.
+- Docs pass: tests/AGENTS.md says it (done); the feature skill's "warm up past OSR (200 passes)" becomes
+  `Allocations.WarmUp` (skill owner).
