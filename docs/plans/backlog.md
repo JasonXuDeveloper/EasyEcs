@@ -65,6 +65,11 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Next, in this order
 
+**Flaky: `PrefetchingProbesBuffersWalksAndLambdasAllocateNothing`** failed in the full suite under load twice
+(fewer-copies' runs, the 8e merge gate; passes alone 3/3): find the measurement race as D128 did for the parallel
+reductions (a background thread allocating in the window, an OSR compile, a pool growing), fix the cause or the
+measurement's setup only. With the next agent that touches prefetching or tests.
+
 **Rename `[ForEachRecord]` -> `[Drain]`** (owner, 2026-10-28, naming audit: "[ForEach] 和 [ForEachRecord] 太像但做的事不一样";
 unreleased, so no migration): right after the tile branch merges (it edits SystemGenerator.cs too). With it
 `IForEachRecord<T>` -> `IDrain<T>`, the analyzer and code-fix strings, `Symbols`, tests (RecordTests names), the
