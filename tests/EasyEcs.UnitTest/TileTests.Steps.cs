@@ -356,8 +356,24 @@ public partial class TileTests
         }
     }
 
-    [Test]
-    public void ASleepingPassStepsOnlyTheTilesThatWoke()
+    [TestCase(4)]
+    [TestCase(0)] // always the walk of the woken
+    [TestCase(int.MaxValue)] // always the walk of every tile once one woke
+    public void ASleepingPassStepsOnlyTheTilesThatWoke(int share)
+    {
+        int shipped = TileWalk.Share;
+        TileWalk.Share = share;
+        try
+        {
+            SleepingPass();
+        }
+        finally
+        {
+            TileWalk.Share = shipped;
+        }
+    }
+
+    private static void SleepingPass()
     {
         using var world = new World();
         var plates = new Dictionary<TilePos, Entity>();
@@ -440,9 +456,24 @@ public partial class TileTests
         }
     }
 
-    [TestCase(1)]
-    [TestCase(4)]
-    public void AFieldMovingEverywhereStepsAwakeThenSleepsWhenSettled(int threads)
+    [TestCase(1, 256)]
+    [TestCase(4, 256)]
+    [TestCase(4, 0)] // the swaps of the passes that step every tile on every thread
+    public void AFieldMovingEverywhereStepsAwakeThenSleepsWhenSettled(int threads, int swaps)
+    {
+        int shipped = TileWalk.Swaps;
+        TileWalk.Swaps = swaps;
+        try
+        {
+            FieldMovingEverywhere(threads);
+        }
+        finally
+        {
+            TileWalk.Swaps = shipped;
+        }
+    }
+
+    private static void FieldMovingEverywhere(int threads)
     {
         const int cells = Torus * 16;
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
