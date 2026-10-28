@@ -171,13 +171,10 @@ public static class Startup
         DynamicBuffer<Fluid>.FillPool(capacity.Chunks);
         DynamicBuffer<Surface>.FillPool(capacity.Chunks);
         DynamicBuffer<NextFluid>.FillPool(capacity.Flowing);
-        // The field's buffers twice over: parallel passes write them on the helper threads, and a helper keeps up to 64
-        // lists of its own, which the owner thread's chunk loads cannot take back (a snapshot restored shares every
-        // buffer until written, so Host/Steady.cs's replay writes them all again).
-        DynamicBuffer<Footing>.FillPool(2 * capacity.Chunks);
-        DynamicBuffer<Scent>.FillPool(2 * capacity.Chunks);
-        DynamicBuffer<NextScent>.FillPool(2 * capacity.Chunks);
-        DynamicBuffer<Trail>.FillPool(2 * capacity.Chunks);
+        DynamicBuffer<Footing>.FillPool(capacity.Chunks);
+        DynamicBuffer<Scent>.FillPool(capacity.Chunks);
+        DynamicBuffer<NextScent>.FillPool(capacity.Chunks);
+        DynamicBuffer<Trail>.FillPool(capacity.Chunks);
         DynamicBuffer<ItemStack>.FillPool(capacity.Players);
     }
     // #endregion capacity
