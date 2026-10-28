@@ -95,16 +95,24 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         public bool Live;                // the entity at this index with Version stepped here
         public bool Dirty;               // it may change: it steps in the next pass of its color
         public TileFaces Edges;          // the faces whose edge the last step changed
+        public EntityId[] Around;        // the tiles across those faces, as the step's exchange found them (by slot)
     }
 
     private readonly World _world;
     private Entry[] _entries = [];
-    private ulong[] _changed = [];       // the tiles a Jacobi step changed, to swap after the pass, a bit per entity index
-    private ulong[] _woken = [];         // the tiles facing an edge a step of the color running changed, a bit per entity index
+    private ulong[] _changed = [];       // the tiles whose step changed them in the color running, a bit per entity index
     private ValueIndex<TGrid, TKey> _index;
     private int _membership = -1;        // the index's membership count when the tiles were last checked
     private ulong _lastTick;             // the tick the pass stamped its writes with: later writes are others'
-    private bool _sleeps;
+    private bool _sleeps;                // this pass keeps tiles asleep (the method may sleep, and the field is not moving everywhere)
+    private int _awake;                  // Jacobi: passes left that step every tile, unseen, before one looks again
+
+    /// <summary>
+    /// Passes a Jacobi step runs with every tile awake once a pass that looked saw nearly every tile change: comparing
+    /// each tile's rows and waking its neighbors costs more than the sleep it allows when the whole field moves (a wave,
+    /// heat spreading everywhere). The step of an unchanged tile writes the same cells, so the result is the same.
+    /// </summary>
+    private const int AwakePasses = 15;
     private int _maxSweeps, _color;
 
     private TileSteps(World world) => _world = world;
@@ -130,7 +138,8 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     private void Begin(bool sleeps, int maxSweeps)
     {
         TileShapeCheck<TTile>.Check();
-        _sleeps = sleeps;
+        _sleeps = sleeps && _awake == 0;
+        if (sleeps && _awake > 0) _awake--;
         _maxSweeps = maxSweeps > 0 ? maxSweeps : Cells;
         _color = 0;
         var index = LookupExtensions.Prepared<TGrid, TKey>(_world) as ValueIndex<TGrid, TKey>;
@@ -151,7 +160,6 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     {
         Array.Resize(ref _entries, Math.Max(capacity, _entries.Length * 2));
         Array.Resize(ref _changed, (_entries.Length + 63) >> 6);
-        Array.Resize(ref _woken, _changed.Length);
     }
 
     /// <summary>
@@ -379,24 +387,22 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         bool changed = Jacobi ? LeaveJacobi(ref entry, frame, ref buffer) : LeaveInPlace(ref entry, frame, ref buffer);
         frame.Next = null;
         if (!changed) return;
-        // Stamped here, by the thread that owns the tile's rows in this pass (as a Mut<T> write), not in Next on the
-        // system's thread; the stamp carries the pass's tick either way.
-        Entity.Stamp<DynamicBuffer<TCell>>(tile);
+        // Stamped and (Jacobi) swapped in Next, on the system's thread: a stamp here would write the summary of its
+        // 64-row word, a cache line the chunks beside share.
+        Interlocked.Or(ref _changed[tile.Index >> 6], 1UL << tile.Index);
         if (Jacobi)
         {
-            entry.Front = buffer.Store; // swapped in Next, after every tile stepped
-            Interlocked.Or(ref _changed[tile.Index >> 6], 1UL << tile.Index);
-            entry.Dirty = _sleeps; // one step of Jacobi is no fixed point: it steps again (no other thread reads it this pass)
+            entry.Front = buffer.Store;
+            entry.Dirty = true; // one step of Jacobi is no fixed point: it steps again (no other thread reads it this pass)
         }
         if (!_sleeps) return;
-        // The tiles across the edges that changed wake after this color (Next): their ids are the ones the step's
-        // exchange read, so no lookup; a bit each, set atomically (several tiles face one).
+        // The tiles across the edges that changed wake after this color (Next): the ids the step's exchange found, kept
+        // in the tile's own state (no lookup in Next, and no memory another thread writes).
+        var ids = entry.Around ??= new EntityId[32 - BitOperations.LeadingZeroCount(TileOffsets<TTile>.SlotMask)];
         for (uint slots = TileOffsets<TTile>.Facing(entry.Edges) & TileOffsets<TTile>.SlotMask; slots != 0; slots &= slots - 1)
         {
-            var id = around[BitOperations.TrailingZeroCount(slots)];
-            if (id == default) continue;
-            int n = id.Index;
-            if ((_woken[n >> 6] & 1UL << n) == 0) Interlocked.Or(ref _woken[n >> 6], 1UL << n);
+            int slot = BitOperations.TrailingZeroCount(slots);
+            ids[slot] = around[slot];
         }
     }
 
@@ -479,35 +485,38 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
 
     /// <summary>
     /// After the tiles of the color running stepped, on the system's thread: each tile that changed becomes its step
-    /// (Jacobi: its second buffer swapped with its cells, O(1); the old cells its second buffer, unless shared; Leave
-    /// stamped it), and the tiles across the edges that changed wake (Leave marked them). True while another color is to
+    /// (Jacobi: its second buffer swapped with its cells, O(1); the old cells its second buffer, unless shared), its
+    /// cells are stamped as written, and the tiles across the edges that changed wake (Leave marked them). True while another color is to
     /// step; after the last, the next writes are newer than this pass's.
     /// </summary>
     public bool Next()
     {
         var world = _world;
         var changed = _changed;
-        for (int word = 0; Jacobi && word < changed.Length; word++)
+        int count = 0;
+        for (int word = 0; word < changed.Length; word++)
         {
+            count += BitOperations.PopCount(changed[word]);
             for (ulong bits = changed[word]; bits != 0; bits &= bits - 1)
             {
                 int i = word << 6 | BitOperations.TrailingZeroCount(bits);
-                Swap(ref _entries[i], world, i);
+                ref var entry = ref _entries[i];
+                var tile = new Entity(world, i, entry.Version);
+                if (Jacobi) Swap(ref entry, tile);
+                Entity.Stamp<DynamicBuffer<TCell>>(tile);
+                if (!_sleeps) continue;
+                for (uint slots = TileOffsets<TTile>.Facing(entry.Edges) & TileOffsets<TTile>.SlotMask; slots != 0; slots &= slots - 1)
+                {
+                    var id = entry.Around[BitOperations.TrailingZeroCount(slots)];
+                    if (id != default) Wake(id); // a tile that has not stepped yet wakes as it joins
+                }
             }
             changed[word] = 0;
         }
-        var woken = _woken;
-        for (int word = 0; word < woken.Length; word++)
-        {
-            for (ulong bits = woken[word]; bits != 0; bits &= bits - 1)
-            {
-                ref var entry = ref _entries[word << 6 | BitOperations.TrailingZeroCount(bits)];
-                if (entry.Live) entry.Dirty = true; // a tile that has not stepped yet wakes as it joins
-            }
-            woken[word] = 0;
-        }
 
         if (++_color < TColors.Count) return true;
+        // Nearly every tile changed: the next passes step them all without looking (AwakePasses).
+        if (Jacobi && _sleeps && count * 8 >= world.Count<DynamicBuffer<TCell>, TGrid>() * 7) _awake = AwakePasses;
         _lastTick = world.ChangeTick;
         // Outside an update (a pass run by hand), a write made next would carry the stamp's tick: the tick moves on, as
         // between updates. Inside one, the next stage's tick is newer; a parallel stage's systems share the tick.
@@ -516,11 +525,11 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     }
 
     /// <summary>
-    /// The tile at index <paramref name="i"/> takes its step: the lists of its cells and of its second buffer trade their
+    /// <paramref name="tile"/> takes its step: the lists of its cells and of its second buffer trade their
     /// arrays (the buffer keeps its list object, so no lookup of it), or, when its list is shared (a prefab's, a clone's, a
     /// snapshot's) or sized otherwise, the buffer takes the second list and the next step a new one.
     /// </summary>
-    private static void Swap(ref Entry entry, World world, int i)
+    private static void Swap(ref Entry entry, Entity tile)
     {
         (entry.FrontRows, entry.NextRows) = (entry.NextRows, entry.FrontRows);
         var cells = entry.Front;
@@ -531,7 +540,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
             (cells.Items, next.Items) = (next.Items, cells.Items);
             return;
         }
-        ref var buffer = ref new Entity(world, i, entry.Version).Find<DynamicBuffer<TCell>>(true);
+        ref var buffer = ref tile.Find<DynamicBuffer<TCell>>(true);
         buffer.Store = next;
         // A list others share is theirs to keep: the next step takes a new one.
         cells?.Recycle();
