@@ -1319,6 +1319,11 @@ threads; float sums differ from the serial pass's in the last bits (another orde
   4-5 us (13-15 %); older rounds of the same case went -7 / +8 %. The only change on that path is one more field of
   PairRun and a predictable `half` branch in the sweep, so it reads as noise: rerun PairsBenchmark --filter
   '*GeneratedParallel*' on a quiet machine before merging (verify).
+  **Rerun on the owner's M4 (2026-10-28, base 685bbc2^1 vs head c327e38, two interleaved rounds, 0 B):** means of the
+  two rounds base -> head: 1k crowd 25.45 -> 26.38 us (+3.6 %; the base alone went 23.26 / 27.64 between rounds),
+  1k sparse 17.26 -> 16.71 (-3 %), 10k crowd 222.0 -> 225.7 (+1.7 %), 10k sparse 100.4 -> 102.1 (+1.7 %), 100k crowd
+  2108 -> 2181 (+3.5 %; head round 2 2092), 100k sparse 881.5 -> 869.6 (-1.4 %). No case slower past the noise:
+  the 1k crowd row was noise.
 - No migration entry: a method EECS105 refused now compiles (both sides, and both sides with Parallel); nothing that
   compiled changes.
 - guide/parallel (or the pair page): `Parallel = true` on a method writing both sides is deterministic across thread

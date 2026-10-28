@@ -40,8 +40,8 @@ names the skill:
 Merged since the last update: symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
 at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
-vector loop measured and dropped; PairsBenchmark GeneratedParallel 1k crowd +3..+16 % to rerun on a quiet machine
-before the bench sync), ghost rows in MultiWorld (`feat-ghost-rows`: 4 zones side by side, border units
+vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the owner's M4: no case slower past
+the noise, docs-todos "feat-symmetric-pairs"), ghost rows in MultiWorld (`feat-ghost-rows`: 4 zones side by side, border units
 copied as `Ghost` rows each update, crossings moved with `MoveEntities`, checked against one world; a
 `CopyEntities<TTag>` proposal in `owner-review.md`, not built; CI now checks the sample's output), Emitted<T>'s segments (`feat-emit-segments`, 4925b09: the chunks' lists kept as
 segments, joined only for a span read or a write; EmitParallel 1.4-2x, a `[ForEachRecord]` reader about 1.2x, 0 B;
@@ -88,7 +88,7 @@ rows, edges found while stepping), 8e and 12e merged; 8f + 8g (one generator bra
 SystemGenerator.cs and Symbols.cs too), then 9, 10, 4, 7, Later, then Finish.
 The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
 
-1. [x] **L2: the generated pair form** (merged e9c3db8, `feat-pairs-2`; open: the owner's M4 run of PairListsBenchmark) (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
+1. [x] **L2: the generated pair form** (merged e9c3db8, `feat-pairs-2`; the owner's M4 run of PairListsBenchmark done 2026-10-28, below) (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
        the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
        (`NearestPlayer`, zombie targeting). Right after WP0b merges. Then L4: examples rewritten in it.
        The spread map (nearest 1.06-1.31x, bar 1.5x; owner 2026-10-27: a bar is not a ship gate, a gain beyond the noise
@@ -103,8 +103,12 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        **Built on `feat-locality-pairs`** (`locality.md` 6.6): `[Neighbor]`, the pass, the generated order / job / vector
        loop, EECS105-107, cutoff per row, two kinds of entity, ties and the keep-target hint (merged; `[Neighbor]` approved
        by the owner, 2026-10-27). **`feat-pairs-2`:** writes to j (`[Neighbor] ref`), parallel pair passes, the EECS107
-       fix and nested-walk rewrites, lists of neighbors picked by cost (Auto never slower; the M4 run of PairListsBenchmark
-       open), `Reduce<T>` / `Mut<T>` in pair methods (GA1); measured and dropped: Lookup gathers under Auto (slower with
+       fix and nested-walk rewrites, lists of neighbors picked by cost (Auto never slower; the owner's M4 run, 2026-10-28, one round, 0 B:
+       Auto within the error of the best choice in all 24 cases. Generated (clusters): Auto = Off everywhere, and lists
+       On are 1.7-3.2x slower (10k crowd 1,070 / 1,066 / 3,440 us, 10k sparse 482 / 499 / 894, 100k crowd 17.4 / 17.5 /
+       41.0 ms, 100k sparse 7.97 / 8.11 / 13.6 ms for Auto / Off / On), so Auto keeps clusters on ARM64. GeneratedRows:
+       the three within 4 % (10k crowd 3,579 / 3,551 / 3,452 us, inside Auto's 96 us error); lists never win clearly on
+       the M4), `Reduce<T>` / `Mut<T>` in pair methods (GA1); measured and dropped: Lookup gathers under Auto (slower with
        many target tables), the spread-map grid of clusters (faster spread, slower packed), the cluster prefetch below
        (slower at every size). L4 (examples) moved to the finish phase (docs-todos).
        Follow-up after L2 merges (owner, 2026-10-27: "cluster pairs + prefetch, faster?"): prefetch the j block of the
