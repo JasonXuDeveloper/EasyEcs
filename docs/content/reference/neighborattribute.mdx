@@ -25,6 +25,9 @@ static void Separate(in Position p, ref Push push, [Neighbor] in Position other)
 
 The cutoff may be a value of the row (`if (d2 >= z.Vision * z.Vision) return;`), and the neighbors may be other entities than the method's (the `[Neighbor]` components say which). The tables holding the compared component keep their rows in space order (inferred from the test: `World.OrderRows`), and the pass reads a cluster of rows against the rows within the cutoff only, a vector of rows per instruction where the method qualifies. The pairs of a row run in the order of the tables' rows (not of the entities): a method that keeps the nearest neighbor breaks ties by the entity (the lower [`EntityId.Index`](/en/docs/reference/entityid#index)), so its result is the same whatever the order.
 
+A method that takes one component by `ref` of its row and of its neighbor (`ref Force f, [Neighbor] ref Force
+g`) writes both sides of its pairs (Newton's third law: `f += push; g -= push;`, or two items merged into one): it runs once for each unordered pair of its rows, never for a row with itself, in the order of the tables' rows (the row is the earlier of the two; half the pairs of a loop over both sides, MD codes' half neighbor lists). Its neighbors are then its rows: each `[Neighbor]` component is one the row takes too, and every component it writes it writes of both sides. On several threads (`Parallel = true`) its rows run in chunks of a fixed size colored so that chunks running at once write no row in common: the same result on any number of threads.
+
 ## Constructors
 
 ### `NeighborAttribute` [#ctor]

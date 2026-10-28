@@ -25,6 +25,8 @@ static void Separate(in Position p, ref Push push, [Neighbor] in Position other)
 
 截断距离可以是行的值（`if (d2 >= z.Vision * z.Vision) return;`），邻居也可以是和方法的实体不同的实体（由 `[Neighbor]` 组件决定）。含被比较组件的表按空间顺序保存行（从判断推断：`World.OrderRows`），遍历只拿一簇行和截断距离以内的行比较，方法符合条件时一条指令处理一个向量的行。一行的各对按表中行的顺序运行（不是实体的顺序）：保留最近邻居的方法按实体打破平局（较小的 [`EntityId.Index`](/zh/docs/reference/entityid#index) 胜出），这样结果和顺序无关。
 
+方法按 `ref` 同时取行自己和邻居的同一个组件时（`ref Force f, [Neighbor] ref Force g`），它写一对的两边（牛顿第三定律：`f += push; g -= push;`，或把两个物品合并成一个）：它的行的每个无序对只运行一次，从不和自己配对，顺序按表中行的顺序（行是两者中较早的那个；是对两边各写一层循环的一半的对，即分子动力学程序的半邻居表）。这时它的邻居就是它的行：每个 `[Neighbor]` 组件行也会取，它写的每个组件两边都写。多线程时（`Parallel = true`）它的行按固定大小的块运行，块经过着色，同时运行的块不会写同一行：任何线程数下结果都相同。
+
 ## 构造函数 [#constructors]
 
 ### `NeighborAttribute` [#ctor]
