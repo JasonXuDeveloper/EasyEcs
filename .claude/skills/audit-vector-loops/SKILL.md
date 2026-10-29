@@ -165,7 +165,9 @@ changes nothing and cannot fail:
 ## Reasons users can fix
 
 `Kernel.Vectorize` returns the loop or one reason; the analyzer reports that reason (EECS055 / EECS056), so a method
-left scalar is exactly a method reported. EasyEcs's own scalar APIs get a reason saying what they are (a key probe
+left scalar is exactly a method reported. A switch expression has no vector form: the reason names it and suggests conditional expressions, or, over a
+call on a struct, a `[ForEach]` method that stores the call's result in a component first (8f). Every stage reading the
+body catches its exceptions (`audit-generator` "Done means"). EasyEcs's own scalar APIs get a reason saying what they are (a key probe
 has no vector form), never "defined in another assembly"; an inlined helper keeps its value's type where the caller
 gives none (`var x = Helper()` over a target-typed `new(...)` / `default`), or the local prints as `??`. Each reason
 is classified once, in Kernel, as:
