@@ -22,7 +22,7 @@ public sealed class ConstructorFieldsAttribute(string constructor, params string
     public string[] Members { get; } = members;
 
     /// <summary>Why the members it sets are not known (its body computes them), or null.</summary>
-    public string? Reason { get; set; }
+    public string Reason { get; set; }
 }
 
 /// <summary>
@@ -52,5 +52,5 @@ public sealed class InlineBodyAttribute(string member, string body, params strin
     public string[] Accessors { get; } = accessors;
 
     /// <summary>Why the body was not recorded (a loop, a name the generated code could not reach), or null.</summary>
-    public string? Reason { get; set; }
+    public string Reason { get; set; }
 }

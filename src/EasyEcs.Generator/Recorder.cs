@@ -18,8 +18,8 @@ namespace EasyEcs.Generator;
 /// be inlined). A field the referencing assembly cannot see becomes a placeholder (<c>__EasyEcsAccessor{i}</c>,
 /// <c>kind|type|name</c>), an internal static helper it calls a local function of its own (<c>__EasyEcsHelper{j}</c>).
 /// Only members taking and returning values (a vector loop inlines nothing else) are recorded. Source output, one file
-/// per source file: an IDE compiling a ProjectReference sees what a build sees, and an
-/// edit rebinds only the bodies of the file it touched, which the syntax filters first (size, loops, throws).
+/// per source file: an IDE compiling a ProjectReference sees what a build sees, and an edit rebinds only the bodies of
+/// the file it touched (<see cref="ReadFiles"/>), which the syntax filters first (size, loops, throws).
 /// </summary>
 internal static class Recorder
 {
@@ -32,12 +32,34 @@ internal static class Recorder
     /// <summary>One source file's facts: the generated file's name and the attribute lines.</summary>
     private sealed record Facts(string HintName, EquatableArray<string> Lines);
 
+    /// <summary>A file's facts, null included, as the value of <see cref="ReadFiles"/>.</summary>
+    private sealed class FileFacts(Facts? facts)
+    {
+        public readonly Facts? Facts = facts;
+    }
+
+    /// <summary>
+    /// The facts read per compilation unit. Roslyn reruns a syntax provider's transform for every matched node on every
+    /// compilation change (only its predicate is kept per tree), so without this each keystroke would bind every
+    /// file's public members again (GeneratorBenchmark: about 5 MB and a fifth of the IDE's run); an unchanged tree
+    /// keeps its root node, so only an edited file is read again. A build parses its trees anew and reads every file;
+    /// in an IDE, a record goes stale only when another file changes what a recorded body names, until this file is
+    /// edited, and the IDE only shows it through the referencing project's EECS055 (its vector loops are
+    /// implementation output, which the IDE does not run).
+    /// </summary>
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<SyntaxNode, FileFacts> ReadFiles = new();
+
     public static void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // One stage entry and one generated file per source file, not per type: the driver's work per run grows with
-        // the entries and files it carries over, and an edit rereads only the file it touched either way.
+        // the entries and files it carries over.
         var facts = context.SyntaxProvider
-            .CreateSyntaxProvider(static (node, _) => node is CompilationUnitSyntax, static (ctx, ct) => Read(ctx, ct))
+            .CreateSyntaxProvider(static (node, _) => node is CompilationUnitSyntax, static (ctx, ct) =>
+            {
+                if (ReadFiles.TryGetValue(ctx.Node, out var known)) return known.Facts;
+                var read = Read(ctx, ct);
+                return ReadFiles.GetValue(ctx.Node, _ => new FileFacts(read)).Facts;
+            })
             .Where(static f => f is not null)
             .WithTrackingName("RecordedTypes");
         context.RegisterSourceOutput(facts, static (spc, facts) =>
@@ -65,17 +87,24 @@ internal static class Recorder
     /// <summary>The facts of every public type declared in one source file, or null when it declares none to record.</summary>
     private static Facts? Read(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
+        // Syntax first: a file whose types declare nothing that could be recorded costs no binding (the first semantic
+        // call on a new compilation is most of this stage's cost per keystroke).
+        List<TypeDeclarationSyntax>? declarations = null;
+        // Types sit in namespaces and other types, never in bodies: the walk stops at members.
+        foreach (var node in ctx.Node.DescendantNodes(static n => n is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax or TypeDeclarationSyntax))
+            if (node is TypeDeclarationSyntax declaration && IsCandidate(declaration) && MayRecord(declaration))
+                (declarations ??= []).Add(declaration);
+        if (declarations == null) return null;
+
         var model = ctx.SemanticModel;
         if (model.Compilation.GetTypeByMetadataName(Recorded.InlineBodyAttribute) is not { } attribute // an EasyEcs without them
             || SymbolEqualityComparer.Default.Equals(attribute.ContainingAssembly, model.Compilation.Assembly)) // EasyEcs itself: its API is not inlined
             return null;
         var lines = new List<string>();
         string? hint = null;
-        // Types sit in namespaces and other types, never in bodies: the walk stops at members.
-        foreach (var node in ctx.Node.DescendantNodes(static n => n is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax or TypeDeclarationSyntax))
+        foreach (var declaration in declarations)
         {
             ct.ThrowIfCancellationRequested();
-            if (node is not TypeDeclarationSyntax declaration || !IsCandidate(declaration)) continue;
             int before = lines.Count;
             if (model.GetDeclaredSymbol(declaration, ct) is INamedTypeSymbol type && Visible(type)) Read(declaration, type, model.Compilation, lines, ct);
             if (hint == null && lines.Count > before) hint = HintName(declaration, model.GetDeclaredSymbol(declaration, ct)!, ct);
@@ -83,6 +112,45 @@ internal static class Recorder
 
         return hint == null ? null : new Facts(hint, new EquatableArray<string>(lines.ToArray()));
     }
+
+    /// <summary>
+    /// Whether <paramref name="type"/> declares, by its syntax alone, something <see cref="Read(TypeDeclarationSyntax,
+    /// INamedTypeSymbol, Compilation, List{string}, System.Threading.CancellationToken)"/> may record: a struct's public
+    /// constructor or positional parameters, a public static (or struct) method or property with a body, none of them
+    /// naming a type that is plainly no value (string, object, an array). A superset: the symbols decide.
+    /// </summary>
+    private static bool MayRecord(TypeDeclarationSyntax type)
+    {
+        bool isStruct = type is StructDeclarationSyntax || type is RecordDeclarationSyntax record && record.ClassOrStructKeyword.IsKind(SyntaxKind.StructKeyword);
+        if (isStruct && type.ParameterList is { Parameters.Count: > 0 } positional && Values(positional)) return true;
+        foreach (var member in type.Members)
+        {
+            if (!member.Modifiers.Any(SyntaxKind.PublicKeyword) || !isStruct && !member.Modifiers.Any(SyntaxKind.StaticKeyword) && member is not ConstructorDeclarationSyntax)
+                continue;
+            switch (member)
+            {
+                case ConstructorDeclarationSyntax c when isStruct && !c.Modifiers.Any(SyntaxKind.StaticKeyword) && Values(c.ParameterList):
+                case MethodDeclarationSyntax m when (m.Body != null || m.ExpressionBody != null) && !NoValue(m.ReturnType) && Values(m.ParameterList):
+                case PropertyDeclarationSyntax p when !NoValue(p.Type)
+                                                      && (p.ExpressionBody != null || p.AccessorList?.Accessors.Any(a => a.Body != null || a.ExpressionBody != null) == true):
+                    return true;
+            }
+        }
+
+        return false;
+
+        static bool Values(BaseParameterListSyntax list) => list.Parameters.All(p => !NoValue(p.Type));
+    }
+
+    /// <summary>Whether <paramref name="type"/> plainly names no value type: string, object, dynamic, an array, a pointer.</summary>
+    private static bool NoValue(TypeSyntax? type) => type switch
+    {
+        NullableTypeSyntax nullable => NoValue(nullable.ElementType),
+        ArrayTypeSyntax or PointerTypeSyntax or FunctionPointerTypeSyntax => true,
+        PredefinedTypeSyntax predefined => predefined.Keyword.Kind() is SyntaxKind.StringKeyword or SyntaxKind.ObjectKeyword,
+        IdentifierNameSyntax { Identifier.Text: "dynamic" } => true,
+        _ => false,
+    };
 
     /// <summary>The generated file's name: the first type recorded, numbered by its declaration when it is partial.</summary>
     private static string HintName(TypeDeclarationSyntax node, ISymbol type, System.Threading.CancellationToken ct)
