@@ -292,6 +292,19 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { if (!h.HasValue) return; h.Value.V = f.V; }", true)]   // written through
     [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", false)]                    // another lane size
     [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", false)]   // in parallel
+    // Switches and patterns as lane masks (Kernel.Switches.cs).
+    [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V = q.V switch { 1 => 2, > 5 => 4, _ => 3 };", true)]
+    [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V = q.V switch { 0 => 1, > 0 => 2 };", true)]                    // not exhaustive: the rows left go to the method
+    [TestCase("[ForEach] static void A(ref F f, in H h) => f.V = h.V switch { float.NaN => 0, < 0 when f.V > 1 => 1, _ => f.V };", true)]
+    [TestCase("[ForEach] static void A(ref P p, in Q q) { switch (q.V) { default: p.V++; break; case 1: return; case > 5 when p.V > 0: p.V = 0; break; } }", true)]
+    [TestCase("[ForEach] static void A(ref F f, in Two t) => f.V = t is { A: > 0, B: < 1 } ? 1 : 0;", true)]               // a property pattern
+    [TestCase("[ForEach] static void A(ref F f, in Duo d) => f.V = d switch { ( > 0, _) => d.A, _ => d.B };", true)]       // a positional one
+    [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V = (p.V, q.V) switch { (0, 0) => 1, (_, > 3) => 2, _ => 3 };", true)] // a tuple
+    [TestCase("[ForEach] static void A(ref F f) { if (f.V is float x && x > 1) f.V = x * 2; }", true)]                     // a declaration
+    [TestCase("[ForEach] static void A(ref Duo d, in F f) => d = f.V switch { > 0 => d with { A = 1 }, _ => new Duo(d.B, d.A) };", true)] // a struct's value
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = c.V switch { 0 => 1, < 10 => (byte)(b.V + 1), _ => b.V };", true)] // narrow lanes
+    [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V = Pick(q.V); static int Pick(int v) { switch (v) { case 0: return 1; case > 5: return 2; } return 3; }", true)] // helpers
+    [TestCase("[ForEach] static void A(ref F f) => f.V = Sign(f.V); static float Sign(float v) => v switch { < 0 => -1, > 0 => 1, _ => 0 };", true)]
     // A helper whose value is target-typed (new(...)): inlined where 'var' gives no type, it keeps its return type.
     [TestCase("public record struct Cell2(int X, int Z); static Cell2 At(float v) => new((int)v, (int)v); [ForEach] static void A(ref F f) { var c = At(f.V); f.V = c.X + c.Z; }", true)]
     public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
@@ -341,10 +354,20 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) => f.V = R.Scaled(f.V); } public static class R { static readonly float Scale = 2; public static float Scaled(float x) => x * Scale;", "it calls R.Scaled, whose body names private field 'float R.Scale' of R, which code outside its type (or file) cannot reach: make it internal", true)]
     [TestCase("[ForEach] static void A(ref F f) => f.V = Log(f.V) * 2; static float Log(float x) { System.Console.WriteLine(x); return x; }", "it calls S.Log, which calls Console.WriteLine")]
     [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
-    [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V = q.V switch { 1 => 2, > 5 => 4, _ => 3 };", "it has a switch expression ('q.V switch { 1 => 2, > 5 => 4, _ => 3 }'), which a vector loop has no form of: write it as conditional expressions ('v == A ? a : v == B ? b : c')", true)]
-    // A switch over a call on a struct (VoxelServer's 'new Nearby(...).Trail(x, z) switch'): the call goes into a pass of its own.
+    // A switch over a call on a struct the loop cannot inline (VoxelServer's 'new Nearby(...).Trail(x, z) switch'): the call goes into a pass of its own.
     [TestCase("public readonly struct Near(int v) { public int Dir(int x) { int d = v; for (int i = 0; i < x; i++) d++; return d; } } [ForEach] static void A(ref P p, in Q q) => p.V = new Near(q.V).Dir(1) switch { 1 => 2, _ => 3 };",
-        "it switches over a call on struct Near ('new Near(q.V).Dir(1)'), which runs row by row, and a vector loop has no switch: call Near.Dir in a [ForEach] method of its own that stores the result in a component, and switch over that field here with conditional expressions ('v == A ? a : v == B ? b : c')", true)]
+        "it switches over a call on struct Near ('new Near(q.V).Dir(1)'), which runs row by row: call Near.Dir in a [ForEach] method of its own that stores the result in a component, and switch over that field here", true)]
+    // Kernel.Switches.cs: what a pattern or switch cannot be as lane masks.
+    [TestCase("static readonly string K = \"a\"; [ForEach] static void A(ref P p) => p.V = K switch { \"a\" => 1, _ => 2 };",
+        "it switches over 'K', a string, which no vector lane holds: a vector loop matches numbers, enums and bools of 4 or 8 bytes, structs of them and tuples of them")]
+    [TestCase("static readonly int[] K = [1]; [ForEach] static void A(ref P p) => p.V = K is [1, ..] ? 1 : 2;",
+        "it matches a list pattern ('[1, ..]'), which tests the elements of a list: a vector loop tests lanes, not lists")]
+    [TestCase("[ForEach] static void A(ref P p) { if (p.V is object o && o.GetHashCode() > 1) p.V = 1; }",
+        "pattern 'object o' declares 'o' as a object, which no vector lane holds: name the value it tests, or a field of it, instead")]
+    [TestCase("[ForEach] static void A(Entity e, ref P p) { switch (p.V) { case 1: p.V = 2; goto case 2; case 2: p.V++; break; } if (p.V < 0) e.SetH(1); }",
+        "it jumps from one switch section to another ('goto case 2;'): a vector loop runs each section on its own lanes, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, which cannot change structure during the pass; move that branch into a [ForEach] method of its own", true)]
+    [TestCase("[ForEach] static void A(Entity e, ref P p) { switch (p.V) { case 1: for (int i = 0; i < 2; i++) p.V++; break; } if (p.V < 0) e.SetH(1); }",
+        "'for (int i = 0; i < 2; i++) p.V++;' is not supported, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, which cannot change structure during the pass; move that branch into a [ForEach] method of its own", true)]
     [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString, which is defined in another assembly")]
     [TestCase("[ForEach] static void A(in B8 b, ref C8 c) { float d = b.V; c.V = (byte)d; }", "local 'd' is a float, not a lane type of 1 or 2 bytes")]
     [TestCase("[ForEach] static void A(in P p, ref Purse u) => u.Sum = p.V + 1L;", "it writes 'u.Sum', which is neither a local nor the lane of a component taken by ref")] // the write, not the conversion of its value
@@ -665,6 +688,28 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("for (nint last = rows - global::System.Runtime.Intrinsics.Vector512<float>.Count;"), generated);
         Assert.That(generated, Does.Not.Contain("Vector5123").And.Not.Contain("Intrinsics.Vector512<float> __p").And.Not.Contain("Intrinsics.Vector512<float> x"), generated);
         Assert.That(generated.IndexOf('\u0001'), Is.EqualTo(-1), "a token left in the loop"); // ordinal: culture comparison ignores U+0001
+    }
+
+    // Kernel.Switches.cs: a switch expression as selects from the last arm up, each arm's mask (its guard and-ed in, read
+    // under the lanes no arm above took) held once; a switch statement's sections as masked writes.
+    [TestCase("[ForEach] static void A(ref F f, in H h) => f.V = h.V switch { < 0 => 0, > 10 when f.V > 1 => 1, _ => f.V };",
+        "var __m1 = global::System.Numerics.Vector.As<float, int>(global::System.Numerics.Vector.LessThan<float>(__c2_0, global::System.Numerics.Vector.Create<float>(0f)));",
+        "var __t4 = global::System.Numerics.Vector.As<float, int>(global::System.Numerics.Vector.GreaterThan<float>(__c1_0, global::System.Numerics.Vector.Create<float>(1f)));",
+        "var __m5 = (global::System.Numerics.Vector.As<float, int>(global::System.Numerics.Vector.GreaterThan<float>(__c2_0, global::System.Numerics.Vector.Create<float>(10f))) & __t4);",
+        "__c1_0 = global::System.Numerics.Vector.ConditionalSelect(global::System.Numerics.Vector.As<int, float>(__m1), global::System.Numerics.Vector.Create<float>(0f), global::System.Numerics.Vector.ConditionalSelect(global::System.Numerics.Vector.As<int, float>(__m5), global::System.Numerics.Vector.Create<float>(1f), __c1_0));")]
+    [TestCase("[ForEach] static void A(ref P p, in Q q) { switch (q.V) { default: p.V++; break; case 1: case 2: p.V = 0; break; } }",
+        "var __m1 = global::System.Numerics.Vector.Equals<int>(__c2_0, global::System.Numerics.Vector.Create<int>((1)));",
+        "var __m3 = global::System.Numerics.Vector.Equals<int>(__c2_0, global::System.Numerics.Vector.Create<int>((2)));",
+        "var __m4 = (__m1 | __m3);",
+        "__c1_0 = global::System.Numerics.Vector.ConditionalSelect(~__m4, (__c1_0 + global::System.Numerics.Vector<int>.One), __c1_0);",                 // the default, first
+        "__c1_0 = global::System.Numerics.Vector.ConditionalSelect(__m4, global::System.Numerics.Vector.Create<int>((0)), __c1_0);",
+        "__c1_0 = global::System.Numerics.Vector.ConditionalSelect((~__m4 & __pass), (__c1_0 + global::System.Numerics.Vector<int>.One), __c1_0);")]      // in a masked word
+    public void ASwitchIsMasksOfItsArms(string method, params string[] lines)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"[EcsSystem] public ref struct S {{ {method} }}"), out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        foreach (var line in lines) Assert.That(generated, Does.Contain(line), generated);
     }
 
     // A reduction: one accumulator per lane and field from T.Identity, folded into the run's partial result in lane order.
@@ -1057,10 +1102,11 @@ public class GeneratorTests
     [TestCase("q.V += 2 + e.Id.Index;", "q.V += 3 + e.Id.Index;")]                       // a fused (scalar) method's body: its pair stays
     [TestCase("if (d2 >= 4f) return; q.V++;", "if (d2 >= 4f) return;  q.V++;")]                  // a pair method's trivia: its kernel and cutoff stay
     [TestCase("c.Ticks += h.V;", "c.Ticks += h.V + 1;")]                                 // a [ForEachRecord] method's body
+    [TestCase("q.V switch { 0 => 1, > 4 => q.V, _ => 2 }", "q.V switch { 0 => 1,  > 4 => q.V, _ => 2 }")] // a vector loop's switch: trivia
     public void EditsThatChangeNoModelHitTheCache(string before, string after)
     {
         string code = "using EasyEcs;\n" + Components +
-            "public struct L; [EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } [ForEach(Slices = 4)] static void D(ref Q q) { } " +
+            "public struct L; [EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in DynamicBuffer<L> b) { } [ForEach(Slices = 4)] static void D(ref Q q) { } [ForEach] static void W(ref Q q) => q.V = q.V switch { 0 => 1, > 4 => q.V, _ => 2 }; " +
             "[ForEach] static void E(ref Q q, Scratch<int> s) { for (int i = 0; i < 2; i++) q.V += ++s.Value; } }" +
             "[EcsSystem] public ref struct G<T> where T : struct, IComponent { [ForEach] static void B(ref T t) { } } public static class H { static void F(World w) => w.AddSystem<G<P>>(); }" +
             "public static class U { static void C(World w) { foreach (var i in w.Query<P>()) i.P.V++; } }" +
@@ -1135,6 +1181,7 @@ public class GeneratorTests
     ];
 
     [TestCase("a [ForEach] body", "p.V += q.V;", "p.V += 2 * q.V;", "SystemLoops SystemCode")]
+    [TestCase("a switch in a [ForEach] body", "p.V += q.V;", "p.V = q.V switch { 0 => 1, > 3 => q.V, _ => p.V };", "SystemLoops SystemCode")]
     [TestCase("an unrelated file", "public class Unrelated { }", "public class Unrelated { int x; }", "")]
     [TestCase("whitespace", "\npublic static class Free", "\n\npublic static class Free", "")]
     [TestCase("a new component field", "P : IComponent { public int V; }", "P : IComponent { public int V; public int W; }",
