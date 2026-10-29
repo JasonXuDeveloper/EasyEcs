@@ -1,21 +1,24 @@
 <doc>
-  <member name="T:EasyEcs.Tile`2" source="68e6047826b0">
+  <member name="T:EasyEcs.Tile`2" source="998c07ee55e2">
     <summary>
       一个瓦片（由 <typeparamref name="TTile" /> 变成瓦片的实体，<see cref="T:EasyEcs.ITile`1" />）的格子，连同邻居的格子：
-      一个 <c>[ForEach]</c> 参数，就像 CUDA 线程块的瓦片和它的 apron，或 MPI 进程的子区域和它的 ghost 格子。<c>static void Diffuse(Tile&lt;Heat,
-      Plate&gt; heat, Mut&lt;DynamicBuffer&lt;NextHeat&gt;&gt; next)</c>：生成的 job 按键找到邻居（网格的每个瓦片，每个邻居查找一次），
-      <see cref="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" /> 把模板要计算的层拷进一个带边的瓦片
-      （<see cref="T:EasyEcs.PaddedTile`2" />）：中间是实体自己的格子，外面一圈 <see cref="P:EasyEcs.ITileShape.Halo" /> 个格子的 halo
-      来自邻居朝向这边的格子，没有邻居的地方按边界（<see cref="P:EasyEcs.ITileShape.Boundary" />）处理，所以模板代码没有边界情况。
+      一个 <c>[ForEach]</c> 参数，就像 CUDA 线程块的瓦片和它的 apron，或 MPI 进程的子区域和它的幽灵格子。生成的 job 按键找到邻居
+      （网格的每个瓦片，每个邻居查找一次），<see cref="M:EasyEcs.Tile`2.ExchangeHalo(System.Int32,System.Int32,`0,System.Boolean)" /> 把模板要计算的层拷进瓦片带边的纹理：中间是实体自己的格子，
+      外面一圈 <see cref="P:EasyEcs.ITileShape.Halo" /> 个格子的光环来自邻居朝向这边的格子，没有邻居的地方按边界
+      （<see cref="P:EasyEcs.ITileShape.Boundary" />）处理，所以模板代码没有边界情况。<see cref="M:EasyEcs.Tile`2.Rows(EasyEcs.TileStencil)" /> 遍历要计算的行，
+      <see cref="M:EasyEcs.Tile`2.At(EasyEcs.TileRow{`1})" /> 在一行周围采样。
       <para>
-      约定：系统被调度为 <c>DynamicBuffer&lt;TCell&gt;</c> 和 <typeparamref name="TTile" /> 的读者（并在遍历之前建好它的索引），
-      所以每个邻居读到的都是遍历之前的值，方法可以并行运行；写其中任何一个的方法不能接收这个瓦片（EECS059）。
-      把这一步的结果写进另一个组件，再由另一个系统提交（双缓冲）。
+      按值接收（<c>Tile&lt;Heat, Plate&gt; heat</c>）时只读：系统被调度为 <c>DynamicBuffer&lt;TCell&gt;</c> 和网格组件的读者
+      （并在遍历之前建好它的索引），所以每个邻居读到的都是遍历之前的值，方法可以并行运行。按 <c>ref</c> 接收
+      （<c>static void Diffuse(ref Tile&lt;Heat, Plate&gt; heat)</c>）时方法推进瓦片：它用 <see cref="M:EasyEcs.Tile`2.Write(EasyEcs.TileRow{`1})" />
+      写这一步的行，写进生成的遍历放在格子旁边的第二个缓冲，等每个瓦片都推进完再和格子交换（Jacobi，MPI 的 u / v 交换：跳过的行写成零）；
+      或者原地写，按颜色逐色扫描，直到瓦片稳定（<see cref="T:EasyEcs.GaussSeidelAttribute">[GaussSeidel]</see>）。遍历从写过的行找出边缘变化的面，
+      只推进可能变化的瓦片：自上次推进以来，自己的格子或邻居朝向它的边缘变了的那些。
       </para>
       只在传入它的那次调用内有效（ref struct）。
     </summary>
     <typeparam name="TCell">格子：实体的 <c>DynamicBuffer&lt;TCell&gt;</c> 的元素。</typeparam>
-    <typeparam name="TTile">把实体放进网格的组件，带着瓦片的形状。</typeparam>
+    <typeparam name="TTile">瓦片的形状：把实体放进网格的组件，或它的 <see cref="T:EasyEcs.Columns`1" />。</typeparam>
   </member>
   <member name="P:EasyEcs.Tile`2.Cells" source="1e148366e590">
     <summary>瓦片自己的格子，布局见 <see cref="T:EasyEcs.ITileShape" />。O(1)。</summary>
@@ -26,36 +29,17 @@
       它的其他组件通过 <see cref="T:EasyEcs.Lookup`1" /> 读。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.Tile`2.Pad" source="35127ca6b34f">
-    <summary>带边拷入所有层，缺失邻居的那一圈为零：见 <see cref="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" />。</summary>
-  </member>
-  <member name="M:EasyEcs.Tile`2.Pad(System.Int32,System.Int32,`0,System.Boolean)" source="46c209e09b76">
-    <summary>
-      把第 <paramref name="from" /> 到第 <paramref name="to" /> 层带边拷进这个线程的纹理：每层的格子在中间，每层外面一圈
-      <see cref="P:EasyEcs.ITileShape.Halo" />（r）个格子（西、东邻居朝向这边的列，北、南邻居朝向这边的行；邻域包含棱时，角来自隔着棱的瓦片）；
-      瓦片不止一层时，<paramref name="from" /> 下面和 <paramref name="to" /> 上面各多 r 层（瓦片自己的，或下方、上方邻居朝向这边的层）。
-      没有邻居的地方（网格里没有、缓冲为空，或在形状的面和邻域之外），halo 按 <see cref="P:EasyEcs.ITileShape.Boundary" /> 处理：
-      <paramref name="border" />，或瓦片自己的边缘格子钳制或镜像（沿没有邻居的那条轴；隔着棱或角、那条轴被钳制的瓦片，从旁边的瓦片读）。
-      传入 <paramref name="mask" /> 时，记录哪些行有不为零的格子（按位），供 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" /> 使用。
-      <para>
-      O(层数 × (Width + 2r) × (Depth + 2r))；线程有了纹理之后零分配（纹理在线程第一次加载时按全部层分配）。纹理属于线程和这个瓦片类型：
-      线程下一次加载 <typeparamref name="TCell" /> 和 <typeparamref name="TTile" /> 时会覆盖它，所以一个方法对每种格子和网格只接收一个瓦片（EECS073）。
-      形状无效（EECS072）、实体的缓冲或某个非空邻居的缓冲比形状的格子少，或层不满足 0 ≤ from ≤ to &lt; Height 时抛出异常。
-      </para>
-    </summary>
-  </member>
   <member name="M:EasyEcs.Tile`2.Beside(System.Int32,System.Int32,System.Int32)" source="711b99b05303">
     <summary>
       偏移 (<paramref name="dx" />, <paramref name="dy" />, <paramref name="dz" />) 处的邻居，每个分量 −1 到 1（隔着面、棱或角的瓦片）；
       那里没有瓦片，或形状的邻域不包含它时为默认值。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.Tile`2.ChangedEdges(System.ReadOnlySpan{`0},System.Boolean@)" source="713a2134935f">
+  <member name="M:EasyEcs.Tile`2.ChangedEdges(System.ReadOnlySpan{`0},System.Boolean@)" source="f86af55796aa">
     <summary>
       <paramref name="next" />（瓦片的这一步，按它的格子布局）是否和瓦片的格子不同，以及哪些面的边缘变了：离这个面
-      <see cref="P:EasyEcs.ITileShape.Halo" /> 个格子以内的格子，对面的邻居会把它读进 halo。没有变化、旁边瓦片朝向它的边缘也没变化的瓦片，
-      下一步算出的结果相同：让它休眠，并唤醒 <see cref="M:EasyEcs.Tile`2.Facing(EasyEcs.TileFaces)" /> 变化边缘的瓦片，
-      这样稀疏网格的开销只是活跃瓦片的开销。O(格子数)，逐行按字节比较。
+      <see cref="P:EasyEcs.ITileShape.Halo" /> 个格子以内的格子，对面的邻居会把它读进光环。推进瓦片（<c>ref Tile</c>）用不到这些：
+      它的遍历从写过的行找出边缘，并让瓦片休眠。O(格子数)，逐行按字节比较。
     </summary>
     <param name="next">这一步：至少有瓦片那么多格子。</param>
     <param name="changed">是否有格子变化。</param>
@@ -68,4 +52,54 @@
       （<c>foreach (var id in tile.Facing(edges))</c>）。每个邻居 O(1)。
     </summary>
   </member>
+
+  <member name="P:EasyEcs.Tile`2.Item(System.Int32,System.Int32,System.Int32)" source="2f360eed7da1">
+    <summary>
+      纹理的格子 (x, y, z)：x 从 −r 到 Width + r − 1，z 从 −r 到 Depth + r − 1，y 是交换过的层以及它们上下各 r 层
+      （2D 瓦片只有这些层），r 是光环宽度。超出，或方法没有先交换瓦片的光环时抛出异常。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Tile`2.At(EasyEcs.TileRow{`1})" source="35d48bc3afc5">
+    <summary>
+      纹理中 <paramref name="row" />（交换过的层中的一行，来自这个瓦片的 <see cref="M:EasyEcs.Tile`2.Rows(EasyEcs.TileStencil)" />，或来自按相同层交换的另一个瓦片）
+      第一个格子处的位置：它的样本。行在范围外，或方法没有先交换瓦片的光环时抛出异常。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Tile`2.ExchangeHalo" source="eeacd1558ead">
+    <summary>交换所有层的光环，缺失邻居的那一圈为零：见 <see cref="M:EasyEcs.Tile`2.ExchangeHalo(System.Int32,System.Int32,`0,System.Boolean)" />。</summary>
+  </member>
+  <member name="M:EasyEcs.Tile`2.ExchangeHalo(System.Int32,System.Int32,`0,System.Boolean)" source="249cd19fc4be">
+    <summary>
+      把第 <paramref name="from" /> 到第 <paramref name="to" /> 层带着光环拷进这个线程里瓦片的纹理，供 <see cref="M:EasyEcs.Tile`2.Rows(EasyEcs.TileStencil)" />、
+      <see cref="M:EasyEcs.Tile`2.At(EasyEcs.TileRow{`1})" /> 和索引器读：每层的格子在中间，每层外面一圈 <see cref="P:EasyEcs.ITileShape.Halo" />（r）个格子
+      （西、东邻居朝向这边的列，北、南邻居朝向这边的行；邻域包含棱时，角来自隔着棱的瓦片）；瓦片不止一层时，
+      <paramref name="from" /> 下面和 <paramref name="to" /> 上面各多 r 层（瓦片自己的，或下方、上方邻居朝向这边的层）。
+      没有邻居的地方（网格里没有、缓冲为空，或在形状的面和邻域之外），光环按 <see cref="P:EasyEcs.ITileShape.Boundary" /> 处理：
+      <paramref name="border" />，或瓦片自己的边缘格子钳制或镜像（沿没有邻居的那条轴；隔着棱或角、那条轴被钳制的瓦片，从旁边的瓦片读）。
+      传入 <paramref name="mask" /> 时，记录哪些行有不为零的格子（按位），供 <see cref="M:EasyEcs.Tile`2.Rows(EasyEcs.TileStencil)" /> 使用。
+      在 <see cref="T:EasyEcs.GaussSeidelAttribute">[GaussSeidel]</see> 推进中，第一次之后的扫描保留自己写过的纹理
+      （这期间其他颜色的邻居不变）：这次调用什么都不拷。
+      <para>
+      O(层数 × (Width + 2r) × (Depth + 2r))；线程有了纹理之后零分配（纹理在线程第一次交换时按全部层分配）。纹理属于线程和这个瓦片类型：
+      线程下一次交换 <typeparamref name="TCell" /> 和 <typeparamref name="TTile" /> 时会覆盖它，所以一个方法对每种格子和网格只接收一个瓦片（EECS073）。
+      形状无效（EECS072）、实体的缓冲或某个非空邻居的缓冲比形状的格子少，或层不满足 0 ≤ from ≤ to &lt; Height 时抛出异常。
+      </para>
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Tile`2.Rows(EasyEcs.TileStencil)" source="dbe18edd78e2">
+    <summary>
+      读 <paramref name="reads" /> 的模板在交换过的层中必须计算的行，逐层、按顺序
+      （<c>foreach (var row in heat.Rows(TileStencil.Layer))</c>）：它读的行里（最远到光环宽度）有不为零格子的那些。
+      每访问一行、每层 O(1)。方法没有先交换瓦片的光环，或交换时没带掩码时抛出异常。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Tile`2.Write(EasyEcs.TileRow{`1})" source="aadb6f5cb45b">
+    <summary>
+      推进瓦片（<c>ref Tile</c> 参数）时，这一步中 <paramref name="row" /> 的格子，共 Width 个：第二个缓冲的这一行，
+      等每个瓦片都推进完就成为格子（Jacobi）；在 <see cref="T:EasyEcs.GaussSeidelAttribute">[GaussSeidel]</see> 推进中，
+      是纹理自己的这一行（交换过的层中的一行），后面的行和扫描会读它。写满这一行的每个格子：这一步没写的行之后为零。
+      O(1)；按值接收的瓦片抛出异常。
+    </summary>
+  </member>
 </doc>
+

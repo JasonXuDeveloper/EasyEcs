@@ -157,7 +157,7 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 ## 瓦片和光环（Tile、Halo） [#tile]
 
 瓦片是把网格切成一箱箱格子后的一个实体：一个实现 `ITile<TKey>` 的组件（形状和键），加上格子的 `DynamicBuffer<TCell>`。光环是围着它、
-宽 `Halo` 个格子的一圈，`Tile<TCell, TTile>.Pad()` 从邻居朝向它的边拷进来（MPI 的幽灵格子、CUDA 瓦片的 apron）。见[网格瓦片](/zh/docs/guide/grids)。
+宽 `Halo` 个格子的一圈，`Tile<TCell, TTile>.ExchangeHalo()` 从邻居朝向它的边拷进来（MPI 的幽灵格子、CUDA 瓦片的 apron）。见[网格瓦片](/zh/docs/guide/grids)。
 
 ## 向量循环（Vector loop） [#vector-loop]
 

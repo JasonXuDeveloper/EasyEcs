@@ -2243,7 +2243,7 @@ World 里需要这个单例（`world.SetEntityRandom(seed, 0)`），推进模拟
 
 [瓦片](/zh/docs/guide/grids#halo)（`ITileShape`）是 Width x Depth x Height 个格子，Depth 1 到 64（一层的活跃行是一个 64 位字），
 光环至少一个格子。光环从旁边瓦片朝向这边的格子拷来，所以在每条有邻居的轴上（它的 `Faces`）最多和瓦片一样长，边界镜像时每条轴都是如此：
-和 MPI 的幽灵格子宽度一样，不会比子区域更宽。规则读形状的常量成员；规则检查不了的形状，`Tile.Pad` 会抛出异常。
+和 MPI 的幽灵格子宽度一样，不会比子区域更宽。规则读形状的常量成员；规则检查不了的形状，`Tile.ExchangeHalo` 会抛出异常。
 
 ```csharp tab="报告" doccheck=alone,expect-EECS072
 // 沿 x 做四阶模板的一条 16 格的带：默认的面包括北和南，
@@ -2288,11 +2288,11 @@ public ref struct PressureSystem
     [ForEach(Parallel = true)]
     static void Step(Tile<Field, Strip> pressure, Tile<Field, Strip> velocity, Mut<DynamicBuffer<NextField>> next)
     {
-        var p = pressure.Pad();
-        var v = velocity.Pad();   // 同一张纹理：p 现在采样的是速度
+        pressure.ExchangeHalo();
+        velocity.ExchangeHalo();   // 同一张纹理：p 现在采样的是速度
         var into = next.Write().AsSpan();
         for (int x = 0; x < 16; x++)
-            into[x] = new NextField(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
+            into[x] = new NextField(pressure[x, 0, 0].Value - (velocity[x + 1, 0, 0].Value - velocity[x - 1, 0, 0].Value) * 0.5f);
     }
 }
 ```
@@ -2309,11 +2309,11 @@ public ref struct PressureSystem
     static void Step(Tile<Pressure, Strip> pressure, Tile<Velocity1D, Strip> velocity,
         Mut<DynamicBuffer<NextPressure>> next)
     {
-        var p = pressure.Pad();
-        var v = velocity.Pad();   // 每种格子类型一张纹理
+        pressure.ExchangeHalo();
+        velocity.ExchangeHalo();   // 每种格子类型一张纹理
         var into = next.Write().AsSpan();
         for (int x = 0; x < 16; x++)
-            into[x] = new NextPressure(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
+            into[x] = new NextPressure(pressure[x, 0, 0].Value - (velocity[x + 1, 0, 0].Value - velocity[x - 1, 0, 0].Value) * 0.5f);
     }
 }
 ```

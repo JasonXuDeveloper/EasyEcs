@@ -318,10 +318,10 @@ ArgumentOutOfRangeException: Outside the padded tile: a cell, row or layer past 
 InvalidOperationException: The tile was loaded without its mask (mask: false): it has no active rows
 ```
 
-- **层：**`Pad(from, to)` 要求 `0 <= from < to <= Height`。
+- **层：**`ExchangeHalo(from, to)` 要求 `0 <= from < to <= Height`。
 - **格子：**瓦片的缓冲要有 `Width × Depth × Height` 个格子；创建瓦片时就填到这个长度（[网格](/zh/docs/guide/grids)）。
 - **形状：**`ITileShape` 的宽、深（1 到 64）、高和光环对不上；分析器在声明处报告这个形状（[EECS072](/zh/docs/guide/analyzer#eecs072)）。
-- **超出加载后的瓦片：**游标或 `padded[x, y, z]` 读到了光环之外。让每个偏移都在 `Halo` 之内，或者声明更大的光环。
+- **超出加载后的瓦片：**游标或 `tile[x, y, z]` 读到了光环之外。让每个偏移都在 `Halo` 之内，或者声明更大的光环。
 - **没有掩码：**`Rows(...)` 走掩码里的活跃行；用 `mask: false` 加载的瓦片一行都没有。带掩码加载，或者自己走每一行
   （[高瓦片](/zh/docs/guide/grids#layers)）。
 

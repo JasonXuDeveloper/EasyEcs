@@ -115,8 +115,8 @@ sample is that loop: [SIMD where the data is a column](/en/docs/samples/voxel-se
 A grid whose next value is a function of its neighbors (water, light, heat) runs like a GPU draws. The grid is cut
 into tiles, one entity each: a component that is the tile's shape and key (`ITile<TKey>`) and a `DynamicBuffer<T>` of
 its cells. A `[ForEach]` method that takes a `Tile<TCell, TTile>` parameter is the shader; the generator finds the
-neighbors, declares the reads and keeps the method parallel. `tile.Pad()` copies the tile with a ring of its
-neighbors' edges into a texture of the thread (an MPI halo exchange), `padded.Rows(reads)` visits only the rows a
+neighbors, declares the reads and keeps the method parallel. `tile.ExchangeHalo()` copies the tile with a ring of its
+neighbors' edges into a texture of the thread (an MPI halo exchange), `tile.Rows(reads)` visits only the rows a
 stencil can change (a bit per row, found with `TrailingZeroCount`), `At(row).Load128` samples the cells around with
 vectors, and a commit system after the pass is the ping-pong. How to declare a tile, write the shader, commit and
 sleep the quiet tiles, with a full example: [grid tiles](/en/docs/guide/grids).
@@ -147,13 +147,13 @@ and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what th
 | Unity `NativeStream`, GPU stream compaction | an `Emit<T>` parameter: records per chunk, joined in row order into `Emitted<T>` | [Emit](/en/docs/guide/threading#emit) |
 | cuRAND Philox, a counter-based generator | `EntityRandom`: a pure function of (seed, entity, tick, stream) | [Random numbers](/en/docs/guide/threading#entity-random) |
 | Kokkos `RangePolicy`, Unity `IJobParallelForBatch` | `world.ForParallel(count, ref job)` with an `IForRange` / `IForSpan<T>` job | [ForParallel](/en/docs/guide/threading#for-parallel) |
-| MPI halo exchange (ghost cells) | `Tile<TCell, TTile>.Pad`: the tile padded with its neighbors' facing edges | [Grid tiles](/en/docs/guide/grids) |
+| MPI halo exchange (ghost cells) | `Tile<TCell, TTile>.ExchangeHalo`: the tile padded with its neighbors' facing edges | [Grid tiles](/en/docs/guide/grids) |
 | Burst auto-vectorization | vector loops of `[ForEach]` methods | [Vector loops](/en/docs/guide/systems#vector-loops) |
 | Burst `float4` / Unity.Mathematics by hand | a batch method with `Vector<T>` / `Vector128<T>` | [Batch methods](/en/docs/guide/systems#batch-methods) |
 | Burst `IJobParallelFor` batch count | `ChunkSize` | [Chunk size](/en/docs/guide/threading#chunk-rows) |
 | Burst Inspector | EECS055, and `SimdMode = SimdMode.Require` (EECS056) | [Analyzer](/en/docs/guide/analyzer#eecs055) |
 | GPU fragment shader, texture sampling | a `[ForEach]` method over a `Tile<TCell, TTile>`, `Load128` of the cells around | [Grid tiles](/en/docs/guide/grids) |
-| GPU stencil | `padded.Rows(reads)`: a bit per row, visited with `TrailingZeroCount` | [Grid tiles](/en/docs/guide/grids) |
+| GPU stencil | `tile.Rows(reads)`: a bit per row, visited with `TrailingZeroCount` | [Grid tiles](/en/docs/guide/grids) |
 | GPU ping-pong targets | two buffers, read one, write the other, commit | [Grid tiles](/en/docs/guide/grids#commit) |
 | Burst `FloatMode.Fast` | `[ForEach(FloatMode = FloatMode.Fast)]`: vector approximations and float sums in lane order | [Vector loops](/en/docs/guide/systems#float-mode) |
 

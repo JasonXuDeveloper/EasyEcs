@@ -189,7 +189,7 @@ the same number on any thread and in any row order. See [random numbers](/en/doc
 
 A tile is one entity of a grid cut into boxes of cells: a component implementing `ITile<TKey>` (its shape and key) and
 a `DynamicBuffer<TCell>` of its cells. The halo is the ring of cells around it, `Halo` cells wide, that
-`Tile<TCell, TTile>.Pad()` copies from the facing edges of its neighbors (MPI's ghost cells, a CUDA tile's apron).
+`Tile<TCell, TTile>.ExchangeHalo()` copies from the facing edges of its neighbors (MPI's ghost cells, a CUDA tile's apron).
 See [grid tiles](/en/docs/guide/grids).
 
 ## Vector loop [#vector-loop]

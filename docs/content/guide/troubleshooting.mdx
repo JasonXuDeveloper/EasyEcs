@@ -362,15 +362,15 @@ ArgumentOutOfRangeException: Outside the padded tile: a cell, row or layer past 
 InvalidOperationException: The tile was loaded without its mask (mask: false): it has no active rows
 ```
 
-- **Layers:** `Pad(from, to)` takes layers `0 <= from < to <= Height`.
+- **Layers:** `ExchangeHalo(from, to)` takes layers `0 <= from < to <= Height`.
 - **Cells:** a tile's buffer holds `Width × Depth × Height` cells; fill it to that length when the tile is created
   ([grids](/en/docs/guide/grids)).
 - **Shape:** the width, depth (1 to 64), height and halo of the `ITileShape` do not fit together; the analyzer reports
   the shape where it is declared ([EECS072](/en/docs/guide/analyzer#eecs072)).
-- **Outside the padded tile:** a cursor or `padded[x, y, z]` read reached past the halo. Keep every offset within
+- **Outside the padded tile:** a cursor or `tile[x, y, z]` read reached past the halo. Keep every offset within
   `Halo`, or declare a larger halo.
-- **Without its mask:** `Rows(...)` walks the active rows of the mask; a tile padded with `mask: false` has none. Pad
-  with the mask, or walk every row yourself ([tall tiles](/en/docs/guide/grids#layers)).
+- **Without its mask:** `Rows(...)` walks the active rows of the mask; a tile exchanged with `mask: false` has none.
+  Exchange with the mask, or walk every row yourself ([tall tiles](/en/docs/guide/grids#layers)).
 
 ## Why did my method not get a vector loop? [#no-vector-loop]
 

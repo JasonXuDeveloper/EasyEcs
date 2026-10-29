@@ -1,7 +1,7 @@
 <doc>
-  <member name="T:EasyEcs.TileCursor`2" source="f5aaebf2f8bb">
+  <member name="T:EasyEcs.TileCursor`2" source="5ac29709f25a">
     <summary>
-      带边瓦片在一行第一个格子处的位置（<see cref="M:EasyEcs.PaddedTile`2.At(EasyEcs.TileRow{`1})" />）：它周围的格子，一次一个或一个向量。
+      瓦片的纹理在一行第一个格子处的位置（<see cref="M:EasyEcs.Tile`2.At(EasyEcs.TileRow{`1})" />）：它周围的格子，一次一个或一个向量。
       偏移以格子计：dx 从 −r（行前第一个 halo 格子）到 Width + r − 1（行后最后一个），dy 和 dz 从 −r 到 r（2D 瓦片 dy 为 0），
       r 是形状的 <see cref="P:EasyEcs.ITileShape.Halo" />；一个向量的格子必须在行后最后一个 halo 格子处或之前结束。
       常量偏移由 JIT 检查，其他偏移用一次比较。

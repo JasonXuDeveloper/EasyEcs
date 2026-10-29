@@ -206,7 +206,7 @@ bit
 | `ref Reduce<T>` | A total over the rows into singleton `T : IReduction<T>` | Always by `ref` (else EECS002); the `Value` field is this chunk's partial result; the combined result replaces `T` ([reductions](/en/docs/guide/threading#reductions), [EECS057](/en/docs/guide/analyzer#eecs057)) |
 | `Emit<T>` | Records the pass appends, by value: `Add(record)` / `AddRange(records)` | Joined in row order into singleton `Emitted<T>` (`Items`, a `DynamicBuffer<T>`) when the pass ends; a later system applies and clears them ([Emit](/en/docs/guide/threading#emit), [EECS070](/en/docs/guide/analyzer#eecs070)) |
 | `in EntityRandom` | The singleton of deterministic random numbers | `random.Float(entity.Id, stream)`, `Range`, `Chance`, `Bits`: the same on any thread count ([EntityRandom](/en/docs/guide/threading#entity-random), [EECS071](/en/docs/guide/analyzer#eecs071)) |
-| `Tile<TCell, TTile>` | A grid tile's cells with its neighbours' edges | `tile.Pad()`, then `Rows` and `At(row).Load128`; parallel ([grid tiles](/en/docs/guide/grids)) |
+| `Tile<TCell, TTile>` | A grid tile's cells with its neighbours' edges | `tile.ExchangeHalo()`, then `Rows` and `At(row).Load128`; parallel ([grid tiles](/en/docs/guide/grids)) |
 | `Mut<T>` | A component the method writes on some rows | `Value` reads; `Write()` and a `SetIfChanged(value)` that changed it stamp the row; a write for the scheduler |
 | Any other type (outside a system) | A value the caller passes to the entry point | `ref int count`, `in Settings s` |
 
