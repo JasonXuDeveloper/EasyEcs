@@ -54,7 +54,7 @@ internal sealed partial class Kernel
         var paths = StructPaths(op.Type) ?? throw new Unsupported($"'{Text(op)}' is a {op.Type?.ToDisplayString()}, not a struct of lanes of {_size} bytes");
         switch (op)
         {
-            case IConversionOperation { Conversion.IsIdentity: true } c:
+            case IConversionOperation c when Keeps(c):
                 return StructOf(c.Operand);
             case IConversionOperation { Operand: IDefaultValueOperation } c when SymbolEqualityComparer.Default.Equals(c.Type, c.Operand.Type) || c.Operand.Type == null:
                 return Zeros(paths); // 'c ? new T(...) : default': the default literal, typed by the other arm
@@ -116,6 +116,9 @@ internal sealed partial class Kernel
                 }
                 return Each(paths.Length, f => $"{V}.ConditionalSelect({As(_mask, Elem(paths[f][paths[f].Length - 1].Type), condition)}, {a[f]}, {b[f]})");
             }
+            case ISwitchExpressionOperation select: // Kernel.Switches.cs: lane by lane, the first arm that matches
+                return Switch(select, StructOf, (lanes, chosen, otherwise) =>
+                    Each(paths.Length, f => $"{V}.ConditionalSelect({As(_mask, Elem(paths[f][paths[f].Length - 1].Type), lanes)}, {chosen[f]}, {otherwise[f]})"));
             default:
                 throw Not(op);
         }

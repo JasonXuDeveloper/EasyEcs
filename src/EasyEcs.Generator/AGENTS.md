@@ -150,7 +150,13 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              lane or the entity's id (Code.VectorTail: every row takes the vector form);
                              Kernel.Streams.cs: the columns a loop writes without reading (WriteOnly, read off the
                              loop's text: Code.Streamed, FlatCode.Streamed) and the streaming loop's text (Streaming:
-                             their loads dropped, their stores StreamingStores.Store)
+                             their loads dropped, their stores StreamingStores.Store);
+                             Kernel.Switches.cs: patterns and switches as lane masks (relational, constant, and / or /
+                             not, property, positional, tuple, type and var patterns; a switch expression first match
+                             wins from its arms' masks, the lanes no arm matches sent to the method; a switch statement's
+                             sections under the lanes their first matching label takes, the default section's wherever
+                             it stands), their reasons (a subject no lane holds, a list pattern, a switch over a call on
+                             a struct: the split), and the inliner's lowering of a switch statement that returns
 EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045 and EECS047-051: calls and declarations that compile but do not
                              do what they say (a job's WriteMask, a dropped copy, SetIfChanged that cannot compare, calls
                              a pass refuses, an index added to while walked, a record key that prints itself, a sliced

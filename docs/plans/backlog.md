@@ -267,7 +267,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        +3 % were noise: here 0.93-1.09x and 0.96-1.02x in every build, including a control whose path is base's
        (base + the copy branch's World fields). Decision record and changelog line in the agent's report, for the
        docs pass.
-8j. [ ] **Switches and patterns become masks** (owner, 2026-10-29: "swtich和pattern matching都需要留意吧"): today
+8j. [x] **Switches and patterns become masks** (owner, 2026-10-29: "swtich和pattern matching都需要留意吧"): today
        `is` patterns over a lane (relational, constant, `and` / `or` / `not`) already vectorize (`Kernel.Pattern`,
        `WidePattern`), but a switch expression, a switch statement, a property pattern (`p is { X: > 0, Y: < 5 }`),
        a pattern over a struct (`v is (> 0, > 0)`), and a helper the call inliner meets with a switch in it keep the
@@ -283,6 +283,15 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        proof case (a call on a struct, inlined, then its switch lowered). Proof: generated text and vector == scalar
        tests per form (NaN, first-match order, a `when` guard, a default arm that is not last), Tier1 with no call
        and no branch in the loop, a KernelBenchmark case against the scalar loop, ARM64 parity.
+       Done on feat-switch-masks (Kernel.Switches.cs): the forms above lower as described; a switch statement's
+       sections may also return, and a non-exhaustive switch expression sends the lanes no arm matches to the method
+       (it throws as written). KernelBenchmark.Grade, generated / scalar: 0.133 and 0.125 at 1,000 rows, 0.024 and
+       0.022 at 100,000 (two rounds, AVX-512, 0 B); its Tier1 loop has no call and no branch but the back edge.
+       Tests: 3282 normal, 3281 with AVX off, 3282 with AVX-512 off, all passing. Zombies' Chase stays scalar:
+       Nearby is a ref struct reading a DynamicBuffer through a Lookup, which the inliner refuses, so EECS055 names
+       the split (Nearby.Trail into a pass of its own, a field of 4 bytes); after it the method still reads
+       Lookup<Position> (vector lookups need SimdMode.Require), runs in parallel, and calls Vector2.Length (an
+       order of adds not proven the scalar code's). ARM64 parity not run here (no ARM64 machine).
 9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
        ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
        `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the
