@@ -293,6 +293,16 @@ tools/bench.sh GeneratorBenchmark
   component of another assembly loses its lanes.
 - A stage that reads method bodies catches its own exceptions and turns them into that method's reason (Kernel
   does): one exception escaping a stage drops every generated file of the project (CS8785, then hundreds of CS7036).
+  Catch everything but `OperationCanceledException`, word it through `Kernel.FailedTo(what, e)`, and keep the plain
+  form (8f: chases, pair cutoffs, fusion sides).
+- A stage that maps operations to the method's parameters checks the parameter belongs to the method: local
+  functions and lambdas in the body have their own parameters, whose ordinals collide (`Chases.Owns`). A partial
+  method's body binds the implementing part's parameters, other symbols than the declaring part's: a map keyed by
+  parameter symbol holds both parts (`PairForm.ReadCutoff`).
+- When the generator and the analyzer share a check, both call one function that returns the reason; two calls drift
+  (EECS106 ignored the cutoff failures the generator fell back on).
+- Comparing generated output: build with `EmitCompilerGeneratedFiles` and `--no-incremental` into a clean folder;
+  the generated folder keeps files of earlier builds.
 - The analyzer reports what the generator skips (same `Symbols` / `Kernel` function); a code fix moves hand-written
   code to the form.
 - A benchmark of the generated form against the hand-written one (`ForEntityBenchmark`, `ConsumeBenchmark`,

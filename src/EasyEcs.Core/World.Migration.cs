@@ -360,6 +360,9 @@ public sealed partial class World
 
     // Rows [first, +count) of a source table, as one run of new rows; moving ones (MoveEntities) leave their cleanup
     // components behind; taken ones (a load's private world) give up their buffer lists (Archetype.CopyRun).
+    // Called once per run, not per row: inlined (with CopyRun) into both call sites of MoveEntities, it made that
+    // method's Tier1 code 3.3x larger and the move 1.2x slower (MigrationBenchmark Move).
+    [MethodImpl(MethodImplOptions.NoInlining)]
     private void ArriveRows(Archetype table, int first, int count, bool moving = false, bool take = false)
     {
         var target = TableFor(table);

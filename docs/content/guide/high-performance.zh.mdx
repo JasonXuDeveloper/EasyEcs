@@ -92,7 +92,7 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
 
 下一个值由邻居决定的网格（水、光照、热量）可以像 GPU 绘制那样运行。网格切成瓦片，每块一个实体：一个组件是瓦片的形状和键
 （`ITile<TKey>`），一个 `DynamicBuffer<T>` 装它的格子。接收 `Tile<TCell, TTile>` 参数的 `[ForEach]` 方法就是着色器；生成器找邻居、
-声明读取，并让方法保持并行。`tile.Pad()` 把瓦片连同一圈邻居的边拷进线程的一张纹理（MPI 的光环交换），`padded.Rows(reads)`
+声明读取，并让方法保持并行。`tile.ExchangeHalo()` 把瓦片连同一圈邻居的边拷进线程的一张纹理（MPI 的光环交换），`tile.Rows(reads)`
 只访问模板可能改变的行（每行一位，用 `TrailingZeroCount` 找到），`At(row).Load128` 用向量采样周围的格子，这一遍之后的提交系统就是乒乓缓冲。
 怎样声明瓦片、写着色器、提交、让安静的瓦片休眠，以及完整例子：[网格瓦片](/zh/docs/guide/grids)。
 
@@ -120,13 +120,13 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
 | Unity 的 `NativeStream`、GPU 的流压缩 | `Emit<T>` 参数：每块一份记录，按行的顺序合并进 `Emitted<T>` | [发出记录](/zh/docs/guide/threading#emit) |
 | cuRAND 的 Philox，基于计数器的生成器 | `EntityRandom`：（种子、实体、tick、流）的纯函数 | [随机数](/zh/docs/guide/threading#entity-random) |
 | Kokkos 的 `RangePolicy`、Unity 的 `IJobParallelForBatch` | `world.ForParallel(count, ref job)` 配 `IForRange` / `IForSpan<T>` job | [ForParallel](/zh/docs/guide/threading#for-parallel) |
-| MPI 光环交换（幽灵格子） | `Tile<TCell, TTile>.Pad`：瓦片四周填上邻居朝向它的边 | [网格瓦片](/zh/docs/guide/grids) |
+| MPI 光环交换（幽灵格子） | `Tile<TCell, TTile>.ExchangeHalo`：瓦片四周填上邻居朝向它的边 | [网格瓦片](/zh/docs/guide/grids) |
 | Burst 自动向量化 | `[ForEach]` 方法的向量循环 | [向量循环](/zh/docs/guide/systems#vector-loops) |
 | Burst 里手写 `float4` / Unity.Mathematics | 用 `Vector<T>` / `Vector128<T>` 的批处理方法 | [批处理方法](/zh/docs/guide/systems#batch-methods) |
 | Burst `IJobParallelFor` 的 batch count | `ChunkSize` | [`ChunkSize`](/zh/docs/guide/threading#chunk-rows) |
 | Burst Inspector | EECS055，以及 `SimdMode = SimdMode.Require`（EECS056） | [分析器](/zh/docs/guide/analyzer#eecs055) |
 | GPU 片元着色器、纹理采样 | 接收 `Tile<TCell, TTile>` 的 `[ForEach]` 方法，用 `Load128` 读周围的格子 | [网格瓦片](/zh/docs/guide/grids) |
-| GPU 模板缓冲 | `padded.Rows(reads)`：每行一位，用 `TrailingZeroCount` 访问 | [网格瓦片](/zh/docs/guide/grids) |
+| GPU 模板缓冲 | `tile.Rows(reads)`：每行一位，用 `TrailingZeroCount` 访问 | [网格瓦片](/zh/docs/guide/grids) |
 | GPU 乒乓渲染目标 | 两个缓冲，读一个写一个，再提交 | [网格瓦片](/zh/docs/guide/grids#commit) |
 | Burst 的 `FloatMode.Fast` | `[ForEach(FloatMode = FloatMode.Fast)]`：向量近似，浮点合计按 lane 的顺序相加 | [向量循环](/zh/docs/guide/systems#float-mode) |
 

@@ -336,7 +336,7 @@ Markdown copy of every page.
   a few heavy rows ([threading](https://ecs.xgamedev.net/en/docs/guide/threading#reductions)). EECS060 and EECS061
   report parallel code that races, EECS086 to EECS089 a hand-written version of these parameters.
 - **Grids shaded like a GPU draws.** A grid cut into tiles is shaded by a method that takes a `Tile<TCell, TTile>`:
-  the generator finds the neighbors, `Pad` adds their edges (the halo, as wide and with as many neighbors as the
+  the generator finds the neighbors, `ExchangeHalo` adds their edges (the halo, as wide and with as many neighbors as the
   stencil reads), and quiet tiles sleep until an edge beside them changes; `IDirectIndexed<TKey>` finds a tile by one
   array read ([grids](https://ecs.xgamedev.net/en/docs/guide/grids)).
 - **Declare it, the generator writes it.** `[Sum]`, `[Min]`, `[Max]` and the others on a singleton's fields declare a

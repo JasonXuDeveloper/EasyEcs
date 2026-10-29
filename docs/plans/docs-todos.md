@@ -1471,13 +1471,72 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
 - The 4-round TileStencil / TileActive / TileSettle and the 2-round TileWoken final numbers were cut off by a worker
   restart; the bench sync runs them again.
 
+## feat-stage-catch (8f)
+
+- guide/analyzer.mdx + zh, EECS055: a switch expression now names itself and its fix. Over a call on a struct
+  (VoxelServer's Chase: `new Nearby(...).Trail(...) switch`): "it switches over a call on struct {T} ('...'), which
+  runs row by row, and a vector loop has no switch: call {T}.{M} in a [ForEach] method of its own that stores the
+  result in a component, and switch over that field here with conditional expressions ('v == A ? a : v == B ? b :
+  c')"; otherwise "it has a switch expression ('...'), which a vector loop has no form of: write it as conditional
+  expressions". Both fixable (Warning under SimdMode.Require).
+- guide/analyzer.mdx + zh: the generator's own failures, each reported as a bug with the stage named ("the generator
+  failed to {what} (Exception: message Please report this as an EasyEcs bug)"), and what the method keeps:
+  - EECS055 (and EECS097 for a lambda pass): "failed to read its reads of other entities": the plain job, no
+    prefetching twin;
+  - EECS106: "failed to read its cutoff test": every pair runs; EECS106 now also reports a cutoff the pass cannot
+    compute once ("its cutoff is not a value the pass can read once: ..."), which the analyzer missed before;
+  - EECS093: "failed to read what M reads, writes and filters": the two passes keep their own walks.
+- guide/neighbors (pair methods) + zh: a partial pair method works (the attributes on the defining part, the body on
+  the implementing one); it used to drop the project's generated output.
+- guide/prefetch (or the Lookup page) + zh: reads through a Lookup<T> or an index of a local function's own
+  parameters are not the method's chases (they used to crash the generator); only the method's own in components and
+  lookups are prefetched.
+- decisions.mdx + zh, next free D: "Every body stage catches its exceptions": Kernel, Chases, PairForm.ReadCutoff and
+  FusionSide each turn an exception into a reason (Kernel.FailedTo) and the plain form, since one throwing stage drops
+  every file of the project (CS8785, then hundreds of errors in user code); the analyzer calls the same function, so
+  what the generator skips it reports.
+
+## feat-switch-masks (8j)
+
+- guide/vector-loops (the page on what a [ForEach] method's vector loop takes) + zh: switches and patterns are lane
+  masks now. A switch expression whose arms are patterns over lanes (numbers, enums, bools, structs of them, tuples of
+  them) is first match wins: each arm's mask (a `when` guard and-ed in) selects its value over the arms after it; `_`
+  or any arm that matches every lane ends it; a row no arm matches goes to the method, which throws
+  SwitchExpressionException as written (no silent default). A switch statement runs each section under the lanes its
+  first matching label takes (a `default` section wherever it stands takes the lanes no other label took); a section
+  may return. Property (`p is { X: > 0, Y: < 5 }`), positional (`v is (> 0, > 0)`: a record's Deconstruct, a
+  Deconstruct that only sets out parameters from fields, the System.Numerics vectors', a tuple's elements), type and
+  `var` patterns over value types; a constant NaN pattern matches NaN (`float.NaN => ...`), as C# tests it. Helpers
+  with a switch expression or a switch statement (returns in its sections) are inlined. Show one example with its
+  generated loop (the "generator writes" tab).
+- guide/analyzer.mdx + zh, EECS055: 8f's two switch texts go ("write it as conditional expressions"). The reasons now:
+  - "it switches over '{x}', a {T}, which no vector lane holds: a vector loop matches numbers, enums and bools of
+    {sizes} bytes, structs of them and tuples of them" (and "it tests '{x}', ..." for `is`); a number of another
+    size: "it switches over '{x}', a byte, not a lane type of 4 or 8 bytes";
+  - "it matches a list pattern ('{p}'), which tests the elements of a list: a vector loop tests lanes, not lists";
+  - "pattern '{p}' declares '{v}' as a {T}, which no vector lane holds: name the value it tests, or a field of it,
+    instead";
+  - "it jumps from one switch section to another ('goto case ...'): a vector loop runs each section on its own lanes"
+    and "it leaves a switch section before its end ('break;')" (cold branches in a method that does not change
+    structure; the reason in one that does);
+  - "its switch expression ('...') gives a value twice as wide as the lanes: assign it to a local of its own first"
+    (lanes of two sizes);
+  - over a call on a struct the loop cannot inline (VoxelServer's Chase): "it switches over a call on struct {T}
+    ('...'), which runs row by row: call {T}.{M} in a [ForEach] method of its own that stores the result in a
+    component, and switch over that field here" (fixable: Warning under SimdMode.Require); where the call gives a
+    number of another lane size, "... stores the result in a component field of 4 or 8 bytes (not a byte) ..."
+    (VoxelServer's Chase says this now; its other blockers are listed in the 8j report and backlog item 8j).
+  - EECS055 inliner reasons: "which has a switch" is gone; "which jumps from one switch section to another (goto
+    case)" is new.
+- performance page / KernelBenchmark table + zh: the Grade rows (GradeScalar, GradeGenerated) once synced.
+- decisions.mdx + zh, next free D: the record drafted in the 8j report ("Switches and patterns are lane masks").
+- changelog (coming version, ### Performance or ### New) + zh: the line from the 8j report.
+- skills/easyecs/SKILL.md (public skill): has no switch advice today; if the docs pass lists what vectorizes, add
+  "switches and patterns over lanes vectorize; list patterns and switches over strings or classes do not".
+
 ## feat-tile-reads: tile loads checked once per loop (nothing user-visible in the API)
 
 - grids guide (en + zh): a column loop `for (int x = 0; x < TTile.Width; x += 4) ... c.Load128<T>(x + k)` gets one
   check per loop; say which loops qualify (an int from a constant, a constant or the shape's extent as the bound, a
   positive step, x written nowhere else, no lambda or local function around the load) and that other loads stay
   checked; the decision record (draft in the agent's report) next to D-tiles.
-- Pre-existing, found by the gates (not this branch): DocCheck fails 16 fences of guide/grids and guide/analyzer
-  (en + zh) on `Tile.Pad` (renamed `ExchangeHalo`); ApiDocs reports 26 Chinese entries stale or missing after the
-  tiles merge (Columns, GaussSeidelAttribute, Tile.At / ExchangeHalo / Rows / Write / the indexer, PaddedTile removed).
-

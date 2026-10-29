@@ -50,6 +50,24 @@ public partial struct PairTotal : ISingletonComponent
     public long Pairs;
 }
 
+/// <summary>
+/// A partial pair method whose cutoff is a singleton: its test names the implementing part's parameters, which the
+/// generator looked up among the declaring part's and threw on (KeyNotFoundException: CS8785, every file dropped).
+/// </summary>
+[EcsSystem]
+public ref partial struct PartialPairCountSystem
+{
+    [ForEach]
+    static partial void Count(in PairSpot p, ref PairCount near, [Neighbor] in PairSpot q, in PairReach reach);
+
+    static partial void Count(in PairSpot p, ref PairCount near, in PairSpot q, in PairReach reach)
+    {
+        float dx = q.X - p.X;
+        float dy = q.Y - p.Y;
+        if (dx * dx + dy * dy < reach.Value * reach.Value) near.Value++;
+    }
+}
+
 /// <summary>Pair methods ([Neighbor]): what the tests run against the pairs a loop over both sides would visit.</summary>
 public static class Neighbors
 {
@@ -423,6 +441,14 @@ public class NeighborTests
             int expected = spots.Count(s => (s.X - p.X) * (s.X - p.X) + (s.Y - p.Y) * (s.Y - p.Y) < 0.75f * 0.75f);
             Assert.That(item.Component2.Value, Is.EqualTo(expected));
         }
+
+        // A partial method: the same counts (its pass reads the cutoff from the singleton too).
+        var counts = new Dictionary<EntityId, int>();
+        foreach (var item in world.Query<PairCount>()) counts[item.Entity.Id] = item.Component1.Value;
+        foreach (var e in Entities<PairSpot>(world)) e.Set(new PairCount());
+        world.AddSystem<PartialPairCountSystem>();
+        world.Update();
+        foreach (var item in world.Query<PairCount>()) Assert.That(item.Component1.Value, Is.EqualTo(counts[item.Entity.Id]));
     }
 
     [Test]

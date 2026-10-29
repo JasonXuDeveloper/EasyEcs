@@ -29,7 +29,7 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
 - **Lifecycle edges**: stale and recycled handles (version checks), retired entities (the Retired tag + cleanup
   components), calls during a pass (`ThrowIfIterating`, tombstones, pass count), parallel stages (shared gate),
   reentrancy, exceptions in the middle of a pass. Exception messages name the call that was refused.
-- **Hot paths**: allocations (0 B allocation tests), bounds checks, inlining (`NoInlining` cold paths), cache lines
+- **Hot paths**: allocations (0 B allocation tests), bounds checks, inlining (`NoInlining` cold paths and per-run helpers called from several sites, `audit-perf` "Check the inlining before crediting a rewrite"), cache lines
   (hot structs power-of-two sized, contended fields padded apart), a lookup done twice (`Has` then `Get`).
 - **Word loops** (any walk of a table by 64-row words: batch, masked, structural, bulk, query enumerators): a word
   without a passing row jumps with `RowFilter.NextPassing`, a run of whole words with `WholeEnd`, a Changed filter's

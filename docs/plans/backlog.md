@@ -31,9 +31,7 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Arrive runs** (item 8i, branch `feat-arrive-runs`): MoveEntities' gain from feat-copy-entities' ArriveRows
-      changes, without CopyEntities.
-- [x] **Tile reads checked once** (owner, 2026-10-29: "先合并，再修读取"; branch `feat-tile-reads`, merge waits for the owner on the Laplacian 512 regression below):
+- [ ] **Tile reads checked once** (owner, 2026-10-29: "先合并，再修读取"; branch `feat-tile-reads`, not merged: the Laplacian 512 regression below is being split and root-caused):
       the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop with one
       check per loop folded by the JIT and a zero-extended index (no public API); TileSteps.Begin reads the thread's
       frame once per tile, the row walk stays in registers, a Jacobi row skips its span check. Tier1: the blur's
@@ -44,8 +42,10 @@ names the skill:
       1-4, +7.2 % at 1 thread and +3.9 % at 4 threads in 4 more rounds of the ping-pong alone, unexplained (the blur
       at 512 is 2-4 % faster) and still at or below hand there (0.90x);
       VoxelServer, WorldSimulation, BattleServer within noise; 0 B.
+- [ ] **Switches and patterns become masks** (item 8j, branch `feat-switch-masks`).
+- [ ] **Constructors and helpers of another assembly** (item 8g, branch `feat-foreign-bodies`).
 
-Merged since the last update: symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
+Merged since the last update: ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
 at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
 vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the owner's M4: no case slower past
@@ -224,10 +224,15 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 8d. [x] **Bug: EECS055 reason text** (`voxel-rewrite.md` GA7): VoxelServer's Chase reports `local 'cell' is a ??`
        (the type name missing); Float reports `LookupExtensions.TryFind, defined in another assembly` where the reason is
        that a key probe has no vector form. Fix the text, a test per case.
-8f. [ ] **The other body stages catch their exceptions** (fix-kernel-foreign's report): `Chases.Of`, `PairModel.Create`
-       and `FusionSide.Of` still drop the project's output when they throw; each needs a safe fallback model (the
-       method's plain job) and a reason, like Kernel. Also a clearer EECS055 reason for a switch expression over a
-       struct call (VoxelServer's Chase reads "'new Nearby(...).Trail(cell.X, cell.Z) s...' is not supported").
+8f. [x] **The other body stages catch their exceptions** (fix-kernel-foreign's report; built on `feat-stage-catch`,
+       waiting for merge): `Chases.Of`, `PairModel.Create` and `FusionSide.Of` dropped the project's output when they
+       threw. Two real crashes fixed at the root: reads through a local function's (or a lambda's local function's) own
+       Lookup taken as the method's chases (their ordinals past the method's parameters), a partial pair method's
+       singleton cutoff (the implementing part's parameters). Each stage now catches what is left and falls back to
+       the plain form with a reason the analyzer reports through the same call (`Kernel.FailedTo`): no prefetching
+       twin (EECS055 / EECS097), every pair (EECS106 through `PairForm.ReadCutoff`, which now also reports a cutoff the
+       pass cannot compute), no fusion (EECS093). EECS055 names a switch expression and, over a call on a struct
+       (VoxelServer's Chase), the split. Docs to-dos in docs-todos "feat-stage-catch".
 8g. [ ] **Constructors and helpers of another assembly, read from what its generator recorded** (found at the
        fix-kernel-foreign merge; owner, 2026-10-28: "有没有别的办法解决这种问题呢"): a component in a contracts
        assembly (HotReload's `Position(float X, float Y)`) makes `new Position(x, y)` an EECS055 warning, because
@@ -259,11 +264,40 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        with 1 component on sorted rows, but 0.92-1.09x with 1 component on scattered rows (MultiWorld's case), and
        `Border.cs` grows by 5 lines instead of shrinking. Fails "never slower" and "less code"; what would change the
        verdict is in `owner-review.md`.
-8i. [ ] **MoveEntities 0.82-0.86x from the ArriveRows changes of feat-copy-entities** (8h's regression A/B, 4 rounds,
-       every round faster): take the shared ArriveRows part (run copies per source table, `Archetype.CopyRun`, the
-       column-by-bit map, `Gather`) without CopyEntities onto its own branch, A/B Migration / Prefab / WorldSimulation
-       / BattleServer again (8h saw WorldSimulation 10k +1-6 % and SaveRecord +3 % in every round, unexplained), ship if
-       Move keeps its gain and nothing else moves.
+8i. [x] **MoveEntities 0.82-0.84x: `ArriveRows` kept out of its callers** (branch `feat-arrive-runs`, unmerged).
+       The gain of feat-copy-entities was the JIT's inlining, not its copy code: base inlined `ArriveRows` with
+       `CopyRun` into both call sites of `MoveEntities` (Tier1 11.9 KB, 692 stack references); the copy branch's
+       wider signature changed that. `[MethodImpl(NoInlining)]` on `ArriveRows` alone: 3.7 KB, 136, Move
+       0.79-0.84x in 8 of 8 rounds; the rewrite of its row loop alone 0.98-1.00x (a wash, dropped); `Gather`, the
+       column-by-bit map and `Remaps` serve only copies (not ported). 8h's WorldSimulation 10k +1-6 % and SaveRecord
+       +3 % were noise: here 0.93-1.09x and 0.96-1.02x in every build, including a control whose path is base's
+       (base + the copy branch's World fields). Decision record and changelog line in the agent's report, for the
+       docs pass.
+8j. [x] **Switches and patterns become masks** (owner, 2026-10-29: "swtich和pattern matching都需要留意吧"): today
+       `is` patterns over a lane (relational, constant, `and` / `or` / `not`) already vectorize (`Kernel.Pattern`,
+       `WidePattern`), but a switch expression, a switch statement, a property pattern (`p is { X: > 0, Y: < 5 }`),
+       a pattern over a struct (`v is (> 0, > 0)`), and a helper the call inliner meets with a switch in it keep the
+       method scalar, and 8f's EECS055 text tells users to rewrite them by hand. Per the owner's rule the generator
+       lowers the plain form: a switch expression whose arms are patterns over lanes becomes first-match-wins
+       selects (each arm's mask and not-yet-matched, `ConditionalSelect` from the last arm up; `_` the default; a
+       guard `when` and-ed in); a switch statement whose sections only assign (no loop, no jump past the switch)
+       becomes the same masked writes as an if / else chain; property and positional patterns over a struct's
+       fields become the fields' compares; a type pattern over a value type is a constant. Left scalar, each with
+       its own reason: list patterns, a `var` / declaration pattern whose variable is read later as an object, a
+       switch over a non-lane (string, class), a section with a loop or a `goto case`. EECS055 then names only
+       those; 8f's "write it as conditional expressions" text goes. VoxelServer's Zombies `Trail(...) switch` is the
+       proof case (a call on a struct, inlined, then its switch lowered). Proof: generated text and vector == scalar
+       tests per form (NaN, first-match order, a `when` guard, a default arm that is not last), Tier1 with no call
+       and no branch in the loop, a KernelBenchmark case against the scalar loop, ARM64 parity.
+       Done on feat-switch-masks (Kernel.Switches.cs): the forms above lower as described; a switch statement's
+       sections may also return, and a non-exhaustive switch expression sends the lanes no arm matches to the method
+       (it throws as written). KernelBenchmark.Grade, generated / scalar: 0.133 and 0.125 at 1,000 rows, 0.024 and
+       0.022 at 100,000 (two rounds, AVX-512, 0 B); its Tier1 loop has no call and no branch but the back edge.
+       Tests: 3282 normal, 3281 with AVX off, 3282 with AVX-512 off, all passing. Zombies' Chase stays scalar:
+       Nearby is a ref struct reading a DynamicBuffer through a Lookup, which the inliner refuses, so EECS055 names
+       the split (Nearby.Trail into a pass of its own, a field of 4 bytes); after it the method still reads
+       Lookup<Position> (vector lookups need SimdMode.Require), runs in parallel, and calls Vector2.Length (an
+       order of adds not proven the scalar code's). ARM64 parity not run here (no ARM64 machine).
 9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
        ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
        `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the
@@ -271,7 +305,9 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        0 B steady state. The form carries a per-tick budget (`voxel-rewrite.md` GA9: VoxelServer caps requests per
        tick, `Rules.MaxRequests`; the owner wants the cap kept).
 10. [x] **Streaming stores in generated loops, gated** (merged 1b1aa12: Predict 0.86-0.94x, Mix 0.90-0.92x past the
-       cache with the reader counted in, gate off inside; ARM64 STNP unmeasured) (owner, 2026-10-27; `microarch.md` M3, prototype
+       cache with the reader counted in, gate off inside; the owner's M4 run, 2026-10-29, one round, 0 B: Auto is the
+       fastest of Auto / Off / On in all 8 cases, 0.80-0.87x of Off at 1M rows and 0.75-0.87x at 16M, so STNP stays gated
+       the same way on ARM64) (owner, 2026-10-27; `microarch.md` M3, prototype
        `Locality/Streams.cs`): non-temporal stores for a column the method writes without reading, only when the
        column's bytes are past `CacheSizes.LastLevel`. Measured in a real world with the next pass reading that column
        counted in; ships when faster in both rounds and never slower (StreamingStoreBenchmark: 1.47x past the cache,
@@ -395,8 +431,15 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       generated `__permN`) tests the class's initialization every iteration and spills around the helper call. The
       first fix (vectors of literals, 2206090) was reverted with the NEON `fixed` removal (cf43ac4) because the M4
       measured every multi-field loop 25-58% slower (`audit-vector-loops`, "Read the loop the JIT wrote"). Next:
-      bisect the two on the M4 (owner runs `KernelBenchmark` `*Generated` at cf43ac4 vs its parent), then try the
-      fix per path (literals only where AOT pays; or the table read into a local before the loop) and land it only
+      bisect the two on the M4. cf43ac4 vs its parent fc527d5 (owner's M4 run, 2026-10-29, one round, 0 B): the
+      `fixed` removal alone costs 10-21% at 100k on the deinterleaving loops (Move2 17.0 -> 19.1 us, Move3 26.3 ->
+      29.5, Move4 34.6 -> 40.2, Step 20.7 -> 25.1, Integrate 8.7 -> 10.0), Wave, Share, Seek and Brighten flat: real,
+      but short of 25-58%. 2206090 (literals) on top, same run conditions: mixed, not uniform. Glide (NEON TBL
+      lookups) 22.3 -> 23.1 -> 28.9 us at 100k (170 -> 183 -> 206 ns at 1k), Seek 69.3 -> 73.4 -> 76.4 us; faster:
+      Wave 240 -> 217 us, Optional 34.7 -> 31.3 us, Step at 1k 270 -> 210 ns; Move2/3/4 no further change. The
+      revert's 1k figures (Move2 179 ns, Move3 264 ns) did not reproduce (146 / 202 ns): that run was noisy.
+      Decision: NEON LD/ST keep `fixed` (as HEAD has); literals return only where they do not read through a NEON
+      TBL table (x64 permutes, lane masks), NEON lookup tables stay hoisted statics. Then try the fix per path (literals only where AOT pays; or the table read into a local before the loop) and land it only
       with JIT x64, JIT ARM64 (M4) and Native AOT numbers.
 - [ ] **The inliner's limit, checked instead of assumed** (owner, 2026-10-26: "is a fixed JIT budget right when SIMD
       width differs?"). Answer: `MAX_INL_LCLS = 32` is RyuJIT's implementation constant with no target condition

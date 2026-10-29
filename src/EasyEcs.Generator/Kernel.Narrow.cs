@@ -103,7 +103,7 @@ internal sealed partial class Kernel
         }
         switch (op)
         {
-            case IConversionOperation { Conversion.IsIdentity: true } c:
+            case IConversionOperation c when Keeps(c):
                 return WideOf(c.Operand);
             case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when IsInt(c.Type) && (IsLane(c.Operand.Type) || PairLane(c.Operand)):
                 return FromLane(c.Operand);
@@ -131,6 +131,8 @@ internal sealed partial class Kernel
                 string condition = Hold(Expr(t.Condition), t.Condition.Type!);
                 return Select(condition, WideOf(t.WhenTrue), WideOf(whenFalse));
             }
+            case ISwitchExpressionOperation select when IsInt(select.Type): // Kernel.Switches.cs
+                return Switch(select, WideOf, Select);
             case IInvocationOperation { Instance: null } call when IsMath(call.TargetMethod) && IsInt(call.TargetMethod.ReturnType)
                 && call.TargetMethod.Parameters.All(p => IsInt(p.Type)):
                 return WideCall(call);
@@ -349,7 +351,7 @@ internal sealed partial class Kernel
         throw new Unsupported($"'{Text(op)}' compares ints that {Bits}-bit lanes do not hold");
     }
 
-    /// <summary><c>value is pattern</c> of an int, as comparisons with its constants.</summary>
+    /// <summary>A relational or constant pattern over an int as a comparison with its constant (<see cref="Match"/> combines them).</summary>
     private string WidePattern(Wide value, IPatternOperation pattern, IOperation op)
     {
         Wide Value(IOperation constant) => constant.ConstantValue is { HasValue: true, Value: int c } ? Constant(c) : throw Not(op);
@@ -359,10 +361,6 @@ internal sealed partial class Kernel
                 return WideCompare(relational.OperatorKind, value, Value(relational.Value), op, op);
             case IConstantPatternOperation { Value: var constant }:
                 return WideCompare(BinaryOperatorKind.Equals, value, Value(constant), op, op);
-            case IBinaryPatternOperation { OperatorKind: var kind, LeftPattern: var left, RightPattern: var right }:
-                return $"({WidePattern(value, left, op)} {(kind == BinaryOperatorKind.And ? "&" : "|")} {WidePattern(value, right, op)})";
-            case INegatedPatternOperation { Pattern: var negated }:
-                return $"(~{WidePattern(value, negated, op)})";
             default:
                 throw Not(pattern);
         }

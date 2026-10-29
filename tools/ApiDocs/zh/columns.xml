@@ -1,0 +1,16 @@
+<doc>
+  <member name="T:EasyEcs.Columns`1" source="14ac17f84857">
+    <summary>
+      一个瓦片的列：<typeparamref name="TTile" /> 的网格（多层的瓦片）上一层的瓦片，Width × Depth，以它的侧面为面，
+      光环、邻域和边界与它相同。同一批实体和键上的第二个场：<c>Tile&lt;Scent, Columns&lt;Chunk&gt;&gt;</c> 是区块的地面，
+      和区块方块的 <c>Tile&lt;Water, Chunk&gt;</c> 并列，格子是一个 Width × Depth 的 <c>DynamicBuffer&lt;Scent&gt;</c>。
+    </summary>
+    <typeparam name="TTile">网格的瓦片组件。</typeparam>
+  </member>
+  <member name="P:EasyEcs.Columns`1.Faces" source="1e53bd4e05bc">
+    <summary><typeparamref name="TTile" /> 的面中的侧面。</summary>
+  </member>
+  <member name="P:EasyEcs.Columns`1.Height" source="a314e9f7d641">
+    <summary>一层。</summary>
+  </member>
+</doc>

@@ -192,6 +192,8 @@ icon: RotateCcwClock
   每个键不再分配数组，`Get` / `TryGet` 只读一条记录（[决策](/zh/docs/decisions#d71-direct-index)）。
 - `SetAll` 对所有行都匹配的 64 行位字一次填好值，不再逐行写（不满的位字和带索引的组件仍逐行）。见
   [批量操作](/zh/docs/guide/bulk#what-it-costs)和[决策](/zh/docs/decisions#d72-setall-whole-words)。
+- `MoveEntities` 约快 1.2 倍：落下每段连续行的步骤不再内联进这个方法，它遍历 id 的循环更精简
+  （[决定](/zh/docs/decisions#d136-arrive-rows-not-inlined)）。
 
 ### 需要修改代码的变更 [#v4-8-0-breaking]
 

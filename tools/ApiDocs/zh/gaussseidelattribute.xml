@@ -1,0 +1,19 @@
+<doc>
+  <member name="T:EasyEcs.GaussSeidelAttribute" source="d6fa24a0b6eb">
+    <summary>
+      用在推进瓦片的 <c>[ForEach]</c> 方法上（一个 <c>ref Tile&lt;TCell, TTile&gt;</c> 参数）：用 Gauss-Seidel 代替 Jacobi。
+      这一步原地写瓦片的格子，所以写过的一行就是后面的行读到的值；方法即一次扫描，在瓦片上反复运行，直到一次扫描什么都没改变
+      （最多 <see cref="P:EasyEcs.GaussSeidelAttribute.MaxSweeps" /> 次）。瓦片按颜色逐色推进，颜色由键的奇偶决定
+      （面模板两种颜色，9 点模板四种，27 点八种）：同一颜色的两个瓦片互不相邻，所以一种颜色的瓦片同时并行推进，
+      读前面颜色留下的格子，结果和线程数无关。一次扫描没有改变的瓦片会休眠，直到旁边的瓦片改变了它读的边缘。
+      适合会稳定下来的松弛（<c>d = Min(neighbor + cost)</c>：距离场、洪水填充、气味），一次遍历代替每跨过一个格子一次。
+      <code>
+            [ForEach(Parallel = true), GaussSeidel]
+            static void Spread(ref Tile&lt;Scent, Ground&gt; scent) { scent.ExchangeHalo(); foreach (var row in scent.Rows()) ... scent.Write(row) ... }
+            </code>
+    </summary>
+  </member>
+  <member name="P:EasyEcs.GaussSeidelAttribute.MaxSweeps" source="82142272ffcd">
+    <summary>一个瓦片在一次遍历中最多扫描的次数（0 为默认：它的格子数）；没稳定的瓦片在下一次遍历接着扫描。</summary>
+  </member>
+</doc>

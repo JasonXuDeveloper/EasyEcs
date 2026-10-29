@@ -202,7 +202,7 @@ public ref struct MovementSystem
 | `ref Reduce<T>` | 对所有行求总数，结果放进单例 `T : IReduction<T>` | 必须按 `ref` 传入（否则 EECS002）；`Value` 字段是这一块的部分结果；合并后的结果替换 `T`（[归约](/zh/docs/guide/threading#reductions)、[EECS057](/zh/docs/guide/analyzer#eecs057)） |
 | `Emit<T>` | 这一遍追加的记录，按值传入：`Add(record)` / `AddRange(records)` | 这一遍结束时按行的顺序并入单例 `Emitted<T>`（`Items`，一个 `DynamicBuffer<T>`）；之后的系统处理并清空它们（[Emit](/zh/docs/guide/threading#emit)、[EECS070](/zh/docs/guide/analyzer#eecs070)） |
 | `in EntityRandom` | 确定性随机数的单例 | `random.Float(entity.Id, stream)`、`Range`、`Chance`、`Bits`：线程数不同结果也一样（[EntityRandom](/zh/docs/guide/threading#entity-random)、[EECS071](/zh/docs/guide/analyzer#eecs071)） |
-| `Tile<TCell, TTile>` | 网格瓦片的格子，连同邻居的边 | `tile.Pad()`，再用 `Rows` 和 `At(row).Load128`；可并行（[网格瓦片](/zh/docs/guide/grids)） |
+| `Tile<TCell, TTile>` | 网格瓦片的格子，连同邻居的边 | `tile.ExchangeHalo()`，再用 `Rows` 和 `At(row).Load128`；可并行（[网格瓦片](/zh/docs/guide/grids)） |
 | `Mut<T>` | 方法只在部分行上写的组件 | `Value` 只读；`Write()` 和改了值的 `SetIfChanged(value)` 才给这一行打 tick；对调度器来说算写入 |
 | 其他任意类型（系统之外） | 调用方传给入口方法的值 | `ref int count`、`in Settings s` |
 

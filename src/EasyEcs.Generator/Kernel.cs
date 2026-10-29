@@ -346,8 +346,14 @@ internal sealed partial class Kernel
     /// row-by-row job and the analyzer reports this (the same call), so one method's failure never drops the files of
     /// the others (a generator that throws loses all of its output, and the build then fails on every name it writes).
     /// </summary>
-    private static ScalarReason Failed(System.Exception e) =>
-        new($"the generator failed to translate it ({e.GetType().Name}: {e.Message} Please report this as an EasyEcs bug)", false, null);
+    private static ScalarReason Failed(System.Exception e) => new(FailedTo("translate it", e), false, null);
+
+    /// <summary>
+    /// The reason of any stage that reads a method's body and threw (<paramref name="what"/>: what it failed to do): the
+    /// stage falls back to the method's plain form and the analyzer reports this text through the same call.
+    /// </summary>
+    internal static string FailedTo(string what, System.Exception e) =>
+        $"the generator failed to {what} ({e.GetType().Name}: {e.Message} Please report this as an EasyEcs bug)";
 
     private static Code? VectorizeMethod(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
         System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out ScalarReason? reason)
@@ -1158,6 +1164,9 @@ internal sealed partial class Kernel
                 if (whenFalse != null) Branch(whenFalse, And(mask, $"~{condition}")!);
                 return true;
             }
+            case ISwitchOperation select:
+                Switch(select, mask); // Kernel.Switches.cs
+                return true;
             case IReturnOperation { ReturnedValue: null }:
                 if (mask == null) return false;
                 if (_alive == null)
@@ -1182,12 +1191,15 @@ internal sealed partial class Kernel
     /// a loop, logging), a cold branch: a vector with a lane that takes it sends its rows to the method itself before any
     /// store, as a Math.Clamp that would throw does. The rows that never take it stay in the vector loop.
     /// </summary>
-    private void Branch(IOperation op, string mask)
+    private void Branch(IOperation op, string mask) => Branch(() => Statement(op, mask), mask);
+
+    /// <summary><see cref="Branch(IOperation, string)"/> of the statements <paramref name="translate"/> translates.</summary>
+    private void Branch(System.Action translate, string mask)
     {
         var saved = Save();
         try
         {
-            Statement(op, mask);
+            translate();
         }
         catch (Unsupported unsupported) when (!unsupported.IsWholeMethod)
         {
@@ -1722,7 +1734,7 @@ internal sealed partial class Kernel
                 return Truncate(WideOf(c.Operand), c.Type!, c); // (byte)(a + b): the low bits, as C# truncates
             case IConversionOperation { IsChecked: false, OperatorMethod: null } c when _narrow && IsEnumConversion(c) && IsLane(c.Type) && IsInt(c.Operand.Type):
                 return Truncate(WideOf(c.Operand), Under(c.Type!), c); // (E)(a + b) of a narrow enum: the same low bits
-            case IConversionOperation { Conversion.IsIdentity: true } c when IsLane(c.Type) || IsBool(c.Type):
+            case IConversionOperation c when Keeps(c) && (IsLane(c.Type) || IsBool(c.Type)):
                 return Expr(c.Operand);
             case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when IsLane(c.Type) && IsLane(c.Operand.Type):
                 return Convert(Expr(c.Operand), c.Operand.Type!, c.Type!) ?? throw Not(c);
@@ -1775,10 +1787,10 @@ internal sealed partial class Kernel
                 _active = active;
                 return $"{V}.ConditionalSelect({MaskAs(condition, t.Type!)}, {whenTrue}, {otherwise})";
             }
-            case IIsPatternOperation { Value: var value } pattern when IsLane(value.Type):
-                return Pattern(Expr(value), value.Type!, pattern.Pattern);
-            case IIsPatternOperation { Value: var value } pattern when _narrow && IsInt(value.Type):
-                return WidePattern(WideOf(value), pattern.Pattern, pattern);
+            case IIsPatternOperation { Value: var value } pattern: // Kernel.Switches.cs
+                return Match(Of(value, false, pattern), pattern.Pattern) ?? $"{Vec(_mask)}.AllBitsSet";
+            case ISwitchExpressionOperation select when IsLane(select.Type) || IsBool(select.Type):
+                return Switch(select, Expr, (lanes, chosen, otherwise) => $"{V}.ConditionalSelect({MaskAs(lanes, select.Type!)}, {chosen}, {otherwise})");
             case IInvocationOperation { Instance: null } call when IsMath(call.TargetMethod):
                 return Call(call);
             default:
@@ -1973,8 +1985,8 @@ internal sealed partial class Kernel
     }
 
     /// <summary>
-    /// <c>value is pattern</c> as a mask: relational (<c>&gt; 0</c>), constant (<c>0</c>, <c>float.NaN</c>), <c>and</c>,
-    /// <c>or</c>, <c>not</c>, as C# tests each (a constant NaN matches NaN).
+    /// A relational (<c>&gt; 0</c>) or constant (<c>0</c>, <c>float.NaN</c>) pattern over a lane as a mask, as C# tests
+    /// each (a constant NaN matches NaN); <see cref="Match"/> combines them (Kernel.Switches.cs).
     /// </summary>
     private string Pattern(string value, ITypeSymbol type, IPatternOperation pattern)
     {
@@ -1989,17 +2001,17 @@ internal sealed partial class Kernel
                 };
                 return Compare(compare, value, Operand(relational.Value, type), type);
             case IConstantPatternOperation { Value: var constant }:
-                if (constant.ConstantValue is { HasValue: true, Value: float.NaN or double.NaN })
-                    return $"(~{Compare("Equals", value, value, type)})";
-                return Compare("Equals", value, Operand(constant, type), type);
-            case IBinaryPatternOperation { OperatorKind: var kind, LeftPattern: var left, RightPattern: var right }:
-                return $"({Pattern(value, type, left)} {(kind == BinaryOperatorKind.And ? "&" : "|")} {Pattern(value, type, right)})";
-            case INegatedPatternOperation { Pattern: var negated }:
-                return $"(~{Pattern(value, type, negated)})";
+                return Equal(value, type, constant);
             default:
                 throw Not(pattern);
         }
     }
+
+    /// <summary>A constant pattern (or case label) as a mask: equal to <paramref name="constant"/>, NaN matching NaN as C# tests it.</summary>
+    private string Equal(string value, ITypeSymbol type, IOperation constant) =>
+        constant.ConstantValue is { HasValue: true, Value: float.NaN or double.NaN }
+            ? $"(~{Compare("Equals", value, value, type)})"
+            : Compare("Equals", value, Operand(constant, type), type);
 
     /// <summary>A pattern's operand as a vector of the tested value's type (a constant converted to it).</summary>
     private string Operand(IOperation op, ITypeSymbol type) =>
@@ -2218,6 +2230,7 @@ internal sealed partial class Kernel
     {
         ILocalReferenceOperation or IInstanceReferenceOperation => false,
         IParameterReferenceOperation { Parameter: var p } => _uniformParams.ContainsKey(p),
+        IIsPatternOperation or ISwitchExpressionOperation => false, // tested per lane (Kernel.Switches.cs), its value broadcast
         IInvocationOperation { TargetMethod.Name: "Clamp" } => false,
         IBinaryOperation { OperatorKind: BinaryOperatorKind.Divide or BinaryOperatorKind.Remainder } b when !IsFloat(b.Type) => false,
         IInvocationOperation { TargetMethod: { Name: "Abs" or "CopySign" or "Sign" } m } when !IsFloat(m.ReturnType) => false,
@@ -2308,6 +2321,9 @@ internal sealed partial class Kernel
 
     private Unsupported NotSupported(IOperation op) => new(op switch
     {
+        ISwitchExpressionOperation select => $"its switch expression ('{Text(select)}') gives a {select.Type?.ToDisplayString()}, not a lane type of {LaneSizes} bytes or a struct of them",
+        IBranchOperation { BranchKind: BranchKind.Break } => $"it leaves a switch section before its end ('{Text(op)}'): a vector loop runs a section's statements to its end",
+        IBranchOperation { Syntax: GotoStatementSyntax { CaseOrDefaultKeyword.RawKind: not 0 } } => $"it jumps from one switch section to another ('{Text(op)}'): a vector loop runs each section on its own lanes",
         IInvocationOperation { TargetMethod: var m } when IsMath(m) => IsFloat(m.ReturnType) && m.Name is "Asin" or "Acos" or "Atan" or "Atan2" or "Cbrt"
             || m.ReturnType.SpecialType == SpecialType.System_Double && m.Name is "Sinh" or "Cosh" or "Tanh"
             ? $"{m.ContainingType.Name}.{m.Name} has no vector form in .NET 10"

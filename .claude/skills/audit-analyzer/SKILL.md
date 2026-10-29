@@ -138,3 +138,5 @@ done. Each round checks coverage per rule, not in total:
 - EECS031 suggests `Reserve(n)` with the inner loop's bound for nested creation loops (`Reserve(Side)` where
   `Side * Side` rows are created) and fires only once that bound is not a constant (feat-tiles-pingpong): check the
   product of nested bounds, or say nothing.
+- EECS021 fires on `[ForEach]` methods of a partial static runner class (feat-stage-catch): a false positive to
+  reproduce and fix.

@@ -63,6 +63,9 @@ what it left undone, which goes on the same list (nothing is dropped silently).
   `*-report-github.md`), `sh -c` and piped awk: tell it to run one plain command per call and write multi-step logic
   as scripts with the Write tool, Python scripts taking the worktree path as an argument working best
   (feat-fewer-copies, feat-emit-segments, feat-symmetric-pairs).
+- Agents share the build lock with hour-long exclusive benchmark runs, so every acquisition can wait a whole
+  benchmark: an agent batches its builds and tests into one script under one `run.sh` call, and prefixes its log names
+  in the shared scratchpad with its branch (feat-switch-masks).
 - Every agent runs ApiDocs (0 problems) and the Release build (0 warnings) before it reports: a branch that changed a
   public XML doc without its zh entry stops the zh pages of that type from being regenerated (fewer-copies left 3).
 

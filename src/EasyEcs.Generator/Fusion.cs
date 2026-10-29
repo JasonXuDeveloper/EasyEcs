@@ -119,14 +119,31 @@ internal static class Fusion
 internal sealed record FusionSide(string Name, EquatableArray<string> Query, EquatableArray<string> With,
     EquatableArray<string> Without, EquatableArray<string> WithAny, EquatableArray<string> Filters, EquatableArray<string> Writes,
     EquatableArray<string> Since, EquatableArray<string> Remote, EquatableArray<string> SingletonReads,
-    EquatableArray<string> SingletonWrites, EquatableArray<string> Scratches, bool Parallel, int ChunkSize, int Slices, string? Blocker)
+    EquatableArray<string> SingletonWrites, EquatableArray<string> Scratches, bool Parallel, int ChunkSize, int Slices, string? Blocker,
+    bool Failed = false)
 {
     /// <summary>
     /// The side of a [ForEach] method of a system (<paramref name="stable"/>: it makes no structural change;
     /// <paramref name="identifies"/>: it uses its Entity only as an identity; <paramref name="parallel"/>: it runs in
-    /// parallel), from its declaration and parameters: no body is bound here.
+    /// parallel), from its declaration and parameters: no body is bound here. When reading it throws, a side that fuses
+    /// with nothing (<see cref="Failed"/>, its <see cref="Blocker"/> the reason, which EECS093 reports through this call):
+    /// the method keeps its own walk, and one method's failure never drops the generated files of the others.
     /// </summary>
     public static FusionSide Of(IMethodSymbol method, bool stable, bool identifies, bool parallel)
+    {
+        try
+        {
+            return Read(method, stable, identifies, parallel);
+        }
+        catch (System.Exception e) when (e is not System.OperationCanceledException)
+        {
+            EquatableArray<string> none = new([]);
+            return new FusionSide(method.Name, none, none, none, none, none, none, none, none, none, none, none, parallel, 0, 0,
+                Kernel.FailedTo($"read what {method.Name} reads, writes and filters", e), true);
+        }
+    }
+
+    private static FusionSide Read(IMethodSymbol method, bool stable, bool identifies, bool parallel)
     {
         string Fqn(ITypeSymbol t) => t.ToDisplayString(Symbols.Fqn);
         var query = new List<string>();

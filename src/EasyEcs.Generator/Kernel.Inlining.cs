@@ -216,8 +216,9 @@ internal sealed partial class Kernel
                     LocalFunctionStatementSyntax => "which declares a local function",
                     ForStatementSyntax or CommonForEachStatementSyntax or WhileStatementSyntax or DoStatementSyntax => "which has a loop",
                     TryStatementSyntax or ThrowStatementSyntax or ThrowExpressionSyntax => "which throws or catches",
+                    GotoStatementSyntax { CaseOrDefaultKeyword.RawKind: not 0 } => "which jumps from one switch section to another (goto case)",
+                    BreakStatementSyntax when node.Parent is SwitchSectionSyntax => null, // a section's end (Kernel.Switches.cs)
                     GotoStatementSyntax or LabeledStatementSyntax or BreakStatementSyntax or ContinueStatementSyntax => "which jumps (goto, break, continue)",
-                    SwitchStatementSyntax or SwitchExpressionSyntax => "which has a switch",
                     UsingStatementSyntax or LockStatementSyntax or FixedStatementSyntax or UnsafeStatementSyntax or CheckedStatementSyntax => "which has a using, lock, fixed, unsafe or checked block",
                     YieldStatementSyntax => "which is an iterator",
                     AwaitExpressionSyntax => "which awaits",
@@ -418,7 +419,7 @@ internal sealed partial class Kernel
     }
 
     /// <summary>One body's rewrite. Every node it binds is an original node of <see cref="Scope.Model"/>'s tree.</summary>
-    private sealed class Rewriter(Inliner owner, Scope scope) : CSharpSyntaxRewriter
+    private sealed partial class Rewriter(Inliner owner, Scope scope) : CSharpSyntaxRewriter
     {
         /// <summary>The statements the calls of the statement being rewritten need before it (null: inside an expression only).</summary>
         private List<StatementSyntax>? _prefix;
@@ -446,6 +447,8 @@ internal sealed partial class Kernel
         {
             ExpressionStatementSyntax e => ExpressionStatement(e.Expression) is { } rewritten ? e.WithExpression(rewritten) : null,
             IfStatementSyntax f => If(f),
+            SwitchStatementSyntax s => Switch(s), // Kernel.Switches.cs
+            BreakStatementSyntax when statement.Parent is SwitchSectionSyntax => statement,
             BlockSyntax b => Body(b),
             LocalDeclarationStatementSyntax or ReturnStatementSyntax or EmptyStatementSyntax => (StatementSyntax?)Visit(statement),
             LocalFunctionStatementSyntax => statement, // inlined at its calls; dropped when all of them are
@@ -635,8 +638,9 @@ internal sealed partial class Kernel
             // The body moves into the generated job, outside the callee's type and file: what only they reach cannot go.
             if (Inlined && Hidden(node) is { } hidden)
                 throw new NotInlined($"whose body names {LambdaPass.Describe(hidden)}: make it internal", true);
-            if (node.Parent is MemberAccessExpressionSyntax access && access.Name == node || node.Parent is QualifiedNameSyntax qualified && qualified.Right == node)
-                return null; // the member of something: its receiver decides
+            if (node.Parent is MemberAccessExpressionSyntax access && access.Name == node || node.Parent is QualifiedNameSyntax qualified && qualified.Right == node
+                || NamesSubpattern(node))
+                return null; // the member of something: its receiver decides (a property pattern's, the value it tests)
             var symbol = Bound(node);
             if (symbol == null) return null;
             if (!Inlined)
@@ -1283,6 +1287,9 @@ internal sealed partial class Kernel
                         }
                         return lowered;
                     }
+                    case SwitchStatementSyntax select: // Kernel.Switches.cs
+                        lowered.AddRange(LowerSwitch(select, rest, exit));
+                        return lowered;
                     default:
                         throw new NotInlined("which returns from inside a statement the vector loop cannot take apart");
                 }

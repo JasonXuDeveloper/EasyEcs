@@ -1,6 +1,6 @@
 <doc>
-  <member name="T:EasyEcs.TileRow`1" source="53ebd399cfb4">
-    <summary>瓦片的一行：第 <see cref="P:EasyEcs.TileRow`1.Y" /> 层的第 <see cref="P:EasyEcs.TileRow`1.Z" /> 行，来自 <see cref="M:EasyEcs.PaddedTile`2.Rows(EasyEcs.TileStencil)" />。</summary>
+  <member name="T:EasyEcs.TileRow`1" source="208cc03aa52d">
+    <summary>瓦片的一行：第 <see cref="P:EasyEcs.TileRow`1.Y" /> 层的第 <see cref="P:EasyEcs.TileRow`1.Z" /> 行，来自 <see cref="M:EasyEcs.Tile`2.Rows(EasyEcs.TileStencil)" />。</summary>
     <typeparam name="TTile">瓦片的组件和形状。</typeparam>
   </member>
   <member name="M:EasyEcs.TileRow`1.#ctor(System.Int32,System.Int32)" source="3b3f58cb6562">

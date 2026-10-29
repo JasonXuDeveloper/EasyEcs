@@ -209,6 +209,16 @@ its own worktree.
   computed from: recomputing the colors cost 100-190 us a pass (symmetric pairs).
 - **A thread-cached pool made exact**: count each thread's largest cache into the fill; shrinking the batch moves the
   cost into contention (1 list per lock cost the parallel churn 5x, 8 per lock 1.5x; `DynamicBuffer.Fill`).
+- **Check the inlining before crediting a rewrite.** When rewriting a method speeds up a caller it barely touches,
+  compare the caller's Tier1 size and inlinee count between the builds, and A/B base + `NoInlining` alone against the
+  rewrite. MoveEntities' 0.82x came from the JIT no longer inlining `ArriveRows` + `CopyRun` into its two call sites
+  (11.9 KB → 3.7 KB), not from the rewritten copy (D136).
+- **A per-run helper called from several sites of a structural method gets `NoInlining`**, like a cold path: it runs
+  once per run of rows, and each inlined copy bloats the caller's loops over ids.
+- **Read Tier1 code from the benchmark process** (BDN `--dev`, `DOTNET_JitDisasm` and `DOTNET_JitStdOutFile` set on the
+  run; the child inherits them). A scratch driver with other components compiles differently (9.5 vs 11.9 KB).
+- **Make a pass-safety test discriminate**: a test that a pass survives arrivals fixes `InitialEntityCapacity`, or
+  `Grow`'s own `StorageVersion` bump hides a missing one.
 
 ## Report
 

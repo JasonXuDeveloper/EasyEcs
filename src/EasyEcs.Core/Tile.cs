@@ -1560,8 +1560,8 @@ internal static class TileLayout
     // Not NoInlining: the JIT then sees that the method only throws and compiles its calls as calls that never return,
     // so the vectors a stencil loaded before a check stay in registers (a call that may return clobbers every one).
     [DoesNotReturn, StackTraceHidden]
-    public static void ThrowOffset() => throw new ArgumentOutOfRangeException(null, "Outside the padded tile: a cell, row or layer past the halo");
+    public static void ThrowOffset() => throw new ArgumentOutOfRangeException(null, "Outside the tile and its halo: a cell, row or layer past the halo");
 
     [DoesNotReturn, StackTraceHidden] // a call that never returns: see ThrowOffset
-    public static void ThrowNoMask() => throw new InvalidOperationException("The tile was loaded without its mask (mask: false): it has no active rows");
+    public static void ThrowNoMask() => throw new InvalidOperationException("The tile's halo was exchanged without its mask (mask: false): it has no active rows");
 }

@@ -2412,7 +2412,7 @@ A [tile](/en/docs/guide/grids#halo) (`ITileShape`) is Width x Depth x Height cel
 active rows of a layer are one 64-bit word), with a halo of one cell or more. The halo is copied from the facing cells
 of the tile beside, so it is at most the tile's extent along every axis that has neighbors (its `Faces`), and along
 every axis when the boundary mirrors: like an MPI ghost width, never wider than the subdomain. The rule reads the
-shape's constant members; `Tile.Pad` throws for a shape it could not check.
+shape's constant members; `Tile.ExchangeHalo` throws for a shape it could not check.
 
 ```csharp tab="Reported" doccheck=alone,expect-EECS072
 // A strip of 16 cells for a fourth-order stencil along x: its default faces include north and south,
@@ -2458,11 +2458,11 @@ public ref struct PressureSystem
     [ForEach(Parallel = true)]
     static void Step(Tile<Field, Strip> pressure, Tile<Field, Strip> velocity, Mut<DynamicBuffer<NextField>> next)
     {
-        var p = pressure.Pad();
-        var v = velocity.Pad();   // the same texture: p now samples the velocity
+        pressure.ExchangeHalo();
+        velocity.ExchangeHalo();   // the same texture: p now samples the velocity
         var into = next.Write().AsSpan();
         for (int x = 0; x < 16; x++)
-            into[x] = new NextField(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
+            into[x] = new NextField(pressure[x, 0, 0].Value - (velocity[x + 1, 0, 0].Value - velocity[x - 1, 0, 0].Value) * 0.5f);
     }
 }
 ```
@@ -2479,11 +2479,11 @@ public ref struct PressureSystem
     static void Step(Tile<Pressure, Strip> pressure, Tile<Velocity1D, Strip> velocity,
         Mut<DynamicBuffer<NextPressure>> next)
     {
-        var p = pressure.Pad();
-        var v = velocity.Pad();   // a texture per cell type
+        pressure.ExchangeHalo();
+        velocity.ExchangeHalo();   // a texture per cell type
         var into = next.Write().AsSpan();
         for (int x = 0; x < 16; x++)
-            into[x] = new NextPressure(p[x, 0, 0].Value - (v[x + 1, 0, 0].Value - v[x - 1, 0, 0].Value) * 0.5f);
+            into[x] = new NextPressure(pressure[x, 0, 0].Value - (velocity[x + 1, 0, 0].Value - velocity[x - 1, 0, 0].Value) * 0.5f);
     }
 }
 ```

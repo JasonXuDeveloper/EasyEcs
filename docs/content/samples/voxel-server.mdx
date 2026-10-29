@@ -275,7 +275,7 @@ branch; `WaterWakeSystem` tags the chunk and its four neighbors `Flowing`.
 grid (`ITile<ChunkPos>`: 16 x 16 x 32 cells, its neighbors the chunks beside it), so the method takes the chunk's water
 and blocks as `Tile<Fluid, Chunk>` and `Tile<Block, Chunk>`, and the generator finds the four neighbors once per chunk.
 The layers to shade come from the `FluidCount` of the chunk and of its neighbors (through `Beside` and a
-`Lookup<FluidCount>`, no search); `Pad(from, to)` copies them into a texture of the thread, a ring of one block around
+`Lookup<FluidCount>`, no search); `ExchangeHalo(from, to)` copies them into a texture of the thread, a ring of one block around
 each layer from the facing row or column of each neighbor, and a layer under and over, as a CUDA block loads its tile
 and halo into shared memory. The loop samples neighbors with no edge case and computes each row of 16 blocks in one
 `Vector128<byte>`. Its neighbors are read as they were before the pass and only `NextFluid` is written, so it is a
