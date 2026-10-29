@@ -85,6 +85,28 @@ public class MoveTests
     }
 
     [Test]
+    public void LongRunsGrowTheTargetAndKeepEveryRowsRecord()
+    {
+        using var from = new World();
+        using var to = new World(new WorldOptions { InitialEntityCapacity = 16 }); // ids and rows grow during the runs
+        to.CreateEntity(new Health(-1)).Destroy();                                  // a free id: the first run reuses it
+        var ids = new EntityId[3000];
+        for (int i = 0; i < ids.Length; i++)
+            ids[i] = (i % 1000 == 0 ? from.CreateEntity(new Health(i)) : from.CreateEntity(new Health(i), new Follows(ids[i - 1]))).Id;
+        var moved = new Entity[ids.Length];
+        Assert.That(from.MoveEntities(to, ids, moved), Is.EqualTo(ids.Length));     // runs of 1 and 999 rows per table
+
+        for (int i = 0; i < ids.Length; i++)
+        {
+            var e = moved[i];
+            Assert.That((e.IsAlive, e.Read<Health>().Value), Is.EqualTo((true, i)));
+            Assert.That(e.Has<Follows>() ? e.Read<Follows>().Target : default, Is.EqualTo(i % 1000 == 0 ? default : moved[i - 1].Id));
+        }
+
+        Assert.That((from.EntityCount, to.EntityCount, to.Count<Follows>()), Is.EqualTo((0, 3000, 2997)));
+    }
+
+    [Test]
     public void AnEntityStillThereIsNotMistakenForOneMovedBefore()
     {
         using var from = new World();

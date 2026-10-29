@@ -257,6 +257,28 @@ public class InstantiateTests
     }
 
     [Test]
+    public void APassGoesOnInTheGrownColumnsAfterAGroupArrives()
+    {
+        using var world = new World(new WorldOptions { InitialEntityCapacity = 4096 }); // only the tables grow below
+        var boss = new Prefab().Set(new Health(500));
+        boss.AddMember().Set(new ChildOf(boss.Id), new Health(20));
+        for (int i = 0; i < 100; i++) world.Instantiate(boss);
+        int visited = 0;
+        foreach (var item in world.Query<Health>())
+        {
+            item.Health.Value = 1; // a ref is valid until the next structural change
+            if (visited++ == 10) // the arrivals grow both tables: their columns move under the pass
+                for (int i = 0; i < 1000; i++) world.Instantiate(boss);
+        }
+
+        int written = 0, spawned = 0;
+        foreach (var item in world.Query<Health>())
+            if (item.Health.Value == 1) written++;
+            else spawned += item.Health.Value;
+        Assert.That((visited, written, spawned), Is.EqualTo((200, 200, 1000 * 520)));
+    }
+
+    [Test]
     public void ADerivedGroupCopiesEveryMemberAndReservingCoversThem()
     {
         using var world = new World();
