@@ -138,6 +138,14 @@ changes nothing and cannot fail:
   or file-local member: the inlined body moves into the generated job, which cannot reach it (fixable: "make it
   internal", EECS096's wording). A `static readonly` field a helper reads becomes a setup uniform, read once per run
   (never per vector: the Native AOT class-init rule). Lambda passes do not inline.
+  **Another assembly** built with EasyEcs is read from what its generator recorded (`Recorder.cs` writes
+  `[assembly: ConstructorFields]` / `[assembly: InlineBody]`, `Recorded.cs` reads them per referenced assembly): a
+  recorded body is bound in a speculative model of the caller and inlined like a source helper. Its hidden fields are
+  lanes (a field of the row's component) or `[UnsafeAccessor]` externs on the job (a static readonly field, read
+  once per run; a field of another struct value); its hidden static helpers are recorded as local functions, not
+  accessors, so the loop sees their bodies. Only members taking and returning values are recorded; a mutable hidden
+  static stays scalar; an assembly without records keeps "declared in another assembly". When the inliner gains a
+  form (as 8j added switches), check that the recorder records it too (`ForeignBodyTests`).
 - **Shared state**: writes to statics, captured fields or another entity; the order of anything observable (records,
   logs) beyond what `Emit<T>` keeps.
 - **A method reading its own write**: a structural write deferred to the end of the pass is correct only when the

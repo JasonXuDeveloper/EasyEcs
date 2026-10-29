@@ -238,6 +238,13 @@ tools/bench.sh GeneratorBenchmark
   `RegisterImplementationSourceOutput` only, bound once per body, with every fact derived from that one
   `IOperation` tree. An entry point users call never depends on a body fact. (Phase 1 measured 300-350 ms per
   keystroke on the unit tests, any edit anywhere, from this.)
+  A transform that must bind every file it matches (the `Recorder`, which writes what other assemblies read) caches
+  its facts per `CompilationUnitSyntax` root in a `ConditionalWeakTable`: an unchanged tree keeps its root across
+  compilations, so only the edited file is read again (a plain syntax provider cost 5.3 MB per edit, the cache 0).
+  A stage tolerated in `AnEditRerunsOnlyTheStepsItChanges` reruns on every edit: measure it in `GeneratorBenchmark`.
+- **Declaring-side output skips EasyEcs.Core**: Core runs its own generator, so a feature that writes something for
+  other assemblies to read must not run on Core, or Core's API changes how user code vectorizes.
+- netstandard2.0 has no `System.Index` / `System.Range`: no list patterns or `^1` over arrays in the generator.
 - **No body binding in transforms**: `GetSymbolInfo` / `GetTypeInfo` inside a member body binds the whole body on
   every edit. Bind a type name alone with `Symbols.TypeNamed` (at the type's open brace, `Symbols.Outside`; the end of
   the file for top-level statements). With nullable off a bind costs the enclosing statement only, with nullable on it
