@@ -54,7 +54,15 @@ internal sealed partial class Kernel
         }
         if (IsLane(type) || IsBool(type))
         {
-            string lane = SubjectLane(value, user);
+            string lane;
+            try
+            {
+                lane = Expr(value);
+            }
+            catch (Unsupported) when (Split(value, user) is { } split)
+            {
+                throw split;
+            }
             return new Subject(type!, value, Lane: held ? Hold(lane, type!) : lane);
         }
         if (StructPaths(type) is { } paths)
@@ -63,28 +71,31 @@ internal sealed partial class Kernel
             if (held) lanes = lanes.Select(l => l == null ? null : Hold(l, type!)).ToArray();
             return new Subject(type!, value, Lanes: lanes, Paths: paths);
         }
+        if (Split(value, user) is { } call) throw call;
         if (user.Descendants().OfType<IListPatternOperation>().FirstOrDefault() is { } list) throw ListPattern(list);
-        throw new Unsupported($"it {(user is IIsPatternOperation ? "tests" : "switches over")} '{Text(value)}', a {type?.ToDisplayString()}, which no vector lane holds: "
-            + $"a vector loop matches numbers, enums and bools of {LaneSizes} bytes, structs of them and tuples of them");
+        string verb = user is IIsPatternOperation ? "tests" : "switches over";
+        throw new Unsupported(IsNumber(type)
+            ? $"it {verb} '{Text(value)}', a {type!.ToDisplayString()}, not a lane type of {LaneSizes} bytes"
+            : $"it {verb} '{Text(value)}', a {type?.ToDisplayString()}, which no vector lane holds: "
+              + $"a vector loop matches numbers, enums and bools of {LaneSizes} bytes, structs of them and tuples of them");
     }
 
+    private static bool IsNumber(ITypeSymbol? type) =>
+        type is { SpecialType: >= SpecialType.System_SByte and <= SpecialType.System_Double } or { TypeKind: TypeKind.Enum };
+
     /// <summary>
-    /// The lanes of <paramref name="value"/>. A switch over a call on a struct the loop cannot inline (a helper struct
-    /// walking other entities' data, VoxelServer's <c>new Nearby(...).Trail(x, z) switch</c>) names the split: the call
-    /// in a pass of its own storing its result in a component, the switch over that field here.
+    /// A switch over a call on a struct the loop cannot inline (a helper struct walking other entities' data,
+    /// VoxelServer's <c>new Nearby(...).Trail(x, z) switch</c>): the split, the call in a pass of its own storing its
+    /// result in a component, the switch over that field here; null for any other value.
     /// </summary>
-    private string SubjectLane(IOperation value, IOperation user)
+    private Unsupported? Split(IOperation value, IOperation user)
     {
-        try
-        {
-            return Expr(value);
-        }
-        catch (Unsupported) when (user is not IIsPatternOperation && value is IInvocationOperation
-                                  { Instance.Type: { TypeKind: TypeKind.Struct } type, TargetMethod: var m } && !IsMath(m) && !KnownVector(type))
-        {
-            throw new Unsupported($"it switches over a call on struct {type.Name} ('{Text(value)}'), which runs row by row: call {type.Name}.{m.Name} "
-                + "in a [ForEach] method of its own that stores the result in a component, and switch over that field here", true);
-        }
+        if (user is IIsPatternOperation || value is not IInvocationOperation { Instance.Type: { TypeKind: TypeKind.Struct } type, TargetMethod: var m }
+            || IsMath(m) || KnownVector(type))
+            return null;
+        string field = IsLane(value.Type) || IsBool(value.Type) ? "a component" : $"a component field of {LaneSizes} bytes (not a {value.Type?.ToDisplayString()})";
+        return new Unsupported($"it switches over a call on struct {type.Name} ('{Text(value)}'), which runs row by row: call {type.Name}.{m.Name} "
+            + $"in a [ForEach] method of its own that stores the result in {field}, and switch over that field here", true);
     }
 
     /// <summary>
