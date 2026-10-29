@@ -87,9 +87,13 @@ public static partial class EasyEcsAnalyzer
             return;
         }
 
-        if (!LambdaPass.IsStable(call.Function!) || !Kernel.LooksEligible(call.Lambda!, true)) return;
-        if (Kernel.Vectorize(call.Lambda!, call.Function!, call.Parallel, true, model, static (_, _) => "", context.CancellationToken, out var reason) == null)
-            context.ReportDiagnostic(Diagnostic.Create(ScalarLambdaPass, location, name, reason));
+        // A lambda the generator gives no vector loop runs its row job; its reads of other entities the generator failed to
+        // read (Chases.Of, the same call) leave that job without its prefetching twin: a generator bug, reported first.
+        bool eligible = LambdaPass.IsStable(call.Function!) && Kernel.LooksEligible(call.Lambda!, true);
+        string? reason = null;
+        if (eligible && Kernel.Vectorize(call.Lambda!, call.Function!, call.Parallel, true, model, static (_, _) => "", context.CancellationToken, out reason) != null) return;
+        Chases.Of(call.Function!, out string? failed);
+        if (failed != null || eligible) context.ReportDiagnostic(Diagnostic.Create(ScalarLambdaPass, location, name, failed ?? reason));
     }
 
     /// <summary>Whether the lambda assigns, increments or passes by ref one of the variables it captures.</summary>

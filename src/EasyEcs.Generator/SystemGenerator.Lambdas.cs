@@ -127,7 +127,7 @@ public sealed partial class SystemGenerator
                 Simd = simd,
                 Scalar = scalar ?? (body == null ? "it runs through its delegate" : ""),
                 // Reads of other entities at the row's ids (and probes, buffers of links), as a [ForEach] method's.
-                Chases = ForEachModel.Usable(Generator.Chases.Of(function), parameters),
+                Chases = ForEachModel.Usable(Generator.Chases.Of(function, out _), parameters),
                 OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LambdaPass.LoopsOrCalls(call.Syntax!),
             };
             return new LambdaModel(invocation.SyntaxTree.FilePath, invocation.SpanStart, location.Version, location.Data,

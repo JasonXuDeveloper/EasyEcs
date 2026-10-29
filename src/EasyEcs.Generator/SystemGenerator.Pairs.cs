@@ -28,28 +28,23 @@ public sealed partial class SystemGenerator
     private sealed record PairModel(string Position, EquatableArray<string> Axes, string Cutoff, bool PerRow, Kernel.Code? Simd, string Scalar, string NoCutoff, bool Symmetric)
     {
         /// <param name="parallel">The pass runs on several threads: the job's singletons are SingletonRef fields.</param>
+        /// <remarks>
+        /// The two stages that read the body catch their exceptions: the cutoff (<see cref="PairForm.ReadCutoff"/>: on a
+        /// failure every pair runs, the body's own test keeping the results, and EECS106 reports the reason through the
+        /// same call) and the vector loop (<c>Kernel.Vectorize</c>: one pair at a time, EECS055's reason), so one method's
+        /// failure never drops the generated files of the others. The rest reads the declaration, as EECS105 does.
+        /// </remarks>
         public static PairModel Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, bool parallel, System.Threading.CancellationToken ct)
         {
             bool outside = Symbols.IsRunner(method);
-            var shape = PairForm.Read(method, syntax, model, ct, out string? noCutoff);
-            string cutoff = "";
-            if (shape != null)
+            var test = PairForm.ReadCutoff(method, syntax, model, (i, kind) => kind switch
             {
-                var names = new Dictionary<IParameterSymbol, string>(SymbolEqualityComparer.Default);
-                for (int i = 0; i < method.Parameters.Length; i++)
-                    names[method.Parameters[i]] = Symbols.Classify(method.Parameters[i], outside) switch
-                    {
-                        Symbols.ParamKind.Component => $"global::System.Runtime.CompilerServices.Unsafe.Add(ref __k{i}, __r)",
-                        Symbols.ParamKind.Singleton => parallel ? $"s{i}.Value" : $"s{i}",
-                        _ => $"x{i}",
-                    };
-                cutoff = Kernel.ScalarOf(shape.Cutoff, names, out string? why) ?? "";
-                if (cutoff.Length == 0)
-                {
-                    noCutoff = $"its cutoff is not a value the pass can read once: {why}";
-                    shape = null;
-                }
-            }
+                Symbols.ParamKind.Component => $"global::System.Runtime.CompilerServices.Unsafe.Add(ref __k{i}, __r)",
+                Symbols.ParamKind.Singleton => parallel ? $"s{i}.Value" : $"s{i}",
+                _ => $"x{i}",
+            }, ct, out string? noCutoff);
+            var shape = test?.Shape;
+            string cutoff = test?.Cutoff ?? "";
 
             // Without a test, the order is the first neighbor component's, unused: every pair runs.
             string position = shape?.Position.ToDisplayString(Symbols.Fqn)

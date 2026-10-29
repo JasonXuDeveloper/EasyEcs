@@ -341,6 +341,10 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) => f.V = R.Scaled(f.V); } public static class R { static readonly float Scale = 2; public static float Scaled(float x) => x * Scale;", "it calls R.Scaled, whose body names private field 'float R.Scale' of R, which code outside its type (or file) cannot reach: make it internal", true)]
     [TestCase("[ForEach] static void A(ref F f) => f.V = Log(f.V) * 2; static float Log(float x) { System.Console.WriteLine(x); return x; }", "it calls S.Log, which calls Console.WriteLine")]
     [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
+    [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V = q.V switch { 1 => 2, > 5 => 4, _ => 3 };", "it has a switch expression ('q.V switch { 1 => 2, > 5 => 4, _ => 3 }'), which a vector loop has no form of: write it as conditional expressions ('v == A ? a : v == B ? b : c')", true)]
+    // A switch over a call on a struct (VoxelServer's 'new Nearby(...).Trail(x, z) switch'): the call goes into a pass of its own.
+    [TestCase("public readonly struct Near(int v) { public int Dir(int x) { int d = v; for (int i = 0; i < x; i++) d++; return d; } } [ForEach] static void A(ref P p, in Q q) => p.V = new Near(q.V).Dir(1) switch { 1 => 2, _ => 3 };",
+        "it switches over a call on struct Near ('new Near(q.V).Dir(1)'), which runs row by row, and a vector loop has no switch: call Near.Dir in a [ForEach] method of its own that stores the result in a component, and switch over that field here with conditional expressions ('v == A ? a : v == B ? b : c')", true)]
     [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString, which is defined in another assembly")]
     [TestCase("[ForEach] static void A(in B8 b, ref C8 c) { float d = b.V; c.V = (byte)d; }", "local 'd' is a float, not a lane type of 1 or 2 bytes")]
     [TestCase("[ForEach] static void A(in P p, ref Purse u) => u.Sum = p.V + 1L;", "it writes 'u.Sum', which is neither a local nor the lane of a component taken by ref")] // the write, not the conversion of its value
@@ -1513,6 +1517,135 @@ public class GeneratorTests
         object[] arguments = [method, syntax, model, broken, System.Threading.CancellationToken.None, null];
         Assert.That(vectorize.Invoke(null, arguments), Is.Null);
         Assert.That(arguments[5], Is.EqualTo("the generator failed to translate it (InvalidOperationException: broken Please report this as an EasyEcs bug)"));
+    }
+
+    // Methods the body stages threw on (backlog 8f): reads through Lookups of a local function's (and a lambda's local
+    // function's) own parameters, whose ordinals the chases took for the method's (an IndexOutOfRangeException in the
+    // model, and in EmitChases); a partial pair method whose cutoff names the implementing part's parameters (a
+    // KeyNotFoundException in PairModel.Create). Each dropped every generated file of the project (CS8785).
+    private const string ThrewOnce = """
+        [EcsSystem] public ref struct LocalChase
+        {
+            [ForEach] static void A(ref P p, Lookup<Owned> owners, in Link link)
+            {
+                p.V = Count(0, 0, 0, 0, owners, link);
+                static int Count(int a, int b, int c, int d, Lookup<Owned> at, in Link by) => at.Count(by.Target);
+            }
+            [ForEach] static void B(ref Q q, Lookup<P> ps, in Link link)
+            {
+                q.V = Read(0, 0, 0, 0, ps, link);
+                static int Read(int a, int b, int c, int d, Lookup<P> at, in Link by) => at[by.Target].HasValue ? 1 : 0;
+            }
+        }
+        public static class LocalLambda
+        {
+            public static void Run(World w) => w.ForEach(static (ref Q q, in Link link, Lookup<P> ps) =>
+            {
+                q.V = Read(0, 0, 0, 0, ps, link);
+                static int Read(int a, int b, int c, int d, Lookup<P> at, in Link by) => at[by.Target].HasValue ? 1 : 0;
+            });
+        }
+        public struct Spot : IComponent { public float X, Y; }
+        public struct Reach : ISingletonComponent { public float R; }
+        [EcsSystem] public ref partial struct PartialPairs
+        {
+            [ForEach] static partial void Near(in Spot p, ref P n, [Neighbor] in Spot q, in Reach reach);
+            static partial void Near(in Spot p, ref P n, in Spot q, in Reach reach)
+            {
+                float dx = q.X - p.X;
+                if (dx * dx < reach.R * reach.R) n.V++;
+            }
+        }
+        """;
+
+    [Test]
+    public async Task MethodsTheBodyStagesThrewOnGetTheirJobs()
+    {
+        // No exception, code that compiles, the plain row jobs (no prefetching twin: the local functions' reads are no
+        // chase of the method) and the partial method's cutoff read once per pass; no failure for the analyzer to report
+        // (the scalar methods' reasons are their lookups').
+        var run = Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, ThrewOnce), out var output, out _).GetRunResult();
+        Assert.That(run.Results.Select(r => r.Exception), Has.All.Null);
+        string code = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".g.cs")).Select(t => t.ToString()));
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, code);
+        Assert.That(code, Does.Not.Contain("Chases"));
+        Assert.That(code, Does.Contain("public double CutoffSquared => (double)((s3.R * s3.R));"));
+        var diagnostics = (await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync()).Where(d => d.Id.StartsWith("EECS")).ToArray();
+        Assert.That(diagnostics.Select(d => d.Id), Has.None.EqualTo("EECS106"));
+        Assert.That(diagnostics.Select(d => d.GetMessage()), Has.None.Contains("the generator failed"));
+    }
+
+    /// <summary>The declaration of a method of <paramref name="source"/>, its symbol, and the same declaration parsed into
+    /// a tree of no compilation, which binding refuses (ArgumentException): a stage handed it throws.</summary>
+    private static (IMethodSymbol Method, Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax Elsewhere, SemanticModel Model) Unbindable(string source, string name)
+    {
+        var compilation = Compile(Components, source);
+        var tree = compilation.SyntaxTrees.Last();
+        var model = compilation.GetSemanticModel(tree);
+        static Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax Find(SyntaxTree t, string name) =>
+            t.GetRoot().DescendantNodes().OfType<Microsoft.CodeAnalysis.CSharp.Syntax.MethodDeclarationSyntax>().First(m => m.Identifier.Text == name);
+        return (model.GetDeclaredSymbol(Find(tree, name))!, Find(CSharpSyntaxTree.ParseText(tree.ToString(), Parse), name), model);
+    }
+
+    private static System.Type GeneratorType(string name) => typeof(SystemGenerator).Assembly.GetType("EasyEcs.Generator." + name)!;
+
+    [Test]
+    public void ChasesThatThrowLeaveThePlainJobAndTheirReason()
+    {
+        // A failure reading the chases leaves the row job without its prefetching twin, with the reason EECS055 (EECS097
+        // for a lambda) reports through the same call.
+        var (method, elsewhere, model) = Unbindable("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Link l, Lookup<Q> q) => p.V = q[l.Target].HasValue ? 1 : 0; }", "A");
+        var of = GeneratorType("Chases").GetMethods().Single(m => m.Name == "Of" && m.GetParameters().Length == 5);
+        object[] arguments = [method, elsewhere, model, System.Threading.CancellationToken.None, null];
+        Assert.That((System.Collections.IEnumerable)of.Invoke(null, arguments)!, Is.Empty);
+        Assert.That(arguments[4], Does.StartWith("the generator failed to read its reads of other entities (ArgumentException: ").And.EndWith(" Please report this as an EasyEcs bug)"));
+    }
+
+    [Test]
+    public void ACutoffThatThrowsRunsEveryPairWithItsReason()
+    {
+        // A failure reading the cutoff test: the pass runs every pair (the body's own test keeps the results), and
+        // EECS106 reports the reason through the same call.
+        var (method, elsewhere, model) = Unbindable("""
+            public struct Spot : IComponent { public float X; }
+            public static class S { [ForEach] public static void A(in Spot p, ref P n, [Neighbor] in Spot q) { float dx = q.X - p.X; if (dx * dx < 4) n.V++; } }
+            """, "A");
+        var read = GeneratorType("PairForm").GetMethod("ReadCutoff")!;
+        object[] arguments = [method, elsewhere, model, null, System.Threading.CancellationToken.None, null];
+        Assert.That(read.Invoke(null, arguments), Is.Null);
+        Assert.That(arguments[5], Does.StartWith("the generator failed to read its cutoff test (ArgumentException: ").And.EndWith(" Please report this as an EasyEcs bug)"));
+    }
+
+    /// <summary>A method symbol whose parameters throw: the declaration a stage reads is broken.</summary>
+    public class BrokenParameters : System.Reflection.DispatchProxy
+    {
+        public IMethodSymbol Real = null!;
+
+        protected override object Invoke(System.Reflection.MethodInfo method, object[] args) =>
+            method.Name == "get_Parameters" ? throw new System.InvalidOperationException("broken") : method.Invoke(Real, args);
+    }
+
+    [Test]
+    public void AFusionSideThatThrowsKeepsItsOwnWalkWithItsReason()
+    {
+        // A failure reading a method for pass fusion: a side that fuses with nothing, whose reason (its Blocker)
+        // EECS093 reports through the same call.
+        var compilation = Compile(Components, "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) => p.V++; [ForEach] static void B(ref P p) => p.V--; }");
+        var type = compilation.GetTypeByMetadataName("S")!;
+        var a = (IMethodSymbol)type.GetMembers("A").Single();
+        var b = (IMethodSymbol)type.GetMembers("B").Single();
+        var broken = System.Reflection.DispatchProxy.Create<IMethodSymbol, BrokenParameters>();
+        ((BrokenParameters)(object)broken).Real = b;
+
+        var side = GeneratorType("FusionSide");
+        var of = side.GetMethod("Of")!;
+        object first = of.Invoke(null, [a, true, true, false])!, second = of.Invoke(null, [broken, true, true, false])!;
+        const string reason = "the generator failed to read what B reads, writes and filters (InvalidOperationException: broken Please report this as an EasyEcs bug)";
+        Assert.That(side.GetProperty("Failed")!.GetValue(second), Is.True);
+        Assert.That(side.GetProperty("Blocker")!.GetValue(second), Is.EqualTo(reason));
+        var problem = GeneratorType("Fusion").GetMethod("Problem", [side, side])!;
+        Assert.That(problem.Invoke(null, [first, second]), Is.EqualTo(reason));
+        Assert.That(problem.Invoke(null, [first, of.Invoke(null, [b, true, true, false])]), Is.Null); // read: one walk
     }
 
     [Test]

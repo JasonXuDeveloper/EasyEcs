@@ -1471,3 +1471,28 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
 - The 4-round TileStencil / TileActive / TileSettle and the 2-round TileWoken final numbers were cut off by a worker
   restart; the bench sync runs them again.
 
+
+## feat-stage-catch (8f)
+
+- guide/analyzer.mdx + zh, EECS055: a switch expression now names itself and its fix. Over a call on a struct
+  (VoxelServer's Chase: `new Nearby(...).Trail(...) switch`): "it switches over a call on struct {T} ('...'), which
+  runs row by row, and a vector loop has no switch: call {T}.{M} in a [ForEach] method of its own that stores the
+  result in a component, and switch over that field here with conditional expressions ('v == A ? a : v == B ? b :
+  c')"; otherwise "it has a switch expression ('...'), which a vector loop has no form of: write it as conditional
+  expressions". Both fixable (Warning under SimdMode.Require).
+- guide/analyzer.mdx + zh: the generator's own failures, each reported as a bug with the stage named ("the generator
+  failed to {what} (Exception: message Please report this as an EasyEcs bug)"), and what the method keeps:
+  - EECS055 (and EECS097 for a lambda pass): "failed to read its reads of other entities": the plain job, no
+    prefetching twin;
+  - EECS106: "failed to read its cutoff test": every pair runs; EECS106 now also reports a cutoff the pass cannot
+    compute once ("its cutoff is not a value the pass can read once: ..."), which the analyzer missed before;
+  - EECS093: "failed to read what M reads, writes and filters": the two passes keep their own walks.
+- guide/neighbors (pair methods) + zh: a partial pair method works (the attributes on the defining part, the body on
+  the implementing one); it used to drop the project's generated output.
+- guide/prefetch (or the Lookup page) + zh: reads through a Lookup<T> or an index of a local function's own
+  parameters are not the method's chases (they used to crash the generator); only the method's own in components and
+  lookups are prefetched.
+- decisions.mdx + zh, next free D: "Every body stage catches its exceptions": Kernel, Chases, PairForm.ReadCutoff and
+  FusionSide each turn an exception into a reason (Kernel.FailedTo) and the plain form, since one throwing stage drops
+  every file of the project (CS8785, then hundreds of errors in user code); the analyzer calls the same function, so
+  what the generator skips it reports.

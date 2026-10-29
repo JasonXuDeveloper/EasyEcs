@@ -170,7 +170,7 @@ internal static class PairForm
     /// <c>in</c> too (a cutoff per row; of a symmetric method, the row's: the earlier of the pair). A symmetric method
     /// that writes the compared component has none.
     /// </summary>
-    public static Shape? Read(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct, out string? reason)
+    private static Shape? Read(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct, out string? reason)
     {
         reason = null;
         (syntax, model) = Symbols.WithBody(method, syntax, model);
@@ -214,6 +214,35 @@ internal static class PairForm
             ? "no term of the test is the squared distance at or past a cutoff ('d2 >= r2' of a sum of squared differences of a row's field and the neighbor's)"
             : "no term of the test is the squared distance within a cutoff ('d2 < r2' of a sum of squared differences of a row's field and the neighbor's)";
         return null;
+    }
+
+    /// <summary>
+    /// The cutoff test the pass reads (<see cref="Read"/>) with the squared cutoff as C# of the job
+    /// (<paramref name="nameOf"/>: a parameter's name there, by index), or null with the reason the pass runs every pair
+    /// (EECS106, through this call): no test found, a cutoff the pass cannot compute once (<c>Kernel.ScalarOf</c>), or a
+    /// failure of the generator reading it, so one method's failure never drops the generated files of the others.
+    /// </summary>
+    public static (Shape Shape, string Cutoff)? ReadCutoff(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
+        System.Func<int, Symbols.ParamKind, string> nameOf, System.Threading.CancellationToken ct, out string? reason)
+    {
+        try
+        {
+            if (Read(method, syntax, model, ct, out reason) is not { } shape) return null;
+            bool outside = Symbols.IsRunner(method);
+            var names = new Dictionary<IParameterSymbol, string>(SymbolEqualityComparer.Default);
+            for (int i = 0; i < method.Parameters.Length; i++) names[method.Parameters[i]] = nameOf(i, Symbols.Classify(method.Parameters[i], outside));
+            // A partial method's test names the parameters of its implementing part.
+            if (method.PartialImplementationPart is { } body)
+                for (int i = 0; i < body.Parameters.Length; i++) names[body.Parameters[i]] = names[method.Parameters[i]];
+            if (Kernel.ScalarOf(shape.Cutoff, names, out string? why) is { Length: > 0 } cutoff) return (shape, cutoff);
+            reason = $"its cutoff is not a value the pass can read once: {why}";
+            return null;
+        }
+        catch (System.Exception e) when (e is not System.OperationCanceledException)
+        {
+            reason = Kernel.FailedTo("read its cutoff test", e);
+            return null;
+        }
     }
 
     /// <summary>
