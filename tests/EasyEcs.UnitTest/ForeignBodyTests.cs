@@ -50,6 +50,7 @@ public class ForeignBodyTests
     {
         var world = new World();
         var random = new Random(seed);
+        world.Reserve<Ember, Furnace>(count);
         for (int i = 0; i < count; i++)
             entities[i] = world.CreateEntity(new Ember(random.Next(-50, 50) * 0.25f, random.Next(-50, 50) * 0.75f), new Furnace(random.Next(-10, 10) * 0.125f));
         world.AddSystem<TSystem>();
