@@ -17,8 +17,9 @@ namespace EasyEcs.Generator;
 /// accessor with a body), its body with every name qualified (<c>[assembly: InlineBody]</c>, or the reason it cannot
 /// be inlined). A field the referencing assembly cannot see becomes a placeholder (<c>__EasyEcsAccessor{i}</c>,
 /// <c>kind|type|name</c>), an internal static helper it calls a local function of its own (<c>__EasyEcsHelper{j}</c>).
-/// Source output, one file per type declaration: an IDE compiling a ProjectReference sees what a build sees, and an
-/// edit rebinds only the bodies of the declaration it touched, which the syntax filters first (size, loops, throws).
+/// Only members taking and returning values (a vector loop inlines nothing else) are recorded. Source output, one file
+/// per source file: an IDE compiling a ProjectReference sees what a build sees, and an
+/// edit rebinds only the bodies of the file it touched, which the syntax filters first (size, loops, throws).
 /// </summary>
 internal static class Recorder
 {
@@ -28,13 +29,15 @@ internal static class Recorder
     /// <summary>How deep internal helpers calling internal helpers are recorded.</summary>
     private const int MaxHelpers = 4;
 
-    /// <summary>One type declaration's facts: its file's name and the attribute lines.</summary>
+    /// <summary>One source file's facts: the generated file's name and the attribute lines.</summary>
     private sealed record Facts(string HintName, EquatableArray<string> Lines);
 
     public static void Initialize(IncrementalGeneratorInitializationContext context)
     {
+        // One stage entry and one generated file per source file, not per type: the driver's work per run grows with
+        // the entries and files it carries over, and an edit rereads only the file it touched either way.
         var facts = context.SyntaxProvider
-            .CreateSyntaxProvider(static (node, _) => IsCandidate(node), static (ctx, ct) => Read(ctx, ct))
+            .CreateSyntaxProvider(static (node, _) => node is CompilationUnitSyntax, static (ctx, ct) => Read(ctx, ct))
             .Where(static f => f is not null)
             .WithTrackingName("RecordedTypes");
         context.RegisterSourceOutput(facts, static (spc, facts) =>
@@ -59,18 +62,50 @@ internal static class Recorder
         return true;
     }
 
+    /// <summary>The facts of every public type declared in one source file, or null when it declares none to record.</summary>
     private static Facts? Read(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
     {
-        var node = (TypeDeclarationSyntax)ctx.Node;
-        if (ctx.SemanticModel.GetDeclaredSymbol(node, ct) is not INamedTypeSymbol type || !Visible(type)
-            || ctx.SemanticModel.Compilation.GetTypeByMetadataName(Recorded.InlineBodyAttribute) is not { } attribute // an EasyEcs without them
-            || SymbolEqualityComparer.Default.Equals(attribute.ContainingAssembly, type.ContainingAssembly)) // EasyEcs itself: its API is not inlined
+        var model = ctx.SemanticModel;
+        if (model.Compilation.GetTypeByMetadataName(Recorded.InlineBodyAttribute) is not { } attribute // an EasyEcs without them
+            || SymbolEqualityComparer.Default.Equals(attribute.ContainingAssembly, model.Compilation.Assembly)) // EasyEcs itself: its API is not inlined
             return null;
         var lines = new List<string>();
+        string? hint = null;
+        // Types sit in namespaces and other types, never in bodies: the walk stops at members.
+        foreach (var node in ctx.Node.DescendantNodes(static n => n is CompilationUnitSyntax or BaseNamespaceDeclarationSyntax or TypeDeclarationSyntax))
+        {
+            ct.ThrowIfCancellationRequested();
+            if (node is not TypeDeclarationSyntax declaration || !IsCandidate(declaration)) continue;
+            int before = lines.Count;
+            if (model.GetDeclaredSymbol(declaration, ct) is INamedTypeSymbol type && Visible(type)) Read(declaration, type, model.Compilation, lines, ct);
+            if (hint == null && lines.Count > before) hint = HintName(declaration, model.GetDeclaredSymbol(declaration, ct)!, ct);
+        }
+
+        return hint == null ? null : new Facts(hint, new EquatableArray<string>(lines.ToArray()));
+    }
+
+    /// <summary>The generated file's name: the first type recorded, numbered by its declaration when it is partial.</summary>
+    private static string HintName(TypeDeclarationSyntax node, ISymbol type, System.Threading.CancellationToken ct)
+    {
+        int index = type.DeclaringSyntaxReferences.Select(r => r.GetSyntax(ct)).ToList().IndexOf(node);
+        string hint = type.ToDisplayString(Symbols.Fqn).Replace("global::", "").Replace('<', '[').Replace('>', ']');
+        return $"{hint}{(index > 0 ? "." + index : "")}.Recorded.g.cs";
+    }
+
+    /// <summary>
+    /// Whether a vector loop could take <paramref name="type"/> as a value: helpers taking or returning anything else
+    /// (a World, a string, an array) are never inlined into one, so they are not recorded.
+    /// </summary>
+    private static bool LaneType(ITypeSymbol type) => type.SpecialType == SpecialType.System_Void || type.IsValueType && !type.IsRefLikeType;
+
+    /// <summary>The facts of one type declaration, added to <paramref name="lines"/>.</summary>
+    private static void Read(TypeDeclarationSyntax node, INamedTypeSymbol type, Compilation compilation, List<string> lines, System.Threading.CancellationToken ct)
+    {
         if (type.IsValueType)
             foreach (var constructor in type.InstanceConstructors)
-                if (constructor.DeclaredAccessibility == Accessibility.Public && !constructor.IsImplicitlyDeclared && Declares(node, constructor, ct))
-                    lines.Add(Constructor(constructor, ctx.SemanticModel.Compilation, ct));
+                if (constructor.DeclaredAccessibility == Accessibility.Public && !constructor.IsImplicitlyDeclared && constructor.Parameters.All(p => LaneType(p.Type))
+                    && Declares(node, constructor, ct))
+                    lines.Add(Constructor(constructor, compilation, ct));
         if (!IsGenericAnywhere(type))
             foreach (var member in type.GetMembers())
             {
@@ -82,16 +117,12 @@ internal static class Recorder
                 }
             }
 
-        if (lines.Count == 0) return null;
-        int index = type.DeclaringSyntaxReferences.Select(r => r.GetSyntax(ct)).ToList().IndexOf(node);
-        string hint = type.ToDisplayString(Symbols.Fqn).Replace("global::", "").Replace('<', '[').Replace('>', ']');
-        return new Facts($"{hint}{(index > 0 ? "." + index : "")}.Recorded.g.cs", new EquatableArray<string>(lines.ToArray()));
-
         void Add(IMethodSymbol? method, IPropertySymbol? property)
         {
             if (method == null || method.DeclaredAccessibility != Accessibility.Public || (property ?? (ISymbol)method).DeclaredAccessibility != Accessibility.Public
                 || method.IsAbstract || method.IsVirtual || method.IsOverride || method.IsExtern || method.IsGenericMethod || method.ReturnsByRef || method.ReturnsByRefReadonly
-                || !method.IsStatic && !type.IsValueType || type.IsExtension || Symbols.IsGenerated(method) || method.Parameters.Any(p => p.IsParams))
+                || !method.IsStatic && !type.IsValueType || type.IsExtension || Symbols.IsGenerated(method) || method.Parameters.Any(p => p.IsParams)
+                || !LaneType(method.ReturnType) || method.Parameters.Any(p => !LaneType(p.Type)))
                 return;
             var syntax = method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(ct);
             if (syntax == null || !node.Span.Contains(syntax.Span)) return;
@@ -110,7 +141,7 @@ internal static class Recorder
             {
                 try
                 {
-                    var writer = new Writer(ctx.SemanticModel.Compilation, ct);
+                    var writer = new Writer(compilation, ct);
                     string text = writer.Record(method, body);
                     lines.Add($"[assembly: global::EasyEcs.InlineBody({Literal(id)}, {Literal(text)}{string.Concat(writer.Accessors.Select(a => ", " + Literal(a)))})]");
                     return;

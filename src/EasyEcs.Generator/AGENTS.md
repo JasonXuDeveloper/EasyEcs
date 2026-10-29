@@ -216,11 +216,12 @@ Chases.cs                    a [ForEach] method's or lambda pass's chases, read 
                              (lookup[x.F], Read, Has), key probes (TryFind / Find / Count) and reads at the ids of an in
                              buffer's elements (foreach, the indexer), with the stages each one prefetches
 Recorder.cs                  what this assembly records for the generators of assemblies referencing it (source output,
-                             one file per public type declaration): [assembly: ConstructorFields] per public constructor
+                             one file per source file): [assembly: ConstructorFields] per public constructor
                              of a public struct (the member each parameter sets, or the reason), [assembly: InlineBody]
-                             per small public helper (static method, struct member, accessor with a body: the body with
-                             names qualified, this as @this, hidden fields as placeholders __EasyEcsAccessor{i}, hidden
-                             static helpers as local functions __EasyEcsHelper{j}; or the reason)
+                             per small public helper taking and returning values (static method, struct member,
+                             accessor with a body: the body with names qualified, this as @this, hidden fields as
+                             placeholders __EasyEcsAccessor{i}, hidden static helpers as local functions
+                             __EasyEcsHelper{j}; or the reason)
 Recorded.cs                  those facts read back per referenced assembly (cached on its symbol): Constructor, BodyOf,
                              Parse (placeholders annotated with their field), AccessOf / FieldOf (a placeholder's field,
                              which Kernel reads as a lane or, uniform, through an [UnsafeAccessor] extern of the job);
