@@ -84,6 +84,7 @@ public static partial class EasyEcsAnalyzer
     private static bool NearMiss(List<FusionSide> group, FusionSide side)
     {
         var last = group[group.Count - 1];
+        if (side.Failed || last.Failed) return true; // the generator failed to read one of them: a bug to report, whatever the rest
         if (side.Blocker != null || group.Any(g => g.Blocker != null)) return false;
         return Fusion.FilterDistance(last, side) switch
         {

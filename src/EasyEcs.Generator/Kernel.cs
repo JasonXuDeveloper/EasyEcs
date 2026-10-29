@@ -346,8 +346,14 @@ internal sealed partial class Kernel
     /// row-by-row job and the analyzer reports this (the same call), so one method's failure never drops the files of
     /// the others (a generator that throws loses all of its output, and the build then fails on every name it writes).
     /// </summary>
-    private static ScalarReason Failed(System.Exception e) =>
-        new($"the generator failed to translate it ({e.GetType().Name}: {e.Message} Please report this as an EasyEcs bug)", false, null);
+    private static ScalarReason Failed(System.Exception e) => new(FailedTo("translate it", e), false, null);
+
+    /// <summary>
+    /// The reason of any stage that reads a method's body and threw (<paramref name="what"/>: what it failed to do): the
+    /// stage falls back to the method's plain form and the analyzer reports this text through the same call.
+    /// </summary>
+    internal static string FailedTo(string what, System.Exception e) =>
+        $"the generator failed to {what} ({e.GetType().Name}: {e.Message} Please report this as an EasyEcs bug)";
 
     private static Code? VectorizeMethod(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model,
         System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out ScalarReason? reason)
@@ -2306,7 +2312,7 @@ internal sealed partial class Kernel
         return NotSupported(op);
     }
 
-    private Unsupported NotSupported(IOperation op) => new(op switch
+    private Unsupported NotSupported(IOperation op) => op is ISwitchExpressionOperation select ? NotSupported(select) : new(op switch
     {
         IInvocationOperation { TargetMethod: var m } when IsMath(m) => IsFloat(m.ReturnType) && m.Name is "Asin" or "Acos" or "Atan" or "Atan2" or "Cbrt"
             || m.ReturnType.SpecialType == SpecialType.System_Double && m.Name is "Sinh" or "Cosh" or "Tanh"
@@ -2323,6 +2329,23 @@ internal sealed partial class Kernel
             => $"it calls a user-defined operator ('{Text(op)}')",
         _ => $"'{Text(op)}' is not supported",
     });
+
+    /// <summary>
+    /// A switch expression: a vector loop has none, and the conditional expressions it is made of are what the user writes
+    /// instead. Over a call on a struct (a helper struct walking other entities' data, VoxelServer's
+    /// <c>new Nearby(...).Trail(x, z) switch</c>) that call runs row by row, so the split names it: the call in a pass of
+    /// its own storing its result in a component, the switch over that field here.
+    /// </summary>
+    private static Unsupported NotSupported(ISwitchExpressionOperation select)
+    {
+        var value = select.Value;
+        while (value is IConversionOperation { IsImplicit: true } conversion) value = conversion.Operand;
+        const string conditionals = "conditional expressions ('v == A ? a : v == B ? b : c')";
+        return value is IInvocationOperation { Instance.Type: { TypeKind: TypeKind.Struct } type, TargetMethod: var m } && !IsMath(m) && !KnownVector(type)
+            ? new($"it switches over a call on struct {type.Name} ('{Text(value)}'), which runs row by row, and a vector loop has no switch: call "
+                  + $"{type.Name}.{m.Name} in a [ForEach] method of its own that stores the result in a component, and switch over that field here with {conditionals}", true)
+            : new($"it has a switch expression ('{Text(select)}'), which a vector loop has no form of: write it as {conditionals}", true);
+    }
 
     /// <summary>The source of <paramref name="op"/> on one line, cut short.</summary>
     private static string Text(IOperation op)

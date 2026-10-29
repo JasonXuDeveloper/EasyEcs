@@ -184,8 +184,13 @@ public static partial class EasyEcsAnalyzer
             || !Symbols.IsForEach(method) || !Symbols.IsValidForEach(method) || method.PartialDefinitionPart != null // a partial method: once, on its definition
             || Symbols.IsForEntity(method)) return; // one entity per call: no loop to vectorize (the generator asks for none)
         int mode = Symbols.Simd(method);
-        if (mode == Symbols.SimdOff || mode == Symbols.SimdAuto && !Kernel.LooksEligible(method)) return;
-        if (Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out Kernel.ScalarReason? reason) != null
+        if (mode == Symbols.SimdOff || mode == Symbols.SimdAuto && !Kernel.LooksEligible(method))
+        {
+            ReportChases(context, method, syntax);
+            return;
+        }
+        if (Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out Kernel.ScalarReason? reason) != null) return;
+        if (ReportChases(context, method, syntax)
             || mode == Symbols.SimdAuto && AccumulatesByHand(method, syntax, context.SemanticModel, context.CancellationToken)) return; // EECS086's
 
         if (reason!.SplitComponent != null) layout.Advised.TryAdd(reason.SplitComponent, 0);
@@ -196,6 +201,21 @@ public static partial class EasyEcsAnalyzer
                 reason.IsFixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info, null,
                 reason.SplitComponent is { } split ? SplitFix(method, syntax, context.SemanticModel, split, context.CancellationToken) : null,
                 method.Name, reason.Text));
+    }
+
+    /// <summary>
+    /// EECS055 for a method without a vector loop whose reads of other entities the generator failed to read
+    /// (<see cref="Chases.Of(IMethodSymbol, MethodDeclarationSyntax, SemanticModel, System.Threading.CancellationToken, out string?)"/>,
+    /// the call the generator makes): its row job runs without the twin that prefetches them. A generator bug, so a
+    /// suggestion in every SimdMode; it replaces the scalar reason (one diagnostic per method).
+    /// </summary>
+    private static bool ReportChases(SyntaxNodeAnalysisContext context, IMethodSymbol method, MethodDeclarationSyntax syntax)
+    {
+        if (Symbols.IsForEachRecord(method)) return false; // the generator reads no chases of a pass over records
+        Chases.Of(method, syntax, context.SemanticModel, context.CancellationToken, out string? failed);
+        if (failed == null) return false;
+        context.ReportDiagnostic(Diagnostic.Create(ScalarLoop, method.Locations.FirstOrDefault(), DiagnosticSeverity.Info, null, null, method.Name, failed));
+        return true;
     }
 
     /// <summary>

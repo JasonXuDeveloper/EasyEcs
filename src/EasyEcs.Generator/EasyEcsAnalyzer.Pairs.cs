@@ -78,7 +78,8 @@ public static partial class EasyEcsAnalyzer
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method || !Symbols.IsValidForEach(method)) return;
         if (PairForm.IsPairMethod(method))
         {
-            if (PairForm.Problem(method) == null && PairForm.Read(method, syntax, context.SemanticModel, context.CancellationToken, out string? reason) == null)
+            if (PairForm.Problem(method) == null
+                && PairForm.ReadCutoff(method, syntax, context.SemanticModel, static (_, _) => "", context.CancellationToken, out string? reason) == null)
                 context.ReportDiagnostic(Diagnostic.Create(NoPairCutoff, syntax.Identifier.GetLocation(), method.Name, reason));
             return;
         }

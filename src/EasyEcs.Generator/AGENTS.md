@@ -50,8 +50,8 @@ SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): t
                              against itself, IPairJob.Symmetric)
 PairForm.cs                  what a pair method is, read once for the generator and the analyzer: Problem (EECS105's
                              reason; IsSymmetric / BothSides: a component by 'ref' of the row and of the neighbor, the
-                             method writing both sides of each unordered pair, and what that form refuses), Read (the distance test: dx * dx sums, DistanceSquared, LengthSquared, and the
-                             cutoff: values, singletons, the row's in components; EECS106's reason), HandWritten
+                             method writing both sides of each unordered pair, and what that form refuses), ReadCutoff (the distance test: dx * dx sums, DistanceSquared, LengthSquared, and the
+                             cutoff: values, singletons, the row's in components, as C# the pass computes once; EECS106's reason, a failure included), HandWritten
                              (EECS107: a loop over other entities, read through a Lookup<T> of the row's component or walked as a query of the World,
                              testing their squared distance)
 PairRewrite.cs               EECS107's fix, read once for the analyzer and its code fix: a search over candidate ids

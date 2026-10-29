@@ -42,21 +42,54 @@ internal static class Chases
 {
     /// <summary>
     /// The distinct chases of <paramref name="method"/>'s body, in the order they appear; empty when it takes no
-    /// Lookup (no body is bound then).
+    /// Lookup (no body is bound then), and empty with <paramref name="failed"/> when reading them threw: the method keeps
+    /// its plain row job without the prefetching twin, and the analyzer reports <paramref name="failed"/> (EECS055, through
+    /// this call), so one method's failure never drops the generated files of the others.
     /// </summary>
-    public static EquatableArray<Chase> Of(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
+    public static EquatableArray<Chase> Of(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct,
+        out string? failed)
     {
-        bool outside = Symbols.IsRunner(method);
-        if (!method.Parameters.Any(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Lookup)) return new([]);
-        (syntax, model) = Symbols.WithBody(method, syntax, model);
-        return model.GetOperation(syntax, ct) is IMethodBodyOperation body ? Of(body, outside) : new([]);
+        failed = null;
+        try
+        {
+            bool outside = Symbols.IsRunner(method);
+            if (!method.Parameters.Any(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Lookup)) return new([]);
+            (syntax, model) = Symbols.WithBody(method, syntax, model);
+            return model.GetOperation(syntax, ct) is IMethodBodyOperation body ? Of(body, method, outside) : new([]);
+        }
+        catch (System.Exception e) when (e is not System.OperationCanceledException)
+        {
+            failed = Failed(e);
+            return new([]);
+        }
     }
 
-    /// <summary>The distinct chases of a lambda pass's body (<paramref name="function"/>), as a [ForEach] method's.</summary>
-    public static EquatableArray<Chase> Of(IAnonymousFunctionOperation function) =>
-        function.Symbol.Parameters.Any(p => Symbols.Classify(p, true) == Symbols.ParamKind.Lookup) ? Of(function.Body, true) : new([]);
+    /// <summary>
+    /// The distinct chases of a lambda pass's body (<paramref name="function"/>), as a [ForEach] method's (EECS097 reports
+    /// <paramref name="failed"/>).
+    /// </summary>
+    public static EquatableArray<Chase> Of(IAnonymousFunctionOperation function, out string? failed)
+    {
+        failed = null;
+        try
+        {
+            return function.Symbol.Parameters.Any(p => Symbols.Classify(p, true) == Symbols.ParamKind.Lookup) ? Of(function.Body, function.Symbol, true) : new([]);
+        }
+        catch (System.Exception e) when (e is not System.OperationCanceledException)
+        {
+            failed = Failed(e);
+            return new([]);
+        }
+    }
 
-    private static EquatableArray<Chase> Of(IOperation body, bool outside)
+    private static string Failed(System.Exception e) => Kernel.FailedTo("read its reads of other entities", e);
+
+    /// <summary>
+    /// The chases of <paramref name="body"/>: reads through a Lookup parameter of <paramref name="owner"/> (the method or
+    /// the lambda) at a value of its own parameters. A local function or lambda in the body reads through parameters of
+    /// its own, whose ordinals are not the owner's.
+    /// </summary>
+    private static EquatableArray<Chase> Of(IOperation body, IMethodSymbol owner, bool outside)
     {
         var found = new List<Chase>();
         foreach (var op in body.Descendants())
@@ -72,8 +105,9 @@ internal static class Chases
                     => (p, key.Value, true, true),
                 _ => (null, null, false, false),
             };
-            if (lookup == null || Symbols.Classify(lookup, outside) != Symbols.ParamKind.Lookup || Path(at!, probe) is not ({ } root, { } members)) continue;
-            if (Root(root, members, body, outside, probe) is not ({ } component, var kind)) continue;
+            if (lookup == null || !Owns(owner, lookup) || Symbols.Classify(lookup, outside) != Symbols.ParamKind.Lookup
+                || Path(at!, probe) is not ({ } root, { } members)) continue;
+            if (Root(root, members, body, outside, probe) is not ({ } component, var kind) || !Owns(owner, component)) continue;
             var chase = new Chase(lookup.Ordinal, component.Ordinal, members, row, kind);
             int same = found.FindIndex(f => f with { Row = false } == chase with { Row = false });
             if (same < 0) found.Add(chase);
@@ -81,6 +115,13 @@ internal static class Chases
         }
         return new(found.ToArray());
     }
+
+    /// <summary>
+    /// Whether <paramref name="p"/> is a parameter of <paramref name="owner"/> (of its implementing part, for a partial
+    /// method), not of a function declared in its body.
+    /// </summary>
+    private static bool Owns(IMethodSymbol owner, IParameterSymbol p) =>
+        SymbolEqualityComparer.Default.Equals(p.ContainingSymbol, owner) || SymbolEqualityComparer.Default.Equals(p.ContainingSymbol, owner.PartialImplementationPart);
 
     /// <summary>
     /// Where the value of a chase comes from, and so its kind: an <c>in</c> component parameter (an entity chase, or a
