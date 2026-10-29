@@ -34,6 +34,13 @@ internal sealed partial class Kernel
     /// A conversion that changes nothing: an identity, or a target-typed switch expression's to the type its arms were
     /// already converted to (<c>byte b = v switch { 0 =&gt; 1, _ =&gt; b }</c>), which Roslyn does not call one.
     /// </summary>
+    // An identity conversion only: a field set through any other conversion is not the field's value.
+    private static IOperation Unwrap(IOperation op)
+    {
+        while (op is IConversionOperation { Conversion.IsIdentity: true } c) op = c.Operand;
+        return op;
+    }
+
     private static bool Keeps(IConversionOperation c) => c.Conversion.IsIdentity
         || c is { OperatorMethod: null, Operand: ISwitchExpressionOperation } && SymbolEqualityComparer.Default.Equals(c.Type, c.Operand.Type);
 
