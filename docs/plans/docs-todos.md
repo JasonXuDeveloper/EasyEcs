@@ -1471,3 +1471,13 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
 - The 4-round TileStencil / TileActive / TileSettle and the 2-round TileWoken final numbers were cut off by a worker
   restart; the bench sync runs them again.
 
+## feat-tile-reads: tile loads checked once per loop (nothing user-visible in the API)
+
+- grids guide (en + zh): a column loop `for (int x = 0; x < TTile.Width; x += 4) ... c.Load128<T>(x + k)` gets one
+  check per loop; say which loops qualify (an int from a constant, a constant or the shape's extent as the bound, a
+  positive step, x written nowhere else, no lambda or local function around the load) and that other loads stay
+  checked; the decision record (draft in the agent's report) next to D-tiles.
+- Pre-existing, found by the gates (not this branch): DocCheck fails 16 fences of guide/grids and guide/analyzer
+  (en + zh) on `Tile.Pad` (renamed `ExchangeHalo`); ApiDocs reports 26 Chinese entries stale or missing after the
+  tiles merge (Columns, GaussSeidelAttribute, Tile.At / ExchangeHalo / Rows / Write / the indexer, PaddedTile removed).
+

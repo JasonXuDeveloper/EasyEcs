@@ -104,3 +104,28 @@ gap is the Tile API's checked column loads, which the by-value form pays too: ba
 VoxelServer TickBenchmark base against head, 4 interleaved rounds: within noise, 0 B.
 
 What would change the verdict: nothing left to decide; the read fix is scheduled.
+
+## Tile loads: the Laplacian gap left, and loads the generator cannot prove (feat-tile-reads, 2026-10-29)
+
+**Proposed by** the tile-reads round. The interceptor of a proven column loop leaves the Laplacian's column loop at
+48 instructions against the hand-written 33 (Laplacian 32x32 at 1 thread: ping-pong 1.14x hand, every other case at or
+below hand). What is left is index arithmetic: the JIT inlines the interceptor's `dx` (x + k) into a temporary because
+the folded-away checked branch still names it, so each column computes `x + k`, then `+ r` again, where the hand form
+adds one base and folds every k into the displacement. Tried and measured in Tier1 listings: the cursor by value
+(an interceptor of an instance method must take `this in`), a span per row (more checks), a 64-bit offset (a
+`movsxd` per column again). **Verdict: not done.** What would change it: a JIT that forward-substitutes the single
+remaining use after the branch folds (worth rechecking on each .NET release with `tools/jitdisasm.sh`), or an API
+that hands the loop's base column to the method (`c.Columns(...)`), which is public surface the owner would decide.
+
+A second proposal, **not built**: an Info rule reporting a `TileCursor` load in a loop the generator cannot prove
+(the variable written in the body, a bound it cannot read), with the reason, as EECS055 does for vector loops. Every
+such load is still correct (checked); the rule would only tell the user why it is slower. Worth it once a user's
+stencil shows up with that shape; the reasons are already the cases `TileLoad.Read` returns null for.
+
+**For the owner to decide before merging:** Laplacian ping-pong at Side 512 (out of cache) is slower than base in two
+independent sets of 4 interleaved rounds: +7.4 % at 1 thread (rounds 1-4), +7.2 % at 1 thread and +3.9 % at 4 threads
+(rounds 6-9, ping-pong alone), while the blur at 512 is 2-4 % faster and the Laplacian stays below hand there (0.90x).
+The Tier1 loop is shorter, so the cause is not the instructions counted; candidates are loop alignment or the per-row
+frame changes in `TileSteps`. Merge as is (in-cache gains everywhere), or root-cause first (bisect the `TileSteps`
+frame change from the interceptor with the same benchmark).
+

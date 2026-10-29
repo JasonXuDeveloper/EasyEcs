@@ -33,11 +33,17 @@ names the skill:
 
 - [ ] **Arrive runs** (item 8i, branch `feat-arrive-runs`): MoveEntities' gain from feat-copy-entities' ArriveRows
       changes, without CopyEntities.
-- [ ] **Tile reads checked once** (owner, 2026-10-29: "先合并，再修读取"): the in-cache gap the ping-pong step
-      keeps against step + commit by hand (Laplacian 1.33x at 1 thread) is the Tile API's per-column range check and
-      sign extension in `TileCursor` loads, paid by the by-value form too; a generator rewrite of `c.Load128(x + k)`
-      into one checked base when the x loop's range is known, or an unchecked row cursor. Proof: Tier1 listings and
-      TileStencil 32 / 512 at 1 and 4 threads against hand, sparse and dense.
+- [x] **Tile reads checked once** (owner, 2026-10-29: "先合并，再修读取"; branch `feat-tile-reads`, merge waits for the owner on the Laplacian 512 regression below):
+      the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop with one
+      check per loop folded by the JIT and a zero-extended index (no public API); TileSteps.Begin reads the thread's
+      frame once per tile, the row walk stays in registers, a Jacobi row skips its span check. Tier1: the blur's
+      column loop 42 -> 36 instructions, the Laplacian's 61 -> 48 (hand: 33), no movsxd or column compare left.
+      BDN, 4 interleaved rounds (Woken 2): ping-pong 5-7 % faster in cache, at or below hand everywhere but
+      Laplacian 32x32 at 1 thread (1.14x hand, was 1.16x: the index arithmetic of `dx`, owner-review "Tile loads:
+      the Laplacian gap left"); Laplacian ping-pong at 512 (out of cache) is slower than base in both runs: +7.4 % at 1 thread in rounds
+      1-4, +7.2 % at 1 thread and +3.9 % at 4 threads in 4 more rounds of the ping-pong alone, unexplained (the blur
+      at 512 is 2-4 % faster) and still at or below hand there (0.90x);
+      VoxelServer, WorldSimulation, BattleServer within noise; 0 B.
 
 Merged since the last update: symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
