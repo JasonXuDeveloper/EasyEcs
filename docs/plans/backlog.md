@@ -419,8 +419,12 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       bisect the two on the M4. cf43ac4 vs its parent fc527d5 (owner's M4 run, 2026-10-29, one round, 0 B): the
       `fixed` removal alone costs 10-21% at 100k on the deinterleaving loops (Move2 17.0 -> 19.1 us, Move3 26.3 ->
       29.5, Move4 34.6 -> 40.2, Step 20.7 -> 25.1, Integrate 8.7 -> 10.0), Wave, Share, Seek and Brighten flat: real,
-      but short of 25-58%. Next: `KernelBenchmark` `*Generated` at 2206090 for the literals' share; NEON LD/ST
-      take `fixed` back whatever it shows. Then try the fix per path (literals only where AOT pays; or the table read into a local before the loop) and land it only
+      but short of 25-58%. 2206090 (literals) on top, same run conditions: mixed, not uniform. Glide (NEON TBL
+      lookups) 22.3 -> 23.1 -> 28.9 us at 100k (170 -> 183 -> 206 ns at 1k), Seek 69.3 -> 73.4 -> 76.4 us; faster:
+      Wave 240 -> 217 us, Optional 34.7 -> 31.3 us, Step at 1k 270 -> 210 ns; Move2/3/4 no further change. The
+      revert's 1k figures (Move2 179 ns, Move3 264 ns) did not reproduce (146 / 202 ns): that run was noisy.
+      Decision: NEON LD/ST keep `fixed` (as HEAD has); literals return only where they do not read through a NEON
+      TBL table (x64 permutes, lane masks), NEON lookup tables stay hoisted statics. Then try the fix per path (literals only where AOT pays; or the table read into a local before the loop) and land it only
       with JIT x64, JIT ARM64 (M4) and Native AOT numbers.
 - [ ] **The inliner's limit, checked instead of assumed** (owner, 2026-10-26: "is a fixed JIT budget right when SIMD
       width differs?"). Answer: `MAX_INL_LCLS = 32` is RyuJIT's implementation constant with no target condition
