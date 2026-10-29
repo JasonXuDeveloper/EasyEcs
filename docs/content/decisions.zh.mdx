@@ -2868,6 +2868,20 @@ Share、Step、Cycle、UpdateCell 的掩码循环，Steer 的循环），最多�
 `DOTNET_EnableAVX=0` 下跑过）。需要 x86 置换的形式在 ARM64 上仍是标量：多字段交错存储的组件（`Interleaved.IsAccelerated`
 需要 AVX2 或 AVX-512）、`Lookup<T>` gather（AVX2），以及宽循环的 AVX-512 置换。
 
+## D136. `ArriveRows` 不内联 [#d136-arrive-rows-not-inlined]
+
+**决定。** `World.ArriveRows` 把一段连续行落进新表（`MoveEntities`、`LoadEntities`、预制体组），标注
+`[MethodImpl(MethodImplOptions.NoInlining)]`。它每段连续行调用一次，不是每行一次。它和 `CopyRun` 一起内联进
+`MoveEntities` 的两个调用点后，这个方法的 Tier1 代码变成 11.9 KB、692 处栈访问；改成调用后是 3.7 KB、136 处。
+
+**数字**（MigrationBenchmark，BenchmarkDotNet 默认作业，和内联的版本交替测 4 轮）。Move 每轮都是 0.82-0.84x
+（144-149 → 118-122 us），0 B。SaveAndLoad、SaveRecord、LoadRecord、预制体的几项和 WorldSimulation / BattleServer
+都在噪声内（0.93-1.06x，每个版本都有快有慢，包括路径代码和基线相同的对照）。
+
+**考虑过的方案。** 复制实体原型分支里重写的逐行循环（每行一次元数据查找、每段一次 `StorageVersion` 递增）：单独测
+0.98-1.00x，叠在这个标注上也没有收益，没有采用。那个分支 Move 的 0.82x 来自同一处内联变化，不是来自它的循环；它的
+gather 和按位的列映射只服务于复制。
+
 ## 相关页面 [#related]
 
 <Cards>

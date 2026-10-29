@@ -276,6 +276,8 @@ major or minor version that needs code changes? The
 - `SetAll` writes a 64-row word whose rows all match with one fill instead of row by row (partial words and indexed
   components keep the loop). See [bulk operations](/en/docs/guide/bulk#what-it-costs) and the
   [decision](/en/docs/decisions#d72-setall-whole-words).
+- `MoveEntities` is about 1.2x faster: the step that lands each run of rows is no longer inlined into it, which keeps
+  its loops over the ids lean ([decision](/en/docs/decisions#d136-arrive-rows-not-inlined)).
 
 ### Changes that need code changes [#v4-8-0-breaking]
 

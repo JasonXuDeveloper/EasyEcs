@@ -3679,6 +3679,23 @@ moved about 13% between sessions). Base is the commit before the copy fix ([D126
 several fields stored interleaved (`Interleaved.IsAccelerated` needs AVX2 or AVX-512), `Lookup<T>` gathers (AVX2), and
 the AVX-512 permutes of wide loops.
 
+## D136. `ArriveRows` is never inlined [#d136-arrive-rows-not-inlined]
+
+**Decision.** `World.ArriveRows`, the step that lands a run of rows in its new table (`MoveEntities`, `LoadEntities`,
+prefab groups), carries `[MethodImpl(MethodImplOptions.NoInlining)]`. It runs once per run of rows, not per row.
+Inlined together with `CopyRun` into both call sites of `MoveEntities`, it grew that method's Tier1 code to 11.9 KB
+with 692 stack references; called, the method is 3.7 KB with 136.
+
+**Numbers** (MigrationBenchmark, BenchmarkDotNet default job, 4 interleaved rounds against the method inlined). Move
+0.82-0.84x in every round (144-149 → 118-122 us), 0 B. SaveAndLoad, SaveRecord, LoadRecord, the prefab cases and
+WorldSimulation / BattleServer stay within noise (0.93-1.06x, both ways in every build, a control with base's path
+code included).
+
+**Considered.** The row loop rewritten on the branch that prototyped copying entities (one meta lookup per row, one
+`StorageVersion` bump per run): 0.98-1.00x alone and nothing on top of the attribute, so dropped. That branch's
+0.82x Move came from the same change of inlining, not from its loop; its gathers and column-by-bit map serve only
+copies.
+
 ## Related [#related]
 
 <Cards>
