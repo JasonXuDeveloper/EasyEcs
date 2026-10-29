@@ -39,7 +39,7 @@
 
     <ItemGroup>
         <None Include="..\..\README.md" Pack="true" PackagePath="\"/>
-        <!-- InterceptorsNamespaces for lambda passes, in every project that references the package (directly or not) -->
+        <!-- InterceptorsNamespaces for lambda passes and tile loads, in every project that references the package (directly or not) -->
         <None Include="build\EasyEcs.props" Pack="true" PackagePath="build;buildTransitive"/>
     </ItemGroup>
 

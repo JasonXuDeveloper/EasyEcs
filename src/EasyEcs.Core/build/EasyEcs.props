@@ -1,6 +1,7 @@
 <Project>
-    <!-- world.ForEach(static (ref P p) => ...): the EasyEcs generator intercepts each call with the job of its lambda, in
-         namespace EasyEcs.Generated; the compiler takes interceptors only from the namespaces a project lists. -->
+    <!-- world.ForEach(static (ref P p) => ...): the EasyEcs generator intercepts each call with the job of its lambda, and
+         each tile load at a column loop's variable (c.Load128<T>(x + k)) with one checked once per loop, in namespace
+         EasyEcs.Generated; the compiler takes interceptors only from the namespaces a project lists. -->
     <PropertyGroup>
         <InterceptorsNamespaces>$(InterceptorsNamespaces);EasyEcs.Generated</InterceptorsNamespaces>
     </PropertyGroup>

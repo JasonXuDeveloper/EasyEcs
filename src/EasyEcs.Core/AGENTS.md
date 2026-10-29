@@ -77,8 +77,9 @@ Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo
                              steps), Rows (TZCNT walk), At / the indexer, Write (a stepped tile's row), TileCursor.Load128,
                              ChangedEdges / Facing (sleeping tiles written by hand)
 TileSteps.cs                 a stepping tile's pass (ref Tile, TileSteps<TCell, TTile, TGrid, TKey, TColors>, one per
-                             world and method): the second buffer of a Jacobi step swapped in after the pass, the rows
-                             it skipped zeroed; [GaussSeidel]'s sweeps in place, color by color (ITileColors,
+                             world and method; Enter decides, Begin hands out the tile with the thread's frame read
+                             once): the second buffer of a Jacobi step swapped in after the pass, the rows it skipped
+                             zeroed; [GaussSeidel]'s sweeps in place, color by color (ITileColors,
                              TileColoring); sleeping tiles, woken by the edges that changed, by others' writes of the
                              cells (and of what else the method reads), by tiles that left the grid, queued by color so
                              a sleeping pass walks only them (StepWoken over the generated job's ITileStep.Step)
@@ -231,5 +232,5 @@ ComponentInfo.cs             per-type column operations (size, managed, create/g
 Annotations.cs               MeansImplicitUse (internal): Rider / ReSharper see systems and [ForEach] methods as used
 BitMask.cs                   256-bit SIMD bitset with overflow (component masks, query sets)
 build/EasyEcs.props          packed as build/EasyEcs.props: adds EasyEcs.Generated to InterceptorsNamespaces (lambda
-                             passes); the repository's Directory.Build.props imports it
+                             passes, tile loads); the repository's Directory.Build.props imports it
 ```
