@@ -71,9 +71,17 @@ StreamingStores.cs           the non-temporal stores of generated vector loops (
                              of the method's columns past CacheSizes.LastLevel), Head (the rows to the first aligned
                              one), Store (AVX-512 / AVX / SSE2 VMOVNTPS where aligned, ARM64 STNP, plain otherwise), Fence
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
-                             Tile<TCell, TTile> (a [ForEach] parameter: up to 26 neighbors found by generated code,
-                             TileNeighbors), Pad into a [ThreadStatic] texture padded with the halo and a row mask,
-                             PaddedTile.Rows (TZCNT walk), TileCursor.Load128, ChangedEdges / Facing (sleeping tiles)
+                             Columns<TTile> (a 2D tile of a 3D grid's key), Tile<TCell, TTile> (a [ForEach] parameter:
+                             up to 26 neighbors found by generated code, TileNeighbors), ExchangeHalo into the thread's
+                             TileFrame (a texture padded with the halo, a row mask per layer, the state of the tile it
+                             steps), Rows (TZCNT walk), At / the indexer, Write (a stepped tile's row), TileCursor.Load128,
+                             ChangedEdges / Facing (sleeping tiles written by hand)
+TileSteps.cs                 a stepping tile's pass (ref Tile, TileSteps<TCell, TTile, TGrid, TKey, TColors>, one per
+                             world and method): the second buffer of a Jacobi step swapped in after the pass, the rows
+                             it skipped zeroed; [GaussSeidel]'s sweeps in place, color by color (ITileColors,
+                             TileColoring); sleeping tiles, woken by the edges that changed, by others' writes of the
+                             cells (and of what else the method reads), by tiles that left the grid, queued by color so
+                             a sleeping pass walks only them (StepWoken over the generated job's ITileStep.Step)
 Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), handed in
                              chunk order to singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear) as
                              segments, not copied: EmitStore (BufferStore.Segmented) joins them only when read as one

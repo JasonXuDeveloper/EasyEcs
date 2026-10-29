@@ -77,3 +77,30 @@ a per-client world, previews), as the feature checklist asks (servers, games, si
 What would change the verdict: a BenchmarkDotNet case (exchange of 500 to 5,000 border rows a tick: `CreateEntity`
 loop vs `SaveEntitiesWith` + `LoadEntities` vs a prototype `CopyEntities`) showing the per-row path costing a
 noticeable share of a tick, or a second sample (VoxelServer's two region worlds) writing the same copy loop.
+## EECS116's code fix (feat-tiles-pingpong, 2026-10-28)
+
+Item 11 asked for a rule and a code fix for a hand-written commit that is a plain copy. The rule shipped (EECS116,
+Warning, reported at the end of the compilation on the commit method, naming the step that writes the second buffer);
+the fix did not. The rewrite is not local: it changes the step method (its by-value `Tile<TCells, ...>` becomes `ref`,
+its `Mut<DynamicBuffer<TNext>>` / `ref DynamicBuffer<TNext>` parameter goes and each write into it becomes
+`Write(row)`), deletes the commit method (and its system when that empties it, with every `AddSystem<T>`,
+`[UpdateAfter<T>]` / `[UpdateBefore<T>]` naming it), and removes the `TNext` buffer type with every
+`GetOrAdd<DynamicBuffer<TNext>>` / `SetCount` that sizes it, in other files and projects. A step that also reads TNext
+(a second step, a debug view) or writes it on some rows only cannot follow at all. A fix that is offered only when all
+of that is mechanical would almost never be offered; one that is offered otherwise breaks code.
+
+What would change the verdict: users porting many hand-written step + commit pairs (VoxelServer's water and the grids
+page's heat are ported by hand in the VoxelServer rewrite and the docs pass), or a fix limited to the step method with
+the commit left for the user to delete (the compiler then reports the stale writes of TNext).
+
+## The generated ping-pong step against step + commit by hand (feat-tiles-pingpong, merged 2026-10-29)
+
+**Owner (2026-10-29): merge it, then fix the reads.** After the Tier1 review (LoadPlane, an unrolled plane Find,
+nint cursor offsets, a Facing table, parallel dense swaps, a woken walk per color with the `TileWalk.Share` gate) the
+`ref Tile` step beats the hand-written form past the last-level cache (Blur9 512x512: 198 against 255-260 ms at 1
+thread, 72 against 88-92 ms at 4) and in sparse fields (about 2x at every share of awake tiles), and still loses in
+cache (Blur9 32x32 529 against 473-505 us, Laplacian 580 against 436-476 us at 1 thread; one `--dev` round each). The
+gap is the Tile API's checked column loads, which the by-value form pays too: backlog "Tile reads checked once".
+VoxelServer TickBenchmark base against head, 4 interleaved rounds: within noise, 0 B.
+
+What would change the verdict: nothing left to decide; the read fix is scheduled.

@@ -13,7 +13,7 @@ namespace VoxelServer;
 // It runs as a shader over the chunks whose field may still change (Spreading), in passes like the water's, with two
 // differences that come from what a field is for. The water is watched as it flows, one step per tick; a distance
 // field is only read once settled, so each step does as much as it can:
-// - A chunk settles its own field before it stops. Its texture is its own (Pad copied it with the edges of its
+// - A chunk settles its own field before it stops. Its texture is its own (ExchangeHalo copied it with the edges of its
 //   neighbors' around), so it sweeps it in place, north to south then back, until a sweep changes nothing. A sweep
 //   carries the scent across the whole chunk north-south, row after row, and along each row east and west in four
 //   doublings (a scan: 1, 2, 4 then 8 columns, each as far as the ground lets a zombie walk), so a field settles in a
@@ -51,17 +51,17 @@ public ref struct ScentStepSystem<TColor> where TColor : struct, IComponent
             step = default;
             return;
         }
-        var last = scent.Pad();
-        var floor = footing.Pad(0, 0, Footing.Unloaded, mask: false);
+        scent.ExchangeHalo();
+        footing.ExchangeHalo(0, 0, Footing.Unloaded, mask: false);
 
         // The field to sweep: the neighbors' edges around (the corners are never read), the chunk's own columns from
         // nothing. Two loads of 16 columns cover a row of 18, the ring included; the middle 16 are then cleared.
         Span<byte> field = stackalloc byte[Row * Row];
         ref byte at = ref MemoryMarshal.GetReference(field);
-        last.At(new TileRow<Ground>(0, 0)).Load128<byte>(-1, 0, -1).StoreUnsafe(ref at);
-        last.At(new TileRow<Ground>(0, 0)).Load128<byte>(1, 0, -1).StoreUnsafe(ref at, 2);
-        last.At(new TileRow<Ground>(0, Size - 1)).Load128<byte>(-1, 0, 1).StoreUnsafe(ref at, (Size + 1) * Row);
-        last.At(new TileRow<Ground>(0, Size - 1)).Load128<byte>(1, 0, 1).StoreUnsafe(ref at, (Size + 1) * Row + 2);
+        scent.At(new TileRow<Ground>(0, 0)).Load128<byte>(-1, 0, -1).StoreUnsafe(ref at);
+        scent.At(new TileRow<Ground>(0, 0)).Load128<byte>(1, 0, -1).StoreUnsafe(ref at, 2);
+        scent.At(new TileRow<Ground>(0, Size - 1)).Load128<byte>(-1, 0, 1).StoreUnsafe(ref at, (Size + 1) * Row);
+        scent.At(new TileRow<Ground>(0, Size - 1)).Load128<byte>(1, 0, 1).StoreUnsafe(ref at, (Size + 1) * Row + 2);
 
         // Where each column may step: north, south, and along the row the runs a scan crosses in 1, 2, 4 and 8 columns,
         // west and east. The ground does not change while the field settles: the rule runs once per step, 16 columns at
@@ -69,11 +69,11 @@ public ref struct ScentStepSystem<TColor> where TColor : struct, IComponent
         Span<Vector128<byte>> ways = stackalloc Vector128<byte>[Ways * Size];
         for (int z = 0; z < Size; z++)
         {
-            var cells = last.At(new TileRow<Ground>(0, z));
+            var cells = scent.At(new TileRow<Ground>(0, z));
             cells.Load128<byte>(-1).StoreUnsafe(ref at, (nuint)((z + 1) * Row));
             cells.Load128<byte>(1).StoreUnsafe(ref at, (nuint)((z + 1) * Row + 2));
             Vector128<byte>.Zero.StoreUnsafe(ref at, (nuint)((z + 1) * Row + 1));   // the chunk's own: from nothing
-            var feet = floor.At(new TileRow<Ground>(0, z));
+            var feet = footing.At(new TileRow<Ground>(0, z));
             var here = feet.Load128<byte>();
             var w = ways.Slice(z * Ways, Ways);
             w[North] = Footing.CanStep(here, feet.Load128<byte>(0, 0, -1));

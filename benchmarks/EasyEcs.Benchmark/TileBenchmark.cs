@@ -6,13 +6,17 @@ using BenchmarkDotNet.Attributes;
 
 namespace EasyEcs.Benchmark;
 
-// Stencils over a torus of 32 x 32 plates of 16 x 16 cells (262,144 cells): what Tile<TCell, TTile> costs against the
-// same stencil written by hand (a Lookup per neighbor, a padded texture on the stack), what sleeping tiles save, and
-// what finding the neighbors costs in a pass.
+// Stencils over a torus of 32 x 32 plates of 16 x 16 cells (262,144 cells, 1 MiB a buffer: in cache), or of 512 x 512
+// (67 million cells, 256 MiB a buffer: past the last-level cache): what Tile<TCell, TTile> costs against the same
+// stencil written by hand (a Lookup per neighbor, a padded texture on the stack), what sleeping tiles save, and what
+// finding the neighbors costs in a pass.
 
 public record struct Plot(int X, int Z)
 {
-    public const int Side = 32;
+    /// <summary>The plots along each side of the torus: <see cref="Default"/>, or a benchmark's [Params] set before its worlds are made.</summary>
+    public static int Side = Default;
+
+    public const int Default = 32;
 
     /// <summary>The plot beside this one across a face, around the torus.</summary>
     public Plot Wrap(TileFaces face) => face switch
@@ -101,11 +105,14 @@ public class TileStencilBenchmark
 {
     [Params(1, 4)] public int Threads;
 
-    private World _blurTile, _blurDirect, _blurHand, _waveTile, _waveHand;
+    [Params(Plot.Default, 512)] public int Side;
+
+    private World _blurTile, _blurDirect, _blurHand, _blurPingPong, _waveTile, _waveHand, _wavePingPong;
 
     [GlobalSetup]
     public void Setup()
     {
+        Plot.Side = Side;
         _blurTile = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p));
         _blurTile.AddSystem<TileSystems.BlurSystem>();
         _blurTile.AddSystem<TileSystems.CommitWarmthSystem>();
@@ -121,6 +128,10 @@ public class TileStencilBenchmark
         _waveHand = TileWorlds.Warm<HandPlot>(Threads, p => new HandPlot(p));
         _waveHand.AddSystem<TileSystems.HandWaveSystem>();
         _waveHand.AddSystem<TileSystems.CommitWarmthSystem>();
+        _blurPingPong = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p), next: false);
+        _blurPingPong.AddSystem<TileSystems.PingBlurSystem>();
+        _wavePingPong = TileWorlds.Warm<WavePlot>(Threads, p => new WavePlot(p), next: false);
+        _wavePingPong.AddSystem<TileSystems.PingWaveSystem>();
         for (int i = 0; i < 3; i++)
         {
             Blur9_Tile();
@@ -128,8 +139,12 @@ public class TileStencilBenchmark
             Blur9_Hand();
             Laplacian_Tile();
             Laplacian_Hand();
+            Blur9_PingPong();
+            Laplacian_PingPong();
         }
         TileWorlds.Same(_blurTile, _blurHand);
+        TileWorlds.Same(_blurPingPong, _blurHand);
+        TileWorlds.Same(_wavePingPong, _waveHand);
         TileWorlds.Same(_blurDirect, _blurHand);
         TileWorlds.Same(_waveTile, _waveHand);
     }
@@ -142,6 +157,8 @@ public class TileStencilBenchmark
         _blurHand.Dispose();
         _waveTile.Dispose();
         _waveHand.Dispose();
+        _blurPingPong.Dispose();
+        _wavePingPong.Dispose();
     }
 
     [Benchmark] public void Blur9_Tile() => _blurTile.Update();
@@ -149,22 +166,29 @@ public class TileStencilBenchmark
     [Benchmark] public void Blur9_Hand() => _blurHand.Update();
     [Benchmark] public void Laplacian_Tile() => _waveTile.Update();
     [Benchmark] public void Laplacian_Hand() => _waveHand.Update();
+    [Benchmark] public void Blur9_PingPong() => _blurPingPong.Update();
+    [Benchmark] public void Laplacian_PingPong() => _wavePingPong.Update();
 }
 
 /// <summary>
-/// A quiet Game of Life: 16 blinkers on 1,024 plates. Always on steps every plate (each skipping its empty rows);
-/// Sparse steps the plates that are awake (the 16, which never change their edges) and lets the others sleep.
+/// A quiet Game of Life: a blinker on every 64th plate (16 of 1,024, or 4,096 of 262,144). Always on steps every plate (each skipping its empty rows);
+/// Sparse steps the plates that are awake (the 16, which never change their edges) and lets the others sleep, by hand
+/// (an Awake tag, a commit, a sleep and a wake system); PingPong steps each plate through ref Tile, the pass keeping its
+/// second buffer and letting the plates that cannot change sleep.
 /// </summary>
 [MemoryDiagnoser]
 public class TileActiveBenchmark
 {
     [Params(1, 4)] public int Threads;
 
-    private World _always, _sparse;
+    [Params(Plot.Default, 512)] public int Side;
+
+    private World _always, _sparse, _pingPong;
 
     [GlobalSetup]
     public void Setup()
     {
+        Plot.Side = Side;
         _always = TileWorlds.Blinkers(Threads, awake: false);
         _always.AddSystem<TileSystems.LifeSystem>();
         _always.AddSystem<TileSystems.CommitSeedSystem>();
@@ -173,13 +197,17 @@ public class TileActiveBenchmark
         _sparse.AddSystem<TileSystems.CommitAwakeSystem>();
         _sparse.AddSystem<TileSystems.SleepSystem>();
         _sparse.AddSystem<TileSystems.WakeSystem>();
+        _pingPong = TileWorlds.Blinkers(Threads, awake: false, next: false);
+        _pingPong.AddSystem<TileSystems.PingLifeSystem>();
         for (int i = 0; i < 4; i++)
         {
             AlwaysOn();
             Sparse();
+            PingPong();
         }
-        if (_sparse.Count<Awake>(QueryFilter.Create()) != 16) throw new InvalidOperationException("16 plates stay awake");
+        if (_sparse.Count<Awake>(QueryFilter.Create()) != Side / 8 * (Side / 8)) throw new InvalidOperationException("the plates with a blinker stay awake");
         TileWorlds.SameSeeds(_always, _sparse);
+        TileWorlds.SameSeeds(_always, _pingPong);
     }
 
     [GlobalCleanup]
@@ -187,10 +215,12 @@ public class TileActiveBenchmark
     {
         _always.Dispose();
         _sparse.Dispose();
+        _pingPong.Dispose();
     }
 
     [Benchmark(Baseline = true)] public void AlwaysOn() => _always.Update();
     [Benchmark] public void Sparse() => _sparse.Update();
+    [Benchmark] public void PingPong() => _pingPong.Update();
 }
 
 /// <summary>
@@ -239,33 +269,35 @@ public class TileNeighborBenchmark
 internal static class TileWorlds
 {
     /// <summary>A torus of plates of random warmth (a fixed seed), the step buffer sized.</summary>
-    public static World Warm<TPlot>(int threads, Func<Plot, TPlot> make, bool probe = false) where TPlot : struct, IComponent
+    public static World Warm<TPlot>(int threads, Func<Plot, TPlot> make, bool probe = false, bool next = true) where TPlot : struct, IComponent
     {
         var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         var random = new Random(7);
-        for (int z = 0; z < Plot.Side; z++)
-        for (int x = 0; x < Plot.Side; x++)
+        world.Reserve<TPlot>(Plot.Side * Plot.Side);
+        for (int n = 0; n < Plot.Side * Plot.Side; n++)
         {
+            int x = n % Plot.Side, z = n / Plot.Side;
             var plate = world.CreateEntity(make(new Plot(x, z)));
             var warmth = plate.GetOrAdd<DynamicBuffer<Warmth>>().SetCount(256);
             for (int i = 0; i < 256; i++) warmth[i] = new Warmth(random.Next(1000));
-            plate.GetOrAdd<DynamicBuffer<NextWarmth>>().SetCount(256);
+            if (next) plate.GetOrAdd<DynamicBuffer<NextWarmth>>().SetCount(256);
             if (probe) plate.Set(new Probe());
         }
         return world;
     }
 
-    /// <summary>A torus of empty Life plates with a blinker in the middle of every 64th.</summary>
-    public static World Blinkers(int threads, bool awake)
+    /// <summary>A torus of empty Life plates with a blinker in the middle of every 64th (8 by 8), or of <paramref name="percent"/> percent of them, spread evenly in creation order.</summary>
+    public static World Blinkers(int threads, bool awake, bool next = true, int percent = 0)
     {
         var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
-        for (int z = 0; z < Plot.Side; z++)
-        for (int x = 0; x < Plot.Side; x++)
+        world.Reserve<LifePlot>(Plot.Side * Plot.Side);
+        for (int n = 0; n < Plot.Side * Plot.Side; n++)
         {
+            int x = n % Plot.Side, z = n / Plot.Side;
             var plate = world.CreateEntity(new LifePlot(new Plot(x, z)));
             var seeds = plate.GetOrAdd<DynamicBuffer<Seed>>().SetCount(256);
-            plate.GetOrAdd<DynamicBuffer<NextSeed>>().SetCount(256);
-            if (x % 8 == 3 && z % 8 == 5)
+            if (next) plate.GetOrAdd<DynamicBuffer<NextSeed>>().SetCount(256);
+            if (percent > 0 ? n * percent / 100 != (n + 1) * percent / 100 : x % 8 == 3 && z % 8 == 5)
                 for (int i = 7; i <= 9; i++) seeds[8 * 16 + i] = new Seed(1);
             if (awake)
             {
@@ -316,11 +348,11 @@ internal static class TileSystems
     private static void Blur<TTile>(Tile<Warmth, TTile> warmth, Mut<DynamicBuffer<NextWarmth>> next)
         where TTile : struct, IComponent, ITileShape
     {
-        var plate = warmth.Pad();
+        warmth.ExchangeHalo();
         var into = MemoryMarshal.Cast<NextWarmth, float>(next.Write().AsSpan());
-        foreach (var row in plate.Rows(TileStencil.Layer))
+        foreach (var row in warmth.Rows(TileStencil.Layer))
         {
-            var c = plate.At(row);
+            var c = warmth.At(row);
             for (int x = 0; x < TTile.Width; x += 4)
                 ((c.Load128<float>(x - 1, 0, -1) + c.Load128<float>(x, 0, -1) + c.Load128<float>(x + 1, 0, -1)
                   + c.Load128<float>(x - 1) + c.Load128<float>(x) + c.Load128<float>(x + 1)
@@ -351,17 +383,63 @@ internal static class TileSystems
         [ForEach(Parallel = true, ChunkSize = 16)]
         static void Step(Tile<Warmth, WavePlot> warmth, Mut<DynamicBuffer<NextWarmth>> next)
         {
-            var plate = warmth.Pad();
+            warmth.ExchangeHalo();
             var into = MemoryMarshal.Cast<NextWarmth, float>(next.Write().AsSpan());
-            foreach (var row in plate.Rows(TileStencil.Layer))
+            foreach (var row in warmth.Rows(TileStencil.Layer))
             {
-                var c = plate.At(row);
+                var c = warmth.At(row);
                 for (int x = 0; x < 16; x += 4)
                 {
                     var here = c.Load128<float>(x);
                     var alongX = -c.Load128<float>(x - 2) + 16f * c.Load128<float>(x - 1) - 30f * here + 16f * c.Load128<float>(x + 1) - c.Load128<float>(x + 2);
                     var alongZ = -c.Load128<float>(x, 0, -2) + 16f * c.Load128<float>(x, 0, -1) - 30f * here + 16f * c.Load128<float>(x, 0, 1) - c.Load128<float>(x, 0, 2);
                     (here + (alongX + alongZ) * (1f / 12) * Rate).CopyTo(into.Slice(row.Index + x));
+                }
+            }
+        }
+    }
+
+    /// <summary>The blur stepped into the plate's second buffer (ref Tile): no NextWarmth, no commit, the swap O(1) per plate.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void PingBlur<TTile>(ref Tile<Warmth, TTile> warmth) where TTile : struct, IComponent, ITileShape
+    {
+        warmth.ExchangeHalo();
+        foreach (var row in warmth.Rows(TileStencil.Layer))
+        {
+            var c = warmth.At(row);
+            var into = MemoryMarshal.Cast<Warmth, float>(warmth.Write(row));
+            for (int x = 0; x < TTile.Width; x += 4)
+                ((c.Load128<float>(x - 1, 0, -1) + c.Load128<float>(x, 0, -1) + c.Load128<float>(x + 1, 0, -1)
+                  + c.Load128<float>(x - 1) + c.Load128<float>(x) + c.Load128<float>(x + 1)
+                  + c.Load128<float>(x - 1, 0, 1) + c.Load128<float>(x, 0, 1) + c.Load128<float>(x + 1, 0, 1)) * (1f / 9))
+                    .CopyTo(into.Slice(x));
+        }
+    }
+
+    [EcsSystem]
+    public ref struct PingBlurSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(ref Tile<Warmth, BlurPlot> warmth) => PingBlur(ref warmth);
+    }
+
+    [EcsSystem]
+    public ref struct PingWaveSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(ref Tile<Warmth, WavePlot> warmth)
+        {
+            warmth.ExchangeHalo();
+            foreach (var row in warmth.Rows(TileStencil.Layer))
+            {
+                var c = warmth.At(row);
+                var into = MemoryMarshal.Cast<Warmth, float>(warmth.Write(row));
+                for (int x = 0; x < 16; x += 4)
+                {
+                    var here = c.Load128<float>(x);
+                    var alongX = -c.Load128<float>(x - 2) + 16f * c.Load128<float>(x - 1) - 30f * here + 16f * c.Load128<float>(x + 1) - c.Load128<float>(x + 2);
+                    var alongZ = -c.Load128<float>(x, 0, -2) + 16f * c.Load128<float>(x, 0, -1) - 30f * here + 16f * c.Load128<float>(x, 0, 1) - c.Load128<float>(x, 0, 2);
+                    (here + (alongX + alongZ) * (1f / 12) * Rate).CopyTo(into.Slice(x));
                 }
             }
         }
@@ -488,10 +566,10 @@ internal static class TileSystems
     /// <summary>Life on bytes: born with three live neighbors, lives on with two or three; a row of 16 in one vector.</summary>
     private static void Life(Tile<Seed, LifePlot> life, Span<byte> into)
     {
-        var plate = life.Pad();
-        foreach (var row in plate.Rows(TileStencil.Layer))
+        life.ExchangeHalo();
+        foreach (var row in life.Rows(TileStencil.Layer))
         {
-            var c = plate.At(row);
+            var c = life.At(row);
             var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)
                 + c.Load128<byte>(-1) + c.Load128<byte>(1)
                 + c.Load128<byte>(-1, 0, 1) + c.Load128<byte>(0, 0, 1) + c.Load128<byte>(1, 0, 1);
@@ -510,6 +588,27 @@ internal static class TileSystems
             var into = MemoryMarshal.Cast<NextSeed, byte>(next.Write().AsSpan());
             into.Clear(); // the rows the mask skips are empty
             Life(life, into);
+        }
+    }
+
+    /// <summary>Life stepped into the plate's second buffer: the rows it skips are zeroed for it, and the plates that cannot change sleep.</summary>
+    [EcsSystem]
+    public ref struct PingLifeSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(ref Tile<Seed, LifePlot> life)
+        {
+            life.ExchangeHalo();
+            foreach (var row in life.Rows(TileStencil.Layer))
+            {
+                var c = life.At(row);
+                var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)
+                    + c.Load128<byte>(-1) + c.Load128<byte>(1)
+                    + c.Load128<byte>(-1, 0, 1) + c.Load128<byte>(0, 0, 1) + c.Load128<byte>(1, 0, 1);
+                var born = Vector128.Equals(count, Vector128.Create((byte)3));
+                var stays = Vector128.Equals(count, Vector128.Create((byte)2)) & c.Load128<byte>();
+                ((born | stays) & Vector128<byte>.One).CopyTo(MemoryMarshal.Cast<Seed, byte>(life.Write(row)));
+            }
         }
     }
 

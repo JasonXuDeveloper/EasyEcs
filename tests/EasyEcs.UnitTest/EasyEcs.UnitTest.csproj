@@ -8,7 +8,7 @@
         <!-- EECS069: fixtures hold references on purpose (SerializationTests asserts that a save of one throws). -->
         <!-- The tests exercise the generic API and hand-written parts the generated forms stand for (EECS033, EECS065,
              EECS067); EECS069: test components that are never saved. -->
-        <NoWarn>$(NoWarn);EECS033;EECS065;EECS067;EECS069</NoWarn>
+        <NoWarn>$(NoWarn);EECS033;EECS065;EECS067;EECS069;EECS116</NoWarn>
         <!-- the gathers and compressing stores of the linked locality prototypes take pointers -->
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     </PropertyGroup>

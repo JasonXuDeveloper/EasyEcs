@@ -22,7 +22,7 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              the filter after a pass without structural changes, a destroy per row otherwise;
                              [ForEntity] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
                              over entity.Run; [ForEachRecord] -> an IForEachRecord<T> job run by
-                             Emitted<T>.Consume (stage RecordMethods, joined to the methods of the updates); [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
+                             Emitted<T>.Consume (stage RecordMethods, joined to the methods of the updates); a ref Tile -> a stepping pass (the method's colors struct, TileSteps.Of per pass, Enter / the sweeps / Leave per tile, a walk per color until Next: the tiles that woke when the pass sleeps and the method has no filter of its own, through the job's ITileStep.Step, else the query; the wakes of what else it reads; a write of its cells); [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
                              methods in declaration order; [UpdateInterval] -> its Interval / Phase), and per
                              assembly the set __EasyEcsSystems: one Add per system and per closed generic system any
                              API names (AddSystem<G<P>>, [UpdateAfter<G<P>>], ...), a switch per hook; no system
@@ -198,6 +198,10 @@ EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted
 EasyEcsAnalyzer.Pairs.cs     EECS105-107: a pair method that cannot run per pair (Error), one whose cutoff test the
                              generator cannot read (every pair runs), a neighbor search written by hand (a Warning
                              with PairRewrite's fix when mechanical, else Info: the grid's upkeep goes with it)
+EasyEcsAnalyzer.Tiles.cs     EECS115-117: a tile step the generator cannot write (Symbols.StepProblem, Write on a tile
+                             taken by value: Error), a second buffer and its plain commit written by hand where the
+                             tile could step itself (compilation end, Warning), a Min / Max relaxation stepped by Jacobi
+                             that [GaussSeidel] would settle (Info)
 EasyEcsAnalyzer.Fusion.cs    EECS093-094: two passes over the same rows that almost share one walk (the reason
                              Fusion.Problem gives), a FusionMode.Require method left apart (Error)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)

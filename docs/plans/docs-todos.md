@@ -1367,3 +1367,107 @@ threads; float sums differ from the serial pass's in the last bits (another orde
   Retrying a measurement: it loosens the check.
 - Docs pass: tests/AGENTS.md says it (done); the feature skill's "warm up past OSR (200 passes)" becomes
   `Allocations.WarmUp` (skill owner).
+
+## feat-tiles-pingpong (items 11, 12a, 12b, GA10, GA3, GA12, 8c) — docs to-dos
+
+Terms (zh): tile 瓦片, halo 光环, ghost cells 幽灵格子, stencil 模板, ping-pong 乒乓缓冲, slice 分帧; Jacobi 雅可比,
+Gauss-Seidel 高斯-赛德尔, red-black 红黑, multicolor 多色 (add the last four to tools/ApiDocs/zh/README.md's glossary
+and lint-terms if they are not there). Each explained in one plain sentence where first used (WRITING.md).
+
+- guide/grids.mdx + zh (the tile page):
+  - "Stepping a tile": take the tile by ref (`ref Tile<Heat, Plate> heat`), call `ExchangeHalo()`, read rows with
+    `At(row)` and write them with `Write(row)`. Jacobi (default: each pass is one time step, every cell reads the step
+    before): the pass keeps a second buffer per tile, swaps it with the cells after every tile stepped (O(1) per
+    tile), writes the rows the step skipped as zero, stamps only the tiles that changed. No `NextHeat` buffer, no
+    commit system: replace the page's `CommitHeatSystem` example with the ref form (EECS116 reports the old one).
+  - `[ForEach, GaussSeidel]`: in place, one buffer; tiles step color by color (colors from the parity of the key's
+    integer fields: 2 for a Faces neighborhood, else one per field: 4 in 2D, 8 in 3D), each tile sweeps until it
+    settles (`MaxSweeps`, default the tile's cell count), deterministic for any thread count. When to pick which:
+    Jacobi when another system reads the field after each pass as a step in time (heat, a wave, Life); Gauss-Seidel
+    for a field read only when settled (distance, flood fill, scent). EECS117 suggests it for a Min / Max relaxation.
+    A torus with an odd number of tiles per axis throws (two neighbors of one color).
+  - Sleeping tiles (GA12): a stepped tile that wrote nothing sleeps; the pass wakes it when a neighbor's facing edge
+    changed, another system wrote its cells (`Changed<DynamicBuffer<TCell>>`), a by-value tile of the same grid or a
+    tracked component it reads changed, or a tile around it left the grid. Sleeping applies only when every other
+    parameter is an Entity, a Scratch, such a tile or a tracked component (else every tile steps each pass). A Jacobi
+    field that moves nearly everywhere (7 of 8 tiles changed in a pass that looked) steps every tile for the next 15
+    passes without comparing or waking (same result: an unchanged tile's step writes the same cells; such passes stamp
+    every tile they step, so a [Changed<DynamicBuffer<TCell>>] reader sees them all). Remove the
+    page's hand-written `ChangedEdges` / `Facing` wake loops from the recommended form (keep them as the manual form).
+  - GA10 / GA3: an empty cell buffer is sized from the tile's shape on the pass; `MaxPooledLength` is raised to a
+    tile's cells, so no `SetCount` and no `MaxPooledLength` line in user code.
+  - 8c: a 2D tile over a 3D grid's key: `Tile<Heat, Columns<Chunk>>` (no second tile component and index);
+    `[GaussSeidel]` replaces the generic per-color systems (`[With<TColor>]`, CS8968); EECS059 is not reported for a
+    lookup of the stepped tile's own grid under `[GaussSeidel]`.
+  - Remove the TODO(water overlap) and the `PaddedTile` text; `Pad()` reads `ExchangeHalo()` everywhere.
+  - Costs: Jacobi O(cells) per stepped tile plus O(1) swap; zeroed rows a few vector stores; Gauss-Seidel
+    O(cells x sweeps) per tile per color pass, one walk per color even when a color is empty.
+- api.mdx + zh: complexity rows for `Tile<TCell, TTile>.ExchangeHalo`, `Write(row)`, `GaussSeidelAttribute`,
+  `Columns<TTile>`; remove `PaddedTile`, `Pad`. Then tools/ApiDocs: zh entries for the new XML docs (GaussSeidelAttribute,
+  MaxSweeps, ITileColors<TKey>, TileColoring, TileSteps<...> members, Tile.ExchangeHalo / Write / Rows / At / indexer,
+  Columns<TTile>, TileNeighbors.Of / KeyAt / Facing) and regenerate docs/content/reference.
+- guide/analyzer.mdx + zh: EECS115 (Error: a step the generator cannot write: [GaussSeidel] without a ref tile, two
+  ref tiles, a ref tile with [ForEntity] / Slices > 1 / [Consume], MaxSweeps < 0, a key without integer fields; Write
+  on a tile taken by value), EECS116 (Warning, end of compilation: a [ForEach] method that only copies `in
+  DynamicBuffer<TNext>` into the cells a step writes into TNext; no code fix, see docs/owner-review.md), EECS117 (Info:
+  a Jacobi ref tile relaxing with Min / Max). EECS003's message now also accepts a Tile parameter alone. EECS072 says
+  ExchangeHalo. EECS073 compares cells and grid.
+- samples/voxel-server page: unchanged output; the rewrite (not this branch) ports Water's step + `WaterCommitSystem`
+  to a ref tile and Scent to `[GaussSeidel]` (EECS116 leaves Water/Commit.cs alone: it also
+  writes FluidCount and a Reduce<Filled>, so it is no plain copy).
+- migration.mdx + zh (next version): `tile.Pad()` -> `tile.ExchangeHalo()` (returns nothing; read through the tile:
+  `tile.At(row)`, `tile[x, y, z]`, `tile.Rows()`); `PaddedTile<TCell, TTile>` removed (use the Tile itself);
+  `TileNeighbors.Of<TTile, TKey>(index, entity, out around)` -> `TileNeighbors.Of<TShape, TGrid, TKey>(...)` (generated
+  code only); a hand-written NextX buffer + commit -> `ref Tile` + `Write(row)`. README "What's new": stepping tiles
+  (Jacobi ping-pong, [GaussSeidel]), sleeping tiles, ExchangeHalo.
+- changelog: New (stepping tiles, GaussSeidel, sleeping, Columns, EECS115-117), Changes that need code changes (Pad,
+  PaddedTile), Performance (the swap instead of the commit copy: numbers below).
+- decisions.mdx + zh (drafts):
+  - "Tiles step by ref: the generator owns the second buffer": why (the commit copied every stepped tile per tick;
+    MPI's u / v swap), what was considered (a swap of two user buffers under the gate: two buffer types left to
+    users; copy-on-write), the zero rows (the step's skipped rows would hold the step before last after a swap),
+    numbers below.
+  - "Two update forms, declared": Jacobi vs [GaussSeidel]; colors from key parity, not from the stencil's offsets read
+    by the generator (a key parity is known per tile without reading the body; 2 colors suffice for a Faces stencil,
+    one bit per integer field covers All / Edges); empty colors still cost a walk.
+  - "Sleeping tiles, owned by the pass": the rule for what a step may read and stay asleep (Entity, Scratch, same-grid
+    tiles, tracked components), the edges found while stepping (12b: LeaveJacobi compares each written row with the
+    cells it replaces, RowEdges, no second pass over the tile; the last row and layer first, stopping once every face
+    changed), the wakes from the neighbor ids the step's exchange found (kept per tile, no index lookup: the lookups
+    in the serial Next made the ping-pong blur 1.3x slower than step + commit at 1 thread, 1.6x at 4), stamps in Next
+    (a stamp from the chunk's thread writes its 64-row word's summary, a line the chunks beside share: 4 threads lost
+    ~25 %), the swap as a trade of the two lists' arrays (no buffer lookup; a shared list goes whole), and the awake
+    passes (sleep bookkeeping costs more than it saves when the field moves everywhere: measured in the toggles, the
+    bookkeeping off was 737 us against 1,003 us at 1 thread).
+  - 12a padded storage: the verdict and numbers below.
+  - Changed filters built once per type (ChangedSince<T>): a filter built per pass interns its bits past 255 and
+    allocates (FilterOverflow.With), found by the 0 B test after ComponentTests registered 300 types.
+- Numbers (BenchmarkDotNet on the shared VM, sd 10-40 %, so differences under ~15 % are not resolved; base 5ac9b37,
+  head e016a59; rerun on the reference machine with `tools/bench.sh TileStencilBenchmark TileActiveBenchmark
+  TileHaloBenchmark --sync` before the pages quote any):
+  - TileStencil (us, 1 / 4 threads): Blur9 by value 751 -> 781 / 397 -> 373, Laplacian by value 742 -> 762 / 397 ->
+    400; the ping-pong step (new) Blur9 788 / 431, Laplacian 760 / 489 against step + commit by hand ~ the by-value
+    numbers (a later dev run: 779 / 421 and 707 / 409). So the ping-pong form ties the hand-written commit at 1 thread
+    and is not yet faster at 4: the pages say it saves the commit system and its copy, not that it is faster.
+  - TileActive (us, 1 / 4 threads): AlwaysOn 435 -> 418 / 239 -> 231, Sparse (sleeping by hand) 12.7 -> 13.1 /
+    13.8 -> 15.0, PingPong (sleeping owned by the pass, new) 22.3 / 15.7: a sparse field costs the generated form
+    1.7x the hand-written one at 1 thread (see docs/owner-review.md).
+  - VoxelServer TickBenchmark (ms, four rounds base -> head, 0 B everywhere): 50 players 56.6 -> 64.0, 49.2 -> 59.3,
+    65.3 -> 69.8, 59.3 -> 51.8; 500 85.4 -> 83.0, 85.3 -> 84.6, 86.8 -> 83.2, 86.4 -> 84.8; 2000 127.0 -> 104.5,
+    122.6 -> 124.4, 140.1 -> 146.1, 139.8 -> 132.0 (no difference past the noise; the sample uses by-value tiles only).
+  - 12a TileHalo (us, 1 / 4 threads): Exchange 261 / 118, Padded 253 / 161: padded storage loses 1.36x at 4 threads
+    (each tile's buffer 27 % larger for a 16 x 16 tile at r = 1, the ring copy scattered over the neighbors' lines),
+    within noise at 1. Dropped; decision record: "Tiles keep their cells unpadded; the halo is exchanged per step".
+    12b shipped inside the Jacobi step (LeaveJacobi), so ChangedEdges stays for hand-written steps only.
+
+## feat-tiles-pingpong merged (2026-10-29): what the final round added
+
+- Tier1 fixes and their numbers, the woken walk per color with `TileWalk.Share = 4`, parallel dense swaps over
+  `TileWalk.Swaps = 256` tiles with serial stamps, LoadPlane, the plane Find, nint cursor offsets: the agent's final
+  report (owner-review "The generated ping-pong step against step + commit by hand" has the verdict numbers).
+- Decision drafts: LoadPlane against the table of barriers; the woken walk against every tile (`TileWalk.Share`);
+  parallel swaps with serial stamps (64-row word summaries are shared); `Swaps` reasoned, not measured apart.
+- zh ApiDocs entries for ITileStep / StepWoken / StepWokenParallel if they are public.
+- The 4-round TileStencil / TileActive / TileSettle and the 2-round TileWoken final numbers were cut off by a worker
+  restart; the bench sync runs them again.
+

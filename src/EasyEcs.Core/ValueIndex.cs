@@ -492,6 +492,12 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
     // Keys with at least one entity: _heads entries are removed when emptied, _byTarget slots are not, so it is counted.
     private int _keyCount;
 
+    /// <summary>
+    /// Moves on whenever an entity enters or leaves a key (and on a reset): a stepping tile pass checks its tiles' keys
+    /// only when it moved (TileSteps). Owner thread, like every write of the index.
+    /// </summary>
+    internal int Membership;
+
     /// <summary>Forget everything; after <see cref="World.Restore(WorldSnapshot)"/> the next lookup re-indexes every row, after <see cref="World.Dispose"/> it finds nothing.</summary>
     void World.IValueIndex.Reset(bool rebuild)
     {
@@ -509,6 +515,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
 
         _sortedCount = 0;
         _keysVersion++;
+        Membership++;
         _built = !rebuild || Unique; // a unique index is given the restored rows at once (World.ResetIndexes)
     }
 
@@ -776,6 +783,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
         else node.Place = head.Add(new EntityId(id, version), _spares);
         node.Key = key;
         node.Linked = true;
+        Membership++;
     }
 
     private void Unlink(int id)
@@ -803,6 +811,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
 
         node.Linked = false;
         node.Key = default!; // let the GC collect a managed key
+        Membership++;
     }
 
     /// <summary>

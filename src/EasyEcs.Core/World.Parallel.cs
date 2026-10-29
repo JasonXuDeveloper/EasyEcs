@@ -107,6 +107,9 @@ public sealed partial class World
     /// <summary>Helpers a runner keeps (each run by one of the process's <see cref="Workers"/>): the calling thread is the other one.</summary>
     private int Helpers => Math.Max(1, _options.MaxDegreeOfParallelism) - 1;
 
+    /// <summary>The threads parallel work runs on at most: the helpers and the calling thread.</summary>
+    internal int ChunkThreads => Helpers + 1;
+
     private unsafe void RunStage(SystemStage stage, long update)
     {
         var systems = stage.Systems;

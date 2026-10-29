@@ -14,7 +14,7 @@ namespace EasyEcs.UnitTest;
 /// fourth-order Laplacian, a 27-point sum, a 1D smoothing) checked against the whole grid computed at once, on one thread
 /// and on four.
 /// </summary>
-public class TileTests
+public partial class TileTests
 {
     public record struct TilePos(int X, int Y, int Z);
 
@@ -157,7 +157,7 @@ public class TileTests
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
     }
 
-    /// <summary>A halo one cell wider than the plate: it would reach past the tile beside (EECS072; Pad throws too).</summary>
+    /// <summary>A halo one cell wider than the plate: it would reach past the tile beside (EECS072; ExchangeHalo throws too).</summary>
 #pragma warning disable EECS072
     public record struct OverPlate(TilePos Pos) : IComponent, ITile<TilePos>
     {
@@ -249,7 +249,7 @@ public class TileTests
     private static Tile<TCell, TTile> TileOf<TCell, TTile>(Entity entity, [System.Diagnostics.CodeAnalysis.UnscopedRef] out TileNeighbors around)
         where TCell : unmanaged where TTile : struct, IComponent, ITile<TilePos>
     {
-        TileNeighbors.Of<TTile, TilePos>(LookupExtensions.Prepared<TTile, TilePos>(entity.World), entity, out around);
+        TileNeighbors.Of<TTile, TTile, TilePos>(LookupExtensions.Prepared<TTile, TilePos>(entity.World), entity, out around);
         return new Tile<TCell, TTile>(entity, in around);
     }
 
@@ -278,8 +278,8 @@ public class TileTests
             if (empty.Contains(at)) continue;
             foreach (bool mask in new[] { true, false }) // the texture is the same with or without the row masks
             {
-                var padded = TileOf<Cell, TTile>(tile, out var around).Pad(from, to, new Cell(fill), mask);
-                Assert.That((padded.From, padded.To), Is.EqualTo((from, to)));
+                var padded = TileOf<Cell, TTile>(tile, out var around);
+                padded.ExchangeHalo(from, to, new Cell(fill), mask);
                 for (int y = from - hy; y <= to + hy; y++)
                 for (int z = -r; z < d + r; z++)
                 for (int x = -r; x < w + r; x++)
@@ -386,10 +386,10 @@ public class TileTests
         var columns = Grid(world, Box(1, 1, 1), s => new Column(s));
         var wide = Grid(world, Box(1, 1, 1), s => new WidePlate(s));
         var over = Grid(world, Box(1, 1, 1), s => new OverPlate(s));
-        Assert.Throws<ArgumentOutOfRangeException>(() => Pad<Column>(columns[0], 2, 1));
-        Assert.Throws<ArgumentOutOfRangeException>(() => Pad<Column>(columns[0], 0, 4));
-        Assert.Throws<ArgumentOutOfRangeException>(() => Pad<Plate>(plates[0], 0, 1));
-        var shape = Assert.Throws<InvalidOperationException>(() => Pad<OverPlate>(over[0], 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Exchange<Column>(columns[0], 2, 1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Exchange<Column>(columns[0], 0, 4));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Exchange<Plate>(plates[0], 0, 1));
+        var shape = Assert.Throws<InvalidOperationException>(() => Exchange<OverPlate>(over[0], 0, 0));
         Assert.That(shape.Message, Does.Contain("halo of 6"));
         Assert.Throws<InvalidOperationException>(() => NoMask(plates[0]));
         Assert.Throws<ArgumentOutOfRangeException>(() => _ = Sample<Plate>(plates[0], -2, 0, 0));
@@ -403,20 +403,33 @@ public class TileTests
         Assert.That(Sample<Plate>(plates[0], 5, 0, 0), Is.EqualTo(Value(5, 0, 0)));              // the cell after the row: the east neighbor's
         Assert.That(Sample<Plate>(plates[0], -1, 0, -1), Is.Zero);                               // a corner: the fill
         plates[1].GetOrAdd<DynamicBuffer<Cell>>().SetCount(3);                                   // a neighbor of 3 cells
-        Assert.Throws<InvalidOperationException>(() => Pad<Plate>(plates[0], 0, 0));
+        Assert.Throws<InvalidOperationException>(() => Exchange<Plate>(plates[0], 0, 0));
         plates[1].GetOrAdd<DynamicBuffer<Cell>>().Clear();                                       // no cells: no neighbor
-        Assert.DoesNotThrow(() => Pad<Plate>(plates[0], 0, 0));
+        Assert.DoesNotThrow(() => Exchange<Plate>(plates[0], 0, 0));
 
-        static void Pad<TTile>(Entity e, int from, int to) where TTile : struct, IComponent, ITile<TilePos> =>
-            TileOf<Cell, TTile>(e, out _).Pad(from, to);
+        static void Exchange<TTile>(Entity e, int from, int to) where TTile : struct, IComponent, ITile<TilePos> =>
+            TileOf<Cell, TTile>(e, out _).ExchangeHalo(from, to);
 
-        static void NoMask(Entity e) => TileOf<Cell, Plate>(e, out _).Pad(0, 0, mask: false).Rows();
+        static void NoMask(Entity e)
+        {
+            var tile = TileOf<Cell, Plate>(e, out _);
+            tile.ExchangeHalo(0, 0, mask: false);
+            tile.Rows();
+        }
 
-        static int Sample<TTile>(Entity e, int dx, int dy, int dz) where TTile : struct, IComponent, ITile<TilePos> =>
-            TileOf<Cell, TTile>(e, out _).Pad().At(new TileRow<TTile>(0, 0))[dx, dy, dz].V;
+        static int Sample<TTile>(Entity e, int dx, int dy, int dz) where TTile : struct, IComponent, ITile<TilePos>
+        {
+            var tile = TileOf<Cell, TTile>(e, out _);
+            tile.ExchangeHalo();
+            return tile.At(new TileRow<TTile>(0, 0))[dx, dy, dz].V;
+        }
 
-        static int Load128<TTile>(Entity e, int dx) where TTile : struct, IComponent, ITile<TilePos> =>
-            TileOf<Cell, TTile>(e, out _).Pad().At(new TileRow<TTile>(0, 0)).Load128<int>(dx).GetElement(3);
+        static int Load128<TTile>(Entity e, int dx) where TTile : struct, IComponent, ITile<TilePos>
+        {
+            var tile = TileOf<Cell, TTile>(e, out _);
+            tile.ExchangeHalo();
+            return tile.At(new TileRow<TTile>(0, 0)).Load128<int>(dx).GetElement(3);
+        }
     }
 
     // ---------------- the active rows ----------------
@@ -455,7 +468,8 @@ public class TileTests
         foreach (var tile in tiles)
         foreach (var (from, to) in ranges)
         {
-            var padded = TileOf<Voxel, TTile>(tile, out var around).Pad(from, to);
+            var padded = TileOf<Voxel, TTile>(tile, out var around);
+            padded.ExchangeHalo(from, to);
             var visited = new HashSet<(int, int)>();
             var order = new List<(int, int)>();
             foreach (var row in padded.Rows(reads))
@@ -489,7 +503,7 @@ public class TileTests
         }
 
         // A row of the texture (a row of the tile or a halo row) holds a cell that is not zero, its halo cells counting.
-        static bool Active(PaddedTile<Voxel, TTile> padded, int y, int z)
+        static bool Active(Tile<Voxel, TTile> padded, int y, int z)
         {
             int r = TTile.Halo;
             for (int x = -r; x < TTile.Width + r; x++)
@@ -525,11 +539,11 @@ public class TileTests
         [ForEach(Parallel = true, ChunkSize = 8)]
         static void Diffuse(Tile<Heat, HeatPlate> heat, Mut<DynamicBuffer<NextHeat>> next)
         {
-            var plate = heat.Pad();
+            heat.ExchangeHalo();
             var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
-            foreach (var row in plate.Rows(TileStencil.Layer))
+            foreach (var row in heat.Rows(TileStencil.Layer))
             {
-                var cells = plate.At(row);
+                var cells = heat.At(row);
                 for (int x = 0; x < 16; x += Vector128<float>.Count)
                 {
                     var here = cells.Load128<float>(x);
@@ -662,11 +676,11 @@ public class TileTests
     /// <summary>The blur of one tile: the nine cells around each, summed row by row, a row of 16 in four vectors.</summary>
     private static void Blur<TTile>(Tile<Heat, TTile> heat, Mut<DynamicBuffer<NextHeat>> next) where TTile : struct, IComponent, ITileShape
     {
-        var plate = heat.Pad();
+        heat.ExchangeHalo();
         var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
-        foreach (var row in plate.Rows(TileStencil.Layer))
+        foreach (var row in heat.Rows(TileStencil.Layer))
         {
-            var c = plate.At(row);
+            var c = heat.At(row);
             for (int x = 0; x < 16; x += 4)
             {
                 var sum = c.Load128<float>(x - 1, 0, -1) + c.Load128<float>(x, 0, -1) + c.Load128<float>(x + 1, 0, -1)
@@ -717,18 +731,19 @@ public class TileTests
     {
         switch (boundary)
         {
-            case TileBoundary.Border: BlurGrid<BlurFill, BlurFillSystem>(threads, p => new BlurFill(p), boundary, new TilePos(1, 0, 2), new TilePos(3, 0, 0)); break;
-            case TileBoundary.Clamp: BlurGrid<BlurClamp, BlurClampSystem>(threads, p => new BlurClamp(p), boundary); break;
-            case TileBoundary.Mirror: BlurGrid<BlurMirror, BlurMirrorSystem>(threads, p => new BlurMirror(p), boundary); break;
-            default: BlurGrid<BlurTorus, BlurTorusSystem>(threads, p => new BlurTorus(p), null); break;
+            case TileBoundary.Border: BlurGrid<BlurFill, BlurFillSystem>(threads, p => new BlurFill(p), boundary, true, new TilePos(1, 0, 2), new TilePos(3, 0, 0)); break;
+            case TileBoundary.Clamp: BlurGrid<BlurClamp, BlurClampSystem>(threads, p => new BlurClamp(p), boundary, true); break;
+            case TileBoundary.Mirror: BlurGrid<BlurMirror, BlurMirrorSystem>(threads, p => new BlurMirror(p), boundary, true); break;
+            default: BlurGrid<BlurTorus, BlurTorusSystem>(threads, p => new BlurTorus(p), null, true); break;
         }
     }
 
     /// <summary>
     /// Blurs a grid of 4 x 4 plates (holes missing from it: the fill) and checks every update against the whole grid
-    /// blurred with the boundary.
+    /// blurred with the boundary. <paramref name="commit"/>: the system steps into NextHeat, which a commit copies back
+    /// (else it steps the tile itself, ping-pong).
     /// </summary>
-    private static void BlurGrid<TTile, TSystem>(int threads, Func<TilePos, TTile> make, TileBoundary? boundary, params TilePos[] holes)
+    private static void BlurGrid<TTile, TSystem>(int threads, Func<TilePos, TTile> make, TileBoundary? boundary, bool commit, params TilePos[] holes)
         where TTile : struct, IComponent, ITile<TilePos> where TSystem : struct, allows ref struct
     {
         const int size = Torus, cells = size * 16;
@@ -739,7 +754,7 @@ public class TileTests
         {
             var plate = world.CreateEntity(make(place));
             var heat = plate.GetOrAdd<DynamicBuffer<Heat>>().SetCount(256);
-            plate.GetOrAdd<DynamicBuffer<NextHeat>>().SetCount(256);
+            if (commit) plate.GetOrAdd<DynamicBuffer<NextHeat>>().SetCount(256);
             for (int i = 0; i < 6; i++) heat[random.Next(256)] = new Heat(random.Next(1, 1000));
             plates.Add(place, plate);
         }
@@ -747,7 +762,7 @@ public class TileTests
         plates[new TilePos(0, 0, 0)].GetOrAdd<DynamicBuffer<Heat>>().AsSpan()[0] = new Heat(5000);
         plates[new TilePos(size - 1, 0, size - 1)].GetOrAdd<DynamicBuffer<Heat>>().AsSpan()[255] = new Heat(5000);
         world.AddSystem<TSystem>();
-        world.AddSystem<CommitHeatSystem>();
+        if (commit) world.AddSystem<CommitHeatSystem>();
 
         var grid = Whole(plates, 16, 16, (Entity e, int i) => e.Read<DynamicBuffer<Heat>>()[i].T, size);
         for (int step = 0; step < 25; step++)
@@ -800,11 +815,11 @@ public class TileTests
         [ForEach(Parallel = true, ChunkSize = 2)]
         static void Step(Tile<Life, LifePlate> life, Mut<DynamicBuffer<NextLife>> next)
         {
-            var plate = life.Pad();
+            life.ExchangeHalo();
             var into = MemoryMarshal.Cast<NextLife, byte>(next.Write().AsSpan());
-            foreach (var row in plate.Rows(TileStencil.Layer))
+            foreach (var row in life.Rows(TileStencil.Layer))
             {
-                var c = plate.At(row);
+                var c = life.At(row);
                 var alive = c.Load128<byte>();
                 var count = c.Load128<byte>(-1, 0, -1) + c.Load128<byte>(0, 0, -1) + c.Load128<byte>(1, 0, -1)
                     + c.Load128<byte>(-1) + c.Load128<byte>(1)
@@ -893,12 +908,12 @@ public class TileTests
         [ForEach(Parallel = true, ChunkSize = 8), With<Awake>]
         static void Diffuse(Tile<Heat, SparsePlate> heat, Mut<DynamicBuffer<NextHeat>> next, ref HeatChange change)
         {
-            var plate = heat.Pad();
+            heat.ExchangeHalo();
             var step = next.Write().AsSpan();
             var into = MemoryMarshal.Cast<NextHeat, float>(step);
-            foreach (var row in plate.Rows(TileStencil.Layer))
+            foreach (var row in heat.Rows(TileStencil.Layer))
             {
-                var cells = plate.At(row);
+                var cells = heat.At(row);
                 for (int x = 0; x < 16; x += Vector128<float>.Count)
                 {
                     var here = cells.Load128<float>(x);
@@ -1005,11 +1020,11 @@ public class TileTests
         [ForEach(Parallel = true, ChunkSize = 4)]
         static void Step(Tile<Heat, WavePlate> heat, Mut<DynamicBuffer<NextHeat>> next)
         {
-            var plate = heat.Pad();
+            heat.ExchangeHalo();
             var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
-            foreach (var row in plate.Rows(TileStencil.Layer))
+            foreach (var row in heat.Rows(TileStencil.Layer))
             {
-                var c = plate.At(row);
+                var c = heat.At(row);
                 for (int x = 0; x < 16; x += 4)
                 {
                     var here = c.Load128<float>(x);
@@ -1081,11 +1096,11 @@ public class TileTests
         [ForEach(Parallel = true, ChunkSize = 2)]
         static void Step(Tile<Cell, Box8> cells, Mut<DynamicBuffer<NextCell>> next)
         {
-            var box = cells.Pad();
+            cells.ExchangeHalo();
             var into = MemoryMarshal.Cast<NextCell, int>(next.Write().AsSpan());
-            foreach (var row in box.Rows())
+            foreach (var row in cells.Rows())
             {
-                var c = box.At(row);
+                var c = cells.At(row);
                 for (int x = 0; x < 8; x += 4)
                 {
                     var sum = Vector128<int>.Zero;
@@ -1189,11 +1204,11 @@ public class TileTests
         [ForEach(Parallel = true, ChunkSize = 2)]
         static void Step(Tile<Heat, Strip> heat, Mut<DynamicBuffer<NextHeat>> next)
         {
-            var strip = heat.Pad();
+            heat.ExchangeHalo();
             var into = MemoryMarshal.Cast<NextHeat, float>(next.Write().AsSpan());
-            foreach (var row in strip.Rows(TileStencil.Self))
+            foreach (var row in heat.Rows(TileStencil.Self))
             {
-                var c = strip.At(row);
+                var c = heat.At(row);
                 for (int x = 0; x < 8; x += 4)
                     ((c.Load128<float>(x - 2) + c.Load128<float>(x - 1) + c.Load128<float>(x) + c.Load128<float>(x + 1) + c.Load128<float>(x + 2)) * 0.2f)
                         .CopyTo(into.Slice(row.Index + x));

@@ -191,6 +191,29 @@ using (var forms = new World())
     forms.Instantiate(prefab).Get<DynamicBuffer<Hit>>().Add(new Hit { Amount = 1 });
 }
 
+// Stepping tiles: a Jacobi step into the tile's second buffer (a blur that empties out) and a [GaussSeidel] distance
+// field in place, on four threads.
+using (var grid = new World(new WorldOptions { MaxDegreeOfParallelism = 4 }))
+{
+    var plates = new Entity[16];
+    for (int i = 0; i < plates.Length; i++)
+    {
+        plates[i] = grid.CreateEntity(new Plate(new PlatePos(i % 4, i / 4)));
+        plates[i].GetOrAddGlow().SetCount(64)[27] = new Glow(900);
+        plates[i].GetOrAddSteps().SetCount(64);
+    }
+    plates[0].GetOrAddSteps().AsSpan()[0] = new Steps(1);
+    for (int i = 0; i < 40; i++)
+    {
+        Tiles.Blur(grid);
+        Tiles.Spread(grid);
+    }
+    Check(plates[15].Read<DynamicBuffer<Steps>>()[63].V == 63, "a [GaussSeidel] step settles a distance field across the grid");
+    float total = 0;
+    foreach (var plate in plates) foreach (var glow in plate.Read<DynamicBuffer<Glow>>()) total += glow.V;
+    Check(total > 0 && total < 16 * 900, "a Jacobi step spreads into its second buffer");
+}
+
 Console.WriteLine($"AOT battle: {battle.Tick} ticks, {battle.Hits} hits, {battle.Deaths} deaths, {server.World.EntityCount} entities");
 return 0;
 
@@ -277,6 +300,59 @@ static class AotChases
     [ForEach(Parallel = true)]
     public static void ProbeParallel(in Want want, ref Got got, Lookup<Badge> badges) =>
         got.A += badges.TryFind(want.Badge, out var found) ? found.Badge.Id : 0;
+}
+
+partial record struct Plate([LookupKey] PlatePos Pos) : IComponent, ITile<PlatePos>
+{
+    static int ITileShape.Width => 8;
+    static int ITileShape.Depth => 8;
+    static PlatePos ITile<PlatePos>.Beside(PlatePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        TileFaces.East => p with { X = p.X + 1 },
+        _ => p,
+    };
+}
+
+record struct PlatePos(int X, int Z);
+record struct Glow(float V);
+record struct Steps(int V);
+
+static class Tiles
+{
+    [ForEach(Parallel = true)]
+    public static void Blur(ref Tile<Glow, Plate> glow)
+    {
+        glow.ExchangeHalo();
+        foreach (var row in glow.Rows())
+        {
+            var c = glow.At(row);
+            var into = glow.Write(row);
+            for (int x = 0; x < 8; x++)
+                into[x] = new Glow((c[x - 1, 0, 0].V + c[x, 0, 0].V + c[x + 1, 0, 0].V + c[x, 0, -1].V + c[x, 0, 1].V) * 0.19f);
+        }
+    }
+
+    [ForEach(Parallel = true), GaussSeidel]
+    public static void Spread(ref Tile<Steps, Plate> steps)
+    {
+        steps.ExchangeHalo();
+        foreach (var row in steps.Rows())
+        {
+            var c = steps.At(row);
+            var into = steps.Write(row);
+            for (int x = 0; x < 8; x++)
+            {
+                int here = c[x, 0, 0].V;
+                if (here == 1) continue;
+                foreach (int n in (ReadOnlySpan<int>)[c[x - 1, 0, 0].V, c[x + 1, 0, 0].V, c[x, 0, -1].V, c[x, 0, 1].V])
+                    if (n != 0 && (here == 0 || n + 1 < here)) here = n + 1;
+                into[x] = new Steps(here);
+            }
+        }
+    }
 }
 
 struct Life : EasyEcs.Aot.Library.ILife

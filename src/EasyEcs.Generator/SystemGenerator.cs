@@ -314,7 +314,19 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         void Pass(ForEachModel m, string name, string at)
         {
             sb.Append($"{at}var {local} = new {name}{Fields(m, world)};\n");
-            sb.Append($"{at}{world}.{m.ForEach}<{m.ComponentTypes}, {name}>(ref {local}{filter}{m.Chunks});\n");
+            if (m.Steps is >= 0 and var s) // a stepping tile: the wakes from what else it reads, then a walk per color
+            {
+                foreach (var wake in m.Parameters[s].Wakes)
+                    sb.Append(wake.StartsWith("cells:", System.StringComparison.Ordinal)
+                        ? $"{at}{local}.p{s}.WakeOnCells<{wake.Substring(6)}>();\n"
+                        : $"{at}{local}.p{s}.WakeOn<{wake.Substring(10)}>();\n");
+                string walk = $"{world}.{m.ForEach}<{m.ComponentTypes}, {name}>(ref {local}{filter}{m.Chunks});";
+                // A sleeping pass walks the tiles that woke, when its queues are complete; else the query (every tile).
+                if (m.WalksWoken)
+                    walk = $"{{ if (!{local}.p{s}.{(m.Parallel ? $"StepWokenParallel(ref {local}, {m.ChunkSize})" : $"StepWoken(ref {local})")}) {walk} }}";
+                sb.Append($"{at}do {walk}\n{at}while ({local}.p{s}.Next());\n");
+            }
+            else sb.Append($"{at}{world}.{m.ForEach}<{m.ComponentTypes}, {name}>(ref {local}{filter}{m.Chunks});\n");
             EmitReductions(sb, m, world, local, at);
             EmitConsume(sb, m, world, whole, at);
         }
@@ -401,6 +413,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 return ($"public bool f{i};", $"f{i} = global::EasyEcs.Lookup<{p.Type}>.PrefetchesPastLastLevel({world})");
             // The grid's index, built before the pass, and the entity's neighbors: a field, not a local, which the
             // caller's zero-initialized locals would clear on every row before TileNeighbors.Of clears it again.
+            case Symbols.ParamKind.Tile when method.FirstOfGrid(i) && p.RefKind == "ref":
+                return ($"public object k{i};\npublic global::EasyEcs.TileNeighbors n{i};\npublic {StepsType(method, i)} p{i};",
+                    $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world}), p{i} = {StepsType(method, i)}.Of({world}, {(p.Sleeps ? "true" : "false")}, {p.Sweeps})");
+            case Symbols.ParamKind.Tile when p.RefKind == "ref":
+                return ($"public {StepsType(method, i)} p{i};", $"p{i} = {StepsType(method, i)}.Of({world}, {(p.Sleeps ? "true" : "false")}, {p.Sweeps})");
             case Symbols.ParamKind.Tile when method.FirstOfGrid(i):
                 return ($"public object k{i};\npublic global::EasyEcs.TileNeighbors n{i};", $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world})");
             case Symbols.ParamKind.Emit: // on one thread the singleton's list itself; in parallel the target of the chunks' lists (from the pool)
@@ -411,6 +428,38 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             default:
                 return null;
         }
+    }
+
+    /// <summary>The colors of the stepping tile of <paramref name="method"/>, declared beside its jobs (<see cref="EmitColors"/>).</summary>
+    private static string ColorsType(ForEachModel method) => $"__ForEach{method.Owner.TypeParameters}.{method.Name}Colors{method.Order}";
+
+    /// <summary>The per-world state of the pass of the stepping tile parameter <paramref name="i"/>.</summary>
+    private static string StepsType(ForEachModel method, int i)
+    {
+        var p = method.Parameters[i];
+        return $"global::EasyEcs.TileSteps<{p.Cell}, {p.Shape}, {p.Grid}, {p.Key}, {ColorsType(method)}>";
+    }
+
+    /// <summary>
+    /// The colors of a stepping tile's method: one for Jacobi; for [GaussSeidel], by the parities of the key's integer
+    /// fields (TileColoring: two for a shape that reads its faces, a bit per field otherwise). Its type also keys the
+    /// pass's state in each world.
+    /// </summary>
+    private static void EmitColors(StringBuilder sb, ForEachModel method)
+    {
+        if (method.Steps is not (>= 0 and var s)) return;
+        var p = method.Parameters[s];
+        string count = "1", of = "0";
+        if (p.Colors.Length > 0)
+        {
+            var parts = p.Colors.Split(';');
+            count = $"global::EasyEcs.TileColoring.Count<{p.Shape}>({parts[2]})";
+            of = $"global::EasyEcs.TileColoring.Of<{p.Shape}>({parts[0]}, {parts[1]})";
+        }
+        sb.Append($"    /// <summary>The colors of <c>{method.Name}</c>'s tiles{(p.Colors.Length > 0 ? ", by the parities of their keys" : ": one, a Jacobi step")}.</summary>\n");
+        sb.Append($"    internal readonly struct {method.Name}Colors{method.Order} : global::EasyEcs.ITileColors<{p.Key}>\n    {{\n");
+        sb.Append($"        public static int Count => {count};\n\n");
+        sb.Append($"        public static int Of({p.Key} key) => {of};\n    }}\n\n");
     }
 
     /// <summary>
@@ -562,7 +611,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             if (p.Kind == Symbols.ParamKind.Tile) // reads of the cells and the grid component, the grid's index built before
             {
                 Declare($"Index<{p.Grid}, {p.Key}>()");
-                Declare($"Read<{p.Type}>()");
+                Declare($"{(p.RefKind == "ref" ? "Write" : "Read")}<{p.Type}>()"); // a stepping tile (ref) writes its cells
                 continue;
             }
 
@@ -650,6 +699,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         if (suffix.Length == 0 && method.Simd is { VectorTail: true }) EmitJob(sb, owner, method with { Simd = null }, number, "Rows");
         // A method chasing other entities has a twin prefetching them, for the passes past the cache of its form.
         if (suffix.Length == 0 && method.HasChaseTwin) EmitJob(sb, owner, method with { IsChaseTwin = true }, number, "Chases");
+        if (suffix.Length == 0) EmitColors(sb, method);
         string job = $"{method.Name}Job{number}{suffix}{method.TypeParameters}";
         var components = method.Query.ToArray();
         int index = 0;
@@ -687,7 +737,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             // Keyed by the method's own job, so its twins (Rows, Chases) find the same box: the gate never changes what the method sees.
             Symbols.ParamKind.Scratch => $"new global::EasyEcs.Scratch<{p.Type}>(ref (t{i} ??= global::EasyEcs.Scratch<{p.Type}>.Of<{method.Name}Job{number}{method.TypeParameters}>()).Value)",
             Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
-            Symbols.ParamKind.Tile => $"new global::EasyEcs.Tile<{p.Cell}, {p.Grid}>({(runs ? "entities[(int)i]" : "entity")}, in n{method.GridOf(i)})",
+            Symbols.ParamKind.Tile when p.RefKind == "ref" => $"ref w{i}", // the step's tile, a local the call writes through
+            Symbols.ParamKind.Tile => $"new global::EasyEcs.Tile<{p.Cell}, {p.Shape}>({(runs ? "entities[(int)i]" : "entity")}, in n{method.GridOf(i)})",
             Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref this.e{i})", // this: a vector loop's column refs are e1, e2...
             Symbols.ParamKind.View => View(p, i),
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
@@ -704,6 +755,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         // A ref struct holds each singleton as a ref field, a register in the row loop: a SingletonRef's box would be
         // null-checked on every row. Parallel jobs are copied into work items on the heap, so they hold SingletonRefs.
         string kind = method.Parallel ? "struct" : "ref struct";
+        bool woken = suffix.Length == 0 && method.WalksWoken;
+        if (woken) marker += ", global::EasyEcs.ITileStep";
         sb.Append($"    internal {kind} {job} : global::EasyEcs.{iface}<{method.ComponentTypes}>{marker}{method.Constraints}\n    {{\n");
         // Only when the method takes the World: an unused field would still be copied into the row loop, where it
         // holds a callee-saved register a job that calls out (a structural change) needs for its loop state.
@@ -728,9 +781,19 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         string first = method.IsBatch ? "global::EasyEcs.EntitySpan entities, " : method.TakesEntity ? "global::EasyEcs.Entity entity, " : "";
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         // A grid's neighbors, found once per entity for every Tile of the grid the method takes.
+        string tileEntity = runs ? "entities[(int)i]" : "entity";
         string grids = string.Concat(Enumerable.Range(0, method.Parameters.Length).Where(method.FirstOfGrid).Select(i =>
-            $"global::EasyEcs.TileNeighbors.Of<{method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {(runs ? "entities[(int)i]" : "entity")}, out n{i}); "));
-        if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;
+            $"global::EasyEcs.TileNeighbors.Of<{method.Parameters[i].Shape}, {method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {tileEntity}, out n{i}); "));
+        if (method.Steps is >= 0 and var steps)
+        {
+            // A stepping tile: the tiles of the color running that may change step (Enter), each sweep of a Gauss-Seidel
+            // step until one changes nothing (Sweep), then the step's change is recorded (Leave).
+            var tile = method.Parameters[steps];
+            string sweep = tile.Colors.Length > 0 ? $"do {call} while (p{steps}.Sweep({tileEntity})); " : call + " ";
+            call = $"if (p{steps}.Enter({tileEntity})) {{ {grids}var w{steps} = new global::EasyEcs.Tile<{tile.Cell}, {tile.Shape}>({tileEntity}, in n{method.GridOf(steps)}); {sweep}p{steps}.Leave({tileEntity}, in n{method.GridOf(steps)}); }}";
+            if (runs) call = $"{{ {call} }}";
+        }
+        else if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;
         // A vector loop reading other entities sends the vectors it cannot resolve, and those its backoff skips, to the
         // method (Kernel.RunRows): one call of a row loop of its own (__Rows) per span, so the vector loop's code holds no
         // row loop of its own for them (D131, the form measured). Locals of the run (a reduction, a context, a Maybe's or
@@ -748,7 +811,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         if (masked) sb.Append('\n');
         sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
         sb.Append($"        public void Execute({first}{(masked ? "ulong pass, " : "")}{List(components.Length, i => string.Format(each, components[i - 1], i))})\n");
-        if (!runs && !local.Contains(true) && grids.Length == 0 && !method.ConsumesEach)
+        if (!runs && !local.Contains(true) && grids.Length == 0 && method.Steps < 0 && !method.ConsumesEach)
             sb.Append($"            => {call}\n");
         else
         {
@@ -835,6 +898,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.View && p.Fields.Any(f => f.Type == components[k] && f.Access == "mut")))
                 own |= 1 << k;
         }
+        if (woken) // a woken tile, run as the query's walk would run it (its components, the filter)
+            sb.Append($"\n        public void Step(global::EasyEcs.Entity tile) => tile.Run<{method.ComponentTypes}, {job}>(ref this, in __ForEach{owner.TypeParameters}.{method.Name}Filter{number});\n");
         string declaring = method.Simd != null ? "IForEachBatch" : iface; // IForEachMasked declares no masks of its own
         sb.Append($"\n        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.WriteMask => {writes};\n");
         sb.Append($"\n        static bool global::EasyEcs.{declaring}<{method.ComponentTypes}>.OneQuery => true; // the method's filter is a constant\n");
@@ -988,8 +1053,17 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <param name="Grid">A Tile's tile component (its key is <paramref name="Key"/>), else "".</param>
     /// <param name="Fields">A view's component fields, in declaration order (empty for any other parameter).</param>
     /// <param name="Accumulates">A Reduce&lt;T&gt; of a singleton declared [Accumulate]: the pass's result is combined into the world's value.</param>
+    /// <param name="Shape">A Tile's shape (its grid's component, or Columns&lt;T&gt; of it), else "".</param>
+    /// <param name="Colors">
+    /// A stepping tile's (<c>ref Tile</c>) colors: "" for Jacobi; for [GaussSeidel], the parity of the key's sum and
+    /// the bits of its fields' parities, as expressions over <c>key</c>, then the field count ("sum;bits;n").
+    /// </param>
+    /// <param name="Sweeps">[GaussSeidel(MaxSweeps = N)]'s N.</param>
+    /// <param name="Sleeps">A stepping tile's pass lets tiles sleep: the method reads nothing whose change the pass cannot see.</param>
+    /// <param name="Wakes">What else wakes a stepping tile: "cells:T" (another tile of the grid, its buffer of T) or "component:T" (a tracked component of the entity).</param>
     private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false, string Key = "",
-        string Cell = "", string Grid = "", EquatableArray<ViewFieldModel> Fields = default, bool Accumulates = false);
+        string Cell = "", string Grid = "", EquatableArray<ViewFieldModel> Fields = default, bool Accumulates = false, string Shape = "",
+        string Colors = "", int Sweeps = 0, bool Sleeps = false, EquatableArray<string> Wakes = default, bool Woken = false);
 
     /// <summary>A view's component field: its name, its component, and "ref" (written) or "in" (read).</summary>
     /// <summary>A view's field: its name, component, and how the job sets it: "ref", "in" (ref readonly) or "mut" (a Mut&lt;T&gt;).</summary>
@@ -1016,6 +1090,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public string ForEach => Loop + (Parallel ? "Parallel" : "");
 
         public bool HasFilter => With.Length + Without.Length + WithAny.Length > 0 || Since;
+
+        /// <summary>A stepping tile whose sleeping pass may walk only the tiles that woke (its job is an ITileStep).</summary>
+        public bool WalksWoken => Steps >= 0 && Parameters[Steps].Woken && Loop == "ForEachEntity" && !IsChaseTwin;
 
         /// <summary>Filters rows by change tick ([Changed&lt;T&gt;] / [Removed&lt;T&gt;] / [ChangedAny&lt;…&gt;] / [RemovedAny&lt;…&gt;]).</summary>
         public bool Since => Changed.Length + Removed.Length + ChangedAny.Length + RemovedAny.Length > 0;
@@ -1073,8 +1150,19 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public int GridOf(int i)
         {
             for (int j = 0; j < i; j++)
-                if (Parameters[j].Kind == Symbols.ParamKind.Tile && Parameters[j].Grid == Parameters[i].Grid) return j;
+                if (Parameters[j].Kind == Symbols.ParamKind.Tile && Parameters[j].Grid == Parameters[i].Grid && Parameters[j].Shape == Parameters[i].Shape) return j;
             return i;
+        }
+
+        /// <summary>The stepping tile parameter (<c>ref Tile</c>), or -1.</summary>
+        public int Steps
+        {
+            get
+            {
+                for (int i = 0; i < Parameters.Length; i++)
+                    if (Parameters[i] is { Kind: Symbols.ParamKind.Tile, RefKind: "ref" }) return i;
+                return -1;
+            }
         }
 
         /// <summary>The job holds the World: the method takes it, or a Lookup reads through it.</summary>
@@ -1226,6 +1314,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     var kind => new ParamModel(kind, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, declared),
                 };
             }).ToArray();
+            parameters = Sleeping(method, parameters); // a stepping tile: whether its tiles may sleep, and what wakes them
             var with = new List<string>();
             var without = new List<string>();
             var withAny = new List<string>();
@@ -1343,10 +1432,63 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
     private static ParamModel TileModel(IParameterSymbol p, string declared)
     {
-        var (cell, grid) = Symbols.TileElements(p.Type)!.Value;
+        var (cell, shape, grid) = Symbols.TileElements(p.Type)!.Value;
         string cellName = cell.ToDisplayString(Symbols.Fqn);
-        return new ParamModel(Symbols.ParamKind.Tile, $"global::EasyEcs.DynamicBuffer<{cellName}>", "in", p.Name, declared,
-            Key: Symbols.TileKey(grid)!.ToDisplayString(Symbols.Fqn), Cell: cellName, Grid: grid.ToDisplayString(Symbols.Fqn));
+        var key = Symbols.TileKey(grid)!;
+        var method = (IMethodSymbol)p.ContainingSymbol;
+        bool steps = Symbols.IsSteppingTile(p);
+        string colors = "";
+        if (steps && Symbols.IsGaussSeidel(method) && Symbols.KeyParities(key, "key") is { Count: > 0 } parities)
+        {
+            var bits = new List<string>();
+            for (int i = 0; i < parities.Count; i++) bits.Add($"(((int)({parities[i]}) & 1) << {i})");
+            colors = $"(int)({string.Join(" + ", parities)}) & 1;{string.Join(" | ", bits)};{parities.Count}";
+        }
+        return new ParamModel(Symbols.ParamKind.Tile, $"global::EasyEcs.DynamicBuffer<{cellName}>", steps ? "ref" : "in", p.Name, declared,
+            Key: key.ToDisplayString(Symbols.Fqn), Cell: cellName, Grid: grid.ToDisplayString(Symbols.Fqn), Shape: shape.ToDisplayString(Symbols.Fqn),
+            Colors: colors, Sweeps: steps ? Symbols.MaxSweeps(method) : 0);
+    }
+
+    /// <summary>
+    /// A stepping tile's pass may let its tiles sleep when the method reads nothing else whose change it cannot see: its
+    /// other parameters are tiles of the same grid (their cells' changes wake), the entity, a Scratch, and components of
+    /// the entity that track changes (theirs wake it). The parameters, the stepping tile's model carrying the verdict.
+    /// </summary>
+    private static ParamModel[] Sleeping(IMethodSymbol method, ParamModel[] parameters)
+    {
+        int stepping = -1;
+        for (int i = 0; i < parameters.Length; i++)
+            if (parameters[i] is { Kind: Symbols.ParamKind.Tile, RefKind: "ref" }) { stepping = i; break; }
+        if (stepping < 0) return parameters;
+        var tile = parameters[stepping];
+        var wakes = new List<string>();
+        bool sleeps = true;
+        for (int i = 0; i < parameters.Length && sleeps; i++)
+        {
+            if (i == stepping) continue;
+            var p = parameters[i];
+            switch (p.Kind)
+            {
+                case Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch:
+                    break;
+                case Symbols.ParamKind.Tile when p.Grid == tile.Grid && p.RefKind == "in":
+                    if (!wakes.Contains("cells:" + p.Cell)) wakes.Add("cells:" + p.Cell);
+                    break;
+                case Symbols.ParamKind.Component or Symbols.ParamKind.Mutable
+                    when p.Tracked || Symbols.Implements(method.Parameters[i].Type, Symbols.TrackChanges):
+                    if (!wakes.Contains("component:" + p.Type)) wakes.Add("component:" + p.Type);
+                    break;
+                default:
+                    sleeps = false;
+                    break;
+            }
+        }
+        var copy = (ParamModel[])parameters.Clone();
+        // A pass that sleeps walks only the tiles that woke when its rows pass no filter but the tile's: a filter would
+        // leave a woken tile out of a walk without the pass knowing it (TileSteps.StepWoken).
+        bool woken = sleeps && !Symbols.AttributeFilters(method).Any() && !Symbols.GroupFilters(method).Any();
+        copy[stepping] = tile with { Sleeps = sleeps, Wakes = new EquatableArray<string>(sleeps ? wakes.ToArray() : new string[0]), Woken = woken };
+        return copy;
     }
 
     private sealed record UpdateModel(OwnerModel Owner, EquatableArray<ForEachModel> Methods)

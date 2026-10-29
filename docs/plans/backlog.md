@@ -31,9 +31,13 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Tiles: ping-pong, padded halos, edges while stepping** ("Next" items 11 + 12a + 12b with 8c's tile gaps and
-      `voxel-rewrite.md` GA3 / GA10 / GA12, branch `feat-tiles-pingpong`). 8c's FillPool item went to the fewer-copies
-      branch (12d).
+- [ ] **Arrive runs** (item 8i, branch `feat-arrive-runs`): MoveEntities' gain from feat-copy-entities' ArriveRows
+      changes, without CopyEntities.
+- [ ] **Tile reads checked once** (owner, 2026-10-29: "先合并，再修读取"): the in-cache gap the ping-pong step
+      keeps against step + commit by hand (Laplacian 1.33x at 1 thread) is the Tile API's per-column range check and
+      sign extension in `TileCursor` loads, paid by the by-value form too; a generator rewrite of `c.Load128(x + k)`
+      into one checked base when the x loop's range is known, or an unchecked row cursor. Proof: Tier1 listings and
+      TileStencil 32 / 512 at 1 and 4 threads against hand, sparse and dense.
 
 Merged since the last update: symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
