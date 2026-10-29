@@ -30,6 +30,29 @@ public static class ChaseKernels
         course = target.HasValue ? new Course(target.Value.X - beacon.X, target.Value.Y - beacon.Y) : default;
     }
 
+    // A local function reading through a Lookup and a component of its own parameters: no chase of the method, whose
+    // parameters have other ordinals (the generator read them as the method's and threw past its 4 parameters: CS8785).
+    [ForEach]
+    public static void ChaseThroughLocal(in Beacon beacon, in Tracker tracker, ref Course course, Lookup<Beacon> beacons)
+    {
+        course = Toward(0, 0, 0, 0, 0, beacons, tracker, beacon);
+
+        static Course Toward(int a, int b, int c, int d, int e, Lookup<Beacon> at, in Tracker to, in Beacon from)
+        {
+            var target = at[to.Target];
+            return target.HasValue ? new Course(target.Value.X - from.X, target.Value.Y - from.Y) : default;
+        }
+    }
+
+    // A key probe of a local function: no probe of the method (it threw in the model, before any file was written).
+    [ForEach]
+    public static void FindLoginThroughLocal(in Seeker seeker, ref Answer answer, Lookup<Login> logins)
+    {
+        answer.A = Find(0, 0, 0, 0, logins, seeker);
+
+        static int Find(int a, int b, int c, int d, Lookup<Login> at, in Seeker by) => at.TryFind(by.Login, out var found) ? found.Id.Index : -1;
+    }
+
     // An id of a component the method writes: no chase (a row ahead may not hold the id its own row reads).
     [ForEach]
     public static void Retarget(ref Tracker tracker, ref Course course, Lookup<Beacon> beacons)
@@ -171,6 +194,17 @@ public class PrefetchTests
                      ("ChaseParallel", w => ChaseKernels.ChaseParallel(w), w => LookupKernels.SteerRows(w)),
                      ("Check", w => ChaseKernels.Check(w), null),
                      ("Retarget", w => ChaseKernels.Retarget(w), null),
+                     ("ChaseThroughLocal", w => ChaseKernels.ChaseThroughLocal(w), w => LookupKernels.SteerRows(w)),
+                     ("LambdaThroughLocal", w => w.ForEach(static (in Beacon beacon, in Tracker tracker, ref Course course, Lookup<Beacon> beacons) =>
+                     {
+                         course = Toward(0, 0, 0, 0, 0, beacons, tracker, beacon);
+
+                         static Course Toward(int a, int b, int c, int d, int e, Lookup<Beacon> at, in Tracker to, in Beacon from)
+                         {
+                             var target = at[to.Target];
+                             return target.HasValue ? new Course(target.Value.X - from.X, target.Value.Y - from.Y) : default;
+                         }
+                     }), w => LookupKernels.SteerRows(w)),
                      ("Steer", w => LookupKernels.Steer(w), w => LookupKernels.SteerRows(w)),
                      ("SteerParallel", w => LookupKernels.SteerParallel(w), w => LookupKernels.SteerRows(w)),
                      ("Probe", w => LookupKernels.Probe(w), w => LookupKernels.ProbeRows(w)),
@@ -386,6 +420,9 @@ public class PrefetchTests
             WithCache(1, () => on = Answers(world, pass));
             Assert.That(on, Is.EqualTo(off), name);
         }
+
+        // A probe in a local function: the method's plain job finds what the method that probes itself does.
+        Assert.That(Answers(world, w => ChaseKernels.FindLoginThroughLocal(w)), Is.EqualTo(Answers(world, w => ChaseKernels.FindLogin(w))), "local function");
 
         // The index grows: its dictionaries resize, the cached entries go with the old buckets.
         world.Reserve<Login, Callsign>(keys * 2);
