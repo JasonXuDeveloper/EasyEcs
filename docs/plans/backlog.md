@@ -36,10 +36,8 @@ names the skill:
       sign extension in `TileCursor` loads, paid by the by-value form too; a generator rewrite of `c.Load128(x + k)`
       into one checked base when the x loop's range is known, or an unchecked row cursor. Proof: Tier1 listings and
       TileStencil 32 / 512 at 1 and 4 threads against hand, sparse and dense.
-- [ ] **Switches and patterns become masks** (item 8j, branch `feat-switch-masks`).
-- [ ] **Constructors and helpers of another assembly** (item 8g, branch `feat-foreign-bodies`).
 
-Merged since the last update: ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
+Merged since the last update: switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
 at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
 vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the owner's M4: no case slower past
@@ -67,6 +65,11 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Next, in this order
 
+- [ ] **EECS033 across assemblies** (found by 8g): it suggested `entity.Spot` for a library component while the
+  program declared its own `Spot`; it matches a component by name across assemblies, and the fix compiled against
+  the wrong type. Match by symbol; a test with two same-named components in two assemblies.
+- [ ] **Recorded bodies with switches** (after the 8j + 8g merge): the inliner inlines switches now; check that a
+  helper of another assembly with a switch expression is recorded and vectorizes, a `ForeignBodyTests` case.
 - [x] **Flaky: `PrefetchingProbesBuffersWalksAndLambdasAllocateNothing`** (fix-flaky-alloc): on-stack replacement
   compiles on the measuring thread. In the full suite the tiering backlog keeps the four probe jobs' loops at Tier0
   past the 50 warm-up frames; their OSR compiles land in the window, 168 B each (one compile per job, 672 B in every
