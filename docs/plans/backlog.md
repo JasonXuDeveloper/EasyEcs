@@ -218,10 +218,15 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 8d. [x] **Bug: EECS055 reason text** (`voxel-rewrite.md` GA7): VoxelServer's Chase reports `local 'cell' is a ??`
        (the type name missing); Float reports `LookupExtensions.TryFind, defined in another assembly` where the reason is
        that a key probe has no vector form. Fix the text, a test per case.
-8f. [ ] **The other body stages catch their exceptions** (fix-kernel-foreign's report): `Chases.Of`, `PairModel.Create`
-       and `FusionSide.Of` still drop the project's output when they throw; each needs a safe fallback model (the
-       method's plain job) and a reason, like Kernel. Also a clearer EECS055 reason for a switch expression over a
-       struct call (VoxelServer's Chase reads "'new Nearby(...).Trail(cell.X, cell.Z) s...' is not supported").
+8f. [x] **The other body stages catch their exceptions** (fix-kernel-foreign's report; built on `feat-stage-catch`,
+       waiting for merge): `Chases.Of`, `PairModel.Create` and `FusionSide.Of` dropped the project's output when they
+       threw. Two real crashes fixed at the root: reads through a local function's (or a lambda's local function's) own
+       Lookup taken as the method's chases (their ordinals past the method's parameters), a partial pair method's
+       singleton cutoff (the implementing part's parameters). Each stage now catches what is left and falls back to
+       the plain form with a reason the analyzer reports through the same call (`Kernel.FailedTo`): no prefetching
+       twin (EECS055 / EECS097), every pair (EECS106 through `PairForm.ReadCutoff`, which now also reports a cutoff the
+       pass cannot compute), no fusion (EECS093). EECS055 names a switch expression and, over a call on a struct
+       (VoxelServer's Chase), the split. Docs to-dos in docs-todos "feat-stage-catch".
 8g. [ ] **Constructors and helpers of another assembly, read from what its generator recorded** (found at the
        fix-kernel-foreign merge; owner, 2026-10-28: "有没有别的办法解决这种问题呢"): a component in a contracts
        assembly (HotReload's `Position(float X, float Y)`) makes `new Position(x, y)` an EECS055 warning, because
