@@ -22,7 +22,7 @@ public class TileWokenBenchmark
 
     /// <summary>The gate EasyEcs.Core reads (internal): set per invocation without allocating.</summary>
     [UnsafeAccessor(UnsafeAccessorKind.StaticField, Name = "Share")]
-    private static extern ref int Share([UnsafeAccessorType("EasyEcs.TileWalk, EasyEcs.Core")] object? walk);
+    private static extern ref int Share([UnsafeAccessorType("EasyEcs.TileWalk, EasyEcs.Core")] object walk);
 
     private int _shipped;
     private World _hand, _auto, _woken, _everyTile;
