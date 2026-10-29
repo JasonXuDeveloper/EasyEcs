@@ -416,8 +416,11 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       generated `__permN`) tests the class's initialization every iteration and spills around the helper call. The
       first fix (vectors of literals, 2206090) was reverted with the NEON `fixed` removal (cf43ac4) because the M4
       measured every multi-field loop 25-58% slower (`audit-vector-loops`, "Read the loop the JIT wrote"). Next:
-      bisect the two on the M4 (owner runs `KernelBenchmark` `*Generated` at cf43ac4 vs its parent), then try the
-      fix per path (literals only where AOT pays; or the table read into a local before the loop) and land it only
+      bisect the two on the M4. cf43ac4 vs its parent fc527d5 (owner's M4 run, 2026-10-29, one round, 0 B): the
+      `fixed` removal alone costs 10-21% at 100k on the deinterleaving loops (Move2 17.0 -> 19.1 us, Move3 26.3 ->
+      29.5, Move4 34.6 -> 40.2, Step 20.7 -> 25.1, Integrate 8.7 -> 10.0), Wave, Share, Seek and Brighten flat: real,
+      but short of 25-58%. Next: `KernelBenchmark` `*Generated` at 2206090 for the literals' share; NEON LD/ST
+      take `fixed` back whatever it shows. Then try the fix per path (literals only where AOT pays; or the table read into a local before the loop) and land it only
       with JIT x64, JIT ARM64 (M4) and Native AOT numbers.
 - [ ] **The inliner's limit, checked instead of assumed** (owner, 2026-10-26: "is a fixed JIT budget right when SIMD
       width differs?"). Answer: `MAX_INL_LCLS = 32` is RyuJIT's implementation constant with no target condition
