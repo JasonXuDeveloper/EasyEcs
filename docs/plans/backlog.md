@@ -290,7 +290,9 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        0 B steady state. The form carries a per-tick budget (`voxel-rewrite.md` GA9: VoxelServer caps requests per
        tick, `Rules.MaxRequests`; the owner wants the cap kept).
 10. [x] **Streaming stores in generated loops, gated** (merged 1b1aa12: Predict 0.86-0.94x, Mix 0.90-0.92x past the
-       cache with the reader counted in, gate off inside; ARM64 STNP unmeasured) (owner, 2026-10-27; `microarch.md` M3, prototype
+       cache with the reader counted in, gate off inside; the owner's M4 run, 2026-10-29, one round, 0 B: Auto is the
+       fastest of Auto / Off / On in all 8 cases, 0.80-0.87x of Off at 1M rows and 0.75-0.87x at 16M, so STNP stays gated
+       the same way on ARM64) (owner, 2026-10-27; `microarch.md` M3, prototype
        `Locality/Streams.cs`): non-temporal stores for a column the method writes without reading, only when the
        column's bytes are past `CacheSizes.LastLevel`. Measured in a real world with the next pass reading that column
        counted in; ships when faster in both rounds and never slower (StreamingStoreBenchmark: 1.47x past the cache,
