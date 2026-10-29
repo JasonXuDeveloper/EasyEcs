@@ -432,6 +432,87 @@ public partial class TileTests
         }
     }
 
+    // ---------------- column loads checked once per loop ----------------
+    // A load at the column of the loop around it (x + k) is intercepted by the generator's check of the loop's first and
+    // last column (SystemGenerator.TileLoads.cs): each load reads what the indexer reads, halo cells included, and a loop
+    // whose columns leave the padded row keeps the cursor's own check, so it throws at the first bad column.
+
+    [Test]
+    public void LoadsInAColumnLoopReadWhatTheIndexerReads()
+    {
+        using var world = new World();
+        var wide = Grid(world, Box(2, 1, 2), s => new WidePlate(s));
+        var tile = TileOf<Cell, WidePlate>(wide[0], out _);
+        tile.ExchangeHalo();
+        // WidePlate: 5 cells and a halo of 2, rows of 9 ints; four ints from x - 1 for x in -1..3 end at the last halo cell.
+        for (int y = -2; y <= 2; y++)
+        {
+            var c = tile.At(new TileRow<WidePlate>(0, Math.Clamp(y, 0, 6)));
+            int dz = y - Math.Clamp(y, 0, 6), n = 0;
+            for (int x = -1; x < 4; x++)
+            {
+                var loaded = c.Load128<int>(x - 1, 0, dz);
+                for (int lane = 0; lane < 4; lane++)
+                    Assert.That(loaded.GetElement(lane), Is.EqualTo(c[x - 1 + lane, 0, dz].V), $"x {x}, z {y}, lane {lane}");
+                n++;
+            }
+            Assert.That(n, Is.EqualTo(5));
+            for (int x = 0; x < 0; x++) _ = c.Load128<int>(x + 100); // a loop that never runs: nothing to check
+        }
+        Assert.That(Shape<WidePlate>(wide[0]), Is.Zero);
+        Assert.That(typeof(TileTests).Assembly.GetTypes().Any(t => t.Name.EndsWith("__TileLoads") && t.GetMethods(
+            System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic).Any(m => m.Name.StartsWith("Load128_"))),
+            "the loads above are intercepted");
+
+        // The shape's own width as the bound, in a method generic over it: the check folds per shape. The lanes that differ.
+        static int Shape<TTile>(Entity e) where TTile : struct, IComponent, ITile<TilePos>
+        {
+            var tile = TileOf<Cell, TTile>(e, out _);
+            tile.ExchangeHalo();
+            var c = tile.At(new TileRow<TTile>(0, 0));
+            int wrong = 0;
+            for (int x = 0; x < TTile.Width; x += 4) // WidePlate: from -2 and from 2, the second ending in the halo
+            {
+                var loaded = c.Load128<int>(x - 2);
+                for (int lane = 0; lane < 4; lane++) wrong += loaded.GetElement(lane) == c[x - 2 + lane, 0, 0].V ? 0 : 1;
+            }
+            return wrong;
+        }
+    }
+
+    [Test]
+    public void AColumnLoopPastThePaddedRowStillThrows()
+    {
+        using var world = new World();
+        var wide = Grid(world, Box(1, 1, 1), s => new WidePlate(s));
+        // x takes 0 and 4: the load at 4 + 1 reads cells 5 to 8, one past the halo of 2.
+        Assert.Throws<ArgumentOutOfRangeException>(() => Loop(wide[0], 0, 1));
+        // x takes -2, 1 and 4: the first load reads from -3.
+        Assert.Throws<ArgumentOutOfRangeException>(() => Loop(wide[0], -2, -1));
+        Assert.DoesNotThrow(() => Loop(wide[0], 0, 0));
+
+        static int Loop(Entity e, int first, int offset)
+        {
+            var tile = TileOf<Cell, WidePlate>(e, out _);
+            tile.ExchangeHalo();
+            var c = tile.At(new TileRow<WidePlate>(0, 0));
+            int sum = 0;
+            switch (first, offset)
+            {
+                case (0, 1):
+                    for (int x = 0; x < 5; x += 4) sum += c.Load128<int>(x + 1).GetElement(0);
+                    break;
+                case (-2, -1):
+                    for (int x = -2; x < 5; x += 3) sum += c.Load128<int>(x - 1).GetElement(0);
+                    break;
+                default:
+                    for (int x = 0; x < 5; x += 3) sum += c.Load128<int>(x).GetElement(0); // 0 and 3: the last load ends at the halo's last cell
+                    break;
+            }
+            return sum;
+        }
+    }
+
     // ---------------- the active rows ----------------
 
     [TestCase(TileStencil.Self)]
