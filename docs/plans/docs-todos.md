@@ -1496,3 +1496,38 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
   FusionSide each turn an exception into a reason (Kernel.FailedTo) and the plain form, since one throwing stage drops
   every file of the project (CS8785, then hundreds of errors in user code); the analyzer calls the same function, so
   what the generator skips it reports.
+
+## feat-foreign-bodies (8g)
+
+- guide/vectorization (the vector loop page) + zh, "Calls": a helper of another assembly is inlined like one of the
+  project's when that assembly was built with EasyEcs's generator (a contracts project referencing EasyEcs is): its
+  public static methods, extension methods, struct methods and property accessors with a body, small and without a
+  loop, throw, switch or lambda (the same syntax limits as a helper of the project). Fields and static helpers the
+  assembly hides are reached anyway (private fields of a component are lanes like any other; a static readonly field
+  of an internal type is read once per run through an `[UnsafeAccessor]` extern of the job). An assembly built
+  without the generator (or with an older EasyEcs) keeps "which is defined in another assembly".
+- guide/vectorization + zh, "Struct values": `new Position(x, y)` of a component of another assembly vectorizes when
+  that assembly recorded the constructor: a positional record struct, or a constructor whose body only assigns its
+  parameters to fields (`=> _x = x;` too, now also in the project itself). Reasons that remain, now named after the
+  record: "its constructor does more than set fields from its parameters ('...')", "the parameter 'X' of T's
+  constructor sets no positional property" (a positional property redeclared), "T's constructor also gives 'F' its
+  initial value ('...')" (a field or property initializer: new in the project too, which used to ignore it and gave
+  the initializer's field the default value in the vector loop).
+- guide/analyzer.mdx + zh, EECS055: the reasons a recorded helper carries ("it calls Physics.Steps, which has a
+  loop"; "it calls T.M, which other assemblies cannot reach" for an internal type it names; "whose recorded body does
+  not bind in this assembly"), and that the fixable "declared in another assembly ... set them by name instead" is
+  now only for assemblies built without the generator.
+- samples/HotReload README + page: Move writes `position = new Position(...)` again (restored after 5fa54c1), with a
+  line saying the contracts assembly's generator records the constructor.
+- architecture.mdx + zh (generator section): Recorder (declaring side, source output, one file per source file, read
+  once per syntax tree: a syntax provider's transform reruns for every file on every keystroke otherwise) and
+  Recorded (reading side, cached per referenced assembly symbol); only members taking and returning values are
+  recorded; the attributes are `EditorBrowsable(Never)` API of EasyEcs.Core (`ConstructorFieldsAttribute`,
+  `InlineBodyAttribute`), written only by the generator. EasyEcs.Core records nothing of its own API.
+- guide/vectorization + zh, "Calls": a helper of another assembly taking or returning a class (string, World, an
+  array) is not recorded; in an IDE, a record follows the edits of its own file (another file's change to what it
+  names shows once that file is edited again; a build always reads every file).
+- decisions.mdx + zh: the decision record of this branch (draft in the 8g report).
+- changelog (coming version, New): "A [ForEach] method calling a constructor or a small helper of another assembly
+  gets its vector loop when that assembly was built with EasyEcs: the generator records constructors' fields and
+  helpers' bodies as hidden assembly attributes, and reaches the fields they hide through [UnsafeAccessor]."

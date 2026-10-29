@@ -227,31 +227,31 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        twin (EECS055 / EECS097), every pair (EECS106 through `PairForm.ReadCutoff`, which now also reports a cutoff the
        pass cannot compute), no fusion (EECS093). EECS055 names a switch expression and, over a call on a struct
        (VoxelServer's Chase), the split. Docs to-dos in docs-todos "feat-stage-catch".
-8g. [ ] **Constructors and helpers of another assembly, read from what its generator recorded** (found at the
-       fix-kernel-foreign merge; owner, 2026-10-28: "有没有别的办法解决这种问题呢"): a component in a contracts
-       assembly (HotReload's `Position(float X, float Y)`) makes `new Position(x, y)` an EECS055 warning, because
-       metadata has no constructor body; users with shared contracts would have to avoid an everyday idiom.
-       Ways checked: reading the IL fails where it matters (a ProjectReference compiles against the project's
-       reference assembly, whose bodies are `throw null`; NuGet packages may ship `ref/` only; a generator does no
-       file IO); guessing from metadata (a record's `Deconstruct` and properties named like the parameters) is wrong
-       when a positional property has its own initializer, and a wrong guess is a wrong vector loop.
-       Chosen: the EasyEcs generator runs in the declaring assembly anyway (it references EasyEcs for IComponent),
-       sees the source and records the facts as hidden assembly-level attributes, which reference assemblies keep
-       (as the compiler records nullability or tuple names): per constructor of a component, the field each
-       parameter is assigned to when the body is only that; per small static helper a vector loop may call (the
-       call inliner's candidates: `Terrain.Cell`-like), its body, so the call inliner inlines helpers of other
-       assemblies too. The referencing Kernel reads them (`compilation.GetAssemblyOrModuleSymbol(reference)
-       .GetAttributes()`, cached per reference); an assembly built without them keeps today's fixable reason.
-       Members the recorded body names that the referencing assembly cannot see (a private backing field, an
-       internal helper, an internal type) are reached through generated `[UnsafeAccessor]` externs, as the systems'
-       private methods already are (owner, 2026-10-28: "还可以搭配 unsafe accessor 之类的吧"): `Field` kind returns a
-       `ref` the JIT turns into a plain load or store, `Method` / `StaticMethod` for calls, .NET 10's
-       `[UnsafeAccessorType]` names a type the caller cannot reference; the vector loop reads such fields as lanes at
-       their offsets like any other field. Checked on JIT x64, ARM64, Native AOT and the WebAssembly demo (Mono AOT),
-       with the Tier1 code showing direct field access and no call.
-       Proof: the HotReload sample's old `new Position(...)` vectorizes with no warning; a hand-written constructor
-       and an initializer-changed positional property stay scalar; a helper of a referenced assembly inlines bit for
-       bit as from source; GeneratorBenchmark shows the attribute read costs nothing per keystroke.
+8g. [x] **Constructors and helpers of another assembly, read from what its generator recorded** (branch
+       `feat-foreign-bodies`, unmerged; owner, 2026-10-28: "有没有别的办法解决这种问题呢", "还可以搭配 unsafe accessor
+       之类的吧"): `new Position(x, y)` of a contracts assembly's component was an EECS055 warning (metadata has no
+       constructor body; reading IL fails on reference assemblies, guessing from a record's shape is wrong when a
+       positional property has an initializer). The declaring assembly's generator (Recorder.cs, source output, one
+       file per source file, read once per syntax tree) writes hidden assembly attributes of EasyEcs.Core, which
+       reference assemblies keep: `[ConstructorFields(ctorId, members...)]` per public constructor of a public struct
+       (or `Reason`), `[InlineBody(memberId, body, accessors...)]` per small public helper taking and returning values
+       (static and extension methods, struct members, accessors with a body; names qualified, `this` as `@this`,
+       hidden fields as placeholders, internal static helpers as local functions; or `Reason`). The referencing
+       Kernel (Recorded.cs, cached per assembly symbol) binds a recorded body in a speculative model like a source
+       helper; a hidden instance field of the row's component is a lane, a hidden static readonly field is read
+       once per run through an `[UnsafeAccessor(StaticField)]` extern of the job (`[UnsafeAccessorType]` for an
+       internal owner); a mutable hidden static and a hidden field in a pair method keep the method scalar.
+       An assembly without records keeps "declared in another assembly". Fixed on the way: an expression-bodied
+       constructor (`=> _x = x`) was "does more than set fields"; a constructor whose type has field initializers
+       now stays scalar with its reason (the vector loop gave the initialized field its default).
+       Proof: HotReload's `new Position(...)` again with no EECS055; ForeignBodyTests (vector == row by row, bit for
+       bit, 0 B; the library compiled against its reference assembly); GeneratorTests (metadata-only reference, no
+       records, reasons, the record's text); AOT program; Tier1 x64 AVX-512: the hidden statics are loads before
+       the loop, the private field a lane, no call in the loop. GeneratorBenchmark per keystroke equals the base
+       (EditMethodBodyIde 29.40 MB against 29.39 MB) once the recorder reads a file once per tree (it was +5.5 MB:
+       a syntax provider's transform reruns for every file on every change). Not checked here (x64 machine): ARM64
+       and the WebAssembly demo (Mono AOT) with an UnsafeAccessor static field: the owner's M4 run.
+       Docs to-dos in docs-todos "feat-foreign-bodies (8g)".
 8h. [x] **`CopyEntities<TTag>` prototype + benchmark: measured, not shipped** (owner, 2026-10-28: "做原型+基准";
        `owner-review.md`, "Ghost rows between worlds"). The prototype is on branch `feat-copy-entities` (unmerged,
        `GhostCopyBenchmark`, `CopyEntitiesTests`): 0.63-0.92x of the `CreateEntity` loop with 3 components, 0.82-1.00x
