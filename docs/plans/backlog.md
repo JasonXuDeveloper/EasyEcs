@@ -262,6 +262,22 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        +3 % were noise: here 0.93-1.09x and 0.96-1.02x in every build, including a control whose path is base's
        (base + the copy branch's World fields). Decision record and changelog line in the agent's report, for the
        docs pass.
+8j. [ ] **Switches and patterns become masks** (owner, 2026-10-29: "swtich和pattern matching都需要留意吧"): today
+       `is` patterns over a lane (relational, constant, `and` / `or` / `not`) already vectorize (`Kernel.Pattern`,
+       `WidePattern`), but a switch expression, a switch statement, a property pattern (`p is { X: > 0, Y: < 5 }`),
+       a pattern over a struct (`v is (> 0, > 0)`), and a helper the call inliner meets with a switch in it keep the
+       method scalar, and 8f's EECS055 text tells users to rewrite them by hand. Per the owner's rule the generator
+       lowers the plain form: a switch expression whose arms are patterns over lanes becomes first-match-wins
+       selects (each arm's mask and not-yet-matched, `ConditionalSelect` from the last arm up; `_` the default; a
+       guard `when` and-ed in); a switch statement whose sections only assign (no loop, no jump past the switch)
+       becomes the same masked writes as an if / else chain; property and positional patterns over a struct's
+       fields become the fields' compares; a type pattern over a value type is a constant. Left scalar, each with
+       its own reason: list patterns, a `var` / declaration pattern whose variable is read later as an object, a
+       switch over a non-lane (string, class), a section with a loop or a `goto case`. EECS055 then names only
+       those; 8f's "write it as conditional expressions" text goes. VoxelServer's Zombies `Trail(...) switch` is the
+       proof case (a call on a struct, inlined, then its switch lowered). Proof: generated text and vector == scalar
+       tests per form (NaN, first-match order, a `when` guard, a default arm that is not last), Tier1 with no call
+       and no branch in the loop, a KernelBenchmark case against the scalar loop, ARM64 parity.
 9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
        ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
        `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the
