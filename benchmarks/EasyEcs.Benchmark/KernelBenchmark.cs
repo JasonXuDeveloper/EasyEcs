@@ -27,7 +27,8 @@ namespace EasyEcs.Benchmark;
 /// accumulator per lane, folded in lane order (the floats' two per lane, a chain each, in the loop over whole vectors);
 /// <c>Cycle</c> writes heat on both branches and counts one, over whole vectors and over <c>_holes</c> (masked words).
 /// <c>Ratio</c> divides ints by constants (8: shifts, 7: doubles) and a float by 2 (a product), <c>Share</c> by a divisor
-/// per row (doubles), over <c>_ratios</c>.
+/// per row (doubles), and <c>Grade</c> switches over that divisor (a switch expression with a guard, a switch statement),
+/// over <c>_ratios</c>.
 /// <c>Wealth</c> sums the int column into a long and <c>Accrue</c> adds it to a column of longs: lanes of two sizes, each
 /// long a pair of vectors per step (Kernel.Pairs.cs).
 /// <c>Optional</c> takes a <c>Maybe&lt;Mass&gt;</c> over <c>_holes</c> (a lane mask of the rows that have it).
@@ -256,6 +257,17 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void ShareGenerated() => Kernels.Share(_ratios);
+
+    // Switches over a divisor per row (random signs and sizes): each arm a mask, the first that matches wins.
+    [Benchmark]
+    public void GradeScalar()
+    {
+        var job = new GradeRows();
+        _ratios.ForEach<Ticks, Den, Heat, GradeRows>(ref job);
+    }
+
+    [Benchmark]
+    public void GradeGenerated() => Kernels.Grade(_ratios);
 
     [Benchmark]
     public void HolesScalar()
@@ -866,6 +878,12 @@ public partial class KernelBenchmark
         static int IForEach<Ticks, Den, Heat>.WriteMask => 5;
     }
 
+    private struct GradeRows : IForEach<Ticks, Den, Heat>, INoStructuralChanges
+    {
+        public void Execute(ref Ticks ticks, ref Den den, ref Heat heat) => Kernels.Grade(ref ticks, in den, ref heat);
+        static int IForEach<Ticks, Den, Heat>.WriteMask => 5;
+    }
+
     private struct ShareRows : IForEach<Ticks, Den>, INoStructuralChanges
     {
         public void Execute(ref Ticks ticks, ref Den den) => Kernels.Share(ref ticks, in den);
@@ -960,6 +978,31 @@ public partial class KernelBenchmark
         // By a divisor per row (never 0 here; a 0 would send its vector's rows to the method).
         [ForEach]
         internal static void Share(ref Ticks ticks, in Den den) => ticks.Value = ticks.Value / den.Value + ticks.Value % den.Value * 1000 + 7919;
+
+        // A switch expression and a switch statement (a default section, a label of two values) over a divisor per row.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void Grade(ref Ticks ticks, in Den den, ref Heat heat)
+        {
+            heat.Value = den.Value switch
+            {
+                < -50 => heat.Value * 0.5f,
+                < 0 when heat.Value > 0 => -heat.Value,
+                > 50 => heat.Value + 1f,
+                _ => 3f,
+            };
+            switch (den.Value & 3)
+            {
+                case 0:
+                    ticks.Value += 2;
+                    break;
+                case 1 or 2:
+                    ticks.Value -= den.Value;
+                    break;
+                default:
+                    ticks.Value ^= 1;
+                    break;
+            }
+        }
 
         // Each branch writes heat, and one counts: masked words select their passing lanes inside these writes.
         [ForEach(SimdMode = SimdMode.Require)]
