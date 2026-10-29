@@ -44,6 +44,7 @@ internal sealed partial class Kernel
         IOperation body, System.Threading.CancellationToken ct)
     {
         var callees = Callees.Of(model.Compilation);
+        callees.Offer(model, syntax);
         if (!body.DescendantsAndSelf().Any(o => callees.Candidate(o) != null)) return null;
         var used = new HashSet<string>(syntax.DescendantTokens().Where(t => t.IsKind(SyntaxKind.IdentifierToken)).Select(t => t.ValueText));
         var inliner = new Inliner(used, method, model.Compilation, ct);
@@ -51,7 +52,7 @@ internal sealed partial class Kernel
         var block = syntax.Body != null ? rewriter.Body(syntax.Body)
             : syntax.ExpressionBody != null ? Block(rewriter.Arrow(syntax.ExpressionBody.Expression, null)) : null;
         if (block == null || inliner.Count + inliner.Left == 0) return null;
-        block = Inliner.WithoutInlinedLocalFunctions(block);
+        block = inliner.WithAccessors(Inliner.WithoutInlinedLocalFunctions(block));
         var replaced = syntax.WithExpressionBody(null).WithSemicolonToken(default).WithBody(block);
         int position = syntax.Body?.SpanStart ?? syntax.ExpressionBody!.SpanStart;
         if (!model.TryGetSpeculativeSemanticModelForMethodBody(position, replaced, out var speculative) || speculative == null) return null;
@@ -75,6 +76,9 @@ internal sealed partial class Kernel
         return (_lambda ? $"{call}: a lambda pass does not inline calls; a [ForEach] method does" : call, false);
     }
 
+    /// <summary>What in a body keeps a vector loop from inlining it, from its syntax alone (null: nothing); Recorder.cs records it.</summary>
+    internal static string? BodyRefusal(SyntaxNode body) => Callee.Refused(body);
+
     /// <summary>A lambda pass's body is translated (it inlines no call).</summary>
     private bool _lambda;
 
@@ -97,10 +101,42 @@ internal sealed partial class Kernel
 
         public static Callees Of(Compilation compilation) => Table.GetValue(compilation, static c => new Callees(c));
 
+        /// <summary>
+        /// A method body of the compilation that recorded bodies of other assemblies are bound in (as static local
+        /// functions in its place, speculatively: <see cref="Callee.Read"/>), the first one offered. Their names are all
+        /// qualified, so where they are bound changes nothing.
+        /// </summary>
+        private Host? _host;
+
+        private sealed record Host(SemanticModel Model, MethodDeclarationSyntax Method);
+
+        /// <summary>Offers <paramref name="method"/> as the place recorded bodies are bound in (<see cref="_host"/>).</summary>
+        public void Offer(SemanticModel model, MethodDeclarationSyntax method)
+        {
+            if (_host == null && (method.Body != null || method.ExpressionBody != null))
+                System.Threading.Interlocked.CompareExchange(ref _host, new Host(model, method), null);
+        }
+
         /// <summary>The name of <paramref name="method"/> as code writes it (a property's, for an accessor).</summary>
         public static string NameOf(IMethodSymbol method) => method.AssociatedSymbol is IPropertySymbol property ? property.Name : method.Name;
 
         public SemanticModel ModelOf(SyntaxTree tree) => _models.GetOrAdd(tree, t => _compilation.GetSemanticModel(t));
+
+        /// <summary>
+        /// A recorded body of another assembly bound as static local functions in the place of a method of this
+        /// compilation (<see cref="_host"/>): the block and its speculative model, whose tree <see cref="ModelOf"/> then
+        /// knows, so the local functions of its helpers are read like the user's own. Null: no place offered yet, or the
+        /// body does not parse.
+        /// </summary>
+        public (BlockSyntax Block, SemanticModel Model)? Bind(Recorded.BodyFact fact)
+        {
+            if (_host is not { } host || Recorded.Parse(fact) is not { } block) return null;
+            var replaced = host.Method.WithExpressionBody(null).WithSemicolonToken(default).WithBody(block);
+            int position = host.Method.Body?.SpanStart ?? host.Method.ExpressionBody!.SpanStart;
+            if (!host.Model.TryGetSpeculativeSemanticModelForMethodBody(position, replaced, out var speculative) || speculative == null) return null;
+            _models[replaced.SyntaxTree] = speculative;
+            return (replaced.Body!, speculative);
+        }
 
         /// <summary>The definition a call or a property access <paramref name="op"/> reaches, when its source is the user's to inline.</summary>
         public IMethodSymbol? Candidate(IOperation op) => op switch
@@ -114,15 +150,18 @@ internal sealed partial class Kernel
 
         /// <summary>
         /// The definition of <paramref name="method"/> when the inliner may take its calls: an ordinary method, a local
-        /// function or an accessor with a body in this compilation, which the generators did not write, called directly
-        /// (not virtual, not through an interface), static or of a struct.
+        /// function or an accessor with a body in this compilation, which the generators did not write, or whose body its
+        /// assembly recorded (Recorded.cs), called directly (not virtual, not through an interface), static or of a
+        /// struct. A recorded body's placeholder is no candidate: the vector loop reads the field it stands for.
         /// </summary>
         public IMethodSymbol? Candidate(IMethodSymbol? method)
         {
             if (method == null) return null;
             var definition = Definition(method);
             if (definition.MethodKind is not (MethodKind.Ordinary or MethodKind.LocalFunction or MethodKind.PropertyGet or MethodKind.PropertySet)) return null;
-            if (definition.DeclaringSyntaxReferences.IsEmpty || Symbols.IsGenerated(definition)) return null;
+            if (definition.DeclaringSyntaxReferences.IsEmpty ? _host == null || Recorded.BodyOf(definition) is not { Reason: null }
+                : Symbols.IsGenerated(definition) || Recorded.AccessOf(definition) != null)
+                return null;
             if (SymbolicReason(definition) != null) return null;
             return Get(definition).Declaration != null ? definition : null;
         }
@@ -139,7 +178,13 @@ internal sealed partial class Kernel
             var definition = Definition(method);
             if (SymbolicReason(definition) is { } symbolic) return symbolic;
             if (definition.MethodKind is not (MethodKind.Ordinary or MethodKind.LocalFunction or MethodKind.PropertyGet or MethodKind.PropertySet)) return null;
-            if (definition.DeclaringSyntaxReferences.IsEmpty) return "which is defined in another assembly";
+            if (definition.DeclaringSyntaxReferences.IsEmpty)
+                return Recorded.BodyOf(definition) switch
+                {
+                    null => "which is defined in another assembly",
+                    { Reason: { } reason } => reason,
+                    _ => _host == null ? null : Get(definition, ct).Refusal,
+                };
             if (Symbols.IsGenerated(definition)) return null;
             return Get(definition, ct).Refusal;
         }
@@ -172,6 +217,22 @@ internal sealed partial class Kernel
         public ExpressionSyntax? Expression { get; private set; }
         public SemanticModel Model { get; private set; } = null!;
         public string? Refusal { get; private set; }
+
+        /// <summary>
+        /// The parameters the body names, in order: the member's own, or a recorded body's (its local function's), after
+        /// its <see cref="Receiver"/>.
+        /// </summary>
+        public System.Collections.Immutable.ImmutableArray<IParameterSymbol> Parameters { get; private set; }
+
+        /// <summary>The type parameters the body names: the member's own, or a recorded body's local function's.</summary>
+        public System.Collections.Immutable.ImmutableArray<ITypeParameterSymbol> TypeParameters { get; private set; }
+
+        /// <summary>A recorded body of an instance member: the parameter its receiver is bound to (named <c>this</c>), or null.</summary>
+        public IParameterSymbol? Receiver { get; private set; }
+
+        /// <summary>Every parameter the body names, its receiver's included.</summary>
+        public IEnumerable<IParameterSymbol> AllParameters => Receiver == null ? Parameters : Parameters.Prepend(Receiver);
+
         private Callees _callees = null!;
         private Effects? _effects;
 
@@ -182,7 +243,8 @@ internal sealed partial class Kernel
 
         public static Callee Read(IMethodSymbol method, Callees callees, System.Threading.CancellationToken ct)
         {
-            var callee = new Callee { Method = method, _callees = callees };
+            var callee = new Callee { Method = method, _callees = callees, Parameters = method.Parameters, TypeParameters = method.TypeParameters };
+            if (method.DeclaringSyntaxReferences.IsEmpty) return callee.ReadRecorded(ct);
             var declaration = (method.PartialImplementationPart ?? method).DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(ct);
             (callee.Block, callee.Expression) = declaration switch
             {
@@ -205,8 +267,40 @@ internal sealed partial class Kernel
             return callee;
         }
 
+        /// <summary>
+        /// A body its assembly recorded (Recorded.cs), bound in the place the compilation offered (<see cref="Callees.Bind"/>):
+        /// its first local function is the member, whose receiver, for an instance member, is its first parameter.
+        /// </summary>
+        private Callee ReadRecorded(System.Threading.CancellationToken ct)
+        {
+            if (Recorded.BodyOf(Method) is not { } fact) return Refuse("which is defined in another assembly");
+            if (fact.Reason != null) return Refuse(fact.Reason);
+            if (_callees.Bind(fact) is not var (block, model)
+                || block.Statements.OfType<LocalFunctionStatementSyntax>().FirstOrDefault(f => f.Identifier.ValueText == Recorded.Body) is not { } function
+                || model.GetDeclaredSymbol(function, ct) is not IMethodSymbol bound)
+                return Refuse("whose recorded body the generator could not read");
+            // What another assembly hides that the record still names (a newer compiler's rule): nothing the generated code could compile.
+            if (model.GetOperation(block, ct) is not { } whole || whole.DescendantsAndSelf().Any(o => o is IInvalidOperation))
+                return Refuse("whose recorded body does not bind in this assembly");
+            bool instance = !Method.IsStatic && !Method.ContainingType.IsExtension;
+            if (instance && bound.Parameters.Length == 0 || bound.Parameters.Length != Method.Parameters.Length + (instance ? 1 : 0)
+                || bound.TypeParameters.Length != Method.TypeParameters.Length)
+                return Refuse("whose recorded body does not match its declaration");
+            (Receiver, Parameters, TypeParameters) = (instance ? bound.Parameters[0] : null, instance ? bound.Parameters.RemoveAt(0) : bound.Parameters, bound.TypeParameters);
+            (Block, Expression) = (function.Body, function.ExpressionBody?.Expression);
+            if ((Refusal = Refused((SyntaxNode?)Block ?? Expression!)) != null) return this;
+            (Declaration, Model) = (function, model);
+            return this;
+        }
+
+        private Callee Refuse(string reason)
+        {
+            Refusal = reason;
+            return this;
+        }
+
         /// <summary>What in a body keeps the vector loop from taking it, from the syntax alone (null: nothing).</summary>
-        private static string? Refused(SyntaxNode body)
+        internal static string? Refused(SyntaxNode body)
         {
             foreach (var node in body.DescendantNodesAndSelf())
             {
@@ -286,13 +380,14 @@ internal sealed partial class Kernel
                     }
 
                     if (opaque == null && op is IInvocationOperation other && !IsMath(other.TargetMethod) && !KnownVector(other.TargetMethod.ContainingType)
-                        && _callees.Candidate(other.TargetMethod) == null && !Symbols.IsGenerated(other.TargetMethod))
+                        && _callees.Candidate(other.TargetMethod) == null && !Symbols.IsGenerated(other.TargetMethod) && Recorded.AccessOf(other.TargetMethod) == null)
                         opaque = $"{other.TargetMethod.ContainingType.Name}.{other.TargetMethod.Name}";
 
                     switch (op)
                     {
                         case IInvalidOperation:
-                        case IInvocationOperation call when !IsMath(call.TargetMethod) && !KnownVector(call.TargetMethod.ContainingType) && !Pure(call.TargetMethod, ct):
+                        case IInvocationOperation call when !IsMath(call.TargetMethod) && !KnownVector(call.TargetMethod.ContainingType) && !Pure(call.TargetMethod, ct)
+                            && Recorded.AccessOf(call.TargetMethod) == null: // a placeholder's field: a write of it passes its struct by ref
                         case IPropertyReferenceOperation access when Symbols.IsGenerated(access.Property)
                             || _callees.Candidate(access.Property.GetMethod) is { } getter && !_callees.Get(getter, ct).Facts(ct).Pure:
                         case IObjectCreationOperation { Type.IsReferenceType: true }:
@@ -394,6 +489,30 @@ internal sealed partial class Kernel
             if (Folding > 0) throw new NotInlined(reason);
             Reason ??= reason;
         }
+
+        /// <summary>The placeholders the inlined recorded bodies use, by their field and form: the name and declaration each has in the method.</summary>
+        private readonly Dictionary<string, (string Name, LocalFunctionStatementSyntax Declaration)> _accessors = new(System.StringComparer.Ordinal);
+
+        /// <summary>
+        /// The name a recorded body's placeholder <paramref name="placeholder"/> has in the method: one per field and form
+        /// (read through <c>in</c>, written through <c>ref</c>, static), whatever body named it, named after the field.
+        /// </summary>
+        public string Accessor(IMethodSymbol placeholder, Recorded.Access access)
+        {
+            string form = placeholder.Parameters.Length == 0 ? "static" : placeholder.Parameters[0].RefKind.ToString();
+            string key = $"{access.Assembly}|{access.Type}|{access.Name}|{form}";
+            if (_accessors.TryGetValue(key, out var known)) return known.Name;
+            if (placeholder.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(ct) is not LocalFunctionStatementSyntax declaration)
+                throw new NotInlined($"whose recorded body names field {access.Name}, which the generator could not read");
+            string type = access.Type.Substring(access.Type.LastIndexOfAny(['.', '+']) + 1);
+            string name = Fresh($"__{type}_{access.Name.Replace('<', '_').Replace('>', '_')}{(form == "In" ? "_in" : "")}");
+            _accessors[key] = (name, declaration.WithIdentifier(Identifier(name)));
+            return name;
+        }
+
+        /// <summary>The method's body with the placeholders its inlined calls use declared at its end (Kernel reads them as fields).</summary>
+        public BlockSyntax WithAccessors(BlockSyntax block) =>
+            _accessors.Count == 0 ? block : block.AddStatements(_accessors.Values.OrderBy(a => a.Name, System.StringComparer.Ordinal).Select(a => (StatementSyntax)a.Declaration).ToArray());
 
         /// <summary>The body without the local functions every call of which was inlined (the vector loop takes none).</summary>
         public static BlockSyntax WithoutInlinedLocalFunctions(BlockSyntax block)
@@ -639,6 +758,7 @@ internal sealed partial class Kernel
             if (Inlined && Hidden(node) is { } hidden)
                 throw new NotInlined($"whose body names {LambdaPass.Describe(hidden)}: make it internal", true);
             if (node.Parent is MemberAccessExpressionSyntax access && access.Name == node || node.Parent is QualifiedNameSyntax qualified && qualified.Right == node
+                || node.Parent is AliasQualifiedNameSyntax // global::Game, as a recorded body writes every name
                 || NamesSubpattern(node))
                 return null; // the member of something: its receiver decides (a property pattern's, the value it tests)
             var symbol = Bound(node);
@@ -656,6 +776,9 @@ internal sealed partial class Kernel
 
             if (scope.Names.TryGetValue(symbol.OriginalDefinition, out var replaced) || scope.Names.TryGetValue(symbol, out replaced))
                 return replaced.WithTriviaFrom(node);
+            // A recorded body's placeholder of a field its assembly hides: declared in the method under a name of its own.
+            if (symbol is IMethodSymbol placeholder && Recorded.AccessOf(placeholder) is { } stood)
+                return IdentifierName(owner.Accessor(placeholder, stood)).WithTriviaFrom(node);
             switch (symbol)
             {
                 case ITypeParameterSymbol:
@@ -747,7 +870,7 @@ internal sealed partial class Kernel
             catch (NotInlined why)
             {
                 _prefix.RemoveRange(mark, _prefix.Count - mark);
-                if (owner.Folding > 0) throw;
+                if (owner.Folding > 0 || RecordedHelper(site)) throw;
                 if (site.View)
                 {
                     owner.Fail($"{Callee(site)}, {why.Reason}");
@@ -786,10 +909,17 @@ internal sealed partial class Kernel
                     return node;
                 }
 
-                if (owner.Folding > 0) throw;
+                if (owner.Folding > 0 || RecordedHelper(site)) throw;
                 return Left(asWritten(), Why(site, why));
             }
         }
+
+        /// <summary>
+        /// A hidden helper of a recorded body (a local function of its text): it exists only there, so a call of it the
+        /// inliner cannot take leaves the whole recorded call in place instead.
+        /// </summary>
+        private static bool RecordedHelper(CallSite site) =>
+            site.Method.MethodKind == MethodKind.LocalFunction && site.Method.Name.StartsWith(Recorded.Helper, System.StringComparison.Ordinal);
 
         private NotInlined Why(CallSite site, NotInlined why) => new($"{Callee(site)}, {why.Reason}", why.Fixable);
 
@@ -988,8 +1118,8 @@ internal sealed partial class Kernel
             var method = site.Method;
             var facts = callee.Facts(owner.Token);
             var names = new Dictionary<ISymbol, ExpressionSyntax>(SymbolEqualityComparer.Default);
-            for (int i = 0; i < method.TypeParameters.Length; i++)
-                names[method.TypeParameters[i]] = ParseTypeName(site.Called.TypeArguments[i].ToDisplayString(Symbols.Fqn));
+            for (int i = 0; i < callee.TypeParameters.Length; i++)
+                names[callee.TypeParameters[i]] = ParseTypeName(site.Called.TypeArguments[i].ToDisplayString(Symbols.Fqn));
             for (var (d, c) = (method.ContainingType.OriginalDefinition, site.Called.ContainingType); d != null && c != null; (d, c) = (d.ContainingType, c.ContainingType))
                 for (int i = 0; i < d.TypeParameters.Length && i < c.TypeArguments.Length; i++)
                     if (!SymbolEqualityComparer.Default.Equals(d.TypeParameters[i], c.TypeArguments[i]))
@@ -1012,9 +1142,12 @@ internal sealed partial class Kernel
                     thisWritable = Writable(site.Receiver);
                 }
 
-                if (method.ContainingType.IsExtension)
+                if (callee.Receiver != null && facts.Written.Contains(callee.Receiver) && !thisWritable)
+                    throw new NotInlined($"which writes its struct, on a receiver it may not write ('{site.Receiver}'): a copy would be written; take it by ref");
+                if (method.ContainingType.IsExtension || callee.Receiver != null)
                 {
-                    var parameter = method.ContainingType.ExtensionParameter!;
+                    // An extension's receiver, or a recorded body's (its first parameter, named 'this'): bound as a parameter.
+                    var parameter = callee.Receiver ?? method.ContainingType.ExtensionParameter!;
                     names[parameter] = Value(parameter, site.Receiver, self!, facts, locals, receiverWritable: thisWritable);
                     self = null;
                 }
@@ -1033,7 +1166,9 @@ internal sealed partial class Kernel
                 }
             }
 
-            var parameters = method.Parameters;
+            // The parameters the body names (a recorded body's own), placed by the member's declaration (same order and names).
+            var parameters = callee.Parameters;
+            var declared = method.Parameters;
             int offset = site.ReceiverIsArgument ? 1 : 0;
             if (site.ReceiverIsArgument)
             {
@@ -1045,8 +1180,8 @@ internal sealed partial class Kernel
             for (int i = 0; i < arguments.Count; i++)
             {
                 var argument = arguments[i];
-                int index = argument.NameColon is { } named ? IndexOf(parameters, named.Name.Identifier.ValueText) : i + offset;
-                if (index < 0 || index >= parameters.Length || parameters[index].IsParams)
+                int index = argument.NameColon is { } named ? IndexOf(declared, named.Name.Identifier.ValueText) : i + offset;
+                if (index < 0 || index >= parameters.Length || declared[index].IsParams)
                     throw new NotInlined("with a params array or an argument the vector loop cannot place");
                 given[index] = argument;
             }
@@ -1056,7 +1191,7 @@ internal sealed partial class Kernel
                 var parameter = parameters[i];
                 if (given[i] is not { } argument)
                 {
-                    if (!parameter.HasExplicitDefaultValue || DefaultLiteral(parameter) is not { } literal)
+                    if (!declared[i].HasExplicitDefaultValue || DefaultLiteral(declared[i]) is not { } literal)
                         throw new NotInlined($"leaving out '{parameter.Name}', whose default the vector loop cannot write");
                     names[parameter] = literal;
                     continue;
@@ -1207,7 +1342,7 @@ internal sealed partial class Kernel
                 switch (o)
                 {
                     case IAssignmentOperation or IIncrementOrDecrementOperation or IInvalidOperation:
-                    case IInvocationOperation call when !IsMath(call.TargetMethod) && !KnownVector(call.TargetMethod.ContainingType)
+                    case IInvocationOperation call when !IsMath(call.TargetMethod) && !KnownVector(call.TargetMethod.ContainingType) && Recorded.AccessOf(call.TargetMethod) == null
                         && !(owner.Callees.Candidate(call.TargetMethod) is { } definition && owner.Callees.Get(definition, owner.Token).Facts(owner.Token).Pure):
                     case IPropertyReferenceOperation access when Symbols.IsGenerated(access.Property)
                         || owner.Callees.Candidate(access.Property.GetMethod) is { } getter && !owner.Callees.Get(getter, owner.Token).Facts(owner.Token).Pure:

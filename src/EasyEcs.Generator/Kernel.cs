@@ -890,7 +890,7 @@ internal sealed partial class Kernel
             kernel._setup.ToString(), prologue + read + hold + kernel._body, stores.ToString(), prologue + read + kept + maskedHold + kernel._body.Masked, masked.ToString(),
             restore.ToString(), fold.ToString(), kernel._size, kernel._mask, Column(first), kernel._components.Any(c => c.Value.Fields.Length > 1 && !kernel._wideOf.ContainsKey(c.Key)),
             kernel._bails, flat, kernel._cold, kernel._wideOf.Count == 0 ? null : string.Join(" && ", kernel._components.Where(c => kernel._wideOf.ContainsKey(c.Key)).Select(c => $"__layout{c.Value.Index}")),
-            kernel.WideStatics())
+            kernel.WideStatics() + string.Concat(kernel._accessors.Values))
         {
             Wide512 = kernel._wide512,
             Wide128 = kernel._wide128,
@@ -929,7 +929,8 @@ internal sealed partial class Kernel
         void Flatten(IOperation op)
         {
             if (op is IBlockOperation block) foreach (var inner in block.Operations) Flatten(inner);
-            else if (op is not (IEmptyOperation or IReturnOperation { IsImplicit: true, ReturnedValue: null })) statements.Add(op); // a lambda's own end
+            else if (op is not (IEmptyOperation or IReturnOperation { IsImplicit: true, ReturnedValue: null }) // a lambda's own end
+                && !(op is ILocalFunctionOperation f && Recorded.AccessOf(f.Symbol) != null)) statements.Add(op);
         }
         Flatten(root);
         var groups = new List<IOperation>[fields];
@@ -1104,6 +1105,8 @@ internal sealed partial class Kernel
                 return true;
             case IEmptyOperation:
                 return true;
+            case ILocalFunctionOperation f when Recorded.AccessOf(f.Symbol) != null:
+                return true; // a placeholder of an inlined recorded body: its calls are the fields it stands for
             case IVariableDeclarationGroupOperation group:
                 foreach (var declaration in group.Declarations)
                 foreach (var declarator in declaration.Declarators)
@@ -1611,6 +1614,10 @@ internal sealed partial class Kernel
                     members.Add(p.Property);
                     op = instance;
                     continue;
+                case IInvocationOperation { Arguments.Length: 1 } call when Recorded.FieldOf(call) is { } hidden:
+                    members.Add(hidden); // a field another assembly hides, read through its recorded body's placeholder
+                    op = call.Arguments[0].Value;
+                    continue;
             }
             members.Reverse();
             return (op, members.ToArray());
@@ -1741,7 +1748,7 @@ internal sealed partial class Kernel
             // An enum to its integer or back (or another enum, or another integer of its size): the bits, as C# converts them unchecked.
             case IConversionOperation { IsChecked: false, OperatorMethod: null } c when IsEnumConversion(c) && IsLane(c.Type) && IsLane(c.Operand.Type):
                 return Convert(Expr(c.Operand), Under(c.Operand.Type!), Under(c.Type!)) ?? throw Not(c);
-            case IFieldReferenceOperation or IPropertyReferenceOperation when LaneOf(op) is { } c:
+            case IFieldReferenceOperation or IPropertyReferenceOperation or IInvocationOperation when LaneOf(op) is { } c:
                 return ComponentLane(c.Index, c.Field, op);
             case IPropertyReferenceOperation { Property.Name: "HasValue", Instance: IParameterReferenceOperation { Parameter: var p } } when _optionals.TryGetValue(p, out var o):
                 return $"__has{o.Index}";
@@ -2247,6 +2254,8 @@ internal sealed partial class Kernel
                 return _uniformParams[p];
             case IFieldReferenceOperation { Field: { IsStatic: true, IsReadOnly: true } f }:
                 return $"{f.ContainingType.ToDisplayString(Symbols.Fqn)}.{f.Name}";
+            case IInvocationOperation { TargetMethod: var placeholder } call when Recorded.AccessOf(placeholder) is { } access:
+                return Hidden(call, access);
             case IFieldReferenceOperation { Field: { IsStatic: false } f, Instance: { } instance }:
                 return $"{Scalar(instance)}.{f.Name}";
             case IPropertyReferenceOperation { Property: { IsStatic: false, Parameters.Length: 0 } p, Instance: { } instance }
@@ -2272,6 +2281,35 @@ internal sealed partial class Kernel
                 // a call or a property could do anything: not hoisted out of the rows
                 throw new Unsupported($"'{Text(op)}' is not a value the loop can compute once per run (a call or a property could do anything)");
         }
+    }
+
+    /// <summary>The accessors of the fields another assembly hides that the uniform values read, by name: the job's statics.</summary>
+    private readonly SortedDictionary<string, string> _accessors = new(System.StringComparer.Ordinal);
+
+    /// <summary>
+    /// A uniform read of a field another assembly hides (a placeholder of an inlined recorded body): through an
+    /// <c>[UnsafeAccessor]</c> extern of the job, which the JIT turns into the field's load (no call). A static readonly
+    /// field is read once per run as any other; a mutable static is not uniform for the same reason a visible one is not.
+    /// </summary>
+    private string Hidden(IInvocationOperation call, Recorded.Access access)
+    {
+        const string Unsafe = "global::System.Runtime.CompilerServices.";
+        var type = call.TargetMethod.ReturnType.ToDisplayString(Symbols.Fqn);
+        string name = $"__hidden_{access.Type.Replace('.', '_').Replace('+', '_')}_{access.Name.Replace('<', '_').Replace('>', '_')}";
+        if (access.IsStatic)
+        {
+            if (!access.IsReadOnly) throw new Unsupported($"static field {access.Name} of {access.Type} may change during the run");
+            _accessors[name] = $"[{Unsafe}UnsafeAccessor({Unsafe}UnsafeAccessorKind.StaticField, Name = \"{access.Name}\")]\n"
+                + $"private static extern ref {type} {name}([{Unsafe}UnsafeAccessorType(\"{access.Type}, {access.Assembly}\")] object o);\n\n";
+            return $"{name}(null)";
+        }
+
+        if (call.Arguments.Length != 1 || call.TargetMethod.Parameters.Length != 1) throw Not(call);
+        var (instance, owner) = (call.Arguments[0].Value, call.TargetMethod.Parameters[0].Type);
+        name += "_of";
+        _accessors[name] = $"[{Unsafe}UnsafeAccessor({Unsafe}UnsafeAccessorKind.Field, Name = \"{access.Name}\")]\n"
+            + $"private static extern ref {type} {name}(ref {owner.ToDisplayString(Symbols.Fqn)} o);\n\n";
+        return $"{name}(ref {Unsafe}Unsafe.AsRef(in {Scalar(instance)}))";
     }
 
     /// <summary>The C# operator of <paramref name="kind"/> in a uniform value (string concatenation and the like are not).</summary>
@@ -2308,6 +2346,8 @@ internal sealed partial class Kernel
     /// <summary>The reason <paramref name="op"/> keeps the method scalar, named the way the method writes it.</summary>
     private Unsupported Not(IOperation op)
     {
+        if (op is IInvocationOperation { TargetMethod: var placeholder } && Recorded.AccessOf(placeholder) is { } hidden)
+            return new Unsupported($"field {hidden.Name} of {hidden.Type}, which its assembly hides, is used in a way the vector loop cannot follow (not a lane of a component, nor a value of the run)");
         // A call of the user's own code the inliner left (Kernel.Inlining.cs), or one it cannot see into.
         if (op is IInvocationOperation { TargetMethod: var target } && !IsMath(target) && !KnownVector(target.ContainingType)
             || op is IPropertyReferenceOperation { Property.GetMethod: not null } && op.Syntax.GetAnnotations(CallReason).Any())

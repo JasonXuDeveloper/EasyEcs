@@ -9,7 +9,6 @@ public ref struct MoveSystem
     [ForEach]
     static void Move(ref Position position, in Velocity velocity)
     {
-        position.X += velocity.X;
-        position.Y += velocity.Y;
+        position = new Position(position.X + velocity.X, position.Y + velocity.Y);
     }
 }

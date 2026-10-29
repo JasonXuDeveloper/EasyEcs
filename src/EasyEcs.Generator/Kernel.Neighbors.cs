@@ -74,6 +74,7 @@ internal sealed partial class Kernel
             : _pairs || _size != 4 ? "its lanes are not of 4 bytes (a cluster is a vector of floats)"
             : null;
         if (why != null) throw new Unsupported(why);
+        if (_accessors.Count > 0) throw new Unsupported("a pair method reads a field another assembly hides"); // the pair job has no statics
 
         // A broadcast of a neighbor's value runs once per neighbor, the others once per pass.
         var setup = new StringBuilder();

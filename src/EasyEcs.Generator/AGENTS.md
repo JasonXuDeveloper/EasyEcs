@@ -131,7 +131,9 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              bound in a speculative model of the body, or the reason it stays scalar;
                              Kernel.Inlining.cs: the user's own calls inlined before translation (static and extension
                              methods, C# 14 extension members, struct methods and properties, local functions, whose
-                             source is in the compilation: Callees reads each callee once per compilation, syntax
+                             source is in the compilation or whose assembly recorded the body (Recorded.cs, bound in a
+                             speculative model of the calling method, its placeholders declared at the method's end):
+                             Callees reads each callee once per compilation, syntax
                              refusals first; Inliner / Rewriter: parameters bound to the caller's variables or locals,
                              early returns as a flag, a value as one expression or a local assigned before the
                              statement), bound in a speculative model of the method body; a call left gets its reason
@@ -219,6 +221,18 @@ Chases.cs                    a [ForEach] method's or lambda pass's chases, read 
                              (SystemGenerator.EmitChases): reads of other entities at an id of an in component
                              (lookup[x.F], Read, Has), key probes (TryFind / Find / Count) and reads at the ids of an in
                              buffer's elements (foreach, the indexer), with the stages each one prefetches
+Recorder.cs                  what this assembly records for the generators of assemblies referencing it (source output,
+                             one file per source file): [assembly: ConstructorFields] per public constructor
+                             of a public struct (the member each parameter sets, or the reason), [assembly: InlineBody]
+                             per small public helper taking and returning values (static method, struct member,
+                             accessor with a body: the body with names qualified, this as @this, hidden fields as
+                             placeholders __EasyEcsAccessor{i}, hidden static helpers as local functions
+                             __EasyEcsHelper{j}; or the reason)
+Recorded.cs                  those facts read back per referenced assembly (cached on its symbol): Constructor, BodyOf,
+                             Parse (placeholders annotated with their field), AccessOf / FieldOf (a placeholder's field,
+                             which Kernel reads as a lane or, uniform, through an [UnsafeAccessor] extern of the job);
+                             Assignments: what a constructor of this compilation sets, read once for Kernel.Struct and
+                             the recorder
 Symbols.cs                   symbol checks shared by generator and analyzer
 Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
 EquatableArray.cs            array with value equality (generator models cache between edits)

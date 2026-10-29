@@ -98,6 +98,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
         // world.ForEach(static (ref P p) => ...): each call intercepted by the job of its lambda (SystemGenerator.Lambdas.cs).
         InitializeLambdas(context);
+
+        // What the assemblies referencing this one read back (Recorder.cs): constructors' fields, helpers' bodies.
+        Recorder.Initialize(context);
     }
 
     private static void Add(SourceProductionContext context, UpdateModel model)

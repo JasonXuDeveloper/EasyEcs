@@ -37,6 +37,7 @@ internal sealed partial class Kernel
 
         var used = new HashSet<string>(syntax.DescendantTokens().Where(t => t.IsKind(SyntaxKind.IdentifierToken)).Select(t => t.ValueText));
         var inliner = new Inliner(used, method, model.Compilation, ct);
+        inliner.Callees.Offer(model, syntax);
         var added = new List<ParameterSyntax>();
         foreach (var p in method.Parameters)
         {
@@ -66,7 +67,7 @@ internal sealed partial class Kernel
             return null;
         }
 
-        body = Inliner.WithoutInlinedLocalFunctions(body);
+        body = inliner.WithAccessors(Inliner.WithoutInlinedLocalFunctions(body));
 
         // The method's parameters as written (their types bind where they did) and the view fields after them.
         var function = LocalFunctionStatement(PredefinedType(Token(SyntaxKind.VoidKeyword)), Identifier(inliner.Fresh("__Desugared")))

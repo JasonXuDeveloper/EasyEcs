@@ -37,6 +37,10 @@ ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkSize, SimdMode), 
                              [Consume] (the visited rows destroyed after the pass), [ForEntity] (a static method run
                              on one entity through a generated entry point), [ForEachRecord] (a static method run on
                              each record of Emitted<T> in order, then the records cleared)
+Recorded.cs                  [assembly: ConstructorFields] / [assembly: InlineBody] (hidden): what the generator records in
+                             a component's assembly for the generators of referencing ones (the member each constructor
+                             parameter sets, a small public helper's body), which metadata and reference assemblies
+                             would not tell them
 Maybe.cs                     Maybe<T>: an optional component parameter of a [ForEach] method
 Mut.cs                       Mut<T>: a [ForEach] parameter stamped only on the rows it writes (Write, SetIfChanged);
                              Values.Same, the boxing-free equality of SetIfChanged

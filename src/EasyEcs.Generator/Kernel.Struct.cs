@@ -164,6 +164,8 @@ internal sealed partial class Kernel
             for (int i = 0; i < ctor.Parameters.Length; i++)
                 if (assigned[i] is { } member && Reaches(paths, [member])) Set(lanes, paths, [member], ValueOf(Arg(i)), creation);
         }
+        else if (ctor is { IsImplicitlyDeclared: false } && !KnownVector(creation.Type))
+            Assigns(ctor); // a parameterless constructor of its own: only when it sets nothing (no body, no initializer)
         if (creation.Initializer != null) Initialize(lanes, paths, creation.Initializer);
         return lanes;
     }
@@ -196,60 +198,38 @@ internal sealed partial class Kernel
     }
 
     /// <summary>
-    /// The member each parameter of a constructor sets: a record's positional parameters their properties; a constructor
-    /// declared here whose body only assigns parameters to fields or auto-properties, those (null where it sets none).
+    /// The member each parameter of a constructor sets (null where it sets none): from its source in this compilation
+    /// (<see cref="Recorded.Assignments"/>), else from what its assembly's generator recorded (<see cref="Recorded.Constructor"/>).
     /// </summary>
     private ISymbol?[] Assigns(IMethodSymbol ctor)
     {
         var type = ctor.ContainingType;
-        var syntax = ctor.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
-        var assigned = new ISymbol?[ctor.Parameters.Length];
-        if (syntax is RecordDeclarationSyntax)
+        if (!ctor.DeclaringSyntaxReferences.IsEmpty)
         {
-            for (int i = 0; i < assigned.Length; i++)
-                assigned[i] = type.GetMembers(ctor.Parameters[i].Name).OfType<IPropertySymbol>()
-                    .FirstOrDefault(p => p.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is ParameterSyntax)
-                    ?? throw new Unsupported($"the parameter '{ctor.Parameters[i].Name}' of {type.Name}'s constructor sets no positional property");
-            return assigned;
+            if (_compilation == null) throw new Unsupported($"{type.Name}'s constructor is not declared in this compilation, so the fields it sets are not known");
+            var (members, why) = Recorded.Assignments(ctor, _compilation, default);
+            return members ?? throw new Unsupported(why!);
         }
-        // Metadata holds no body to read, nor a mark of a record's positional constructor: what a constructor of another
-        // assembly sets is not known, and a parameter named after a property proves nothing (the body may compute it).
-        if (syntax == null)
+        if (Recorded.Constructor(ctor) is { } recorded)
         {
-            string reason = $"it calls {type.Name}'s constructor, which is declared in another assembly, so the fields it sets are not known";
-            // Fixable when every field can be set by name, through itself or its property: 'x with { F = ... }' says the same.
-            var settable = type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).Select(f => Symbols.Associated(f) switch
-            {
-                IPropertySymbol { SetMethod.DeclaredAccessibility: Accessibility.Public } property => property.Name,
-                null when f is { DeclaredAccessibility: Accessibility.Public, IsReadOnly: false } => f.Name,
-                _ => null,
-            }).ToArray();
-            if (settable.Length == 0 || settable.Any(n => n == null)) throw new Unsupported(reason);
-            string fields = string.Join(", ", settable.Select(n => $"{n} = ..."));
-            throw new Unsupported($"{reason}: set them by name instead ('new {type.Name} {{ {fields} }}', or 'with {{ {fields} }}')", true);
+            if (recorded.Reason != null || recorded.Members.Length != ctor.Parameters.Length) throw new Unsupported(recorded.Reason ?? $"{type.Name}'s constructor was recorded for other parameters");
+            return recorded.Members.Select(name => name.Length == 0 ? null
+                : type.GetMembers(name).FirstOrDefault(m => m is IFieldSymbol { IsStatic: false } or IPropertySymbol { IsStatic: false })
+                  ?? throw new Unsupported($"{type.Name} has no member '{name}' its constructor was recorded to set")).ToArray();
         }
-        if (syntax is not ConstructorDeclarationSyntax { Initializer: null } declaration || _compilation == null
-            || _compilation.GetSemanticModel(declaration.SyntaxTree).GetOperation(declaration) is not IConstructorBodyOperation body)
-            throw new Unsupported($"{type.Name}'s constructor is not declared in this compilation, so the fields it sets are not known");
-        var statements = body.BlockBody?.Operations ?? (body.ExpressionBody != null ? [body.ExpressionBody] : []);
-        foreach (var statement in statements)
+        // An assembly built without the records: metadata holds no body to read, nor a mark of a record's positional
+        // constructor, and a parameter named after a property proves nothing (the body may compute it).
+        string reason = $"it calls {type.Name}'s constructor, which is declared in another assembly, so the fields it sets are not known";
+        // Fixable when every field can be set by name, through itself or its property: 'x with { F = ... }' says the same.
+        var settable = type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).Select(f => Symbols.Associated(f) switch
         {
-            var e = statement is IExpressionStatementOperation { Operation: var inner } ? inner : statement;
-            if (e is not ISimpleAssignmentOperation { Target: var target, Value: var value }
-                || Chain(target) is not (IInstanceReferenceOperation, { Length: 1 } chain)
-                || Unwrap(value) is not IParameterReferenceOperation { Parameter: var p }
-                || !SymbolEqualityComparer.Default.Equals(p.ContainingSymbol, ctor) || assigned[p.Ordinal] != null
-                || chain[0] is IPropertySymbol property && Symbols.BackingField(property) == null)
-                throw new Unsupported($"{type.Name}'s constructor does more than set fields from its parameters ('{Text(statement)}')");
-            assigned[p.Ordinal] = chain[0];
-        }
-        return assigned;
-    }
-
-    private static IOperation Unwrap(IOperation op)
-    {
-        while (op is IConversionOperation { Conversion.IsIdentity: true } c) op = c.Operand;
-        return op;
+            IPropertySymbol { SetMethod.DeclaredAccessibility: Accessibility.Public } property => property.Name,
+            null when f is { DeclaredAccessibility: Accessibility.Public, IsReadOnly: false } => f.Name,
+            _ => null,
+        }).ToArray();
+        if (settable.Length == 0 || settable.Any(n => n == null)) throw new Unsupported(reason);
+        string fields = string.Join(", ", settable.Select(n => $"{n} = ..."));
+        throw new Unsupported($"{reason}: set them by name instead ('new {type.Name} {{ {fields} }}', or 'with {{ {fields} }}')", true);
     }
 
     /// <summary>A component-wise operator of a vector type: vector op vector, vector op scalar, scalar * vector.</summary>

@@ -1093,7 +1093,7 @@ public class GeneratorTests
         "ForEachMethods", "RecordMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
         "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes", "LambdaPasses", "LambdaFiles", "Views", "Prefabs",
-        "SystemPlaces", "SystemFusions", "SetFusions", "SystemLoops", "SystemCode",
+        "SystemPlaces", "SystemFusions", "SetFusions", "SystemLoops", "SystemCode", "RecordedTypes",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -1202,7 +1202,9 @@ public class GeneratorTests
         var edited = new[] { components, systems, other }.Single(t => t.ToString().Contains(before));
         var next = compilation.ReplaceSyntaxTree(edited, CSharpSyntaxTree.ParseText(edited.ToString().Replace(before, after), Parse, path: edited.FilePath));
         var changed = changes.Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
-        string[] tolerated = ["IsEasyEcsCore", "SetFusions"];
+        // RecordedTypes: a syntax provider over compilation units, rerun for an edited file (their bodies filtered by
+        // size and syntax before any is bound); its facts compare equal, so nothing is emitted again.
+        string[] tolerated = ["IsEasyEcsCore", "SetFusions", "RecordedTypes"];
 
         foreach (bool ide in new[] { false, true })
         {
@@ -1491,15 +1493,22 @@ public class GeneratorTests
         }
         """;
 
-    /// <summary>The library of <see cref="ForeignComponents"/>, built with its generated members, as a reference.</summary>
-    private static MetadataReference ForeignLibrary()
+    /// <summary>
+    /// A library (<see cref="ForeignComponents"/> by default), built with its generated members, as a reference: with what
+    /// its generator records (Recorder.cs) or, <paramref name="recorded"/> false, as an assembly built without it; as its
+    /// reference assembly (<paramref name="reference"/>: bodies <c>throw null</c>, private fields of structs kept), as a
+    /// ProjectReference compiles against it.
+    /// </summary>
+    private static MetadataReference ForeignLibrary(bool recorded = true, bool reference = false, string source = ForeignComponents)
     {
-        var library = CSharpCompilation.Create("Shared", [CSharpSyntaxTree.ParseText("using EasyEcs;\n" + ForeignComponents, Parse)],
+        var library = CSharpCompilation.Create("Shared", [CSharpSyntaxTree.ParseText("using EasyEcs;\n" + source, Parse)],
             Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-        Driver().RunGeneratorsAndUpdateCompilation(library, out var built, out _);
+        var driver = recorded ? Driver() : CSharpGeneratorDriver.Create([new ComponentGenerator().AsSourceGenerator()], parseOptions: Parse);
+        driver.RunGeneratorsAndUpdateCompilation(library, out var built, out _);
+        Assert.That(built.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         using var image = new System.IO.MemoryStream();
-        Assert.That(built.Emit(image).Success, Is.True);
+        Assert.That(built.Emit(image, options: reference ? new Microsoft.CodeAnalysis.Emit.EmitOptions(metadataOnly: true) : null).Success, Is.True);
         return MetadataReference.CreateFromImage(image.ToArray());
     }
 
@@ -1524,11 +1533,32 @@ public class GeneratorTests
         Assert.That(foreign, Does.Contain("for (nint last = rows - global::System.Numerics.Vector<"), foreign);
     }
 
-    [Test]
-    public async Task AConstructorOfAnotherAssemblyKeepsTheMethodScalarWithItsFix()
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task AConstructorOfAnotherAssemblyIsReadFromWhatItsGeneratorRecorded(bool reference)
     {
-        // Metadata holds no constructor body: what new Velocity(v) sets is not known there, while the record's own
-        // assembly reads its positional constructor. The fix the message names compiles to the same loop.
+        // The library's generator recorded what new Velocity(v) sets ([assembly: ConstructorFields], kept by its
+        // reference assembly): the method gets the loop it gets in source, and no EECS055.
+        const string built = """
+            using Shared;
+            [EcsSystem] public ref struct Push
+            {
+                [ForEach] static void A(ref Velocity velocity) => velocity = new Velocity(velocity.Value * 2);
+            }
+            """;
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(built).AddReferences(ForeignLibrary(reference: reference)), out var output, out _);
+        Assert.That((await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync()).Select(d => d.Id), Has.None.EqualTo("EECS055"));
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(ForeignComponents, built), out var local, out _);
+        Assert.That(output.SyntaxTrees.Single(IsCode).ToString(), Is.EqualTo(local.SyntaxTrees.Single(IsCode).ToString()));
+    }
+
+    [Test]
+    public async Task AConstructorOfAnAssemblyBuiltWithoutRecordsKeepsTheMethodScalarWithItsFix()
+    {
+        // Metadata holds no constructor body: built without EasyEcs's generator, the library says nothing of what
+        // new Velocity(v) sets, while the record's own assembly reads its positional constructor. The fix the message
+        // names compiles to the same loop.
         const string built = """
             using Shared;
             [EcsSystem] public ref struct Push
@@ -1537,7 +1567,7 @@ public class GeneratorTests
                 [ForEach] static void B(ref Velocity velocity) => velocity = new Velocity { Value = velocity.Value * 2 };
             }
             """;
-        Driver().RunGeneratorsAndUpdateCompilation(Compile(built).AddReferences(ForeignLibrary()), out var output, out _);
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(built).AddReferences(ForeignLibrary(recorded: false)), out var output, out _);
         var reasons = (await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync()).Where(d => d.Id == "EECS055").ToArray();
         Assert.That(reasons.Select(d => d.GetMessage()), Is.EqualTo(new[]
         {
@@ -1546,6 +1576,84 @@ public class GeneratorTests
         }));
         Assert.That(reasons[0].Severity, Is.EqualTo(DiagnosticSeverity.Warning));
         Assert.That(await Diagnose(ForeignComponents, built), Has.None.EqualTo("EECS055"));   // in source: both vectorized
+    }
+
+    // Helpers and constructors of a library its generator records: hidden fields (an instance field of a component, a
+    // static readonly field of an internal type), a private helper, an extension, and those it records with a reason.
+    private const string ForeignHelpers = """
+        namespace Lib;
+        public record struct Spot(float X, float Y) : IComponent;
+        public struct Heat : IComponent
+        {
+            private float _degrees;
+            public Heat(float degrees) => _degrees = degrees;
+            public readonly float Degrees => _degrees;
+            public void Warm(float by) => _degrees += by * Tables.Gain;
+        }
+        public static class Physics
+        {
+            private static readonly float s_scale = 0.5f;
+            public static float Scaled(float v) => Clamp01(v * s_scale);
+            private static float Clamp01(float v) => v < 0 ? 0 : v > 1 ? 1 : v;
+            public static float Cool(this float v, float by) => v - by * Tables.Gain;
+            public static float Steps(float n) { float s = 0; for (int i = 0; i < n; i++) s += i; return s; }
+            public static float Noise(float v) { Hidden h = default; return v + h.Bias; }
+        }
+        internal static class Tables { public static readonly float Gain = 2f; }
+        internal struct Hidden { public float Bias; }
+        public struct Warmth : IComponent { public float Value; public Warmth(float value) => Value = value * 2; }
+        public record struct Shifted(float X) : IComponent { public float X { get; set; } = X + 1; }
+        public record struct Biased(float X) : IComponent { public float Bias = 1; }
+        """;
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task HelpersOfAnotherAssemblyAreInlinedFromWhatItsGeneratorRecorded(bool reference)
+    {
+        const string built = """
+            using Lib;
+            [EcsSystem] public ref struct Glow
+            {
+                [ForEach] static void A(ref Heat h, ref Spot s) { s.X = Physics.Scaled(h.Degrees); h.Warm(0.25f); }
+                [ForEach] static void B(ref Spot s) => s.Y = s.Y.Cool(0.5f);
+                [ForEach] static void C(ref Spot s) => s = new Spot(s.X + 1, s.Y);
+                [ForEach] static void D(ref Spot s) => s.X = Physics.Steps(s.Y);
+                [ForEach] static void E(ref Warmth w) => w = new Warmth(w.Value);
+                [ForEach] static void F(ref Shifted w) => w = new Shifted(w.X);
+                [ForEach] static void G(ref Biased w) => w = new Biased(w.X);
+            }
+            """;
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(built).AddReferences(ForeignLibrary(reference: reference, source: ForeignHelpers)), out var output, out _);
+        string code = output.SyntaxTrees.Single(IsCode).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, code);
+        // The private field is a lane like any other; the internal type's static readonly field is read once per run.
+        Assert.That(code, Does.Contain("UnsafeAccessorKind.StaticField, Name = \"Gain\")").And.Contain("UnsafeAccessorType(\"Lib.Tables, Shared\")")
+            .And.Contain("UnsafeAccessorKind.StaticField, Name = \"s_scale\")"), code);
+        var reasons = (await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync()).Where(d => d.Id == "EECS055").Select(d => d.GetMessage()).ToArray();
+        Assert.That(reasons, Is.EquivalentTo(new[]
+        {
+            "[ForEach] method 'D' runs one row at a time, without a vector loop: it calls Physics.Steps, which has a loop",
+            "[ForEach] method 'E' runs one row at a time, without a vector loop: Warmth's constructor does more than set fields from its parameters ('Value = value * 2')",
+            "[ForEach] method 'G' runs one row at a time, without a vector loop: Biased's constructor also gives 'Bias' its initial value ('1')",
+            "[ForEach] method 'F' runs one row at a time, without a vector loop: the parameter 'X' of Shifted's constructor sets no positional property",
+        }), string.Join("\n", reasons));
+    }
+
+    [Test]
+    public void ARecordNamesOnlyWhatOtherAssembliesReach()
+    {
+        // What the library's generator writes: positional members, a body with every name qualified and its placeholders,
+        // and the reasons of what it does not record (an internal type named by a helper).
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(ForeignHelpers), out var output, out _);
+        string records = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Recorded.g.cs")).Select(t => t.ToString()));
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, records);
+        Assert.That(records, Does.Contain("[assembly: global::EasyEcs.ConstructorFields(\"M:Lib.Spot.#ctor(System.Single,System.Single)\", \"X\", \"Y\")]"), records);
+        Assert.That(records, Does.Contain("[assembly: global::EasyEcs.ConstructorFields(\"M:Lib.Heat.#ctor(System.Single)\", \"_degrees\")]"), records);
+        Assert.That(records, Does.Contain("\"M:Lib.Shifted.#ctor(System.Single)\", Reason = \"the parameter 'X' of Shifted's constructor sets no positional property\""), records);
+        Assert.That(records, Does.Contain("\"M:Lib.Physics.Scaled(System.Single)\"").And.Contain("__EasyEcsHelper0").And.Contain("static readonly field|Lib.Physics|s_scale"), records);
+        Assert.That(records, Does.Contain("\"M:Lib.Heat.Warm(System.Single)\"").And.Contain("ref global::Lib.Heat @this").And.Contain("field|Lib.Heat|_degrees"), records);
+        Assert.That(records, Does.Contain("\"M:Lib.Physics.Noise(System.Single)\", \"\", Reason = \"it names Hidden, which other assemblies cannot name\""), records);
+        Assert.That(records, Does.Not.Contain("Lib.Tables.Gain"), records); // internal: a placeholder, never its name
     }
 
     [Test]

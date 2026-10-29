@@ -350,7 +350,7 @@ internal static class LambdaPass
     }
 
     /// <summary>A constant as C# writes it, or null when it has no literal form here.</summary>
-    private static string? Constant(object? value, ITypeSymbol type)
+    internal static string? Constant(object? value, ITypeSymbol type)
     {
         string? text = value switch
         {

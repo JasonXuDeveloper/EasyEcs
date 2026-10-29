@@ -58,6 +58,35 @@ using (var healing = new World())
     Check(patient.Life.Value == 2, "a library's generic system runs on every second update");
 }
 
+// Constructors and helpers of another assembly, inlined from what its generator recorded: the private field of its
+// component and the static readonly fields of its internal types reached through [UnsafeAccessor] externs, which Native
+// AOT compiles like the JIT (a field load, no call); the vector loop and the method row by row end alike, bit for bit.
+using (var vector = new World())
+using (var rows = new World())
+{
+    var random = new Random(3);
+    var (va, ra) = (new Entity[1000], new Entity[1000]);
+    for (int i = 0; i < va.Length; i++)
+    {
+        var spot = new EasyEcs.Aot.Library.Ember(random.Next(-50, 50) * 0.25f, random.Next(-50, 50) * 0.75f);
+        var furnace = new EasyEcs.Aot.Library.Furnace(random.Next(-10, 10) * 0.125f);
+        va[i] = vector.CreateEntity(spot, furnace);
+        ra[i] = rows.CreateEntity(spot, furnace);
+    }
+
+    for (int round = 0; round < 3; round++)
+    {
+        Foreign.Heat(vector);
+        Foreign.HeatRows(rows);
+    }
+
+    bool same = true;
+    for (int i = 0; i < va.Length; i++)
+        same &= va[i].Read<EasyEcs.Aot.Library.Ember>().Equals(ra[i].Read<EasyEcs.Aot.Library.Ember>())
+            && BitConverter.SingleToInt32Bits(va[i].Read<EasyEcs.Aot.Library.Furnace>().Degrees) == BitConverter.SingleToInt32Bits(ra[i].Read<EasyEcs.Aot.Library.Furnace>().Degrees);
+    Check(same, "another assembly's constructors and helpers inlined from its records compute what their calls compute");
+}
+
 // The prefetch gates read the last-level cache and the L2 from the operating system once per process (sysfs or sysconf,
 // sysctl, GetLogicalProcessorInformationEx): in native code too. A world of 2 entities is in any cache.
 using (var small = new World())
@@ -352,6 +381,23 @@ static class Tiles
                 into[x] = new Steps(here);
             }
         }
+    }
+}
+
+static class Foreign
+{
+    [ForEach(SimdMode = SimdMode.Require)]
+    public static void Heat(ref EasyEcs.Aot.Library.Ember s, ref EasyEcs.Aot.Library.Furnace f)
+    {
+        s = new EasyEcs.Aot.Library.Ember(EasyEcs.Aot.Library.Physics.Scaled(f.Degrees), EasyEcs.Aot.Library.Physics.Cool(s.Y, 0.5f));
+        f.Warm(0.25f);
+    }
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    public static void HeatRows(ref EasyEcs.Aot.Library.Ember s, ref EasyEcs.Aot.Library.Furnace f)
+    {
+        s = new EasyEcs.Aot.Library.Ember(EasyEcs.Aot.Library.Physics.Scaled(f.Degrees), EasyEcs.Aot.Library.Physics.Cool(s.Y, 0.5f));
+        f.Warm(0.25f);
     }
 }
 
