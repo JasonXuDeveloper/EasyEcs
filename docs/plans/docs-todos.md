@@ -1496,3 +1496,41 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
   FusionSide each turn an exception into a reason (Kernel.FailedTo) and the plain form, since one throwing stage drops
   every file of the project (CS8785, then hundreds of errors in user code); the analyzer calls the same function, so
   what the generator skips it reports.
+
+## feat-switch-masks (8j)
+
+- guide/vector-loops (the page on what a [ForEach] method's vector loop takes) + zh: switches and patterns are lane
+  masks now. A switch expression whose arms are patterns over lanes (numbers, enums, bools, structs of them, tuples of
+  them) is first match wins: each arm's mask (a `when` guard and-ed in) selects its value over the arms after it; `_`
+  or any arm that matches every lane ends it; a row no arm matches goes to the method, which throws
+  SwitchExpressionException as written (no silent default). A switch statement runs each section under the lanes its
+  first matching label takes (a `default` section wherever it stands takes the lanes no other label took); a section
+  may return. Property (`p is { X: > 0, Y: < 5 }`), positional (`v is (> 0, > 0)`: a record's Deconstruct, a
+  Deconstruct that only sets out parameters from fields, the System.Numerics vectors', a tuple's elements), type and
+  `var` patterns over value types; a constant NaN pattern matches NaN (`float.NaN => ...`), as C# tests it. Helpers
+  with a switch expression or a switch statement (returns in its sections) are inlined. Show one example with its
+  generated loop (the "generator writes" tab).
+- guide/analyzer.mdx + zh, EECS055: 8f's two switch texts go ("write it as conditional expressions"). The reasons now:
+  - "it switches over '{x}', a {T}, which no vector lane holds: a vector loop matches numbers, enums and bools of
+    {sizes} bytes, structs of them and tuples of them" (and "it tests '{x}', ..." for `is`); a number of another
+    size: "it switches over '{x}', a byte, not a lane type of 4 or 8 bytes";
+  - "it matches a list pattern ('{p}'), which tests the elements of a list: a vector loop tests lanes, not lists";
+  - "pattern '{p}' declares '{v}' as a {T}, which no vector lane holds: name the value it tests, or a field of it,
+    instead";
+  - "it jumps from one switch section to another ('goto case ...'): a vector loop runs each section on its own lanes"
+    and "it leaves a switch section before its end ('break;')" (cold branches in a method that does not change
+    structure; the reason in one that does);
+  - "its switch expression ('...') gives a value twice as wide as the lanes: assign it to a local of its own first"
+    (lanes of two sizes);
+  - over a call on a struct the loop cannot inline (VoxelServer's Chase): "it switches over a call on struct {T}
+    ('...'), which runs row by row: call {T}.{M} in a [ForEach] method of its own that stores the result in a
+    component, and switch over that field here" (fixable: Warning under SimdMode.Require); where the call gives a
+    number of another lane size, "... stores the result in a component field of 4 or 8 bytes (not a byte) ..."
+    (VoxelServer's Chase says this now; its other blockers are listed in the 8j report and backlog item 8j).
+  - EECS055 inliner reasons: "which has a switch" is gone; "which jumps from one switch section to another (goto
+    case)" is new.
+- performance page / KernelBenchmark table + zh: the Grade rows (GradeScalar, GradeGenerated) once synced.
+- decisions.mdx + zh, next free D: the record drafted in the 8j report ("Switches and patterns are lane masks").
+- changelog (coming version, ### Performance or ### New) + zh: the line from the 8j report.
+- skills/easyecs/SKILL.md (public skill): has no switch advice today; if the docs pass lists what vectorizes, add
+  "switches and patterns over lanes vectorize; list patterns and switches over strings or classes do not".
