@@ -360,6 +360,11 @@ public class GeneratorTests
     // Kernel.Switches.cs: what a pattern or switch cannot be as lane masks.
     [TestCase("static readonly string K = \"a\"; [ForEach] static void A(ref P p) => p.V = K switch { \"a\" => 1, _ => 2 };",
         "it switches over 'K', a string, which no vector lane holds: a vector loop matches numbers, enums and bools of 4 or 8 bytes, structs of them and tuples of them")]
+    [TestCase("static readonly byte K = 1; [ForEach] static void A(ref P p) => p.V = K switch { 1 => 2, _ => 3 };",
+        "it switches over 'K', a byte, not a lane type of 4 or 8 bytes")]
+    // VoxelServer's Chase: the call gives a byte where the lanes are 4 bytes wide.
+    [TestCase("public readonly struct Near(int v) { public byte Dir(int x) { int d = v; for (int i = 0; i < x; i++) d++; return (byte)d; } } [ForEach] static void A(ref P p, in Q q) => p.V = new Near(q.V).Dir(1) switch { 1 => 2, _ => 3 };",
+        "it switches over a call on struct Near ('new Near(q.V).Dir(1)'), which runs row by row: call Near.Dir in a [ForEach] method of its own that stores the result in a component field of 4 or 8 bytes (not a byte), and switch over that field here", true)]
     [TestCase("static readonly int[] K = [1]; [ForEach] static void A(ref P p) => p.V = K is [1, ..] ? 1 : 2;",
         "it matches a list pattern ('[1, ..]'), which tests the elements of a list: a vector loop tests lanes, not lists")]
     [TestCase("[ForEach] static void A(ref P p) { if (p.V is object o && o.GetHashCode() > 1) p.V = 1; }",
