@@ -63,7 +63,8 @@ internal static class Recorder
     {
         var node = (TypeDeclarationSyntax)ctx.Node;
         if (ctx.SemanticModel.GetDeclaredSymbol(node, ct) is not INamedTypeSymbol type || !Visible(type)
-            || ctx.SemanticModel.Compilation.GetTypeByMetadataName(Recorded.InlineBodyAttribute) == null) // an EasyEcs without the attributes
+            || ctx.SemanticModel.Compilation.GetTypeByMetadataName(Recorded.InlineBodyAttribute) is not { } attribute // an EasyEcs without them
+            || SymbolEqualityComparer.Default.Equals(attribute.ContainingAssembly, type.ContainingAssembly)) // EasyEcs itself: its API is not inlined
             return null;
         var lines = new List<string>();
         if (type.IsValueType)
