@@ -626,7 +626,7 @@ public ref struct SleepSystem
     [ForEach, With<Awake>]
     static void Sleep(Entity plate, in Change change)
     {
-        if (!change.Changed) life.RemoveAwake();
+        if (!change.Changed) plate.RemoveAwake();
     }
 }
 
