@@ -133,7 +133,7 @@ changes nothing and cannot fail:
   functions, up to 8 deep; ref/out bound to the caller's variables). A known pure runtime call (math) is translated.
   What stays a call keeps the method scalar, with its reason from `ReasonForCall` (shared by the generator and the
   analyzer): virtual, interface or delegate targets, another assembly, recursion, deeper than 8, a body refused on
-  syntax before any binding (a loop, lambda, try/throw, switch, `fixed`/unsafe, stackalloc, ...), a writing helper
+  syntax before any binding (a loop, lambda, try/throw, `goto case`, `fixed`/unsafe, stackalloc, ...; switches are inlined), a writing helper
   inside a larger expression (fixable: "call it in a statement of its own"), and a body naming a private, protected
   or file-local member: the inlined body moves into the generated job, which cannot reach it (fixable: "make it
   internal", EECS096's wording). A `static readonly` field a helper reads becomes a setup uniform, read once per run
@@ -165,8 +165,15 @@ changes nothing and cannot fail:
 ## Reasons users can fix
 
 `Kernel.Vectorize` returns the loop or one reason; the analyzer reports that reason (EECS055 / EECS056), so a method
-left scalar is exactly a method reported. A switch expression has no vector form: the reason names it and suggests conditional expressions, or, over a
-call on a struct, a `[ForEach]` method that stores the call's result in a component first (8f). Every stage reading the
+left scalar is exactly a method reported. Switches and patterns are lane masks (`Kernel.Switches.cs`): a
+switch expression selects from its last arm up, each arm's mask (pattern and `when` guard and the lanes no earlier arm
+took) held once, unmatched lanes sent to the method so `SwitchExpressionException` still throws; a switch statement runs
+each section as masked writes, `default` taking the rest wherever it stands; property, positional, type and `var`
+patterns over value types become field compares or a constant. Each form left scalar has its own reason: list patterns,
+values no lane holds (strings, classes, narrow numbers), declarations of non-lane types, `goto case`, a `break` before a
+section's end, loops in sections; over a struct call the inliner refuses, the reason suggests a `[ForEach]` method that
+stores the call's result in a component field of 4 or 8 bytes first. Check: a target-typed expression (`byte b = v
+switch {...}`) can carry a conversion to its own type that Roslyn does not mark identity; `Keeps` treats it as one. Every stage reading the
 body catches its exceptions (`audit-generator` "Done means"). EasyEcs's own scalar APIs get a reason saying what they are (a key probe
 has no vector form), never "defined in another assembly"; an inlined helper keeps its value's type where the caller
 gives none (`var x = Helper()` over a target-typed `new(...)` / `default`), or the local prints as `??`. Each reason
