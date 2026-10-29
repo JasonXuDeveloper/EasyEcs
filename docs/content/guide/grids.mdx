@@ -9,7 +9,7 @@ A server simulates some state as a grid: water that flows between blocks, heat t
 field, a cellular automaton. Each cell's next value depends on the cells around it, so a plain `[ForEach]` method
 over cells would look up neighbors per cell. EasyEcs cuts the grid into tiles, one entity each with its cells in a
 [dynamic buffer](/en/docs/guide/dynamic-buffers), and a `Tile<TCell, TTile>` parameter hands the method the tile
-padded with its neighbors' edges: the method is a shader that samples cells with vectors and no edge cases, tiles run
+with a halo of its neighbors' edges: the method is a shader that samples cells with vectors and no edge cases, tiles run
 in parallel, and quiet tiles can sleep.
 
 ## When to use it [#when-to-use-it]
@@ -136,7 +136,7 @@ buffer to the method's filter, and keeps the method parallel.
   taken from the facing edges of its neighbors (the ghost cells of an MPI halo exchange; where there is no neighbor,
   the shape's `Boundary`). The loop then samples neighbors with no edge case, and every neighbor reads as it was
   before the pass.
-- **`tile.Rows(reads)`** visits only the rows that hold a cell that is not zero, or that read such a row: the load
+- **`tile.Rows(reads)`** visits only the rows that hold a cell that is not zero, or that read such a row: the exchange
   records a bit per row and the walk finds each with one `TrailingZeroCount`. A cold or dry row costs nothing.
 - **`tile.At(row)`** is a cursor on a row: `Load128<T>(dx, dy, dz)` reads 16 bytes (four floats, sixteen byte
   cells) one cell, layer or row away, checked against the halo. `Load256` and `LoadVector` read wider vectors.
@@ -260,7 +260,7 @@ access.Write<DynamicBuffer<NextTemperature>>();
 
 A tile of more than one layer (`Height` above 1) is a box of cells: a chunk of a voxel world, a cube of a 3D field.
 `Faces` says which faces have neighbors: `TileFaces.All` for a grid of cubes, the default `Sides` for columns that
-reach from the bottom of the world to its top. `ExchangeHalo()` loads every layer with `Halo` layers under and over them, and a
+reach from the bottom of the world to its top. `ExchangeHalo()` copies every layer with `Halo` layers under and over them, and a
 cursor samples one layer away with `dy`:
 
 ```csharp
@@ -317,14 +317,14 @@ public ref struct SpreadGasSystem
 }
 ```
 
-- **Part of the layers.** `tile.ExchangeHalo(from, to)` loads layers `from` to `to` only (with their halo layers), for a stencil
+- **Part of the layers.** `tile.ExchangeHalo(from, to)` copies layers `from` to `to` only (with their halo layers), for a stencil
   that knows where the work is: the layers a chunk's water reaches, the band a front crosses. `Rows` then walks those
   layers, and `row.Y` / `row.Z` say where a row is; `row.Index` is its first cell in any buffer of the tile's layout.
 - **A border of your own.** `ExchangeHalo(from, to, border)` sets the value the halo holds where there is no neighbor under
   `TileBoundary.Border`: the temperature outside the map, solid rock around a cave.
 - **A field only sampled.** `ExchangeHalo(from, to, border, mask: false)` skips the test of every cell for the active rows. Use
   it for a second field the method samples while it walks the rows of the first: `At(row)` takes a row of another
-  tile loaded with the same layers. `Rows` of a tile loaded without its mask throws.
+  tile exchanged with the same layers. `Rows` of a tile exchanged without its mask throws.
 - **Single cells.** `cursor[dx, dy, dz]` reads one cell around a row, `tile[x, y, z]` any cell of the texture
   (halo included), and `tile.Cells` the tile's own cells without a load. `Load256` and `LoadVector` read 32 bytes or a
   `Vector<T>` where the row is wide enough.
@@ -337,7 +337,7 @@ sizes:
 - **`Halo`** (default 1) is the width of the ring: a stencil reaching r cells away needs r, such as the fourth-order
   Laplacian (five points along each axis, r = 2). A cursor's samples reach up to r away, and `Rows(reads)` widens its
   row mask by r. A halo is at most the tile's extent along every axis with neighbors: wider would reach past the tile
-  beside ([EECS072](/en/docs/guide/analyzer#eecs072), and an exception at the first load).
+  beside ([EECS072](/en/docs/guide/analyzer#eecs072), and an exception at the first exchange).
 - **`Neighborhood`** (default `Faces`) picks the tiles read into the ring's edges and corners: `Faces` (von Neumann:
   4 tiles in 2D, 6 in 3D), `FacesAndEdges` (8 or 18) or `All` (Moore: 8 or 26). A nine-point stencil (the Game of
   Life, a box blur) needs `All`; a seven-point one reads no corner, so it skips the extra searches.
@@ -395,7 +395,7 @@ public ref struct LifeSystem
 }
 ```
 
-A tile takes one step per pass. A deeper halo that runs several steps per load (temporal blocking) was built, measured
+A tile takes one step per pass. A deeper halo that runs several steps per exchange (temporal blocking) was built, measured
 and dropped: each step also computes the halo cells the next one reads, and on grids whose cells fit the cache k plain
 passes were faster ([D77](/en/docs/decisions#d77-tiles)). A game that runs one step per frame has nothing to fuse
 anyway; only grids far larger than the cache could gain from it, and none was measured.
@@ -497,8 +497,8 @@ A key out of range or in a taken slot is still found, through the hash. The Voxe
   Each pass is 2r + 1 samples instead of (2r + 1)², and the intermediate buffer is a cell type of its own.
 - **One cell type per field.** A tile pads one `DynamicBuffer<TCell>`. A grid with several fields (water and blocks,
   temperature and pressure) keeps one cell type per field and takes one `Tile` per field
-  (`Tile<Fluid, Chunk> water, Tile<Block, Chunk> blocks`): each field is padded on its own and sampled with the same
-  offsets. Two tiles of the same cell type and grid would share the thread's texture
+  (`Tile<Fluid, Chunk> water, Tile<Block, Chunk> blocks`): each field exchanges its halo on its own and is
+  sampled with the same offsets. Two tiles of the same cell type and grid would share the thread's texture
   ([EECS073](/en/docs/guide/analyzer#eecs073)).
 
 {/* TODO(water overlap): the MPI-style interior/ring overlap (the interior of a chunk shaded while its ring waits for
@@ -753,7 +753,7 @@ search. The measured numbers of the water shader, by hand against the tile, are 
   passes find it built.
 - **Per `ExchangeHalo`:** a copy of the tile's cells and the facing edges of its neighbors, O(layers × (Width + 2r) ×
   (Depth + 2r)), and a bit per row. No allocation once the thread has its texture.
-- **Memory:** one texture per thread and per (cell type, tile type), allocated on the thread's first load, of the
+- **Memory:** one texture per thread and per (cell type, tile type), allocated on the thread's first exchange, of the
   tile's cells with their halo; the cells themselves are dynamic buffers (two per tile with a step buffer).
 - **Sleeping tiles:** `ChangedEdges` compares the step with the cells row by row as bytes, O(cells); a sleeping tile
   costs nothing per pass.
@@ -764,15 +764,15 @@ search. The measured numbers of the water shader, by hand against the tile, are 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | A `Tile` parameter and a write of its cell buffer in one method | Neighbors read while other threads write them | [EECS059](/en/docs/guide/analyzer#eecs059): write a second buffer |
-| A halo wider than the tile | It would reach past the tile beside | [EECS072](/en/docs/guide/analyzer#eecs072), and an exception at the first load |
+| A halo wider than the tile | It would reach past the tile beside | [EECS072](/en/docs/guide/analyzer#eecs072), and an exception at the first exchange |
 | Two tiles of the same cell type and grid in one method | The second `ExchangeHalo` replaces the first in the thread's texture | [EECS073](/en/docs/guide/analyzer#eecs073): one cell type per field |
 | A pass that reads cells it updated in the same pass | Results depend on the visit order and the thread count | Review: write into a step buffer, commit after |
 | `Rows(reads)` for a stencil whose result is not zero where everything it reads is zero | The rows it skips keep the last step's values | Review: `Rows(TileStencil.All)` or every row |
 | A nine-point stencil with the default `Neighborhood` | The corners of the halo hold the boundary, not the diagonal tiles | Tests: `TileNeighborhood.All` |
 | A cell buffer with fewer cells than the shape | `ExchangeHalo` throws | Size both buffers with `SetCount` at creation |
 | `ExchangeHalo(from, to)` with layers outside `0` to `Height - 1`, or `from` above `to` | `ExchangeHalo` throws `ArgumentOutOfRangeException` | Review: the layers of the shape |
-| `Rows` of a tile loaded with `mask: false` | `InvalidOperationException`: it has no active rows | Load the tile whose rows you walk with its mask |
-| A sample further away than `Halo` | `ArgumentOutOfRangeException` (outside the padded tile) | Review: `Halo => r` for a stencil reaching r cells |
+| `Rows` of a tile exchanged with `mask: false` | `InvalidOperationException`: it has no active rows | Exchange the halo of the tile whose rows you walk with its mask |
+| A sample further away than `Halo` | `ArgumentOutOfRangeException` (outside the tile and its halo) | Review: `Halo => r` for a stencil reaching r cells |
 | Sleeping a new tile before its first step | It never reads the neighbors it was created beside | Create tiles awake |
 
 ## Related [#related]

@@ -31,7 +31,7 @@ page for the first words of your message.
 | `The world keeps no destroy log` | [Reading a destroy log that is off](#no-destroy-log) |
 | `The index of X by K is not built yet` | [An index first looked up in a parallel pass](#index-not-built) |
 | `This Lookup<X> holds no index by K` | [A lookup whose key the job did not prepare](#lookup-no-index) |
-| `Layers … of a X tile`, `The DynamicBuffer<X> of … holds … cells`, `X is a … tile with a halo of …`, `Outside the padded tile`, `The tile was loaded without its mask` | [A tile that throws](#tile-throws) |
+| `Layers … of a X tile`, `The DynamicBuffer<X> of … holds … cells`, `X is a … tile with a halo of …`, `Outside the tile and its halo`, `The tile's halo was exchanged without its mask` | [A tile that throws](#tile-throws) |
 
 The problems that throw nothing: [a system that never runs](#system-does-not-run),
 [systems that do not run in parallel](#not-parallel), [a method without a vector loop](#no-vector-loop),
@@ -352,14 +352,14 @@ made elsewhere, in a helper the parameter was passed to, names no index the job 
 `Find` or `Count` with that key type on the parameter in the `[ForEach]` method itself, and pass the result to the
 helper ([lookups](/en/docs/guide/threading#lookups)).
 
-## Why does a tile throw when it is padded or read? [#tile-throws]
+## Why does a tile throw when its halo is exchanged or read? [#tile-throws]
 
 ```text
 ArgumentOutOfRangeException: Layers 0 to 20 of a GasCube tile of 16 layers
 InvalidOperationException: The DynamicBuffer<Gas> of … holds 200 cells; a GasCube tile has 4096
 InvalidOperationException: GasCube is a 16 x 16 x 16 tile with a halo of 20: a halo of 20 is wider than its rows (16 cells)
-ArgumentOutOfRangeException: Outside the padded tile: a cell, row or layer past the halo
-InvalidOperationException: The tile was loaded without its mask (mask: false): it has no active rows
+ArgumentOutOfRangeException: Outside the tile and its halo: a cell, row or layer past the halo
+InvalidOperationException: The tile's halo was exchanged without its mask (mask: false): it has no active rows
 ```
 
 - **Layers:** `ExchangeHalo(from, to)` takes layers `0 <= from < to <= Height`.
@@ -367,7 +367,7 @@ InvalidOperationException: The tile was loaded without its mask (mask: false): i
   ([grids](/en/docs/guide/grids)).
 - **Shape:** the width, depth (1 to 64), height and halo of the `ITileShape` do not fit together; the analyzer reports
   the shape where it is declared ([EECS072](/en/docs/guide/analyzer#eecs072)).
-- **Outside the padded tile:** a cursor or `tile[x, y, z]` read reached past the halo. Keep every offset within
+- **Outside the tile and its halo:** a cursor or `tile[x, y, z]` read reached past the halo. Keep every offset within
   `Halo`, or declare a larger halo.
 - **Without its mask:** `Rows(...)` walks the active rows of the mask; a tile exchanged with `mask: false` has none.
   Exchange with the mask, or walk every row yourself ([tall tiles](/en/docs/guide/grids#layers)).

@@ -252,7 +252,7 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | `Lanes.Compact<T>(source, mask, destination)` | O(1): at most 64 elements; for elements of 8 or 4 bytes 8 or 4 vector steps with AVX-512, skipping steps that select nothing; without AVX-512, one step per selected element when 12 or fewer are, else 16 or 8 steps with AVX2, 16 steps for 4-byte elements with 128-bit vectors (ARM64's NEON, SSSE3), otherwise one step per element up to the last selected one | writes `source[i]` for each set bit `i` of `mask`, in order, to the start of `destination` and returns `PopCount(mask)`; reads nothing past `source` and writes only that many elements; throws `ArgumentException` when a bit lies at or past `source.Length` or `destination` is shorter than `PopCount(mask)`; allocation-free |
 | `Lanes.Selection(mask, first, destination)` | O(1): `Compact` over the numbers 0 to 63, then `first` added a vector at a time | writes `first + i` for each set bit `i` of `mask`, in order, and returns `PopCount(mask)`: a word of rows a condition passed as a row list; throws `ArgumentException` when `destination` is too short; allocation-free |
 
-`Tile<TCell, TTile>`, the `[ForEach]` parameter of a stencil over a grid of tiles, and the padded layers it loads:
+`Tile<TCell, TTile>`, the `[ForEach]` parameter of a stencil over a grid of tiles, and the halo it exchanges:
 
 | API | Complexity | Notes |
 | --- | --- | --- |
@@ -261,7 +261,7 @@ query shapes), as it joins every cached query it matches. Both are cold paths.
 | `tile.Beside(face)` / `tile.Beside(dx, dy, dz)` / `tile.Cells` | O(1) | a neighbor's id (default when none or outside the neighborhood) / the entity's cells |
 | `tile.ChangedEdges(next, out changed)` | O(cells), row by row as bytes | whether the step differs from the cells, and the faces whose edge (r cells deep) changed |
 | `tile.Facing(edges)` | O(1) per neighbor | the neighbors that read those edges into their halo, across faces, edges and corners |
-| `tile.Rows(reads)` | O(1) per layer and per row visited: a trailing-zero count | the rows whose stencil (`TileStencil`, up to r away) holds a cell that is not zero, layer by layer; throws when loaded without `mask` |
+| `tile.Rows(reads)` | O(1) per layer and per row visited: a trailing-zero count | the rows whose stencil (`TileStencil`, up to r away) holds a cell that is not zero, layer by layer; throws when exchanged without `mask` |
 | `tile.At(row)` | O(1) | the row's first cell; checks the row is inside |
 | `cursor.Load128<TLane>(dx, dy, dz)` / `Load256` / `LoadVector` / `cursor[dx, dy, dz]` | O(1): one unaligned load | offsets within r cells, rows and layers of the row; one unsigned compare per axis, folded away when constant |
 | `tile[x, y, z]` | O(1) | any texel of the texture, checked |

@@ -126,7 +126,7 @@ plate.GetOrAddNextTemperature().SetCount(16 * 16);
 
 - **`tile.ExchangeHalo()`** 把瓦片的格子拷进这个线程的一张纹理，每层外面一圈 `Halo` 个格子，取自邻居朝向它的边（MPI 光环交换里的幽灵格子；
   没有邻居时按形状的 `Boundary`）。之后循环采样邻居没有边界情况，每个邻居读到的都是这一遍之前的样子。
-- **`tile.Rows(reads)`** 只访问有不为零的格子、或者会读到这样一行的行：加载时每行记一位，遍历时每一行用一次 `TrailingZeroCount` 找到。
+- **`tile.Rows(reads)`** 只访问有不为零的格子、或者会读到这样一行的行：交换时每行记一位，遍历时每一行用一次 `TrailingZeroCount` 找到。
   冷的或干的一行没有开销。
 - **`tile.At(row)`** 是一行上的游标：`Load128<T>(dx, dy, dz)` 读相隔一个格子、一层或一行的 16 个字节（四个 float、十六个字节格子），
   按光环检查范围。`Load256` 和 `LoadVector` 读更宽的向量。
@@ -242,7 +242,7 @@ access.Write<DynamicBuffer<NextTemperature>>();
 ### 高瓦片：多层、`Height` 和 `ExchangeHalo(from, to)` [#layers]
 
 多于一层（`Height` 大于 1）的瓦片是一箱格子：体素世界的一片地形，3D 场的一个立方体。`Faces` 说明哪些面有邻居：立方体网格用
-`TileFaces.All`，从世界底部一直到顶部的柱子用默认的 `Sides`。`ExchangeHalo()` 加载每一层，上下各加 `Halo` 层；游标用 `dy` 采样上一层或下一层：
+`TileFaces.All`，从世界底部一直到顶部的柱子用默认的 `Sides`。`ExchangeHalo()` 拷贝每一层，上下各加 `Halo` 层；游标用 `dy` 采样上一层或下一层：
 
 ```csharp
 public record struct CubePos(int X, int Y, int Z);
@@ -298,12 +298,12 @@ public ref struct SpreadGasSystem
 }
 ```
 
-- **只加载一部分层。** `tile.ExchangeHalo(from, to)` 只加载第 `from` 到 `to` 层（连同它们的光环层），适合知道活在哪里的模板：地形里水到得了的层、
+- **只交换一部分层。** `tile.ExchangeHalo(from, to)` 只拷贝第 `from` 到 `to` 层（连同它们的光环层），适合知道活在哪里的模板：地形里水到得了的层、
   波前经过的那一段。`Rows` 只遍历这些层，`row.Y` / `row.Z` 是行的位置；`row.Index` 是它在任何同布局缓冲里的第一个格子。
 - **自定义边界值。** `TileBoundary.Border` 下，`ExchangeHalo(from, to, border)` 设置没有邻居时光环里的值：地图外的温度、洞穴四周的岩石。
 - **只采样的字段。** `ExchangeHalo(from, to, border, mask: false)` 不再逐格检查活跃行。方法遍历第一个字段的行、同时采样第二个字段时用它：
-  `At(row)` 接受用同样的层加载的另一块瓦片的行。没带掩码加载的瓦片调用 `Rows` 会抛出异常。
-- **单个格子。** `cursor[dx, dy, dz]` 读一行周围的一个格子，`tile[x, y, z]` 读纹理里的任意格子（含光环），`tile.Cells` 不加载就能读瓦片自己的格子。
+  `At(row)` 接受用同样的层交换的另一块瓦片的行。没带掩码交换的瓦片调用 `Rows` 会抛出异常。
+- **单个格子。** `cursor[dx, dy, dz]` 读一行周围的一个格子，`tile[x, y, z]` 读纹理里的任意格子（含光环），`tile.Cells` 不交换光环就能读瓦片自己的格子。
   行足够宽时，`Load256` 和 `LoadVector` 读 32 字节或一个 `Vector<T>`。
 
 ### 更宽的光环、棱和角 [#halo]
@@ -312,7 +312,7 @@ public ref struct SpreadGasSystem
 
 - **`Halo`**（默认 1）是这一圈的宽度：模板读到 r 个格子之外就需要 r，比如四阶拉普拉斯算子（每条轴五个点，r = 2）。游标的采样最远到 r，
   `Rows(reads)` 把行掩码向外扩 r。光环在每条有邻居的轴上最多和瓦片一样宽，再宽就越过了旁边的瓦片
-  （[EECS072](/zh/docs/guide/analyzer#eecs072)，第一次加载时也会抛出异常）。
+  （[EECS072](/zh/docs/guide/analyzer#eecs072)，第一次交换时也会抛出异常）。
 - **`Neighborhood`**（默认 `Faces`）选择读进这一圈棱和角的瓦片：`Faces`（von Neumann：2D 4 块，3D 6 块）、`FacesAndEdges`（8 或 18 块）
   或 `All`（Moore：8 或 26 块）。九点模板（生命游戏、盒式模糊）需要 `All`；七点模板不读角，也就省下多出来的查找。
   `tile.Beside(dx, dy, dz)` 返回其中任意一块，`tile.Beside(face)` 返回某个面对面的那块。
@@ -367,7 +367,7 @@ public ref struct LifeSystem
 }
 ```
 
-瓦片每遍走一步。一次加载走多步的深光环（时间分块）做出来测量过后放弃了：每一步还要算下一步读的光环格子，格子装得进缓存的网格上，
+瓦片每遍走一步。一次交换走多步的深光环（时间分块）做出来测量过后放弃了：每一步还要算下一步读的光环格子，格子装得进缓存的网格上，
 k 遍普通的遍历更快（[D77](/zh/docs/decisions#d77-tiles)）。每帧只走一步的游戏本来也没有可合并的步；只有远大于缓存的网格才可能从中获益，
 而这样的网格没有测过。
 
@@ -458,7 +458,7 @@ public partial record struct MapPlate([UniqueKey] PlatePos Pos)
 - **可分离核拆成两个系统。** 先沿 x 再沿 z 的高斯模糊是两个系统：第一个沿 x 读瓦片（`TileStencil.Self`），写进中间缓冲；第二个接收那个缓冲的
   `Tile`，沿 z 读。每遍 2r + 1 次采样，而不是 (2r + 1)²，中间缓冲是它自己的格子类型。
 - **每个字段一种格子类型。** 瓦片填充一个 `DynamicBuffer<TCell>`。有多个字段的网格（水和方块、温度和压力）每个字段一种格子类型，每个字段接收一个
-  `Tile`（`Tile<Fluid, Chunk> water, Tile<Block, Chunk> blocks`）：每个字段各自填充，用同样的偏移采样。同一格子类型和网格的两个瓦片会共用线程的纹理
+  `Tile`（`Tile<Fluid, Chunk> water, Tile<Block, Chunk> blocks`）：每个字段各自交换光环，用同样的偏移采样。同一格子类型和网格的两个瓦片会共用线程的纹理
   （[EECS073](/zh/docs/guide/analyzer#eecs073)）。
 
 {/* TODO(water overlap): MPI 式的内部/外圈重叠（地形内部先着色，外圈等光环）以及只交换变化过的边的光环交换。各在这里写一条，
@@ -705,7 +705,7 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
   方法里同一网格的瓦片参数共用；外加一次方法调用（它不内联进 job，见[生成器写了什么](#generated)）。
 - **遍历之前：** 在所有者线程上创建并建好键的索引，第一次 O(瓦片数)；之后的遍历直接用建好的索引。
 - **每次 `ExchangeHalo`：** 拷贝瓦片的格子和邻居朝向它的边，O(层数 × (Width + 2r) × (Depth + 2r))，外加每行一位。线程有了纹理之后不再分配。
-- **内存：** 每个线程、每种（格子类型，瓦片类型）一张纹理，在线程第一次加载时分配，大小是瓦片的格子加上光环；格子本身是动态缓冲
+- **内存：** 每个线程、每种（格子类型，瓦片类型）一张纹理，在线程第一次交换时分配，大小是瓦片的格子加上光环；格子本身是动态缓冲
   （带下一步缓冲时每块瓦片两个）。
 - **休眠的瓦片：** `ChangedEdges` 按字节逐行比较下一步和格子，O(格子数)；休眠的瓦片每遍没有开销。
 - **不用时：** 没有开销。没有瓦片参数的 World 不查找邻居，没有纹理，也没有掩码。
@@ -715,14 +715,14 @@ tick 3  [4 alive, asleep]  [2 alive, awake]  [1 alive, awake]
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 同一个方法里有 `Tile` 参数又写它的格子缓冲 | 读邻居的同时别的线程在写它们 | [EECS059](/zh/docs/guide/analyzer#eecs059)：写第二个缓冲 |
-| 光环比瓦片还宽 | 会越过旁边的瓦片 | [EECS072](/zh/docs/guide/analyzer#eecs072)，第一次加载时也会抛出异常 |
+| 光环比瓦片还宽 | 会越过旁边的瓦片 | [EECS072](/zh/docs/guide/analyzer#eecs072)，第一次交换时也会抛出异常 |
 | 一个方法里有同一格子类型和网格的两个瓦片 | 第二次 `ExchangeHalo` 覆盖线程纹理里的第一次 | [EECS073](/zh/docs/guide/analyzer#eecs073)：每个字段一种格子类型 |
 | 一遍读到了同一遍里已更新的格子 | 结果取决于访问顺序和线程数 | 代码审查：写进下一步的缓冲，之后再提交 |
 | 读到的全是零时结果不为零的模板用 `Rows(reads)` | 跳过的行留着上一步的值 | 代码审查：`Rows(TileStencil.All)` 或遍历每一行 |
 | 九点模板用默认的 `Neighborhood` | 光环的角放的是边界值，不是对角的瓦片 | 测试：`TileNeighborhood.All` |
 | 格子缓冲比形状的格子少 | `ExchangeHalo` 抛出异常 | 创建时用 `SetCount` 定好两个缓冲的大小 |
 | `ExchangeHalo(from, to)` 的层超出 `0` 到 `Height - 1`，或 `from` 大于 `to` | `ExchangeHalo` 抛出 `ArgumentOutOfRangeException` | 代码审查：形状的层数 |
-| 用 `mask: false` 加载的瓦片调用 `Rows` | `InvalidOperationException`：它没有活跃行 | 要遍历哪块瓦片的行，就带掩码加载哪块 |
+| 用 `mask: false` 交换光环的瓦片调用 `Rows` | `InvalidOperationException`：它没有活跃行 | 要遍历哪块瓦片的行，就带掩码交换哪块 |
 | 采样距离超过 `Halo` | `ArgumentOutOfRangeException`（超出带填充的瓦片） | 代码审查：模板伸出 r 格就写 `Halo => r` |
 | 新瓦片第一步之前就休眠 | 它永远不会读到创建时旁边的邻居 | 创建时让瓦片醒着 |
 

@@ -30,7 +30,7 @@ faq: true
 | `The world keeps no destroy log` | [销毁日志没开就去读](#no-destroy-log) |
 | `The index of X by K is not built yet` | [在并行遍历里第一次查索引](#index-not-built) |
 | `This Lookup<X> holds no index by K` | [job 没有准备这个键的查找](#lookup-no-index) |
-| `Layers … of a X tile`、`The DynamicBuffer<X> of … holds … cells`、`X is a … tile with a halo of …`、`Outside the padded tile`、`The tile was loaded without its mask` | [瓦片抛异常](#tile-throws) |
+| `Layers … of a X tile`、`The DynamicBuffer<X> of … holds … cells`、`X is a … tile with a halo of …`、`Outside the tile and its halo`、`The tile's halo was exchanged without its mask` | [瓦片抛异常](#tile-throws) |
 
 不抛异常的问题：[系统从不运行](#system-does-not-run)、[系统没有并行](#not-parallel)、[方法没有向量循环](#no-vector-loop)、[并行方法只在一个线程上跑](#parallel-one-thread)、[浮点总和不一致](#float-total)、[随机数重复](#random-repeats)、[生成成员缺失](#member-missing)、
 [单个实体上的 job 没有运行](#run-false)、[通过 ref 写的值丢了](#ref-lost)、[加载后组件不见了](#save-dropped-data)、[搬迁时留下的实体](#move-skipped)、
@@ -308,21 +308,21 @@ InvalidOperationException: This Lookup<Unit> holds no index by Team: a [ForEach]
 **修法：**在 `[ForEach]` 方法本身里，用这个键类型对参数调 `TryFind`、`Find` 或 `Count`，再把结果传给辅助方法
 （[查找](/zh/docs/guide/threading#lookups)）。
 
-## 为什么瓦片在加载或读取时抛异常？ [#tile-throws]
+## 为什么瓦片在交换光环或读取时抛异常？ [#tile-throws]
 
 ```text
 ArgumentOutOfRangeException: Layers 0 to 20 of a GasCube tile of 16 layers
 InvalidOperationException: The DynamicBuffer<Gas> of … holds 200 cells; a GasCube tile has 4096
 InvalidOperationException: GasCube is a 16 x 16 x 16 tile with a halo of 20: a halo of 20 is wider than its rows (16 cells)
-ArgumentOutOfRangeException: Outside the padded tile: a cell, row or layer past the halo
-InvalidOperationException: The tile was loaded without its mask (mask: false): it has no active rows
+ArgumentOutOfRangeException: Outside the tile and its halo: a cell, row or layer past the halo
+InvalidOperationException: The tile's halo was exchanged without its mask (mask: false): it has no active rows
 ```
 
 - **层：**`ExchangeHalo(from, to)` 要求 `0 <= from < to <= Height`。
 - **格子：**瓦片的缓冲要有 `Width × Depth × Height` 个格子；创建瓦片时就填到这个长度（[网格](/zh/docs/guide/grids)）。
 - **形状：**`ITileShape` 的宽、深（1 到 64）、高和光环对不上；分析器在声明处报告这个形状（[EECS072](/zh/docs/guide/analyzer#eecs072)）。
-- **超出加载后的瓦片：**游标或 `tile[x, y, z]` 读到了光环之外。让每个偏移都在 `Halo` 之内，或者声明更大的光环。
-- **没有掩码：**`Rows(...)` 走掩码里的活跃行；用 `mask: false` 加载的瓦片一行都没有。带掩码加载，或者自己走每一行
+- **超出瓦片和光环：**游标或 `tile[x, y, z]` 读到了光环之外。让每个偏移都在 `Halo` 之内，或者声明更大的光环。
+- **没有掩码：**`Rows(...)` 走掩码里的活跃行；用 `mask: false` 交换光环的瓦片一行都没有。带掩码交换，或者自己走每一行
   （[高瓦片](/zh/docs/guide/grids#layers)）。
 
 ## 为什么我的方法没有得到向量循环？ [#no-vector-loop]

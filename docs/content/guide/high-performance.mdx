@@ -147,7 +147,7 @@ and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what th
 | Unity `NativeStream`, GPU stream compaction | an `Emit<T>` parameter: records per chunk, joined in row order into `Emitted<T>` | [Emit](/en/docs/guide/threading#emit) |
 | cuRAND Philox, a counter-based generator | `EntityRandom`: a pure function of (seed, entity, tick, stream) | [Random numbers](/en/docs/guide/threading#entity-random) |
 | Kokkos `RangePolicy`, Unity `IJobParallelForBatch` | `world.ForParallel(count, ref job)` with an `IForRange` / `IForSpan<T>` job | [ForParallel](/en/docs/guide/threading#for-parallel) |
-| MPI halo exchange (ghost cells) | `Tile<TCell, TTile>.ExchangeHalo`: the tile padded with its neighbors' facing edges | [Grid tiles](/en/docs/guide/grids) |
+| MPI halo exchange (ghost cells) | `Tile<TCell, TTile>.ExchangeHalo`: the tile with a halo of its neighbors' facing edges | [Grid tiles](/en/docs/guide/grids) |
 | Burst auto-vectorization | vector loops of `[ForEach]` methods | [Vector loops](/en/docs/guide/systems#vector-loops) |
 | Burst `float4` / Unity.Mathematics by hand | a batch method with `Vector<T>` / `Vector128<T>` | [Batch methods](/en/docs/guide/systems#batch-methods) |
 | Burst `IJobParallelFor` batch count | `ChunkSize` | [Chunk size](/en/docs/guide/threading#chunk-rows) |

@@ -246,7 +246,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `Lanes.Compact<T>(source, mask, destination)` | O(1)：最多 64 个元素；8 字节或 4 字节的元素，AVX-512 为 8 步或 4 步向量操作，没有选中元素的步跳过；没有 AVX-512 时，选中不超过 12 个就每个选中元素一步，否则 AVX2 为 16 步或 8 步，128 位向量（ARM64 的 NEON、SSSE3）对 4 字节元素为 16 步，其余情况每个元素一步，直到最后一个选中的元素 | 对 `mask` 的每个置位 `i`，按顺序把 `source[i]` 写到 `destination` 开头，返回 `PopCount(mask)`；不读 `source` 之外的内存，只写这么多个元素；某一位落在 `source.Length` 或之后、或 `destination` 短于 `PopCount(mask)` 时抛出 `ArgumentException`；不分配 |
 | `Lanes.Selection(mask, first, destination)` | O(1)：对 0 到 63 这些数做 `Compact`，再按向量加上 `first` | 对 `mask` 的每个置位 `i`，按顺序写出 `first + i`，返回 `PopCount(mask)`：把条件通过的一个字的行变成行列表；`destination` 太短时抛出 `ArgumentException`；不分配 |
 
-`Tile<TCell, TTile>`，网格分块上模板计算的 `[ForEach]` 参数，以及它加载的带边层：
+`Tile<TCell, TTile>`，网格分块上模板计算的 `[ForEach]` 参数，以及它交换的光环：
 
 | API | 复杂度 | 说明 |
 | --- | --- | --- |
@@ -255,7 +255,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `tile.Beside(face)` / `tile.Beside(dx, dy, dz)` / `tile.Cells` | O(1) | 邻居的 id（没有、或不在邻域内时为默认值）/ 实体的格子 |
 | `tile.ChangedEdges(next, out changed)` | O(格子数)，逐行按字节比较 | 这一步和格子是否不同，以及边缘（深 r 个格子）变了的面 |
 | `tile.Facing(edges)` | 每个邻居 O(1) | 把这些边缘读进光环的邻居，隔着面、棱和角 |
-| `tile.Rows(reads)` | 每层、每访问一行 O(1)：一次尾零计数 | 模板（`TileStencil`，最远 r）读到不为零格子的行，逐层；加载时没传 `mask` 则抛出异常 |
+| `tile.Rows(reads)` | 每层、每访问一行 O(1)：一次尾零计数 | 模板（`TileStencil`，最远 r）读到不为零格子的行，逐层；交换时没传 `mask` 则抛出异常 |
 | `tile.At(row)` | O(1) | 这一行的第一个格子；检查行在范围内 |
 | `cursor.Load128<TLane>(dx, dy, dz)` / `Load256` / `LoadVector` / `cursor[dx, dy, dz]` | O(1)：一次非对齐加载 | 偏移在这一行的 r 个格子、行、层之内；每条轴一次无符号比较，常量时被消掉 |
 | `tile[x, y, z]` | O(1) | 纹理的任意格子，有检查 |
