@@ -139,9 +139,9 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     if (dropEntity != null && await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false)) dropEntity = null;
                     Register(context, diagnostic, "Consume its rows with [Consume]", root, method, Consumed(method, destroy, dropEntity));
                     break;
-                case "EECS109" when kind == "ForEachRecord" && node.FirstAncestorOrSelf<ForEachStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax hook } } records
+                case "EECS109" when kind == "Drain" && node.FirstAncestorOrSelf<ForEachStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax hook } } records
                                     && RecordMethod(root, hook, records, diagnostic.Properties) is { } handle:
-                    Register(context, diagnostic, "Handle each record in a [ForEachRecord] method", root, hook, handle);
+                    Register(context, diagnostic, "Handle each record in a [Drain] method", root, hook, handle);
                     break;
                 case "EECS107" when kind == "Pairs" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
                                     && PairMethod(root, method, diagnostic.Properties) is { } pairs:
@@ -169,9 +169,9 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     context.RegisterCodeFix(CodeAction.Create($"Take it as a Reduce<{singleton}>{(diagnostic.Properties.TryGetValue("Declare", out var declare) && declare == "Accumulate" ? $" and declare {singleton} [Accumulate]" : "")}",
                         token => Accumulated(context.Document, diagnostic, total, token), diagnostic.Id + "Accumulate"), diagnostic);
                     break;
-                case "EECS080" when kind == "ForEntity":
-                    context.RegisterCodeFix(CodeAction.Create("Write it as a [ForEntity] method",
-                        token => ToForEntity(context.Document, diagnostic, token), diagnostic.Id), diagnostic);
+                case "EECS080" when kind == "EntityMethod":
+                    context.RegisterCodeFix(CodeAction.Create("Write it as an [EntityMethod] method",
+                        token => ToEntityMethod(context.Document, diagnostic, token), diagnostic.Id), diagnostic);
                     break;
                 case "EECS037" when kind == "WriteMask" && diagnostic.Properties.TryGetValue("WriteMask", out var writes) && writes != null:
                     if (DeclareWriteMask(root, node, writes) is { } withWrites)

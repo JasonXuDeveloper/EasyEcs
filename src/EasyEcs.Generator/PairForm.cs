@@ -69,7 +69,7 @@ internal static class PairForm
     {
         if (!IsPairMethod(method)) return null;
         bool outside = Symbols.IsRunner(method);
-        if (Symbols.IsForEntity(method)) return "is a [ForEntity] method: a pair runs over the world";
+        if (Symbols.IsEntityMethod(method)) return "is an [EntityMethod] method: a pair runs over the world";
         if (!method.IsStatic) return "is an instance method: make it static";
         if (method.IsGenericMethod || method.ContainingType.IsGenericType) return "is generic: a pair method's order names its component";
         if (Symbols.IsParallel(method) && !IsSymmetric(method) && method.Parameters.FirstOrDefault(p => p.RefKind == RefKind.Ref && Symbols.IsNeighbor(p)) is { } shared)

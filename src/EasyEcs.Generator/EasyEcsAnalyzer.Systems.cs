@@ -160,7 +160,7 @@ public static partial class EasyEcsAnalyzer
         }
 
         if (NearHook(method.Name) is not { } hook || !method.ReturnsVoid || method.IsGenericMethod || !Symbols.HookParameters(method, out _)
-            || method.ContainingType.GetMembers(hook).Length > 0 || Symbols.IsForEach(method) || Symbols.IsForEntity(method)
+            || method.ContainingType.GetMembers(hook).Length > 0 || Symbols.IsForEach(method) || Symbols.IsEntityMethod(method)
             || Called(method, context.CancellationToken)) return;
         context.ReportDiagnostic(Diagnostic.Create(MisspelledHook, method.Locations.FirstOrDefault(),
             ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Hook").Add("Hook", hook), method.Name, method.ContainingType.Name, hook));
@@ -234,7 +234,7 @@ public static partial class EasyEcsAnalyzer
 
     /// <summary>
     /// EECS008: the code of a system reaching another system, through one of its members (a method, a field, a
-    /// [ForEntity] entry point) or World.System / TryGetSystem.
+    /// [EntityMethod] entry point) or World.System / TryGetSystem.
     /// </summary>
     private static void AnalyzeSystemReference(OperationAnalysisContext context)
     {
@@ -253,7 +253,7 @@ public static partial class EasyEcsAnalyzer
             IMemberReferenceOperation reference => reference.Member,
             _ => null,
         };
-        // A generated [ForEntity] entry point is an extension member of its type: its owner is the extended type.
+        // A generated [EntityMethod] entry point is an extension member of its type: its owner is the extended type.
         var owner = member?.ContainingType is { IsExtension: true } extension && Symbols.IsGenerated(member!)
             ? extension.ExtensionParameter?.Type as INamedTypeSymbol : member?.ContainingType;
         // A constant is a value, not a reach into the other system's code or state.

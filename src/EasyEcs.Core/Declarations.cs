@@ -179,7 +179,7 @@ public sealed class NotSavedAttribute : Attribute;
 /// <c>ref readonly</c> (read) or <see cref="Mut{T}"/> (written, stamped only where written) fields of components, public
 /// or internal, with the business methods that use them:
 /// <c>[View] public ref struct Fighter { public ref Health Health; public ref readonly Armor Armor; public void TakeDamage(int n) =&gt; Health.Value -= Math.Max(0, n - Armor.Value); }</c>.
-/// A <c>[ForEach]</c> or <c>[ForEntity]</c> method takes it by value (<c>static void Hit(Fighter fighter, in Damage damage)</c>):
+/// A <c>[ForEach]</c> or <c>[EntityMethod]</c> method takes it by value (<c>static void Hit(Fighter fighter, in Damage damage)</c>):
 /// the method visits the entities that have every component of the view, its fields read and write as its own
 /// <c>ref</c> / <c>in</c> parameters would (the schedule, the change ticks of tracked components and the vector loop alike),
 /// and the generated job builds the view over the row at no cost. The generator also writes <c>entity.AsFighter()</c>

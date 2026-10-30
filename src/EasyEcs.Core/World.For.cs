@@ -3,7 +3,7 @@ using System;
 namespace EasyEcs;
 
 /// <summary>
-/// A job over a range of indexes, run in chunks by <see cref="World.ForParallel{TJob}"/> (Kokkos' <c>RangePolicy</c>,
+/// A job over a range of indexes, run in chunks by <see cref="World.ParallelFor{TJob}"/> (Kokkos' <c>RangePolicy</c>,
 /// Unity's <c>IJobParallelForBatch</c>): each call gets one chunk.
 /// </summary>
 public interface IForRange
@@ -13,7 +13,7 @@ public interface IForRange
 }
 
 /// <summary>
-/// A job over the elements of a list, run in chunks by <see cref="World.ForParallel{T, TJob}"/>: each call gets one
+/// A job over the elements of a list, run in chunks by <see cref="World.ParallelFor{T, TJob}"/>: each call gets one
 /// chunk's elements, writable.
 /// </summary>
 /// <typeparam name="T">The element.</typeparam>
@@ -39,7 +39,7 @@ public sealed partial class World
     /// write what another chunk reads. Owner thread. Allocation-free after the first call per job type.
     /// </summary>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative.</exception>
-    public void ForParallel<TJob>(int count, ref TJob job, int chunkSize = 0) where TJob : struct, IForRange
+    public void ParallelFor<TJob>(int count, ref TJob job, int chunkSize = 0) where TJob : struct, IForRange
     {
         ArgumentOutOfRangeException.ThrowIfNegative(count);
         if (count == 0) return;
@@ -49,13 +49,13 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// <see cref="ForParallel{TJob}"/> over the elements of <paramref name="items"/> (an <see cref="Emitted{T}"/>
+    /// <see cref="ParallelFor{TJob}"/> over the elements of <paramref name="items"/> (an <see cref="Emitted{T}"/>
     /// singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The
     /// list must not change while the call runs. The records of an <see cref="Emitted{T}"/> that parallel passes left in
     /// their chunks' lists are run where they are, in order, not joined first: a chunk that spans two of those lists
     /// gets one call per list, each with its own <c>start</c>.
     /// </summary>
-    public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>
+    public void ParallelFor<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>
     {
         var store = items.Store;
         if (store is not { Shares: BufferStore.Segmented }) // an Emitted<T>'s list in segments is its own already
@@ -67,12 +67,12 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// <see cref="ForParallel{TJob}"/> in chunks of exactly <paramref name="size"/> indexes, for heavy items that are no
+    /// <see cref="ParallelFor{TJob}"/> in chunks of exactly <paramref name="size"/> indexes, for heavy items that are no
     /// rows of a table (no presence-bit word to keep whole): a stepping tile pass's woken tiles
     /// (<see cref="TileSteps{TCell, TTile, TGrid, TKey, TColors}.StepWokenParallel{TJob}"/>), where chunks of 64 tiles
     /// would leave most threads idle.
     /// </summary>
-    internal void ForParallelChunks<TJob>(int count, ref TJob job, int size) where TJob : struct, IForRange
+    internal void ParallelForChunks<TJob>(int count, ref TJob job, int size) where TJob : struct, IForRange
     {
         if (count == 0) return;
         var work = WorkOf<RangeChunks<TJob>>();

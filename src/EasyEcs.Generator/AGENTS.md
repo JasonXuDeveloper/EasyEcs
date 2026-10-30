@@ -20,8 +20,8 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              [Removed<T>] -> Since(LastRunTick + 1) and a read of T; Mut<T> -> a write stamped per
                              write; Slices -> the slice of the run; ChunkSize -> the chunkSize argument; Lookup reads at an id of an in component, key probes (TryFind / Find / Count at an in component's key) and reads at the ids of an in buffer's elements (Chases), no vector loop -> a twin job (Job{i}Chases) over runs of rows prefetching each chase's stages k rows apart (records 2k and rows k ahead; probes by the index's representation), which the pass runs past the last-level cache (EmitChases, EmitPass; parallel: the twin is a batch job per chunk, ForEachBatchParallel); [Consume] -> DestroyAll of
                              the filter after a pass without structural changes, a destroy per row otherwise;
-                             [ForEntity] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
-                             over entity.Run; [ForEachRecord] -> an IForEachRecord<T> job run by
+                             [EntityMethod] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
+                             over entity.Run; [Drain] -> an IDrain<T> job run by
                              Emitted<T>.Consume (stage RecordMethods, joined to the methods of the updates); a ref Tile -> a stepping pass (the method's colors struct, TileSteps.Of per pass, Enter / the sweeps / Leave per tile, a walk per color until Next: the tiles that woke when the pass sleeps and the method has no filter of its own, through the job's ITileStep.Step, else the query; the wakes of what else it reads; a write of its cells); [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
                              methods in declaration order; [UpdateInterval] -> its Interval / Phase), and per
                              assembly the set __EasyEcsSystems: one Add per system and per closed generic system any
@@ -106,7 +106,7 @@ EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as de
                              reach into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
                              no signature fits, a system API given a type that is no [EcsSystem], a method named almost
                              like a hook)
-UnusedSuppressor.cs          suppresses IDE0051 / IDE0052 on [ForEach], [ForEntity] and hook methods (called through
+UnusedSuppressor.cs          suppresses IDE0051 / IDE0052 on [ForEach], [EntityMethod] and hook methods (called through
                              UnsafeAccessor; Rider reads their [MeansImplicitUse])
 EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the
                              check of EECS056):
@@ -174,7 +174,7 @@ EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045 and EECS047-051: calls and
                              a structural change, Disable of a component that cannot be disabled, filters no entity
                              passes, a second group in one filter, an update during a pass)
 EasyEcsAnalyzer.Parallel.cs  EECS060-061: code on several threads (a parallel [ForEach] method, the Execute of a job
-                             run by ForEachParallel or ForParallel) that writes memory every thread shares, a parallel
+                             run by ForEachParallel or ParallelFor) that writes memory every thread shares, a parallel
                              job's field read after the call; EECS071: System.Random in a [ForEach] method (fix:
                              EntityRandom); EECS088: two EntityRandom draws of one stream for one entity in pass code
                              (fix: the next free stream), or a draw in a loop that does not vary its stream
@@ -184,9 +184,9 @@ EasyEcsAnalyzer.Parts.cs     EECS062-069, EECS102 (a [Prefab] the generator cann
                              Identity, a setup attribute on a type it does not fit, a managed type without a Nino
                              formatter (Warning when the code saves what holds it: entity saves write no singletons)
 EasyEcsAnalyzer.Forms.cs     EECS080-085, EECS103 and EECS108-109: what the generator declares for code written by hand (a one-entity
-                             job [ForEntity] writes, a [ForEach] method that destroys every entity it visits: [Consume],
+                             job [EntityMethod] writes, a [ForEach] method that destroys every entity it visits: [Consume],
                              a batch method's vector loop written by hand that the method for one row gets generated,
-                             the walk and Clear of Emitted<T> a [ForEachRecord] method gets generated)
+                             the walk and Clear of Emitted<T> a [Drain] method gets generated)
                              and those attributes (and [UpdateInterval]) where they cannot apply (EECS082 is retired)
 HandSimd.cs                  EECS103's detection, read once for the analyzer and its code fix: a batch [ForEach]
                              method whose body is a hand-written vector loop (prelude of streams and broadcasts, one

@@ -32,7 +32,7 @@ public sealed partial class EasyEcsCodeFixes
     /// <summary>The most components one arity call takes.</summary>
     private const int MaxArity = 9;
 
-    /// <summary>A [ForEach] / [ForEntity] parameter over the component, and how its uses split.</summary>
+    /// <summary>A [ForEach] / [EntityMethod] parameter over the component, and how its uses split.</summary>
     private sealed class PassParameter(ParameterSyntax syntax, IParameterSymbol symbol)
     {
         public ParameterSyntax Syntax { get; } = syntax;
@@ -265,10 +265,10 @@ public sealed partial class EasyEcsCodeFixes
     private static bool Generated(ISymbol symbol) => symbol.Locations.Any(l => l.SourceTree?.FilePath.Contains("EasyEcs.Generator") == true)
         || symbol.ContainingType?.GetAttributes().Any(a => a.AttributeClass?.Name == "GeneratedCodeAttribute") == true;
 
-    /// <summary>A parameter of a [ForEach] or [ForEntity] method: the rows the split keeps together (every entity with the component has the new one).</summary>
+    /// <summary>A parameter of a [ForEach] or [EntityMethod] method: the rows the split keeps together (every entity with the component has the new one).</summary>
     private static PassParameter? Pass(ParameterSyntax syntax, SemanticModel model, CancellationToken token) =>
         syntax.Parent?.Parent is MethodDeclarationSyntax method && model.GetDeclaredSymbol(method, token) is { } symbol
-        && symbol.GetAttributes().Any(a => a.AttributeClass is { Name: "ForEachAttribute" or "ForEntityAttribute" } attribute && InEasyEcs(attribute))
+        && symbol.GetAttributes().Any(a => a.AttributeClass is { Name: "ForEachAttribute" or "EntityMethodAttribute" } attribute && InEasyEcs(attribute))
         && model.GetDeclaredSymbol(syntax, token) is { } parameter
             ? new PassParameter(syntax, parameter) : null;
 

@@ -20,7 +20,7 @@ public static partial class EasyEcsAnalyzer
         "A [ForEach] method that takes a tile by ref steps it: a Jacobi step writes the rows of the tile's second " +
         "buffer, which the pass swaps with its cells once every tile stepped; a [GaussSeidel] step writes the cells in " +
         "place, color by color, sweep after sweep until the tile settles. So the pass steps one tile per entity over the " +
-        "whole grid ([ForEntity], Slices and [Consume] cannot), [GaussSeidel] needs that tile and a key of integer fields " +
+        "whole grid ([EntityMethod], Slices and [Consume] cannot), [GaussSeidel] needs that tile and a key of integer fields " +
         "to color the tiles by, and Write is for the tile the method steps (a tile taken by value throws).",
         helpLinkUri: Help("EECS115"));
 
@@ -56,7 +56,7 @@ public static partial class EasyEcsAnalyzer
         start.RegisterSymbolAction(context =>
         {
             var method = (IMethodSymbol)context.Symbol;
-            if (!Symbols.IsForEach(method) && !Symbols.IsForEntity(method)) return;
+            if (!Symbols.IsForEach(method) && !Symbols.IsEntityMethod(method)) return;
             if (Symbols.StepProblem(method) is { } problem)
                 context.ReportDiagnostic(Diagnostic.Create(BadStep, method.Locations.FirstOrDefault(), Symbols.Describe(method), problem));
             foreach (var tile in method.Parameters)

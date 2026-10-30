@@ -66,7 +66,7 @@ public static partial class EasyEcsAnalyzer
     private static void AnalyzePairDeclaration(SymbolAnalysisContext context)
     {
         var method = (IMethodSymbol)context.Symbol;
-        if (!Symbols.IsValidForEach(method) && !Symbols.IsForEntity(method) || !PairForm.IsPairMethod(method)) return;
+        if (!Symbols.IsValidForEach(method) && !Symbols.IsEntityMethod(method) || !PairForm.IsPairMethod(method)) return;
         if (PairForm.Problem(method) is { } problem)
             context.ReportDiagnostic(Diagnostic.Create(BadPairMethod, method.Locations.FirstOrDefault(), method.Name, problem));
     }

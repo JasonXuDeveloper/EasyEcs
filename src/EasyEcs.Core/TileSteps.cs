@@ -401,7 +401,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         var run = new WokenRun<TJob> { Job = job, Walk = _walk, World = _world };
         // About four chunks per thread at least: a few woken tiles, each heavy, are spread over every thread.
         int size = Math.Max(1, Math.Min(chunkSize > 0 ? chunkSize : int.MaxValue, _walked / (4 * _world.ChunkThreads)));
-        _world.ForParallelChunks(_walked, ref run, size);
+        _world.ParallelForChunks(_walked, ref run, size);
         return true;
     }
 
@@ -676,7 +676,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
             if (swapped)
             {
                 var run = new SwapRun { Steps = this };
-                world.ForParallelChunks((_entries.Length + 63) >> 6, ref run, 4);
+                world.ParallelForChunks((_entries.Length + 63) >> 6, ref run, 4);
             }
             var blocks = _blocks;
             for (int b = 0; b < blocks.Length; b++)

@@ -13,7 +13,7 @@ namespace EasyEcs.CodeFixes;
 /// <summary>
 /// The fixes that turn hand-written forms into the declarations the generator reads: a [ForEach] method's final destroy
 /// into [Consume] (EECS084), and
-/// a one-entity job with its calls into a [ForEntity] method and its entry point's calls (EECS080), and a batch method's
+/// a one-entity job with its calls into an [EntityMethod] method and its entry point's calls (EECS080), and a batch method's
 /// hand-written vector loop into the method for one row the generator vectorizes (EECS103), and a total accumulated
 /// through a 'ref' singleton into a Reduce&lt;T&gt; of an [Accumulate] singleton (EECS086). The analyzer decided each
 /// (its properties); these only rewrite.
@@ -21,7 +21,7 @@ namespace EasyEcs.CodeFixes;
 public sealed partial class EasyEcsCodeFixes
 {
     /// <summary>
-    /// EECS109: a system's OnUpdate that walks Emitted&lt;T&gt; and clears it becomes <c>[ForEachRecord] static void
+    /// EECS109: a system's OnUpdate that walks Emitted&lt;T&gt; and clears it becomes <c>[Drain] static void
     /// Handle(in T record, ref S s, ...)</c> holding the loop's body (the singleton locals as 'ref' parameters, the World
     /// when the body uses it: the analyzer's property), its lines moved out by one level.
     /// </summary>
@@ -35,8 +35,8 @@ public sealed partial class EasyEcsCodeFixes
         var leading = hook.GetLeadingTrivia();
         string indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last().ToFullString() : "";
         if (hook.Modifiers.Count == 0 || hook.AttributeLists.Count > 0) return null;
-        // [ForEachRecord] on a line of its own, where the hook's line began (its leading trivia), the modifiers indented below it.
-        var attribute = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(SyntaxFactory.IdentifierName("ForEachRecord"))))
+        // [Drain] on a line of its own, where the hook's line began (its leading trivia), the modifiers indented below it.
+        var attribute = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(SyntaxFactory.IdentifierName("Drain"))))
             .WithLeadingTrivia(leading).WithTrailingTrivia(eol);
         var method = hook.WithoutLeadingTrivia();
         method = method.WithModifiers(method.Modifiers.Replace(method.Modifiers[0], method.Modifiers[0].WithLeadingTrivia(SyntaxFactory.Whitespace(indent))))
@@ -137,11 +137,11 @@ public sealed partial class EasyEcsCodeFixes
     }
 
     /// <summary>
-    /// EECS080: the job struct as a static class with a [ForEntity] method Run (the job's fields its last parameters,
+    /// EECS080: the job struct as a static class with an [EntityMethod] method Run (the job's fields its last parameters,
     /// in their order), each creation and Run call as one call of the entry point, and the filter field gone once
     /// nothing else uses it.
     /// </summary>
-    private static async Task<Solution> ToForEntity(Document document, Diagnostic diagnostic, CancellationToken token)
+    private static async Task<Solution> ToEntityMethod(Document document, Diagnostic diagnostic, CancellationToken token)
     {
         var solution = document.Project.Solution;
         var props = diagnostic.Properties;
@@ -203,7 +203,7 @@ public sealed partial class EasyEcsCodeFixes
         return solution;
     }
 
-    /// <summary>The static class the job becomes: its modifiers but ref / readonly, and one [ForEntity] method Run.</summary>
+    /// <summary>The static class the job becomes: its modifiers but ref / readonly, and one [EntityMethod] method Run.</summary>
     private static MemberDeclarationSyntax? Method(StructDeclarationSyntax job, INamedTypeSymbol type, SemanticModel model,
         System.Collections.Immutable.ImmutableDictionary<string, string?> props, CancellationToken token)
     {
@@ -257,7 +257,7 @@ public sealed partial class EasyEcsCodeFixes
         var text = new StringBuilder();
         text.Append(string.Join(" ", keep.Concat(["static", "class"]))).Append(' ').Append(job.Identifier.ValueText).Append(eol);
         text.Append(indent).Append('{').Append(eol);
-        text.Append(methodLeading).Append("[ForEntity").Append(string.IsNullOrEmpty(filter) ? "" : ", " + filter).Append(']').Append(eol);
+        text.Append(methodLeading).Append("[EntityMethod").Append(string.IsNullOrEmpty(filter) ? "" : ", " + filter).Append(']').Append(eol);
         text.Append(methodIndent).Append("static void Run(").Append(string.Join(", ", parameters)).Append(')');
         text.Append(renamed is ArrowExpressionClauseSyntax arrow ? " " + arrow.ToFullString().Trim() + ";" + eol : eol + renamed.ToFullString().TrimEnd() + eol);
         text.Append(indent).Append('}');

@@ -140,7 +140,7 @@ public static partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor EntryPointCollision = new("EECS021", "A generated entry point has a method's signature",
         "The entry point of {2} (the {1}the caller's values) would have the signature of a method '{0}' of its type, or of another generated entry point: rename one of them",
         Category, DiagnosticSeverity.Error, true,
-        "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity; for a [ForEntity] method, one that takes the entity and runs the method on it.", helpLinkUri: Help("EECS021"));
+        "Outside a system, the generator writes an overload of a [ForEach] method that takes the World (and the change tick, for [Changed<T>] / [Removed<T>]) followed by the method's context parameters, and runs the method over every matching entity; for an [EntityMethod] method, one that takes the entity and runs the method on it.", helpLinkUri: Help("EECS021"));
 
     public static readonly DiagnosticDescriptor Unnameable = new("EECS022", "Type out of reach of the generated code",
         "{0} uses '{1}', which code outside its declaring type cannot name: make it internal or public",
@@ -750,11 +750,11 @@ public static partial class EasyEcsAnalyzer
         if (!Symbols.IsGeneratedJob(method)) return;
         var location = method.Locations.FirstOrDefault();
 
-        bool outside = Symbols.IsRunner(method), one = Symbols.IsForEntity(method);
+        bool outside = Symbols.IsRunner(method), one = Symbols.IsEntityMethod(method);
         var excluded = Excluded(method, context.CancellationToken);
-        string? problem = one ? Symbols.ForEntityProblem(method) : null;
+        string? problem = one ? Symbols.EntityMethodProblem(method) : null;
         if (problem != null)
-            context.ReportDiagnostic(Diagnostic.Create(BadForEntity, location,
+            context.ReportDiagnostic(Diagnostic.Create(BadEntityMethod, location,
                 !method.IsStatic && problem.StartsWith("is an instance") ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Static") : null,
                 method.Name, problem));
         else if (outside && !method.IsStatic && !Symbols.IsSystem(method.ContainingType)) // in a system: EECS075
@@ -903,7 +903,7 @@ public sealed class DeclarationAnalyzer : EasyEcsAnalyzer.Area
         EasyEcsAnalyzer.BadParameter, EasyEcsAnalyzer.ComponentCount, EasyEcsAnalyzer.Generic, EasyEcsAnalyzer.NotASystem, EasyEcsAnalyzer.NotStruct, EasyEcsAnalyzer.MixedBatch,
         EasyEcsAnalyzer.NotParallel, EasyEcsAnalyzer.WriteThroughReadOnly, EasyEcsAnalyzer.BufferCopy, EasyEcsAnalyzer.HiddenStructuralChange, EasyEcsAnalyzer.OffThreadStructuralChange, EasyEcsAnalyzer.EntityInData,
         EasyEcsAnalyzer.OrderCycle, EasyEcsAnalyzer.OrderAcrossGroups, EasyEcsAnalyzer.EntryPointCollision, EasyEcsAnalyzer.FilterOutsideGroup, EasyEcsAnalyzer.LocalForEach, EasyEcsAnalyzer.BadSlices,
-        EasyEcsAnalyzer.BadChunkSize, EasyEcsAnalyzer.ReductionOverwritten, EasyEcsAnalyzer.LookupOfWritten, EasyEcsAnalyzer.BadEmit, EasyEcsAnalyzer.BadForEntity, EasyEcsAnalyzer.BadTileShape,
+        EasyEcsAnalyzer.BadChunkSize, EasyEcsAnalyzer.ReductionOverwritten, EasyEcsAnalyzer.LookupOfWritten, EasyEcsAnalyzer.BadEmit, EasyEcsAnalyzer.BadEntityMethod, EasyEcsAnalyzer.BadTileShape,
         EasyEcsAnalyzer.IndexedByRef, EasyEcsAnalyzer.BadIndexedKey, EasyEcsAnalyzer.Unnameable,
         EasyEcsAnalyzer.SharedTile);
 

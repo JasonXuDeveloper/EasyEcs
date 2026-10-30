@@ -46,7 +46,7 @@ public static partial class EasyEcsAnalyzer
         Category, DiagnosticSeverity.Warning, true, OnlyReadsDescription, helpLinkUri: Help(OnlyReadsId),
         customTags: WellKnownDiagnosticTags.CompilationEnd);
 
-    public static readonly DiagnosticDescriptor UnusedParameter = new("EECS026", "A [ForEach] or [ForEntity] parameter the method does not use",
+    public static readonly DiagnosticDescriptor UnusedParameter = new("EECS026", "A [ForEach] or [EntityMethod] parameter the method does not use",
         "{0} does not use parameter '{1}': {2}",
         Category, DiagnosticSeverity.Warning, true,
         "Every parameter costs per row or per pass: a component loads and advances its column (and a 'ref' one is a " +
@@ -182,7 +182,7 @@ public static partial class EasyEcsAnalyzer
         var syntax = (MethodDeclarationSyntax)context.Node;
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
             || !Symbols.IsForEach(method) || !Symbols.IsValidForEach(method) || method.PartialDefinitionPart != null // a partial method: once, on its definition
-            || Symbols.IsForEntity(method)) return; // one entity per call: no loop to vectorize (the generator asks for none)
+            || Symbols.IsEntityMethod(method)) return; // one entity per call: no loop to vectorize (the generator asks for none)
         int mode = Symbols.Simd(method);
         if (mode == Symbols.SimdOff || mode == Symbols.SimdAuto && !Kernel.LooksEligible(method))
         {
@@ -211,7 +211,7 @@ public static partial class EasyEcsAnalyzer
     /// </summary>
     private static bool ReportChases(SyntaxNodeAnalysisContext context, IMethodSymbol method, MethodDeclarationSyntax syntax)
     {
-        if (Symbols.IsForEachRecord(method)) return false; // the generator reads no chases of a pass over records
+        if (Symbols.IsDrain(method)) return false; // the generator reads no chases of a pass over records
         Chases.Of(method, syntax, context.SemanticModel, context.CancellationToken, out string? failed);
         if (failed == null) return false;
         context.ReportDiagnostic(Diagnostic.Create(ScalarLoop, method.Locations.FirstOrDefault(), DiagnosticSeverity.Info, null, null, method.Name, failed));
@@ -322,7 +322,7 @@ public static partial class EasyEcsAnalyzer
             AnalyzeHandWritten(context, method, body, core, resets);
             AnalyzeScratch(context, method, body);
             AnalyzeLookups(context, core, method, body);
-            AnalyzeAllocations(context, method, body, Symbols.IsForEntity(method) ? "on every call" : "for every entity it visits, each update", true);
+            AnalyzeAllocations(context, method, body, Symbols.IsEntityMethod(method) ? "on every call" : "for every entity it visits, each update", true);
         }
         else if (Symbols.JobInterface(method) != null)
         {
@@ -343,7 +343,7 @@ public static partial class EasyEcsAnalyzer
         Dictionary<IParameterSymbol, List<IOperation>> uses)
     {
         bool empty = body is IMethodBodyOperation { BlockBody.Operations.Length: 0, ExpressionBody: null } or IBlockOperation { Operations.Length: 0 };
-        bool outside = Symbols.IsRunner(method), one = Symbols.IsForEntity(method);
+        bool outside = Symbols.IsRunner(method), one = Symbols.IsEntityMethod(method);
         string described = Symbols.Describe(method), each = one ? "on every call" : "for every row";
         var requirements = Symbols.Requirements(method, context.CancellationToken);
         var excluded = Excluded(method, context.CancellationToken);
@@ -760,7 +760,7 @@ public static partial class EasyEcsAnalyzer
         context.ReportDiagnostic(Diagnostic.Create(WriteAccessOnlyReads, location, fix,
                 $"Parameter '{p.Name}' of {Symbols.Describe(method)} (Maybe<{component.Name}>)",
                 Symbols.Implements(component, Symbols.TrackChanges)
-                    ? (Symbols.IsForEntity(method) ? "the entity's row is" : "every row it visits that has one is") + " stamped as changed, so [Changed<" + component.Name + ">] systems visit rows nobody changed"
+                    ? (Symbols.IsEntityMethod(method) ? "the entity's row is" : "every row it visits that has one is") + " stamped as changed, so [Changed<" + component.Name + ">] systems visit rows nobody changed"
                     : "the system is scheduled as the component's writer, so no parallel stage runs it beside a reader",
                 $"take it as a ReadOnlyMaybe<{component.Name}>"));
     }
@@ -812,7 +812,7 @@ public static partial class EasyEcsAnalyzer
         foreach (var (operation, type, singleton, presence) in RowLookups(core, method, body, all))
         {
             string name = type.ToMinimalDisplayString(operation.SemanticModel!, operation.Syntax.SpanStart);
-            bool job = !Symbols.IsGeneratedJob(method), one = !job && Symbols.IsForEntity(method);
+            bool job = !Symbols.IsGeneratedJob(method), one = !job && Symbols.IsEntityMethod(method);
             string advice = job ? (singleton ? $"keep it in a field of the job, set before the loop" : $"add {name} to the job's components")
                 : singleton ? $"take it as a parameter ('in {name}' or 'ref {name}'), resolved once per {(one ? "call" : "pass")}"
                 : presence ? $"take a {(Symbols.IsIndexed(type) ? "ReadOnlyMaybe" : "Maybe")}<{name}> parameter, or split the method with [With<{name}>] / [Without<{name}>]"

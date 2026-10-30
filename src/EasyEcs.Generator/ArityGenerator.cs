@@ -894,7 +894,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                 /// <see cref="Run{{{tps}}, TJob}(ref TJob, in QueryFilter)"/> with <paramref name="since"/> as the filter's
                 /// tick: its <c>Changed</c> components must have been written (its <c>Removed</c> ones removed) at or after
                 /// <paramref name="since"/>. The same test as <c>filter.Since(since)</c>, without the copy of the filter
-                /// (a static filter, as the entry point of a <c>[ForEntity, Changed&lt;T&gt;]</c> method passes it).
+                /// (a static filter, as the entry point of an <c>[EntityMethod, Changed&lt;T&gt;]</c> method passes it).
                 /// O(components the filter names).
                 /// </summary>
                 [MethodImpl(MethodImplOptions.AggressiveInlining)]
