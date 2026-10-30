@@ -113,6 +113,35 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         Recorder.Initialize(context);
     }
 
+    /// <summary>
+    /// The models of the calls <paramref name="isCandidate"/> finds, for a stage only implementation output reads. The
+    /// syntax provider returns the call itself and the binding (<paramref name="create"/>) runs in a later step: Roslyn
+    /// runs every syntax provider's transform whenever any step asks for syntax, so a model bound in that transform
+    /// would be built on every keystroke in the IDE although no output it skips reads it, while a later step is
+    /// skipped with the output. In a build the step reruns per compilation, as the transform did; the calls of one
+    /// file share one semantic model.
+    /// </summary>
+    private static IncrementalValuesProvider<T> BoundLater<T>(IncrementalGeneratorInitializationContext context,
+        System.Func<SyntaxNode, System.Threading.CancellationToken, bool> isCandidate,
+        System.Func<SemanticModel, InvocationExpressionSyntax, System.Threading.CancellationToken, T?> create) where T : class =>
+        context.SyntaxProvider
+            .CreateSyntaxProvider(isCandidate, static (ctx, _) => (InvocationExpressionSyntax)ctx.Node)
+            .Collect()
+            .Combine(context.CompilationProvider)
+            .SelectMany((input, ct) =>
+            {
+                var models = new List<T>();
+                SemanticModel? model = null;
+                foreach (var call in input.Left) // in the order of the files: one semantic model per file
+                {
+                    ct.ThrowIfCancellationRequested();
+                    if (model?.SyntaxTree != call.SyntaxTree) model = input.Right.GetSemanticModel(call.SyntaxTree);
+                    if (create(model, call, ct) is { } found) models.Add(found);
+                }
+
+                return models;
+            });
+
     /// <summary>The entry points of a type that is not a system, or of a type's [EntityMethod] methods: declarations only.</summary>
     private static void AddEntryPoints(SourceProductionContext context, UpdateModel model) =>
         context.AddSource($"{model.Owner.HintName}.{(model.One ? "EntityMethod" : "ForEach")}.EntryPoints.g.cs", SourceText.From(EmitEntryPoints(model), Encoding.UTF8));

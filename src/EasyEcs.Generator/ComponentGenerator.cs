@@ -508,7 +508,21 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         /// struct or enum counts), or null. <paramref name="core"/>: EasyEcs's assembly, whose own components are never
         /// disabled.
         /// </summary>
-        public static Shape? Of(INamedTypeSymbol type, IAssemblySymbol core)
+        public static Shape? Of(INamedTypeSymbol type, IAssemblySymbol core) =>
+            Shapes.GetValue(type, t => new Shaped(Compute(t, core))).Value;
+
+        /// <summary>
+        /// Each type's shape, once per compilation (its symbols are the key): every component asks for its own and for
+        /// those of the namesakes whose names it could share (<see cref="Members"/>), on every edit.
+        /// </summary>
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<INamedTypeSymbol, Shaped> Shapes = new();
+
+        private sealed class Shaped(Shape? value)
+        {
+            public readonly Shape? Value = value;
+        }
+
+        private static Shape? Compute(INamedTypeSymbol type, IAssemblySymbol core)
         {
             if (type.TypeKind is not (TypeKind.Struct or TypeKind.Enum) || !Symbols.IsExtensible(type, out _)) return null;
             bool singleton = Symbols.Implements(type, Symbols.Singleton);
@@ -765,9 +779,9 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             string hash = Code.Fnv(item).ToString("x8");
             // A referenced assembly this one sees the internals of (InternalsVisibleTo) that uses the same shape has the
             // class already: a second would make every member ambiguous.
-            foreach (var existing in compilation.GetTypesByMetadataName("EasyEcs." + ClassOf(hash)))
-                if (!SymbolEqualityComparer.Default.Equals(existing.ContainingAssembly, compilation.Assembly)
-                    && compilation.IsSymbolAccessibleWithin(existing, compilation.Assembly))
+            // The class is internal: only the assemblies that give this one access are looked in.
+            foreach (var friend in Friends.GetValue(compilation, static c => c.SourceModule.ReferencedAssemblySymbols.Where(a => a.GivesAccessTo(c.Assembly)).ToArray()))
+                if (friend.GetTypeByMetadataName("EasyEcs." + ClassOf(hash)) is { } existing && compilation.IsSymbolAccessibleWithin(existing, compilation.Assembly))
                     return null;
             return new QueryShape(hash, item, read, new EquatableArray<QueryMember>(members.ToArray()));
         }
@@ -815,6 +829,13 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         }
 
         /// <summary>The name of the class holding a shape's members.</summary>
+        /// <summary>
+        /// The referenced assemblies that give the compilation access to their internals, found once per compilation:
+        /// every query call asks, on every edit, and searching every reference by name for each (201 for the unit
+        /// tests) cost more than the rest of the shape.
+        /// </summary>
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<Compilation, IAssemblySymbol[]> Friends = new();
+
         public static string ClassOf(string hash) => "QueryItemExtensions_" + hash;
     }
 
