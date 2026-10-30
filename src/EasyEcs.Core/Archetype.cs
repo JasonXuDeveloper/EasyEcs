@@ -1167,6 +1167,7 @@ internal sealed class Archetype
 
         var rows = into ?? new TableCopy(this);
         bool kept = into != null && Kept(into, rewrites); // its rows' lists may still match: see CopyChangedLists
+        bool stream = StreamingStores.CopyPays(UnmanagedBytes(count));
         for (int c = 0; c < Columns.Length; c++)
         {
             var info = _infos[c];
@@ -1190,7 +1191,7 @@ internal sealed class Archetype
             {
                 int bytes = count * info.Size;
                 if (column == null || column.Length < bytes) column = new byte[bytes];
-                Unsafe.CopyBlockUnaligned(ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(column)), ref Aligned(Columns[c]), (uint)bytes);
+                CopyBlock(ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(column)), ref Aligned(Columns[c]), bytes, stream);
             }
 
             int words = (count + 63) >> 6;
@@ -1277,6 +1278,7 @@ internal sealed class Archetype
         int words = (count + 63) >> 6;
         ulong since = rows.Synced;
         bool toCopy = stamp == 0;
+        bool stream = StreamingStores.CopyPays(UnmanagedBytes(count));
         for (int c = 0; c < Columns.Length; c++)
         {
             var info = _infos[c];
@@ -1286,7 +1288,7 @@ internal sealed class Archetype
             if (ticks < 0)
             {
                 // Untracked: the table's rows may have been written through refs without a trace.
-                if (info.Size >= 0) CopyBytes(c, copy, 0, count, toCopy);
+                if (info.Size >= 0) CopyBytes(c, copy, 0, count, toCopy, stream);
                 else if (toCopy) info.CopyRows(Columns[c], copy, count); // never a buffer: buffers are tracked
                 else info.CopyRows(copy, Columns[c], count);
                 continue;
@@ -1335,7 +1337,7 @@ internal sealed class Archetype
     /// Rows [<paramref name="first"/>, <paramref name="first"/> + <paramref name="count"/>) of unmanaged column
     /// <paramref name="c"/> copied into <paramref name="copy"/> (a copy's bytes of it), or back from it.
     /// </summary>
-    private void CopyBytes(int c, Array copy, int first, int count, bool toCopy)
+    private void CopyBytes(int c, Array copy, int first, int count, bool toCopy, bool stream = false)
     {
         int size = _infos[c].Size;
         ref byte table = ref Unsafe.Add(ref Aligned(Columns[c]), (nint)first * size);
@@ -1345,8 +1347,32 @@ internal sealed class Archetype
             if (toCopy) CopyBytes(ref table, ref saved, size);
             else CopyBytes(ref saved, ref table, size);
         }
-        else if (toCopy) Unsafe.CopyBlockUnaligned(ref saved, ref table, (uint)(count * size));
-        else Unsafe.CopyBlockUnaligned(ref table, ref saved, (uint)(count * size));
+        else if (toCopy) CopyBlock(ref saved, ref table, count * size, stream);
+        else CopyBlock(ref table, ref saved, count * size, stream);
+    }
+
+    /// <summary>
+    /// The bytes of this table's unmanaged columns over <paramref name="rows"/> rows: what a capture or restore of them
+    /// copies in all, the measure <see cref="StreamingStores.CopyPays"/> compares with the last-level cache.
+    /// O(columns).
+    /// </summary>
+    private long UnmanagedBytes(int rows)
+    {
+        long bytes = 0;
+        for (int c = 0; c < _infos.Length; c++)
+            if (_infos[c].Size > 0) bytes += (long)_infos[c].Size * rows;
+        return bytes;
+    }
+
+    /// <summary>
+    /// <paramref name="bytes"/> bytes from <paramref name="from"/> to <paramref name="to"/> (no overlap): around the
+    /// caches when the operation's copies are past the last-level cache (<paramref name="stream"/>, from
+    /// <see cref="StreamingStores.CopyPays"/>), else memmove.
+    /// </summary>
+    internal static void CopyBlock(ref byte to, ref byte from, long bytes, bool stream)
+    {
+        if (stream) StreamingStores.Copy(ref to, ref from, (nuint)bytes);
+        else Unsafe.CopyBlockUnaligned(ref to, ref from, (uint)bytes);
     }
 
     /// <summary>
@@ -1463,14 +1489,15 @@ internal sealed class Archetype
         Reserve(count);
         if (rows != null)
         {
+            bool stream = StreamingStores.CopyPays(UnmanagedBytes(count));
             for (int c = 0; c < Columns.Length; c++)
             {
                 if (_infos[c].Owner >= 0) continue; // change ticks: stamped or cleared by the caller
                 if (kept && _infos[c].IsBuffer) CopyChangedLists(c, rows, count, before, since, toCopy: false);
                 else if (_infos[c].Size < 0) _infos[c].CopyRows(rows.Columns[c], Columns[c], count, swap, own: !swap);
                 else
-                    Unsafe.CopyBlockUnaligned(ref Aligned(Columns[c]), ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(rows.Columns[c])),
-                        (uint)(count * _infos[c].Size));
+                    CopyBlock(ref Aligned(Columns[c]), ref MemoryMarshal.GetArrayDataReference(Unsafe.As<byte[]>(rows.Columns[c])),
+                        count * _infos[c].Size, stream);
             }
 
             rows.Slots.AsSpan(0, count).CopyTo(Slots); // after the columns: CopyChangedLists compares the old slots

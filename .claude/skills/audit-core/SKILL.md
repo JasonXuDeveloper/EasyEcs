@@ -55,6 +55,10 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
   sharing.
 - **Change ticks and snapshots**: a Capture or Restore that does not advance the change tick makes every incremental
   copy conservative (everything ever written counts as written since); a restore stamps only the rows it copies back.
+- **Large copies**: a whole-column copy of a snapshot goes through `Archetype.CopyBlock` with one
+  `StreamingStores.CopyPays` per table (the bytes of all its columns, not of one copy: memmove streams each copy past
+  its own threshold already); a resize copies plainly (measured: a wash). A pointer copy into a `byte[]` that is not
+  pinned (a `TableCopy`'s columns) pins it with `fixed` first. Measurements and the rules: `audit-perf`.
 - **Filters past bit 255**: a `QueryFilter` built per pass with a component bit past 255 allocates
   (`FilterOverflow.With`); cache filters per type (`ChangedSince<T>`). It shows only in the full suite, after other
   tests registered 300 types, so allocation tests that build filters must also run there (feat-tiles-pingpong).

@@ -74,7 +74,10 @@ CacheSizes.cs                the last-level cache and one core's L2, read once p
 StreamingStores.cs           the non-temporal stores of generated vector loops (a column the method writes without
                              reading, past the last-level cache): Pays (the gate, once per run: MinRows, the table's rows
                              of the method's columns past CacheSizes.LastLevel), Head (the rows to the first aligned
-                             one), Store (AVX-512 / AVX / SSE2 VMOVNTPS where aligned, ARM64 STNP, plain otherwise), Fence
+                             one), Store (AVX-512 / AVX / SSE2 VMOVNTPS where aligned, ARM64 STNP, plain otherwise), Fence;
+                             the core's large copies: CopyPays (a table's unmanaged columns past the last-level cache,
+                             AVX) and Copy (four pages at a time around the caches), taken by Capture / Restore through
+                             Archetype.CopyBlock (a resize keeps memmove: its allocation outweighs the copy)
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                              Columns<TTile> (a 2D tile of a 3D grid's key), Tile<TCell, TTile> (a [ForEach] parameter:
                              up to 26 neighbors found by generated code, TileNeighbors; TileCells.Pool: the pool of a

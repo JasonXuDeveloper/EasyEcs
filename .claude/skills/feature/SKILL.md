@@ -116,6 +116,9 @@ cases (`audit-analyzer`, "Tests: every rule, every edge").
 BenchmarkDotNet only: before and after, two rounds, A/B copies outside the repo tree, under `flock /tmp/bench.lock`
 on a quiet machine; Tier1 asm of new hot loops (`tools/jitdisasm.sh`). Ships only as a net win at 0 B with no
 regression in WorldSimulation, BattleServer and the feature's neighbors. A benchmark for anything not covered yet.
+A change meant to make a pass faster states the pass's bytes and operations per row and where it sits on the
+machine's roofline (`audit-perf`, "Roofline"): more SIMD for a pass already at the bandwidth roof is not the change
+to make.
 
 A feature proposed to remove code is checked on its sample before any benchmark round: write the sample with it
 first (8h: `CopyEntities` grew MultiWorld's Border from 9 lines to 14, so it failed "less code" before its numbers).
