@@ -182,7 +182,7 @@ public static partial class EasyEcsAnalyzer
         var syntax = (MethodDeclarationSyntax)context.Node;
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
             || !Symbols.IsForEach(method) || !Symbols.IsValidForEach(method) || method.PartialDefinitionPart != null // a partial method: once, on its definition
-            || Symbols.IsEntityMethod(method)) return; // one entity per call: no loop to vectorize (the generator asks for none)
+            || Symbols.IsEntityMethod(method) || Symbols.MaxRows(method) > 0) return; // one entity per call (an [EntityMethod], a collected row): no loop to vectorize
         int mode = Symbols.Simd(method);
         if (mode == Symbols.SimdOff || mode == Symbols.SimdAuto && !Kernel.LooksEligible(method))
         {

@@ -91,7 +91,7 @@ item or a gap (section 4).
 | `Cell<TCell,TTile>`, per-tile results | none (hand `Vector128`, Flow.cs:104-123, Step.cs) | Flow; the scent if as fast (L ~-60 / -80) | WP5, WP5b |
 | Cluster pairs `[Neighbor]` (cutoff per row or one, two kinds, self masks, keep hint, nearest, `[Neighbor] ref`, parallel) | none | ZombieTarget (nearest), Pickup (writes j), optionally Attack (section 3) | feat-pairs-2, GA1, GA8 |
 | `[OrderBy]` / ordered rows (L1) | none | inferred from the pair methods on `Position` (no `[OrderBy]`) (S) | pairs |
-| Deferred load / save (G10) | none (Chunks.cs:19-84, 105-142 by hand) | item 9's form | item 9 |
+| Deferred load / save (G10) | `[ForEach(MaxRows = N)]` (feat-deferred-consume): Read, Generate, Save as methods | done with item 9 | item 9 |
 | `DescribeSchedule`, `MeasureSystems` | Program.cs:15, Server.cs | keep | — |
 | `FloatMode` | none | no float reduction or float loop beyond Walk | — |
 
@@ -135,10 +135,10 @@ L = lines saved (approximate). Output: same unless said.
 
 | System | Lines | After | L |
 |---|---|---|---|
-| ChunkRead | 19-43 | **after item 9**: the plain `[ForEach]` request; the budget `Rules.MaxRequests` kept | ~-12 |
-| ChunkGenerate | 47-84 | **after 9 + 11 / 8c**: `RemoveRed` / `RemoveBlack` (67-68) and the four `SetCount`s (75-78) go (GA10) | ~-18 |
+| ChunkRead | 19-43 | done (item 9): `[ForEach(MaxRows = Rules.MaxRequests), With<Saved>, Consume]`, 23 -> 12 code lines | -11 |
+| ChunkGenerate | 47-84 | item 9 done (a MaxRows method, 34 -> 25 code lines); **after 11 / 8c**: `RemoveRed` / `RemoveBlack` (67-68) and the four `SetCount`s (75-78) go (GA10) | ~-18 |
 | ChunkUnload | 90-98 | `Viewers.Count` long: vector loop, marked `SetUnloading` | 0 |
-| ChunkSave | 105-142 | **after item 9**; the `keep` rule stays as data | ~-10 |
+| ChunkSave | 105-142 | done (item 9): a method that returns to keep a chunk, 36 -> 21 code lines | -15 |
 | comment 17-18 | | stale (only Load / Save are refused in a pass, EECS041): rewrite with item 9 | |
 
 ### 2.3 Movement.cs (98), Aoi.cs (144)

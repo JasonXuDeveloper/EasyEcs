@@ -17,7 +17,7 @@ AllocationTests race the same way.
 ```
 tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System (and stats),
                                ForEachSystem (and Slices), Singleton, Concurrency, Parallel, Runner, Run (entity.Run),
-                               EntityMethod, Consume, Fusion (fused walks against FusionMode.Off twins, the exclusions), Form (EECS080 / EECS084),
+                               EntityMethod, Consume, MaxRows ([ForEach(MaxRows = N)]: the budget, the plain form against the OnUpdate by hand, rows destroyed or changed by an earlier row, write-back, a runner past the stack, 0 B; the generated text, EECS118, EECS119, EECS041's hint), Fusion (fused walks against FusionMode.Off twins, the exclusions), Form (EECS080 / EECS084),
                                Changed (and Mut, ChangedAny), Removed (and the destroy log), Instantiate, DynamicBuffer,
                                Index (and unique keys), Tile (column loads checked once per loop against the indexer, and past the row still throwing; TileTests.Steps.cs: Jacobi and [GaussSeidel] steps against the whole grid, sleeping tiles, 0 B), OrderedIndex, Order (ordered tables: [OrderBy] and OrderRows,
                                the sort, clusters, pairs, churn, saves, parallel passes), Relation, Hierarchy, TargetPolicy, Group, Cleanup,
@@ -40,6 +40,6 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                the shared test components
 tests/EasyEcs.Aot/             the battle server (BattleServer.cs), an ordered table, a pair method (and a parallel one into a Reduce<T>, and one writing both sides, serial and parallel), the prefetching twins (probes, buffer
                                chases, a parallel probe; the gate forced on against off) and the generated forms of an
-                               [Accumulate] total, a [Drain] pass and enum / bool lanes published with Native AOT, warnings as errors, and
+                               [Accumulate] total, a [Drain] pass, a [ForEach(MaxRows = N)] budget (consumed, and a write following its row) and enum / bool lanes published with Native AOT, warnings as errors, and
                                run by CI: no AOT warning and the native binary passes its checks
 ```

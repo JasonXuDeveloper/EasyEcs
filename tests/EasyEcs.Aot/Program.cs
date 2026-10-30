@@ -218,6 +218,18 @@ using (var forms = new World())
     var prefab = new Prefab().Set(new Coin()).SetBuffer<Hit>();
     forms.ReserveBuffers(prefab, 10);
     forms.Instantiate(prefab).Get<DynamicBuffer<Hit>>().Add(new Hit { Amount = 1 });
+
+    // A budget of rows per run ([ForEach(MaxRows = N)]): collected first, run outside the walk, 'ref' writes carried
+    // to the row the entity moved to, more rows than the stack holds taken from the array pool.
+    var orders = new Entity[100];
+    forms.CreateEntities(orders, new Order { Value = 1 });
+    Forms.Raise(forms);
+    Check(orders[0].Order.Value == 11 && orders[2].IsRaised && orders[3].Order.Value == 1, "a budget's write follows its row");
+    long served = 0;
+    Forms.Serve(forms, ref served);
+    Check(served == 70 && forms.Count<Order>() == 30, "a budget of 70 rows, consumed");
+    Forms.Serve(forms, ref served);
+    Check(served == 100 && !forms.Any<Order>(), "the rows over the budget wait a run");
 }
 
 // Stepping tiles: a Jacobi step into the tile's second buffer (a blur that empties out) and a [GaussSeidel] distance
@@ -416,6 +428,10 @@ struct Awake : IComponent { public bool Value; }
 
 struct Hit { public int Amount; }
 
+struct Order : IComponent { public int Value; }
+
+struct Raised : IComponent;
+
 [Accumulate, Sum]
 partial struct Purse : ISingletonComponent { public long Total; }
 
@@ -432,4 +448,18 @@ static class Forms
 
     [Drain]
     public static void Book(in Hit hit, ref long total) => total += hit.Amount;
+
+    [ForEach(MaxRows = 3)]
+    public static void Raise(Entity order, ref Order value)
+    {
+        value.Value += 10;
+        order.SetRaised();                                                // moves the row
+    }
+
+    [ForEach(MaxRows = 70), Consume]
+    public static void Serve(in Order order, World world, ref long served)
+    {
+        world.CreateEntity(new Coin { Value = order.Value });
+        served++;
+    }
 }

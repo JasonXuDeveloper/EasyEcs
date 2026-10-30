@@ -51,7 +51,8 @@ public static partial class EasyEcsAnalyzer
         "TrimExcess, Capture, Restore, RemoveTypes, GroupBy, SortRows, OrderRows, Save, Load, SaveEntities, LoadEntities, LoadEntitiesInto and " +
         "MoveEntities rewrite, reorder or copy whole tables, so a world refuses them while a pass walks its rows (a foreach over " +
         "Query, a [ForEach] method, a job's Execute): they throw InvalidOperationException. Record what to do as data " +
-        "and make the call after the pass.", helpLinkUri: Help("EECS041"));
+        "and make the call after the pass; a [ForEach] method given a budget ([ForEach(MaxRows = N)]) runs on the rows it " +
+        "collects first, outside the walk, where the call is allowed.", helpLinkUri: Help("EECS041"));
 
     public static readonly DiagnosticDescriptor IndexChangedInWalk = new("EECS042", "An indexed component changed while its index is walked",
         "'{0}' adds to the index of '{1}' while this foreach walks it ('{2}'): collect the entities first, then change them",
@@ -493,7 +494,9 @@ public static partial class EasyEcsAnalyzer
         // EECS041: a call a pass refuses, during one.
         if (onWorld && PassRefused.Contains(method.Name) && DuringPass(call, context.ContainingSymbol, core) is { } pass)
             context.ReportDiagnostic(Diagnostic.Create(RefusedInPass, call.Syntax.GetLocation(), "World." + method.Name, pass,
-                "record what to do as data, and make the call after the pass"));
+                pass.StartsWith("[ForEach]", System.StringComparison.Ordinal) && !Symbols.IsEntityMethod((IMethodSymbol)context.ContainingSymbol)
+                    ? "give the method a budget, [ForEach(MaxRows = N)], and it runs on N rows a run outside the walk, where the call is allowed"
+                    : "record what to do as data, and make the call after the pass"));
 
         // EECS042: the indexed component changed during a walk of its index.
         if (IndexChange(call, core) is { } changed)
@@ -582,6 +585,7 @@ public static partial class EasyEcsAnalyzer
         if (containing is not IMethodSymbol method) return null;
         bool forEach = Symbols.IsGeneratedJob(method), job = !forEach && Symbols.JobInterface(method) != null;
         if (!forEach && !job) return null;
+        if (forEach && Symbols.MaxRows(method) > 0) return null; // its collected rows run outside the walk (World.ForEachCollected)
         foreach (var world in worlds)
         {
             bool visited = world switch

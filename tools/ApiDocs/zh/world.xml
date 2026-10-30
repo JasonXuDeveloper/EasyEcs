@@ -709,5 +709,17 @@
       这里只补到它们数量中较大的那个。一次性 O(组件数 + 列表数) 次分配。只能在所有者线程调用。
     </summary>
   </member>
-</doc>
 
+  <member name="M:EasyEcs.World.ForEachCollected``3(``2@,System.Int32,EasyEcs.QueryFilter@)" source="7f0aaeaf131c">
+    <summary>
+      对最多 <paramref name="maxRows" /> 个拥有 <c>T1, T2</c> 全部组件（并且满足 <paramref name="filter" />）的实体运行
+      <paramref name="job" />，按 <c>Query</c> 访问的顺序取前面的实体，在任何遍历之外运行：先收集它们的 id（<c>CollectIds</c>），
+      再依次对每个实体运行 job，传入组件的副本，所以 job 可以做任何变更，包括遍历中不允许的调用（<c>LoadEntities</c>、
+      <c>SaveEntities</c>）。前面的运行销毁了的实体，或者改得不再匹配的实体，会跳过；job 写的组件
+      （<c>IForEachEntity.WriteMask</c>）在它运行之后写回，写到实体移到的行，除非实体失去了这些组件。
+      <c>[ForEach(MaxRows = N)]</c> 方法就是这样运行的。返回 job 运行了几个实体。O(匹配的原型数 + 收集满
+      <paramref name="maxRows" /> 个之前读过的行)；零分配（最多 64 个 id 放在栈上，更多的放在 <c>ArrayPool</c> 的数组里）。
+      只能在所有者线程调用。
+    </summary>
+  </member>
+</doc>

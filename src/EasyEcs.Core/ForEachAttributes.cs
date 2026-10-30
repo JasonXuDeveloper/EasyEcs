@@ -83,6 +83,26 @@ public sealed class ForEachAttribute : Attribute
     /// error (EECS094); <see cref="FusionMode.Off"/> gives the method a walk of its own. Default <see cref="FusionMode.Auto"/>.
     /// </summary>
     public FusionMode FusionMode { get; init; }
+
+    /// <summary>
+    /// The rows the method runs on at most per run of its system: a budget for work that costs too much to do for every
+    /// row at once (the chunks to load or save this tick, the requests a server serves per tick). The first N matching rows
+    /// in the order <c>Query</c> visits them are collected when the pass starts, then the method runs on each of them
+    /// outside the walk (<see cref="World.ForEachCollected{T1, TJob}(ref TJob, int, in QueryFilter)"/>), so it may make any change: it
+    /// may call <c>LoadEntities</c>, <c>SaveEntities</c> and the other calls a pass refuses. The rows past the budget wait
+    /// for the next run; with <see cref="ConsumeAttribute">[Consume]</see> each row is destroyed after the method ran on it,
+    /// so the next run takes the next ones. A row an earlier row's method destroyed, or changed so it no longer matches, is
+    /// skipped. The method's components are copies of the row's, its <c>ref</c> ones written back after it (to the row
+    /// the entity moved to, unless it lost them). Per entity, on one thread: not with <see cref="Parallel"/>,
+    /// <see cref="Slices"/>, component spans, <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c> (the rows past the budget
+    /// would lose their changes), <see cref="Mut{T}"/>, <see cref="Maybe{T}"/>, a view, a tile, <see cref="Scratch{T}"/>
+    /// or <c>[Neighbor]</c> (EECS118). Default 0: every row, in one walk.
+    /// <code>
+    /// [ForEach(MaxRows = 8), Consume]
+    /// static void Load(in LoadRequest request, World world) => world.LoadEntities(Files.Read(request.Pos));   // 8 a tick
+    /// </code>
+    /// </summary>
+    public int MaxRows { get; init; }
 }
 
 /// <summary>

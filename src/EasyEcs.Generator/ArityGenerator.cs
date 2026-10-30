@@ -839,6 +839,48 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         return Match<{{tps}}>(in filter, {{List(n, i => "out _")}}).CollectAlive(filter.Tick, into);
                     }
 
+                    /// <summary>
+                    /// Run <paramref name="job"/> on at most <paramref name="maxRows"/> entities having all of
+                    /// <c>{{tps}}</c> (and matching <paramref name="filter"/>), the first in the order <c>Query</c> visits
+                    /// them, outside any pass: their ids are collected first (<c>CollectIds</c>), then the job runs on each in
+                    /// turn with copies of its components, so it may make any change, the calls a pass refuses included
+                    /// (<c>LoadEntities</c>, <c>SaveEntities</c>). An entity an earlier run destroyed, or changed so it no
+                    /// longer matches, is skipped; the components the job writes (<c>IForEachEntity.WriteMask</c>) are
+                    /// written back after it ran, to the row the entity moved to, unless it lost them. What
+                    /// <c>[ForEach(MaxRows = N)]</c> methods run as. Returns how many entities the job ran on. O(matching
+                    /// archetypes + the rows read until <paramref name="maxRows"/> are collected); allocation-free (up to 64
+                    /// ids on the stack, more in an array of <c>ArrayPool</c>). Owner thread only.
+                    /// </summary>
+                    public int ForEachCollected<{{tps}}, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default)
+                {{cons}}
+                        where TJob : struct, IForEachEntity<{{tps}}>, allows ref struct
+                    {
+                        filter.Whole();
+                        if (maxRows <= 0) return 0;
+                        var match = Match<{{tps}}>(in filter, {{List(n, i => "out _")}});
+                        Span<EntityId> ids = stackalloc EntityId[CollectedOnStack];
+                        EntityId[] rented = null;
+                        if (maxRows > CollectedOnStack)
+                        {
+                            int matching = match.CountAlive(filter.Tick); // the array's size: the rows there are, not the budget
+                            if (matching > CollectedOnStack) ids = rented = ArrayPool<EntityId>.Shared.Rent(Math.Min(maxRows, matching));
+                        }
+
+                        int taken = match.CollectAlive(filter.Tick, ids.Slice(0, Math.Min(maxRows, ids.Length))), ran = 0;
+                        try
+                        {
+                            for (int i = 0; i < taken; i++)
+                                if (TryGetEntity(ids[i], out var entity) && entity.RunCollected<{{tps}}, TJob>(ref job, in filter, match))
+                                    ran++;
+                        }
+                        finally
+                        {
+                            if (rented != null) ArrayPool<EntityId>.Shared.Return(rented);
+                        }
+
+                        return ran;
+                    }
+
 
                 """);
         }
@@ -910,6 +952,30 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         return false;
             {{refs}}
                     RunJob<{{tps}}, TJob>(ref job, archetype, slot, {{args}});
+                    return true;
+                }
+
+                /// <summary>
+                /// The job of <c>World.ForEachCollected</c> on this entity, outside any pass: false when it is not
+                /// alive, lacks a component or fails <paramref name="filter"/>. The job gets copies of the components (a
+                /// structural change it makes moves rows, and with no pass running nothing keeps a ref to the old row);
+                /// those it writes go back to the row the entity is in after it ran, stamped, unless it lost them.
+                /// </summary>
+                internal bool RunCollected<{{tps}}, TJob>(ref TJob job, in QueryFilter filter, QueryMatch match)
+            {{cons}}
+                    where TJob : struct, IForEachEntity<{{tps}}>, allows ref struct
+                {
+                    var archetype = LocateArchetype(out int slot, false);
+                    if (archetype == null) return false;
+                    if (filter.HasOverflow ? !World.RowPasses(match, archetype, slot, filter.Tick) : !filter.Passes(archetype, slot, filter.Tick))
+                        return false;
+            {{Lines(n, i => $"        ref T{i} r{i} = ref At<T{i}>(archetype, slot);\n        if (Unsafe.IsNullRef(ref r{i})) return false;\n        var c{i} = r{i};")}}
+                    job.Execute(this, {{List(n, i => $"ref c{i}")}});
+                    if (TJob.WriteMask == 0) return true;
+                    archetype = LocateArchetype(out slot, false); // where the job left the entity
+                    if (archetype == null) return true;
+                    var world = _world;
+            {{Lines(n, i => $"        if ((TJob.WriteMask & {1 << (i - 1)}) != 0 && !Unsafe.IsNullRef(ref r{i} = ref At<T{i}>(archetype, slot)))\n        {{\n            r{i} = c{i};\n            archetype.Stamp<T{i}>(slot, world.ChangeTick);\n        }}")}}
                     return true;
                 }
 

@@ -17,7 +17,8 @@ namespace EasyEcs.Generator;
 /// be one (EECS081), an [UpdateInterval] that cannot apply (EECS083), a [ForEach] method that destroys every entity it visits by hand (EECS084), a [Consume] that
 /// cannot apply (EECS085); a batch method's vector loop written by hand that the generator writes from the method
 /// for one row (EECS103, <see cref="HandSimd"/>); a [Drain] method the generator cannot write (EECS108) and the
-/// walk and clear of Emitted&lt;T&gt; it writes, written by hand (EECS109). Each computes its code fix as diagnostic properties.
+/// walk and clear of Emitted&lt;T&gt; it writes, written by hand (EECS109); rows collected and looped over by hand in an OnUpdate,
+/// which a [ForEach(MaxRows = N)] method gets generated (EECS119). Each computes its code fix as diagnostic properties.
 /// </summary>
 public static partial class EasyEcsAnalyzer
 {
@@ -90,6 +91,25 @@ public static partial class EasyEcsAnalyzer
         "loop is a system's OnUpdate whole: the singletons it took by ref, the list, the loop and the Clear.",
         helpLinkUri: Help("EECS109"));
 
+    public static readonly DiagnosticDescriptor HandWrittenCollected = new("EECS119", "Rows collected and run by hand",
+        "'{0}' collects up to {1} rows of {2} and loops over them by hand: a [ForEach(MaxRows = {1})] method over {2} gets the collection and the loop generated, and runs outside the walk as this loop does",
+        Category, DiagnosticSeverity.Warning, true,
+        "A system's OnUpdate that collects the ids of the first N matching rows (CollectIds into a span of N) and loops over " +
+        "them serves a budget of N rows a run outside any pass, where it may load, save, create and destroy: what a " +
+        "[ForEach(MaxRows = N)] method does, its components handed to it as copies and its 'ref' ones written back, " +
+        "[Consume] destroying each row after it. The method holds only the loop's body. The fix writes it when the hook " +
+        "is that whole: the span, the CollectIds (its filter a QueryFilter of With / Without), a foreach over the ids that " +
+        "takes each entity with GetEntity, guards the method does not need (Any of the rows' components, a count of 0) and " +
+        "declarations it can move into the method.",
+        helpLinkUri: Help("EECS119"));
+
+    /// <summary>
+    /// EECS119's properties: the [ForEach] method's attributes, name, parameters and body (one line per line, indented
+    /// from 0), and the filter field the fix deletes (no other use), if any.
+    /// </summary>
+    public const string CollectedAttributes = "CollectedAttributes", CollectedName = "CollectedName", CollectedParameters = "CollectedParameters",
+        CollectedBody = "CollectedBody", CollectedFilter = "CollectedFilter";
+
     /// <summary>EECS109's property: the record method's parameters after the record ("ref global::S s, ..."), when the fix applies.</summary>
     public const string RecordParameters = "RecordParameters", RecordName = "Record";
 
@@ -107,6 +127,7 @@ public static partial class EasyEcsAnalyzer
         context.RegisterSymbolAction(AnalyzeConsume, SymbolKind.Method);
         context.RegisterSymbolAction(AnalyzeRecordPass, SymbolKind.Method);
         context.RegisterSyntaxNodeAction(AnalyzeHandWrittenRecordPass, SyntaxKind.ForEachStatement);
+        context.RegisterSyntaxNodeAction(AnalyzeHandWrittenCollected, SyntaxKind.InvocationExpression);
         context.RegisterCompilationStartAction(AnalyzeEntityJobs);
     }
 
@@ -261,6 +282,220 @@ public static partial class EasyEcsAnalyzer
         var parameters = singletons.Select(s => $"ref {s.Type.ToMinimalDisplayString(model, loop.SpanStart)} {s.Name}").ToList();
         if (usesWorld) parameters.Add($"{worldParameter.Type.ToMinimalDisplayString(model, loop.SpanStart)} {worldParameter.Name}");
         return string.Join(", ", parameters);
+    }
+
+    // ---------------- EECS119: rows collected and run by hand ----------------
+
+    /// <summary>
+    /// EECS119: <c>int n = world.CollectIds&lt;T..&gt;(ids, filter)</c> in a system's OnUpdate, followed in the same block
+    /// by a loop over <c>ids</c>. The fix's properties when the hook is the canonical whole (<see cref="CollectedFix"/>).
+    /// </summary>
+    private static void AnalyzeHandWrittenCollected(SyntaxNodeAnalysisContext context)
+    {
+        var syntax = (InvocationExpressionSyntax)context.Node;
+        if (syntax.Expression is not MemberAccessExpressionSyntax { Name: GenericNameSyntax { Identifier.ValueText: "CollectIds" } }
+            || syntax.ArgumentList.Arguments.Count is 0 or > 2
+            || syntax.Parent is not EqualsValueClauseSyntax { Parent: VariableDeclaratorSyntax { Parent: VariableDeclarationSyntax { Variables.Count: 1, Parent: LocalDeclarationStatementSyntax collect } } counted }
+            || collect.Parent is not BlockSyntax { Parent: MethodDeclarationSyntax hookSyntax } block) return;
+        var model = context.SemanticModel;
+        var ct = context.CancellationToken;
+        if (model.GetDeclaredSymbol(hookSyntax, ct) is not { } hook || Symbols.Hook(hook) != Symbols.HookKind.Update
+            || model.GetOperation(syntax, ct) is not IInvocationOperation { TargetMethod: var target } call || !Symbols.Named(target.ContainingType, Symbols.World)
+            || call.Arguments.Length == 0 || Symbols.Unwrap(call.Arguments[0].Value) is not ILocalReferenceOperation { Local: var ids }
+            || model.GetDeclaredSymbol(counted, ct) is not ILocalSymbol count) return;
+        int at = block.Statements.IndexOf(collect);
+        StatementSyntax? loop = null;
+        for (int i = at + 1; i < block.Statements.Count && loop == null; i++)
+            if (block.Statements[i] is ForEachStatementSyntax or ForStatementSyntax && Names(block.Statements[i], ids, model, ct)) loop = block.Statements[i];
+        if (loop == null) return;
+
+        // The budget: the span's length, a constant for the attribute.
+        var size = ids.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(ct) is VariableDeclaratorSyntax { Initializer.Value: var made }
+            ? made switch
+            {
+                StackAllocArrayCreationExpressionSyntax { Type: ArrayTypeSyntax { RankSpecifiers: { Count: 1 } ranks } } when ranks[0].Sizes.Count == 1 => ranks[0].Sizes[0],
+                ArrayCreationExpressionSyntax { Type.RankSpecifiers: { Count: 1 } ranks } when ranks[0].Sizes.Count == 1 => ranks[0].Sizes[0],
+                _ => null,
+            }
+            : null;
+        string budget = size?.WithoutTrivia().ToString() ?? "N";
+        string types = string.Join(", ", target.TypeArguments.Select(t => t.ToMinimalDisplayString(model, syntax.SpanStart)));
+        var properties = ImmutableDictionary<string, string?>.Empty;
+        if (size != null && model.GetConstantValue(size, ct) is { HasValue: true, Value: int }
+            && CollectedFix(block, collect, loop, call, hook, ids, count, budget, model, ct) is { } fix)
+            properties = fix.Add(FixKind, "Collected");
+        context.ReportDiagnostic(Diagnostic.Create(HandWrittenCollected, syntax.GetLocation(), properties,
+            $"{hook.ContainingType.Name}.{hook.Name}", budget, types));
+    }
+
+    /// <summary>Whether <paramref name="node"/> names <paramref name="symbol"/>.</summary>
+    private static bool Names(SyntaxNode node, ISymbol symbol, SemanticModel model, System.Threading.CancellationToken ct) =>
+        node.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>()
+            .Any(n => n.Identifier.ValueText == symbol.Name && SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(n, ct).Symbol, symbol));
+
+    /// <summary>
+    /// The [ForEach(MaxRows = N)] method EECS119's fix writes, as properties, or null when the hook is not the canonical
+    /// whole: a static OnUpdate(World) holding the span, the CollectIds (no filter, or a QueryFilter of With / Without
+    /// built inline or in a static readonly field), guards (<c>if (!world.Any&lt;T&gt;()) return;</c> of the rows'
+    /// components, <c>if (n == 0) return;</c>), declarations without calls the method can make per row, and last a
+    /// <c>foreach (var id in ids[..n])</c> whose body starts with <c>var e = world.GetEntity(id);</c> and neither
+    /// returns nor breaks out of the loop (a 'continue' becomes a 'return'; the id becomes <c>e.Id</c>).
+    /// </summary>
+    private static ImmutableDictionary<string, string?>? CollectedFix(BlockSyntax block, LocalDeclarationStatementSyntax collect, StatementSyntax loop,
+        IInvocationOperation call, IMethodSymbol hook, ILocalSymbol ids, ILocalSymbol count, string budget, SemanticModel model, System.Threading.CancellationToken ct)
+    {
+        if (!hook.IsStatic || hook.Parameters.Length != 1 || !Symbols.Named(hook.Parameters[0].Type, Symbols.World)
+            || block.Statements[block.Statements.Count - 1] != loop || loop is not ForEachStatementSyntax { Statement: BlockSyntax { Statements.Count: >= 1 } body } each
+            || Symbols.Unwrap(call.Instance) is not IParameterReferenceOperation { Parameter: var world } || !SymbolEqualityComparer.Default.Equals(world, hook.Parameters[0])) return null;
+        bool Is(ExpressionSyntax? e, ISymbol symbol) => e is IdentifierNameSyntax && SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(e, ct).Symbol, symbol);
+        int position = call.Syntax.SpanStart;
+        string Short(ITypeSymbol type) => type.ToMinimalDisplayString(model, position);
+
+        // The loop: foreach over ids[..n] (or ids[0..n], ids.Slice(0, n)), its first statement the entity.
+        bool walksIds = each.Expression switch
+        {
+            ElementAccessExpressionSyntax { Expression: var span, ArgumentList.Arguments: { Count: 1 } index } =>
+                index[0].Expression is RangeExpressionSyntax { RightOperand: var end, LeftOperand: var start }
+                && Is(span, ids) && Is(end, count) && (start == null || start is LiteralExpressionSyntax { Token.ValueText: "0" }),
+            InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Slice", Expression: var span }, ArgumentList.Arguments: { Count: 2 } slice } =>
+                slice[0].Expression is LiteralExpressionSyntax { Token.ValueText: "0" } && Is(span, ids) && Is(slice[1].Expression, count),
+            _ => false,
+        };
+        if (!walksIds || model.GetDeclaredSymbol(each, ct) is not ILocalSymbol id
+            || body.Statements[0] is not LocalDeclarationStatementSyntax { Declaration.Variables: { Count: 1 } declared } || declared[0] is not { Initializer.Value: InvocationExpressionSyntax get } entityDeclarator
+            || model.GetOperation(get, ct) is not IInvocationOperation { TargetMethod.Name: "GetEntity", Arguments: { Length: 1 } gottenArguments } got
+            || gottenArguments[0] is not { } gotten
+            || !Symbols.Named(got.TargetMethod.ContainingType, Symbols.World) || Symbols.Unwrap(got.Instance) is not IParameterReferenceOperation { Parameter: var from }
+            || !SymbolEqualityComparer.Default.Equals(from, world) || Symbols.Unwrap(gotten.Value) is not ILocalReferenceOperation { Local: var gottenId }
+            || !SymbolEqualityComparer.Default.Equals(gottenId, id) || model.GetDeclaredSymbol(entityDeclarator, ct) is not ILocalSymbol entity) return null;
+
+        // The filter: none, an inline chain, or a static readonly field initialized with one.
+        var queried = call.TargetMethod.TypeArguments;
+        var filters = new List<string>();
+        var required = new List<ITypeSymbol>(queried);
+        string? field = null;
+        if (call.Arguments.Length == 2 && !call.Arguments[1].IsImplicit)
+        {
+            var chain = Symbols.Unwrap(call.Arguments[1].Value);
+            if (chain is IFieldReferenceOperation { Field: { IsStatic: true, IsReadOnly: true } filterField })
+            {
+                if (filterField.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(ct) is not VariableDeclaratorSyntax { Initializer.Value: { } initializer, Parent: VariableDeclarationSyntax { Variables.Count: 1 } }
+                    || initializer.SyntaxTree != block.SyntaxTree) return null;
+                chain = Symbols.Unwrap(model.GetOperation(initializer, ct));
+                // Deleted when the call is its only use in the type.
+                if (filterField.ContainingType.DeclaringSyntaxReferences.Length == 1
+                    && filterField.ContainingType.DeclaringSyntaxReferences[0].GetSyntax(ct).DescendantNodes().OfType<IdentifierNameSyntax>().Count(n => n.Identifier.ValueText == filterField.Name) == 1)
+                    field = filterField.Name;
+            }
+            while (chain is IInvocationOperation { TargetMethod: var step } link && Symbols.Named(step.ContainingType, "EasyEcs.QueryFilter"))
+            {
+                if (step.Name == "Create" && step.IsStatic && link.Arguments.Length == 0)
+                {
+                    chain = null;
+                    break;
+                }
+                if (step.Name is not ("With" or "Without") || step.TypeArguments.Length != 1 || link.Arguments.Length != 0) return null;
+                filters.Insert(0, $"{step.Name}<{Short(step.TypeArguments[0])}>"); // the chain is read from its end
+                if (step.Name == "With") required.Add(step.TypeArguments[0]);
+                chain = Symbols.Unwrap(link.Instance);
+            }
+            if (chain != null) return null;
+        }
+        var attributes = new List<string> { $"ForEach(MaxRows = {budget})" };
+        attributes.AddRange(queried.Select(t => $"With<{Short(t)}>"));
+        attributes.AddRange(filters);
+
+        // The other statements: the span, guards, declarations the method makes per row.
+        var moved = new List<StatementSyntax>();
+        foreach (var statement in block.Statements)
+        {
+            if (statement == collect || statement == loop) continue;
+            switch (statement)
+            {
+                case LocalDeclarationStatementSyntax { Declaration.Variables: { Count: 1 } span } when SymbolEqualityComparer.Default.Equals(model.GetDeclaredSymbol(span[0], ct), ids):
+                    continue;
+                case IfStatementSyntax { Statement: ReturnStatementSyntax { Expression: null }, Else: null } guard when Guard(guard.Condition):
+                    continue;
+                case LocalDeclarationStatementSyntax { Declaration.Variables.Count: 1 } local
+                    when !local.DescendantNodes().Any(n => n is InvocationExpressionSyntax or AssignmentExpressionSyntax or PostfixUnaryExpressionSyntax or PrefixUnaryExpressionSyntax or AnonymousFunctionExpressionSyntax)
+                         && !Names(local, ids, model, ct) && !Names(local, count, model, ct) && block.Statements.IndexOf(local) > block.Statements.IndexOf(collect):
+                    moved.Add(local);
+                    continue;
+                default:
+                    return null;
+            }
+        }
+
+        bool Guard(ExpressionSyntax condition) => condition switch
+        {
+            // if (!world.Any<T>()) return;  of the rows' components: no rows, nothing to collect.
+            PrefixUnaryExpressionSyntax { RawKind: (int)SyntaxKind.LogicalNotExpression, Operand: InvocationExpressionSyntax any }
+                => model.GetOperation(any, ct) is IInvocationOperation { TargetMethod: { Name: "Any" } anyMethod } anyCall
+                   && anyCall.Arguments.All(a => a.IsImplicit)
+                   && Symbols.Named(anyMethod.ContainingType, Symbols.World) && Symbols.Unwrap(anyCall.Instance) is IParameterReferenceOperation { Parameter: var p }
+                   && SymbolEqualityComparer.Default.Equals(p, world)
+                   && anyMethod.TypeArguments.All(t => required.Contains(t, SymbolEqualityComparer.Default)),
+            // if (n == 0) return;  (or n <= 0)
+            BinaryExpressionSyntax { RawKind: (int)SyntaxKind.EqualsExpression or (int)SyntaxKind.LessThanOrEqualExpression, Left: var left, Right: LiteralExpressionSyntax { Token.ValueText: "0" } } => Is(left, count),
+            _ => false,
+        };
+
+        // The body: no return, no break out of the loop, no use of the span or the count; continue -> return, id -> e.Id.
+        var rest = body.Statements.Skip(1).ToList();
+        var replacements = new Dictionary<SyntaxNode, SyntaxNode>();
+        foreach (var statement in rest)
+            foreach (var node in statement.DescendantNodesAndSelf(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax)))
+                switch (node)
+                {
+                    case ReturnStatementSyntax or YieldStatementSyntax or GotoStatementSyntax:
+                        return null;
+                    case BreakStatementSyntax or ContinueStatementSyntax when !InnerLoop(node, each):
+                        if (node is BreakStatementSyntax) return null;
+                        replacements[node] = SyntaxFactory.ReturnStatement().WithTriviaFrom(node);
+                        break;
+                    case IdentifierNameSyntax named when named.Identifier.ValueText == ids.Name || named.Identifier.ValueText == count.Name || named.Identifier.ValueText == id.Name:
+                        var symbol = model.GetSymbolInfo(named, ct).Symbol;
+                        if (SymbolEqualityComparer.Default.Equals(symbol, ids) || SymbolEqualityComparer.Default.Equals(symbol, count)) return null;
+                        if (SymbolEqualityComparer.Default.Equals(symbol, id))
+                            replacements[named] = SyntaxFactory.ParseExpression($"{entity.Name}.Id").WithTriviaFrom(named);
+                        break;
+                }
+
+        var lines = new List<string>();
+        foreach (var statement in moved.Concat(rest))
+        {
+            var leading = statement.GetLeadingTrivia();
+            string indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last().ToFullString() : "";
+            var text = replacements.TryGetValue(statement, out var whole) ? whole
+                : statement.ReplaceNodes(statement.DescendantNodes().Where(replacements.ContainsKey), (old, _) => replacements[old]);
+            foreach (var line in text.ToFullString().Replace("\r\n", "\n").TrimEnd('\n').Split('\n'))
+            {
+                if (line.Trim().Length == 0 && lines.Count == 0) continue;
+                lines.Add(line.StartsWith(indent, StringComparison.Ordinal) ? line.Substring(indent.Length) : line.TrimStart());
+            }
+        }
+
+        bool usesWorld = moved.Concat(rest).Any(st => Names(st, world, model, ct));
+        bool usesEntity = rest.Any(st => Names(st, entity, model, ct) || Names(st, id, model, ct));
+        var parameters = new List<string>();
+        if (usesEntity) parameters.Add($"{Short(entity.Type)} {entity.Name}");
+        if (usesWorld) parameters.Add($"{Short(world.Type)} {world.Name}");
+
+        string system = hook.ContainingType.Name;
+        string name = system.EndsWith("System", StringComparison.Ordinal) && system.Length > 6 ? system.Substring(0, system.Length - 6) : "Run";
+        var properties = ImmutableDictionary<string, string?>.Empty
+            .Add(CollectedAttributes, string.Join(", ", attributes)).Add(CollectedName, name)
+            .Add(CollectedParameters, string.Join(", ", parameters)).Add(CollectedBody, string.Join("\n", lines));
+        return field != null ? properties.Add(CollectedFilter, field) : properties;
+    }
+
+    /// <summary>A break or continue inside a loop (or, for a break, a switch section) nested in <paramref name="outer"/> belongs to it.</summary>
+    private static bool InnerLoop(SyntaxNode node, SyntaxNode outer)
+    {
+        for (var at = node.Parent; at != null && at != outer; at = at.Parent)
+            if (at is ForStatementSyntax or ForEachStatementSyntax or WhileStatementSyntax or DoStatementSyntax
+                || node is BreakStatementSyntax && at is SwitchSectionSyntax) return true;
+        return false;
     }
 
     // ---------------- EECS103: a vector loop written by hand ----------------
@@ -588,7 +823,7 @@ public sealed class FormAnalyzer : EasyEcsAnalyzer.Area
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         EasyEcsAnalyzer.BadConsume, EasyEcsAnalyzer.BadUpdateInterval, EasyEcsAnalyzer.HandWrittenConsume,
         EasyEcsAnalyzer.HandWrittenEntityJob, EasyEcsAnalyzer.HandWrittenVectorLoop, EasyEcsAnalyzer.BadRecordPass,
-        EasyEcsAnalyzer.HandWrittenRecordPass);
+        EasyEcsAnalyzer.HandWrittenRecordPass, EasyEcsAnalyzer.HandWrittenCollected);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeForms(context);
 }

@@ -26,6 +26,7 @@ public sealed partial class SystemGenerator
             bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
             // A pair method's loop is its pair job's (SystemGenerator.Pairs.cs).
             if (PairForm.IsPairMethod(method)) return new LoopModel(owner, order, null, "", PairModel.Create(method, syntax, model, parallel, ct));
+            if (Symbols.MaxRows(method) > 0) return null; // its collected rows run one by one (World.ForEachCollected)
             var simd = ForEachModel.VectorLoop(method, syntax, model, parallel, ct, out string? scalar);
             return new LoopModel(owner, order, simd, scalar ?? "", null);
         }

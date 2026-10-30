@@ -29,11 +29,11 @@ names the skill:
 | docs pass | `audit-docs` |
 | bench sync, master | `verify` |
 
-## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
+## Running (1 agent, worktree under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-`feat-tiles-rest` (items 11, 12a, 12b leftovers): finished, waiting for the merge (docs-todos "feat-tiles-rest").
+`feat-generator-cost` (G1, the generator's per-keystroke cost).
 
-Merged since the last update: tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
+Merged since the last update: `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; names under owner review), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
 at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
 vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the owner's M4: no case slower past
@@ -295,6 +295,15 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        drain. Analyzer rule and code fix for the hand-written form; proof: VoxelServer lines before / after, tests,
        0 B steady state. The form carries a per-tick budget (`voxel-rewrite.md` GA9: VoxelServer caps requests per
        tick, `Rules.MaxRequests`; the owner wants the cap kept).
+       **Built on `feat-deferred-consume`, not merged** (names await the owner's review): `[ForEach(MaxRows = N)]`
+       collects the first N rows (Query order) and runs the method on each outside the walk
+       (`World.ForEachCollected`), so it may load and save; `[Consume]` destroys per row. EECS118 (invalid MaxRows),
+       EECS119 (hand-written CollectIds + loop in OnUpdate, code fix), EECS041 names the budget; ids provisional.
+       VoxelServer: ChunkRead / ChunkGenerate / ChunkSave as methods, Systems/Chunks.cs 143 -> 103 lines, output
+       unchanged. TickBenchmark base / head (two rounds, ms, 0 B): 50: 57.4 / 53.9, 54.8 / 55.5; 500: 85.8 / 83.9,
+       85.3 / 86.5; 2000: 133.5 / 147.7, 133.5 / 116.8 (inside the noise). MaxRowsBenchmark generated / hand:
+       1.06-1.14x at budget 64, 1.18-1.30x at 256 (6-10 ns a row: the per-row destroy and lookup), 0 B. Docs to-dos
+       in docs-todos.md (feat-deferred-consume).
 10. [x] **Streaming stores in generated loops, gated** (merged 1b1aa12: Predict 0.86-0.94x, Mix 0.90-0.92x past the
        cache with the reader counted in, gate off inside; the owner's M4 run, 2026-10-29, one round, 0 B: Auto is the
        fastest of Auto / Off / On in all 8 cases, 0.80-0.87x of Off at 1M rows and 0.75-0.87x at 16M, so STNP stays gated

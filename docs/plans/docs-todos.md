@@ -1591,3 +1591,40 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
 - api.mdx + zh: `TileCells.Pool` is generated-code API (hidden): no complexity row, like `TileNeighbors.Of`.
 - samples/voxel-server page + README: the options region lost the Block and Fluid `MaxPooledLength` lines (the page
   includes the file; check the walkthrough's sentence about the pools).
+
+## feat-deferred-consume (backlog item 9, G10 / GA9): `[ForEach(MaxRows = N)]`
+
+- guide/systems (en + zh): a section "A budget per run: MaxRows" next to `[Consume]` (anatomy: what it is; when to
+  use it: loads, saves, requests a server serves per tick, anything a pass refuses (EECS041) or that costs too much
+  for every row at once; how: `You write` / `The generator writes` from real output (the job, `world.ForEachCollected`,
+  the Visit count `Math.Min(Count, N)`); semantics: the first N rows in Query order collected when the pass starts,
+  the method run on each outside the walk on copies of its components, `ref` ones written back (to the row the entity
+  moved to, unless it lost them) and stamped, rows an earlier row's method destroyed or changed so they no longer
+  match skipped, the rest wait; with `[Consume]` each row destroyed after its method (never a DestroyAll); singletons
+  resolved once per pass as in any job; a throwing row keeps the rows after it; costs: CollectIds + one Entity lookup
+  and a component copy per row, up to 64 ids on the stack, more from ArrayPool (MaxRowsBenchmark numbers through
+  BenchTable); pitfalls: EECS118 (parallel, Slices, change filters, spans, Maybe, Mut, view, tile, Scratch,
+  [Neighbor], SimdMode.Require, FusionMode.Require), no vector loop and no fusion (the schedule line says "at most N
+  rows per run, collected first, then run one by one outside the walk"), the system runs alone when it takes the World
+  or consumes.
+- guide/systems `[Consume]` section: a consuming method with MaxRows destroys per row; the "Skip it for" Callout can
+  point to MaxRows for a backlog.
+- guide/structural-changes and guide/saves (en + zh): LoadEntities / SaveEntities / MoveEntities from a [ForEach]
+  method with a budget (no OnUpdate + CollectIds by hand any more); EECS041's message now says so.
+- guide/analyzer (en + zh): EECS118 (Error, Invalid [ForEach(MaxRows = N)]) and EECS119 (Warning, rows collected
+  and looped over by hand in an OnUpdate; fix: the [ForEach(MaxRows = N)] method, its filter field deleted when
+  unused, guards dropped, declarations moved in, continue -> return, id -> e.Id; no fix for a for loop, a break or
+  return out of the loop, a use of the count, or statements it cannot move, such as the copy-then-DestroyEntities
+  shape). Ids provisional (taken at merge: 110-114 unused here, 115-117 taken by tiles). Rule list and range in
+  src/EasyEcs.Generator/AGENTS.md and the public skill.
+- api.mdx + zh: `World.ForEachCollected<T1..T9, TJob>(ref job, maxRows, in filter)` complexity row (O(matching
+  archetypes + the rows read until maxRows are collected) + one lookup per row); `ForEachAttribute.MaxRows`.
+- samples/voxel-server.mdx + zh: the load / unload walkthrough (regions `load`, `unload` of Systems/Chunks.cs) now
+  shows the plain methods: say the budget is `MaxRows = Rules.MaxRequests`, that the requests are consumed per row,
+  and that Save returns to keep a chunk; the "(a pass may not load or create entities, EECS041)" wording in the page
+  if it repeats the old comment. The README's file map line for Systems/Chunks.cs if it names OnUpdate.
+- skills/easyecs/SKILL.md: "work a pass refuses, or a budget per tick: [ForEach(MaxRows = N)], not OnUpdate +
+  CollectIds".
+- decisions.mdx + zh: the decision record (draft in the item-9 report); roadmap: item 9 done; changelog (New) and
+  README "What's new".
+- glossary: "budget" (a cap of rows per run, game engines' time-sliced work) if the docs pass keeps the word.

@@ -32,7 +32,8 @@ EcsSystem.cs                 [EcsSystem] (a system: a ref struct of static membe
                              access and cadence) and ISystemSet (one generated __EasyEcsSystems per assembly: the
                              switch over its systems' codes, registered by a module initializer, weakly held for
                              collectible assemblies), the registry World.AddSystem<T> resolves a type through
-ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkSize, SimdMode), [With<T>], [Without<T>], [Changed<T>],
+ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkSize, SimdMode, MaxRows: a budget of rows per run, collected first and
+                             run outside the walk: World.ForEachCollected, generated with CollectIds), [With<T>], [Without<T>], [Changed<T>],
                              [Removed<T>] ([WithAny<..>] / [ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
                              [Consume] (the visited rows destroyed after the pass), [EntityMethod] (a static method run
                              on one entity through a generated entry point), [Drain] (a static method run on
