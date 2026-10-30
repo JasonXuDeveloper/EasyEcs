@@ -517,6 +517,10 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       (48 against 33 instructions; Tier1 listing and TileRestart / ping-pong benchmarks before and after);
       (d) an Info rule naming why a `TileCursor` load runs checked (the loop the generator cannot prove: the variable
       written in the body, an unreadable bound; the reasons `TileLoad.Read` returns null for), as EECS055 does.
+      (e) the per-tile frame read once without a second call (`Enter` handing the tile out through an out parameter
+      the job keeps in a register; the reverted Begin/Frame split's untried design), measured on TileActive and
+      TileWoken; (f) a benchmark of `Rows()` walking odd `[GaussSeidel]` sweeps backwards against forwards, to settle
+      the 8c drop with numbers. (e) and (f) by the owner's rule "try it now" (AGENTS.md, 2026-10-30).
       (c) and (d) edit the generator: after `feat-roslyn-guidance` merges.
 
 ## Finish
