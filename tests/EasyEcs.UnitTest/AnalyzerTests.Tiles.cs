@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
 
@@ -69,6 +70,49 @@ public partial class AnalyzerTests
     [Test]
     public Task ARelaxationThatSweepsIsClean() => AssertClean(GeneratorTests.Components, TileParts,
         "[EcsSystem] public ref struct S { [ForEach, GaussSeidel] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); foreach (var row in t.Rows()) { var c = t.At(row); var into = t.Write(row); for (int x = 0; x < 4; x++) into[x] = (byte)System.Math.Min(c[x, 0, 0], c[x - 1, 0, 0] + 1); } } }");
+
+    private static string Loading(string loop) =>
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Tile<byte, G> t, ref P p) { t.ExchangeHalo(); foreach (var row in t.Rows()) { var c = t.At(row); " + loop + " } } }";
+
+    [TestCase("for (int x = 0; x < 4; x += 4) { p.V += c.Load128<byte>(x).ToScalar(); x += 0; }", "writes 'x'")]                             // written in the body
+    [TestCase("for (int x = 0; x < 4; x++) { ref int y = ref x; p.V += c.Load128<byte>(x).ToScalar(); }", "takes a reference")]          // a reference to it
+    [TestCase("for (int x = 0; x < p.V; x += 4) p.V += c.Load128<byte>(x).ToScalar();", "condition")]                                       // a bound it cannot read
+    [TestCase("for (int x = 0; 4 > x; x += 4) p.V += c.Load128<byte>(x).ToScalar();", "condition")]                                         // the bound first
+    [TestCase("for (int x = 0; x < 4; x += p.V) p.V += c.Load128<byte>(x).ToScalar();", "positive constant")]                              // a step that is not a constant
+    [TestCase("for (int x = 3; x >= 0; x--) p.V += c.Load128<byte>(x - 3).ToScalar();", "condition")]                                      // walked backwards
+    [TestCase("for (int x = p.V; x < 4; x += 4) p.V += c.Load128<byte>(x).ToScalar();", "starts from a constant")]                          // a start that is not a constant
+    [TestCase("int x = row.Z; p.V += c.Load128<byte>(x).ToScalar();", "not declared by a for loop")]                                         // no loop
+    [TestCase("int x = 0; while (x < 4) { p.V += c.Load128<byte>(x).ToScalar(); x += 4; }", "not declared by a for loop")]                   // a while loop
+    [TestCase("for (int x = 0; x < 4; x += 4) p.V += c.Load128<byte>(x * 2).ToScalar();", "not the variable of a for loop")]                // a column that is not x + k
+    [TestCase("for (int x = 0; x < 4; x += 4) { int L(int k) => k; p.V += c.Load256<byte>(L(x)).ToScalar(); }", "not the variable")]          // a call around the column
+    public async Task ATileLoadTheGeneratorCannotFollowReports(string loop, string reason)
+    {
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, Loading(loop)])).Where(d => d.Id == "EECS120").ToArray();
+        Assert.That(found, Has.Length.EqualTo(1));
+        Assert.That(found[0].Severity, Is.EqualTo(Microsoft.CodeAnalysis.DiagnosticSeverity.Info));
+        Assert.That(found[0].GetMessage(), Does.Contain(reason));
+    }
+
+    [TestCase("for (int x = 0; x < 4; x += 4) p.V += c.Load128<byte>(x).ToScalar();")]                                     // proven: the interceptor's
+    [TestCase("for (int x = 0; x < 4; x += 4) p.V += c.Load128<byte>(1 + x).ToScalar();")]
+    [TestCase("for (int x = 0; x <= 3; ++x) p.V += c.Load128<byte>(x - 1).ToScalar();")]
+    [TestCase("p.V += c.Load128<byte>(1).ToScalar() + c.Load128<byte>().ToScalar() + c.Load128<byte>(dy: 0).ToScalar();")] // constants: the JIT checks them
+    [TestCase("const int k = 2; p.V += c.Load128<byte>(k).ToScalar();")]
+    [TestCase("foreach (var col in c.Columns(4)) p.V += col.Load128<byte>(-1).ToScalar();")]                              // a column walk
+    [TestCase("int x = row.Z; p.V += c[x, 0, 0];")]                                                                        // the indexer: not a load
+    public async Task TileLoadsTheGeneratorFollowsAreClean(string loop) =>
+        Assert.That((await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, Loading(loop)])).Where(d => d.Id == "EECS120"), Is.Empty);
+
+    // A cursor is a ref struct, so a lambda or local function takes the tile as a parameter and captures only the column.
+    [TestCase("int L(Tile<byte, G> u) => u.At(new TileRow<G>(0, 0)).Load128<byte>(x).ToScalar(); p.V += L(t);", "local function")]
+    [TestCase("Ld f = u => u.At(new TileRow<G>(0, 0)).Load128<byte>(x).ToScalar(); p.V += f(t);", "lambda")]
+    public async Task ALoadInAFunctionInsideTheLoopReports(string body, string reason)
+    {
+        string source = "public delegate int Ld(Tile<byte, G> u); [EcsSystem] public ref struct S { [ForEach] static void A(Tile<byte, G> t, ref P p) { t.ExchangeHalo(); for (int x = 0; x < 4; x += 4) { " + body + " } } }";
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, source])).Where(d => d.Id == "EECS120").ToArray();
+        Assert.That(found, Has.Length.EqualTo(1));
+        Assert.That(found[0].GetMessage(), Does.Contain(reason));
+    }
 
     [Test]
     public async Task OneBadStepIsReportedOnce()
