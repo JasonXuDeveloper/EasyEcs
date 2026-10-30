@@ -11,22 +11,32 @@ public record struct PageMark(int Value) : IComponent;
 public record struct PageLink(EntityId Target) : IComponent;
 
 /// <summary>
-/// Large pinned arrays on 2 MiB pages (HugePages): which arrays are advised, that the kernel backs them with huge
-/// pages where transparent huge pages are on, and that worlds, lookups and snapshots read the same values either way.
+/// Large pinned arrays on 2 MiB pages (HugePages): zeroed whatever the memory held before, backed by huge pages where
+/// transparent huge pages are on, and worlds, lookups and snapshots reading the same values either way.
 /// </summary>
 public class HugePagesTests
 {
     private const int Many = 600_000; // 9.6 MB of entity records, 2.4 MB per int column: past one huge page each
 
     [Test]
-    public void SmallArraysAndOffAreNotAdvised()
+    public void ArraysAreZeroedOverMemoryUsedBefore([Values(false, true)] bool huge, [Values(64 << 10, (6 << 20) + 4093)] int length)
     {
-        Assert.That(HugePages.Advise(GC.AllocateArray<byte>(64 << 10, pinned: true), 64 << 10), Is.False, "under one huge page");
         bool was = HugePages.Enabled;
-        HugePages.Enabled = false;
+        HugePages.Enabled = huge && was;
         try
         {
-            Assert.That(HugePages.Advise(GC.AllocateArray<byte>(8 << 20, pinned: true), 8 << 20), Is.False, "off");
+            for (int round = 0; round < 4; round++)
+            {
+                var array = HugePages.AllocatePinned<byte>(length);
+                Assert.That(array.Length, Is.EqualTo(length));
+                Assert.That(array.AsSpan().IndexOfAnyExcept((byte)0), Is.EqualTo(-1), $"round {round}");
+                array.AsSpan().Fill(0xA5); // dirty the memory the next round may be handed
+                GC.Collect();
+            }
+
+            var records = HugePages.AllocatePinned<EntityMeta>((5 << 20) / 16 + 3);
+            for (int i = 0; i < records.Length; i++)
+                Assert.That(records[i].Archetype == null && records[i].Version == 0 && records[i].Slot == 0, Is.True, $"record {i}");
         }
         finally
         {
@@ -35,13 +45,13 @@ public class HugePagesTests
     }
 
     [Test]
-    public void OnLinuxTheKernelBacksAnAdvisedArrayWithHugePages()
+    public void OnLinuxTheKernelBacksALargeArrayWithHugePages()
     {
         if (!HugePages.Enabled) Assert.Ignore("transparent huge pages are off here, or this is not Linux");
-        var array = GC.AllocateArray<byte>(16 << 20, pinned: true);
-        Assert.That(HugePages.Advise(array, array.Length), Is.True);
+        var array = HugePages.AllocatePinned<byte>(16 << 20);
+        for (int i = 0; i < array.Length; i += 4096) array[i] = 1; // the first touch faults the pages
         long huge = AnonHugeBytes(array);
-        if (huge == 0) Assert.Inconclusive("the kernel found no free huge page (fragmented memory); khugepaged collapses it later");
+        if (huge == 0) Assert.Inconclusive("no huge page: memory the GC handed out again keeps its 4 KiB pages, or the kernel found no free 2 MiB (fragmented memory); khugepaged collapses an advised range later");
         Assert.That(huge, Is.GreaterThanOrEqualTo(2L << 20));
     }
 
@@ -71,6 +81,46 @@ public class HugePagesTests
                 var target = markers[entities[i].Get<PageLink>().Target];
                 Assert.That(target.HasValue && target.Value.Value == (int)((i * 7919L) % Many), Is.True, $"row {i}");
             }
+        }
+        finally
+        {
+            HugePages.Enabled = was;
+        }
+    }
+
+    [Test]
+    public void GrownAndTrimmedWorldsReadTheSameWithAndWithoutHugePages([Values(false, true)] bool huge)
+    {
+        bool was = HugePages.Enabled;
+        HugePages.Enabled = huge && was;
+        try
+        {
+            // Doubling steps (plain pinned arrays), then a reservation past twice the capacity (a sized one), then a trim.
+            using var world = new World();
+            var batch = new Entity[4096];
+            int made = 0;
+            for (; made < Many / 2; made += batch.Length)
+            {
+                world.CreateEntities(batch, new PageMark(0), new PageLink());
+                for (int i = 0; i < batch.Length; i++) batch[i].Get<PageMark>() = new PageMark(made + i);
+            }
+
+            world.Reserve<PageMark, PageLink>(4 * Many);
+            var more = new Entity[Many];
+            world.CreateEntities(more, new PageMark(0), new PageLink());
+            for (int i = 0; i < more.Length; i++) more[i].Get<PageMark>() = new PageMark(made + i);
+            world.TrimExcess();
+
+            long sum = 0, expected = 0;
+            int count = 0;
+            foreach (var entity in world.Entities)
+            {
+                sum += entity.Get<PageMark>().Value;
+                expected += count++;
+            }
+
+            Assert.That(count, Is.EqualTo(made + Many));
+            Assert.That(sum, Is.EqualTo(expected));
         }
         finally
         {
