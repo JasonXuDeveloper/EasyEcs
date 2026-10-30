@@ -59,7 +59,7 @@ its own worktree.
    generics (`allows ref struct`), C# 14 extension members, Native AOT (`IlcInstructionSet`, D108), dynamic PGO and
    guarded devirtualization. Read the runtime's source before assuming a behavior (thread pool spin, GC modes).
 4. **The runtime's own overhead**: what a system costs per update apart from its rows (`SystemDispatchBenchmark`),
-   what a pass costs per table and per word (`SparseBenchmark`), per chunk (`ParallelForEachBenchmark`), per stage
+   what a pass costs per table and per word (`SparseBenchmark`), per chunk (`ParallelPassBenchmark`), per stage
    (`ParallelSystemsBenchmark`), per structural change (`OperationBenchmark`), per world (`MultiWorldBenchmark`).
 
 ## Method
