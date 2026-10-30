@@ -788,11 +788,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             $"global::EasyEcs.TileNeighbors.Of<{method.Parameters[i].Shape}, {method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {tileEntity}, out n{i}); "));
         if (method.Steps is >= 0 and var steps)
         {
-            // A stepping tile: the tiles of the color running that may change step (Enter), the tile on this thread's
-            // frame (Begin, the one read of the frame per tile), each sweep of a Gauss-Seidel step until one changes
-            // nothing (Sweep), then the step's change is recorded (Leave); Sweep and Leave take the frame from the tile.
-            string sweep = method.Parameters[steps].Colors.Length > 0 ? $"do {call} while (p{steps}.Sweep({tileEntity}, in w{steps})); " : call + " ";
-            call = $"if (p{steps}.Enter({tileEntity})) {{ {grids}var w{steps} = p{steps}.Begin({tileEntity}, in n{method.GridOf(steps)}); {sweep}p{steps}.Leave({tileEntity}, in n{method.GridOf(steps)}, in w{steps}); }}";
+            // A stepping tile: the tiles of the color running that may change step (Enter), each sweep of a Gauss-Seidel
+            // step until one changes nothing (Sweep), then the step's change is recorded (Leave).
+            var tile = method.Parameters[steps];
+            string sweep = tile.Colors.Length > 0 ? $"do {call} while (p{steps}.Sweep({tileEntity})); " : call + " ";
+            call = $"if (p{steps}.Enter({tileEntity})) {{ {grids}var w{steps} = new global::EasyEcs.Tile<{tile.Cell}, {tile.Shape}>({tileEntity}, in n{method.GridOf(steps)}); {sweep}p{steps}.Leave({tileEntity}, in n{method.GridOf(steps)}); }}";
             if (runs) call = $"{{ {call} }}";
         }
         else if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;

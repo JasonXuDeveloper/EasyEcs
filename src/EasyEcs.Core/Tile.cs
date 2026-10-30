@@ -373,21 +373,6 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
         _frame = TileFrame<TCell, TTile>.Current;
     }
 
-    /// <summary>The tile of a step (<see cref="TileSteps{TCell, TTile, TGrid, TKey, TColors}.Begin"/>), on the frame it set up.</summary>
-    internal Tile(Entity entity, ref readonly TileNeighbors around, TileFrame<TCell, TTile> frame)
-    {
-        _entity = entity;
-        _around = ref around;
-        _frame = frame;
-    }
-
-    /// <summary>
-    /// This thread's frame, as the step's pass gave it (<see cref="TileSteps{TCell, TTile, TGrid, TKey, TColors}.Sweep"/>
-    /// and <see cref="TileSteps{TCell, TTile, TGrid, TKey, TColors}.Leave"/>); read from the thread when the method
-    /// replaced its tile with <c>default</c>.
-    /// </summary>
-    internal readonly TileFrame<TCell, TTile> Frame => _frame ?? TileFrame<TCell, TTile>.Current;
-
     /// <summary>The tile's own cells, in the layout of <see cref="ITileShape"/>. O(1).</summary>
     public readonly ReadOnlySpan<TCell> Cells
     {
@@ -755,10 +740,8 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
         if (frame.Stepping != _entity.Id) TileFrame<TCell, TTile>.ThrowNotStepping();
         if (frame.Next is { } next)
         {
-            // The bounds: Y < Height and Z < Depth (checked above), so Written (a word per layer) holds word Y, and the
-            // row's Width cells end by the tile's cell count, which Next holds at least (TileSteps.Begin sizes it).
-            Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(frame.Written), row.Y) |= 1UL << row.Z;
-            return MemoryMarshal.CreateSpan(ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(next), row.Index), TTile.Width);
+            frame.Written[row.Y] |= 1UL << row.Z;
+            return new Span<TCell>(next, row.Index, TTile.Width);
         }
         return frame.WriteInPlace(row.Y, row.Z, _entity.Id);
     }
@@ -1092,7 +1075,7 @@ public ref struct TileRows<TTile> where TTile : struct, ITileShape
         while (_rows == 0)
         {
             if (_layer == _last) return false;
-            _rows = Visit(ref _masks, ++_layer, _reads);
+            _rows = Visit(++_layer);
         }
 
         _z = BitOperations.TrailingZeroCount(_rows);
@@ -1100,25 +1083,21 @@ public ref struct TileRows<TTile> where TTile : struct, ITileShape
         return true;
     }
 
-    /// <summary>
-    /// The rows of texture layer <paramref name="layer"/> the stencil reads something in (its neighbors are in the
-    /// texture: halo layers). Static, given the walk's fields: a call on the walk itself would take its address, and the
-    /// walk would live in memory for every row of the method's loop instead of in registers.
-    /// </summary>
-    private static ulong Visit(ref TileMask masks, int layer, TileStencil reads)
+    /// <summary>The rows of texture layer <paramref name="layer"/> the stencil reads something in (its neighbors are in the texture: halo layers).</summary>
+    private readonly ulong Visit(int layer)
     {
         int depth = TTile.Depth, hy = TTile.Height > 1 ? TTile.Halo : 0;
-        ref var here = ref Unsafe.Add(ref masks, layer);
+        ref var here = ref Unsafe.Add(ref _masks, layer);
         ulong visit = 0;
-        if ((reads & TileStencil.Self) != 0) visit |= here.Rows;
-        if ((reads & TileStencil.NorthSouth) != 0) visit |= Spread(here);
+        if ((_reads & TileStencil.Self) != 0) visit |= here.Rows;
+        if ((_reads & TileStencil.NorthSouth) != 0) visit |= Spread(here);
         for (int k = 1; k <= hy; k++)
         {
             ref var up = ref Unsafe.Add(ref here, k);
             ref var down = ref Unsafe.Add(ref here, -k);
-            if ((reads & TileStencil.Above) != 0) visit |= up.Rows;
-            if ((reads & TileStencil.Below) != 0) visit |= down.Rows;
-            if ((reads & TileStencil.Diagonals) != 0) visit |= Spread(up) | Spread(down);
+            if ((_reads & TileStencil.Above) != 0) visit |= up.Rows;
+            if ((_reads & TileStencil.Below) != 0) visit |= down.Rows;
+            if ((_reads & TileStencil.Diagonals) != 0) visit |= Spread(up) | Spread(down);
         }
 
         return depth == 64 ? visit : visit & ((1UL << depth) - 1);
@@ -1228,11 +1207,7 @@ internal sealed class TileFrame<TCell, TTile> where TCell : unmanaged where TTil
     /// <summary>The tile this thread steps (a <c>ref Tile</c>); default outside a step.</summary>
     public EntityId Stepping;
 
-    /// <summary>
-    /// A Jacobi step: the cells of the next buffer, which <see cref="Tile{TCell, TTile}.Write"/> hands out; null in place.
-    /// Never shorter than the tile's cell count (<see cref="TileSteps{TCell, TTile, TGrid, TKey, TColors}.Begin"/> sizes it):
-    /// Write's rows skip their bounds check on it.
-    /// </summary>
+    /// <summary>A Jacobi step: the cells of the next buffer, which <see cref="Tile{TCell, TTile}.Write"/> hands out; null in place.</summary>
     public TCell[] Next;
 
     /// <summary>The rows the step wrote (a Gauss-Seidel step: this sweep), a word per layer.</summary>
