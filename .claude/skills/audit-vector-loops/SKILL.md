@@ -104,7 +104,7 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   form stays, and with neither the method is scalar with the reason (fixable when a split helps). Fewer locals come
   from extracting a field into its own name, reusing a merge's first input and one temporary for the packed stores.
 - **Inner loops** (Burst's loop vectorizer): a scalar `for` / `foreach` over a span inside a method the generator
-  already compiles (a `[ForEach]` method, a `ForParallel` job's `Execute`) is a vector loop over its elements: a
+  already compiles (a `[ForEach]` method, a `ParallelFor` job's `Execute`) is a vector loop over its elements: a
   `DynamicBuffer<T>`'s elements, an `[InlineArray]` or fixed buffer field, an `IForSpan<T>` / `IForRange` body, a
   neighbor list. One core for every element loop; the per-row loop and the element loop share the same lowering of
   the body. Inferred, no declaration (`audit-generator`, declaration surface: inference first).

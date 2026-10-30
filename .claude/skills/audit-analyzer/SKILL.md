@@ -26,7 +26,7 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
   reads (`Read`), per-entity structural changes (bulk calls), a method that could be a vector loop (EECS055 /
   EECS056, the exact reason from `Kernel.Vectorize`). Info is left for hints a user may not be able to act on
   (EECS055's reasons that come from the algorithm itself; the fixable ones become a Warning that names the fix).
-- **Written by hand where the generator writes it** (EECS080-089): a hand-written job instead of `[ForEntity]`,
+- **Written by hand where the generator writes it** (EECS080-089): a hand-written job instead of `[EntityMethod]`,
   destroying every visited row instead of `[Consume]`, a singleton accumulated row by row instead of `Reduce<T>`,
   other entities read through the World instead of `Lookup<T>`, records appended by hand instead of `Emit<T>`,
   hand-written parts instead of `[Sum]` / `[LookupKey]` / `[Group]`.

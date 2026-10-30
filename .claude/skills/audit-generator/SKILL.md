@@ -15,7 +15,7 @@ shared with the analyzer (`audit-analyzer`).
 
 1. **Users write a thing once** (`feature`, part 2). Generated today: members per component (`entity.X`, `SetX`,
    `TryGetX`, `world.XIndex`), arity families, system code and the set per assembly, jobs and entry points
-   (`[ForEntity]`), parts (`[Sum]`, `[LookupKey]`, `[Group]`), type setup (`[GroupBy]`, `[WhenTargetDestroyed]`,
+   (`[EntityMethod]`), parts (`[Sum]`, `[LookupKey]`, `[Group]`), type setup (`[GroupBy]`, `[WhenTargetDestroyed]`,
    `[NotSaved]`), the save registry. Look for boilerplate still left in `samples/`, templates, `BattleServer.cs` and
    the docs examples (a hand-written job, a reset-then-accumulate singleton, a registry call, a copy per arity): each
    is a candidate for an attribute, a parameter or a generated member, with the rule and code fix that move users to
@@ -203,7 +203,7 @@ Reading the output: build with `-p:EmitCompilerGeneratedFiles=true`, and read on
   non-unique key throw "holds no index").
 
 - **A ref-struct job called in a loop is copied to a local first**: through a `ref` the JIT reloads it every
-  iteration (that alone made `[ForEachRecord]` 2x slower than the hand-written walk).
+  iteration (that alone made `[Drain]` 2x slower than the hand-written walk).
 - **A new tracked stage needs input in GeneratorTests' code**, or its caching assertion has nothing to check.
 
 ## Speed: measure first
@@ -317,7 +317,7 @@ tools/bench.sh GeneratorBenchmark
   the generated folder keeps files of earlier builds.
 - The analyzer reports what the generator skips (same `Symbols` / `Kernel` function); a code fix moves hand-written
   code to the form.
-- A benchmark of the generated form against the hand-written one (`ForEntityBenchmark`, `ConsumeBenchmark`,
+- A benchmark of the generated form against the hand-written one (`EntityMethodBenchmark`, `ConsumeBenchmark`,
   `KernelBenchmark`, `ReduceBenchmark` are the pattern), and GeneratorBenchmark for the per-keystroke cost.
 - `You write` / `The generator writes` from real output wherever the form appears in an example: guide page, README
   (`<details>`), docs home, getting started, battle server walkthrough (a docs to-do; `audit-docs` part 3). A change

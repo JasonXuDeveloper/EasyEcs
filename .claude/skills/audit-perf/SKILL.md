@@ -22,7 +22,7 @@ its own worktree.
    - work a parameter does per chunk (`Reduce<T>`, `Emit<T>`, `Scratch<T>`, `Lookup<T>`, `Tile<,>`, `EntityRandom`):
      the hand-written versions are what EECS086-089 report;
    - schedule choices the generator can make: `Parallel`, `ChunkRows`, `Slices`, `[UpdateInterval]`, `[Consume]`,
-     one-entity jobs (`[ForEntity]`), runs of one system set across stages.
+     one-entity jobs (`[EntityMethod]`), runs of one system set across stages.
 2. **Ideas from other fields**, each checked against what EasyEcs already does (decisions D67-D90):
    - **GPU / CUDA**: structure of arrays, coalesced loads (column loads, interleaved fields), warp-style masks (lane
      masks of passing rows), shared-memory tiles (`Tile<,>` with a halo), reductions in a fixed order;
