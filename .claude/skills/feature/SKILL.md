@@ -10,6 +10,10 @@ metadata:
 A feature, rule or change ships only with every part below that applies to it. Check them off before merging. Each
 part names the skill that audits it.
 
+Nothing found while building it is left for later (AGENTS.md, "Try it now; research a problem, never skip it"): a
+slower case, an allocation, a scalar fallback or a gap to hand-written code is explained from the Tier1 assembly, the
+generated source or a profile and fixed in the same branch before it merges.
+
 ## 1. Core (`audit-core`)
 
 - One shared non-generic core with thin typed wrappers; T1..T9 variants come from `ArityGenerator` templates.
