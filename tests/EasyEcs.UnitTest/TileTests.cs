@@ -1374,4 +1374,45 @@ public partial class TileTests
             Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
         }
     }
+
+    // ---------------- the pool of a tile's cells ----------------
+
+    /// <summary>A cell no other test pools: 4 bytes, so the pool keeps lists of 1,024 by default.</summary>
+    public record struct Mineral(int Grade);
+
+    /// <summary>A 32 x 32 x 8 chunk: 8,192 cells, more than the pool keeps of a 4-byte element by default.</summary>
+    public record struct MineralChunk(TilePos Pos) : IComponent, ITile<TilePos>
+    {
+        readonly TilePos IIndexed<TilePos>.Key => Pos;
+        static int ITileShape.Width => 32;
+        static int ITileShape.Depth => 32;
+        static int ITileShape.Height => 8;
+        static TileFaces ITileShape.Faces => TileFaces.All;
+        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
+    }
+
+    /// <summary>A 2D shape of the same cell over the chunk's key, smaller: the pool keeps the larger.</summary>
+    [EcsSystem]
+    public ref struct MineralReadSystem
+    {
+        [ForEach] static void Read(Tile<Mineral, MineralChunk> minerals, ref MineralProbe probe) => probe.Value += minerals.Cells.Length;
+        [ForEach] static void ReadTop(Tile<Mineral, Columns<MineralChunk>> top, ref MineralProbe probe) => probe.Value -= top.Cells.Length;
+    }
+
+    public struct MineralProbe : IComponent { public int Value; }
+
+    [Test]
+    public void ThePoolKeepsTheCellsOfATileTheAssemblyReads()
+    {
+        // Nothing ran the system: the generated module initializer raised the pool when the assembly loaded.
+        Assert.That(DynamicBuffer<Mineral>.MaxPooledLength, Is.EqualTo(32 * 32 * 8));
+        TileCells.Pool<Mineral, Columns<MineralChunk>>(); // a smaller shape never lowers it
+        Assert.That(DynamicBuffer<Mineral>.MaxPooledLength, Is.EqualTo(32 * 32 * 8));
+
+        // FillPool then hands out lists of a whole chunk.
+        DynamicBuffer<Mineral>.FillPool(2);
+        using var world = new World();
+        var chunk = world.CreateEntity(new MineralChunk(default), new DynamicBuffer<Mineral>());
+        Assert.That(Allocations.Of(() => chunk.Get<DynamicBuffer<Mineral>>().SetCount(32 * 32 * 8)), Is.Zero);
+    }
 }

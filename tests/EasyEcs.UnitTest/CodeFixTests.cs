@@ -252,6 +252,11 @@ public class CodeFixTests
     [TestCase("EECS084", "Consume its rows with [Consume]",
         "public struct Hit : IComponent { public int Amount; }\n[EcsSystem] public ref struct S\n{\n    [ForEach]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        if (e.Has<Q>()) p.V = 0;\n        e.Destroy();\n    }\n}",
         "    [ForEach, Consume]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        if (e.Has<Q>()) p.V = 0;\n    }")]
+    [TestCase("EECS117", "Settle each tile in place with [GaussSeidel]",
+        AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct S\n{\n    [ForEach(Parallel = true)]\n    static void A(ref Tile<byte, G> t)\n    {\n"
+        + "        t.ExchangeHalo();\n        foreach (var row in t.Rows())\n        {\n            var c = t.At(row);\n            var into = t.Write(row);\n"
+        + "            for (int x = 0; x < 4; x++) into[x] = (byte)System.Math.Min(c[x, 0, 0], c[x - 1, 0, 0] + 1);\n        }\n    }\n}",
+        "    [ForEach(Parallel = true), GaussSeidel]\n    static void A(ref Tile<byte, G> t)")]
     [TestCase("EECS017", "Store its EntityId",
         "public struct Target : IComponent { public Entity Of; }\npublic static class U { public static bool F(Entity e, Entity other) { e.Set(new Target { Of = other }); return e.Read<Target>().Of.Id == other.Id; } }",
         "public struct Target : IComponent { public EntityId Of; }")]
@@ -570,6 +575,8 @@ public class CodeFixTests
     [TestCase("EECS053", "public static class Run { public static void F(World world) => world.ForEach(static (ref T t, in Q q) => { if (q.V > 0) t.V = q.V; }); }")] // a lambda: the Mut fix rewrites methods
     [TestCase("EECS071", "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) => p.V = (int)System.Random.Shared.NextInt64(9); }")] // no EntityRandom twin
     [TestCase("EECS071", "[EcsSystem] public ref struct S { [ForEach] static void A(System.Span<P> p) => p[0].V = System.Random.Shared.Next(); }")] // a batch method: no Entity
+    [TestCase("EECS117", AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, N> t) { t.ExchangeHalo(); foreach (var row in t.Rows()) { var c = t.At(row); var into = t.Write(row); "
+                         + "for (int x = 0; x < 4; x++) into[x] = (byte)System.Math.Min(c[x, 0, 0], c[x - 1, 0, 0] + 1); } } }")] // a key with a string: no colors
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
     {
         var document = Document(Data + source);
