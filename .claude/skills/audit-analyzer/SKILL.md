@@ -119,6 +119,10 @@ done. Each round checks coverage per rule, not in total:
   before it lands. A branch reports its new ids as provisional.
 - **Data flow follows ref locals** (`ref readonly var q = ref x.Read(id)`): a rule that tracks where a value comes
   from misses hand-written code through them otherwise (EECS107's grid search, `PairForm.Path`).
+- **netstandard2.0 has no `System.Index`**: no list patterns (`[var x]`) in a rule; write `{ Count: 1 } list` and
+  `list[0]`.
+- **`IInvocationOperation.Arguments` includes implicit default arguments** (`world.Any<T>()` has one): match a call
+  without written arguments with `Arguments.All(a => a.IsImplicit)`, not `Length: 0`.
 - **A test case triggers only its own rule**: write each case so neighboring rules stay quiet (EECS075 static,
   EECS003 no component, EECS106 unread cutoff, EECS002 by-ref), or the test asserts on the wrong diagnostic.
 - **A new or widened case runs over BattleServer and the samples, Info included**: builds do not show Info, but

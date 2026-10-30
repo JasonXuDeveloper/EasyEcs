@@ -66,6 +66,10 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
   maps, halos, chunk claiming, column loads); a .NET 10 API that does the job cheaper. Report them to `audit-perf`
   (its list of fields to borrow from); build only with numbers.
 
+- **A per-row path that must allow `LoadEntities` / `SaveEntities`** cannot go through `entity.Run`, which opens a
+  pass: it works on copies of the components and writes the `ref` ones back (`Entity.RunCollected`, `[ForEach(MaxRows
+  = N)]`).
+
 ## Fixing
 
 - Every bug gets a regression test that fails before the fix (run it against the old code once).
