@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.IForSpan`1" source="dcca413e5bc6">
+  <member name="T:EasyEcs.IForSpan`1" source="466d98971860">
     <summary>
-      一个列表的元素上的 job，由 <see cref="M:EasyEcs.World.ForParallel``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" /> 分块运行：
+      一个列表的元素上的 job，由 <see cref="M:EasyEcs.World.ParallelFor``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" /> 分块运行：
       每次调用拿到一个块的元素，可写。
     </summary>
     <typeparam name="T">元素。</typeparam>

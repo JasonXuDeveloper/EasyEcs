@@ -13,27 +13,27 @@ namespace EasyEcs.Generator;
 
 /// <summary>
 /// The rules of the declarations the generator turns into code for one entity, a schedule and a consuming pass
-/// (EECS080-EECS085): a hand-written one-entity job [ForEntity] would write (EECS080), a [ForEntity] method that cannot
+/// (EECS080-EECS085): a hand-written one-entity job [EntityMethod] would write (EECS080), an [EntityMethod] method that cannot
 /// be one (EECS081), an [UpdateInterval] that cannot apply (EECS083), a [ForEach] method that destroys every entity it visits by hand (EECS084), a [Consume] that
 /// cannot apply (EECS085); a batch method's vector loop written by hand that the generator writes from the method
-/// for one row (EECS103, <see cref="HandSimd"/>); a [ForEachRecord] method the generator cannot write (EECS108) and the
+/// for one row (EECS103, <see cref="HandSimd"/>); a [Drain] method the generator cannot write (EECS108) and the
 /// walk and clear of Emitted&lt;T&gt; it writes, written by hand (EECS109). Each computes its code fix as diagnostic properties.
 /// </summary>
 public static partial class EasyEcsAnalyzer
 {
     public static readonly DiagnosticDescriptor HandWrittenEntityJob = new("EECS080", "A hand-written one-entity job",
-        "'{0}' is a job written by hand and run only with entity.Run: [ForEntity] on a static method writes the job, its WriteMask and its entry point ({1})",
+        "'{0}' is a job written by hand and run only with entity.Run: [EntityMethod] on a static method writes the job, its WriteMask and its entry point ({1})",
         Category, DiagnosticSeverity.Warning, true,
-        "A struct implementing IForEachEntity<T1..Tn>, created and handed to entity.Run, is what [ForEntity] generates " +
+        "A struct implementing IForEachEntity<T1..Tn>, created and handed to entity.Run, is what [EntityMethod] generates " +
         "from a static method: the method's 'ref' parameters make the WriteMask, its filters the QueryFilter, and its other " +
-        "parameters the values the entry point takes. The fix turns the struct into a static class with a [ForEntity] " +
+        "parameters the values the entry point takes. The fix turns the struct into a static class with an [EntityMethod] " +
         "method Run and each call into Type.Run(entity, values), when every use of the struct is such a call.",
         helpLinkUri: Help("EECS080"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
-    public static readonly DiagnosticDescriptor BadForEntity = new("EECS081", "Invalid [ForEntity] method",
-        "[ForEntity] method '{0}' {1}",
+    public static readonly DiagnosticDescriptor BadEntityMethod = new("EECS081", "Invalid [EntityMethod] method",
+        "[EntityMethod] method '{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
-        "A [ForEntity] method is static and runs on one entity through its generated entry point, which takes the " +
+        "An [EntityMethod] method is static and runs on one entity through its generated entry point, which takes the " +
         "entity. What belongs to a pass over many rows (component spans, an EntitySpan, a Reduce partial result, a " +
         "Scratch) has no meaning for one entity, and a method cannot be both a pass ([ForEach]) and a run on one entity.",
         helpLinkUri: Help("EECS081"));
@@ -72,20 +72,20 @@ public static partial class EasyEcsAnalyzer
         "horizontal operations, loads at other offsets, accumulators across vectors and calls into user code are left alone.",
         helpLinkUri: Help("EECS103"));
 
-    public static readonly DiagnosticDescriptor BadRecordPass = new("EECS108", "Invalid [ForEachRecord] method",
-        "[ForEachRecord] method '{0}' {1}",
+    public static readonly DiagnosticDescriptor BadRecordPass = new("EECS108", "Invalid [Drain] method",
+        "[Drain] method '{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
-        "A [ForEachRecord] method is static and takes the record it handles first, by 'in': the generator runs it on each " +
+        "A [Drain] method is static and takes the record it handles first, by 'in': the generator runs it on each " +
         "record of Emitted<T> in order, then clears them. What belongs to rows (components, Maybe, Mut, Reduce, Scratch, " +
         "the Entity, filters, [Consume]) has no meaning for a record, and an Emit<T> of its own record type would be " +
         "cleared unhandled. The generator writes nothing for an invalid method.",
         helpLinkUri: Help("EECS108"));
 
     public static readonly DiagnosticDescriptor HandWrittenRecordPass = new("EECS109", "The records of Emitted<T> walked and cleared by hand",
-        "'{0}' walks the records of Emitted<{1}> and clears them by hand: a [ForEachRecord] method taking 'in {1} {2}' gets the walk and the Clear generated",
+        "'{0}' walks the records of Emitted<{1}> and clears them by hand: a [Drain] method taking 'in {1} {2}' gets the walk and the Clear generated",
         Category, DiagnosticSeverity.Info, true,
         "Code that gets Emitted<T>'s list, runs a loop over it and clears it handles each record once, in the order the " +
-        "passes emitted them: what a [ForEachRecord] method does, written once per record type. The method holds only the " +
+        "passes emitted them: what a [Drain] method does, written once per record type. The method holds only the " +
         "loop's body; its other parameters are what the body used (singletons, the World). The fix writes it when the " +
         "loop is a system's OnUpdate whole: the singletons it took by ref, the list, the loop and the Clear.",
         helpLinkUri: Help("EECS109"));
@@ -142,7 +142,7 @@ public static partial class EasyEcsAnalyzer
             || statements[statements.Count - 1] is not ExpressionStatementSyntax { Expression: InvocationExpressionSyntax last } destroy
             || context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
             || !Symbols.IsForEach(method) || Symbols.IsConsume(method) || Symbols.IsParallel(method) || Symbols.Slices(method) != 1
-            || Symbols.IsForEntity(method)) return;
+            || Symbols.IsEntityMethod(method)) return;
         if (context.SemanticModel.GetOperation(last, context.CancellationToken) is not IInvocationOperation { TargetMethod: { Name: "Destroy", Parameters.Length: 0 } target } call
             || !Symbols.Named(target.ContainingType, Symbols.Entity)
             || Symbols.Unwrap(call.Instance) is not IParameterReferenceOperation { Parameter: var entity }
@@ -164,12 +164,12 @@ public static partial class EasyEcsAnalyzer
                 : "each entity goes after its row"));
     }
 
-    // ---------------- EECS108 / EECS109: [ForEachRecord] ----------------
+    // ---------------- EECS108 / EECS109: [Drain] ----------------
 
     private static void AnalyzeRecordPass(SymbolAnalysisContext context)
     {
         var method = (IMethodSymbol)context.Symbol;
-        if (Symbols.IsForEachRecord(method) && Symbols.RecordProblem(method) is { } problem)
+        if (Symbols.IsDrain(method) && Symbols.RecordProblem(method) is { } problem)
             context.ReportDiagnostic(Diagnostic.Create(BadRecordPass, method.Locations.FirstOrDefault(), method.Name, problem));
     }
 
@@ -202,7 +202,7 @@ public static partial class EasyEcsAnalyzer
         string name = record.ToMinimalDisplayString(model, loop.SpanStart);
         var properties = ImmutableDictionary<string, string?>.Empty;
         if (RecordFix(block, loop, clear, declarator, world, item, model, ct) is { } parameters)
-            properties = properties.Add(FixKind, "ForEachRecord").Add(RecordParameters, parameters).Add(RecordName, name);
+            properties = properties.Add(FixKind, "Drain").Add(RecordParameters, parameters).Add(RecordName, name);
         string where = model.GetEnclosingSymbol(loop.SpanStart, ct) is { } method ? method.ContainingType?.Name is { } type ? $"{type}.{method.Name}" : method.Name : "the code";
         context.ReportDiagnostic(Diagnostic.Create(HandWrittenRecordPass, loop.ForEachKeyword.GetLocation(), properties, where, name, item.Name));
     }
@@ -222,7 +222,7 @@ public static partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// The parameters after the record of the [ForEachRecord] method EECS109's fix writes, or null when it does not
+    /// The parameters after the record of the [Drain] method EECS109's fix writes, or null when it does not
     /// apply: the block is a system's static OnUpdate(World), its statements are 'ref' locals of singletons read from
     /// that World, the list, the loop (one variable) and the Clear, and the loop's body uses no other local.
     /// </summary>
@@ -283,7 +283,7 @@ public static partial class EasyEcsAnalyzer
 
     // ---------------- EECS080: hand-written one-entity jobs ----------------
 
-    /// <summary>A struct job whose declaration [ForEntity] can write: what the fix needs of it.</summary>
+    /// <summary>A struct job whose declaration [EntityMethod] can write: what the fix needs of it.</summary>
     private sealed record JobShape(INamedTypeSymbol Type, Location Location, string Parameters, string Modifiers, bool UsesEntity);
 
     /// <summary>A use of a candidate job: a creation and its entity.Run call (Pattern), the Run call's type argument (Covered), or anything else.</summary>
@@ -334,7 +334,7 @@ public static partial class EasyEcsAnalyzer
                     || all.Where(u => u.Kind == UseCovered).Any(c => !patterns.Any(p => p.Call == c.Call))
                     || patterns.Select(p => p.Filter).Distinct().Count() != 1) continue;
                 var locations = new List<Location>();
-                var properties = ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ForEntity")
+                var properties = ImmutableDictionary<string, string?>.Empty.Add(FixKind, "EntityMethod")
                     .Add(JobParameters, shape.Parameters).Add(JobModifiers, shape.Modifiers).Add(JobFilter, patterns[0].Filter)
                     .Add(DropEntity, shape.UsesEntity ? null : "1");
                 for (int k = 0; k < patterns.Count; k++)
@@ -393,7 +393,7 @@ public static partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// The shape [ForEntity] can write: a struct (not partial, not generic, no attributes) with only instance fields
+    /// The shape [EntityMethod] can write: a struct (not partial, not generic, no attributes) with only instance fields
     /// without initializers, a constant static WriteMask and Execute, whose body reads its fields and writes no
     /// component WriteMask leaves out. Null otherwise.
     /// </summary>

@@ -41,9 +41,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             .Where(static m => m is not null)
             .WithTrackingName("Systems");
 
-        // [ForEachRecord] methods: passes over the records of Emitted<T>, in the same models as [ForEach] methods.
+        // [Drain] methods: passes over the records of Emitted<T>, in the same models as [ForEach] methods.
         var records = context.SyntaxProvider
-            .ForAttributeWithMetadataName(Symbols.ForEachRecordAttribute,
+            .ForAttributeWithMetadataName(Symbols.DrainAttribute,
                 static (node, _) => node is MethodDeclarationSyntax,
                 static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ctx.SemanticModel, ct))
             .Where(static m => m is not null)
@@ -84,16 +84,16 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             if (input.Left.Length > 0) spc.AddSource("__EasyEcsSystems.g.cs", SourceText.From(EmitSet(input.Left, input.Right), Encoding.UTF8));
         });
 
-        // [ForEntity] methods: entry points that run the method's job on one entity (entity.Run), in a system too.
+        // [EntityMethod] methods: entry points that run the method's job on one entity (entity.Run), in a system too.
         var ones = context.SyntaxProvider
-            .ForAttributeWithMetadataName(Symbols.ForEntityAttribute,
+            .ForAttributeWithMetadataName(Symbols.EntityMethodAttribute,
                 static (node, _) => node is MethodDeclarationSyntax,
                 static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ctx.SemanticModel, ct))
             .Where(static m => m is not null)
-            .WithTrackingName("ForEntityMethods");
+            .WithTrackingName("EntityMethods");
         var entityTypes = ones.Collect()
             .SelectMany(static (all, _) => UpdateModel.Group(all!, [], entryPoints: true).Select(m => m with { One = true }))
-            .WithTrackingName("ForEntityTypes");
+            .WithTrackingName("EntityMethodTypes");
         context.RegisterSourceOutput(entityTypes, static (spc, model) => Add(spc, model));
 
         // world.ForEach(static (ref P p) => ...): each call intercepted by the job of its lambda (SystemGenerator.Lambdas.cs).
@@ -108,7 +108,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     private static void Add(SourceProductionContext context, UpdateModel model)
     {
         var owner = model.Owner;
-        context.AddSource($"{owner.HintName}.{(model.One ? "ForEntity" : owner.IsSystem ? "System" : "ForEach")}.g.cs", SourceText.From(Emit(model), Encoding.UTF8));
+        context.AddSource($"{owner.HintName}.{(model.One ? "EntityMethod" : owner.IsSystem ? "System" : "ForEach")}.g.cs", SourceText.From(Emit(model), Encoding.UTF8));
         if (model.One || !owner.IsSystem || !owner.IsPublic || owner.TypeParameters.Length == 0) return;
         // Assembly attributes cannot follow the namespace of the code's file.
         string ns = owner.Namespace.Length > 0 ? owner.Namespace + "." : "";
@@ -225,14 +225,14 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <summary>
     /// The entry points of a type that is not a system, static extension members of the type. [ForEach] methods run
     /// the job over the world (taking the world, the change tick for [Changed&lt;T&gt;] / [Removed&lt;T&gt;], the slice of
-    /// a sliced method); [ForEntity] methods (<paramref name="perEntity"/>) run it on the entity they take with
+    /// a sliced method); [EntityMethod] methods (<paramref name="perEntity"/>) run it on the entity they take with
     /// <c>entity.Run</c> and return whether it ran. Both take the method's context parameters.
     /// </summary>
     private static void EmitEntryPoints(StringBuilder sb, UpdateModel model, bool perEntity)
     {
         var owner = model.Owner;
         sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
-        sb.Append($"{(owner.IsPublic ? "public" : "internal")} static class {owner.FlatName}{(perEntity ? "ForEntity" : "ForEach")}\n{{\n");
+        sb.Append($"{(owner.IsPublic ? "public" : "internal")} static class {owner.FlatName}{(perEntity ? "EntityMethod" : "ForEach")}\n{{\n");
         sb.Append($"    extension{owner.TypeParameters}({owner.FullName}){owner.Constraints}\n    {{\n");
         for (int m = 0; m < model.Methods.Length; m++)
         {
@@ -309,7 +309,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         }
 
         string job = $"{forEach}.{method.Name}Job{i}{method.TypeParameters}";
-        if (method.Record.Length > 0) // [ForEachRecord]: the records in order, then cleared
+        if (method.Record.Length > 0) // [Drain]: the records in order, then cleared
         {
             sb.Append($"{indent}var {local} = new {job}{Fields(method, world)};\n");
             sb.Append($"{indent}global::EasyEcs.Emitted<{method.Record}>.Consume({world}, ref {local});\n");
@@ -954,14 +954,14 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// The job of a [ForEachRecord] method (an <c>IForEachRecord&lt;T&gt;</c> ref struct, run by
+    /// The job of a [Drain] method (an <c>IDrain&lt;T&gt;</c> ref struct, run by
     /// <c>Emitted&lt;T&gt;.Consume</c>): its singletons resolved once per pass as ref fields, its lookups and emits as a
     /// [ForEach] job's on one thread, the method called on each record.
     /// </summary>
     private static void EmitRecordJob(StringBuilder sb, OwnerModel owner, ForEachModel method, int number)
     {
         string job = $"{method.Name}Job{number}{method.TypeParameters}";
-        sb.Append($"    internal ref struct {job} : global::EasyEcs.IForEachRecord<{method.Record}>\n    {{\n");
+        sb.Append($"    internal ref struct {job} : global::EasyEcs.IDrain<{method.Record}>\n    {{\n");
         if (method.NeedsWorld) sb.Append("        public global::EasyEcs.World World;\n");
         for (int i = 0; i < method.Parameters.Length; i++)
             if (JobField(method, i, "") is { } field)
@@ -1114,13 +1114,13 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// <summary>Uses its Entity parameters (if any) only as identities (<see cref="Symbols.OnlyIdentifies"/>).</summary>
         public bool Identifies { get; init; }
 
-        /// <summary>[ForEntity]: the job runs on one entity (entity.Run), from an entry point that takes it.</summary>
+        /// <summary>[EntityMethod]: the job runs on one entity (entity.Run), from an entry point that takes it.</summary>
         public bool One { get; init; }
 
         /// <summary>[Consume]: the entities the pass visits are destroyed.</summary>
         public bool Consume { get; init; }
 
-        /// <summary>[ForEachRecord]: the record type it handles (its first parameter's), else "".</summary>
+        /// <summary>[Drain]: the record type it handles (its first parameter's), else "".</summary>
         public string Record { get; init; } = "";
 
         /// <summary>
@@ -1288,7 +1288,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
             // Spans are modeled as their element type: Span<T> writes T, ReadOnlySpan<T> reads it.
             bool outside = Symbols.IsRunner(method);
-            string record = Symbols.IsForEachRecord(method) ? Symbols.RecordType(method)!.ToDisplayString(Symbols.Fqn) : "";
+            string record = Symbols.IsDrain(method) ? Symbols.RecordType(method)!.ToDisplayString(Symbols.Fqn) : "";
             var parameters = method.Parameters.Select((p, at) =>
             {
                 string declared = (p.RefKind switch { RefKind.Ref => "ref ", RefKind.In => "in ", RefKind.RefReadOnlyParameter => "ref readonly ", _ => "" })
@@ -1374,7 +1374,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             bool identifies = Symbols.OnlyIdentifies(method, syntax, model);
                         // Declaration order by member index: a text position would change (and re-emit the file) on any edit above it.
             int order = method.ContainingType.GetMembers().IndexOf(method);
-            string? scalar = null; // why the method runs scalar; a [ForEntity] method has no loop to explain
+            string? scalar = null; // why the method runs scalar; an [EntityMethod] method has no loop to explain
             return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, parallel, order,
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
@@ -1389,14 +1389,14 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
                     Slices = Symbols.Slices(method), ChunkSize = Symbols.ChunkSize(method), Identifies = identifies,
-                    One = Symbols.IsForEntity(method), Consume = Symbols.IsConsume(method), Record = record,
+                    One = Symbols.IsEntityMethod(method), Consume = Symbols.IsConsume(method), Record = record,
                     // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
                     // One entity has no run of rows to vectorize; a system's loop is its implementation's (SystemLoops).
-                    Simd = Symbols.IsForEntity(method) || !outside || PairForm.IsPairMethod(method) || record.Length > 0 ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
+                    Simd = Symbols.IsEntityMethod(method) || !outside || PairForm.IsPairMethod(method) || record.Length > 0 ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
                     Scalar = scalar ?? "",
                     Pair = outside && PairForm.IsPairMethod(method) ? PairModel.Create(method, syntax, model, parallel, ct) : null,
                     // Reads of other entities at the row's ids, by EntityId (a keyed lookup finds through its index).
-                    Chases = Symbols.IsForEntity(method) || record.Length > 0 ? new([]) : Usable(Generator.Chases.Of(method, syntax, model, ct, out _), parameters),
+                    Chases = Symbols.IsEntityMethod(method) || record.Length > 0 ? new([]) : Usable(Generator.Chases.Of(method, syntax, model, ct, out _), parameters),
                     OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),
                     Fusion = outside || PairForm.IsPairMethod(method) || record.Length > 0 ? null : FusionSide.Of(method, stable, identifies, parallel), // a pair pass walks windows
                 };
@@ -1498,7 +1498,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
     private sealed record UpdateModel(OwnerModel Owner, EquatableArray<ForEachModel> Methods)
     {
-        /// <summary>The type's [ForEntity] methods: entry points only (in a file of their own).</summary>
+        /// <summary>The type's [EntityMethod] methods: entry points only (in a file of their own).</summary>
         public bool One { get; init; }
 
         /// <summary>The system's [UpdateInterval(n, Phase = p)]: n (0 without one) and p.</summary>
@@ -1512,7 +1512,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// <summary>
         /// One model per type with [ForEach] methods, and per system (with or without methods), its methods in
         /// declaration order. A [ForEach] method of an [EcsSystem] the generator writes no code for (EECS074, EECS022)
-        /// is left out; <paramref name="entryPoints"/> ([ForEntity] methods) keeps every owner, a system's too, since
+        /// is left out; <paramref name="entryPoints"/> ([EntityMethod] methods) keeps every owner, a system's too, since
         /// its entry points need no system code.
         /// </summary>
         public static IEnumerable<UpdateModel> Group(ImmutableArray<ForEachModel> methods, ImmutableArray<SystemModel> systems, bool entryPoints = false)

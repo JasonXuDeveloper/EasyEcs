@@ -80,7 +80,7 @@ public sealed partial class World
 
     /// <summary>
     /// Items per chunk for <paramref name="items"/> items of <paramref name="work"/> (rows of a pass, elements of
-    /// <see cref="ForParallel{TJob}"/>): <paramref name="chunkSize"/> rounded up to 64 when given, else by the items'
+    /// <see cref="ParallelFor{TJob}"/>): <paramref name="chunkSize"/> rounded up to 64 when given, else by the items'
     /// measured cost (<see cref="ParallelWork.Rows"/>), else about four chunks per thread, a multiple of 64 between
     /// 1,024 and <see cref="MaxChunkRows"/>.
     /// </summary>
@@ -136,7 +136,7 @@ public sealed partial class World
 
     /// <summary>
     /// Run the chunks 0 .. <paramref name="chunks"/> - 1 of <paramref name="work"/> (a parallel pass, a
-    /// <see cref="ForParallel{TJob}"/>), structural changes refused meanwhile: on the chunk runner, or on this thread
+    /// <see cref="ParallelFor{TJob}"/>), structural changes refused meanwhile: on the chunk runner, or on this thread
     /// when there are fewer than two or the runner cannot take them (<see cref="TryRunChunks"/>).
     /// </summary>
     internal void RunChunks(ParallelWork work, int chunks)

@@ -74,7 +74,7 @@ public static partial class EasyEcsAnalyzer
     /// </summary>
     private static void AnalyzeHandWritten(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body, Core core, Resets resets)
     {
-        if (!Symbols.IsForEach(method) || Symbols.IsForEntity(method)) return; // one entity per call: nothing to split into chunks
+        if (!Symbols.IsForEach(method) || Symbols.IsEntityMethod(method)) return; // one entity per call: nothing to split into chunks
         foreach (var (p, fields, covers) in Accumulations(method, body))
         {
             var singleton = (INamedTypeSymbol)p.Type;
@@ -222,7 +222,7 @@ public static partial class EasyEcsAnalyzer
     /// </summary>
     private static IEnumerable<(IParameterSymbol Parameter, List<Accumulated> Fields, bool Covers)> Accumulations(IMethodSymbol method, IOperation body)
     {
-        if (!Symbols.IsForEach(method) || Symbols.IsForEntity(method) || Symbols.IsBatch(method) || Symbols.IsParallel(method)
+        if (!Symbols.IsForEach(method) || Symbols.IsEntityMethod(method) || Symbols.IsBatch(method) || Symbols.IsParallel(method)
             || Symbols.Slices(method) != 1) yield break;
         foreach (var p in method.Parameters)
         {
@@ -433,7 +433,7 @@ public static partial class EasyEcsAnalyzer
     /// </summary>
     private static (IParameterSymbol World, List<OtherRead> Reads)? OtherEntityReads(IMethodSymbol method, IOperation body, Core core)
     {
-        if (!Symbols.IsForEach(method) || Symbols.IsForEntity(method) || Symbols.IsBatch(method)
+        if (!Symbols.IsForEach(method) || Symbols.IsEntityMethod(method) || Symbols.IsBatch(method)
             || method.Parameters.FirstOrDefault(p => Symbols.Classify(p) == Symbols.ParamKind.World) is not { } world) return null;
         var reads = new List<OtherRead>();
         var found = new List<IOperation>(); // the entity handles TryGetEntity / GetEntity give

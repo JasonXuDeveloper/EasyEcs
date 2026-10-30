@@ -665,36 +665,6 @@ public void ForEachParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob j
 - `ForEachParallel(…)`：O(M + S)
 - `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkSize)`：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
-### `ForParallel` [#forparallel]
-
-```csharp
-public void ForParallel<TJob>(int count, ref TJob job, int chunkSize = 0) where TJob : struct, IForRange;
-```
-
-在多个线程上对下标 0 到 `count` - 1 运行 `job`：区间切成块（64 个下标的整数倍：在一次调用测得元素开销之前，每个线程约四块，介于 1,024 和 [`World.MaxChunkRows`](/zh/docs/reference/world#maxchunkrows) 之间；之后元素很重时每块约 25 µs，循环很短时块更少；或者用 `chunkSize` 向上取整到 64），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程一次认领一块，每块运行 job 的一份副本（Execute 写进它字段的内容不会合并回来）。和并行 `[ForEach]` 遍历是同一个运行器：只有帮手线程划算时才唤醒它们，少于两块或运行器已经在忙时在调用线程上运行。job 不能改变 World 的结构（结构变更会抛异常），也不能写另一个块读的数据。所有者线程。每种 job 类型第一次调用之后零分配。
-
-**异常**
-
-- `ArgumentOutOfRangeException`：`count` 为负数。
-
-**复杂度**（[API 表](/zh/docs/api)）：
-
-- `world.ForParallel<TJob>(count, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
-- `ForParallel<T, TJob>(ref buffer, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
-
-### `ForParallel` [#forparallel-2]
-
-```csharp
-public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>;
-```
-
-对 `items`（一个 [`Emitted`](/zh/docs/reference/emitted) 单例的记录、某个单例的缓冲区）的元素运行 [`World.ForParallel`](/zh/docs/reference/world#forparallel)：每个块以 span 拿到自己的元素，可以写。调用运行期间列表不能改变。并行遍历留在各块列表里的 [`Emitted`](/zh/docs/reference/emitted) 记录就地运行，按顺序，不先合并：一个块跨两个这样的列表时，每个列表调用一次，各自带自己的 `start`。
-
-**复杂度**（[API 表](/zh/docs/api)）：
-
-- `world.ForParallel<TJob>(count, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
-- `ForParallel<T, TJob>(ref buffer, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
-
 ### `GetEntity` [#getentity]
 
 ```csharp
@@ -953,6 +923,36 @@ public int MoveEntities(World target, ReadOnlySpan<EntityId> entities, Span<Enti
 把 `entities`（失效的 id、重复的 id 和退休实体，即因清理组件而保留的实体，都跳过）搬到 `target`，即同一线程上的另一个 World：目标 World 新建带着这些组件的实体，结果和 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 读这组实体的存档一样，只是省掉了编码；然后在这边销毁它们（子实体一起销毁，所以层级要整棵一起搬）。清理组件（[`ICleanupComponent`](/zh/docs/reference/icleanupcomponent)）不会搬走：它们留在这边的实体上（它现在退休了），交给本 World 的系统释放它们持有的资源，新实体没有这些组件。新句柄按顺序写进 `moved`（放得下多少写多少，跳过的 id 对应 [`Entity`](/zh/docs/reference/entity) 的 default）；返回搬走的数量。id 列表写成 `CollectionsMarshal.AsSpan(list)`，不复制。O(实体数 × 组件数)。调用线程必须同时是两个 World 的所有者线程；任何一个 World 正在遍历时都不能调用。要搬的实体有一个唯一键（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)），而 `target` 里已有实体持有它时，抛 `InvalidOperationException`，什么都不搬。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(实体数 × 组件数)
+
+### `ParallelFor` [#parallelfor]
+
+```csharp
+public void ParallelFor<TJob>(int count, ref TJob job, int chunkSize = 0) where TJob : struct, IForRange;
+```
+
+在多个线程上对下标 0 到 `count` - 1 运行 `job`：区间切成块（64 个下标的整数倍：在一次调用测得元素开销之前，每个线程约四块，介于 1,024 和 [`World.MaxChunkRows`](/zh/docs/reference/world#maxchunkrows) 之间；之后元素很重时每块约 25 µs，循环很短时块更少；或者用 `chunkSize` 向上取整到 64），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程一次认领一块，每块运行 job 的一份副本（Execute 写进它字段的内容不会合并回来）。和并行 `[ForEach]` 遍历是同一个运行器：只有帮手线程划算时才唤醒它们，少于两块或运行器已经在忙时在调用线程上运行。job 不能改变 World 的结构（结构变更会抛异常），也不能写另一个块读的数据。所有者线程。每种 job 类型第一次调用之后零分配。
+
+**异常**
+
+- `ArgumentOutOfRangeException`：`count` 为负数。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.ParallelFor<TJob>(count, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+- `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+
+### `ParallelFor` [#parallelfor-2]
+
+```csharp
+public void ParallelFor<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>;
+```
+
+对 `items`（一个 [`Emitted`](/zh/docs/reference/emitted) 单例的记录、某个单例的缓冲区）的元素运行 [`World.ParallelFor`](/zh/docs/reference/world#parallelfor)：每个块以 span 拿到自己的元素，可以写。调用运行期间列表不能改变。并行遍历留在各块列表里的 [`Emitted`](/zh/docs/reference/emitted) 记录就地运行，按顺序，不先合并：一个块跨两个这样的列表时，每个列表调用一次，各自带自己的 `start`。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.ParallelFor<TJob>(count, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+- `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
 ### `Query` [#query]
 

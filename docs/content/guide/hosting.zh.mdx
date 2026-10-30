@@ -227,7 +227,7 @@ public ref struct ReceiveSpawns
 拿到 `ChannelClosedException`，而不是等一个永远不来的答复（见[完整例子](#full-example)的 `Arena.RunAsync`）。
 
 针对已有实体的请求带上它的 `EntityId`。系统找到这个实体，在它上面跑一个
-[`[ForEntity]`](/zh/docs/guide/queries#run-on-one-entity) 方法：方法的所有组件只查找一次，再用过滤条件排除死掉的单位。实体已经不在、
+[`[EntityMethod]`](/zh/docs/guide/queries#run-on-one-entity) 方法：方法的所有组件只查找一次，再用过滤条件排除死掉的单位。实体已经不在、
 过滤条件不通过或者缺组件时，入口方法返回 `false`，这正好就是答复：
 
 ```csharp
@@ -237,7 +237,7 @@ public readonly record struct HealRequest(EntityId Unit, int Amount, TaskComplet
 
 public static class Heals
 {
-    [ForEntity, Without<Dead>]                                         // 死掉的单位被拒绝，就像遍历会跳过它
+    [EntityMethod, Without<Dead>]                                         // 死掉的单位被拒绝，就像遍历会跳过它
     static void Heal(ref Health health, int amount) => health.Value += amount;
 }
 

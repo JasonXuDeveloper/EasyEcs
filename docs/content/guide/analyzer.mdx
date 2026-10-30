@@ -75,7 +75,7 @@ EECS049, not also a cost of its parameters; an instance hook of a system is EECS
 | [EECS023](#eecs023) | Error | Filters go on `[ForEach]` methods and system groups | Remove the filter |
 | [EECS024](#eecs024) | Error | `[ForEach]` is not on a local function | |
 | [EECS025](#eecs025) | Warning | A write access only reads | `in`, `ReadOnlySpan<T>`, `Read<T>()`, `in T` for a `Mut<T>` |
-| [EECS026](#eecs026) | Warning | A `[ForEach]` or `[ForEntity]` method uses its parameters | `[With<T>]`, or remove the parameter |
+| [EECS026](#eecs026) | Warning | A `[ForEach]` or `[EntityMethod]` method uses its parameters | `[With<T>]`, or remove the parameter |
 | [EECS027](#eecs027) | Warning | A `[ForEach]` method takes what it looks up on every row | Take the lookup as a parameter |
 | [EECS028](#eecs028) | Warning | Code that runs every update does not allocate | |
 | [EECS030](#eecs030) | Warning | A structural change over a query is one bulk call | The bulk call |
@@ -126,8 +126,8 @@ EECS049, not also a cost of its parameters; an instance hook of a system is EECS
 | [EECS075](#eecs075) | Error | A system has static members only | Make it static |
 | [EECS076](#eecs076) | Error | A hook is a static void method taking the `World`, the `SystemHandle`, both or neither | |
 | [EECS077](#eecs077) | Error | A system API is given a system type | |
-| [EECS080](#eecs080) | Info | A one-entity job is a `[ForEntity]` method | Write it as a `[ForEntity]` method |
-| [EECS081](#eecs081) | Error | A `[ForEntity]` method is static and takes what one entity has | Make it static |
+| [EECS080](#eecs080) | Info | A one-entity job is an `[EntityMethod]` method | Write it as an `[EntityMethod]` method |
+| [EECS081](#eecs081) | Error | An `[EntityMethod]` method is static and takes what one entity has | Make it static |
 | [EECS083](#eecs083) | Error | `[UpdateInterval]`: an interval of 1 or more, a phase 0 to n - 1, on a system | |
 | [EECS084](#eecs084) | Info | A `[ForEach]` method that destroys every entity it visits is `[Consume]` | `[Consume]` |
 | [EECS085](#eecs085) | Error | `[Consume]` goes with `[ForEach]`, without `Slices` | |
@@ -308,7 +308,7 @@ public ref struct SpawnSystem
 
 **Systems must not reference systems.** Error. No code fix.
 
-The code of a system reaches another system: it calls one of its methods or `[ForEntity]` entry points, reads one of
+The code of a system reaches another system: it calls one of its methods or `[EntityMethod]` entry points, reads one of
 its fields, or looks it up with `World.System<T>()` / `World.TryGetSystem<T>(out …)`. Systems that call each other are
 coupled: neither can be removed, reordered or tested alone, and the scheduler cannot see what the call touches. A
 `const` of another system is a value and is allowed; a helper both need goes into a static class of its own.
@@ -1998,7 +1998,7 @@ later system (double buffering, the GPU's ping-pong), or split the work into two
 **Code running on several threads writes shared memory.** Warning. No code fix.
 
 A `[ForEach(Parallel = true)]` method, and the `Execute` of a job run by `ForEachParallel`, `ForEachEntityParallel`,
-`ForEachBatchParallel` or `world.ForParallel`, run on several threads at once, one chunk each. A static field or auto-property, an object a
+`ForEachBatchParallel` or `world.ParallelFor`, run on several threads at once, one chunk each. A static field or auto-property, an object a
 context parameter refers to, or the object a job's field holds (every chunk's copy of the job shares it) is the same
 memory for all of them: an increment loses updates, a list's `Add` corrupts the list, and which plain write is kept depends on timing.
 The rule leaves out a constant every thread writes, `[ThreadStatic]` fields, concurrent collections, `Interlocked` and
@@ -2047,10 +2047,10 @@ at the cost of a contended cache line on every row.
 ## EECS061 [#eecs061]
 
 **A parallel job's field read after the pass.** Warning. Code fix: runs the job on one thread (`ForEach` /
-`ForEachEntity` / `ForEachBatch`), when the call passes no `chunkSize`; a `ForParallel` call has no such twin and gets
+`ForEachEntity` / `ForEachBatch`), when the call passes no `chunkSize`; a `ParallelFor` call has no such twin and gets
 no fix.
 
-`ForEachParallel`, `ForEachEntityParallel`, `ForEachBatchParallel` and `world.ForParallel` run a copy of the job per
+`ForEachParallel`, `ForEachEntityParallel`, `ForEachBatchParallel` and `world.ParallelFor` run a copy of the job per
 chunk and merge nothing back: the job passed by `ref` keeps the values it had before the call. A field `Execute` writes (a sum, a count, a
 flag) and the caller reads afterwards holds its old value. The rule reports the call when the first use of the job after it reads such a field.
 Jobs that merge their chunks' copies back are left out: a job that implements `Merges` itself, implicitly or
@@ -2586,11 +2586,11 @@ Mark the type `[EcsSystem]` and make it a `ref struct` of static members, or nam
 
 ## EECS080 [#eecs080]
 
-**A one-entity job written by hand.** Suggestion (Info). Code fix: writes it as a `[ForEntity]` method and changes
+**A one-entity job written by hand.** Suggestion (Info). Code fix: writes it as an `[EntityMethod]` method and changes
 each call.
 
 A struct implementing `IForEachEntity<T1..Tn>`, created and handed to `entity.Run` right away, is what
-[`[ForEntity]`](/en/docs/guide/queries#run-on-one-entity) generates from a static method: its `ref` parameters make the
+[`[EntityMethod]`](/en/docs/guide/queries#run-on-one-entity) generates from a static method: its `ref` parameters make the
 `WriteMask`, its filter attributes the `QueryFilter`, its other parameters the values the entry point takes, and
 `INoStructuralChanges` follows from what the method calls. The rule reports the struct when every use of it is such a
 call: `var job = new J { ... };` followed by `entity.Run<.., J>(ref job)`, with no filter or with one held in a
@@ -2622,7 +2622,7 @@ public static class Combat
 ```csharp tab="Fixed"
 public static class TakeHit
 {
-    [ForEntity, Without<Dead>]
+    [EntityMethod, Without<Dead>]
     static void Run(ref Health hp, int damage) => hp.Value -= damage;
 }
 
@@ -2637,9 +2637,9 @@ it shows in the IDE only.
 
 ## EECS081 [#eecs081]
 
-**A `[ForEntity]` method that cannot run on one entity.** Error. Code fix: makes an instance method static.
+**An `[EntityMethod]` method that cannot run on one entity.** Error. Code fix: makes an instance method static.
 
-A `[ForEntity]` method is static: the generator writes an entry point next to it that takes the entity, and no
+An `[EntityMethod]` method is static: the generator writes an entry point next to it that takes the entity, and no
 instance is there to call it on. It takes components (`in`, `ref`, `Maybe<T>`), singletons, the `Entity`, the `World`
 and the caller's values; what belongs to a pass over many rows (component spans, an `EntitySpan`, a `Reduce<T>`, a
 `Scratch<T>`) has no meaning for one entity, and a method is either a pass (`[ForEach]`) or a run on one entity.
@@ -2647,7 +2647,7 @@ and the caller's values; what belongs to a pass over many rows (component spans,
 ```csharp tab="Reported" doccheck=expect-EECS081
 public static class Healing
 {
-    [ForEntity]
+    [EntityMethod]
     static void Heal(Span<Health> health, int amount) { }   // a span: one entity has one Health
 }
 ```
@@ -2655,7 +2655,7 @@ public static class Healing
 ```csharp tab="Fixed"
 public static class Healing
 {
-    [ForEntity]
+    [EntityMethod]
     static void Heal(ref Health hp, int amount) => hp.Value += amount;   // Healing.Heal(unit, 5)
 }
 ```
@@ -2875,7 +2875,7 @@ An [`EntityRandom`](/en/docs/reference/entityrandom) number is a pure function o
 the stream. Two draws for the same entity with the same stream in one pass come from the same bits: a direction whose X
 always equals its Y, a hit roll that always matches the damage roll. The same holds for a draw inside a loop whose
 stream and entity the loop does not change, where every iteration gets the same number. Add the iteration to the
-stream (`stream + (uint)i`), which has no single mechanical fix. The rule checks `[ForEach]` and `[ForEntity]` methods
+stream (`stream + (uint)i`), which has no single mechanical fix. The rule checks `[ForEach]` and `[EntityMethod]` methods
 and the `Execute` of jobs, where each row draws once per update. A test that compares two draws on purpose is left
 alone.
 
@@ -2982,7 +2982,7 @@ into a static class or a generic system), and no `[ForEach]` method that reads t
 
 ## Unused-member warnings [#never-used]
 
-The generated code calls `[ForEach]`, `[ForEntity]` and hook methods through `UnsafeAccessor`, by name, which the
+The generated code calls `[ForEach]`, `[EntityMethod]` and hook methods through `UnsafeAccessor`, by name, which the
 IDE's "private member is unused" analyzers do not count as a use. A suppressor in the package hides those warnings on
 exactly these methods: EECSS01 for IDE0051 (never used) and EECSS02 for IDE0052 (never read). Rider and ReSharper
 read the JetBrains `[MeansImplicitUse]` the attributes carry instead

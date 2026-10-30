@@ -120,8 +120,8 @@ form in .NET 10. Each ships when the methods that need it measure faster.
   finalizer rounds ([D79](/en/docs/decisions#d79-entity-random)).
 - Keyed (histogram) reductions: no candidate wins at the sizes such an API would serve; a `Reduce<T>` of
   `[InlineArray]` bins covers a few thousand ([D81](/en/docs/decisions#d81-keyed-reductions)).
-- `[ForEntity]` entry points as extension members of `Entity`: every request of every module would land in one type's
-  member list ([D82](/en/docs/decisions#d82-for-entity)).
+- `[EntityMethod]` entry points as extension members of `Entity`: every request of every module would land in one type's
+  member list ([D82](/en/docs/decisions#d82-entity-method)).
 - A system's cadence as an overridable property or set at run time: the attribute is a constant the schedule reads; a
   cadence that changes is a group the host updates when it wants
   ([D83](/en/docs/decisions#d83-update-interval-attribute)).

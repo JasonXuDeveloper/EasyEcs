@@ -116,7 +116,7 @@ public sealed class ConsumeAttribute : Attribute;
 /// <code>
 /// public static class Orders
 /// {
-///     [ForEntity, Without&lt;Closed&gt;]
+///     [EntityMethod, Without&lt;Closed&gt;]
 ///     static void Buy(ref Stock stock, ref Sales sales, int quantity) { stock.Items -= quantity; sales.Count += quantity; }
 /// }
 ///
@@ -124,7 +124,7 @@ public sealed class ConsumeAttribute : Attribute;
 /// </code>
 /// </summary>
 [AttributeUsage(AttributeTargets.Method), JetBrains.Annotations.MeansImplicitUse]
-public sealed class ForEntityAttribute : Attribute;
+public sealed class EntityMethodAttribute : Attribute;
 
 /// <summary>
 /// A static method that handles each record the passes emitted (<see cref="Emit{T}"/>) once: its first parameter is the
@@ -139,12 +139,12 @@ public sealed class ForEntityAttribute : Attribute;
 /// ones handled included. Records added to <see cref="Emitted{T}"/> while the pass runs are cleared unhandled
 /// (an <see cref="Emit{T}"/> of the same record is refused: EECS108).
 /// <code>
-/// [ForEachRecord]
+/// [Drain]
 /// static void Send(in EntityUpdate update, ref Stats stats) => stats.Sent += update.Viewers;   // each update, once
 /// </code>
 /// </summary>
 [AttributeUsage(AttributeTargets.Method), JetBrains.Annotations.MeansImplicitUse]
-public sealed class ForEachRecordAttribute : Attribute;
+public sealed class DrainAttribute : Attribute;
 
 /// <summary>
 /// Whether a <see cref="ForEachAttribute"/> method runs as a vector loop (<see cref="ForEachAttribute.SimdMode"/>). A method

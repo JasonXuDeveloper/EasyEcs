@@ -40,7 +40,7 @@ vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the 
 the noise, docs-todos "feat-symmetric-pairs"), ghost rows in MultiWorld (`feat-ghost-rows`: 4 zones side by side, border units
 copied as `Ghost` rows each update, crossings moved with `MoveEntities`, checked against one world; a
 `CopyEntities<TTag>` proposal in `owner-review.md`, not built; CI now checks the sample's output), Emitted<T>'s segments (`feat-emit-segments`, 4925b09: the chunks' lists kept as
-segments, joined only for a span read or a write; EmitParallel 1.4-2x, a `[ForEachRecord]` reader about 1.2x, 0 B;
+segments, joined only for a span read or a write; EmitParallel 1.4-2x, a `[Drain]` reader about 1.2x, 0 B;
 generator unchanged), fewer copies (`feat-fewer-copies`, 837c956: incremental Capture / Restore, Rollback
 with 16 writes 3.2 ms -> 36 us and BufferSnapshot Restore 78 -> 1.2 us; sorts gather into a spare column and swap it in,
 1M wide rows 77-88 -> 71-81 ms; `FillPool` exact on helper threads, so VoxelServer fills its field buffers once, not
@@ -73,18 +73,10 @@ CI runs the unit tests on ARM64 (b1dbdb0).
   `DOTNET_TC_OnStackReplacement=0` (3 of 3 clean). Fix: `Allocations.WarmUp` runs until the JIT has settled (no
   compile in the process for 40 runs and 0.5 s). Decision draft in `docs-todos.md`, "fix-flaky-alloc".
 
-**Rename `[ForEachRecord]` -> `[Drain]`** (owner, 2026-10-28, naming audit: "[ForEach] 和 [ForEachRecord] 太像但做的事不一样";
-unreleased, so no migration): right after the tile branch merges (it edits SystemGenerator.cs too). With it
-`IForEachRecord<T>` -> `IDrain<T>`, the analyzer and code-fix strings, `Symbols`, tests (RecordTests names), the
-benchmarks' method names (EmitBenchmark, RecordBenchmark: site keys unaffected, not synced yet), zh ApiDocs files
-(`foreachrecordattribute.xml` -> `drainattribute.xml`, `iforeachrecord.xml`), the reference regenerated, plans, file
-maps and skills. Glossary: drain = 排空 (each record handled once, then cleared).
-In the same pass (owner, 2026-10-28, all unreleased): **`[ForEntity]` -> `[EntityMethod]`** (a callable on one entity,
-not a pass; "method" as the docs say `[ForEach]` method and pair method; zh 实体方法; D82 rewritten, EECS080's fix
-title, `Symbols`, the code fixes) and **`world.ForParallel` -> `world.ParallelFor`** (.NET `Parallel.For`, OpenMP
-`parallel for`, TBB / Kokkos `parallel_for`; `IForRange` / `IForSpan` unchanged). `[GaussSeidel]` stays (renamed
-from `[RedBlack]` on 2026-10-27). Grep every old name afterwards (code, tests, benchmarks, samples, plans, skills,
-zh ApiDocs; history pages only may keep them).
+- [x] **Renames** (owner, 2026-10-28, naming audit; all unreleased, so no migration, no alias, no code fix):
+  `[ForEachRecord]` / `IForEachRecord<T>` -> `[Drain]` / `IDrain<T>` (zh 排空), `[ForEntity]` -> `[EntityMethod]`
+  (zh 实体方法), `world.ForParallel` -> `world.ParallelFor`. Done on `feat-renames` (D141), waiting to merge; the
+  docs pass of the record pass (`docs-todos.md`, feat-generator-gaps) uses the new names.
 
 Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
 rows, edges found while stepping), 8e and 12e merged; 8f + 8g (one generator branch) start once the tile branch merged (they edit Kernel.cs,
@@ -357,7 +349,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
           Rollback 141 -> 177 us, 0 B), so the first parallel write after a restore does not copy on a helper thread.
           Bar: back to the old times or better with the 0 B steady state kept.
        e. [x] **Emitted<T> without the join copy**: `Emit<T>.Join` copies every chunk's list into the singleton's list.
-          Keep the chunks' lists in order as segments: `[ForEachRecord]` and `ForParallel` walk the segments (users
+          Keep the chunks' lists in order as segments: `[Drain]` and `ParallelFor` walk the segments (users
           see no change); a contiguous span is joined only when user code asks for one.
 13. [ ] The rest of "Later" below.
 
@@ -385,7 +377,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       Measured before and after (GeneratorBenchmark, ReportAnalyzer: UnitTest analyzer 40 s, generators 4 s).
 - [ ] **Inner loops** (`inner-loops.md`), in this order (WP0b done): WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
       WP5 `Cell<TCell,TTile>` (bar: hand-written speed), WP5b (per-tile results, several inputs/outputs, VoxelServer
-      `Flow.cs`), WP1 InlineArray, WP4 ForParallel lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
+      `Flow.cs`), WP1 InlineArray, WP4 ParallelFor lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
       a small rewrite would vectorize warns).
 - [ ] **Generated text cleanup** (`generated-text.md`, ranked; one agent, SystemGenerator owner, after lookup gathers):
       1 `GeneratedTextTests` guard first (fails on today's output, allow-list shrinks as each step lands);
@@ -404,9 +396,9 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       readability counts once the asm is equal.
 - [x] **Generator gaps found by the VoxelServer plan** (`voxel-rewrite.md` section 3): built on feat-generator-gaps,
   merged: G0 enum lanes and single-bool components in vector loops, G5 `[Accumulate]` totals (EECS086's
-  total case and fix), G6 `[ForEachRecord]` (EECS108, EECS109 and fix), G4 `World.ReserveBuffers(prefab, count)`; G7
-  not built (owner-review.md). Names approved by the owner (2026-10-27): `[Accumulate]`, `[ForEachRecord]` +
-  `IForEachRecord<T>`, `World.ReserveBuffers`. Docs pass: docs-todos.md "feat-generator-gaps". G1 / G2 come with inner-loops WP5 /
+  total case and fix), G6 `[Drain]` (EECS108, EECS109 and fix), G4 `World.ReserveBuffers(prefab, count)`; G7
+  not built (owner-review.md). Names approved by the owner (2026-10-27): `[Accumulate]`, `[Drain]` +
+  `IDrain<T>`, `World.ReserveBuffers`. Docs pass: docs-todos.md "feat-generator-gaps". G1 / G2 come with inner-loops WP5 /
   WP2; G8 / G9 with L2.
 - [ ] **A `using` alias to a system does not bind its generated entry point**: `using Alias = Hunters;` then
   `Alias.Hunt(world)` fails with CS7036 (found by feat-locality-core). Find whether the generator or the interceptor
@@ -480,7 +472,7 @@ step starts before the earlier one is done, so docs and numbers are written once
 - [ ] **2. The exemplar pass: the refactor** (#169, `audit-code`; owner, 2026-10-27: "9 的第一步不是重构全部 sample demo
       benchmark unit test 和文档里的代码例子吗，全用上最正确的最合适的功能（新功能也包含），尤其是 voxelserver 需要大规模重构").
       Every piece of code users read or copy is rewritten in the most correct, most fitting form, new features
-      included (vector loops through plain `[ForEach]`, `[Accumulate]`, `[ForEachRecord]`, `Emit`, `Scratch`,
+      included (vector loops through plain `[ForEach]`, `[Accumulate]`, `[Drain]`, `Emit`, `Scratch`,
       `EntityRandom`, views, `[OrderBy]` / pairs, tiles with `[GaussSeidel]` and the ping-pong step, `IDirectMapped`,
       `ChunkSize` only where it pays, the least code the generator allows):
       a. **VoxelServer, a large rewrite** (owner answers in `voxel-rewrite.md` section 9: every zombie looks every
@@ -509,7 +501,7 @@ step starts before the earlier one is done, so docs and numbers are written once
          skill `skills/easyecs/SKILL.md`, README), DocCheck at 0.
       Proof: outputs and README / page output blocks match, 0 B steady state, tests three ways, A/B no slower.
 - [ ] **2b. EECS086, EECS109 and EECS055's "a bool among N fields" become Warnings** (owner, 2026-10-27) once the
-      samples use `[Accumulate]` / `[ForEachRecord]` and VoxelServer splits its bools (Body.OnGround, Exposure.Sunlit):
+      samples use `[Accumulate]` / `[Drain]` and VoxelServer splits its bools (Body.OnGround, Exposure.Sunlit):
       one line each in the analyzer (pass `true`, fixable, in Kernel.cs for EECS055), with step 2.
 - [ ] **3. Docs pass** (#141, after the refactor: pages describe and include the final code): everything in `docs-todos.md`; DocCheck and ApiDocs kept at 0 (both 0 since the fix-ci merge); decision
       record for the 8 declined declarations; roadmap item for inner loops; analyzer range EECS002-103.

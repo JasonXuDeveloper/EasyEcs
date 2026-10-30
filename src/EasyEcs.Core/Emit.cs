@@ -138,9 +138,9 @@ public readonly ref struct Emit<T> where T : struct
 /// <summary>
 /// The records the passes with an <see cref="Emit{T}"/> parameter appended, in row order of each pass and in the order
 /// the passes ran: a singleton, added by the first pass that emits. The system that applies the records reads
-/// <see cref="Items"/> (<c>foreach</c>, <c>AsReadOnlySpan</c>, <see cref="World.ForParallel{T, TJob}"/>) and clears it.
+/// <see cref="Items"/> (<c>foreach</c>, <c>AsReadOnlySpan</c>, <see cref="World.ParallelFor{T, TJob}"/>) and clears it.
 /// A parallel pass hands over its chunks' lists, not copies of their records: <c>Count</c>, <c>Clear</c>, a
-/// <see cref="ForEachRecordAttribute"/> pass and <see cref="World.ForParallel{T, TJob}"/> take the records where they
+/// <see cref="DrainAttribute"/> pass and <see cref="World.ParallelFor{T, TJob}"/> take the records where they
 /// are, and the first read as one span (<c>foreach</c>, <c>AsReadOnlySpan</c>, the indexer) or write joins them into one
 /// list, O(records) once. Snapshots and saves copy the records like a buffer component's.
 /// </summary>
@@ -167,12 +167,12 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
 
     /// <summary>
     /// Runs <paramref name="job"/> on each record of <paramref name="world"/>'s <see cref="Emitted{T}"/> (none when it has
-    /// no such singleton), in the order they were emitted, then clears them: a <see cref="ForEachRecordAttribute"/>
+    /// no such singleton), in the order they were emitted, then clears them: a <see cref="DrainAttribute"/>
     /// method's pass. The records walked are those present when it starts: one the job adds is cleared unhandled. A job
     /// that throws leaves every record in place. O(records), no allocation. Owner thread. Generated code calls this.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public static void Consume<TJob>(World world, ref TJob job) where TJob : IForEachRecord<T>, allows ref struct
+    public static void Consume<TJob>(World world, ref TJob job) where TJob : IDrain<T>, allows ref struct
     {
         if (!world.HasSingleton<Emitted<T>>()) return;
         ref var items = ref world.GetSingleton<Emitted<T>>().Items; // a box of its own: the ref outlives other singletons' adds
@@ -213,11 +213,11 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
 }
 
 /// <summary>
-/// The job of a <see cref="ForEachRecordAttribute"/> method, which the generator writes: the method called on one
+/// The job of a <see cref="DrainAttribute"/> method, which the generator writes: the method called on one
 /// record with the values its pass resolved (singletons, lookups). Run by <see cref="Emitted{T}.Consume{TJob}"/>.
 /// </summary>
 /// <typeparam name="T">The record.</typeparam>
-public interface IForEachRecord<T> where T : struct
+public interface IDrain<T> where T : struct
 {
     /// <summary>Handle <paramref name="record"/>.</summary>
     void Execute(in T record);
@@ -229,8 +229,8 @@ public interface IForEachRecord<T> where T : struct
 /// list in chunk order (<see cref="Append"/>) instead of copying their records in (MPI's gather without the copy, a
 /// rope's segments): its records are then its own (<c>Items[0, head)</c>) followed by those of its segments in order,
 /// <see cref="BufferStore{T}.Count"/> counts them all, and <see cref="BufferStore.Shares"/> reads
-/// <see cref="BufferStore.Segmented"/>. Count, Clear (the segments back to the pool), a [ForEachRecord] pass and
-/// <see cref="World.ForParallel{T, TJob}"/> take the records where they are (<see cref="BufferStore{T}.Run"/>); a read
+/// <see cref="BufferStore.Segmented"/>. Count, Clear (the segments back to the pool), a [Drain] pass and
+/// <see cref="World.ParallelFor{T, TJob}"/> take the records where they are (<see cref="BufferStore{T}.Run"/>); a read
 /// as one span, a write, a pass resolving the singleton (<see cref="World.SingletonRef{T}"/>, which an emitting pass on
 /// one thread does too), a capture and a save join them first (<see cref="Settle"/>), once: O(records), the copy the
 /// pass no longer makes. The list keeps the largest size the joined records needed; the segments, those their chunks needed.

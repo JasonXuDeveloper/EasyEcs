@@ -304,9 +304,9 @@ Check, in this order:
 `WorldOptions.MeasureSystems` counts every run in `system.Stats.Runs`, which tells "never ran" from "ran and did
 nothing".
 
-## Why does a `[ForEntity]` method or `entity.Run` return `false`? [#run-false]
+## Why does an `[EntityMethod]` method or `entity.Run` return `false`? [#run-false]
 
-The entry point of a `[ForEntity]` method (`Requests.TakeHit(unit, 30)`), and `entity.Run<T…, TJob>(ref job, filter)`
+The entry point of an `[EntityMethod]` method (`Requests.TakeHit(unit, 30)`), and `entity.Run<T…, TJob>(ref job, filter)`
 under it, run only when the entity can take the work, and say `false`, without running it, when:
 
 1. **The entity is not alive:** destroyed since you took its handle, or `default(Entity)`. `Run` does not throw for
@@ -336,7 +336,7 @@ InvalidOperationException: The index of Unit by Team is not built yet, and build
 ```
 
 A value index is built by its first lookup. Code on several threads (a parallel `[ForEach]` method, a system of a
-parallel stage, `world.ForParallel`) that looks one up through the `World` would build it while other threads read it,
+parallel stage, `world.ParallelFor`) that looks one up through the `World` would build it while other threads read it,
 so the lookup refuses. **Fix:** take a [`Lookup<T>`](/en/docs/guide/threading#lookups) parameter and call `TryFind`,
 `Find` or `Count` on it: the generated job builds the index before the pass. Or look the key up once on the owner
 thread before the update, which builds the index for the passes after it.

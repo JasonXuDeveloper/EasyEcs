@@ -312,7 +312,7 @@ public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in Query
 
 One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
 
-[`Entity.Run`](/en/docs/reference/entity#run-2) with `since` as the filter's tick: its `Changed` components must have been written (its `Removed` ones removed) at or after `since`. The same test as `filter.Since(since)`, without the copy of the filter (a static filter, as the entry point of a `[ForEntity, Changed<T>]` method passes it). O(components the filter names).
+[`Entity.Run`](/en/docs/reference/entity#run-2) with `since` as the filter's tick: its `Changed` components must have been written (its `Removed` ones removed) at or after `since`. The same test as `filter.Since(since)`, without the copy of the filter (a static filter, as the entry point of an `[EntityMethod, Changed<T>]` method passes it). O(components the filter names).
 
 **Complexity** ([API table](/en/docs/api)):
 

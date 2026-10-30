@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.ForEntityAttribute" source="9a876f68b2a2">
+  <member name="T:EasyEcs.EntityMethodAttribute" source="25ed0ea0491b">
     <summary>
       在单个实体上运行的静态方法：生成器写一个入口，它是方法所在类型的静态成员，和方法同名，接收实体（带 <c>[Changed&lt;T&gt;]</c> /
       <c>[Removed&lt;T&gt;]</c> 时接着是 tick，然后是方法的其他值），返回方法有没有运行。方法能接收的，就是系统之外的
@@ -13,7 +13,7 @@
       <code>
       public static class Orders
       {
-          [ForEntity, Without&lt;Closed&gt;]
+          [EntityMethod, Without&lt;Closed&gt;]
           static void Buy(ref Stock stock, ref Sales sales, int quantity) { stock.Items -= quantity; sales.Count += quantity; }
       }
 

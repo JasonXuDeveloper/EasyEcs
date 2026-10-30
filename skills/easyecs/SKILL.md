@@ -113,7 +113,7 @@ available as Markdown: add `.md` to its URL.
   rows at a time (EECS054: only with `Parallel = true`); light rows keep the default. Threads claim chunks from one
   shared counter, like OpenMP's `schedule(dynamic, n)`: never assume an order between chunks.
 - Code that runs on several threads (a parallel `[ForEach]` method, the `Execute` of a job run by `ForEachParallel`,
-  `ForEachEntityParallel`, `ForEachBatchParallel` or `ForParallel`) never writes shared state: no static field, no
+  `ForEachEntityParallel`, `ForEachBatchParallel` or `ParallelFor`) never writes shared state: no static field, no
   object a context parameter or a job field refers to (EECS060). A parallel job's fields are not merged back unless
   the job implements `Merges` itself: each chunk runs a copy, so never read a field after the parallel call; run it
   with `ForEach` / `ForEachEntity` / `ForEachBatch` instead (EECS061). A total over the rows (a count, a sum, a min / max, a bounding box) is a `ref Reduce<T>` parameter (always `ref`:
@@ -170,7 +170,7 @@ available as Markdown: add `.md` to its URL.
   why a method stayed scalar (a narrow value out of range, a component too wide for the work, a `Maybe<T>` in a
   parallel method, a call outside a condition); put `[ForEach(SimdMode = SimdMode.Require)]` on a hot method so losing the loop fails the
   build (EECS056), `SimdMode.Off` on one that should stay scalar.
-- A request or message for one entity is a private static `[ForEntity]` method (`ref` for what it writes, filter
+- A request or message for one entity is a private static `[EntityMethod]` method (`ref` for what it writes, filter
   attributes such as `[Without<Dead>]`, the caller's values after the components), called through its generated entry
   point `Owner.Method(entity, values…)`; a job written by hand and run with `entity.Run` is EECS080, an instance
   method or one taking spans EECS081. The entry point returns `false` when the entity is gone, lacks a component or

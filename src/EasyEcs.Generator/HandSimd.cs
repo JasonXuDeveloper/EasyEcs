@@ -63,7 +63,7 @@ internal static class HandSimd
     /// </summary>
     public static PerRow? Of(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
     {
-        if (!MayBe(syntax) || !Symbols.IsForEach(method) || Symbols.IsForEntity(method) || Symbols.Simd(method) == Symbols.SimdOff
+        if (!MayBe(syntax) || !Symbols.IsForEach(method) || Symbols.IsEntityMethod(method) || Symbols.Simd(method) == Symbols.SimdOff
             || Symbols.IsGenerated(method) || !method.IsStatic || !method.ReturnsVoid || method.IsGenericMethod
             || method.PartialDefinitionPart != null || method.PartialImplementationPart != null) return null;
         PerRow form;

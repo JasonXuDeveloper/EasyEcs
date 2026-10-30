@@ -15,10 +15,10 @@ namespace EasyEcs.Generator;
 internal static class Symbols
 {
     public const string ForEachAttribute = "EasyEcs.ForEachAttribute";
-    public const string ForEntityAttribute = "EasyEcs.ForEntityAttribute";
+    public const string EntityMethodAttribute = "EasyEcs.EntityMethodAttribute";
     public const string ConsumeAttribute = "EasyEcs.ConsumeAttribute";
     public const string NeighborAttribute = "EasyEcs.NeighborAttribute";
-    public const string ForEachRecordAttribute = "EasyEcs.ForEachRecordAttribute";
+    public const string DrainAttribute = "EasyEcs.DrainAttribute";
     public const string UpdateIntervalAttribute = "EasyEcs.UpdateIntervalAttribute";
     public const string WithAttribute = "EasyEcs.WithAttribute<T>";
     public const string WithoutAttribute = "EasyEcs.WithoutAttribute<T>";
@@ -842,7 +842,7 @@ internal static class Symbols
         /// writes) or <c>[Neighbor] Entity</c> (the other entity): the method runs per pair (PairForm).
         /// </summary>
         Neighbor,
-        /// The first parameter of a [ForEachRecord] method, <c>in T</c>: the record of <c>Emitted&lt;T&gt;</c> it handles
+        /// The first parameter of a [Drain] method, <c>in T</c>: the record of <c>Emitted&lt;T&gt;</c> it handles
         /// (<see cref="RecordType"/>). Never returned by <see cref="Classify(IParameterSymbol)"/>: its place makes it one.
         /// </summary>
         Record,
@@ -867,30 +867,30 @@ internal static class Symbols
     /// A [ForEach] method outside a system: static, in a type that is no system. The generator writes its job and an
     /// entry point taking the world (and the caller's context parameters), a static extension member of the type.
     /// </summary>
-    public static bool IsRunner(IMethodSymbol method) => !IsSystem(method.ContainingType) || IsForEntity(method);
+    public static bool IsRunner(IMethodSymbol method) => !IsSystem(method.ContainingType) || IsEntityMethod(method);
 
     /// <summary>
-    /// A [ForEntity] method: static, it runs on one entity through its entry point, a static extension member of its
+    /// An [EntityMethod] method: static, it runs on one entity through its entry point, a static extension member of its
     /// type (in a system too) that takes the entity, then the tick with [Changed&lt;T&gt;] / [Removed&lt;T&gt;], then
     /// the caller's context parameters, and runs the method's job with <c>entity.Run</c>.
     /// </summary>
-    public static bool IsForEntity(IMethodSymbol method) =>
-        method.GetAttributes().Any(a => Named(a.AttributeClass, ForEntityAttribute));
+    public static bool IsEntityMethod(IMethodSymbol method) =>
+        method.GetAttributes().Any(a => Named(a.AttributeClass, EntityMethodAttribute));
 
-    /// <summary>How a diagnostic names a generated job's method: "[ForEach] method 'Move'" or "[ForEntity] method 'Heal'".</summary>
+    /// <summary>How a diagnostic names a generated job's method: "[ForEach] method 'Move'" or "[EntityMethod] method 'Heal'".</summary>
     public static string Describe(IMethodSymbol method) =>
-        (IsForEntity(method) ? "[ForEntity] method '" : IsForEachRecord(method) ? "[ForEachRecord] method '" : "[ForEach] method '") + method.Name + "'";
+        (IsEntityMethod(method) ? "[EntityMethod] method '" : IsDrain(method) ? "[Drain] method '" : "[ForEach] method '") + method.Name + "'";
 
     /// <summary>
-    /// A [ForEachRecord] method: static, its first parameter the record (<c>in T</c>) it handles once per record of
+    /// A [Drain] method: static, its first parameter the record (<c>in T</c>) it handles once per record of
     /// <c>Emitted&lt;T&gt;</c>, in order, before the records are cleared; in a system it runs in declaration order with the
     /// [ForEach] methods, elsewhere through an entry point taking the world and the caller's values.
     /// </summary>
-    public static bool IsForEachRecord(IMethodSymbol method) =>
-        method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachRecordAttribute));
+    public static bool IsDrain(IMethodSymbol method) =>
+        method.GetAttributes().Any(a => Named(a.AttributeClass, DrainAttribute));
 
     /// <summary>
-    /// The record a [ForEachRecord] method handles: its first parameter's type, taken by <c>in</c> (or <c>ref readonly</c>),
+    /// The record a [Drain] method handles: its first parameter's type, taken by <c>in</c> (or <c>ref readonly</c>),
     /// a struct that is no component or singleton and no ref struct; else null.
     /// </summary>
     public static ITypeSymbol? RecordType(IMethodSymbol method) =>
@@ -903,15 +903,15 @@ internal static class Symbols
     private static bool IsFramework(ITypeSymbol type) => Named(type.ContainingNamespace, "EasyEcs");
 
     /// <summary>
-    /// Why a [ForEachRecord] method cannot be generated (EECS108), or null: it also has [ForEach] or [ForEntity], is an
+    /// Why a [Drain] method cannot be generated (EECS108), or null: it also has [ForEach] or [EntityMethod], is an
     /// instance or generic method, does not take its record first by <c>in</c>, has a filter or [Consume], or takes what
     /// a pass over records has none of (a component, a Maybe, a Reduce, the Entity, ...) or an <c>Emit&lt;T&gt;</c> of its
     /// own record (cleared unhandled when the pass ends).
     /// </summary>
     public static string? RecordProblem(IMethodSymbol method)
     {
-        if (IsForEach(method) || IsForEntity(method))
-            return "also has [ForEach] or [ForEntity]: a method handles records, the rows of a pass or one entity";
+        if (IsForEach(method) || IsEntityMethod(method))
+            return "also has [ForEach] or [EntityMethod]: a method handles records, the rows of a pass or one entity";
         if (!method.IsStatic) return "is an instance method: make it static";
         if (method.IsGenericMethod) return "is generic: its pass handles the records of one type";
         if (RecordType(method) is not { } record)
@@ -938,11 +938,11 @@ internal static class Symbols
     }
 
     /// <summary>
-    /// Why a [ForEntity] method cannot be generated (EECS081), or null: it is an instance method, also has [ForEach],
+    /// Why an [EntityMethod] method cannot be generated (EECS081), or null: it is an instance method, also has [ForEach],
     /// or takes a parameter that has no meaning for one entity (a component span, an EntitySpan, a Reduce, a Scratch).
     /// Its other problems are those of a [ForEach] method outside a system (EECS002, EECS003, EECS021, EECS022).
     /// </summary>
-    public static string? ForEntityProblem(IMethodSymbol method)
+    public static string? EntityMethodProblem(IMethodSymbol method)
     {
         if (method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachAttribute)))
             return "also has [ForEach]: a method is either a pass over the world or a run on one entity";
@@ -1040,15 +1040,15 @@ internal static class Symbols
         return members.Any(m =>
             !m.GetAttributes().Any(IsGeneratorMark) // not the entry point itself
             && (m.Parameters.Select(p => (p.Type.ToDisplayString(), p.RefKind)).SequenceEqual(expected)
-                || !SymbolEqualityComparer.Default.Equals(m, method) && (IsGeneratedJob(m) || IsForEachRecord(m)) && EntryPoint(m).SequenceEqual(expected)));
+                || !SymbolEqualityComparer.Default.Equals(m, method) && (IsGeneratedJob(m) || IsDrain(m)) && EntryPoint(m).SequenceEqual(expected)));
     }
 
     private static List<(string, RefKind)> EntryPoint(IMethodSymbol method)
     {
-        var parameters = new List<(string, RefKind)> { (IsForEntity(method) ? Entity : World, RefKind.None) };
+        var parameters = new List<(string, RefKind)> { (IsEntityMethod(method) ? Entity : World, RefKind.None) };
         if (TracksSince(method)) parameters.Add(("ulong", RefKind.None));
         if (Slices(method) > 1) parameters.Add(("int", RefKind.None));
-        foreach (var p in method.Parameters.Skip(IsForEachRecord(method) ? 1 : 0)) // a record method's record is no caller's value
+        foreach (var p in method.Parameters.Skip(IsDrain(method) ? 1 : 0)) // a record method's record is no caller's value
             if (Classify(p, true) == ParamKind.Context) parameters.Add((p.Type.ToDisplayString(), p.RefKind));
         return parameters;
     }
@@ -1440,7 +1440,7 @@ internal static class Symbols
             return gaussSeidel ? "has [GaussSeidel] but takes no tile by ref: the attribute steps the tile the method takes as 'ref Tile<TCell, TTile>'" : null;
         if (stepped.Length > 1)
             return $"takes '{stepped[0].Name}' and '{stepped[1].Name}' by ref: a pass steps one tile of each entity, take the others by value";
-        if (IsForEntity(method))
+        if (IsEntityMethod(method))
             return $"takes '{stepped[0].Name}' by ref, but runs on one entity: a step swaps or sweeps the whole grid after its tiles stepped (make it a [ForEach] method)";
         if (Slices(method) > 1)
             return $"takes '{stepped[0].Name}' by ref, but runs on a slice of the grid: a step reads every neighbor's cells as the pass before left them (drop Slices)";
@@ -1531,9 +1531,9 @@ internal static class Symbols
     {
         var type = method.ContainingType;
         bool outside = IsRunner(method);
-        if (IsForEachRecord(method)) // a pass over records: no components, no filter (EECS108 says why not)
+        if (IsDrain(method)) // a pass over records: no components, no filter (EECS108 says why not)
             return RecordProblem(method) == null && Unnameable(method) == null && (outside ? !EntryPointCollides(method) : IsValidSystem(type));
-        if (IsForEntity(method) ? ForEntityProblem(method) != null : ConsumeProblem(method) != null) return false;
+        if (IsEntityMethod(method) ? EntityMethodProblem(method) != null : ConsumeProblem(method) != null) return false;
         if (StepProblem(method) != null) return false;
         if (!method.IsStatic || outside && EntryPointCollides(method)) return false;
         if (!outside && !IsValidSystem(type)) return false; // EECS074: no system code
@@ -1980,9 +1980,9 @@ internal static class Symbols
         method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachAttribute));
 
     /// <summary>
-    /// A [ForEach] or a [ForEntity] method: the generator compiles its body into a job, so the rules about its
+    /// A [ForEach] or an [EntityMethod] method: the generator compiles its body into a job, so the rules about its
     /// parameters, filters and what its body costs or changes apply to both.
     /// </summary>
     public static bool IsGeneratedJob(IMethodSymbol method) =>
-        method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachAttribute) || Named(a.AttributeClass, ForEntityAttribute));
+        method.GetAttributes().Any(a => Named(a.AttributeClass, ForEachAttribute) || Named(a.AttributeClass, EntityMethodAttribute));
 }

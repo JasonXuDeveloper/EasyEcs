@@ -45,9 +45,9 @@
   - `ArityGenerator.Lambdas()` writes `World.Lambdas.g.cs` stubs taking `Delegate body` that throw `NotCompiled()`.
 
 ### 1.2 Core
-- **ForParallel** (`World.For.cs`):
+- **ParallelFor** (`World.For.cs`):
   - `IForRange.Execute(int start, int end)`, `IForSpan<T>.Execute(int start, Span<T> items)`.
-  - `ForParallel(int count, ref TJob, chunkSize)` and `ForParallel<T,TJob>(ref DynamicBuffer<T>, ref TJob, chunkSize)`.
+  - `ParallelFor(int count, ref TJob, chunkSize)` and `ParallelFor<T,TJob>(ref DynamicBuffer<T>, ref TJob, chunkSize)`.
   - One job copy per chunk, nothing merged back (D80). **The generator never sees `Execute` bodies.**
 - **Buffers** (`DynamicBuffer.cs`): `AsReadOnlySpan()`, `GetEnumerator()` (ReadOnlySpan enumerator), `AsSpan(this ref)` (unshares the copy-on-write store, D124), `SetCount` returns a Span.
 - **Tile** (`Tile.cs`):
@@ -67,7 +67,7 @@
 | `samples/VoxelServer/Systems/Items.cs`, `Inventory.HasRoom/Add` | searches with early exit | not a vector target |
 | `benchmarks/.../TileBenchmark.cs` `TileSystems.Blur`, `WaveSystem`, Life (l.495), `HandBlurSystem` | `Load128` stencils, the Laplacian | Cell targets / baselines |
 | `benchmarks/.../KernelBenchmark.cs` `Kernels.StepBatch` / `StepBatch512` (l.1024/1051) | `[ForEach]` batch methods with hand Vector<T> / Vector512 | baselines; EECS103 fires, so the benchmark project needs `NoWarn` |
-| `benchmarks/.../ForParallelBenchmark.cs` `Light`/`Heavy` (IForSpan) | scalar element loops (Heavy has an inner `k<8` loop) | ForParallel body |
+| `benchmarks/.../ParallelForBenchmark.cs` `Light`/`Heavy` (IForSpan) | scalar element loops (Heavy has an inner `k<8` loop) | ParallelFor body |
 | `benchmarks/.../BattleServer.cs` `PlanningSystem.Plan` | `for i < 8` over the singleton `[InlineArray] WaypointArray`, argmin | constant-trip loop (still scalar for `Mut<Goal>`) |
 | `BattleServer.LootValue` | buffer sum outside a pass | out of scope |
 | `HistogramBenchmark` | `[InlineArray(1024)]` bins | scatter: not vectorizable |
@@ -204,17 +204,17 @@ What the generator does:
   - `Plan`'s argmin is a loop-carried local per lane, so 8 iterations run in order: exact.
 - The per-row `call` for tails is unchanged: no body copy needed.
 
-### 2.3 ForParallel bodies: a lambda pass over a buffer's elements
+### 2.3 ParallelFor bodies: a lambda pass over a buffer's elements
 You write:
 ```csharp
-world.ForParallel(ref hits.Items, 0.999f, static (ref Hit hit, float keep) => hit.Amount = hit.Amount * keep + 1);
+world.ParallelFor(ref hits.Items, 0.999f, static (ref Hit hit, float keep) => hit.Amount = hit.Amount * keep + 1);
 ```
-- `ArityGenerator.Lambdas()` adds `ForParallel<T, V1..Vn>(ref DynamicBuffer<T> items, V1 v1, …, Delegate body) => throw NotCompiled()`.
-- `LambdaPass.IsCandidate/IsTarget` accept `ForParallel`.
+- `ArityGenerator.Lambdas()` adds `ParallelFor<T, V1..Vn>(ref DynamicBuffer<T> items, V1 v1, …, Delegate body) => throw NotCompiled()`.
+- `LambdaPass.IsCandidate/IsTarget` accept `ParallelFor`.
 - The element is treated as the lambda's only component (`Hit(int, float)`: two 4-byte lanes). `Kernel.Vectorize(lambda…)` runs unchanged. The interceptor runs a generated `IForSpan<T>` job:
 ```csharp
-internal static void ForParallel3(this World world, ref DynamicBuffer<Hit> items, float v1, Delegate body)
-{ var job = new LambdaJob3 { x1 = v1 }; world.ForParallel(ref items, ref job); }
+internal static void ParallelFor3(this World world, ref DynamicBuffer<Hit> items, float v1, Delegate body)
+{ var job = new LambdaJob3 { x1 = v1 }; world.ParallelFor(ref items, ref job); }
 file struct LambdaJob3 : IForSpan<Hit>
 {
     public float x1;
@@ -332,7 +332,7 @@ The rule from `audit-vector-loops` is that results are bit-identical to the scal
 
 | Form | Default (`FloatMode.Exact`) | Needs `FloatMode.Fast` |
 |---|---|---|
-| Element-wise buffer, span, InlineArray, ForParallel lambda, Cell bodies | exact: same IEEE op per lane in order (D68); integer division, Clamp and Abs guards bail to scalar (D127) | the D127 Fast lowerings (Pow, Log10, Tan…) as today |
+| Element-wise buffer, span, InlineArray, ParallelFor lambda, Cell bodies | exact: same IEEE op per lane in order (D68); integer division, Clamp and Abs guards bail to scalar (D127) | the D127 Fast lowerings (Pow, Log10, Tan…) as today |
 | Constant-trip loops unrolled into the per-row loop | exact, including loop-carried locals and argmin (each lane runs the iterations in order) | — |
 | Reductions over elements into outer locals | exact: integer `+ - & \| ^` (wrapping), integer Min/Max in any form, float `Math.Min`/`Math.Max` (associative and commutative incl. NaN and ±0) | float/double `+`/`*` sums; float `if (x < best) best = x` (ties between -0 and +0 depend on order; counterexample in the notes); the reason says "set FloatMode = FloatMode.Fast, or accumulate in an int/long" |
 | 1D offset reads | exact given the alias guard (the scalar loop would read new values otherwise, so it stays scalar) | — |
@@ -416,9 +416,9 @@ through `EmitLoops`, which splits them into methods when the count says so.
 - Benchmark: `ElementLoopBenchmark.Smooth3Scalar/Generated/HandWritten`.
 - Risk: proof gaps. Prefer scalar with a reason over a guess.
 
-**WP4: the `ForParallel` lambda over a buffer.**
-- Tests: `ForParallelTests` (equivalence 1 vs 4 threads, chunk edges at 1,024 multiples, 0 B, EECS095/096/097 on the new call).
-- Benchmark: `ForParallelBenchmark` gains `LightLambda` and `HeavyLambda` against `LightForParallel`/`HeavyForParallel` (hand jobs, scalar) and `*Serial`.
+**WP4: the `ParallelFor` lambda over a buffer.**
+- Tests: `ParallelForTests` (equivalence 1 vs 4 threads, chunk edges at 1,024 multiples, 0 B, EECS095/096/097 on the new call).
+- Benchmark: `ParallelForBenchmark` gains `LightLambda` and `HeavyLambda` against `LightParallelFor`/`HeavyParallelFor` (hand jobs, scalar) and `*Serial`.
 - Risk: low; the lambda infrastructure and the IForSpan runner exist.
 
 **WP5: `Cell<TCell,TTile>` (built on WP2/WP3): the headline package.**
@@ -464,16 +464,16 @@ through `EmitLoops`, which splits them into methods when the count says so.
   - `TileBenchmark`'s Cell cases;
   - demo pragma or rewrite;
   - VoxelServer `Flow.cs` becomes Cell methods (WP5b).
-- Docs: `systems.mdx` vector loops (inner loops), `dynamic-buffers.mdx`, `grids.mdx` (Cell form with "You write / The generator writes", Load128 examples rewritten), the ForParallel section, `analyzer.mdx` EECS103 (en+zh), the public skill, glossary (shader, stencil, halo, lane), `api.mdx` complexity rows, changelog, roadmap.
+- Docs: `systems.mdx` vector loops (inner loops), `dynamic-buffers.mdx`, `grids.mdx` (Cell form with "You write / The generator writes", Load128 examples rewritten), the ParallelFor section, `analyzer.mdx` EECS103 (en+zh), the public skill, glossary (shader, stencil, halo, lane), `api.mdx` complexity rows, changelog, roadmap.
 - Decision records:
   - D132: element loops share the core; the body is copied (considered: compilation-copy synthesis, intercepting IForSpan jobs, `Element<T>`, which the owner declined).
   - D133: `Cell<,>`, the general stencil form; D77 rewritten to the decision that is true then.
   - D134: EECS103.
-- Update `audit-vector-loops` SKILL: a ForParallel job's Execute is compiled only in lambda form.
+- Update `audit-vector-loops` SKILL: a ParallelFor job's Execute is compiled only in lambda form.
 
 ## 6. Drop or defer
 - **Intercepting hand-written `IForSpan`/`IForRange` jobs:** dropped. D63/D18 allow interceptors only for lambda passes, and it would need field accessors into user structs. The lambda form (WP4) covers it. Possible later rule: an Execute that is one plain element loop → "write it as a lambda pass".
-- **`ForParallel(count, values…, static (int i, …) =>)` over arrays:** deferred until a use asks (D80: no use case beyond buffers).
+- **`ParallelFor(count, values…, static (int i, …) =>)` over arrays:** deferred until a use asks (D80: no use case beyond buffers).
 - **Gathers through index lists (MD neighbor lists, Lookup):** deferred to the owner's separate "retry vectorized reads, sorted by table, AVX-512" task. D90 measured 0.8–1.18x.
 - **Early-exit loops (searches, `break`):** short, exactness of the first match plus side effects; not worth it.
 - **Prefix sums / recurrences:** need reassociation or log-step shuffles; the owner declined `Scan<T>`.
@@ -488,6 +488,6 @@ through `EmitLoops`, which splits them into methods when the count says so.
 ### Critical Files for Implementation
 - /workspace/EasyEcs/src/EasyEcs.Generator/Kernel.cs (`Translate`, `Statement`, `IsUniform`/`Scalar`, `Paths`; plus new `Kernel.Loops.cs` / `Kernel.Cells.cs`)
 - /workspace/EasyEcs/src/EasyEcs.Generator/SystemGenerator.cs (`EmitAccessor`, `EmitVectorLoop`, `EmitFlatLoop`, `ForEachModel.Simd`/`OutOfLine`, `TileModel`)
-- /workspace/EasyEcs/src/EasyEcs.Generator/LambdaPass.cs and /workspace/EasyEcs/src/EasyEcs.Generator/SystemGenerator.Lambdas.cs (Copy/Qualifier → `BodyCopy.cs`; the ForParallel lambda)
+- /workspace/EasyEcs/src/EasyEcs.Generator/LambdaPass.cs and /workspace/EasyEcs/src/EasyEcs.Generator/SystemGenerator.Lambdas.cs (Copy/Qualifier → `BodyCopy.cs`; the ParallelFor lambda)
 - /workspace/EasyEcs/src/EasyEcs.Core/Tile.cs (new `Cell<,>`, `PaddedTile` row access) and /workspace/EasyEcs/src/EasyEcs.Core/World.For.cs
 - /workspace/EasyEcs/src/EasyEcs.Generator/EasyEcsAnalyzer.Forms.cs (EECS103) with /workspace/EasyEcs/src/EasyEcs.CodeFixes/EasyEcsCodeFixes.Forms.cs

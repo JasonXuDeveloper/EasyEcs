@@ -21,7 +21,7 @@ players with `MeasureSystems` (single runs on a shared VM: a ranking, not number
   steady state 0 B.
 - **The restructure**:
   1. Totals become one `[Accumulate, Sum] Stats`; Carried, Filled and TallySystem go.
-  2. The outbox becomes a `[ForEachRecord]` method.
+  2. The outbox becomes a `[Drain]` method.
   3. The zombies' target becomes the nearest form of the cluster-pair method; `ChunkRing` goes.
   4. Pickup becomes a pair method that writes the neighbor (`[Neighbor] ref Item`).
   5. The bodies' tables take the space order those pairs infer, so the chunk-buffer reads of Physics, Float, Chase
@@ -35,7 +35,7 @@ players with `MeasureSystems` (single runs on a shared VM: a ranking, not number
   10. **After item 9**: the chunk lifecycle in the generated deferred load and save.
 - **Expected**: about 380-450 lines fewer (about 15%), 41 → about 30 systems. About 120 lines are possible with what
   is merged today; the rest waits for items 9, 11, 8c, WP2, WP5 and WP5b.
-- **Output**: identical for the reshapes, `[Accumulate]` / `[ForEachRecord]`, AOI, water and the fire merge. It
+- **Output**: identical for the reshapes, `[Accumulate]` / `[Drain]`, AOI, water and the fire merge. It
   changes for the pairs (ties by the lower `EntityId.Index`; every zombie looks every tick instead of in Slices), the
   inferred row order (spawn and pickup order), possibly the scent with `[GaussSeidel]`, and the chunk budget (item 9).
 - **Prefetch never fires here**: at 2,000 players the world has about 8k entities (about 0.25 MB against the 8 MB
@@ -67,11 +67,11 @@ item or a gap (section 4).
 | `Reduce<T>` + `[Sum]` | Carried, Filled | folded into `Stats` | — |
 | `[Accumulate]` | none | `[Accumulate, Sum] Stats` as `ref Reduce<Stats>` in every pass; Carried, Filled, Tally go (L ~-25; S: Die and SendChunks vectorize) | GA1, GA2 |
 | `Emit<T>` | SendEntities | keep | — |
-| `[ForEachRecord]` | none (Replication.cs:53-67 by hand) | `[ForEachRecord] static void Send(in EntityUpdate u, ref Stats s)` (L -8) | none |
+| `[Drain]` | none (Replication.cs:53-67 by hand) | `[Drain] static void Send(in EntityUpdate u, ref Stats s)` (L -8) | none |
 | `EntityRandom` | Spawn, FakeClients | keep | — |
 | `Scratch<T>` | none | none fits (small per-row stackallocs; tile scratch is the generator's after item 11) | — |
 | `[Consume]` | none | the chunk requests through item 9's deferred form with a per-tick budget | item 9 |
-| `[ForEntity]`, lambda passes | none (lambda in Host only) | none fits | — |
+| `[EntityMethod]`, lambda passes | none (lambda in Host only) | none fits | — |
 | `[View]` | none | no fit: `Nearby` is a bundle of lookups | GA5 |
 | `[Prefab]` declarations | none (fluent, Program.cs:190-209) | stays fluent (G3 declined) | — |
 | `SetAbsent<T>` | none | Program.cs:195 `.Set(...).RemoveUnloading()` → `.SetAbsent<Unloading>()`; :206 → `.SetAbsent<Burning>()`; `Visible` absent until placed (L -2, Le) | none |
@@ -187,7 +187,7 @@ about 25 index counts per crossing. The page says why (count, do not search). GA
 | SendChunks | 12-18 | `ref Reduce<Stats>`: a vector loop (widening sum) | 0 |
 | ChunkSent | 22-26 | unchanged | 0 |
 | SendEntities | 37-49 | unchanged (`Maybe` in parallel: inherent) | 0 |
-| SendPackets | 53-67 | `[ForEachRecord] static void Send(in EntityUpdate u, ref Stats stats)` | -8 |
+| SendPackets | 53-67 | `[Drain] static void Send(in EntityUpdate u, ref Stats stats)` | -8 |
 | Tally | 73-82 | deleted (`[Accumulate]`) | -12 |
 | Clock | 89-96 | unchanged | 0 |
 
@@ -269,7 +269,7 @@ precomputed mask; Terrain's hand SIMD only per Q5.
 
 ## 6. Deterministic output
 
-- Identical: bool splits, `SetAbsent`, FireDamage per row, the Fire merge, `[Accumulate]`, `[ForEachRecord]`,
+- Identical: bool splits, `SetAbsent`, FireDamage per row, the Fire merge, `[Accumulate]`, `[Drain]`,
   `ReserveBuffers`, AOI lookups, Viewers long, water ping-pong and Cell, HeightMap / Footing loops, Terrain scalar.
 - Changes: the pair target (ties, cadence), the inferred order (spawn and item ids, pickup order), the pair pickup,
   possibly the `[GaussSeidel]` scent, the item 9 budget if it differs.
@@ -285,7 +285,7 @@ Host/Steady.cs 0 B, VoxelServerTests, `--schedule` diff, no EECS055-bool / EECS0
 1. **Reshape, output identical**: bool splits (Body, Exposure, Input, Visible), Viewers long, `SetAbsent`,
    FireDamage per row + the Fire merge, F7, the Chunks.cs:17 comment.
 2. **Totals, output identical**: `[Accumulate, Sum] Stats` (Carried, Filled, Tally deleted), SendPackets →
-   `[ForEachRecord]`, `ReserveBuffers`; check stages (GA2).
+   `[Drain]`, `ReserveBuffers`; check stages (GA2).
 3. **AOI without the `World`**, output identical.
 4. **Pairs** (after feat-pairs-2, GA1): Keep + Acquire (`ChunkRing` deleted), Pickup with `[Neighbor] ref Item`, the
    order inferred; output blocks updated once at the end; Target, Pickup, Physics, Float, Chase measured per system.
@@ -306,7 +306,7 @@ Host/Steady.cs 0 B, VoxelServerTests, `--schedule` diff, no EECS055-bool / EECS0
 | F5 Chase gather | obsolete (Chase reads the Trail through `Nearby`; the prefetch twin never fires at this scale) |
 | F4 Terrain | open, Q5 |
 | G0 | built; applied with the bool splits |
-| G5, G6, G4 | built (`[Accumulate]`, `[ForEachRecord]`, `ReserveBuffers`); applied in step 2 |
+| G5, G6, G4 | built (`[Accumulate]`, `[Drain]`, `ReserveBuffers`); applied in step 2 |
 | G2, G1 | open: WP2 / WP5 / WP5b in Later |
 | G8, G9 | G8 built (nearest with hint, cutoff per row, two kinds); G9 (writes to j), parallel pairs and the cluster renames on feat-pairs-2 |
 | "G10 declined" | contradicted: approved as backlog item 9 |

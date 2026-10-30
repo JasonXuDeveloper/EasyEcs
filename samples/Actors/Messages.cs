@@ -2,7 +2,7 @@ using EasyEcs;
 
 namespace Actors;
 
-// A message is a method run on the one actor it is addressed to: [ForEntity] writes the job entity.Run runs (one
+// A message is a method run on the one actor it is addressed to: [EntityMethod] writes the job entity.Run runs (one
 // table lookup for all the components the method takes, the same rules as a system's pass: change ticks, refs that
 // survive structural changes) and an entry point, Messages.Buy(shop, quantity), that returns whether it ran.
 public static class Messages
@@ -10,7 +10,7 @@ public static class Messages
     /// <summary>A customer buys from a shop that has not closed.</summary>
     // Writes Stock and Sales (ref): both are stamped and both follow the shop if it moves table. It runs only for an
     // order it fills (Mailman checks the stock first): a refused order would still stamp Stock.
-    [ForEntity, Without<Closed>]
+    [EntityMethod, Without<Closed>]
     static void Buy(Entity shop, ref Stock stock, ref Sales sales, int quantity)
     {
         stock.Items -= quantity;
@@ -25,7 +25,7 @@ public static class Messages
     }
 
     /// <summary>A customer pays coins into a bank account.</summary>
-    [ForEntity]
+    [EntityMethod]
     static void Deposit(ref Balance balance, long coins) => balance.Coins += coins;
 }
 

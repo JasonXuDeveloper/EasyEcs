@@ -6,12 +6,12 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// The records a parallel pass emitted, processed in place (an <see cref="Emitted{T}"/> singleton's list): a light
-/// step per record (scale an amount) and a heavy one (a few square roots), with <see cref="World.ForParallel{T, TJob}"/>
+/// step per record (scale an amount) and a heavy one (a few square roots), with <see cref="World.ParallelFor{T, TJob}"/>
 /// on the world's runner, against a plain loop on one thread and <c>Parallel.For</c> over the same chunks with a
 /// static delegate over static state (no closure: the best a user writes without the runner).
 /// </summary>
 [MemoryDiagnoser]
-public class ForParallelBenchmark
+public class ParallelForBenchmark
 {
     [Params(10_000, 100_000)] public int Records;
 
@@ -50,27 +50,27 @@ public class ForParallelBenchmark
     public void LightSerial() => Light(_world.GetSingleton<Emitted<Hit>>().Items.AsSpan());
 
     [Benchmark]
-    public void LightForParallel()
+    public void LightParallelFor()
     {
         var job = new LightJob();
-        _world.ForParallel(ref _world.GetSingleton<Emitted<Hit>>().Items, ref job);
+        _world.ParallelFor(ref _world.GetSingleton<Emitted<Hit>>().Items, ref job);
     }
 
     [Benchmark]
-    public void LightParallelFor() => Parallel.For(0, (s_count + s_chunk - 1) / s_chunk, LightChunk);
+    public void LightDotNetParallelFor() => Parallel.For(0, (s_count + s_chunk - 1) / s_chunk, LightChunk);
 
     [Benchmark]
     public void HeavySerial() => Heavy(_world.GetSingleton<Emitted<Hit>>().Items.AsSpan());
 
     [Benchmark]
-    public void HeavyForParallel()
+    public void HeavyParallelFor()
     {
         var job = new HeavyJob();
-        _world.ForParallel(ref _world.GetSingleton<Emitted<Hit>>().Items, ref job);
+        _world.ParallelFor(ref _world.GetSingleton<Emitted<Hit>>().Items, ref job);
     }
 
     [Benchmark]
-    public void HeavyParallelFor() => Parallel.For(0, (s_count + s_chunk - 1) / s_chunk, HeavyChunk);
+    public void HeavyDotNetParallelFor() => Parallel.For(0, (s_count + s_chunk - 1) / s_chunk, HeavyChunk);
 
     public record struct Hit(int Target, float Amount);
 

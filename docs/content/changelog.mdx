@@ -30,7 +30,7 @@ major or minor version that needs code changes? The
   [EECS077](/en/docs/guide/analyzer#eecs077) (a type that is no system given to `AddSystem<T>` and the other system
   APIs). A code fix on CS0246 rewrites a 4.7 class system as an `[EcsSystem]` ref struct
   ([analyzer](/en/docs/guide/analyzer#migration-fix)).
-- The IDE no longer reports `[ForEach]`, `[ForEntity]` and hook methods as unused: a suppressor in the package hides
+- The IDE no longer reports `[ForEach]`, `[EntityMethod]` and hook methods as unused: a suppressor in the package hides
   IDE0051 and IDE0052 on them, and the attributes carry JetBrains `[MeansImplicitUse]` for Rider and ReSharper. See
   [unused-member warnings](/en/docs/guide/analyzer#never-used).
 - A generic system closed in another assembly (`AddSystem<Regen<Health>>()` in the game, `Regen<T>` in a library) is
@@ -129,10 +129,10 @@ major or minor version that needs code changes? The
   `Chance`. Rule [EECS071](/en/docs/guide/analyzer#eecs071) (warning, with a code fix to `EntityRandom`) reports
   `Random.Shared` and `new Random()` in a `[ForEach]` method. See the
   [decision](/en/docs/decisions#d79-entity-random).
-- `world.ForParallel(count, ref job)` runs an `IForRange` job over a range of indexes, and
-  `world.ForParallel(ref buffer, ref job)` an `IForSpan<T>` job over the elements of a list (an `Emitted<T>`'s
+- `world.ParallelFor(count, ref job)` runs an `IForRange` job over a range of indexes, and
+  `world.ParallelFor(ref buffer, ref job)` an `IForSpan<T>` job over the elements of a list (an `Emitted<T>`'s
   records), on the world's runner with its chunks; EECS060 and EECS061 cover their jobs. See the
-  [decision](/en/docs/decisions#d80-for-parallel).
+  [decision](/en/docs/decisions#d80-parallel-for).
 - Analyzer rule [EECS060](/en/docs/guide/analyzer#eecs060) (warning): a parallel `[ForEach]` method or the `Execute`
   of a job run by `ForEachParallel`, `ForEachEntityParallel` or `ForEachBatchParallel` writes memory every thread
   shares (a static field, an object a context parameter or a job's field refers to): the writes race. Rule
@@ -162,7 +162,7 @@ major or minor version that needs code changes? The
   [EECS054](/en/docs/guide/analyzer#eecs054) rejects a negative count and `ChunkRows` without `Parallel`. See
   [threading](/en/docs/guide/threading#chunk-rows) and the [decision](/en/docs/decisions#d67-chunk-rows).
 
-- `[ForEntity]` on a static method runs it on one entity: the generator writes the job `entity.Run` runs (its `ref`
+- `[EntityMethod]` on a static method runs it on one entity: the generator writes the job `entity.Run` runs (its `ref`
   parameters the `WriteMask`, its filter attributes the filter) and an entry point named like the method that takes
   the entity and the method's other values and returns whether it ran (`Requests.TakeHit(unit, damage)`). Analyzer rule
   [EECS080](/en/docs/guide/analyzer#eecs080) (suggestion, with a code fix) finds a hand-written one-entity job and
@@ -170,7 +170,7 @@ major or minor version that needs code changes? The
   entity. See [queries](/en/docs/guide/queries#run-on-one-entity).
 - `entity.Run<T1..Tn, TJob>(ref job, in filter, since)` runs a job with `since` as the filter's tick: the test of
   `filter.Since(since)` without a copy of the filter, so a `static readonly` filter serves every call. The entry point
-  of a `[ForEntity, Changed<T>]` method passes its filter this way. See the [API](/en/docs/api#queries).
+  of an `[EntityMethod, Changed<T>]` method passes its filter this way. See the [API](/en/docs/api#queries).
 - `[ForEach, Consume]` destroys exactly the rows a pass visited when it ends, for event and command entities handled
   once: in bulk (a `DestroyAll` of the method's filter) after a method without structural changes, row by row after
   one that may make them. Analyzer rule [EECS084](/en/docs/guide/analyzer#eecs084) (suggestion, with a code fix)
@@ -234,7 +234,7 @@ major or minor version that needs code changes? The
 - A `Mut<T>` of a run of rows refers to the change-tick column its job looks up once per run (`MutColumn`): a write
   stamps its row with no lookup of the world's tick, the column or its arrays. See
   [change tracking](/en/docs/guide/change-tracking).
-- The entry point of a `[ForEntity, Changed<T>]` method runs its static filter with the tick beside it instead of a
+- The entry point of an `[EntityMethod, Changed<T>]` method runs its static filter with the tick beside it instead of a
   copy of the filter per call.
 - A tile job keeps the neighbors it finds in a field of the job: no 216-byte local cleared on every row before
   `TileNeighbors.Of` clears it again. See [grids](/en/docs/guide/grids#generated).
@@ -309,8 +309,8 @@ major or minor version that needs code changes? The
 ### Fixes [#v4-8-0-fixes]
 
 - EECS071 also reports a `System.Random` held in a field; EECS028 leaves `new Random()` to it. EECS055 no longer
-  reports `[ForEntity]` methods, which the generator never vectorizes, and the messages of EECS002, EECS010,
-  EECS025 to EECS028 and the other `[ForEach]` rules name a `[ForEntity]` method as such. EECS028 in a `[ForEach]`
+  reports `[EntityMethod]` methods, which the generator never vectorizes, and the messages of EECS002, EECS010,
+  EECS025 to EECS028 and the other `[ForEach]` rules name an `[EntityMethod]` method as such. EECS028 in a `[ForEach]`
   method names the `Scratch<T>` parameter, and EECS010 names the parameter a parallel method cannot take.
 - EECS069 warns for a managed singleton only when the code saves whole worlds (`Save`, `SaveWithout`): entity saves
   write no singletons. See the [decision](/en/docs/decisions#d99-singleton-saves).

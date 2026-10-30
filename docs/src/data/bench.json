@@ -528,7 +528,7 @@
         }
       ]
     },
-    "ForParallelBenchmark": {
+    "ParallelForBenchmark": {
       "namespace": "EasyEcs.Benchmark",
       "job": "EnvironmentVariables=DOTNET_TC_CallCountingDelayMs=0 IterationCount=8 IterationTime=250ms LaunchCount=2 WarmupCount=6",
       "rows": [
@@ -544,7 +544,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "LightForParallel",
+          "method": "LightParallelFor",
           "params": {
             "Records": "10000"
           },
@@ -555,7 +555,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "LightParallelFor",
+          "method": "LightDotNetParallelFor",
           "params": {
             "Records": "10000"
           },
@@ -577,7 +577,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "HeavyForParallel",
+          "method": "HeavyParallelFor",
           "params": {
             "Records": "10000"
           },
@@ -588,7 +588,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "HeavyParallelFor",
+          "method": "HeavyDotNetParallelFor",
           "params": {
             "Records": "10000"
           },
@@ -610,7 +610,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "LightForParallel",
+          "method": "LightParallelFor",
           "params": {
             "Records": "100000"
           },
@@ -621,7 +621,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "LightParallelFor",
+          "method": "LightDotNetParallelFor",
           "params": {
             "Records": "100000"
           },
@@ -643,7 +643,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "HeavyForParallel",
+          "method": "HeavyParallelFor",
           "params": {
             "Records": "100000"
           },
@@ -654,7 +654,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "HeavyParallelFor",
+          "method": "HeavyDotNetParallelFor",
           "params": {
             "Records": "100000"
           },

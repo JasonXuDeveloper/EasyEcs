@@ -7,10 +7,10 @@ using NUnit.Framework;
 namespace EasyEcs.UnitTest;
 
 /// <summary>
-/// [ForEachRecord]: a method run on each record of <see cref="Emitted{T}"/> in the order the passes emitted them, then
+/// [Drain]: a method run on each record of <see cref="Emitted{T}"/> in the order the passes emitted them, then
 /// the records cleared, against the walk and Clear written by hand; its generated code, EECS108 and EECS109.
 /// </summary>
-public class RecordTests
+public class DrainTests
 {
     public record struct Power(int Value) : IComponent;
     public record struct Toughness(int Value) : IComponent;
@@ -51,7 +51,7 @@ public class RecordTests
     [EcsSystem, UpdateAfter<Strikes>]
     public ref struct Book
     {
-        [ForEachRecord]
+        [Drain]
         static void Enter(in Blow blow, ref Ledger ledger)
         {
             ledger.Total += blow.Amount;
@@ -60,7 +60,7 @@ public class RecordTests
         }
     }
 
-    /// <summary>The walk and Clear by hand: what [ForEachRecord] replaces (EECS109).</summary>
+    /// <summary>The walk and Clear by hand: what [Drain] replaces (EECS109).</summary>
     [EcsSystem, UpdateAfter<Strikes>]
     public ref struct HandBook
     {
@@ -85,7 +85,7 @@ public class RecordTests
         [ForEach(SimdMode = SimdMode.Off)]
         static void Strike(Entity entity, in Power power, Emit<Blow> blows) => blows.Add(new Blow(entity.Id, power.Value));
 
-        [ForEachRecord]
+        [Drain]
         static void Enter(in Blow blow, ref Ledger ledger, Lookup<Toughness> lives, Emit<Fallen> fallen)
         {
             ledger.Total += blow.Amount;
@@ -96,14 +96,14 @@ public class RecordTests
 
     public static class Records
     {
-        [ForEachRecord]
+        [Drain]
         public static void Count(in Blow blow, ref int count, ref long total)
         {
             count++;
             total += blow.Amount;
         }
 
-        [ForEachRecord]
+        [Drain]
         public static void Apply(in Blow blow, World world)
         {
             if (world.TryGetEntity(blow.Target, out var target)) target.Get<Toughness>().Value -= blow.Amount;
@@ -222,12 +222,12 @@ public class RecordTests
     [Test]
     public void TheGeneratedPassRunsTheJobOverTheRecords()
     {
-        string source = "using EasyEcs;\n" + Data + "[EcsSystem] public ref struct S { [ForEachRecord] static void H(in Rec r, ref Tally t, Lookup<P> ps, Emit<Other> o) { t.N += r.V; o.Add(new Other(r.V)); } }" +
-                        "public static class R { [ForEachRecord] public static void G(in Rec r, ref int n) => n += r.V; }";
+        string source = "using EasyEcs;\n" + Data + "[EcsSystem] public ref struct S { [Drain] static void H(in Rec r, ref Tally t, Lookup<P> ps, Emit<Other> o) { t.N += r.V; o.Add(new Other(r.V)); } }" +
+                        "public static class R { [Drain] public static void G(in Rec r, ref int n) => n += r.V; }";
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(source), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string text = string.Join("\n", output.SyntaxTrees.Select(t => t.ToString()));
-        Assert.That(text, Does.Contain("internal ref struct HJob0 : global::EasyEcs.IForEachRecord<global::Rec>"));
+        Assert.That(text, Does.Contain("internal ref struct HJob0 : global::EasyEcs.IDrain<global::Rec>"));
         Assert.That(text, Does.Contain("public void Execute(in global::Rec record) => __ForEach.H_0(default, in record, ref s1, new global::EasyEcs.Lookup<global::P>(World, null), new global::EasyEcs.Emit<global::Other>(ref this.e3));"));
         Assert.That(text, Does.Contain("global::EasyEcs.Emitted<global::Rec>.Consume(world, ref job0);"));
         Assert.That(text, Does.Contain("access.WriteSingleton<global::EasyEcs.Emitted<global::Rec>>();"));
@@ -235,15 +235,15 @@ public class RecordTests
         Assert.That(text, Does.Contain("\"H: the records of Emitted<Rec>, in order, then cleared\""));
     }
 
-    [TestCase("public static class R { [ForEachRecord] static void A(in Rec r, in P p) { } }", "takes 'p', which a pass over records has none of")]
-    [TestCase("public static class R { [ForEachRecord] static void A(Rec r) { } }", "does not take its record first by 'in'")]
-    [TestCase("public static class R { [ForEachRecord] static void A(in P r) { } }", "does not take its record first by 'in'")]          // a component
-    [TestCase("public static class R { [ForEachRecord] static void A(in Rec r, Emit<Rec> more) { } }", "an Emit<Rec> of its own records")]
-    [TestCase("public static class R { [ForEachRecord, With<P>] static void A(in Rec r) { } }", "has a filter or [Consume]")]
-    [TestCase("public class R { [ForEachRecord] void A(in Rec r) { } }", "is an instance method")]
-    [TestCase("public static class R { [ForEachRecord] static void A<T>(in Rec r) { } }", "is generic")]
-    [TestCase("public static class R { [ForEachRecord, ForEach] static void A(in Rec r) { } }", "also has [ForEach] or [ForEntity]")]
-    [TestCase("[EcsSystem] public ref struct S { [ForEachRecord] static void A(in Rec r, int n) { } }", "takes 'n', which a pass over records has none of")] // a caller's value in a system
+    [TestCase("public static class R { [Drain] static void A(in Rec r, in P p) { } }", "takes 'p', which a pass over records has none of")]
+    [TestCase("public static class R { [Drain] static void A(Rec r) { } }", "does not take its record first by 'in'")]
+    [TestCase("public static class R { [Drain] static void A(in P r) { } }", "does not take its record first by 'in'")]          // a component
+    [TestCase("public static class R { [Drain] static void A(in Rec r, Emit<Rec> more) { } }", "an Emit<Rec> of its own records")]
+    [TestCase("public static class R { [Drain, With<P>] static void A(in Rec r) { } }", "has a filter or [Consume]")]
+    [TestCase("public class R { [Drain] void A(in Rec r) { } }", "is an instance method")]
+    [TestCase("public static class R { [Drain] static void A<T>(in Rec r) { } }", "is generic")]
+    [TestCase("public static class R { [Drain, ForEach] static void A(in Rec r) { } }", "also has [ForEach] or [EntityMethod]")]
+    [TestCase("[EcsSystem] public ref struct S { [Drain] static void A(in Rec r, int n) { } }", "takes 'n', which a pass over records has none of")] // a caller's value in a system
     public async Task AnInvalidRecordMethodIsReported(string source, string reason)
     {
         var found = (await GeneratorTests.Analyze([Data + source])).Where(d => d.Id == "EECS108").Select(d => d.GetMessage()).ToArray();
@@ -251,8 +251,8 @@ public class RecordTests
         Assert.That(found[0], Does.Contain(reason));
     }
 
-    [TestCase("public static class R { [ForEachRecord] static void A(in Rec r, ref Tally t, Lookup<P> p, World w, Emit<Other> o, ref int n) { } }")]
-    [TestCase("[EcsSystem] public ref struct S { [ForEachRecord] static void A(in Rec r, in Tally t, World w) { } }")]
+    [TestCase("public static class R { [Drain] static void A(in Rec r, ref Tally t, Lookup<P> p, World w, Emit<Other> o, ref int n) { } }")]
+    [TestCase("[EcsSystem] public ref struct S { [Drain] static void A(in Rec r, in Tally t, World w) { } }")]
     public async Task AValidRecordMethodIsNotReported(string source) =>
         Assert.That((await GeneratorTests.Analyze([Data + source])).Where(d => d.Id.StartsWith("EECS1") || d.Severity == DiagnosticSeverity.Error), Is.Empty);
 
@@ -262,7 +262,7 @@ public class RecordTests
     {
         var found = (await GeneratorTests.Analyze([Data + source])).Where(d => d.Id == "EECS109").ToArray();
         Assert.That(found.Select(d => d.GetMessage()), Has.Exactly(1).Items);
-        Assert.That(found[0].GetMessage(), Does.Contain("walks the records of Emitted<Rec> and clears them by hand: a [ForEachRecord] method taking 'in Rec r'"));
+        Assert.That(found[0].GetMessage(), Does.Contain("walks the records of Emitted<Rec> and clears them by hand: a [Drain] method taking 'in Rec r'"));
         Assert.That(found[0].Severity, Is.EqualTo(DiagnosticSeverity.Info));
         Assert.That(found[0].Properties.ContainsKey("RecordParameters"), Is.EqualTo(fixable));
     }

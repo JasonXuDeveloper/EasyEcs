@@ -8,7 +8,7 @@ namespace EasyEcs.UnitTest;
 
 /// <summary>
 /// [View] ref structs: one entity's components as ref / ref readonly fields with business methods, taken by [ForEach]
-/// and [ForEntity] methods (the job builds the view over the row; its fields count as the method's own parameters for
+/// and [EntityMethod] methods (the job builds the view over the row; its fields count as the method's own parameters for
 /// the schedule, the change ticks and the vector loop) and reached from an entity (AsX / TryGetX).
 /// </summary>
 public static class Arena
@@ -70,7 +70,7 @@ public static class Arena
     [ForEach]
     public static void Strike(Fighter fighter, int damage) => fighter.TakeDamage(damage);
 
-    [ForEntity]
+    [EntityMethod]
     public static void Hit(Fighter fighter, int damage, ref bool dead)
     {
         fighter.TakeDamage(damage);
@@ -279,7 +279,7 @@ public class ViewTests
     }
 
     [Test]
-    public void RunnersAndForEntityMethodsTakeViews()
+    public void RunnersAndEntityMethodsTakeViews()
     {
         using var world = new World();
         var e = Fighter(world, 10, 1, 0);
@@ -405,7 +405,7 @@ public class ViewRuleTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(PQ v, ref P p) => v.Add(); }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(PQ v, Maybe<Q> q) => v.Add(); }")]
     [TestCase("[View] public ref struct OnlyQ { public ref readonly Q Q; } [EcsSystem] public ref struct S { [ForEach] static void A(PQ v, OnlyQ w) => v.Add(); }")]
-    [TestCase("public static class R { [ForEntity] static void A(PQ v, in Q q) => v.Add(); }")]                                // [ForEntity]
+    [TestCase("public static class R { [EntityMethod] static void A(PQ v, in Q q) => v.Add(); }")]                                // [EntityMethod]
     public async Task AComponentReachedTwiceIsAnError(string source) =>
         Assert.That(await Ids(source), Is.EqualTo(new[] { "EECS099" }));
 
@@ -419,7 +419,7 @@ public class ViewRuleTests
         Assert.That(await Ids(source), Is.EqualTo(new[] { "EECS100" }));
 
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Q q) { var v = new PQ { P = ref p, Q = ref q }; v.Add(); } }")]
-    [TestCase("public static class R { [ForEntity] static void A(ref P p, in Q q, int n) { var v = new PQ { P = ref p, Q = ref q }; v.Add(); } }")]
+    [TestCase("public static class R { [EntityMethod] static void A(ref P p, in Q q, int n) { var v = new PQ { P = ref p, Q = ref q }; v.Add(); } }")]
     [TestCase("public static class U { public static void F(Entity e) { var v = new PQ { P = ref e.Get<P>(), Q = ref e.Read<Q>() }; v.Add(); } }")]
     [TestCase("public static class U { public static void F(Entity e) { var v = new PQ { P = ref e.P, Q = ref e.Q }; v.Add(); } }")]
     public async Task AViewBuiltByHandIsReported(string source) =>
@@ -447,7 +447,7 @@ public class ViewRuleTests
 
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(VT v) { if (v.Q.V > 0) v.T.V++; } }")]           // the field on some rows
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(VT v) { if (v.Q.V > 0) return; v.Add(); } }")]   // a member on some rows
-    [TestCase("public static class R { [ForEntity] static void A(VT v, int n) { if (n > 0) v.T.V = n; } }")]              // one entity
+    [TestCase("public static class R { [EntityMethod] static void A(VT v, int n) { if (n > 0) v.T.V = n; } }")]              // one entity
     [TestCase("[View] public ref struct W { public ref T T; public void Up(int n) { if (n > 0) T.V += n; } }")]           // in the view's member
     public async Task ATrackedComponentWrittenThroughAViewOnSomeRowsIsReported(string source) =>
         Assert.That(await SomeRows(source), Is.EqualTo(new[] { "EECS053" }));
@@ -464,7 +464,7 @@ public class ViewRuleTests
     public void AJobStampsTheRowsAMutFieldWrites()
     {
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(GeneratorTests.Components, Tracked,
-            "public static class R { [ForEntity] static void A(VM v) => v.Up(1); } [EcsSystem] public ref struct S { [ForEach] static void B(VM v) => v.Up(1); }"), out var output, out _);
+            "public static class R { [EntityMethod] static void A(VM v) => v.Up(1); } [EcsSystem] public ref struct S { [ForEach] static void B(VM v) => v.Up(1); }"), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("global::EasyEcs.MutColumn.Of<global::T>(in entities)"));              // a run's change-tick column
@@ -524,7 +524,7 @@ public class ViewRuleTests
     public void AJobBuildsTheViewOverItsRow()
     {
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(GeneratorTests.Components, Views,
-            "public static class R { [ForEntity] static void A(in T t, PQ v) => v.Add(); } [EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void B(PQ v) => v.Add(); }"), out var output, out _);
+            "public static class R { [EntityMethod] static void A(in T t, PQ v) => v.Add(); } [EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void B(PQ v) => v.Add(); }"), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("new global::PQ { P = ref c2, Q = ref c3 }"));                          // one entity: after the component parameter

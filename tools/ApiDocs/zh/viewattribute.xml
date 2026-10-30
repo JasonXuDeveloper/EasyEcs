@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.ViewAttribute" source="d7d776e6319e">
+  <member name="T:EasyEcs.ViewAttribute" source="499fabcba7a7">
     <summary>
       一个实体若干组件的视图：一个 <c>ref struct</c>，实例字段是组件的 <c>ref</c>（写）、<c>ref readonly</c>（读）或 <see cref="Mut{T}"/>（写，只在写过的地方打 tick）字段，
       public 或 internal，再加上使用这些字段的业务方法：
       <c>[View] public ref struct Fighter { public ref Health Health; public ref readonly Armor Armor; public void TakeDamage(int n) =&gt; Health.Value -= Math.Max(0, n - Armor.Value); }</c>。
-      <c>[ForEach]</c> 或 <c>[ForEntity]</c> 方法按值接收它（<c>static void Hit(Fighter fighter, in Damage damage)</c>）：方法访问拥有视图全部组件的实体，
+      <c>[ForEach]</c> 或 <c>[EntityMethod]</c> 方法按值接收它（<c>static void Hit(Fighter fighter, in Damage damage)</c>）：方法访问拥有视图全部组件的实体，
       视图字段的读写和方法自己的 <c>ref</c> / <c>in</c> 参数一样计算（调度、被追踪组件的变更 tick、向量循环都是如此），生成的 job 在行上构造视图，没有开销。
       生成器还写出 <c>entity.AsFighter()</c> 和 <c>entity.TryGetFighter(out fighter)</c>。视图持有指向实体那一行的 ref，所以这个实体的结构变更
       （或任何移动行的变更）之后就不能再用它。

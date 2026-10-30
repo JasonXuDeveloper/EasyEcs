@@ -10,7 +10,7 @@ using NUnit.Framework;
 namespace EasyEcs.UnitTest;
 
 /// <summary>
-/// [ForEach] and [ForEntity] methods are called by generated code through UnsafeAccessor, which IDEs do not see as a
+/// [ForEach] and [EntityMethod] methods are called by generated code through UnsafeAccessor, which IDEs do not see as a
 /// use: the analyzer suppresses Roslyn's "unused private member", Rider reads [MeansImplicitUse].
 /// </summary>
 public class UnusedTests
@@ -51,7 +51,7 @@ public class UnusedTests
             }
             public static class Potions
             {
-                [ForEntity] static void Drink(ref Hp hp, int amount) => hp.V += amount;
+                [EntityMethod] static void Drink(ref Hp hp, int amount) => hp.V += amount;
             }
             """), out var output, out _);
 
@@ -69,7 +69,7 @@ public class UnusedTests
     }
 
     [TestCase(typeof(ForEachAttribute))]
-    [TestCase(typeof(ForEntityAttribute))]
+    [TestCase(typeof(EntityMethodAttribute))]
     public void RiderSeesTheMethodsAsUsed(System.Type attribute) =>
         Assert.That(attribute.GetCustomAttributes(false).Select(a => a.GetType().FullName),
             Does.Contain("JetBrains.Annotations.MeansImplicitUseAttribute"));

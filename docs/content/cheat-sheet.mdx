@@ -75,7 +75,7 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 | `world.DescribeTables()` | Tables, columns, rows and bytes, for tools |
 | `world.DescribeSchedule()` | Every group's stages, each system's reads and writes, why it waits, the pairs only registration orders; `ToString()` / `ToMermaid()` |
 | `world.TrimExcess()` | Drops empty tables and shrinks the others after a peak, at a quiet moment |
-| `world.ForParallel(count, ref job)` / `ForParallel(ref buffer, ref job)` | An `IForRange` job over indexes, or an `IForSpan<T>` job over a `DynamicBuffer<T>`'s elements, in chunks on the world's runner ([ForParallel](/en/docs/guide/threading#for-parallel)) |
+| `world.ParallelFor(count, ref job)` / `ParallelFor(ref buffer, ref job)` | An `IForRange` job over indexes, or an `IForSpan<T>` job over a `DynamicBuffer<T>`'s elements, in chunks on the world's runner ([ParallelFor](/en/docs/guide/threading#parallel-for)) |
 | `world.SetEntityRandom(Seed: s)` | The seed of `EntityRandom`; every `Update()` advances its tick: each number a function of (seed, entity, tick, stream) ([EntityRandom](/en/docs/guide/threading#entity-random)) |
 | `world.DestroyedSince(since, into, out count)` / `DestroyLogOldestTick` | Entities destroyed since a tick, with `WorldOptions.DestroyLogCapacity`; `false`: the reader is older than the log |
 
@@ -122,15 +122,15 @@ unit.RemoveDead();                                  // flips a presence bit: the
 if (unit.TryGetHealth(out var hp)) { /* hp is a copy */ }
 ```
 
-```csharp tab="[ForEntity]"
+```csharp tab="[EntityMethod]"
 public static class Requests
 {
-    [ForEntity]                                        // the generator writes the job and Requests.TakeHit(entity, damage)
+    [EntityMethod]                                        // the generator writes the job and Requests.TakeHit(entity, damage)
     static void TakeHit(ref Health hp, int damage) => hp.Value -= damage;
 }
 ```
 
-```csharp tab="[ForEntity]"
+```csharp tab="[EntityMethod]"
 bool applied = Requests.TakeHit(unit, 30);           // false: not alive or no Health
 ```
 
@@ -219,7 +219,7 @@ bit
 | `[ForEach(SimdMode = SimdMode.Require)]` | Method | The method must get its vector loop, else a build error ([EECS056](/en/docs/guide/analyzer#eecs056)); `SimdMode.Off` keeps it scalar without [EECS055](/en/docs/guide/analyzer#eecs055) |
 | `[ForEach(FloatMode = FloatMode.Fast)]` | Method | `Sin`, `Cos`, `Exp`, `Log`, `Log2`, `Hypot` in the vector loop take .NET's vector approximations, and a float `Reduce<T>` sum adds lane by lane; `Exact` (the default) keeps the method's results bit for bit ([FloatMode](/en/docs/guide/systems#float-mode)) |
 | `[ForEach, Consume]` | Method | The rows the pass visited are destroyed when it ends: events, commands ([Consume](/en/docs/guide/systems#consume), [EECS084](/en/docs/guide/analyzer#eecs084)) |
-| `[ForEntity]` | Static method | Runs on one entity through a generated entry point, `Owner.Method(entity, values)` ([one entity](/en/docs/guide/queries#run-on-one-entity), [EECS080](/en/docs/guide/analyzer#eecs080)) |
+| `[EntityMethod]` | Static method | Runs on one entity through a generated entry point, `Owner.Method(entity, values)` ([one entity](/en/docs/guide/queries#run-on-one-entity), [EECS080](/en/docs/guide/analyzer#eecs080)) |
 | `[ForEach(Slices = N)]` | Method | Each run visits one slice, about 1 / N of the rows: every row once per N runs (not with `Changed` / `Removed`: [EECS035](/en/docs/guide/analyzer#eecs035)) |
 | `[With<T>]` | Method, system group | Requires `T` without passing it |
 | `[Without<T>]` | Method, system group | Excludes entities with `T` |

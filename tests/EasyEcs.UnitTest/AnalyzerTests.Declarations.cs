@@ -25,7 +25,7 @@ public partial class AnalyzerTests
 
     // EECS003 at its threshold: ten components, one above nine.
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref C0 a, in C1 b, in C2 c, in C3 d, in C4 e, in C5 f, in C6 g, in C7 h, in C8 i, in C9 j) => a.V = j.V; }", "EECS003")]
-    [TestCase("public static class R { [ForEntity] static void A(ref C0 a, in C1 b, in C2 c, in C3 d, in C4 e, in C5 f, in C6 g, in C7 h, in C8 i, in C9 j) => a.V = j.V; }", "EECS003")]
+    [TestCase("public static class R { [EntityMethod] static void A(ref C0 a, in C1 b, in C2 c, in C3 d, in C4 e, in C5 f, in C6 g, in C7 h, in C8 i, in C9 j) => a.V = j.V; }", "EECS003")]
     // EECS005: an instance method of a generic or nested class.
     [TestCase("public class G<X> { [ForEach] void A(ref P p) { } }", "EECS005")]
     [TestCase("public static class O { public class R { [ForEach] void A(ref P p) { } } }", "EECS005")]
@@ -49,8 +49,8 @@ public partial class AnalyzerTests
     // EECS023: WithAny on a component, a filter on a plain struct.
     [TestCase("[WithAny<P, Q>] public struct NotAGroup : IComponent;", "EECS023")]
     [TestCase("[With<P>] public struct NotAGroup;", "EECS023")]
-    // EECS024: [ForEntity] on a local function, a local function in a hook.
-    [TestCase("public static class U { public static void M() { [ForEntity] static void Local(ref P p) => p.V++; } }", "EECS024")]
+    // EECS024: [EntityMethod] on a local function, a local function in a hook.
+    [TestCase("public static class U { public static void M() { [EntityMethod] static void Local(ref P p) => p.V++; } }", "EECS024")]
     [TestCase("[EcsSystem] public ref struct S { static void OnUpdate() { [ForEach] static void Local(ref P p) => p.V++; } }", "EECS024")]
     public Task DeclarationRulesReport(string source, string id) => AssertReports(id, GeneratorTests.Components, Ten, source);
 
@@ -150,13 +150,13 @@ public partial class AnalyzerTests
     [TestCase("[UpdateInterval(4)] public class NotASystem { }", "EECS083")]
     [TestCase("public static class R { [Consume] static void A(ref P p) { } }", "EECS085")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Slices = 2), Consume] static void A(ref P p) { } }", "EECS085")]
-    [TestCase("public static class R { [ForEntity] void A(ref P p) { } }", "EECS081")]
-    [TestCase("public static class R { [ForEntity] static void A(System.Span<P> p) { } }", "EECS081")]
-    [TestCase("public static class R { [ForEntity, ForEach] static void A(ref P p) { } }", "EECS081")]
-    [TestCase("public static class R { [ForEntity] static void A(ref P p, Scratch<int> s) { } }", "EECS081")]
-    [TestCase("public static class R { [ForEntity] static void A(ref P p, int n) { } static void A(Entity e, int n) { } }", "EECS021")]
-    [TestCase("public static class R { [ForEntity] static void A(P p) { } }", "EECS002")]
-    [TestCase("public static class R { [ForEntity] static void A(int n) { } }", "EECS003")]
+    [TestCase("public static class R { [EntityMethod] void A(ref P p) { } }", "EECS081")]
+    [TestCase("public static class R { [EntityMethod] static void A(System.Span<P> p) { } }", "EECS081")]
+    [TestCase("public static class R { [EntityMethod, ForEach] static void A(ref P p) { } }", "EECS081")]
+    [TestCase("public static class R { [EntityMethod] static void A(ref P p, Scratch<int> s) { } }", "EECS081")]
+    [TestCase("public static class R { [EntityMethod] static void A(ref P p, int n) { } static void A(Entity e, int n) { } }", "EECS021")]
+    [TestCase("public static class R { [EntityMethod] static void A(P p) { } }", "EECS002")]
+    [TestCase("public static class R { [EntityMethod] static void A(int n) { } }", "EECS003")]
     [TestCase("[UpdateBefore<B>, UpdateAfter<C>] [EcsSystem] public ref struct A { } [EcsSystem] public ref struct B { } [UpdateAfter<B>] [EcsSystem] public ref struct C { }", "EECS019")]
     [TestCase("public struct G : ISystemGroup; [UpdateInGroup<G>] [EcsSystem] public ref struct A { } [UpdateAfter<A>] [EcsSystem] public ref struct B { }", "EECS020")]
     [TestCase("public struct Zone : IComponent, IGroup { public int Id; public int Group => Id; } [EcsSystem] public ref struct S { [ForEach] static void A(ref Zone z) { } }", "EECS015")]
@@ -188,7 +188,7 @@ public partial class AnalyzerTests
     [TestCase("[UpdateBefore<G2<int>>] [EcsSystem] public ref struct G1 { [ForEach] static void A(ref P p) { } } [UpdateBefore<G1>] [EcsSystem] public ref struct G2<X> { [ForEach] static void B(ref Q q) { } }", "EECS019")]
     [TestCase("[EcsSystem] public ref struct S { public static event System.Action Fired; }", "EECS007")]
     [TestCase("[EcsSystem] public ref struct S { public static int Count { get; private set; } }", "EECS007")]
-    [TestCase("[EcsSystem] public ref struct A { [ForEntity] static void Hit(ref P p) { } } [EcsSystem] public ref struct S { [ForEach] static void B(Entity e, ref Q q) => A.Hit(e); }", "EECS008")] // a generated entry point
+    [TestCase("[EcsSystem] public ref struct A { [EntityMethod] static void Hit(ref P p) { } } [EcsSystem] public ref struct S { [ForEach] static void B(Entity e, ref Q q) => A.Hit(e); }", "EECS008")] // a generated entry point
     [TestCase("public class S : IComponent;", "EECS006")]
     [TestCase("[EcsSystem] public class S { }", "EECS074")]
     [TestCase("[EcsSystem] public struct S { }", "EECS074")]
@@ -304,22 +304,22 @@ public partial class AnalyzerTests
         Assert.That(errors, Is.Empty);
     }
 
-    // A message names the method as what it is ([ForEach] or [ForEntity]), what it costs there, and the parameter at fault.
-    [TestCase("public static class H { [ForEntity] static void A(ref P p, in Q q, int n) => p.V += n; }", "EECS026",
-        "[ForEntity] method 'A' does not use parameter 'q': its column is still loaded on every call; require the component with [With<Q>] instead")]
-    [TestCase("public static class H { [ForEntity] static void A(Entity e, ref P p, int n) => p.V += n; }", "EECS026",
-        "[ForEntity] method 'A' does not use parameter 'e': remove it")]
-    [TestCase("public static class H { [ForEntity] static void A(ref P p, ref Q q) => p.V = q.V; }", "EECS025",
-        "Parameter 'q' of [ForEntity] method 'A' (ref) is a write access, but the code only reads it: the system is scheduled as the component's writer, so no parallel stage runs it beside a reader; take it by 'in'")]
-    [TestCase("public static class H { [ForEntity] static void A(ref T t, int v) { if (v > 0) t.V = v; } }", "EECS053",
-        "Parameter 't' of [ForEntity] method 'A' takes T by 'ref', but some calls return without a write, and every call stamps the row as changed; take it as a Mut<T> and write through Write() or SetIfChanged")]
+    // A message names the method as what it is ([ForEach] or [EntityMethod]), what it costs there, and the parameter at fault.
+    [TestCase("public static class H { [EntityMethod] static void A(ref P p, in Q q, int n) => p.V += n; }", "EECS026",
+        "[EntityMethod] method 'A' does not use parameter 'q': its column is still loaded on every call; require the component with [With<Q>] instead")]
+    [TestCase("public static class H { [EntityMethod] static void A(Entity e, ref P p, int n) => p.V += n; }", "EECS026",
+        "[EntityMethod] method 'A' does not use parameter 'e': remove it")]
+    [TestCase("public static class H { [EntityMethod] static void A(ref P p, ref Q q) => p.V = q.V; }", "EECS025",
+        "Parameter 'q' of [EntityMethod] method 'A' (ref) is a write access, but the code only reads it: the system is scheduled as the component's writer, so no parallel stage runs it beside a reader; take it by 'in'")]
+    [TestCase("public static class H { [EntityMethod] static void A(ref T t, int v) { if (v > 0) t.V = v; } }", "EECS053",
+        "Parameter 't' of [EntityMethod] method 'A' takes T by 'ref', but some calls return without a write, and every call stamps the row as changed; take it as a Mut<T> and write through Write() or SetIfChanged")]
     [TestCase("[View] public ref struct VT { public ref T T; } [EcsSystem] public ref struct S { [ForEach] static void A(VT v, in P p) { if (p.V > 0) v.T.V = p.V; } }", "EECS053",
         "[ForEach] method 'A' writes T by 'ref' through field 'T' of view VT, but some rows pass through without a write, and every row it visits is stamped as changed; make the field a Mut<T> and write through Write() or SetIfChanged")]
     [TestCase("[View] public ref struct VT { public ref T T; public void Up(int n) { if (n > 0) T.V += n; } }", "EECS053",
         "View member 'Up' writes T by 'ref' through field 'T' of view VT, but some paths through it return without a write, and every row the view is built over is stamped as changed; make the field a Mut<T> and write through Write() or SetIfChanged")]
-    [TestCase("public static class H { [ForEntity] static void A(Entity e, ref P p) => p.V = e.Read<Q>().V; }", "EECS027",
-        "[ForEntity] method 'A' looks up 'Q' with 'e.Read<Q>()' beside the lookup its entry point makes; take it as a parameter ('in Q' or 'ref Q'), or a Maybe<Q> when some entities lack it")]
-    [TestCase("public static class H { [ForEntity] static void A(ref P p) => p.V = new System.Collections.Generic.List<int>().Count; }", "EECS028",
+    [TestCase("public static class H { [EntityMethod] static void A(Entity e, ref P p) => p.V = e.Read<Q>().V; }", "EECS027",
+        "[EntityMethod] method 'A' looks up 'Q' with 'e.Read<Q>()' beside the lookup its entry point makes; take it as a parameter ('in Q' or 'ref Q'), or a Maybe<Q> when some entities lack it")]
+    [TestCase("public static class H { [EntityMethod] static void A(ref P p) => p.V = new System.Collections.Generic.List<int>().Count; }", "EECS028",
         "'new System.Collections.Generic.List<int>()' allocates a new List in 'A', which runs on every call")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p) { var l = new System.Collections.Generic.List<int> { p.V }; p.V = l.Count; } }", "EECS028",
         "'new System.Collections.Generic.List<int> { p.V }' allocates a new List in 'A', which runs for every entity it visits, each update; a Scratch<System.Collections.Generic.List<int>> parameter keeps one per thread for the next rows (clear it before use)")]
@@ -329,8 +329,8 @@ public partial class AnalyzerTests
         "[ForEach] method 'A' cannot run in parallel: it takes 'n' by 'ref', which every chunk would race on: pass it by value or 'in', or collect per-chunk results with a Reduce<T> or an Emit<T>")]
     [TestCase("public static class R { [ForEach(Parallel = true)] static void A(ref P p, System.ReadOnlySpan<int> s) => p.V = s[0]; }", "EECS010",
         "[ForEach] method 'A' cannot run in parallel: it takes 's', a ReadOnlySpan<int>, which the job the threads share cannot hold (a ref struct lives on one stack): pass an array, or read the data through a Lookup<T> or a singleton")]
-    [TestCase("public static class H { [ForEntity] static void A(P p) { } }", "EECS002",
-        "Parameter 'p' of [ForEntity] method 'A' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Emit of a struct, an Entity or the World (outside a system, also a value the caller passes, of any other type)")]
+    [TestCase("public static class H { [EntityMethod] static void A(P p) { } }", "EECS002",
+        "Parameter 'p' of [EntityMethod] method 'A' must be a 'ref'/'in' IComponent or ISingletonComponent struct, a Span/ReadOnlySpan of an IComponent struct, a Maybe, Mut or Lookup of one, a 'ref Reduce' of a singleton, a Scratch, an Emit of a struct, an Entity or the World (outside a system, also a value the caller passes, of any other type)")]
     public async Task MessagesNameWhatTheyMean(string source, string id, string message)
     {
         var found = (await Analyze([Components, source])).Where(d => d.Id == id).Select(d => d.GetMessage()).ToArray();

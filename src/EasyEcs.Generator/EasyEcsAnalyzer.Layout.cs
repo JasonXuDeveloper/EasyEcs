@@ -53,7 +53,7 @@ public static partial class EasyEcsAnalyzer
         /// <summary>The fields <paramref name="method"/> touches of each component it takes, when the component is one EECS091 may report.</summary>
         public void Collect(IMethodSymbol method, IOperation body)
         {
-            if (!Symbols.IsForEach(method) || Symbols.IsForEntity(method)) return; // one entity per call walks no column
+            if (!Symbols.IsForEach(method) || Symbols.IsEntityMethod(method)) return; // one entity per call walks no column
             List<(IParameterSymbol P, ITypeSymbol Component)>? taken = null;
             foreach (var p in method.Parameters)
             {

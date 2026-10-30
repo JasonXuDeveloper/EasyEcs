@@ -428,7 +428,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Holder h) { }")]                                             // not numeric fields
     [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;")] // vectorized
-    [TestCase("[ForEntity] static void A(ref F f, in H h) => f.V = h.V.GetHashCode();")]                // one entity: no loop
+    [TestCase("[EntityMethod] static void A(ref F f, in H h) => f.V = h.V.GetHashCode();")]                // one entity: no loop
     [TestCase("public struct Acc : ISingletonComponent { public float Sum; } [ForEach] static void A(in F f, ref Acc a) => a.Sum += f.V;")] // accumulated by hand: EECS086 when a system resets it, a running total otherwise
     public void MethodsNotMeantForAVectorLoopGetNoMessage(string members)
     {
@@ -1092,7 +1092,7 @@ public class GeneratorTests
     [
         "ForEachMethods", "RecordMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
-        "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
+        "GroupBy", "TargetPolicies", "NotSaved", "EntityMethods", "EntityMethodTypes", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
         "SystemPlaces", "SystemFusions", "SetFusions", "SystemLoops", "SystemCode", "RecordedTypes",
     ];
 
@@ -1106,7 +1106,7 @@ public class GeneratorTests
     [TestCase("public P P = new() { V = 3 };", "public P P = new() { V = 3 }; ")] // a prefab declaration's trivia
     [TestCase("q.V += 2 + e.Id.Index;", "q.V += 3 + e.Id.Index;")]                       // a fused (scalar) method's body: its pair stays
     [TestCase("if (d2 >= 4f) return; q.V++;", "if (d2 >= 4f) return;  q.V++;")]                  // a pair method's trivia: its kernel and cutoff stay
-    [TestCase("c.Ticks += h.V;", "c.Ticks += h.V + 1;")]                                 // a [ForEachRecord] method's body
+    [TestCase("c.Ticks += h.V;", "c.Ticks += h.V + 1;")]                                 // a [Drain] method's body
     [TestCase("q.V switch { 0 => 1, > 4 => q.V, _ => 2 }", "q.V switch { 0 => 1,  > 4 => q.V, _ => 2 }")] // a vector loop's switch: trivia
     public void EditsThatChangeNoModelHitTheCache(string before, string after)
     {
@@ -1118,14 +1118,14 @@ public class GeneratorTests
             "public partial struct Census : ISingletonComponent { [Sum] public int N; [Min] public float L; }" +
             "public partial record struct Zn([GroupBy] int Id) : IComponent; [WhenTargetDestroyed(TargetPolicy.Remove)] public record struct Tether(EntityId Target) : IRelation;" +
             "[NotSaved] public record struct Wire(object O) : IComponent;" +
-            "[UpdateInterval(3, Phase = 1)] [EcsSystem] public ref struct Sch { static void OnUpdate(World w) { _ = w.EntityCount; } } public static class FE { [ForEntity, Without<Q>] static void E(ref P p, int n) { } }" +
+            "[UpdateInterval(3, Phase = 1)] [EcsSystem] public ref struct Sch { static void OnUpdate(World w) { _ = w.EntityCount; } } public static class FE { [EntityMethod, Without<Q>] static void E(ref P p, int n) { } }" +
             "[View] public ref struct Vw { public ref P P; public ref readonly Q Q; public void Add(int n) { P.V += Q.V + n; } }" +
             "[EcsSystem] public ref struct VS { [ForEach] static void M(Vw v) => v.Add(1); }" +
             "[Prefab] public partial struct Kind { public P P = new() { V = 3 }; public Q Q; }" +
             "[EcsSystem] public ref struct F1 { [ForEach] static void Fa(ref Q q, Entity e) => q.V += e.Id.Index; [ForEach] static void Fb(ref Q q, Entity e) => q.V += 2 + e.Id.Index; } [EcsSystem] public ref struct F2 { [ForEach] static void Fc(ref Q q) => q.V++; }" +
             "public struct Fp : IComponent { public float X, Y; } [EcsSystem] public ref struct Pr { [ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X, dy = p.Y - o.Y, d2 = dx * dx + dy * dy; if (d2 >= 4f) return; q.V++; } }" +
             "[Accumulate, Sum] public partial struct Tot : ISingletonComponent { public long N; } [EcsSystem] public ref struct Ac { [ForEach] static void T(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }" +
-            "public record struct Hit(int V); [EcsSystem] public ref struct Rc { [ForEachRecord] static void H(in Hit h, ref Clock c) => c.Ticks += h.V; }";
+            "public record struct Hit(int V); [EcsSystem] public ref struct Rc { [Drain] static void H(in Hit h, ref Clock c) => c.Ticks += h.V; }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         // A lambda pass in a file of its own: its interceptor names the file's checksum, so an edit there is a new model.
@@ -1293,7 +1293,7 @@ public class GeneratorTests
     public void AnEditedScheduleReemitsOnlyItsSystem()
     {
         var tree = CSharpSyntaxTree.ParseText("using EasyEcs;\n" + Components + "[UpdateInterval(3)] [EcsSystem] public ref struct S { }", Parse);
-        var other = CSharpSyntaxTree.ParseText("using EasyEcs;\n[EcsSystem] public ref struct O { [ForEach] static void B(ref Q q) => q.V++; } public static class E { [ForEntity] static void C(ref P p) { } }", Parse);
+        var other = CSharpSyntaxTree.ParseText("using EasyEcs;\n[EcsSystem] public ref struct O { [ForEach] static void B(ref Q q) => q.V++; } public static class E { [EntityMethod] static void C(ref P p) { } }", Parse);
         var compilation = Compile().AddSyntaxTrees(tree, other);
         var driver = Driver().RunGenerators(compilation);
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(tree, CSharpSyntaxTree.ParseText(tree.ToString().Replace("UpdateInterval(3)", "UpdateInterval(5, Phase = 2)"), Parse)));
@@ -1301,13 +1301,13 @@ public class GeneratorTests
         var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
-        Assert.That(Steps(driver)["ForEntityTypes"].SelectMany(s => s.Outputs).Select(o => o.Reason),
+        Assert.That(Steps(driver)["EntityMethodTypes"].SelectMany(s => s.Outputs).Select(o => o.Reason),
             Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged));
         Assert.That(driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("struct __S_SystemCode")), Does.Contain("public static int Interval => 5;\n\n    public static int Phase => 2;"));
     }
 
     [Test]
-    public void ConsumeForEntityAndSchedulesAreGenerated()
+    public void ConsumeEntityMethodAndSchedulesAreGenerated()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, """
             [EcsSystem] public ref struct S
@@ -1318,7 +1318,7 @@ public class GeneratorTests
             [UpdateInterval(4, Phase = 3)] [EcsSystem] public ref struct Slow { static void OnUpdate() { } }
             [UpdateInterval(2)] [EcsSystem] public ref struct G<X> where X : struct, IComponent { }
             public static class H { static void F(World w) => w.AddSystem<G<P>>(); }
-            public static class O { [ForEntity, Changed<T>] static void C(Entity e, ref P p, in Clock c, int n) { } }
+            public static class O { [EntityMethod, Changed<T>] static void C(Entity e, ref P p, in Clock c, int n) { } }
             public static class R { [ForEach, Consume] static void D(in Q q, ref int n) => n++; }
             """), out var output, out _);
         string all = string.Join("\n", output.SyntaxTrees.Skip(2).Select(t => t.ToString()));

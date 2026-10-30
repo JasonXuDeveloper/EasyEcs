@@ -242,7 +242,7 @@ the channel. A handler that writes after that gets a `ChannelClosedException` at
 comes ([full example](#full-example), `Arena.RunAsync`).
 
 A request about an entity that exists already carries its `EntityId`. The system finds the entity and runs a
-[`[ForEntity]`](/en/docs/guide/queries#run-on-one-entity) method on it: one lookup for all the method's components, and
+[`[EntityMethod]`](/en/docs/guide/queries#run-on-one-entity) method on it: one lookup for all the method's components, and
 a filter that rules out a dead unit. The entry point returns `false` when the entity is gone, fails the filter or lacks
 a component, which is the reply:
 
@@ -253,7 +253,7 @@ public readonly record struct HealRequest(EntityId Unit, int Amount, TaskComplet
 
 public static class Heals
 {
-    [ForEntity, Without<Dead>]                                         // a dead unit is refused, as a pass skips it
+    [EntityMethod, Without<Dead>]                                         // a dead unit is refused, as a pass skips it
     static void Heal(ref Health health, int amount) => health.Value += amount;
 }
 

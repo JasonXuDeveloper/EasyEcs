@@ -267,9 +267,9 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 
 `WorldOptions.MeasureSystems` 会在 `system.Stats.Runs` 里统计每次运行，能分清“从没跑过”和“跑了但什么都没做”。
 
-## 为什么 `[ForEntity]` 方法或 `entity.Run` 返回 `false`？ [#run-false]
+## 为什么 `[EntityMethod]` 方法或 `entity.Run` 返回 `false`？ [#run-false]
 
-`[ForEntity]` 方法的入口（`Requests.TakeHit(unit, 30)`）以及它底下的 `entity.Run<T…, TJob>(ref job, filter)`，只在实体接得住时才运行，
+`[EntityMethod]` 方法的入口（`Requests.TakeHit(unit, 30)`）以及它底下的 `entity.Run<T…, TJob>(ref job, filter)`，只在实体接得住时才运行，
 以下情况不运行，返回 `false`：
 
 1. **实体已经不在了：**拿到句柄之后被销毁了，或者是 `default(Entity)`。`Run` 不会像 `Get` 那样抛异常。
@@ -294,7 +294,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 InvalidOperationException: The index of Unit by Team is not built yet, and building it now, while a parallel stage or pass runs, would change it under the threads reading it. Find it through a Lookup<Unit> parameter (its index is built before the pass), or look it up once on the owner thread before the update.
 ```
 
-值索引由第一次查找建立。在多个线程上跑的代码（并行 `[ForEach]` 方法、并行阶段里的系统、`world.ForParallel`）通过 `World` 去查，
+值索引由第一次查找建立。在多个线程上跑的代码（并行 `[ForEach]` 方法、并行阶段里的系统、`world.ParallelFor`）通过 `World` 去查，
 就会在别的线程读它的同时建它，所以查找会拒绝。**修法：**用 [`Lookup<T>`](/zh/docs/guide/threading#lookups) 参数，在它上面调
 `TryFind`、`Find` 或 `Count`：生成的 job 会在遍历前建好索引。或者在更新前，在所有者线程上查一次这个键，之后的遍历就有索引了。
 

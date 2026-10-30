@@ -45,7 +45,7 @@ public static partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor HandWrittenView = new("EECS101", "A view built by hand",
         "'{0}' is built by hand from {1}: {2}",
         Category, DiagnosticSeverity.Warning, true,
-        "A [ForEach] or [ForEntity] method takes a view as a parameter, and the generated job builds it over the row (the " +
+        "A [ForEach] or [EntityMethod] method takes a view as a parameter, and the generated job builds it over the row (the " +
         "same refs, no copy); an entity builds it with the generated AsX(). Building it from the method's component " +
         "parameters or from the entity's components by hand repeats what the generator writes.",
         helpLinkUri: Help("EECS101"));
@@ -214,7 +214,7 @@ public static partial class EasyEcsAnalyzer
 
     /// <summary>
     /// EECS101: <c>new View { F = ref x, ... }</c> setting every field of a valid view, each from a component parameter of
-    /// the [ForEach] / [ForEntity] method it is in (fix: the view as its parameter), or each from one entity's component
+    /// the [ForEach] / [EntityMethod] method it is in (fix: the view as its parameter), or each from one entity's component
     /// (fix: <c>entity.AsView()</c>).
     /// </summary>
     private static void AnalyzeHandWrittenView(OperationAnalysisContext context)

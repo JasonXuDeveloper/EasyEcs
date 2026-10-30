@@ -95,7 +95,7 @@ with what each costs and when to use it, and [API and complexity](https://ecs.xg
   [bulk changes](https://ecs.xgamedev.net/docs/guide/bulk), [cleanup components and disable](https://ecs.xgamedev.net/docs/guide/cleanup-and-disable).
 - **Systems and queries**: [systems](https://ecs.xgamedev.net/docs/guide/systems) of `[ForEach]` methods with filters, `Maybe<T>`,
   batch methods, slices, `[UpdateInterval]`, `[Consume]`, groups, ordering and generic systems;
-  [ad-hoc queries and struct jobs](https://ecs.xgamedev.net/docs/guide/queries), `[ForEntity]` for one entity.
+  [ad-hoc queries and struct jobs](https://ecs.xgamedev.net/docs/guide/queries), `[EntityMethod]` for one entity.
 - **Compute**: [vector loops, parallel passes and batch methods](https://ecs.xgamedev.net/docs/guide/high-performance);
   [reductions, scratch, lookups, emitted records, deterministic random numbers](https://ecs.xgamedev.net/docs/guide/threading#reductions);
   [grids shaded by tiles](https://ecs.xgamedev.net/docs/guide/grids).
@@ -332,7 +332,7 @@ Markdown copy of every page.
 - **Parallel passes that need no locks.** `[ForEach]` parameters do per chunk what shared state would do with locks:
   `Reduce<T>` for totals (OpenMP's `reduction`), `Emit<T>` for records a later system applies, `Lookup<T>` to read
   other entities, `Scratch<T>` for a thread's working memory, `EntityRandom` for random numbers that are the same on
-  any number of threads; `world.ForParallel` runs a loop over other data on the same threads, and `ChunkRows` spreads
+  any number of threads; `world.ParallelFor` runs a loop over other data on the same threads, and `ChunkRows` spreads
   a few heavy rows ([threading](https://ecs.xgamedev.net/en/docs/guide/threading#reductions)). EECS060 and EECS061
   report parallel code that races, EECS086 to EECS089 a hand-written version of these parameters.
 - **Grids shaded like a GPU draws.** A grid cut into tiles is shaded by a method that takes a `Tile<TCell, TTile>`:
@@ -343,7 +343,7 @@ Markdown copy of every page.
   reduction; `[LookupKey]`, `[UniqueKey]` and `[Group]` on a member declare an index key or a group; `[GroupBy]`,
   `[WhenTargetDestroyed]` and `[NotSaved]` on a type declare every world's setup for it
   ([declared parts](https://ecs.xgamedev.net/en/docs/guide/entities-and-components#declared-parts)).
-  `[UpdateInterval(n, Phase = p)]` on a system declares its cadence; `[ForEntity]` writes the job and the entry point that
+  `[UpdateInterval(n, Phase = p)]` on a system declares its cadence; `[EntityMethod]` writes the job and the entry point that
   run a method on one entity; `[Consume]` destroys the rows a pass handled
   ([systems](https://ecs.xgamedev.net/en/docs/guide/systems#consume)).
 - **Servers that reach their peak and stop allocating.** `Reserve(prefab, n)` covers index keys, the retired table and

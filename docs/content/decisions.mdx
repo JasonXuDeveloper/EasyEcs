@@ -97,9 +97,9 @@ after the change on the machine of the time; they are history, not the current r
 | [D77](#d77-tiles) | Grid tiles: a parameter that loads its halo |
 | [D78](#d78-emit) | Records out of a pass are an `Emit<T>` parameter, appended in row order |
 | [D79](#d79-entity-random) | Deterministic random numbers are a pure function, `EntityRandom` |
-| [D80](#d80-for-parallel) | A parallel loop over a range or a list is `world.ForParallel` |
+| [D80](#d80-parallel-for) | A parallel loop over a range or a list is `world.ParallelFor` |
 | [D81](#d81-keyed-reductions) | Keyed reductions not added |
-| [D82](#d82-for-entity) | One entity is a `[ForEntity]` method |
+| [D82](#d82-entity-method) | One entity is an `[EntityMethod]` method |
 | [D83](#d83-update-interval-attribute) | A system's cadence is an attribute |
 | [D84](#d84-consume) | `[Consume]` destroys the visited rows in bulk when it can |
 | [D90](#d90-vector-loops-reach) | Vector loops for parallel methods, optional and narrow lanes, struct values and wide rows |
@@ -136,6 +136,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D131](#d131-lookup-gathers) | Vector loops gather other entities' fields when the method asks for it (`SimdMode.Require`) |
 | [D134](#d134-eecs103) | EECS103: a batch method's hand-written vector loop is reported with the method for one row |
 | [D135](#d135-inlined-locals) | Generated jobs stay within the inliner's 32 IL locals; loops past it run as methods per width |
+| [D141](#d141-drain-entity-method-parallel-for) | `[Drain]`, `[EntityMethod]` and `world.ParallelFor` |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
 reused.
@@ -2114,20 +2115,20 @@ and `new Random()` in a `[ForEach]` method; its fix draws from `EntityRandom` wi
 - **The seed only passed explicitly:** kept (the static members), and the singleton added so a `[ForEach]` method
   takes one `in` parameter.
 
-## D80. A parallel loop over a range or a list is `world.ForParallel` [#d80-for-parallel]
+## D80. A parallel loop over a range or a list is `world.ParallelFor` [#d80-parallel-for]
 
-**Decision.** `world.ForParallel(count, ref job)` runs an `IForRange` job (`Execute(start, end)`) over indexes, and
-`world.ForParallel(ref buffer, ref job)` an `IForSpan<T>` job (`Execute(start, span)`) over the elements of a
+**Decision.** `world.ParallelFor(count, ref job)` runs an `IForRange` job (`Execute(start, end)`) over indexes, and
+`world.ParallelFor(ref buffer, ref job)` an `IForSpan<T>` job (`Execute(start, span)`) over the elements of a
 `DynamicBuffer<T>` (an `Emitted<T>`'s records), on the world's runner: the chunks of parallel `[ForEach]` (about four
 per thread, multiples of 64 between 1,024 and `MaxChunkRows`, or `chunkSize`), the same claiming and helper
 waking, the structure frozen during the call. One job copy per chunk; nothing is merged back. EECS060 and EECS061
 cover the jobs.
 
 **Why.**
-- **Records need processing after the pass that emitted them.** `ForParallelBenchmark`, 4 cores: a heavy step per
+- **Records need processing after the pass that emitted them.** `ParallelForBenchmark`, 4 cores: a heavy step per
   record (a few square roots) 1.2 to 2 times faster than one thread at 10,000 / 100,000 records (the machine was
   shared, so the gain varied between rounds), level with `Parallel.For` over the same chunks with a static delegate
-  (within the noise of each other across the two rounds), which allocates 2 KB per call; ForParallel allocates
+  (within the noise of each other across the two rounds), which allocates 2 KB per call; ParallelFor allocates
   nothing. A light step (one multiply-add) is memory bound: 1.7 to 1.8 times slower than one thread at 10,000 records
   (handing out chunks costs more than the work) and 0.9 to 1.2 times its time at 100,000; such a step stays a loop.
 - **One runner.** `Parallel.For` beside the world's runner would put two pools of helpers on the same cores; the
@@ -2160,9 +2161,9 @@ per-chunk copies in an array, and the runtime creates no array of a value type t
 - **Per-thread bins** (above) and **a sparse list per chunk** (pairs sorted and merged): the second adds a sort per
   chunk to the same merge, so it was not built.
 
-## D82. One entity is a `[ForEntity]` method [#d82-for-entity]
+## D82. One entity is an `[EntityMethod]` method [#d82-entity-method]
 
-**Decision.** A static method marked `[ForEntity]` runs on one entity. The generator writes the `IForEachEntity` job
+**Decision.** A static method marked `[EntityMethod]` runs on one entity. The generator writes the `IForEachEntity` job
 that `entity.Run` takes (its `ref` parameters are the `WriteMask`, its filter attributes are a `static readonly`
 filter, and it implements `INoStructuralChanges` when the method makes no structural change). It also writes an entry
 point next to the method, with the method's name: `Owner.Method(entity, [since,] values…)`. The entry point returns
@@ -2175,8 +2176,9 @@ whether the method ran.
   gets a generated job and entry point
   ([D26](#d26-generated-members-and-a-suggestion-to-use-them)). One entity is the same pattern with
   `entity.Run` in place of `world.ForEach`.
-- **The name pairs with `[ForEach]`.** `[ForEach]` runs the method for each matching row; `[ForEntity]` runs it for
-  the one entity the caller gives. Both attributes declare what the method is, not when it runs.
+- **The name says it is a method on one entity, not a pass.** `[ForEach]` runs the method for each matching row;
+  `[EntityMethod]` is called with the one entity it runs on. Both attributes declare what the method is, not when it
+  runs (the names: [D141](#d141-drain-entity-method-parallel-for)).
   - The working name, `[RunOn]`, reads as a schedule (run on a thread, on an update) and suggests a target type
     argument.
   - `[OneEntity]` names the cardinality, but no verb or preposition says the method runs.
@@ -2184,7 +2186,7 @@ whether the method ran.
   named like the method, with the entity first. A method with `[Changed<T>]` / `[Removed<T>]` takes the tick to look
   back from second, the way `Since` does. As with runners, the method stays private so that its name is free for the
   entry point.
-- **It costs what the hand-written job costs.** The generated code is the same `entity.Run` call: `ForEntityBenchmark` (1,000 hits on 10,000 units, a tenth dead): 9.80 and 9.96 µs in two rounds against 10.04 and 9.97 µs for the hand-written job and filter field, inside the error, 0 B both.
+- **It costs what the hand-written job costs.** The generated code is the same `entity.Run` call: `EntityMethodBenchmark` (1,000 hits on 10,000 units, a tenth dead): 9.80 and 9.96 µs in two rounds against 10.04 and 9.97 µs for the hand-written job and filter field, inside the error, 0 B both.
 
 **Considered.**
 - **An extension member on `Entity` (`unit.TakeHit(30)`).** Every request of every module would land in `Entity`'s
@@ -2426,7 +2428,7 @@ them has a code fix.
 
 **Decision.** EECS088 reports two `EntityRandom` draws of the same stream for the same entity in one method, and a
 draw in a loop that changes neither its stream nor its entity. It checks the code of passes only: `[ForEach]` and
-`[ForEntity]` methods and the `Execute` of jobs. Its code fix gives the later draw the next stream that no draw of the
+`[EntityMethod]` methods and the `Execute` of jobs. Its code fix gives the later draw the next stream that no draw of the
 method uses.
 
 **Why.**
@@ -2676,7 +2678,7 @@ cache entries first, then swaps in an empty array with `Interlocked.Exchange`. N
 ## D107. `[ForEach]` and hook methods are not reported as unused [#d107-never-used-warnings]
 
 **Decision.** A `DiagnosticSuppressor` in the package hides IDE0051 (EECSS01) and IDE0052 (EECSS02) on `[ForEach]`,
-`[ForEntity]`, `[OnCreate]`, `[OnUpdate]` and `[OnDestroy]` methods. The attributes carry JetBrains'
+`[EntityMethod]`, `[OnCreate]`, `[OnUpdate]` and `[OnDestroy]` methods. The attributes carry JetBrains'
 `[MeansImplicitUse]` (an internal copy, which Rider and ReSharper read by name), `[EcsSystem]` with `WithMembers`.
 
 **Why.**
@@ -2735,7 +2737,7 @@ public ref struct Poisoning
 }
 ```
 
-- **A parameter.** A `[ForEach]` or `[ForEntity]` method, or a lambda pass (`world.ForEach(static (Fighter f, in
+- **A parameter.** A `[ForEach]` or `[EntityMethod]` method, or a lambda pass (`world.ForEach(static (Fighter f, in
   Poison p) => f.TakeDamage(p.PerTick))`), takes the view by value. The method visits the entities that
   have every component of the view. The generated job builds the view over the row (`new Fighter { Health = ref c1,
   Armor = ref c2 }`, `Unsafe.Add` of the run's refs in a batch job). The view's fields count as the method's own
@@ -3177,14 +3179,14 @@ work is near, one spinning helper at a time, an affinity partitioner, and a tune
   569 -> 647, 701 µs (a rerun at load 3.3: 69.0, 65.7 -> 70.0, 69.6 µs and 557, 625 -> 656, 617 µs).
 - **One spinning helper at a time (Go's scheduler)** saved CPU in the harness (9 to 16 % per tick) and lost the
   back-to-back passes: `ParallelSystemsBenchmark` 61 -> 72 to 82 µs, `ParallelForEachBenchmark.Tick` 465, 525 ->
-  524, 663 µs, `HeavyForParallel` 100,000 records 299, 308 -> 337, 388 µs. Waking the rest from the first helper
+  524, 663 µs, `HeavyParallelFor` 100,000 records 299, 308 -> 337, 388 µs. Waking the rest from the first helper
   instead of the owner was worse (`ParallelSystemsBenchmark` 61 -> 103 to 126 µs).
 - **A shorter spin** (35 µs, the .NET thread pool's `LowLevelLifoSemaphore`): `ParallelSystemsBenchmark` 69 to 84 ->
   104 to 111 µs for about 3 % less CPU per tick. The spin stays 100 µs.
 
 **Considered.**
 - **TBB's affinity partitioner** (each thread starts on the chunks it ran last time, then steals): it kept a thread's
-  rows in its cache only when they fit (`LightForParallel` 10,000 records 9.3, 8.4 -> 7.0, 6.5 µs) and lost on the
+  rows in its cache only when they fit (`LightParallelFor` 10,000 records 9.3, 8.4 -> 7.0, 6.5 µs) and lost on the
   passes of 100,000 rows (`ParallelForEachBenchmark.Tick` 527, 574 -> 635, 629 µs, `EntityJob` 589, 544 -> 762,
   631 µs). The shared cursor balances better than fixed homes on a shared machine.
 - **A tuner of the chunk size** (Halide's autotuning, per job type: try 1, 2, 4, 8 and 16 chunks per thread, six
@@ -3398,7 +3400,7 @@ generated members (`world.XIndex`, `IIndexed<TKey>.Key`) and the index types do 
 
 ## D130. Parallel passes cut chunks by the rows' measured cost; `ChunkSize` only overrides it [#d130-measured-chunks]
 
-**Decision.** A parallel pass (a `[ForEach(Parallel = true)]` method, `ForEachParallel`, `ForParallel`) that sets no
+**Decision.** A parallel pass (a `[ForEach(Parallel = true)]` method, `ForEachParallel`, `ParallelFor`) that sets no
 `ChunkSize` cuts its chunks from the time its rows took. Each pass keeps a moving average of thread time per row,
 from the runs it already times to choose between helpers and the caller alone, and from one run in 16 of a pass that
 runs as one chunk; the first timed run is dropped (cold). From it: four chunks per thread, unless that makes chunks
@@ -3422,7 +3424,7 @@ stamping pass whose measured chunks are under 4,096 rows opens its blocks, as `C
   7,003 / 5,296, 5,609. Level within noise: Light 1,000 rows 0.12, 0.12 / 0.13, 0.13; Light and Heavy at 100,000
   rows; Uneven 1,000,000 rows (63,502, 63,987 / 64,417, 66,965: chunks were already small enough);
   `ParallelForEachBenchmark`, `ParallelSystemsBenchmark`, `RunnerBenchmark`, `ParallelRunnerBenchmark.Runner`,
-  `ForParallelBenchmark`, `WorldSimulationBenchmark`, `BattleServerBenchmark` (4,144, 3,968 / 3,924, 4,824 µs; two
+  `ParallelForBenchmark`, `WorldSimulationBenchmark`, `BattleServerBenchmark` (4,144, 3,968 / 3,924, 4,824 µs; two
   earlier rounds 3,919, 3,952 / 3,675, 3,847).
 - **Short passes must not pay for it.** The first prototype cleared chunk arrays sized for the most chunks a cost can
   ask for after every call, and read the clock twice on every one-chunk run: Light 1,000 rows went from 124 to
@@ -3695,6 +3697,38 @@ code included).
 `StorageVersion` bump per run): 0.98-1.00x alone and nothing on top of the attribute, so dropped. That branch's
 0.82x Move came from the same change of inlining, not from its loop; its gathers and column-by-bit map serve only
 copies.
+
+## D141. `[Drain]`, `[EntityMethod]` and `world.ParallelFor` [#d141-drain-entity-method-parallel-for]
+
+**Decision.** Three forms added in 4.8 take new names before they ship: the method run once on each record of
+`Emitted<T>` is `[Drain]` (its job interface `IDrain<T>`; it was `[ForEachRecord]` / `IForEachRecord<T>`), the
+static method run on one entity through its entry point is `[EntityMethod]` (it was `[ForEntity]`), and the
+parallel loop over a range or a list is `world.ParallelFor` (it was `world.ForParallel`). `IForRange`, `IForSpan<T>`,
+the EECS ids and the generated entry points' shape do not change. None of the old names was released, so no alias, no
+migration entry and no code fix: they were never in a package.
+
+**Why.**
+- **The `ForEach*` names looked alike and did different things.** `[ForEach]` visits rows every update;
+  `[ForEachRecord]` consumed a queue once and cleared it; `[ForEntity]` was no pass at all but a call on one entity.
+  Readers took them for variants of one form and asked which loop each one was.
+- **Drain is the stream-processing word for consuming a queue.** Rust's `Vec::drain`, a Go channel drained, Bevy's
+  `Events::drain`: every item taken out once, in order, the queue left empty. That is what the pass does to
+  `Emitted<T>` (each record handled once, then cleared). It walks records, not entities, on one thread, and clears what
+  it walked: nothing a `[ForEach]` suffix says. "Record" also read as C#'s `record` types. The Chinese pages call it 排空.
+- **`EntityMethod` says what it is: a method on one entity.** The docs already speak of a `[ForEach]` method and a
+  pair method; this one is called from code (a request handler, an event) with the entity it runs on, so "method",
+  not a pass. The Chinese pages call it 实体方法.
+- **`ParallelFor` is the order everyone else uses.** .NET's `Parallel.For`, OpenMP's `parallel for`, TBB's and
+  Kokkos' `parallel_for`: readers who know any of them find it under that name. `ForParallel` read like the
+  `ForEach*Parallel` family, which runs rows, not a range.
+
+**Considered.**
+- **`[ForEachEmitted]`:** pairs with `Emit<T>` but says nothing of the clear.
+- **`[Handle]`:** too general; any method handles something.
+- **`[ForEntity]` kept** (the first naming round kept it as a callable on one entity, not a pass): the `For` prefix
+  still put it in the `ForEach` family, which it is not.
+- **An `[Obsolete]` alias or a code fix for the old names:** none of them shipped (4.7 has none), so there is no code
+  to migrate.
 
 ## Related [#related]
 

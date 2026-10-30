@@ -28,7 +28,7 @@ public partial class AnalyzerTests
     [Test]
     public async Task AStepOfOneEntityReports()
     {
-        string source = "public static class R { [ForEntity] public static void A(ref Tile<byte, G> t) { } }";
+        string source = "public static class R { [EntityMethod] public static void A(ref Tile<byte, G> t) { } }";
         Assert.That(await Count("EECS115", GeneratorTests.Components, TileParts, source), Is.EqualTo(1));
     }
 

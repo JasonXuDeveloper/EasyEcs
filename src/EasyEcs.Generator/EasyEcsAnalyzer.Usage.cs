@@ -808,7 +808,7 @@ public static partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// EECS049 for a view a [ForEach] / [ForEntity] method builds over the entity it visits (<c>e.AsX()</c>,
+    /// EECS049 for a view a [ForEach] / [EntityMethod] method builds over the entity it visits (<c>e.AsX()</c>,
     /// <c>e.TryGetX(out x)</c> on its Entity parameter) that covers a component the method's filters exclude: the
     /// entity never has it, so AsX throws on every one and TryGetX finds none.
     /// </summary>

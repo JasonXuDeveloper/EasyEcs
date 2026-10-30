@@ -15,7 +15,7 @@ namespace EasyEcs.Benchmark;
 /// array (the same, without the queue's segments). Every variant ends with the records collected (Emit: the chunks'
 /// lists handed to Emitted, in order) and clears them, as the applying system would. Half the attackers hit (the others are out of range). <c>EmitParallelThenRead</c> and
 /// <c>EmitParallelThenRecords</c> also walk the records: as one span (the chunks' lists joined), and through a
-/// <c>[ForEachRecord]</c> pass (walked where the chunks left them).
+/// <c>[Drain]</c> pass (walked where the chunks left them).
 /// </summary>
 [MemoryDiagnoser]
 public class EmitBenchmark
@@ -80,7 +80,7 @@ public class EmitBenchmark
         return total;
     }
 
-    /// <summary>The parallel pass, then a <c>[ForEachRecord]</c> pass over the records (which clears them).</summary>
+    /// <summary>The parallel pass, then a <c>[Drain]</c> pass over the records (which clears them).</summary>
     [Benchmark]
     public long EmitParallelThenRecords()
     {
@@ -146,7 +146,7 @@ public class EmitBenchmark
             if (attack.Range < 25) hits.Add(new Hit(aim.Target, attack.Power));
         }
 
-        [ForEachRecord]
+        [Drain]
         public static void Apply(in Hit hit, ref Damage damage) => damage.Total += hit.Amount;
 
         [ForEach(Parallel = true)]

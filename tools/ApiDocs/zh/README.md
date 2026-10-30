@@ -57,6 +57,8 @@ The terms of the Chinese guide pages (`docs/content/glossary.zh.mdx`). Use these
 | pair method (a `[ForEach]` method with `[Neighbor]` parameters: what one entity and one neighbor do); neighbor | 邻居对方法（簇 / 簇对是它在运行时按块执行的单位，用户看不到）；邻居 |
 | change-tick block (4,096 rows: `BlockTicks`), word (64 rows) | 区段、位字 |
 | segment (a chunk's list kept in `Emitted<T>`'s list, not copied) | 分段 (never 区段, the change-tick block) |
+| drain (a `[Drain]` method: each record of `Emitted<T>` handled once, then cleared) | 排空 |
+| entity method (an `[EntityMethod]` method: run on one entity through its entry point) | 实体方法 |
 
 A sample's domain words never reuse a framework term: VoxelServer's terrain chunk is 地形 (measure word 片: 一片地形,
 每片地形), never 块 or 区块, which name the parallel chunk and nothing else.

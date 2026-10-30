@@ -595,7 +595,7 @@ access.WriteSingleton<Emitted<Hit>>();   // 读记录的系统等它跑完
 - **每一遍都是追加。** 一次更新里可以有几个系统发出同一种 `T`（近战和法术都发出伤害），各在自己的位置；结算的系统负责清空。发出记录的系统按
   `Emitted<T>` 的写者调度，读的系统会等它；一个方法既发出又接收 `Emitted<T>`，或用两个参数发出同一种类型，报
   [EECS070](/zh/docs/guide/analyzer#eecs070)。
-- **并行结算。** 记录是一个列表：[`world.ForParallel`](#for-parallel) 按块对它的元素运行一个 job，适合每条记录只写记录本身的活（掷骰、编码）。
+- **并行结算。** 记录是一个列表：[`world.ParallelFor`](#parallel-for) 按块对它的元素运行一个 job，适合每条记录只写记录本身的活（掷骰、编码）。
 - **像缓冲一样存档。** 快照和存档会拷贝 `Emitted<T>` 里剩下的记录。
 - **开销：** 每条记录追加一次到这一块的列表。列表来自它们自己的池，保持在一块用到过的最大尺寸，所以稳定的遍历零分配；每遍把每块的列表拷进
   `Emitted<T>` 一次。
@@ -680,13 +680,13 @@ world.AddSystem<WanderSystem>();
 
 <BenchTable bench="ParallelRunnerBenchmark" />
 
-### 不是行的数据：`world.ForParallel` [#for-parallel]
+### 不是行的数据：`world.ParallelFor` [#parallel-for]
 
-有些并行的活面对的不是表里的行：`Emitted<T>` 的记录、数组的格子、一段下标。`world.ForParallel` 在 World 的运行器上对它运行一个结构体 job，
+有些并行的活面对的不是表里的行：`Emitted<T>` 的记录、数组的格子、一段下标。`world.ParallelFor` 在 World 的运行器上对它运行一个结构体 job，
 块、领块和辅助线程都和并行的 `[ForEach]` 一样（相当于 Kokkos 的 `RangePolicy`、Unity 的 `IJobParallelForBatch`）：
 
-- `world.ForParallel(count, ref job)` 对下标 0 到 count - 1 运行 `IForRange` job，`Execute(start, end)`。
-- `world.ForParallel(ref buffer, ref job)` 对一个 `DynamicBuffer<T>`（`Emitted<T>` 的 `Items`、单例的缓冲）的元素运行 `IForSpan<T>` job，
+- `world.ParallelFor(count, ref job)` 对下标 0 到 count - 1 运行 `IForRange` job，`Execute(start, end)`。
+- `world.ParallelFor(ref buffer, ref job)` 对一个 `DynamicBuffer<T>`（`Emitted<T>` 的 `Items`、单例的缓冲）的元素运行 `IForSpan<T>` job，
   `Execute(start, items)`，每块的元素是一个可写的 span。
 
 ```csharp
@@ -712,7 +712,7 @@ public ref struct CriticalSystem
     static void OnUpdate(World world)
     {
         var job = new RollCriticals { Random = world.EntityRandom };
-        world.ForParallel(ref world.GetSingleton<Emitted<Hit>>().Items, ref job);
+        world.ParallelFor(ref world.GetSingleton<Emitted<Hit>>().Items, ref job);
     }
 }
 ```
@@ -724,9 +724,9 @@ public ref struct CriticalSystem
   [`ChunkSize`](#chunk-rows) 一样。少于两块，或者运行器正忙时，在调用线程上运行。
 - **所有者线程，零分配**（每种 job 类型第一次调用之后）。
 
-`ForParallelBenchmark` 对 10 万条记录做轻活和重活，对比单线程、`ForParallel` 和 `Parallel.For`（[D80](/zh/docs/decisions#d80-for-parallel)）。
+`ParallelForBenchmark` 对 10 万条记录做轻活和重活，对比单线程、`ParallelFor` 和 `Parallel.For`（[D80](/zh/docs/decisions#d80-parallel-for)）。
 
-<BenchTable bench="ForParallelBenchmark" />
+<BenchTable bench="ParallelForBenchmark" />
 
 ### 来自其他线程的输入 [#input-from-other-threads]
 
@@ -918,7 +918,7 @@ unit 0 at (7.06, 7.06) with 60 hp
 - **一个并行方法：** 同一个调度器，按块分配；调用线程总是参与。只有实测表明辅助线程能让这次遍历比单线程快至少五分之一时才唤醒它们，
   所以 tick 之间的小遍历就在调用线程上跑。每块要领一次、复制一份 job；写被追踪组件的方法设了 [`ChunkSize`](#chunk-rows) 时，
   遍历前每 4,096 行还要打开一次 tick 块，每写 64 行做一次原子 OR。[`Reduce<T>`](#reductions) 每块多一个 job 副本，这一遍结束时合并一次；
-  [`Scratch<T>`](#scratch) 每块查一次这个线程的值；[`Lookup<T>`](#lookups) 每次读取一次实体查找；[`Emit<T>`](#emit) 每条记录追加一次，这一遍结束时每块的列表拷贝一次。`world.ForParallel`
+  [`Scratch<T>`](#scratch) 每块查一次这个线程的值；[`Lookup<T>`](#lookups) 每次读取一次实体查找；[`Emit<T>`](#emit) 每条记录追加一次，这一遍结束时每块的列表拷贝一次。`world.ParallelFor`
   的开销和并行遍历一样，只是没有行。一次遍历的原子操作：[运行器怎样同步](#runner-contract)。
 - **不用时：** `ParallelSystems` 默认关闭，从不使用它的 World 不为它付出任何开销。
 
@@ -956,7 +956,7 @@ unit 0 at (7.06, 7.06) with 60 hp
 | 逐行往单例的列表里追加记录 | 只能单线程 | [EECS089](/zh/docs/guide/analyzer#eecs089)：`Emit<T>` |
 | `[ForEach]` 方法里用 `Random.Shared` 或 `new Random()` | 每次运行、每种线程数抽到的数都不同 | [EECS071](/zh/docs/guide/analyzer#eecs071)：`EntityRandom` |
 | 同一实体用同一个流抽两次 | 两次是同一个数 | [EECS088](/zh/docs/guide/analyzer#eecs088)：每次抽取一个流 |
-| `ForParallel` 之后读 job 的字段 | 还是旧值：每一块跑的是副本 | [EECS061](/zh/docs/guide/analyzer#eecs061) |
+| `ParallelFor` 之后读 job 的字段 | 还是旧值：每一块跑的是副本 | [EECS061](/zh/docs/guide/analyzer#eecs061) |
 
 ## 和其他 ECS 库的对比 [#compared-with-other-ecs-libraries]
 

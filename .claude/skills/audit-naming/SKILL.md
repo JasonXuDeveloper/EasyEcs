@@ -32,6 +32,9 @@ A name is the first doc a reader sees. This audit covers every name, not only th
 4. **For every name, ask**:
    - **Ambiguity**: is one word used for two things (group, index, pass, slice, tick, since, run, restore, forget,
      rows, into, destroyed/alive)? Are two names used for one thing?
+     Do two names look alike but do different things (owner, 2026-10-28: `[ForEach]`, `[ForEachRecord]` and
+     `[ForEntity]` became `[ForEach]`, `[Drain]` and `[EntityMethod]`, D141)? A `ForEach*` name is a pass over rows;
+     a form that is not one does not borrow the prefix.
    - **Behavior**: does the name say its cost, whether it stamps a tick, whether it is a structural change, and
      whether it throws? The convention: `Get` throws, `TryGet` returns false, `Find` enumerates.
    - **ECS vocabulary**: does it match DOTS, Bevy, Flecs, Arch and Friflo where the behavior is the same, and
@@ -77,5 +80,9 @@ A name is the first doc a reader sees. This audit covers every name, not only th
   - `api.mdx`, and `tools/ApiDocs` zh entries;
   - a decision record;
   - analyzer and code-fix strings, samples, templates, the demo.
+- **Released or not**: grep the last release tag's `src` for the old name. A name that never shipped needs no
+  migration entry, alias or code fix: the coming version's changelog and the pages just use the new name, and the
+  decision record says what it was (D141). A released one also gets a code fix from the compiler's error on the old
+  form (`RenamedAttributes`, `RenamedArguments` in `EasyEcsCodeFixes.Declarations.cs`).
 - **Stale names**: `grep -rn "<old>" docs/content AGENTS.md README.md samples templates demo` must show only the
   history pages (changelog, migration, decisions).

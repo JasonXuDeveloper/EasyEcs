@@ -34,8 +34,8 @@ EcsSystem.cs                 [EcsSystem] (a system: a ref struct of static membe
                              collectible assemblies), the registry World.AddSystem<T> resolves a type through
 ForEachAttributes.cs         [ForEach] (Parallel, Slices, ChunkSize, SimdMode), [With<T>], [Without<T>], [Changed<T>],
                              [Removed<T>] ([WithAny<..>] / [ChangedAny<..>] / [RemovedAny<..>] are generated: Filters.g.cs),
-                             [Consume] (the visited rows destroyed after the pass), [ForEntity] (a static method run
-                             on one entity through a generated entry point), [ForEachRecord] (a static method run on
+                             [Consume] (the visited rows destroyed after the pass), [EntityMethod] (a static method run
+                             on one entity through a generated entry point), [Drain] (a static method run on
                              each record of Emitted<T> in order, then the records cleared)
 Recorded.cs                  [assembly: ConstructorFields] / [assembly: InlineBody] (hidden): what the generator records in
                              a component's assembly for the generators of referencing ones (the member each constructor
@@ -89,9 +89,9 @@ TileSteps.cs                 a stepping tile's pass (ref Tile, TileSteps<TCell, 
 Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), handed in
                              chunk order to singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear) as
                              segments, not copied: EmitStore (BufferStore.Segmented) joins them only when read as one
-                             span or written; Count, Clear, [ForEachRecord] and ForParallel take them in place (Run);
+                             span or written; Count, Clear, [Drain] and ParallelFor take them in place (Run);
                              AddIds / AddLanes: a vector loop's passing lanes appended compacted, in row order;
-                             Emitted<T>.Consume + IForEachRecord<T>: a [ForEachRecord] pass (the records walked, then cleared)
+                             Emitted<T>.Consume + IDrain<T>: a [Drain] pass (the records walked, then cleared)
 EntityRandom.cs              EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
                              (four SplitMix64 finalizer rounds); a singleton (Seed, and a Tick the world adds one to
                              at the start of every update: World.Run) and static members
@@ -142,7 +142,7 @@ SpinGate.cs                  SpinGate + SpinScope: the CAS lock (spin, then yiel
 World.Systems.cs             system groups, ordering, parallel stages (consecutive non-conflicting systems),
                              synchronous Update / Update<TGroup>, Dispose
 World.Parallel.cs            allocation-free runner (the caller + the helper threads of Workers.cs, adaptive waking)
-                             for system stages and the row chunks of parallel [ForEach]; World.For.cs: ForParallel
+                             for system stages and the row chunks of parallel [ForEach]; World.For.cs: ParallelFor
                              (IForRange over a range, IForSpan<T> over a buffer's elements) on the same runner
 Workers.cs                   the fixed helper threads of every world's parallel work (one set per process, FIFO queue,
                              spin then park; ThreadSetup warms per-thread state once per thread: no allocation in steady state)

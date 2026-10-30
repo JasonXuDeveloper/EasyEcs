@@ -43,7 +43,7 @@ public class TileHaloBenchmark
             for (int c = 0; c < W * W; c++) _cells[i][c] = _front[i][(c / W + 1) * P + c % W + 1] = random.Next(1000);
         }
         var ring = new RingJob { Cells = _front };
-        _world.ForParallel(Plates, ref ring);
+        _world.ParallelFor(Plates, ref ring);
         for (int step = 0; step < 3; step++)
         {
             Exchange();
@@ -62,7 +62,7 @@ public class TileHaloBenchmark
     public void Exchange()
     {
         var job = new ExchangeJob { Cells = _cells, Next = _next };
-        _world.ForParallel(Plates, ref job, 16);
+        _world.ParallelFor(Plates, ref job, 16);
         (_cells, _next) = (_next, _cells);
     }
 
@@ -70,9 +70,9 @@ public class TileHaloBenchmark
     public void Padded()
     {
         var step = new PaddedJob { Front = _front, Back = _back };
-        _world.ForParallel(Plates, ref step, 16);
+        _world.ParallelFor(Plates, ref step, 16);
         var ring = new RingJob { Cells = _back };
-        _world.ForParallel(Plates, ref ring, 16);
+        _world.ParallelFor(Plates, ref ring, 16);
         (_front, _back) = (_back, _front);
     }
 

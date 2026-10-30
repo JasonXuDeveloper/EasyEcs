@@ -304,7 +304,7 @@ public class EmitTests
     }
 
     // Segments: a parallel pass hands its chunks' lists to Emitted<T> (BufferStore.Segmented), joined only when the
-    // records are read as one span or written; Count, Clear, [ForEachRecord] passes and ForParallel take them in place.
+    // records are read as one span or written; Count, Clear, [Drain] passes and ParallelFor take them in place.
 
     /// <summary>A trap under every eleventh attacker: an emitter on one thread between two parallel ones.</summary>
     [EcsSystem, UpdateAfter<ParallelStrikes>]
@@ -344,7 +344,7 @@ public class EmitTests
 
     public static class Books
     {
-        [ForEachRecord]
+        [Drain]
         public static void Book(in Hit hit, ref Tally tally)
         {
             tally.Total += hit.Amount;
@@ -484,7 +484,7 @@ public class EmitTests
     }
 
     [Test]
-    public void ForParallelRunsTheSegmentsInPlace()
+    public void ParallelForRunsTheSegmentsInPlace()
     {
         const int attackers = 20_000;
         var (world, _) = Fight(attackers, 37, 4);
@@ -496,7 +496,7 @@ public class EmitTests
             Assert.That(Segmented(ref hits), Is.True);
             int count = hits.Count;
             var job = new Number();
-            world.ForParallel(ref hits, ref job, chunkSize: 64); // chunks that span two segments: one call per segment
+            world.ParallelFor(ref hits, ref job, chunkSize: 64); // chunks that span two segments: one call per segment
             Assert.That(Segmented(ref hits), Is.True);
             var numbered = hits.AsReadOnlySpan();
             Assert.That(numbered.Length, Is.EqualTo(count));

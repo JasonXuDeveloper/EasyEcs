@@ -55,7 +55,7 @@ EECS076（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS023](#eecs023) | 错误 | 过滤条件只放在 `[ForEach]` 方法和系统分组上 | 删掉过滤条件 |
 | [EECS024](#eecs024) | 错误 | `[ForEach]` 不能放在局部函数上 | |
 | [EECS025](#eecs025) | 警告 | 写访问没有只读 | `in`、`ReadOnlySpan<T>`、`Read<T>()`，`Mut<T>` 改成 `in T` |
-| [EECS026](#eecs026) | 警告 | `[ForEach]` 或 `[ForEntity]` 方法用到自己的参数 | `[With<T>]`，或删掉参数 |
+| [EECS026](#eecs026) | 警告 | `[ForEach]` 或 `[EntityMethod]` 方法用到自己的参数 | `[With<T>]`，或删掉参数 |
 | [EECS027](#eecs027) | 警告 | 每行都要查的数据，作为 `[ForEach]` 参数传入 | 把查找改成参数 |
 | [EECS028](#eecs028) | 警告 | 每次更新都执行的代码不分配内存 | |
 | [EECS030](#eecs030) | 警告 | 对查询结果的结构变化用一次批量调用 | 批量调用 |
@@ -106,8 +106,8 @@ EECS076（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 | [EECS075](#eecs075) | 错误 | 系统只有静态成员 | 改成 static |
 | [EECS076](#eecs076) | 错误 | 钩子是返回 void 的静态方法，接收 `World`、`SystemHandle`、两者或都不接收 | |
 | [EECS077](#eecs077) | 错误 | 系统 API 接收的是系统类型 | |
-| [EECS080](#eecs080) | 信息 | 单实体 job 写成 `[ForEntity]` 方法 | 改写成 `[ForEntity]` 方法 |
-| [EECS081](#eecs081) | 错误 | `[ForEntity]` 方法是静态的，只接收单个实体有的东西 | 改成静态方法 |
+| [EECS080](#eecs080) | 信息 | 单实体 job 写成 `[EntityMethod]` 方法 | 改写成 `[EntityMethod]` 方法 |
+| [EECS081](#eecs081) | 错误 | `[EntityMethod]` 方法是静态的，只接收单个实体有的东西 | 改成静态方法 |
 | [EECS083](#eecs083) | 错误 | `[UpdateInterval]`：间隔至少为 1，相位在 0 到 n - 1 之间，用在系统上 | |
 | [EECS084](#eecs084) | 信息 | 销毁每个访问到的实体的 `[ForEach]` 方法用 `[Consume]` | `[Consume]` |
 | [EECS085](#eecs085) | 错误 | `[Consume]` 和 `[ForEach]` 一起用，不带 `Slices` | |
@@ -278,7 +278,7 @@ public ref struct SpawnSystem
 
 **系统不能引用系统。** 错误。没有代码修复。
 
-系统的代码够到了另一个系统：调用它的方法或 `[ForEntity]` 入口，读它的字段，或者用 `World.System<T>()` / `World.TryGetSystem<T>(out …)`
+系统的代码够到了另一个系统：调用它的方法或 `[EntityMethod]` 入口，读它的字段，或者用 `World.System<T>()` / `World.TryGetSystem<T>(out …)`
 找它。互相调用的系统耦合在一起：谁都不能单独移除、调整顺序或测试，调度器也看不到这次调用碰了什么。另一个系统的 `const` 是一个值，允许使用；
 两个系统都要用的辅助函数放进单独的静态类。`System<T>` 和 `TryGetSystem<T>` 是给工具、测试和承载 World 的代码用的。
 
@@ -1861,7 +1861,7 @@ public ref struct MoveFlock
 
 **在多个线程上运行的代码写共享内存。** 警告。没有代码修复。
 
-`[ForEach(Parallel = true)]` 方法，以及由 `ForEachParallel`、`ForEachEntityParallel`、`ForEachBatchParallel` 或 `world.ForParallel` 运行的 job 的 `Execute`，会同时在多个线程上跑，
+`[ForEach(Parallel = true)]` 方法，以及由 `ForEachParallel`、`ForEachEntityParallel`、`ForEachBatchParallel` 或 `world.ParallelFor` 运行的 job 的 `Execute`，会同时在多个线程上跑，
 每个线程一块行。静态字段或自动属性、上下文参数引用的对象、job 字段持有的对象（每一块的 job 副本共享它），对所有线程都是同一块内存：
 自增会丢更新，列表的 `Add` 会把列表写坏，普通写入最后留下哪个取决于时机。规则不报：每个线程都写同一个常量、`[ThreadStatic]` 字段、
 并发集合、`Interlocked` 和 `Volatile` 调用、`lock` 里的写入、数组和列表的元素（不同的行可以各占不同的元素）以及局部变量。
@@ -1908,9 +1908,9 @@ public ref struct TakeHits
 ## EECS061 [#eecs061]
 
 **并行 job 的字段在遍历之后被读取。** 警告。代码修复：在调用没有传 `chunkSize` 时，改成在一个线程上运行这个 job（`ForEach` /
-`ForEachEntity` / `ForEachBatch`）；`ForParallel` 没有对应的单线程调用，不提供修复。
+`ForEachEntity` / `ForEachBatch`）；`ParallelFor` 没有对应的单线程调用，不提供修复。
 
-`ForEachParallel`、`ForEachEntityParallel`、`ForEachBatchParallel` 和 `world.ForParallel` 给每一块运行一个 job 副本，什么都不合并回来：按 `ref` 传入的 job 保持调用之前的值。
+`ForEachParallel`、`ForEachEntityParallel`、`ForEachBatchParallel` 和 `world.ParallelFor` 给每一块运行一个 job 副本，什么都不合并回来：按 `ref` 传入的 job 保持调用之前的值。
 `Execute` 写的字段（总和、计数、标记），调用方之后再读，读到的还是旧值。调用之后对这个 job 的第一次使用是读这样的字段时，规则报告这次调用。
 会把各块副本合并回来的 job 不报：job 自己实现了 `Merges`，隐式或显式都算（带 `Reduce<T>` 参数的方法生成的 job 就是这样）。
 接口默认的 `Merges` 什么都不合并，只继承它的 job 照样报告。
@@ -2409,9 +2409,9 @@ world.AddSystem<Regeneration>();                           // 能编译，但没
 
 ## EECS080 [#eecs080]
 
-**手写的单实体 job。** 建议（信息级别）。代码修复：改写成 `[ForEntity]` 方法，并改掉每一处调用。
+**手写的单实体 job。** 建议（信息级别）。代码修复：改写成 `[EntityMethod]` 方法，并改掉每一处调用。
 
-实现 `IForEachEntity<T1..Tn>`、创建后马上交给 `entity.Run` 的结构体，正是 [`[ForEntity]`](/zh/docs/guide/queries#run-on-one-entity)
+实现 `IForEachEntity<T1..Tn>`、创建后马上交给 `entity.Run` 的结构体，正是 [`[EntityMethod]`](/zh/docs/guide/queries#run-on-one-entity)
 从静态方法生成的东西：方法的 `ref` 参数构成 `WriteMask`，过滤特性构成 `QueryFilter`，其余参数就是入口接收的值，
 `INoStructuralChanges` 由方法调用了什么推出来。只有当这个结构体的每一处使用都是这样的调用时，规则才报告它：
 `var job = new J { ... };` 紧跟着 `entity.Run<.., J>(ref job)`，不带过滤条件，或者过滤条件放在 `static readonly` 字段里。
@@ -2442,7 +2442,7 @@ public static class Combat
 ```csharp tab="修正"
 public static class TakeHit
 {
-    [ForEntity, Without<Dead>]
+    [EntityMethod, Without<Dead>]
     static void Run(ref Health hp, int damage) => hp.Value -= damage;
 }
 
@@ -2456,16 +2456,16 @@ public static class Combat
 
 ## EECS081 [#eecs081]
 
-**无法在单个实体上运行的 `[ForEntity]` 方法。** 错误。代码修复：把实例方法改成静态方法。
+**无法在单个实体上运行的 `[EntityMethod]` 方法。** 错误。代码修复：把实例方法改成静态方法。
 
-`[ForEntity]` 方法是静态的：生成器在它旁边写一个接收实体的入口，没有实例可以调用它。它接收组件（`in`、`ref`、`Maybe<T>`）、
+`[EntityMethod]` 方法是静态的：生成器在它旁边写一个接收实体的入口，没有实例可以调用它。它接收组件（`in`、`ref`、`Maybe<T>`）、
 单例、`Entity`、`World` 和调用方传入的值；属于多行遍历的东西（组件 span、`EntitySpan`、`Reduce<T>`、`Scratch<T>`）对单个实体
 没有意义；一个方法要么是遍历（`[ForEach]`），要么在单个实体上运行。
 
 ```csharp tab="报告" doccheck=expect-EECS081
 public static class Healing
 {
-    [ForEntity]
+    [EntityMethod]
     static void Heal(Span<Health> health, int amount) { }   // span：一个实体只有一个 Health
 }
 ```
@@ -2473,7 +2473,7 @@ public static class Healing
 ```csharp tab="修正"
 public static class Healing
 {
-    [ForEntity]
+    [EntityMethod]
     static void Heal(ref Health hp, int amount) => hp.Value += amount;   // Healing.Heal(unit, 5)
 }
 ```
@@ -2678,7 +2678,7 @@ public ref struct Pursuit
 
 [`EntityRandom`](/zh/docs/reference/entityrandom) 的数是种子、实体、tick 和流的纯函数。同一遍里对同一个实体、用同一个流抽两次，
 得到的是同样的比特：方向的 X 永远等于 Y，命中骰永远等于伤害骰。循环里的抽取也一样：如果循环不改变它的流和实体，每次迭代都拿到同一个数。
-把迭代加进流里（`stream + (uint)i`），这种情况没有唯一的机械改法。这条规则检查 `[ForEach]`、`[ForEntity]` 方法和 job 的 `Execute`，
+把迭代加进流里（`stream + (uint)i`），这种情况没有唯一的机械改法。这条规则检查 `[ForEach]`、`[EntityMethod]` 方法和 job 的 `Execute`，
 在那里每一行每次更新抽一次。有意比较两次抽取的测试不报告。
 
 ```csharp tab="报告" doccheck=alone,expect-EECS088
@@ -2781,7 +2781,7 @@ internal ref struct WaveSystem
 
 ## 未使用成员警告 [#never-used]
 
-生成的代码通过 `UnsafeAccessor` 按名字调用 `[ForEach]`、`[ForEntity]` 和钩子方法，IDE 的“私有成员未使用”分析器不把这算作使用。
+生成的代码通过 `UnsafeAccessor` 按名字调用 `[ForEach]`、`[EntityMethod]` 和钩子方法，IDE 的“私有成员未使用”分析器不把这算作使用。
 包里的一个抑制器只在这些方法上隐藏这类警告：EECSS01 对应 IDE0051（从未使用），EECSS02 对应 IDE0052（从未读取）。Rider 和 ReSharper
 改为读取这些特性带的 JetBrains `[MeansImplicitUse]`（[D107](/zh/docs/decisions#d107-never-used-warnings)）。其他成员上什么都不抑制，
 所以没有方法调用的私有辅助函数照样会报。

@@ -836,14 +836,14 @@ public class DynamicBufferTests
     }
 
     [Test]
-    public void ForParallelOverASharedBufferWritesItsOwnCopy()
+    public void ParallelForOverASharedBufferWritesItsOwnCopy()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
         var original = Stocked(world);
         original.Get<DynamicBuffer<Stock>>().SetCount(4096);
         var clone = original.Clone();
         var job = new Negate();
-        world.ForParallel(ref clone.Get<DynamicBuffer<Stock>>(), ref job, 256);
+        world.ParallelFor(ref clone.Get<DynamicBuffer<Stock>>(), ref job, 256);
         Assert.That(clone.Read<DynamicBuffer<Stock>>()[100], Is.EqualTo(new Stock(-1)));
         Assert.That(original.Read<DynamicBuffer<Stock>>()[100], Is.EqualTo(new Stock(0)));
     }

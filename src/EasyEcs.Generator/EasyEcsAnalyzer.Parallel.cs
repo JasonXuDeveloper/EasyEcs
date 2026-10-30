@@ -21,7 +21,7 @@ public static partial class EasyEcsAnalyzer
         "{0} writes {1}, which every thread running its chunks shares: the writes race{2}",
         Category, DiagnosticSeverity.Warning, true,
         "A parallel [ForEach] method, and the Execute of a job run by ForEachParallel, ForEachEntityParallel, ForEachBatchParallel or " +
-        "ForParallel, run on " +
+        "ParallelFor, run on " +
         "several threads at once, one chunk of rows each. A static field or auto-property, an object a context parameter " +
         "or a job's field refers to, is the same memory for all of them: an increment or a compound assignment loses " +
         "updates, a collection's Add corrupts it, and which plain write is kept depends on the threads' timing. Write the " +
@@ -33,7 +33,7 @@ public static partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor LostJobWrite = new("EECS061", "A parallel job's field read after the pass",
         "'{0}' is run by {1}, which gives each chunk its own copy of the job, so what Execute writes to its field '{2}' never reaches '{3}', read after the call",
         Category, DiagnosticSeverity.Warning, true,
-        "ForEachParallel, ForEachEntityParallel, ForEachBatchParallel and ForParallel run a copy of the job per chunk, on several " +
+        "ForEachParallel, ForEachEntityParallel, ForEachBatchParallel and ParallelFor run a copy of the job per chunk, on several " +
         "threads, and merge nothing back unless the job merges (Merges): the job passed by ref keeps the values it had before the " +
         "call. A field Execute writes (a sum, a count, a flag) and the caller reads afterwards holds its old value. Run the job " +
         "on one thread (ForEach, ForEachEntity, ForEachBatch), " +
@@ -97,7 +97,7 @@ public static partial class EasyEcsAnalyzer
     }
 
     /// <summary>
-    /// EECS088 on the first draw of a [ForEach] or [ForEntity] method's body (or a job's Execute) (the others are seen from it): a draw whose stream, entity and source an
+    /// EECS088 on the first draw of a [ForEach] or [EntityMethod] method's body (or a job's Execute) (the others are seen from it): a draw whose stream, entity and source an
     /// earlier draw of the body shares, unless the two sit in the two branches of an if or two arms of a switch (the fix:
     /// the next stream no draw uses); a draw with a constant stream in a loop, of an entity and source the loop does not
     /// change (no fix: the stream needs the iteration).
@@ -288,12 +288,12 @@ public static partial class EasyEcsAnalyzer
 
     /// <summary>
     /// EECS060 and EECS061 at a <c>ForEachParallel</c> / <c>ForEachEntityParallel</c> / <c>ForEachBatchParallel</c> /
-    /// <c>ForParallel</c> call: the job's Execute writes shared memory, or a field of the job the caller reads after the call.
+    /// <c>ParallelFor</c> call: the job's Execute writes shared memory, or a field of the job the caller reads after the call.
     /// </summary>
     private static void AnalyzeParallelJob(OperationAnalysisContext context)
     {
         var call = (IInvocationOperation)context.Operation;
-        if (call.TargetMethod is not { Name: "ForEachParallel" or "ForEachEntityParallel" or "ForEachBatchParallel" or "ForParallel", TypeArguments.Length: > 0 } method
+        if (call.TargetMethod is not { Name: "ForEachParallel" or "ForEachEntityParallel" or "ForEachBatchParallel" or "ParallelFor", TypeArguments.Length: > 0 } method
             || !Symbols.Named(method.ContainingType, Symbols.World)
             || method.TypeArguments[method.TypeArguments.Length - 1] is not INamedTypeSymbol job
             || Execute(job, method) is not ({ } execute, var face)
@@ -320,7 +320,7 @@ public static partial class EasyEcsAnalyzer
             if (use.Parent is not IFieldReferenceOperation { Field: var field } read || read.Parent is ISimpleAssignmentOperation { Target: var t } && t == read)
                 break; // the job itself used again, or the field set: what follows may see that, not the call's state
             if (!own.Contains(field)) continue;
-            var fix = method.Name != "ForParallel" // no serial twin: the caller calls Execute itself
+            var fix = method.Name != "ParallelFor" // no serial twin: the caller calls Execute itself
                       && call.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name: var name } }
                       && call.Arguments.All(a => a.Parameter?.Name != "chunkSize" || a.IsImplicit)
                 ? Fix(call.Syntax.ReplaceToken(name.Identifier, SyntaxFactory.Identifier(method.Name.Substring(0, method.Name.Length - "Parallel".Length))).ToString(),
@@ -335,7 +335,7 @@ public static partial class EasyEcsAnalyzer
     /// <summary>
     /// The job's Execute for the type arguments of a parallel call before the job's, and the interface it implements:
     /// IForEach&lt;…&gt;, IForEachEntity&lt;…&gt; or IForEachBatch&lt;…&gt; of the components; IForRange, or IForSpan&lt;T&gt;
-    /// of the element, for ForParallel.
+    /// of the element, for ParallelFor.
     /// </summary>
     private static (IMethodSymbol? Execute, INamedTypeSymbol Face)? Execute(INamedTypeSymbol job, IMethodSymbol call)
     {

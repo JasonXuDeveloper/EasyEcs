@@ -4,7 +4,7 @@ using NUnit.Framework;
 namespace EasyEcs.UnitTest;
 
 /// <summary>
-/// [ForEntity] methods: the generator writes the job entity.Run runs and an entry point that takes the entity and the
+/// [EntityMethod] methods: the generator writes the job entity.Run runs and an entry point that takes the entity and the
 /// caller's values, returning whether the method ran.
 /// </summary>
 public static class Orders
@@ -15,7 +15,7 @@ public static class Orders
     public record struct Fees(int PerItem) : ISingletonComponent;
 
     // Writes both: both are stamped, and both follow the shop when it closes (a structural change in the middle).
-    [ForEntity, Without<Closed>]
+    [EntityMethod, Without<Closed>]
     static void Buy(Entity shop, ref Stock stock, ref Sales sales, int quantity)
     {
         stock = stock with { Items = stock.Items - quantity };
@@ -24,32 +24,32 @@ public static class Orders
     }
 
     // Reads only: nothing is stamped; returns its result through a ref value.
-    [ForEntity]
+    [EntityMethod]
     static void Count(in Stock stock, ref int items) => items = stock.Items;
 
     // A singleton, resolved through the entity's world.
-    [ForEntity]
+    [EntityMethod]
     static void Charge(in Sales sales, in Fees fees, ref long due) => due = (long)sales.Count * fees.PerItem;
 
     // [Changed<T>]: the entry point takes the tick to look back from.
-    [ForEntity, Changed<Stock>]
+    [EntityMethod, Changed<Stock>]
     static void Restocked(in Stock stock, ref int items) => items = stock.Items;
 
     // A generic method: the entry point takes the type argument.
-    [ForEntity]
+    [EntityMethod]
     static void Found<T>(in T component, ref bool found) where T : struct, IComponent => found = true;
 }
 
-// A system's [ForEntity] method: its entry point is a static member of the system, like any type's.
+// A system's [EntityMethod] method: its entry point is a static member of the system, like any type's.
 [EcsSystem]
 public ref struct Restock
 {
     [ForEach] static void Daily(ref Orders.Stock stock) => stock = stock with { Items = stock.Items + 1 };
 
-    [ForEntity] static void Now(ref Orders.Stock stock, int items) => stock = stock with { Items = stock.Items + items };
+    [EntityMethod] static void Now(ref Orders.Stock stock, int items) => stock = stock with { Items = stock.Items + items };
 }
 
-public class ForEntityTests
+public class EntityMethodTests
 {
     [Test]
     public void ASystemsMethodGetsAnEntryPointToo()

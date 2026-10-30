@@ -51,7 +51,7 @@ the running agent branches merge; the plan goes to the owner first. This is that
 | `Parameters/` | the `[ForEach]` parameters: `Maybe`, `Mut`, `Reduce`, `Scratch`, `Emit`, `EntityRandom` (systems, threading) | 6 |
 | `Lookups/` | `Lookup<T>`, its lanes and prefetches, the last-level cache gate | 3 |
 | `VectorLoops/` | the helpers generated vector loops call: interleaved loads, lane math, compaction | 4 |
-| `Parallel/` | the runner, `ForParallel`, helper threads, the spin gate (threading) | 4 |
+| `Parallel/` | the runner, `ParallelFor`, helper threads, the spin gate (threading) | 4 |
 | `Indexes/` | value, unique and ordered indexes (indexes-and-relations) | 4 |
 | `Relations/` | relations, hierarchy, target policies (indexes-and-relations, hierarchy) | 4 |
 | `Grids/` | tiles (`Cell<,>` joins it with inner-loops WP5) (grids) | 1 |
@@ -429,7 +429,7 @@ none extra). Lines are today's line counts. Files marked "stays" keep their path
 | `PrefetchTests.cs` | `Lookups/PrefetchTests.cs` | 222 |
 | `OrderTests.cs` | `OrderedTables/OrderTests.cs` | 760 |
 | `ConcurrencyTests.cs` | `Parallel/ConcurrencyTests.cs` | 184 |
-| `ForParallelTests.cs` | `Parallel/ForParallelTests.cs` | 144 |
+| `ParallelForTests.cs` | `Parallel/ParallelForTests.cs` | 144 |
 | `ParallelTests.cs` | `Parallel/ParallelTests.cs` | 687 |
 | `RunnerTests.cs` | `Parallel/RunnerTests.cs` | 188 |
 | `WorkersTests.cs` | `Parallel/WorkersTests.cs` | 201 |
@@ -452,7 +452,7 @@ none extra). Lines are today's line counts. Files marked "stays" keep their path
 | `GroupTests.cs` | `Storage/GroupTests.cs` | 129 |
 | `ConsumeTests.cs` | `Systems/ConsumeTests.cs` | 231 |
 | `ForEachSystemTests.cs` | `Systems/ForEachSystemTests.cs` | 683 |
-| `ForEntityTests.cs` | `Systems/ForEntityTests.cs` | 161 |
+| `EntityMethodTests.cs` | `Systems/EntityMethodTests.cs` | 161 |
 | `FusionTests.cs` | `Systems/FusionTests.cs` | 648 |
 | `GenericTests.cs` | `Systems/GenericTests.cs` | 181 |
 | `LambdaPassTests.cs` | `Systems/LambdaPassTests.cs` | 371 |
@@ -499,7 +499,7 @@ none extra). Lines are today's line counts. Files marked "stays" keep their path
 | `PairsBenchmark.cs` | `OrderedTables/PairsBenchmark.cs` | 171 |
 | `RowOrderBenchmark.cs` | `OrderedTables/RowOrderBenchmark.cs` | 100 |
 | `ChunkRowsBenchmark.cs` | `Parallel/ChunkRowsBenchmark.cs` | 101 |
-| `ForParallelBenchmark.cs` | `Parallel/ForParallelBenchmark.cs` | 101 |
+| `ParallelForBenchmark.cs` | `Parallel/ParallelForBenchmark.cs` | 101 |
 | `ParallelForEachBenchmark.cs` | `Parallel/ParallelForEachBenchmark.cs` | 114 |
 | `ParallelRunnerBenchmark.cs` | `Parallel/ParallelRunnerBenchmark.cs` | 103 |
 | `ParallelSystemsBenchmark.cs` | `Parallel/ParallelSystemsBenchmark.cs` | 79 |
@@ -525,7 +525,7 @@ none extra). Lines are today's line counts. Files marked "stays" keep their path
 | `GroupBenchmark.cs` | `Storage/GroupBenchmark.cs` | 107 |
 | `TrimBenchmark.cs` | `Storage/TrimBenchmark.cs` | 99 |
 | `ConsumeBenchmark.cs` | `Systems/ConsumeBenchmark.cs` | 85 |
-| `ForEntityBenchmark.cs` | `Systems/ForEntityBenchmark.cs` | 98 |
+| `EntityMethodBenchmark.cs` | `Systems/EntityMethodBenchmark.cs` | 98 |
 | `FusionBenchmark.cs` | `Systems/FusionBenchmark.cs` | 224 |
 | `LambdaPassBenchmark.cs` | `Systems/LambdaPassBenchmark.cs` | 91 |
 | `OrderingBenchmark.cs` | `Systems/OrderingBenchmark.cs` | 66 |

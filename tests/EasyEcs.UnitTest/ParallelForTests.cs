@@ -4,8 +4,8 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-/// <summary><see cref="World.ForParallel{TJob}"/>: a range or a list's elements in chunks, on the world's runner.</summary>
-public class ForParallelTests
+/// <summary><see cref="World.ParallelFor{TJob}"/>: a range or a list's elements in chunks, on the world's runner.</summary>
+public class ParallelForTests
 {
     /// <summary>Each index written by exactly one chunk.</summary>
     private struct Fill : IForRange
@@ -64,7 +64,7 @@ public class ForParallelTests
             var job = new Fill { Cells = new int[count] };
             for (int run = 1; run <= 20; run++)
             {
-                world.ForParallel(count, ref job);
+                world.ParallelFor(count, ref job);
                 for (int i = 0; i < count; i++)
                     if (job.Cells[i] != run * (i + 1)) Assert.Fail($"{threads} threads, run {run}: index {i} holds {job.Cells[i]}");
             }
@@ -76,11 +76,11 @@ public class ForParallelTests
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
         var census = new Visits { Chunks = new int[1], Smallest = [int.MaxValue] };
-        world.ForParallel(10_000, ref census, chunkSize: 100); // rounded up to 128
+        world.ParallelFor(10_000, ref census, chunkSize: 100); // rounded up to 128
         Assert.That(census.Chunks[0], Is.EqualTo((10_000 + 127) / 128));
         Assert.That(census.Smallest[0], Is.EqualTo(10_000 % 128));
         census = new Visits { Chunks = new int[1], Smallest = [int.MaxValue] };
-        world.ForParallel(500, ref census); // below the smallest default chunk: one chunk, on the caller
+        world.ParallelFor(500, ref census); // below the smallest default chunk: one chunk, on the caller
         Assert.That(census.Chunks[0], Is.EqualTo(1));
     }
 
@@ -91,14 +91,14 @@ public class ForParallelTests
         ref var hits = ref world.GetOrAddSingleton<Emitted<EmitTests.Hit>>().Items;
         for (int i = 0; i < 50_000; i++) hits.Add(new EmitTests.Hit(default, i));
         var job = new Scale { Factor = 3 };
-        world.ForParallel(ref hits, ref job);
+        world.ParallelFor(ref hits, ref job);
         for (int i = 0; i < hits.Count; i++) Assert.That(hits[i].Amount, Is.EqualTo(i * 3 + i));
         hits.Clear();
-        world.ForParallel(ref hits, ref job); // no elements: nothing to run
+        world.ParallelFor(ref hits, ref job); // no elements: nothing to run
         using var fresh = new World();
         ref var none = ref fresh.GetOrAddSingleton<Emitted<EmitTests.Hit>>().Items;
         Assert.That(none.Capacity, Is.Zero);
-        fresh.ForParallel(ref none, ref job); // no list at all
+        fresh.ParallelFor(ref none, ref job); // no list at all
     }
 
     [Test]
@@ -106,10 +106,10 @@ public class ForParallelTests
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
         var job = new Structural { World = world };
-        Assert.Throws<InvalidOperationException>(() => world.ForParallel(10_000, ref job));
+        Assert.Throws<InvalidOperationException>(() => world.ParallelFor(10_000, ref job));
         Assert.That(world.EntityCount, Is.Zero);
         var fill = new Fill { Cells = new int[10] };
-        world.ForParallel(10, ref fill); // the world works after the throw
+        world.ParallelFor(10, ref fill); // the world works after the throw
         Assert.That(fill.Cells[9], Is.EqualTo(10));
     }
 
@@ -118,11 +118,11 @@ public class ForParallelTests
     {
         using var world = new World();
         var job = new Fill { Cells = [] };
-        Assert.Throws<ArgumentOutOfRangeException>(() => world.ForParallel(-1, ref job));
+        Assert.Throws<ArgumentOutOfRangeException>(() => world.ParallelFor(-1, ref job));
     }
 
     [Test]
-    public void ForParallelDoesNotAllocateAfterItsFirstCall()
+    public void ParallelForDoesNotAllocateAfterItsFirstCall()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
         var fill = new Fill { Cells = new int[100_000] };
@@ -133,8 +133,8 @@ public class ForParallelTests
             ref var hits = ref world.GetSingleton<Emitted<EmitTests.Hit>>().Items;
             for (int i = 0; i < count; i++)
             {
-                world.ForParallel(fill.Cells.Length, ref fill);
-                world.ForParallel(ref hits, ref scale);
+                world.ParallelFor(fill.Cells.Length, ref fill);
+                world.ParallelFor(ref hits, ref scale);
             }
         }
 

@@ -50,7 +50,7 @@ public static partial class EasyEcsAnalyzer
         string? before = null;
         foreach (var member in type.GetMembers())
         {
-            if (member is not IMethodSymbol method || Symbols.IsForEntity(method) || !Symbols.IsValidForEach(method)
+            if (member is not IMethodSymbol method || Symbols.IsEntityMethod(method) || !Symbols.IsValidForEach(method)
                 || method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is not MethodDeclarationSyntax syntax)
                 continue;
             var model = Symbols.ModelOf(syntax.SyntaxTree, context.SemanticModel);
