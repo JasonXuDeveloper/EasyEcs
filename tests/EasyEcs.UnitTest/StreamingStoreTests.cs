@@ -301,6 +301,50 @@ public class StreamingStoreTests
             }), Is.Zero);
         });
     }
+
+    // Large copies (borrowed-ideas.md item 5): StreamingStores.Copy writes what memmove writes at every length and target
+    // offset (a head to the first line, four pages at a time, a tail), nothing past it.
+    [TestCase(0, 0), TestCase(1, 16), TestCase(63, 16), TestCase(16_384, 0), TestCase(16_449, 16), TestCase(70_000, 48)]
+    public unsafe void StreamedCopyWritesWhatMemmoveWrites(int bytes, int offset)
+    {
+        if (!System.Runtime.Intrinsics.X86.Avx.IsSupported) Assert.Ignore("no AVX");
+        var from = new byte[bytes + 64];
+        var to = new byte[bytes + 128];
+        for (int i = 0; i < from.Length; i++) from[i] = (byte)(i * 31 + 7);
+        Array.Fill(to, (byte)0xAB);
+        StreamingStores.Copy(ref to[offset], ref from[0], (nuint)bytes);
+        Assert.That(to.AsSpan(offset, bytes).SequenceEqual(from.AsSpan(0, bytes)), Is.True);
+        Assert.That(to[offset + bytes], Is.EqualTo(0xAB));
+        if (offset > 0) Assert.That(to[offset - 1], Is.EqualTo(0xAB));
+    }
+
+    // Capture, Restore and growth with the copies streamed (the cache taken as 1 byte) hold what they hold with memmove.
+    [Test]
+    public void StreamedSnapshotsAndGrowthKeepEveryValue()
+    {
+        if (!System.Runtime.Intrinsics.X86.Avx.IsSupported) Assert.Ignore("no AVX");
+        WithCache(1, () =>
+        {
+            Assert.That(StreamingStores.CopyPays(2), Is.True);
+            using var world = new World(new WorldOptions { InitialEntityCapacity = 16 });
+            var entities = new Entity[5000];
+#pragma warning disable EECS031 // the table's growth (its columns resized, streamed) is what this checks
+            for (int i = 0; i < entities.Length; i++) entities[i] = world.CreateEntity(new Fuel(i), new Flare(-i));
+#pragma warning restore EECS031
+            var snapshot = world.Capture();
+            for (int i = 0; i < entities.Length; i++) entities[i].Get<Fuel>() = new Fuel(0);
+            world.Restore(snapshot);
+            for (int i = 0; i < entities.Length; i++)
+                Assert.That((entities[i].Get<Fuel>().Value, entities[i].Get<Flare>().Value), Is.EqualTo(((float)i, (float)-i)));
+            entities[7].Get<Flare>() = new Flare(99);
+            world.Capture(snapshot); // in sync: the untracked columns copied whole
+            entities[7].Get<Flare>() = new Flare(1);
+            world.Restore(snapshot);
+            Assert.That(entities[7].Get<Flare>().Value, Is.EqualTo(99f));
+            Assert.That(entities[4999].Get<Fuel>().Value, Is.EqualTo(4999f));
+        });
+    }
+
 }
 
 /// <summary>A system whose schedule lines name a streamed loop and a plain one.</summary>

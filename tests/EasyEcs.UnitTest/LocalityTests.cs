@@ -303,4 +303,30 @@ public class LocalityTests
             System.Runtime.InteropServices.NativeMemory.AlignedFree(streamed);
         }
     }
+
+    // The streamed copies write what memmove writes, every length (a head to the first line, whole steps, four pages,
+    // a tail) and both alignments (a byte[]'s data 16 bytes past a line, a table's column on one).
+    [TestCase(0, 0), TestCase(1, 16), TestCase(63, 16), TestCase(300, 0), TestCase(16_400, 16), TestCase(70_000, 16), TestCase(70_000, 0)]
+    public unsafe void StreamedCopiesWriteWhatMemmoveWrites(int bytes, int offset)
+    {
+        var src = (byte*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)bytes + 64, 64);
+        var dst = (byte*)System.Runtime.InteropServices.NativeMemory.AlignedAlloc((nuint)bytes + 64, 64);
+        try
+        {
+            for (int i = 0; i < bytes; i++) src[i] = (byte)(i * 31 + 7);
+            foreach (var form in new[] { 0, 1 })
+            {
+                new Span<byte>(dst, bytes + 64).Fill(0xAB);
+                if (form == 0) Streams.NonTemporalCopy(src, dst + offset, (nuint)bytes);
+                else Streams.NonTemporalCopyPages(src, dst + offset, (nuint)bytes);
+                Assert.That(new ReadOnlySpan<byte>(dst + offset, bytes).SequenceEqual(new ReadOnlySpan<byte>(src, bytes)), Is.True);
+                Assert.That(dst[offset + bytes], Is.EqualTo(0xAB), "nothing written past the copy");
+            }
+        }
+        finally
+        {
+            System.Runtime.InteropServices.NativeMemory.AlignedFree(src);
+            System.Runtime.InteropServices.NativeMemory.AlignedFree(dst);
+        }
+    }
 }
