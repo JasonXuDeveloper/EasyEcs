@@ -1900,12 +1900,7 @@ public static partial class EasyEcsAnalyzer
     /// <summary>EECS031: CreateEntity / Instantiate in a counted for loop with no reservation before it.</summary>
     private static void CountedLoop(OperationAnalysisContext context, IForLoopOperation loop, Core core)
     {
-        if (loop.Before.Length != 1 || loop.Before[0] is not IVariableDeclarationGroupOperation group
-            || Declarator(group) is not { Symbol: var index, Initializer.Value: var start }
-            || loop.Condition is not IBinaryOperation { OperatorKind: BinaryOperatorKind.LessThan, LeftOperand: ILocalReferenceOperation left, RightOperand: var bound }
-            || !SymbolEqualityComparer.Default.Equals(left.Local, index)
-            || loop.AtLoopBottom.Length != 1 || loop.AtLoopBottom[0] is not IExpressionStatementOperation { Operation: var bottom } || !Steps(bottom, index)
-            || !Simple(bound) || !Simple(start)) return;
+        if (!Counted(loop, out var index, out var start, out var bound)) return;
 
         var creations = loop.Body.Descendants().OfType<IInvocationOperation>().Where(c => core.Is(c.TargetMethod.ContainingType, core.World)
             && (c.TargetMethod.Name == "CreateEntity" && c.TargetMethod.TypeArguments.Length > 0
@@ -1917,22 +1912,41 @@ public static partial class EasyEcsAnalyzer
         // an entity now and then, or is the inner loop's to report.
         if (!Symbols.AlwaysRuns(create, loop.Body)) return;
         string world = create.Instance!.Syntax.ToString();
+        // Nested counted loops create the product of their counts (a grid: Side * Side rows), so the loops around this
+        // one count too, as far out as each runs the inner loop on every pass for the same count: the reservation
+        // goes before the outermost, and a small inner bound no longer hides a large product.
+        var outermost = loop;
+        var outermostIndex = index;
+        long? known = Known(start, bound);
+        string count = Count(start, bound, false);
+        var bounds = new List<IOperation> { start, bound };
+        bool nested = false;
+        while (Enclosing(outermost) is { } outer && Symbols.AlwaysRuns(outermost, outer.Body)
+            && Counted(outer, out var outerIndex, out var outerStart, out var outerBound)
+            && Invariant(bounds, outer.Body, outerIndex) && !Destroys(outer.Body, outermost, core))
+        {
+            long? outerKnown = Known(outerStart, outerBound);
+            known = known is { } a && outerKnown is { } b ? a * b : null;
+            count = $"{Count(outerStart, outerBound, true)} * {(nested ? count : Count(start, bound, true))}";
+            nested = true;
+            (outermost, outermostIndex) = (outer, outerIndex);
+            bounds.Add(outerStart);
+            bounds.Add(outerBound);
+        }
+
         // A system creates entities in a world that is running: rows freed by earlier destroys are reused, and a
         // table that grew keeps its size, so the cost is a start-up's, paid once.
-        if (Reserved(loop, world, core) || Symbols.SystemOf(context.ContainingSymbol) != null) return;
+        if (Reserved(outermost, world, core) || Symbols.SystemOf(context.ContainingSymbol) != null) return;
         // A count known to be small never sends an array to the large object heap (D28): doubling costs nothing there.
-        if ((bound.ConstantValue is { HasValue: true, Value: int end } ? end : FixedLength(bound)) is int known
-            && (start.ConstantValue is { HasValue: true, Value: int begin } ? known - begin : known) < SmallCount)
-            return;
+        if (known < SmallCount) return;
 
         var model = loop.SemanticModel!;
-        int at = loop.Syntax.SpanStart;
+        int at = outermost.Syntax.SpanStart;
         bool zero = start.ConstantValue is { HasValue: true, Value: 0 };
-        string count = zero ? bound.Syntax.ToString() : $"{bound.Syntax} - {start.Syntax}";
         bool instantiate = create.TargetMethod.Name == "Instantiate";
 
         // The whole loop as one call: `handles[i] = world.CreateEntity(values)` over every slot of `handles`, the values the same each time.
-        if (zero && Single(loop.Body) is IExpressionStatementOperation { Operation: ISimpleAssignmentOperation { Target: IArrayElementReferenceOperation { ArrayReference: var array, Indices: { Length: 1 } indices }, Value: var assigned } }
+        if (!nested && zero && Single(loop.Body) is IExpressionStatementOperation { Operation: ISimpleAssignmentOperation { Target: IArrayElementReferenceOperation { ArrayReference: var array, Indices: { Length: 1 } indices }, Value: var assigned } }
             && indices[0] is ILocalReferenceOperation i
             && Symbols.Unwrap(assigned) == create && SymbolEqualityComparer.Default.Equals(i.Local, index)
             && bound is IPropertyReferenceOperation { Property.Name: "Length", Instance: { } lengthOf } && lengthOf.Syntax.ToString() == array.Syntax.ToString()
@@ -1952,12 +1966,75 @@ public static partial class EasyEcsAnalyzer
         // components alone, not the one an instance with given components goes to).
         if (instantiate && create.Arguments.Length > 1) return;
         string reserve = instantiate
-            ? Invariant([create.Arguments[0].Value], loop.Body, index) ? $"{world}.Reserve({create.Arguments[0].Value.Syntax}, {count})" : ""
+            ? Invariant([create.Arguments[0].Value], outermost.Body, outermostIndex) ? $"{world}.Reserve({create.Arguments[0].Value.Syntax}, {count})" : ""
             : $"{world}.Reserve<{string.Join(", ", create.TargetMethod.TypeArguments.Select(t => t.ToMinimalDisplayString(model, at)))}>({count})";
         if (reserve.Length == 0) return;
-        context.ReportDiagnostic(Diagnostic.Create(CreateInLoop, loop.Syntax.GetLocation(),
-            Binds(model, loop.Syntax, reserve, out _) ? ImmutableDictionary<string, string?>.Empty.Add(Insert, reserve + ";").Add(FixTitle, "Reserve room first") : null,
+        context.ReportDiagnostic(Diagnostic.Create(CreateInLoop, outermost.Syntax.GetLocation(),
+            Binds(model, outermost.Syntax, reserve, out _) ? ImmutableDictionary<string, string?>.Empty.Add(Insert, reserve + ";").Add(FixTitle, "Reserve room first") : null,
             count, $"reserve room first with '{reserve}'"));
+    }
+
+    /// <summary>
+    /// A loop <c>for (int i = start; i &lt; bound; i++)</c> (or <c>i += 1</c>) whose start and bound can be repeated
+    /// before it (<see cref="Simple"/>): it runs <c>bound - start</c> times unless its body leaves early.
+    /// </summary>
+    private static bool Counted(IForLoopOperation loop, out ILocalSymbol index, out IOperation start, out IOperation bound)
+    {
+        index = null!;
+        start = bound = null!;
+        if (loop.Before.Length != 1 || loop.Before[0] is not IVariableDeclarationGroupOperation group
+            || Declarator(group) is not { Symbol: var declared, Initializer.Value: var first }
+            || loop.Condition is not IBinaryOperation { OperatorKind: BinaryOperatorKind.LessThan, LeftOperand: ILocalReferenceOperation left, RightOperand: var end }
+            || !SymbolEqualityComparer.Default.Equals(left.Local, declared)
+            || loop.AtLoopBottom.Length != 1 || loop.AtLoopBottom[0] is not IExpressionStatementOperation { Operation: var bottom } || !Steps(bottom, declared)
+            || !Simple(end) || !Simple(first)) return false;
+        (index, start, bound) = (declared, first, end);
+        return true;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="body"/>, outside <paramref name="inner"/>, destroys entities or clears the world: then each
+    /// pass of the outer loop takes back what the inner one created (a churn), and the counts do not multiply.
+    /// </summary>
+    private static bool Destroys(IOperation body, IOperation inner, Core core)
+    {
+        foreach (var operation in body.Descendants())
+            if (operation is IInvocationOperation { TargetMethod: { Name: var name } target }
+                && (name.StartsWith("Destroy", System.StringComparison.Ordinal) || name is "Dispose" or "Clear")
+                && (core.Is(target.ContainingType, core.World) || core.Is(target.ContainingType, core.Entity))
+                && !inner.Syntax.Span.Contains(operation.Syntax.Span))
+                return true;
+
+        return false;
+    }
+
+    /// <summary>The for loop whose body holds <paramref name="loop"/> with no other loop, lambda or local function between them; else null.</summary>
+    private static IForLoopOperation? Enclosing(IForLoopOperation loop)
+    {
+        for (IOperation current = loop, parent = loop.Parent!; parent != null; current = parent, parent = parent.Parent!)
+            switch (parent)
+            {
+                case IForLoopOperation outer when outer.Body == current:
+                    return outer;
+                case ILoopOperation or IAnonymousFunctionOperation or ILocalFunctionOperation:
+                    return null;
+            }
+
+        return null;
+    }
+
+    /// <summary>How many times a counted loop runs when its start and bound are known (a constant, an array created with one); else null.</summary>
+    private static long? Known(IOperation start, IOperation bound) =>
+        (bound.ConstantValue is { HasValue: true, Value: int end } ? end : FixedLength(bound)) is int known
+            ? start.ConstantValue is { HasValue: true, Value: int begin } ? known - begin : known
+            : null;
+
+    /// <summary>A counted loop's count as C#: <c>bound</c>, or <c>bound - start</c> (parenthesized as a factor of a product).</summary>
+    private static string Count(IOperation start, IOperation bound, bool factor)
+    {
+        bool zero = start.ConstantValue is { HasValue: true, Value: 0 };
+        string text = zero ? bound.Syntax.ToString() : $"{bound.Syntax} - {start.Syntax}";
+        return factor && (!zero || Symbols.Unwrap(bound) is IBinaryOperation) ? $"({text})" : text;
     }
 
     /// <summary>
