@@ -25,10 +25,10 @@ Order agreed with the owner: code first, docs checked and updated in full once a
 ## Final pass (after everything above)
 
 - [ ] Full docs audit (audit-docs): every page en/zh against the final code; the agents' docs to-do lists; BenchTables
-      for Consume / ForEntity / SystemDispatch; search-expectations.json (ForEntity, Consume, entity.Run);
+      for Consume / EntityMethod / SystemDispatch; search-expectations.json (EntityMethod, Consume, entity.Run);
       high-performance "What it costs" section; grids "generator writes" tabs against real output; VoxelServer TODOs;
       example.mdx walkthrough vs BattleServer.cs regions; changelog / README What's new / migration complete.
-- [ ] `tools/bench.sh --site --sync` on the final code (classes missing from bench.json: Consume, ForEntity,
+- [ ] `tools/bench.sh --site --sync` on the final code (classes missing from bench.json: Consume, EntityMethod,
       SystemDispatch, Access, Kernel, ChangeTrackingWrite, DestroyLog, Slices, Trim); check the moved list.
 - [ ] README numbers: headline (1.72 ms -> about 1.5 ms), the 4-row table, the comparison table; tell the owner to
       update the GitHub description.
@@ -46,7 +46,7 @@ Order agreed with the owner: code first, docs checked and updated in full once a
 
 Systems as [EcsSystem] ref structs (sets, switch dispatch, SystemHandle, EECS074-077, code fixes, suppressor,
 generic systems across assemblies for AOT), OneQuery (dispatch -34%), owner-thread gate, runner padding, Lock/CAS,
-filter-less passes, Mut column, ForEntity filter, tile neighbors, attribute reductions vectorize, column loads,
+filter-less passes, Mut column, EntityMethod filter, tile neighbors, attribute reductions vectorize, column loads,
 EECS089 / EECS060-061, BlockTicks atomic OR only when shared (QueryTick -18%), RS1030, IlcInstructionSet native,
 UnsafeAccessor + PGO checked (inlined with guarded devirtualization; the C4 wrapper reverted).
 Generator A/B: EditMethodBody 421 -> 227 ms, 39 -> 28 MB; EECS086-089 no measurable cost.
@@ -200,7 +200,7 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - Follow-up (analyzer): EECS049 could also report a [WithAny<Q,T>] whose every type is in [Without<>] (matches nothing). New detection; do with the analyzer follow-ups.
 - analyzer.mdx + zh: EECS025/053 cover lambda passes; EECS025 unwritten view ref fields (compilation end, 'ref readonly' fix, public library views excluded); EECS049 new cases (WithAny all excluded, lambdas, AsX/TryGetX on visited entity), new message; EECS049 on a lambda suppresses EECS095-097. Changelog.
 - Decision record (small): EECS025 for view fields is compilation-wide, reported on the field (a per-method report would break methods that write it).
-- roadmap.mdx + zh: one Planned item for docs/plans/inner-loops.md's goal (plain loops over buffers / inline arrays / ForParallel lambdas become vector loops; Cell<TCell,TTile> shaders; EECS103), linking D77/D90. Rewrite the stale "Vector loops: the forms left for later" item (Pow and kin partly done by D127; masked tail D126).
+- roadmap.mdx + zh: one Planned item for docs/plans/inner-loops.md's goal (plain loops over buffers / inline arrays / ParallelFor lambdas become vector loops; Cell<TCell,TTile> shaders; EECS103), linking D77/D90. Rewrite the stale "Vector loops: the forms left for later" item (Pow and kin partly done by D127; masked tail D126).
 
 ## feat-lookupkey-chunkrows (D129, D130, merged)
 - Changelog / migration / README What's new: [IndexKey] -> [LookupKey] (code fix), measured chunk sizes (ChunkSize only overrides).
@@ -921,10 +921,10 @@ Pages to write in the docs pass (en + zh each; zh terms: 块 = a parallel chunk 
   AccumulateBenchmark (100k rows: hand-written `ref Singleton` scalar 232.6 us, `[Accumulate]` 8.3 us, parallel 6.6 us,
   0 B). Pitfall: without `[Accumulate]` the pass replaces the value. EECS086's total case (Info until the singleton
   reduces, then a Warning whose fix takes it as `Reduce<T>` and declares `[Accumulate]`).
-- **guide/emit (Emit<T>)**: a section "Handling the records: `[ForEachRecord]`". Form: `[ForEachRecord] static void
+- **guide/emit (Emit<T>)**: a section "Handling the records: `[Drain]`". Form: `[Drain] static void
   Send(in EntityUpdate u, ref Stats s, Lookup<Viewers> v, World w)`; runs in declaration order inside the system,
   an entry point `Owner.Method(world, values...)` outside; records in emitted order, then cleared; a pass that throws
-  clears nothing; an `Emit<T>` of the same record type is refused (EECS108). Costs: RecordBenchmark (both tally into
+  clears nothing; an `Emit<T>` of the same record type is refused (EECS108). Costs: DrainBenchmark (both tally into
   a singleton: 100k records 284.1 us by hand, 278.9 us generated; 1k 2.44 / 2.52 us; 0 B). EECS109 (Info) and its fix
   (a system's OnUpdate that is only the walk becomes the method).
 - **guide/systems#vector-loops**: enums are lanes (their integer's: compare, convert, set to a constant), and a bool
@@ -936,9 +936,9 @@ Pages to write in the docs pass (en + zh each; zh terms: 块 = a parallel chunk 
   holding the buffer; lists of `MaxPooledLength` elements (set it first), process-wide, not cumulative across prefabs
   sharing a type; when not to (a buffer that stays short: count x MaxPooledLength of memory).
 - **guide/analyzer**: EECS108 (Error) and EECS109 (Info, fix) entries; EECS086's total case; EECS055's new bool reason.
-- **api.mdx**: done on the branch (rows for `[Accumulate]`, `[ForEachRecord]`, `ReserveBuffers`, the record pass).
+- **api.mdx**: done on the branch (rows for `[Accumulate]`, `[Drain]`, `ReserveBuffers`, the record pass).
 - **migration / changelog / README "What's new"**: New: `[Accumulate]`, struct-level `[Sum]`..`[Any]`,
-  `[ForEachRecord]`, `World.ReserveBuffers`, enum and bool lanes. No breaking change (EECS055's message for a component
+  `[Drain]`, `World.ReserveBuffers`, enum and bool lanes. No breaking change (EECS055's message for a component
   with a bool among several fields changed).
 
 - **BattleServer.cs (example.mdx)**: EECS086's total case reports Shoot, SendFire and SendFireOut (they add to the
@@ -951,7 +951,7 @@ What each form replaces in the samples (VoxelServer rewrite, `voxel-rewrite.md` 
 - G5: the four systems that reset nothing and add to a singleton row by row (`ref Totals t` then `t.X += ...`): each
   becomes `ref Reduce<Totals>` plus `[Accumulate]` on the singleton (gets a vector loop, may run parallel).
 - G6: the three get / loop / clear blocks over `Emitted<T>` (VoxelServer SendPackets and two more): each becomes one
-  `[ForEachRecord]` method holding the loop's body (about 4 lines each).
+  `[Drain]` method holding the loop's body (about 4 lines each).
 - G0: methods scalar only for an enum or a single-bool component now vectorize; Play (Body.OnGround), Expose and Out
   (Exposure.Sunlit) stay scalar until those bools get components of their own (the new reason says so).
 - G4: Program.cs `DynamicBuffer<Block / Fluid / Surface / ItemStack>.FillPool(...)` become
@@ -964,7 +964,7 @@ Decision-record drafts (for decisions.mdx + .zh.mdx):
   `ref Singleton` every row writes, so the pass is scalar and on one thread; as a reduction it gets a vector loop and
   chunks, and one Combine more per pass. Considered: a new parameter type (`Total<T>`), a second interface; rejected:
   the reduction already is the right form, only its end differs. Numbers: AccumulateBenchmark above.
-- **[ForEachRecord]: the records' walk is generated, one thread, the job copied to a local.** Why: get / loop / clear is
+- **[Drain]: the records' walk is generated, one thread, the job copied to a local.** Why: get / loop / clear is
   written once per record type; the job's refs reloaded per record cost 2x (first measurement: 286 vs 124 us when the
   job was walked through its ref), a local copy keeps them in registers (equal). Considered: a parallel record pass
   (order matters to most consumers: dropped), records as entities (structural cost per record: dropped).
@@ -1023,7 +1023,7 @@ Docs pass:
 Each needs a migration entry (old -> new), a changelog line, a README "What's new" line and a decision record that
 names the field each term comes from (audit-naming, "The reference design's vocabulary"):
 - `QueryOptions.ParallelChunkRows` -> `MaxChunkRows` (released in 4.7: migration entry required), and the
-  `chunkRows` parameter of `world.ForParallel` -> `chunkSize` (OpenMP's `schedule(static, chunk_size)`).
+  `chunkRows` parameter of `world.ParallelFor` -> `chunkSize` (OpenMP's `schedule(static, chunk_size)`).
 - `TileReads` -> `TileStencil` (the cells a tile method reads: a stencil, as in stencil codes).
 - `TileBoundary.Fill` -> `TileBoundary.Border`, and `Pad(from, to, fill, mask)` -> `Pad(from, to, border, mask)`
   (a Dirichlet boundary; Clamp and Mirror unchanged).
@@ -1181,40 +1181,26 @@ chunk lookup per zombie).
 ## feat-emit-segments (12e, merged 4925b09)
 
 - Threading page (Emit), "What it costs" / "How to use it fast": a parallel pass no longer copies records; Count,
-  Clear, `[ForEachRecord]` and ForParallel take them where they are; a span read (`foreach`, `AsReadOnlySpan`, the
-  indexer), a write or `SingletonRef<Emitted<T>>` joins once (O(records)); prefer `[ForEachRecord]` / ForParallel.
+  Clear, `[Drain]` and ParallelFor take them where they are; a span read (`foreach`, `AsReadOnlySpan`, the
+  indexer), a write or `SingletonRef<Emitted<T>>` joins once (O(records)); prefer `[Drain]` / ParallelFor.
 - `IForSpan` docs: one `Execute` per segment inside a chunk over segmented records.
 - `api.mdx` rows: Emit join O(1) per chunk; `Emitted.Items.Count` O(1); `Clear` O(segments); first span read or write
   after a parallel pass O(records); `SingletonRef<Emitted<T>>` O(records) once.
-- Behaviour notes (changelog): `Items.Capacity` can be below `Count` until joined; a `[ForEachRecord]` job removing
+- Behaviour notes (changelog): `Items.Capacity` can be below `Count` until joined; a `[Drain]` job removing
   records of the same `Emitted<T>` stops at the new count; EmitPool keeps chunks' lists until joined or cleared (at most
   64 segments per `Emitted<T>`); `BufferStore<T>` unsealed (internal).
 - Glossary: segment = 分段 (added to tools/ApiDocs/zh/README.md).
 - Decision record (agent's text): **Emitted<T> keeps the chunks' lists as segments.** The singleton's list
-  (`EmitStore<T>`) takes each chunk's list, in chunk order, as a segment at O(1); Count, Clear, `[ForEachRecord]` and
-  `World.ForParallel` use them in place; a span read, a write, `World.SingletonRef`, capture, save and load join first,
+  (`EmitStore<T>`) takes each chunk's list, in chunk order, as a segment at O(1); Count, Clear, `[Drain]` and
+  `World.ParallelFor` use them in place; a span read, a write, `World.SingletonRef`, capture, save and load join first,
   once. Records stay in chunk order, bit-identical at any thread count; users and the generator unchanged. Considered:
   a `Count`/`Clear` beside `Items` (users change code), a joining ref property `Items` (joins for Count/Clear too), a
   segments field on every `BufferStore<T>` (8 bytes per entity buffer). Chosen: a subclass flagged by a negative
   `Shares`; writes already branch on it, span reads gain one compare; at most 64 segments before an append joins.
   Numbers (two rounds, 0 B): EmitParallel 10k 16.3 -> 11.1 / 12.3 us, 100k 98.1 -> 50.4, 81.4 -> 52.9 us; then a
-  `[ForEachRecord]` pass 10k 29.1 -> 23.0 / 24.5, 100k 241.5 -> 192.4, 232.5 -> 203.8 us; WorldSimulation, BattleServer,
-  ParallelForEach, ForParallel, Record, DynamicBuffer, StructuralLoop within noise.
-  zh: **Emitted<T> 把各块的列表留作分段。** 单例的列表（`EmitStore<T>`）按块的顺序直接接收每个块的列表作为一个分段，每块 O(1)；`Count`、`Clear`、`[ForEachRecord]` 遍历和 `World.ForParallel` 就地使用；按一个 span 读、写入、`World.SingletonRef`、快照、存档和加载先合并一次。记录仍按块的顺序，任何线程数下逐位相同；用户代码和生成器不变。考虑过：在 `Items` 旁加 `Count`/`Clear`（用户要改代码）、访问时合并的 ref 属性 `Items`（`Count`/`Clear` 也会合并）、给每个 `BufferStore<T>` 加分段字段（每个实体缓冲多 8 字节）。选定：子类加负的 `Shares` 标记；写入本来就按它分支，span 读多一次比较；最多 64 个分段，再追加就先合并。
-
-## Naming: [ForEachRecord] -> [Drain] (owner, 2026-10-28)
-
-- Decision record (naming): `[Drain]`, after Rust's `Vec::drain`, Go's channel drain and Bevy's `Events::drain`: each
-  record of `Emitted<T>` handled once, then cleared. Why not `[ForEachRecord]`: one suffix from `[ForEach]` for a pass
-  that walks records, not entities, runs on one thread and clears what it walked; "record" also reads as C#'s `record`
-  types. Considered: `[ForEachEmitted]` (pairs with Emit but says nothing of the clear), `[Handle]` (too general).
-  `[ForEntity]` kept (D82: a callable on one entity, not a pass). zh: 排空.
-- Pages: the threading page's Emit section and every example use `[Drain]`; the glossary entry "Emitted records"
-  names it.
-- Also renamed (owner, 2026-10-28): `[ForEntity]` -> `[EntityMethod]` (rewrite D82: the name says it is a method
-  called on one entity, not a pass; "method" as `[ForEach]` method and pair method; zh 实体方法) and
-  `world.ForParallel` -> `world.ParallelFor` (.NET `Parallel.For`, OpenMP `parallel for`, TBB/Kokkos `parallel_for`;
-  zh keeps 并行 for). The threading page's range-for section and api.mdx rows use the new names.
+  `[Drain]` pass 10k 29.1 -> 23.0 / 24.5, 100k 241.5 -> 192.4, 232.5 -> 203.8 us; WorldSimulation, BattleServer,
+  ParallelForEach, ParallelFor, Record, DynamicBuffer, StructuralLoop within noise.
+  zh: **Emitted<T> 把各块的列表留作分段。** 单例的列表（`EmitStore<T>`）按块的顺序直接接收每个块的列表作为一个分段，每块 O(1)；`Count`、`Clear`、`[Drain]` 遍历和 `World.ParallelFor` 就地使用；按一个 span 读、写入、`World.SingletonRef`、快照、存档和加载先合并一次。记录仍按块的顺序，任何线程数下逐位相同；用户代码和生成器不变。考虑过：在 `Items` 旁加 `Count`/`Clear`（用户要改代码）、访问时合并的 ref 属性 `Items`（`Count`/`Clear` 也会合并）、给每个 `BufferStore<T>` 加分段字段（每个实体缓冲多 8 字节）。选定：子类加负的 `Shares` 标记；写入本来就按它分支，span 读多一次比较；最多 64 个分段，再追加就先合并。
 
 ## feat-ghost-rows (MultiWorld, merged)
 
@@ -1407,7 +1393,7 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
   MaxSweeps, ITileColors<TKey>, TileColoring, TileSteps<...> members, Tile.ExchangeHalo / Write / Rows / At / indexer,
   Columns<TTile>, TileNeighbors.Of / KeyAt / Facing) and regenerate docs/content/reference.
 - guide/analyzer.mdx + zh: EECS115 (Error: a step the generator cannot write: [GaussSeidel] without a ref tile, two
-  ref tiles, a ref tile with [ForEntity] / Slices > 1 / [Consume], MaxSweeps < 0, a key without integer fields; Write
+  ref tiles, a ref tile with [EntityMethod] / Slices > 1 / [Consume], MaxSweeps < 0, a key without integer fields; Write
   on a tile taken by value), EECS116 (Warning, end of compilation: a [ForEach] method that only copies `in
   DynamicBuffer<TNext>` into the cells a step writes into TNext; no code fix, see docs/owner-review.md), EECS117 (Info:
   a Jacobi ref tile relaxing with Min / Max). EECS003's message now also accepts a Tile parameter alone. EECS072 says
