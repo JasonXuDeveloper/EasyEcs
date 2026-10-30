@@ -107,7 +107,7 @@ public class TileStencilBenchmark
 
     [Params(Plot.Default, 512)] public int Side;
 
-    private World _blurTile, _blurDirect, _blurHand, _blurPingPong, _waveTile, _waveHand, _wavePingPong;
+    private World _blurTile, _blurDirect, _blurHand, _blurPingPong, _waveTile, _waveHand, _wavePingPong, _blurColumns, _waveColumns;
 
     [GlobalSetup]
     public void Setup()
@@ -132,6 +132,10 @@ public class TileStencilBenchmark
         _blurPingPong.AddSystem<TileSystems.PingBlurSystem>();
         _wavePingPong = TileWorlds.Warm<WavePlot>(Threads, p => new WavePlot(p), next: false);
         _wavePingPong.AddSystem<TileSystems.PingWaveSystem>();
+        _blurColumns = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p), next: false);
+        _blurColumns.AddSystem<TileSystems.ColumnBlurSystem>();
+        _waveColumns = TileWorlds.Warm<WavePlot>(Threads, p => new WavePlot(p), next: false);
+        _waveColumns.AddSystem<TileSystems.ColumnWaveSystem>();
         for (int i = 0; i < 3; i++)
         {
             Blur9_Tile();
@@ -141,12 +145,16 @@ public class TileStencilBenchmark
             Laplacian_Hand();
             Blur9_PingPong();
             Laplacian_PingPong();
+            Blur9_Columns();
+            Laplacian_Columns();
         }
         TileWorlds.Same(_blurTile, _blurHand);
         TileWorlds.Same(_blurPingPong, _blurHand);
         TileWorlds.Same(_wavePingPong, _waveHand);
         TileWorlds.Same(_blurDirect, _blurHand);
         TileWorlds.Same(_waveTile, _waveHand);
+        TileWorlds.Same(_blurColumns, _blurHand);
+        TileWorlds.Same(_waveColumns, _waveHand);
     }
 
     [GlobalCleanup]
@@ -159,6 +167,8 @@ public class TileStencilBenchmark
         _waveHand.Dispose();
         _blurPingPong.Dispose();
         _wavePingPong.Dispose();
+        _blurColumns.Dispose();
+        _waveColumns.Dispose();
     }
 
     [Benchmark] public void Blur9_Tile() => _blurTile.Update();
@@ -168,6 +178,8 @@ public class TileStencilBenchmark
     [Benchmark] public void Laplacian_Hand() => _waveHand.Update();
     [Benchmark] public void Blur9_PingPong() => _blurPingPong.Update();
     [Benchmark] public void Laplacian_PingPong() => _wavePingPong.Update();
+    [Benchmark] public void Blur9_Columns() => _blurColumns.Update();
+    [Benchmark] public void Laplacian_Columns() => _waveColumns.Update();
 }
 
 /// <summary>
@@ -440,6 +452,48 @@ internal static class TileSystems
                     var alongX = -c.Load128<float>(x - 2) + 16f * c.Load128<float>(x - 1) - 30f * here + 16f * c.Load128<float>(x + 1) - c.Load128<float>(x + 2);
                     var alongZ = -c.Load128<float>(x, 0, -2) + 16f * c.Load128<float>(x, 0, -1) - 30f * here + 16f * c.Load128<float>(x, 0, 1) - c.Load128<float>(x, 0, 2);
                     (here + (alongX + alongZ) * (1f / 12) * Rate).CopyTo(into.Slice(x));
+                }
+            }
+        }
+    }
+
+    /// <summary>The blur stepped by ref, its columns walked by the cursor (c.Columns): one address per column, the offsets in the loads.</summary>
+    [EcsSystem]
+    public ref struct ColumnBlurSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(ref Tile<Warmth, BlurPlot> warmth)
+        {
+            warmth.ExchangeHalo();
+            foreach (var row in warmth.Rows(TileStencil.Layer))
+            {
+                var into = MemoryMarshal.Cast<Warmth, float>(warmth.Write(row));
+                foreach (var col in warmth.At(row).Columns(4))
+                    ((col.Load128<float>(-1, 0, -1) + col.Load128<float>(0, 0, -1) + col.Load128<float>(1, 0, -1)
+                      + col.Load128<float>(-1) + col.Load128<float>() + col.Load128<float>(1)
+                      + col.Load128<float>(-1, 0, 1) + col.Load128<float>(0, 0, 1) + col.Load128<float>(1, 0, 1)) * (1f / 9))
+                        .CopyTo(into.Slice(col.X));
+            }
+        }
+    }
+
+    /// <summary>The Laplacian stepped by ref, its columns walked by the cursor (c.Columns).</summary>
+    [EcsSystem]
+    public ref struct ColumnWaveSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(ref Tile<Warmth, WavePlot> warmth)
+        {
+            warmth.ExchangeHalo();
+            foreach (var row in warmth.Rows(TileStencil.Layer))
+            {
+                var into = MemoryMarshal.Cast<Warmth, float>(warmth.Write(row));
+                foreach (var col in warmth.At(row).Columns(4))
+                {
+                    var here = col.Load128<float>();
+                    var alongX = -col.Load128<float>(-2) + 16f * col.Load128<float>(-1) - 30f * here + 16f * col.Load128<float>(1) - col.Load128<float>(2);
+                    var alongZ = -col.Load128<float>(0, 0, -2) + 16f * col.Load128<float>(0, 0, -1) - 30f * here + 16f * col.Load128<float>(0, 0, 1) - col.Load128<float>(0, 0, 2);
+                    (here + (alongX + alongZ) * (1f / 12) * Rate).CopyTo(into.Slice(col.X));
                 }
             }
         }

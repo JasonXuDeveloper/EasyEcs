@@ -47,8 +47,8 @@ public class TileRestartBenchmark
     /// <summary>The cells a spring moves per update: a step (its old scent still nearly right) or a hop of 8 (gone).</summary>
     [Params(1, 8)] public int Hop;
 
-    private World _restart, _turn, _linger, _hand;
-    private Dictionary<Plot, Entity> _restartPlates, _turnPlates, _lingerPlates, _handPlates;
+    private World _restart, _turn, _linger, _hand, _columns;
+    private Dictionary<Plot, Entity> _restartPlates, _turnPlates, _lingerPlates, _handPlates, _columnsPlates;
     private int _tick;
 
     [GlobalSetup]
@@ -56,6 +56,8 @@ public class TileRestartBenchmark
     {
         (_restart, _restartPlates) = Make(Threads, hand: false);
         _restart.AddSystem<TileRestartSystems.RestartSystem>();
+        (_columns, _columnsPlates) = Make(Threads, hand: false);
+        _columns.AddSystem<TileRestartSystems.RestartColumnsSystem>();
         (_turn, _turnPlates) = Make(Threads, hand: false);
         _turn.AddSystem<TileRestartSystems.TurnSystem>();
         (_linger, _lingerPlates) = Make(Threads, hand: false);
@@ -69,6 +71,8 @@ public class TileRestartBenchmark
         {
             Restart();
             _tick--;
+            RestartColumns();
+            _tick--;
             Turn();
             _tick--;
             Linger();
@@ -79,6 +83,7 @@ public class TileRestartBenchmark
         for (int i = 0; i < 2 * Plot.Side; i++)
         {
             _restart.Update();
+            _columns.Update();
             _turn.Update();
             _linger.Update();
             _hand.Update();
@@ -89,6 +94,7 @@ public class TileRestartBenchmark
             var cells = left.Current.Component2.AsReadOnlySpan();
             var pos = left.Current.Component1.Pos;
             if (!cells.SequenceEqual(_handPlates[pos].Read<DynamicBuffer<Odor>>().AsReadOnlySpan())
+                || !cells.SequenceEqual(_columnsPlates[pos].Read<DynamicBuffer<Odor>>().AsReadOnlySpan())
                 || !cells.SequenceEqual(_turnPlates[pos].Read<DynamicBuffer<Odor>>().AsReadOnlySpan())
                 || !cells.SequenceEqual(_lingerPlates[pos].Read<DynamicBuffer<Odor>>().AsReadOnlySpan()))
                 throw new InvalidOperationException($"the fields differ at {pos}");
@@ -99,6 +105,7 @@ public class TileRestartBenchmark
     public void Cleanup()
     {
         _restart.Dispose();
+        _columns.Dispose();
         _turn.Dispose();
         _linger.Dispose();
         _hand.Dispose();
@@ -116,6 +123,13 @@ public class TileRestartBenchmark
     {
         Move(_restartPlates, _tick++);
         _restart.Update();
+    }
+
+    [Benchmark]
+    public void RestartColumns()
+    {
+        Move(_columnsPlates, _tick++);
+        _columns.Update();
     }
 
     [Benchmark]
@@ -194,6 +208,27 @@ internal static class TileRestartSystems
                 var into = odor.Write(row);
                 for (int x = 0; x < 16; x++)
                     into[x] = new Odor(Rule(s[x, 0, 0].On != 0, c[x, 0, -1].V, c[x, 0, 1].V, c[x - 1, 0, 0].V, c[x + 1, 0, 0].V));
+            }
+        }
+    }
+
+    /// <summary>Restart with each row's cells walked by the cursor (c.Columns(1)): the neighbors at constant offsets of the column.</summary>
+    [EcsSystem]
+    public ref struct RestartColumnsSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16), GaussSeidel]
+        static void Settle(ref Tile<Odor, OdorPlot> odor, Tile<OdorSpring, OdorPlot> springs)
+        {
+            springs.ExchangeHalo(0, 0, mask: false);
+            odor.ExchangeHalo();
+            odor.Restart();
+            for (int z = 0; z < 16; z++) // a source term: every row
+            {
+                var row = new TileRow<OdorPlot>(0, z);
+                var s = springs.At(row);
+                var into = odor.Write(row);
+                foreach (var c in odor.At(row).Columns(1))
+                    into[c.X] = new Odor(Rule(s[c.X, 0, 0].On != 0, c[0, 0, -1].V, c[0, 0, 1].V, c[-1, 0, 0].V, c[1, 0, 0].V));
             }
         }
     }
