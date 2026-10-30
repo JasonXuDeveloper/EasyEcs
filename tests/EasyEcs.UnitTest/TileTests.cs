@@ -513,6 +513,85 @@ public partial class TileTests
         }
     }
 
+    // ---------------- the walk of a row's columns ----------------
+    // c.Columns(step) hands each column out with loads at offsets from it, checked against the walk's first and last
+    // column: what they read is what the cursor's indexer reads, and an offset whose load leaves the padded row from
+    // either column throws.
+
+    [Test]
+    public void AWalkOfColumnsReadsWhatTheIndexerReads()
+    {
+        using var world = new World();
+        var wide = Grid(world, Box(2, 1, 2), s => new WidePlate(s));
+        var deep = Grid(world, Box(2, 2, 2), s => new DeepColumn(s));
+        foreach (int step in new[] { 1, 2, 3, 5 })
+            Assert.That(Walk<WidePlate>(wide[0], step, 0), Is.EqualTo(new[] { 0, step, 2 * step, 3 * step, 4 * step }.Where(x => x < 5)));
+        foreach (int step in new[] { 1, 4, 8 })
+            Assert.That(Walk<DeepColumn>(deep[0], step, 3), Is.EqualTo(Enumerable.Range(0, 8).Where(x => x % step == 0)));
+
+        // Every offset a load may take from every column, the lanes against the indexer's cells.
+        static List<int> Walk<TTile>(Entity e, int step, int y) where TTile : struct, IComponent, ITile<TilePos>
+        {
+            var tile = TileOf<Cell, TTile>(e, out _);
+            tile.ExchangeHalo();
+            int r = TTile.Halo, w = TTile.Width, hy = TTile.Height > 1 ? r : 0, last = (w - 1) / step * step;
+            var xs = new List<int>();
+            for (int z = 0; z < TTile.Depth; z++)
+            {
+                var c = tile.At(new TileRow<TTile>(y, z));
+                xs.Clear();
+                foreach (var col in c.Columns(step))
+                {
+                    xs.Add(col.X);
+                    for (int dy = -hy; dy <= hy; dy++)
+                    for (int dz = -r; dz <= r; dz++)
+                    {
+                        for (int dx = -r; dx + last <= w + r - 1; dx++)
+                            Assert.That(col[dx, dy, dz].V, Is.EqualTo(c[col.X + dx, dy, dz].V), $"{typeof(TTile).Name} x {col.X} + {dx}, {dy}, {dz}");
+                        for (int dx = -r; dx + last + 3 <= w + r - 1; dx++)
+                        {
+                            var loaded = col.Load128<int>(dx, dy, dz);
+                            for (int lane = 0; lane < 4; lane++)
+                                Assert.That(loaded.GetElement(lane), Is.EqualTo(c[col.X + dx + lane, dy, dz].V), $"{typeof(TTile).Name} x {col.X} + {dx}, lane {lane}");
+                        }
+                    }
+                }
+            }
+            return xs;
+        }
+    }
+
+    [Test]
+    public void AWalkOfColumnsThrowsAtAnOffsetPastThePaddedRow()
+    {
+        using var world = new World();
+        var wide = Grid(world, Box(1, 1, 1), s => new WidePlate(s));
+        // WidePlate: 5 cells, a halo of 2, rows of 9 ints from -2 to 6.
+        Assert.Throws<ArgumentOutOfRangeException>(() => Read(wide[0], 0, 0, 0, 0, false));   // no step
+        Assert.Throws<ArgumentOutOfRangeException>(() => Read(wide[0], 6, 0, 0, 0, false));   // a step past the row
+        Assert.That(Read(wide[0], 5, 0, 0, 0, true), Is.Zero);                               // one column: 0 to 3
+        Assert.That(Read(wide[0], 4, -1, 0, 0, true), Is.Zero);                              // 0 and 4: from 3 to 6 at the last
+        Assert.Throws<ArgumentOutOfRangeException>(() => Read(wide[0], 4, 0, 0, 0, true));    // 4 to 7 at the last
+        Assert.Throws<ArgumentOutOfRangeException>(() => Read(wide[0], 1, -3, 0, 0, false));  // -3: before the halo
+        Assert.That(Read(wide[0], 4, 2, 0, 0, false), Is.Zero);                              // the cell at 6, the last
+        Assert.Throws<ArgumentOutOfRangeException>(() => Read(wide[0], 4, 3, 0, 0, false));   // 7
+        Assert.Throws<ArgumentOutOfRangeException>(() => Read(wide[0], 1, 0, 0, 3, false));   // past the halo north or south
+        Assert.Throws<ArgumentOutOfRangeException>(() => Read(wide[0], 1, 0, 1, 0, true));    // a 2D tile has no layer above
+
+        static int Read(Entity e, int step, int dx, int dy, int dz, bool vector)
+        {
+            var tile = TileOf<Cell, WidePlate>(e, out _);
+            tile.ExchangeHalo();
+            int wrong = 0;
+            var c = tile.At(new TileRow<WidePlate>(0, 3));
+            foreach (var col in c.Columns(step))
+                wrong += vector
+                    ? (col.Load128<int>(dx, dy, dz).GetElement(0) == c[col.X + dx, dy, dz].V ? 0 : 1)
+                    : (col[dx, dy, dz].V == c[col.X + dx, dy, dz].V ? 0 : 1);
+            return wrong;
+        }
+    }
+
     // ---------------- the active rows ----------------
 
     [TestCase(TileStencil.Self)]
