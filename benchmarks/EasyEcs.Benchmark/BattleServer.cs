@@ -361,12 +361,12 @@ public ref struct KillFeedSystem                                          // the
 
 // #region requests
 /// <summary>
-/// What a client asks of one unit: [ForEntity] writes the job <c>entity.Run</c> runs (one table lookup, Health its
+/// What a client asks of one unit: [EntityMethod] writes the job <c>entity.Run</c> runs (one table lookup, Health its
 /// WriteMask) and the entry point <c>Requests.TakeHit(unit, damage)</c>. The write is replicated with the next send.
 /// </summary>
 public static class Requests
 {
-    [ForEntity, Without<Dead>]
+    [EntityMethod, Without<Dead>]
     static void TakeHit(ref Health hp, int damage) => hp.Value -= damage;
 }
 // #endregion requests

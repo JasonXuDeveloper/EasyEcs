@@ -5,12 +5,12 @@ namespace EasyEcs.Benchmark;
 /// <summary>
 /// Requests on one entity at a time: 1,000 calls, each on another of 10,000 units (a tenth of them dead), applying a
 /// hit to <c>Health</c> (tracked) and counting it in <c>Hits</c>, refused for a dead unit. <c>Handwritten</c> is the
-/// struct job and <c>static readonly</c> filter a request handler writes for <c>entity.Run</c>; <c>ForEntity</c> is
-/// the same method declared with <c>[ForEntity, Without&lt;Dead&gt;]</c>, run through its generated entry point;
-/// <c>ForEntityChanged</c> adds <c>[Changed&lt;Health&gt;]</c> (every unit passes: tick 1). 0 bytes every way.
+/// struct job and <c>static readonly</c> filter a request handler writes for <c>entity.Run</c>; <c>EntityMethod</c> is
+/// the same method declared with <c>[EntityMethod, Without&lt;Dead&gt;]</c>, run through its generated entry point;
+/// <c>EntityMethodChanged</c> adds <c>[Changed&lt;Health&gt;]</c> (every unit passes: tick 1). 0 bytes every way.
 /// </summary>
 [MemoryDiagnoser]
-public class ForEntityBenchmark
+public class EntityMethodBenchmark
 {
     private const int Count = 10_000, Calls = 1_000;
 
@@ -24,7 +24,7 @@ public class ForEntityBenchmark
         _units = new Entity[Count];
         _world.CreateEntities(_units, new Health(1_000_000), new Hits(0));
         for (int i = 0; i < Count; i += 10) _units[i].Set(new Dead());
-        for (int i = 0; i < 10; i++) { Handwritten(); ForEntity(); }
+        for (int i = 0; i < 10; i++) { Handwritten(); EntityMethod(); }
     }
 
     [GlobalCleanup]
@@ -44,7 +44,7 @@ public class ForEntityBenchmark
     }
 
     [Benchmark]
-    public int ForEntity()
+    public int EntityMethod()
     {
         int done = 0;
         for (int i = 0; i < Calls; i++)
@@ -54,7 +54,7 @@ public class ForEntityBenchmark
 
     /// <summary>The method with <c>[Changed&lt;Health&gt;]</c> too: its entry point takes the tick to look back from.</summary>
     [Benchmark]
-    public int ForEntityChanged()
+    public int EntityMethodChanged()
     {
         int done = 0;
         for (int i = 0; i < Calls; i++)
@@ -82,15 +82,15 @@ public class ForEntityBenchmark
 
 public static class UnitRequests
 {
-    [ForEntity, Without<ForEntityBenchmark.Dead>]
-    static void Hit(ref ForEntityBenchmark.Health hp, ref ForEntityBenchmark.Hits hits, int damage)
+    [EntityMethod, Without<EntityMethodBenchmark.Dead>]
+    static void Hit(ref EntityMethodBenchmark.Health hp, ref EntityMethodBenchmark.Hits hits, int damage)
     {
         hp.Value -= damage;
         hits.Count++;
     }
 
-    [ForEntity, Without<ForEntityBenchmark.Dead>, Changed<ForEntityBenchmark.Health>]
-    static void HitIfHit(ref ForEntityBenchmark.Health hp, ref ForEntityBenchmark.Hits hits, int damage)
+    [EntityMethod, Without<EntityMethodBenchmark.Dead>, Changed<EntityMethodBenchmark.Health>]
+    static void HitIfHit(ref EntityMethodBenchmark.Health hp, ref EntityMethodBenchmark.Hits hits, int damage)
     {
         hp.Value -= damage;
         hits.Count++;

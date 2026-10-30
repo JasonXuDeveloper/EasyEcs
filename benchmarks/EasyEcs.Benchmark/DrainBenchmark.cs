@@ -6,11 +6,11 @@ namespace EasyEcs.Benchmark;
 /// Records handled once: per operation, <see cref="Records"/> records are appended to <c>Emitted&lt;Hit&gt;</c> (what
 /// passes taking an <c>Emit&lt;Hit&gt;</c> leave), then handled in order into a singleton and cleared. <c>HandWritten</c>
 /// is a system's update as EECS109 finds it: the singleton and the list taken by ref, the walk, the Clear;
-/// <c>ForEachRecord</c> is the generated pass of a <c>[ForEachRecord]</c> method with the same body, taking the singleton
+/// <c>Drain</c> is the generated pass of a <c>[Drain]</c> method with the same body, taking the singleton
 /// by ref. Both leave the same tally (checked in setup). Steady state allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
-public class RecordBenchmark
+public class DrainBenchmark
 {
     [Params(1_000, 100_000)] public int Records;
 
@@ -26,11 +26,11 @@ public class RecordBenchmark
         _world.GetOrAddSingleton<Tally>();
         long hand = HandWritten();
         _world.GetSingleton<Tally>() = default;
-        if (hand != ForEachRecord()) throw new System.InvalidOperationException("the two passes differ");
+        if (hand != Drain()) throw new System.InvalidOperationException("the two passes differ");
         for (int i = 0; i < 10; i++)
         {
             HandWritten();
-            ForEachRecord();
+            Drain();
         }
     }
 
@@ -53,7 +53,7 @@ public class RecordBenchmark
     }
 
     [Benchmark]
-    public long ForEachRecord()
+    public long Drain()
     {
         _world.GetOrAddSingleton<Emitted<Hit>>().Items.AddRange(_hits);
         HitRecords.Book(_world);
@@ -72,8 +72,8 @@ public class RecordBenchmark
 
 public static class HitRecords
 {
-    [ForEachRecord]
-    public static void Book(in RecordBenchmark.Hit hit, ref RecordBenchmark.Tally tally)
+    [Drain]
+    public static void Book(in DrainBenchmark.Hit hit, ref DrainBenchmark.Tally tally)
     {
         tally.Total += hit.Amount;
         tally.Order = tally.Order * 31 + hit.Target;
