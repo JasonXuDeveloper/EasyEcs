@@ -6,7 +6,7 @@
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
         <IsPackable>false</IsPackable>
-        <!-- [SkipLocalsInit] (WaterFlowSystem: a stackalloc'd texture Pad writes whole) needs it; no unsafe code. -->
+        <!-- [SkipLocalsInit] (ScentStepSystem: stackalloc'd buffers it writes whole) needs it; no unsafe code. -->
         <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
         <!-- Read by Native AOT only (dotnet publish -p:PublishAot=true): compile for the CPU of the machine that
              publishes, or the Vector512 tier of the generated vector loops is compiled out. A fleet names a level
