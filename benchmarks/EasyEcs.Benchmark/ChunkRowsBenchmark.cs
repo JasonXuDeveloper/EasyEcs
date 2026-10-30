@@ -32,13 +32,13 @@ public class ChunkRowsBenchmark
                 _world.AddSystem<Move>();
                 break;
             case Body.Heavy:
-                var waypoints = new ParallelForEachBenchmark.Waypoints();
-                for (int i = 0; i < ParallelForEachBenchmark.Waypoints.Count; i++) waypoints[i] = (MathF.Cos(i) * 5_000, MathF.Sin(i) * 5_000);
-                _world.AddSingleton<ParallelForEachBenchmark.Waypoints>() = waypoints;
-                _world.CreateEntities(new Entity[Entities], new ParallelForEachBenchmark.Agent(0, 0, 1, 0));
+                var waypoints = new ParallelPassBenchmark.Waypoints();
+                for (int i = 0; i < ParallelPassBenchmark.Waypoints.Count; i++) waypoints[i] = (MathF.Cos(i) * 5_000, MathF.Sin(i) * 5_000);
+                _world.AddSingleton<ParallelPassBenchmark.Waypoints>() = waypoints;
+                _world.CreateEntities(new Entity[Entities], new ParallelPassBenchmark.Agent(0, 0, 1, 0));
                 int n = 0;
-                foreach (var item in _world.Query<ParallelForEachBenchmark.Agent>())
-                    item.Component1 = new ParallelForEachBenchmark.Agent(n % 10_000, n++ / 10, 1, 0);
+                foreach (var item in _world.Query<ParallelPassBenchmark.Agent>())
+                    item.Component1 = new ParallelPassBenchmark.Agent(n % 10_000, n++ / 10, 1, 0);
                 _world.AddSystem<Steer>();
                 break;
             case Body.Uneven:
@@ -83,8 +83,8 @@ public class ChunkRowsBenchmark
     public ref struct Steer
     {
         [ForEach(Parallel = true)]
-        static void Run(ref ParallelForEachBenchmark.Agent agent, in ParallelForEachBenchmark.Waypoints waypoints) =>
-            ParallelForEachBenchmark.SteerAgent(ref agent, in waypoints);
+        static void Run(ref ParallelPassBenchmark.Agent agent, in ParallelPassBenchmark.Waypoints waypoints) =>
+            ParallelPassBenchmark.SteerAgent(ref agent, in waypoints);
     }
 
     [EcsSystem]

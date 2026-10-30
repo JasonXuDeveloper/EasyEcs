@@ -10,7 +10,7 @@ namespace EasyEcs.Benchmark;
 /// Steady state must allocate 0 bytes per tick either way.
 /// </summary>
 [MemoryDiagnoser]
-public class ParallelForEachBenchmark
+public class ParallelPassBenchmark
 {
     [Params(100_000)] public int Entities;
     [Params(false, true)] public bool Parallel;

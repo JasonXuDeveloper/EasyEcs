@@ -14,7 +14,7 @@ namespace EasyEcs.Benchmark;
 /// (records in the order threads happen to add them), and an <see cref="Interlocked"/> cursor into a preallocated
 /// array (the same, without the queue's segments). Every variant ends with the records collected (Emit: the chunks'
 /// lists handed to Emitted, in order) and clears them, as the applying system would. Half the attackers hit (the others are out of range). <c>EmitParallelThenRead</c> and
-/// <c>EmitParallelThenRecords</c> also walk the records: as one span (the chunks' lists joined), and through a
+/// <c>EmitParallelThenDrain</c> also walk the records: as one span (the chunks' lists joined), and through a
 /// <c>[Drain]</c> pass (walked where the chunks left them).
 /// </summary>
 [MemoryDiagnoser]
@@ -42,7 +42,7 @@ public class EmitBenchmark
         _collected.Capacity = Attackers;
         _world.GetOrAddSingleton<Emitted<Hit>>().Items.EnsureCapacity(Attackers);
         _world.GetOrAddSingleton<Damage>();
-        if (EmitParallelThenRecords() != EmitParallelThenRead()) throw new System.InvalidOperationException("the two walks differ");
+        if (EmitParallelThenDrain() != EmitParallelThenRead()) throw new System.InvalidOperationException("the two walks differ");
     }
 
     [GlobalCleanup]
@@ -82,7 +82,7 @@ public class EmitBenchmark
 
     /// <summary>The parallel pass, then a <c>[Drain]</c> pass over the records (which clears them).</summary>
     [Benchmark]
-    public long EmitParallelThenRecords()
+    public long EmitParallelThenDrain()
     {
         Strikes.Emitting(_world);
         _world.GetSingleton<Damage>().Total = 0;

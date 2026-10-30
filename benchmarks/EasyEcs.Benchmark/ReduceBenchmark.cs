@@ -122,7 +122,7 @@ public partial class ReduceBenchmark
     }
 
     [Benchmark]
-    public long SumParallelFor()
+    public long SumDotNetParallelFor()
     {
         s_total = 0;
         Parallel.For(0, Entities, NoTotal, AddScore, AddTotal);
@@ -130,7 +130,7 @@ public partial class ReduceBenchmark
     }
 
     [Benchmark]
-    public long SumParallelForOptions()
+    public long SumDotNetParallelForOptions()
     {
         s_total = 0;
         Parallel.For(0, Entities, Options, NoTotal, AddScore, AddTotal);
@@ -138,7 +138,7 @@ public partial class ReduceBenchmark
     }
 
     [Benchmark]
-    public long SumParallelForChunks()
+    public long SumDotNetParallelForChunks()
     {
         Parallel.For(0, s_chunks, SumChunk);
         long total = 0;
@@ -171,7 +171,7 @@ public partial class ReduceBenchmark
     }
 
     [Benchmark]
-    public float MassParallelFor()
+    public float MassDotNetParallelFor()
     {
         s_mass = 0;
         Parallel.For(0, Entities, NoMass, AddWeight, AddMass);
@@ -179,7 +179,7 @@ public partial class ReduceBenchmark
     }
 
     [Benchmark]
-    public float MassParallelForChunks()
+    public float MassDotNetParallelForChunks()
     {
         Parallel.For(0, s_chunks, MassChunk);
         float total = 0;
