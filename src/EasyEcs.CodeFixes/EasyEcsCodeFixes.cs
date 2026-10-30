@@ -143,6 +143,10 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                     && relaxed.AttributeLists.SelectMany(l => l.Attributes).Any(IsForEach):
                     Register(context, diagnostic, "Settle each tile in place with [GaussSeidel]", root, relaxed, WithGaussSeidel(relaxed));
                     break;
+                case "EECS116" when kind == "Step" && diagnostic.AdditionalLocations.Count == 1:
+                    context.RegisterCodeFix(CodeAction.Create("Step the tile by ref and write its rows with Write(row) (then delete this commit and the buffer it copies)",
+                        token => SteppedByRef(context.Document, diagnostic, token), diagnostic.Id + "Step"), diagnostic);
+                    break;
                 case "EECS119" when kind == "Collected" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } hook
                                     && Collected(root, hook, diagnostic.Properties) is { } collected:
                     context.RegisterCodeFix(CodeAction.Create("Run the rows in a [ForEach(MaxRows = N)] method",

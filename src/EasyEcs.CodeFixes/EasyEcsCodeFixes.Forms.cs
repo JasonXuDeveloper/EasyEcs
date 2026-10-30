@@ -184,6 +184,82 @@ public sealed partial class EasyEcsCodeFixes
     }
 
     /// <summary>
+    /// EECS116: the step that writes a second buffer beside its tile (the diagnostic's additional location, in any
+    /// document) steps the tile by ref: the tile parameter becomes 'ref', the buffer parameter goes, the body's
+    /// <c>var into = ...next...;</c> and <c>into.Clear();</c> go, and the row loop declares <c>into</c> over
+    /// <c>tile.Write(row)</c> (through <c>MemoryMarshal.Cast</c> to the lanes it was cast to, or to the buffer's element),
+    /// each slice or index at <c>row.Index</c> (+ a term) taken at the term. The commit and the buffer type stay for the
+    /// user to delete (the analyzer's properties name what to rewrite; it checked that this is all there is).
+    /// </summary>
+    private static async Task<Solution> SteppedByRef(Document document, Diagnostic diagnostic, CancellationToken token)
+    {
+        var solution = document.Project.Solution;
+        var props = diagnostic.Properties;
+        var where = diagnostic.AdditionalLocations[0];
+        var target = solution.GetDocument(where.SourceTree) ?? document;
+        var root = await target.GetSyntaxRootAsync(token).ConfigureAwait(false);
+        if (root?.FindNode(where.SourceSpan).FirstAncestorOrSelf<MethodDeclarationSyntax>() is not { Body: { } body } method
+            || props["Tile"] is not { } tileName || props["Next"] is not { } nextName || props["Into"] is not { } intoName
+            || props["Cell"] is not { } cell || props["NextCell"] is not { } nextCell)
+            return solution;
+        props.TryGetValue("Lane", out var lane);
+
+        var declaration = body.Statements.OfType<LocalDeclarationStatementSyntax>()
+            .FirstOrDefault(s => s.Declaration.Variables is { Count: 1 } v && v[0].Identifier.ValueText == intoName);
+        var rows = body.DescendantNodes().OfType<ForEachStatementSyntax>().FirstOrDefault(f =>
+            f.Expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Rows", Expression: IdentifierNameSyntax t } }
+            && t.Identifier.ValueText == tileName && f.Statement.DescendantNodes().OfType<IdentifierNameSyntax>().Any(i => i.Identifier.ValueText == intoName));
+        if (declaration?.Declaration.Variables[0].Initializer?.Value is not { } init || rows == null) return solution;
+        string row = rows.Identifier.ValueText;
+
+        // The new initializer: the span of the next buffer becomes the row Write hands out, cast as before.
+        var write = SyntaxFactory.ParseExpression($"{tileName}.Write({row})");
+        var span = init.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>().First(i =>
+            i.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "AsSpan" } a && a.Expression.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>().Any(n => n.Identifier.ValueText == nextName));
+        bool qualified = root.DescendantNodes().OfType<UsingDirectiveSyntax>().Any(u => u.Name?.ToString() == "System.Runtime.InteropServices");
+        string marshal = qualified ? "MemoryMarshal" : "System.Runtime.InteropServices.MemoryMarshal";
+        var value = lane == null ? SyntaxFactory.ParseExpression($"{marshal}.Cast<{cell}, {nextCell}>({write})")
+            : lane == cell ? write
+            : init.ReplaceNodes(new SyntaxNode[] { span, init.DescendantNodes().OfType<GenericNameSyntax>().First(g => g.Identifier.ValueText == "Cast").TypeArgumentList.Arguments[0] },
+                (old, _) => old == span ? write : SyntaxFactory.ParseTypeName(cell));
+        var declared = declaration.WithDeclaration(declaration.Declaration.WithVariables(SyntaxFactory.SingletonSeparatedList(
+            declaration.Declaration.Variables[0].WithInitializer(SyntaxFactory.EqualsValueClause(value.WithoutTrivia()))))).WithoutLeadingTrivia().WithTrailingTrivia(SyntaxFactory.ElasticCarriageReturnLineFeed);
+
+        // Each use in the row loop: at row.Index (+ a term) becomes at the term.
+        var uses = rows.Statement.DescendantNodes().Where(n => n switch
+        {
+            InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Slice", Expression: IdentifierNameSyntax i } } => i.Identifier.ValueText == intoName,
+            ElementAccessExpressionSyntax { Expression: IdentifierNameSyntax i } => i.Identifier.ValueText == intoName,
+            _ => false,
+        }).ToArray();
+        static ExpressionSyntax? Term(ExpressionSyntax at) => at is BinaryExpressionSyntax sum ? sum.Right : null; // row.Index alone: no term
+        var statement = rows.Statement.ReplaceNodes(uses, (_, now) => now switch
+        {
+            InvocationExpressionSyntax slice => Term(slice.ArgumentList.Arguments[0].Expression) is { } term
+                ? slice.WithArgumentList(slice.ArgumentList.WithArguments(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(term.WithoutTrivia()))))
+                : ((MemberAccessExpressionSyntax)slice.Expression).Expression.WithTriviaFrom(slice),
+            ElementAccessExpressionSyntax index => index.WithArgumentList(index.ArgumentList.WithArguments(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(
+                Term(index.ArgumentList.Arguments[0].Expression)?.WithoutTrivia() ?? SyntaxFactory.LiteralExpression(SyntaxKind.NumericLiteralExpression, SyntaxFactory.Literal(0)))))),
+            _ => now,
+        });
+        var loopBody = statement is BlockSyntax block ? block.WithStatements(block.Statements.Insert(0, declared))
+            : SyntaxFactory.Block(declared, statement.WithoutLeadingTrivia());
+        var stepped = body.ReplaceNode(rows, rows.WithStatement(loopBody.WithAdditionalAnnotations(Microsoft.CodeAnalysis.Formatting.Formatter.Annotation)));
+
+        // The declaration and the clears of the whole buffer go (the pass zeroes the rows the step skips).
+        var gone = stepped.Statements.Where(s => s is LocalDeclarationStatementSyntax { Declaration.Variables: { Count: 1 } v } && v[0].Identifier.ValueText == intoName
+            || s is ExpressionStatementSyntax { Expression: InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Clear", Expression: IdentifierNameSyntax i } } } && i.Identifier.ValueText == intoName);
+        stepped = stepped.RemoveNodes(gone, SyntaxRemoveOptions.KeepNoTrivia)!;
+
+        var parameters = method.ParameterList.Parameters;
+        var tile = parameters.First(p => p.Identifier.ValueText == tileName);
+        parameters = parameters.Replace(tile, Modify(tile, SyntaxKind.RefKeyword));
+        parameters = parameters.Remove(parameters.First(p => p.Identifier.ValueText == nextName));
+        var rewritten = method.WithBody(stepped).WithParameterList(method.ParameterList.WithParameters(parameters));
+        return solution.WithDocumentSyntaxRoot(target.Id, root.ReplaceNode(method, rewritten));
+    }
+
+    /// <summary>
     /// EECS080: the job struct as a static class with an [EntityMethod] method Run (the job's fields its last parameters,
     /// in their order), each creation and Run call as one call of the entry point, and the filter field gone once
     /// nothing else uses it.
