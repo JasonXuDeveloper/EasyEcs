@@ -55,6 +55,7 @@ public class MaxRowsBenchmark
     private int Refill(int served)
     {
         int loaded = _world.DestroyAll<Loaded>();
+        _world.Reserve<Request>(served);
         for (int i = 0; i < served; i++) _world.CreateEntity(new Request(_next++));
         return loaded;
     }
