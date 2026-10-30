@@ -122,10 +122,24 @@ A second proposal, **not built**: an Info rule reporting a `TileCursor` load in 
 such load is still correct (checked); the rule would only tell the user why it is slower. Worth it once a user's
 stencil shows up with that shape; the reasons are already the cases `TileLoad.Read` returns null for.
 
-**For the owner to decide before merging:** Laplacian ping-pong at Side 512 (out of cache) is slower than base in two
-independent sets of 4 interleaved rounds: +7.4 % at 1 thread (rounds 1-4), +7.2 % at 1 thread and +3.9 % at 4 threads
-(rounds 6-9, ping-pong alone), while the blur at 512 is 2-4 % faster and the Laplacian stays below hand there (0.90x).
-The Tier1 loop is shorter, so the cause is not the instructions counted; candidates are loop alignment or the per-row
-frame changes in `TileSteps`. Merge as is (in-cache gains everywhere), or root-cause first (bisect the `TileSteps`
-frame change from the interceptor with the same benchmark).
+**Reverted: the per-tile frame changes (TileSteps.Begin, Tile.Frame, the static TileRows.Visit, the unchecked
+Jacobi row of Tile.Write).** The first measurement of both halves together showed the Laplacian ping-pong at Side 512
+5-7 % slower than the base, so the halves were built apart on the base (09622ba) and run in 4 interleaved rounds of the
+Laplacian ping-pong. The frame half won nothing anywhere: 1.020x / 1.054x at Side 32, 1.012x / 1.063x at Side 512 (1 /
+4 threads). Its Tier1 says why: splitting Enter into Enter and Begin adds a call per tile and returns the Tile (a ref
+struct) through a hidden return buffer; Enter and Begin take 158 instructions with 23 stack operands against 116 and 8
+for Enter alone, more than the two thread-static reads per tile it saved. What would change the verdict: a design that
+reads the frame once without a second call (Enter handing the tile out through an out parameter the job keeps in a
+register), measured on TileActive and TileWoken, where the per-tile cost matters more than in a dense stencil.
+
+**Kept: the tile-load interceptor.** Alone against the base, 8 interleaved rounds of the Laplacian ping-pong: 0.987x and
+0.988x at Side 32, 0.997x at Side 512 on 4 threads, and at Side 512 on 1 thread the paired per-round ratios 1.029,
+1.081, 1.014, 1.032, 1.038, 1.003, 0.987, 0.964 (median 1.022, standard deviation 0.035, the base itself moving 15 %
+between rounds). In 3 more rounds of the ping-pong steps: Laplacian 0.92-0.97x, Blur9 0.94-1.01x, Side 512 on 4 threads
+0.89x / 0.95x; TileActive PingPong at Side 512 1.03-1.04x, a pass whose time is the walk over sleeping tiles, which the
+interceptor does not change. The step's loop is shorter with PGO on and off (52 against 66 and 47 against 61
+instructions, no spill, no movsxd; neither loop gets alignment padding), so no mechanism in the generated code explains
+a slower out-of-cache case: the swings at Side 512 are the size of what code the change does not touch moves on this
+machine (a 4-vCPU VM, no hardware counters, an L3 shared with other tenants). What would change the verdict: a quiet
+machine (the owner's M4 or a bare-metal x64) showing Side 512 slower in paired rounds.
 

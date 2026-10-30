@@ -31,17 +31,13 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Tile reads checked once** (owner, 2026-10-29: "先合并，再修读取"; branch `feat-tile-reads`, not merged: the Laplacian 512 regression below is being split and root-caused):
-      the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop with one
-      check per loop folded by the JIT and a zero-extended index (no public API); TileSteps.Begin reads the thread's
-      frame once per tile, the row walk stays in registers, a Jacobi row skips its span check. Tier1: the blur's
-      column loop 42 -> 36 instructions, the Laplacian's 61 -> 48 (hand: 33), no movsxd or column compare left.
-      BDN, 4 interleaved rounds (Woken 2): ping-pong 5-7 % faster in cache, at or below hand everywhere but
-      Laplacian 32x32 at 1 thread (1.14x hand, was 1.16x: the index arithmetic of `dx`, owner-review "Tile loads:
-      the Laplacian gap left"); Laplacian ping-pong at 512 (out of cache) is slower than base in both runs: +7.4 % at 1 thread in rounds
-      1-4, +7.2 % at 1 thread and +3.9 % at 4 threads in 4 more rounds of the ping-pong alone, unexplained (the blur
-      at 512 is 2-4 % faster) and still at or below hand there (0.90x);
-      VoxelServer, WorldSimulation, BattleServer within noise; 0 B.
+- [ ] **Tile reads checked once** (owner, 2026-10-29: "先合并，再修读取"; branch `feat-tile-reads`, merged with 09622ba,
+      waiting for the coordinator's verdict): the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy,
+      dz)` in a proven column loop with one check per loop folded by the JIT and a zero-extended index (no public API).
+      Tier1: the Laplacian's column loop 61 -> 47 instructions (PGO on: 66 -> 52; hand: 33), the blur's 42 -> 36. The
+      per-tile frame half was measured apart and reverted (owner-review "Tile loads"); the interceptor alone: Laplacian
+      ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise (paired median 1.022 at 1 thread, 0.997 at 4),
+      Blur9 0.94-1.01x, 0 B; Laplacian 32x32 at 1 thread stays above hand (owner-review "the Laplacian gap left").
 - [ ] **Switches and patterns become masks** (item 8j, branch `feat-switch-masks`).
 - [ ] **Constructors and helpers of another assembly** (item 8g, branch `feat-foreign-bodies`).
 
