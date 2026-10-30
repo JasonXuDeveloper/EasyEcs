@@ -4,7 +4,7 @@ namespace EasyEcs;
 
 /// <summary>
 /// A set of component and singleton types, built once and kept (a <c>static readonly</c> field): the components a save
-/// writes (<see cref="World.SaveEntitiesWith"/>), the
+/// writes (<see cref="World.SaveEntitiesWith"/>) or a copy carries (<see cref="World.CopyEntities{TTag}"/>), the
 /// record of what persists without the runtime state around it; or, for a restart, the types a whole-world save leaves
 /// out (<see cref="World.SaveWithout"/>) and the singletons a load keeps
 /// (<see cref="World.LoadKeeping"/>).
@@ -59,6 +59,9 @@ public readonly struct ComponentSet
     public bool ContainsSingleton<T>() where T : struct, ISingletonComponent => ContainsSingleton(SingletonType<T>.Index);
 
     internal bool Contains(int bit) => _bits.HasBit(bit);
+
+    /// <summary>The component bits of the set (<see cref="World.CopyEntities{TTag}"/> compares sets by them).</summary>
+    internal BitMask Components => _bits;
 
     internal bool ContainsSingleton(int slot) => _singletons.HasBit(slot);
 

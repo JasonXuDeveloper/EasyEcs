@@ -294,6 +294,9 @@ internal abstract class ComponentInfo
     /// </summary>
     public abstract void Remap(Array column, int start, int count, IdMap map);
 
+    /// <summary>Whether <see cref="Remap"/> changes anything: a buffer (its list is made the arrival's own) or a type with <see cref="EntityId"/> fields.</summary>
+    public abstract bool Remaps { get; }
+
     /// <summary>Write unmanaged rows (<c>count × Size</c> bytes) for a save: canonical when the generator registered the type.</summary>
     public abstract void WriteRows(ref Writer writer, ReadOnlySpan<byte> rows);
 
@@ -367,6 +370,8 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
     public override int SavedSize => default(T) is IBuffer ? Buffer.RowSize : TypeRegistry.RowSize<T>();
 
     public override int SavedLayout => default(T) is IBuffer ? Buffer.Layout : TypeRegistry.RowSize<T>() != 0 ? TypeRegistry.RawLayout<T>.Hash : 0;
+
+    public override bool Remaps => default(T) is IBuffer || TypeRegistry.EntityIdOffsets<T>.Value.Length != 0;
 
     public override void Remap(Array column, int start, int count, IdMap map)
     {

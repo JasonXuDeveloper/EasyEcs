@@ -837,47 +837,93 @@ internal sealed class Archetype
     }
 
     /// <summary>
-    /// Copy rows [<paramref name="from"/>, +<paramref name="count"/>) of <paramref name="source"/>, a table with the same
-    /// components (of any world: columns line up, bits are global), into the new rows from <paramref name="to"/>: as
-    /// <see cref="CloneRows"/> does for one row, with one block copy per unmanaged column. With <paramref name="take"/>
-    /// the source's buffer lists move instead of being copied, and its rows are left without them (a load's private
-    /// world, whose rows serve nothing else). Inside the structural gate.
+    /// Copy rows [<paramref name="from"/>, +<paramref name="count"/>) of <paramref name="source"/> (of any world: bits are
+    /// global), or the <paramref name="count"/> rows <paramref name="rows"/> lists (a gather: rows of one table that do
+    /// not follow each other), into the new rows from <paramref name="to"/>: as <see cref="CloneRows"/> does for one row,
+    /// with one block copy per unmanaged column of a run. The table has the same components as <paramref name="source"/>
+    /// (its columns line up), or a subset of them plus components the source lacks (a copy of some components with a
+    /// tag, <see cref="World.CopyEntities{TTag}"/>): those hold their default value, present and written at
+    /// <paramref name="tick"/>. With <paramref name="take"/> the source's buffer lists move instead of being copied, and
+    /// its rows are left without them (a load's private world, whose rows serve nothing else). Inside the structural gate.
     /// </summary>
-    public void CopyRun(Archetype source, int from, int to, int count, ulong tick, bool take = false)
+    public void CopyRun(Archetype source, int from, int to, int count, ulong tick, bool take = false, ReadOnlySpan<int> rows = default)
     {
+        bool gather = !rows.IsEmpty;
+        // The same components: the same columns (both sorted by bit); else each column found by its bit.
+        bool same = source.Columns.Length == Columns.Length && source.ComponentMask.Equals(in ComponentMask);
         for (int c = 0; c < Columns.Length; c++)
         {
             var info = Info(c);
             if (info.Owner >= 0)
             {
-                int owner = ColumnIndex(info.Owner);
-                if (source.Bits(owner) == null) StampRange(c, to, count, tick);
+                int owner = same ? ColumnIndex(info.Owner) : source.ColumnIndex(info.Owner);
+                if (owner < 0 || source.Bits(owner) == null) StampRange(c, to, count, tick);
                 else
                     for (int r = 0; r < count; r++)
-                        if (source.Has(owner, from + r)) StampRange(c, to + r, 1, tick);
+                        if (source.Has(owner, gather ? rows[r] : from + r)) StampRange(c, to + r, 1, tick);
                         else ClearTicks(c, to + r, 1);
                 continue;
             }
 
-            bool all = source.Bits(c) == null; // every source row has the component
+            int s = same ? c : source.ColumnIndex(Components[c]);
+            if (s < 0) // a component the source lacks (new rows are present in every column): its default value
+            {
+                if (info.Managed) info.Clear(Columns[c], to, count);
+                else Unsafe.InitBlockUnaligned(ref Unsafe.Add(ref Aligned(Columns[c]), (nint)to * info.Size), 0, (uint)(count * info.Size));
+                continue;
+            }
+
+            bool all = source.Bits(s) == null; // every source row has the component
             if (info.Managed)
                 for (int r = 0; r < count; r++)
                 {
-                    if (!all && !source.Has(c, from + r) && !(source.HasDisabled && source.Keeps(c, from + r))) continue;
-                    if (!take || !info.IsBuffer) info.CloneManaged(source.Columns[c], from + r, Columns[c], to + r);
+                    int row = gather ? rows[r] : from + r;
+                    if (!all && !source.Has(s, row) && !(source.HasDisabled && source.Keeps(s, row))) continue;
+                    if (!take || !info.IsBuffer) info.CloneManaged(source.Columns[s], row, Columns[c], to + r);
                     else
                     {
-                        info.CopyManaged(source.Columns[c], from + r, Columns[c], to + r);
-                        info.Clear(source.Columns[c], from + r, 1); // the list moved: the next load takes another
+                        info.CopyManaged(source.Columns[s], row, Columns[c], to + r);
+                        info.Clear(source.Columns[s], row, 1); // the list moved: the next load takes another
                     }
                 }
-            else
+            else if (!gather)
                 Unsafe.CopyBlockUnaligned(ref Unsafe.Add(ref Aligned(Columns[c]), (nint)to * info.Size),
-                    ref Unsafe.Add(ref Aligned(source.Columns[c]), (nint)from * info.Size), (uint)(count * info.Size));
+                    ref Unsafe.Add(ref Aligned(source.Columns[s]), (nint)from * info.Size), (uint)(count * info.Size));
+            else Gather(ref Aligned(source.Columns[s]), rows[..count], ref Unsafe.Add(ref Aligned(Columns[c]), (nint)to * info.Size), info.Size);
 
             if (all) continue;
             for (int r = 0; r < count; r++)
-                if (!source.Has(c, from + r)) MarkAbsent(c, to + r, keep: source.HasDisabled && source.Keeps(c, from + r));
+            {
+                int row = gather ? rows[r] : from + r;
+                if (!source.Has(s, row)) MarkAbsent(c, to + r, keep: source.HasDisabled && source.Keeps(s, row));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Copy the values of <paramref name="rows"/> of a column starting at <paramref name="source"/> one after another
+    /// into <paramref name="target"/>: one load and store per row for the common sizes, a block copy for the others.
+    /// </summary>
+    private static void Gather(ref byte source, ReadOnlySpan<int> rows, ref byte target, int size)
+    {
+        switch (size)
+        {
+            case 4:
+                for (int r = 0; r < rows.Length; r++)
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref target, (nint)r * 4), Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref source, (nint)rows[r] * 4)));
+                return;
+            case 8:
+                for (int r = 0; r < rows.Length; r++)
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref target, (nint)r * 8), Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref source, (nint)rows[r] * 8)));
+                return;
+            case 16:
+                for (int r = 0; r < rows.Length; r++)
+                    Unsafe.WriteUnaligned(ref Unsafe.Add(ref target, (nint)r * 16), Unsafe.ReadUnaligned<Vector128<byte>>(ref Unsafe.Add(ref source, (nint)rows[r] * 16)));
+                return;
+            default:
+                for (int r = 0; r < rows.Length; r++)
+                    Unsafe.CopyBlockUnaligned(ref Unsafe.Add(ref target, (nint)r * size), ref Unsafe.Add(ref source, (nint)rows[r] * size), (uint)size);
+                return;
         }
     }
 
