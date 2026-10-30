@@ -188,6 +188,29 @@ public partial class AnalyzerTests
         Assert.That((await Diagnose(Components, Extra, source)).Where(e => e.StartsWith("CS")), Is.Empty, "the case compiles");
     }
 
+    // EECS033 across assemblies: a library's Lib.Spot and the program's own Spot each have a generated class named
+    // SpotEcsExtensions, so entity.Spot binds wherever either class is in scope. At the top of a file the program's
+    // class is found before the one 'using Lib' imports: there entity.Spot is the program's, and Read<Lib.Spot>() has no
+    // shorter spelling. In a namespace that imports Lib, entity.Spot is the library's.
+    internal const string LibrarySpot = "namespace Lib; public record struct Spot(float X, float Y) : IComponent;";
+    internal const string OwnSpot = "public record struct Spot(int X) : IComponent;\n";
+
+    [TestCase("using Lib; public static class U { public static Lib.Spot F(Entity e) => e.Read<Lib.Spot>(); }", false)]             // e.Spot is the program's
+    [TestCase("using Lib; public static class U { public static bool F(Entity e) => e.Has<Lib.Spot>(); }", false)]
+    [TestCase("using Lib; public static class U { public static void F(Entity e) => e.Remove<Lib.Spot>(); }", false)]
+    [TestCase("public static class U { public static Lib.Spot F(Entity e) => e.Read<Lib.Spot>(); }", false)]                        // the library's class is not in scope
+    [TestCase("using Lib; public static class U { public static Spot F(Entity e) => e.Read<Spot>(); }", true)]                      // the program's own
+    [TestCase("namespace Other { using Lib; public static class U { public static Lib.Spot F(Entity e) => e.Read<Lib.Spot>(); } }", true)] // the library's
+    [TestCase("namespace Other { using Lib; public static class U { public static bool F(Entity e) => e.Has<Lib.Spot>(); } }", true)]
+    [TestCase("namespace Other { using Lib; public static class U { public static global::Spot F(Entity e) => e.Read<global::Spot>(); } }", false)] // e.Spot is the library's
+    public async Task TheGeneratedMemberIsTheComponentsOwnAcrossAssemblies(string source, bool reported)
+    {
+        var library = ForeignLibrary(source: LibrarySpot);
+        var found = await GeneratorTests.Analyze([source + "\n" + OwnSpot], [library]);
+        Assert.That(found.Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, "the case compiles");
+        Assert.That(found.Count(d => d.Id == "EECS033"), Is.EqualTo(reported ? 1 : 0), string.Join("\n", found.Select(d => d.GetMessage())));
+    }
+
     // A warning costs, a suggestion (Info) is the same call written shorter, an error is code that cannot work (D29).
     [TestCase("EECS025", DiagnosticSeverity.Warning)]
     [TestCase("EECS026", DiagnosticSeverity.Warning)]

@@ -33,9 +33,12 @@ public class GeneratorTests
             new ViewGenerator().AsSourceGenerator(), new PrefabGenerator().AsSourceGenerator()], parseOptions: Parse,
         driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
 
-    internal static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources)
+    internal static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources) => await Analyze(sources, []);
+
+    /// <summary><see cref="Analyze(string[])"/> with <paramref name="references"/> (a library: <see cref="ForeignLibrary"/>).</summary>
+    internal static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources, MetadataReference[] references)
     {
-        Driver().RunGeneratorsAndUpdateCompilation(Compile(sources), out var output, out _);
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(sources).AddReferences(references), out var output, out _);
         return await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync();
     }
 
@@ -1348,7 +1351,7 @@ public class GeneratorTests
         Assert.That(all, Does.Contain("public static int Interval => 4;\n\n    public static int Phase => 3;").And.Contain("public static int Interval => 2;\n\n    public static int Phase => 0;"));
         Assert.That(all, Does.Contain("systems.Add<global::G<global::P>, global::__G_1_SystemCode<global::P>>();"));
         Assert.That(all, Does.Contain("public static bool C(global::EasyEcs.Entity e, ulong since, int n)"));
-        Assert.That(all, Does.Contain("bool ran = false;\n            OEntityMethod.__C_0(e, since, n, ref ran);\n            return ran;"));  // the entry point calls its pass
+        Assert.That(all, Does.Contain("bool ran = false;\n            OEntityMethods.__C_0(e, since, n, ref ran);\n            return ran;"));  // the entry point calls its pass
         Assert.That(all, Does.Contain("if (e.World is not { } world) return;"));
         Assert.That(all, Does.Contain("ran = e.Run<global::P, __ForEach.CJob0>(ref job, in __ForEach.CFilter0, since);"));
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, all);
@@ -1526,7 +1529,7 @@ public class GeneratorTests
     /// reference assembly (<paramref name="reference"/>: bodies <c>throw null</c>, private fields of structs kept), as a
     /// ProjectReference compiles against it.
     /// </summary>
-    private static MetadataReference ForeignLibrary(bool recorded = true, bool reference = false, string source = ForeignComponents)
+    internal static MetadataReference ForeignLibrary(bool recorded = true, bool reference = false, string source = ForeignComponents)
     {
         var library = CSharpCompilation.Create("Shared", [CSharpSyntaxTree.ParseText("using EasyEcs;\n" + source, Parse)],
             Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),

@@ -849,14 +849,37 @@ public class CodeFixTests
         Assert.That(actions, Is.Empty, "a class is no component: nothing mechanical to do");
     }
 
+    /// <summary>
+    /// EECS033's fix for a library's component beside the program's own of the same name
+    /// (<see cref="AnalyzerTests.TheGeneratedMemberIsTheComponentsOwnAcrossAssemblies"/>): <c>e.Spot</c> where it is the
+    /// library's member, so the fixed method still returns the library's Spot (the program's would not convert).
+    /// </summary>
+    [Test]
+    public async Task TheGeneratedMemberOfALibrarysComponentReadsThatComponent()
+    {
+        var document = Document("using EasyEcs;\n" + AnalyzerTests.OwnSpot
+            + "namespace Other { using Lib; public static class U { public static Lib.Spot F(Entity e) => e.Read<Lib.Spot>(); } }",
+            generate: true, reference: GeneratorTests.ForeignLibrary(source: AnalyzerTests.LibrarySpot));
+        var diagnostic = (await Analyze(document)).Single(d => d.Id == "EECS033");
+        var actions = new List<CodeAction>();
+        await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        var operation = (await actions.Single(a => a.Title == "Use .Spot").GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
+        var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
+        var text = (await fixedDocument.GetTextAsync()).ToString();
+        Assert.That(text, Does.Contain("=> e.Spot;"), text);
+        Assert.That((await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, text);
+        Assert.That((await Analyze(fixedDocument)).Where(d => d.Id == "EECS033"), Is.Empty, text);
+    }
+
     /// <summary>A one-file project; with <paramref name="generate"/> the generators run as in a build (the generated members exist).</summary>
-    private static Document Document(string source, bool generate = false)
+    private static Document Document(string source, bool generate = false, MetadataReference reference = null)
     {
         var workspace = new AdhocWorkspace();
         var project = workspace.AddProject(ProjectInfo.Create(ProjectId.CreateNewId(), VersionStamp.Default, "Test", "Test", LanguageNames.CSharp,
             compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
             parseOptions: GeneratorTests.Parse, // the interceptors of lambda passes too
-            metadataReferences: GeneratorTests.Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+            metadataReferences: GeneratorTests.Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location))
+                .Concat(reference != null ? [reference] : []),
             analyzerReferences: generate ? [new Generators()] : []));
         return workspace.AddDocument(project.Id, "Test.cs", SourceText.From(source));
     }
