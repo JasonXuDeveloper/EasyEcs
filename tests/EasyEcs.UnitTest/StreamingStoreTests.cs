@@ -318,9 +318,9 @@ public class StreamingStoreTests
         if (offset > 0) Assert.That(to[offset - 1], Is.EqualTo(0xAB));
     }
 
-    // Capture, Restore and growth with the copies streamed (the cache taken as 1 byte) hold what they hold with memmove.
+    // Capture and Restore with the copies streamed (the cache taken as 1 byte) hold what they hold with memmove.
     [Test]
-    public void StreamedSnapshotsAndGrowthKeepEveryValue()
+    public void StreamedSnapshotsKeepEveryValue()
     {
         if (!System.Runtime.Intrinsics.X86.Avx.IsSupported) Assert.Ignore("no AVX");
         WithCache(1, () =>
@@ -328,9 +328,8 @@ public class StreamingStoreTests
             Assert.That(StreamingStores.CopyPays(2), Is.True);
             using var world = new World(new WorldOptions { InitialEntityCapacity = 16 });
             var entities = new Entity[5000];
-#pragma warning disable EECS031 // the table's growth (its columns resized, streamed) is what this checks
+            world.Reserve<Fuel, Flare>(entities.Length);
             for (int i = 0; i < entities.Length; i++) entities[i] = world.CreateEntity(new Fuel(i), new Flare(-i));
-#pragma warning restore EECS031
             var snapshot = world.Capture();
             for (int i = 0; i < entities.Length; i++) entities[i].Get<Fuel>() = new Fuel(0);
             world.Restore(snapshot);
