@@ -1227,8 +1227,10 @@ public class GeneratorTests
         var changed = listed.Where(n => n[0] != '~').ToArray();
         var regrouped = listed.Where(n => n[0] == '~').Select(n => n.Substring(1)).ToArray();
         // RecordedTypes: a syntax provider over compilation units, rerun for an edited file (their bodies filtered by
-        // size and syntax before any is bound); its facts compare equal, so nothing is emitted again.
-        string[] tolerated = ["IsEasyEcsCore", "RecordedTypes"];
+        // size and syntax before any is bound); its facts compare equal, so nothing is emitted again. LambdaPasses and
+        // TileLoads bind their calls in a build on every compilation (SystemGenerator.BoundLater: in the IDE they do
+        // not run, asserted below); their models compare equal, so their files stay cached.
+        string[] tolerated = ["IsEasyEcsCore", "RecordedTypes", "LambdaPasses", "TileLoads"];
 
         foreach (bool ide in new[] { false, true })
         {
@@ -1280,6 +1282,29 @@ public class GeneratorTests
         GeneratorDriver driver = CSharpGeneratorDriver.Create(
             [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator(),
                 new ViewGenerator().AsSourceGenerator(), new PrefabGenerator().AsSourceGenerator()],
+            parseOptions: Parse, driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.Implementation));
+        driver = driver.RunGenerators(compilation);
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        driver.RunGenerators(compilation.ReplaceSyntaxTree(other, CSharpSyntaxTree.ParseText("public class Unrelated { int x; }", Parse, path: "Unrelated.cs")));
+        Assert.That(watch.Elapsed.TotalSeconds, Is.LessThan(3), "binding the body takes over 10 s; the generators alone take milliseconds");
+    }
+
+    // A lambda pass and a tile load are bound only for implementation output, which an IDE skips while typing: Roslyn
+    // runs every syntax provider's transform whenever any step reads syntax, so the binding must come in a later step
+    // (SystemGenerator.BoundLater), or each keystroke anywhere binds the body around every such call.
+    [TestCase("w.ForEach(static (ref P p) => p.V++);")]
+    [TestCase("int s = 0; for (int x = 0; x < 16; x += 4) s += c.Load128<int>(x)[0];")]
+    public void AnEditElsewhereInTheIdeBindsNoImplementationOnlyCall(string call)
+    {
+        string nested = "x17.GetHashCode()";
+        for (int i = 17; i >= 0; i--) nested = $"M(x{i} => {nested})";
+        var slow = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class Slow { static int M(System.Func<int, int> f) => 0; static int M(System.Func<string, int> f) => 0; " +
+            "static int F(World w, TileCursor<int, Sh> c) { " + call + " return " + nested + "; } }", Parse, path: "Slow.cs");
+        var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse, path: "Unrelated.cs");
+        var compilation = Compile(Components + TileShape).AddSyntaxTrees(slow, other);
+        compilation = compilation.WithOptions(compilation.Options.WithNullableContextOptions(NullableContextOptions.Enable));
+        GeneratorDriver driver = CSharpGeneratorDriver.Create([new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator()],
             parseOptions: Parse, driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.Implementation));
         driver = driver.RunGenerators(compilation);
 
