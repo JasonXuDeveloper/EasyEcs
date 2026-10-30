@@ -10,7 +10,7 @@ description: "一个实体若干组件的视图：一个 ref struct，实例字�
 public sealed class ViewAttribute : Attribute
 ```
 
-一个实体若干组件的视图：一个 `ref struct`，实例字段是组件的 `ref`（写）、`ref readonly`（读）或 `Mut{T}`（写，只在写过的地方打 tick）字段，public 或 internal，再加上使用这些字段的业务方法：`[View] public ref struct Fighter { public ref Health Health; public ref readonly Armor Armor; public void TakeDamage(int n) => Health.Value -= Math.Max(0, n - Armor.Value); }`。`[ForEach]` 或 `[ForEntity]` 方法按值接收它（`static void Hit(Fighter fighter, in Damage damage)`）：方法访问拥有视图全部组件的实体，视图字段的读写和方法自己的 `ref` / `in` 参数一样计算（调度、被追踪组件的变更 tick、向量循环都是如此），生成的 job 在行上构造视图，没有开销。生成器还写出 `entity.AsFighter()` 和 `entity.TryGetFighter(out fighter)`。视图持有指向实体那一行的 ref，所以这个实体的结构变更（或任何移动行的变更）之后就不能再用它。
+一个实体若干组件的视图：一个 `ref struct`，实例字段是组件的 `ref`（写）、`ref readonly`（读）或 `Mut{T}`（写，只在写过的地方打 tick）字段，public 或 internal，再加上使用这些字段的业务方法：`[View] public ref struct Fighter { public ref Health Health; public ref readonly Armor Armor; public void TakeDamage(int n) => Health.Value -= Math.Max(0, n - Armor.Value); }`。`[ForEach]` 或 `[EntityMethod]` 方法按值接收它（`static void Hit(Fighter fighter, in Damage damage)`）：方法访问拥有视图全部组件的实体，视图字段的读写和方法自己的 `ref` / `in` 参数一样计算（调度、被追踪组件的变更 tick、向量循环都是如此），生成的 job 在行上构造视图，没有开销。生成器还写出 `entity.AsFighter()` 和 `entity.TryGetFighter(out fighter)`。视图持有指向实体那一行的 ref，所以这个实体的结构变更（或任何移动行的变更）之后就不能再用它。
 
 ## 构造函数 [#constructors]
 

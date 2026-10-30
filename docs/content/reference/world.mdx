@@ -665,36 +665,6 @@ One overload per number of components, 1 to 9 (generated from one template); thi
 - `ForEachParallel(…)`: O(M + S)
 - `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkSize)`: O(M + S), divided over up to `MaxDegreeOfParallelism` threads
 
-### `ForParallel` [#forparallel]
-
-```csharp
-public void ForParallel<TJob>(int count, ref TJob job, int chunkSize = 0) where TJob : struct, IForRange;
-```
-
-Run `job` over indexes 0 to `count` - 1 on several threads: the range is cut into chunks (a multiple of 64 indexes: about four per thread, between 1,024 and [`World.MaxChunkRows`](/en/docs/reference/world#maxchunkrows), until a call has measured the items' cost, then chunks of about 25 µs for heavy items and fewer for a short loop; or `chunkSize` rounded up to 64) that the calling thread and up to [`WorldOptions.MaxDegreeOfParallelism`](/en/docs/reference/worldoptions#maxdegreeofparallelism) - 1 helper threads claim one at a time, each running a copy of the job (what Execute writes into its fields is not merged back). The same runner as the parallel `[ForEach]` passes: helpers are woken only while they pay, and fewer than two chunks, or a runner already busy, run on the calling thread. The job must not change the world's structure (a structural change throws) nor write what another chunk reads. Owner thread. Allocation-free after the first call per job type.
-
-**Exceptions**
-
-- `ArgumentOutOfRangeException`: `count` is negative.
-
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.ForParallel<TJob>(count, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
-- `ForParallel<T, TJob>(ref buffer, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
-
-### `ForParallel` [#forparallel-2]
-
-```csharp
-public void ForParallel<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>;
-```
-
-[`World.ForParallel`](/en/docs/reference/world#forparallel) over the elements of `items` (an [`Emitted`](/en/docs/reference/emitted) singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The list must not change while the call runs. The records of an [`Emitted`](/en/docs/reference/emitted) that parallel passes left in their chunks' lists are run where they are, in order, not joined first: a chunk that spans two of those lists gets one call per list, each with its own `start`.
-
-**Complexity** ([API table](/en/docs/api)):
-
-- `world.ForParallel<TJob>(count, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
-- `ForParallel<T, TJob>(ref buffer, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
-
 ### `GetEntity` [#getentity]
 
 ```csharp
@@ -953,6 +923,36 @@ public int MoveEntities(World target, ReadOnlySpan<EntityId> entities, Span<Enti
 Move `entities` (stale ids, repeats and retired entities, kept alive for their cleanup components, are skipped) into `target`, another world of this thread: the target gets new entities with their components, as [`World.LoadEntities`](/en/docs/reference/world#loadentities) makes them from a save of the group, without encoding it; then they are destroyed here (their children with them, so move a hierarchy together). Cleanup components ([`ICleanupComponent`](/en/docs/reference/icleanupcomponent)) do not move: they stay behind on the entity, now retired, for the systems of this world to release what they hold, and the new entity does not have them. The new handles are written in order into `moved` (as many as fit, [`Entity`](/en/docs/reference/entity) default for a skipped id); returns how many moved. A list of ids goes as `CollectionsMarshal.AsSpan(list)`, no copy. O(entities × components). Owner thread of both worlds; not while a pass iterates in either. Throws `InvalidOperationException`, moving nothing, when a moving entity has a unique key ([`IUniqueIndexed`](/en/docs/reference/iuniqueindexed)) an entity of `target` has.
 
 **Complexity** ([API table](/en/docs/api)): O(entities × components)
+
+### `ParallelFor` [#parallelfor]
+
+```csharp
+public void ParallelFor<TJob>(int count, ref TJob job, int chunkSize = 0) where TJob : struct, IForRange;
+```
+
+Run `job` over indexes 0 to `count` - 1 on several threads: the range is cut into chunks (a multiple of 64 indexes: about four per thread, between 1,024 and [`World.MaxChunkRows`](/en/docs/reference/world#maxchunkrows), until a call has measured the items' cost, then chunks of about 25 µs for heavy items and fewer for a short loop; or `chunkSize` rounded up to 64) that the calling thread and up to [`WorldOptions.MaxDegreeOfParallelism`](/en/docs/reference/worldoptions#maxdegreeofparallelism) - 1 helper threads claim one at a time, each running a copy of the job (what Execute writes into its fields is not merged back). The same runner as the parallel `[ForEach]` passes: helpers are woken only while they pay, and fewer than two chunks, or a runner already busy, run on the calling thread. The job must not change the world's structure (a structural change throws) nor write what another chunk reads. Owner thread. Allocation-free after the first call per job type.
+
+**Exceptions**
+
+- `ArgumentOutOfRangeException`: `count` is negative.
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.ParallelFor<TJob>(count, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+- `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+
+### `ParallelFor` [#parallelfor-2]
+
+```csharp
+public void ParallelFor<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>;
+```
+
+[`World.ParallelFor`](/en/docs/reference/world#parallelfor) over the elements of `items` (an [`Emitted`](/en/docs/reference/emitted) singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The list must not change while the call runs. The records of an [`Emitted`](/en/docs/reference/emitted) that parallel passes left in their chunks' lists are run where they are, in order, not joined first: a chunk that spans two of those lists gets one call per list, each with its own `start`.
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.ParallelFor<TJob>(count, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+- `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
 
 ### `Query` [#query]
 

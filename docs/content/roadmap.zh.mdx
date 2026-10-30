@@ -97,7 +97,7 @@ Godot 不需要这些：面向 `net10.0` 的 Godot 4 .NET 项目现在就能运�
   （[D79](/zh/docs/decisions#d79-entity-random)）。
 - 按键（直方图）归约：在这种 API 面向的规模上没有一个候选方案明显胜出；几千个桶以内用 `[InlineArray]` 桶的 `Reduce<T>` 就够
   （[D81](/zh/docs/decisions#d81-keyed-reductions)）。
-- 把 `[ForEntity]` 入口写成 `Entity` 的扩展成员：所有模块的所有请求都会堆进同一个类型的成员列表（[D82](/zh/docs/decisions#d82-for-entity)）。
+- 把 `[EntityMethod]` 入口写成 `Entity` 的扩展成员：所有模块的所有请求都会堆进同一个类型的成员列表（[D82](/zh/docs/decisions#d82-entity-method)）。
 - 用可重写的属性或在运行时设置系统的节奏：特性是调度能读到的常量；要变的节奏就放进一个分组，由宿主决定何时更新
   （[D83](/zh/docs/decisions#d83-update-interval-attribute)）。
 - 宽行的完整转置、gather 和跨步加载，`[Lane]` / `[Hot]` 字段标记，`[Layout(Soa)]` 存储，以及展开的向量循环：测下来更慢或不更快，

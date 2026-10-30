@@ -676,7 +676,7 @@ missing).
   turn; the system that applies the records clears them. The emitting system is scheduled as a writer of
   `Emitted<T>`, so a reader waits for it, and a method that both emits and takes `Emitted<T>`, or emits one type
   through two parameters, is [EECS070](/en/docs/guide/analyzer#eecs070).
-- **Applying in parallel.** The records are a list: [`world.ForParallel`](#for-parallel) runs a job over its
+- **Applying in parallel.** The records are a list: [`world.ParallelFor`](#parallel-for) runs a job over its
   elements in chunks, for work per record that writes only the record (a roll, an encoding).
 - **Saved like a buffer.** Snapshots and saves copy the records left in `Emitted<T>`.
 - **What it costs:** an append per record into the chunk's list. The lists come from a pool of their own, kept at the
@@ -774,14 +774,14 @@ two; at 100,000 rows they are level
 
 <BenchTable bench="ParallelRunnerBenchmark" />
 
-### Data that is not rows: `world.ForParallel` [#for-parallel]
+### Data that is not rows: `world.ParallelFor` [#parallel-for]
 
 Some parallel work is over data that is not rows of a table: the records of an `Emitted<T>`, the cells of an array, a
-range of indexes. `world.ForParallel` runs a struct job over it on the world's runner, with the chunks, claims and
+range of indexes. `world.ParallelFor` runs a struct job over it on the world's runner, with the chunks, claims and
 helpers of a parallel `[ForEach]` (Kokkos' `RangePolicy`, Unity's `IJobParallelForBatch`):
 
-- `world.ForParallel(count, ref job)` runs an `IForRange` job, `Execute(start, end)`, over indexes 0 to count - 1.
-- `world.ForParallel(ref buffer, ref job)` runs an `IForSpan<T>` job, `Execute(start, items)`, over the elements of a
+- `world.ParallelFor(count, ref job)` runs an `IForRange` job, `Execute(start, end)`, over indexes 0 to count - 1.
+- `world.ParallelFor(ref buffer, ref job)` runs an `IForSpan<T>` job, `Execute(start, items)`, over the elements of a
   `DynamicBuffer<T>` (an `Emitted<T>`'s `Items`, a singleton's buffer), each chunk's elements as a writable span.
 
 ```csharp
@@ -807,7 +807,7 @@ public ref struct CriticalSystem
     static void OnUpdate(World world)
     {
         var job = new RollCriticals { Random = world.EntityRandom };
-        world.ForParallel(ref world.GetSingleton<Emitted<Hit>>().Items, ref job);
+        world.ParallelFor(ref world.GetSingleton<Emitted<Hit>>().Items, ref job);
     }
 }
 ```
@@ -823,10 +823,10 @@ public ref struct CriticalSystem
   a runner already busy, run on the calling thread.
 - **Owner thread, allocation-free** after the first call per job type.
 
-`ForParallelBenchmark` runs light and heavy work over 100,000 records serially, through `ForParallel` and through
-`Parallel.For` ([D80](/en/docs/decisions#d80-for-parallel)).
+`ParallelForBenchmark` runs light and heavy work over 100,000 records serially, through `ParallelFor` and through
+`Parallel.For` ([D80](/en/docs/decisions#d80-parallel-for)).
 
-<BenchTable bench="ForParallelBenchmark" />
+<BenchTable bench="ParallelForBenchmark" />
 
 ### Input from other threads [#input-from-other-threads]
 
@@ -1040,7 +1040,7 @@ over 100,000 rows, sequential and parallel (`ParallelForEachBenchmark`):
   the pass and one atomic OR per 64 written rows. A [`Reduce<T>`](#reductions) adds a job copy per chunk, combined
   once when the pass ends; a [`Scratch<T>`](#scratch) one lookup of the thread's value per chunk; a
   [`Lookup<T>`](#lookups) one entity lookup per read; an [`Emit<T>`](#emit) an append per record and one copy of
-  each chunk's list when the pass ends. `world.ForParallel` costs what a parallel pass does, without the rows. The
+  each chunk's list when the pass ends. `world.ParallelFor` costs what a parallel pass does, without the rows. The
   atomics of a pass: [how the runner synchronizes](#runner-contract).
 - **Off:** `ParallelSystems` is off by default, and a world that never uses it pays nothing for it.
 
@@ -1078,7 +1078,7 @@ over 100,000 rows, sequential and parallel (`ParallelForEachBenchmark`):
 | Records added to a singleton's list row by row | One thread | [EECS089](/en/docs/guide/analyzer#eecs089): `Emit<T>` |
 | `Random.Shared` or `new Random()` in a `[ForEach]` method | Different numbers on every run and thread count | [EECS071](/en/docs/guide/analyzer#eecs071): `EntityRandom` |
 | Two draws of one stream for one entity | The same number twice | [EECS088](/en/docs/guide/analyzer#eecs088): one stream per draw |
-| Reading a `ForParallel` job's field after the call | Still the old value: each chunk ran a copy | [EECS061](/en/docs/guide/analyzer#eecs061) |
+| Reading a `ParallelFor` job's field after the call | Still the old value: each chunk ran a copy | [EECS061](/en/docs/guide/analyzer#eecs061) |
 
 ## Compared with other ECS libraries [#compared-with-other-ecs-libraries]
 

@@ -147,7 +147,7 @@ World 用来跑并行工作的部件：一个阶段里的系统，或者一个�
 ## 发出的记录（Emit） [#emit]
 
 一遍产生、留给后面系统处理的记录（命中、数据包）：`Emit<T>` 参数追加到所在[块](#chunk)自己的列表，遍历结束时这些列表按行的顺序追加到单例
-`Emitted<T>`，由结算它们的系统清空。就是 Unity 的 `NativeStream`。见[发出记录](/zh/docs/guide/threading#emit)。
+`Emitted<T>`。`[Drain]` 方法再按这个顺序把每条记录处理一次，然后清空（排空列表）。就是 Unity 的 `NativeStream`。见[发出记录](/zh/docs/guide/threading#emit)。
 
 ## 流（`EntityRandom` 的 stream） [#stream]
 
@@ -185,7 +185,7 @@ World 执行系统的顺序：每个[分组](#system-group)的[阶段](#stage)�
 
 ## 入口方法（Entry point） [#entry-point]
 
-生成器在系统之外的 `[ForEach]` 方法（[runner](/zh/docs/guide/systems#foreach-outside-systems)）或 `[ForEntity]` 方法旁边写的同名静态方法：
+生成器在系统之外的 `[ForEach]` 方法（[runner](/zh/docs/guide/systems#foreach-outside-systems)）或 `[EntityMethod]` 方法旁边写的同名静态方法：
 `Reports.SumHealth(world, ref total)` 在一个 World 上跑这一遍，`Requests.TakeHit(unit, damage)` 在单个实体上运行方法，返回它有没有运行。
 见[单个实体](/zh/docs/guide/queries#run-on-one-entity)。
 

@@ -592,7 +592,7 @@
       生成的 <c>GetOrAddClock(…)</c> 调用它。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.ForParallel``1(System.Int32,``0@,System.Int32)" source="4d77ed34b7e2">
+  <member name="M:EasyEcs.World.ParallelFor``1(System.Int32,``0@,System.Int32)" source="4d77ed34b7e2">
     <summary>
       在多个线程上对下标 0 到 <paramref name="count" /> - 1 运行 <paramref name="job" />：区间切成块（64 个下标的整数倍：在一次调用测得元素开销之前，每个线程约四块，
       介于 1,024 和 <see cref="F:EasyEcs.World.MaxChunkRows" /> 之间；之后元素很重时每块约 25 µs，循环很短时块更少；或者用
@@ -603,10 +603,10 @@
     </summary>
     <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="count" /> 为负数。</exception>
   </member>
-  <member name="M:EasyEcs.World.ForParallel``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" source="050cfe35728f">
+  <member name="M:EasyEcs.World.ParallelFor``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" source="8a365c7e165d">
     <summary>
       对 <paramref name="items" />（一个 <see cref="T:EasyEcs.Emitted`1" /> 单例的记录、某个单例的缓冲区）的元素运行
-      <see cref="M:EasyEcs.World.ForParallel``1(System.Int32,``0@,System.Int32)" />：每个块以 span 拿到自己的元素，可以写。
+      <see cref="M:EasyEcs.World.ParallelFor``1(System.Int32,``0@,System.Int32)" />：每个块以 span 拿到自己的元素，可以写。
       调用运行期间列表不能改变。并行遍历留在各块列表里的 <see cref="T:EasyEcs.Emitted`1" /> 记录就地运行，按顺序，不先合并：
       一个块跨两个这样的列表时，每个列表调用一次，各自带自己的 <c>start</c>。
     </summary>

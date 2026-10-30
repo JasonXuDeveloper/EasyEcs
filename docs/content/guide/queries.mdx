@@ -14,7 +14,7 @@ is allocation-free.
 
 <Callout type="idea" title="Use it for">
   Iteration outside systems: request handlers between updates, tools, tests, one-off passes. Work on one entity
-  ([`[ForEntity]`](#run-on-one-entity)): the handler of a request or of a message to an actor. Counts and existence
+  ([`[EntityMethod]`](#run-on-one-entity)): the handler of a request or of a message to an actor. Counts and existence
   checks (`Count`, `Any`). Bulk destroys (`DestroyAll<T>(filter)`). The filters themselves, which `[ForEach]`
   methods take as attributes.
 </Callout>
@@ -90,7 +90,7 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | The fastest ad-hoc loop | `world.ForEach<T1..Tn, TJob>(ref job, filter)` with a [struct job](#foreach-a-struct-job) |
 | Ad-hoc loop that needs the `Entity` | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` |
 | Ad-hoc arithmetic over runs of rows | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` |
-| Work on one entity (a request, a message) | a [`[ForEntity]`](#run-on-one-entity) method, or `entity.Run<T1..Tn, TJob>(ref job, filter)` |
+| Work on one entity (a request, a message) | a [`[EntityMethod]`](#run-on-one-entity) method, or `entity.Run<T1..Tn, TJob>(ref job, filter)` |
 | Ad-hoc heavy work on several threads | [`ForEachParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) / [`ForEachEntityParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) |
 | A convenient loop (tools, tests, handlers) | `foreach (var item in world.Query<T1..Tn>(filter))` |
 | A loop that only reads (a save, a send, a report) | [`foreach (var item in world.Read<T1..Tn>(filter))`](#read): nothing stamped |
@@ -254,10 +254,10 @@ var drift = new Drift();
 world.ForEachBatch<Position, Velocity, Drift>(ref drift, Filters.Active);
 ```
 
-### One entity: `[ForEntity]` and `entity.Run` [#run-on-one-entity]
+### One entity: `[EntityMethod]` and `entity.Run` [#run-on-one-entity]
 
 Code that handles one entity at a time (a request, a message to an actor, a command from a client) writes the work
-as a static method marked `[ForEntity]`, like a `[ForEach]` method that runs on one entity. The generator writes the
+as a static method marked `[EntityMethod]`, like a `[ForEach]` method that runs on one entity. The generator writes the
 job and an entry point next to the method, named like it, that takes the entity and the method's other values and
 returns whether it ran. It gets the refs a pass gives a row: one table lookup for all its components instead of one
 per `Get`. Its `ref` components are the ones stamped as written, `in` ones are read, and filter attributes
@@ -272,7 +272,7 @@ has its name.
 ```csharp
 public static class Requests
 {
-    [ForEntity, Without<Dead>]
+    [EntityMethod, Without<Dead>]
     static void TakeHit(Entity unit, ref Health hp, int damage)
     {
         if (hp.Value <= damage) unit.SetDead();   // a structural change: hp still points at the entity's value
@@ -285,7 +285,7 @@ public static class Requests
 <Tab value="The generator writes">
 
 ```csharp doccheck=skip
-public static class RequestsForEntity
+public static class RequestsEntityMethod
 {
     extension(Requests)
     {
@@ -320,7 +320,7 @@ bool applied = Requests.TakeHit(unit, 30);   // false: dead, no Health, or not a
 ```
 
 It returns `false`, without running the method, when the entity lacks a component, fails the filter or is not alive.
-A struct job written by hand and handed to `entity.Run` only is what `[ForEntity]` writes: the analyzer suggests the
+A struct job written by hand and handed to `entity.Run` only is what `[EntityMethod]` writes: the analyzer suggests the
 method ([EECS080](/en/docs/guide/analyzer#eecs080), with a code fix that converts the job and its calls). A method
 that only fits a pass (a span, an `EntitySpan`, a `Reduce<T>`, a `Scratch<T>`) or that also has `[ForEach]` is
 [EECS081](/en/docs/guide/analyzer#eecs081).
@@ -355,7 +355,7 @@ if (unit.Run<Health, ReadHealth>(ref read, Hits.Alive)) Console.WriteLine(read.V
 ```
 
 Without a filter, `entity.Run<T1..Tn, TJob>(ref job)` checks only that the entity is alive and has the components.
-What follows holds for `[ForEntity]` methods and jobs alike:
+What follows holds for `[EntityMethod]` methods and jobs alike:
 
 - **The refs survive the job's own structural changes**, as in `ForEachEntity`: the components in `WriteMask` are copied
   to the entity's new row after `Execute`, also when it throws, so what was written before the exception stays.
@@ -613,7 +613,7 @@ not a mover, but the job over `Position` alone counts it.
 | `ForEachEntity` when the entity is rarely used | A batch job with `EntitySpan` | Handles built only for the rows that need one |
 | A scalar loop over many rows | A batch job with `Vector<T>` | The JIT does not vectorize on its own |
 | `Count(...) > 0` | `Any(...)` | Stops at the first match ([EECS032](/en/docs/guide/analyzer#eecs032)) |
-| Several `Get` / `TryGetRef` and a `Has<Dead>()` per request | A [`[ForEntity]`](#run-on-one-entity) method with `[Without<Dead>]` | One lookup; the refs are carried across structural changes |
+| Several `Get` / `TryGetRef` and a `Has<Dead>()` per request | A [`[EntityMethod]`](#run-on-one-entity) method with `[Without<Dead>]` | One lookup; the refs are carried across structural changes |
 | Scanning for a key | A [value index](/en/docs/guide/indexes-and-relations) | O(matches) instead of O(rows) |
 | A `Read` loop that copies ids into a span and breaks when it is full | [`CollectIds`](#collect-ids) | A table whose rows all match is one copy |
 
@@ -671,8 +671,8 @@ Against Friflo.Engine.ECS on the same world: one component, two components scala
 | Treating `false` from `Run` as "dead" | It also means a missing component or a filter that failed | Code review: test `IsAlive` |
 | `QueryFilter.Create()…` built at every `Run` or query call | The filter is rebuilt and looked up at every call | Code review: a `static readonly` field |
 | `entity.Run` inside a parallel `[ForEach]` method | Its job may change structure from several threads | [EECS010](/en/docs/guide/analyzer#eecs010) |
-| A struct job written by hand only to be handed to `entity.Run` | Code the generator writes, kept in sync by hand | [EECS080](/en/docs/guide/analyzer#eecs080) (with a code fix): a `[ForEntity]` method |
-| A `[ForEntity]` method that is an instance method, also has `[ForEach]`, or takes a span, an `EntitySpan`, a `Reduce<T>` or a `Scratch<T>` | Compile error: one entity has no pass | [EECS081](/en/docs/guide/analyzer#eecs081) |
+| A struct job written by hand only to be handed to `entity.Run` | Code the generator writes, kept in sync by hand | [EECS080](/en/docs/guide/analyzer#eecs080) (with a code fix): an `[EntityMethod]` method |
+| An `[EntityMethod]` method that is an instance method, also has `[ForEach]`, or takes a span, an `EntitySpan`, a `Reduce<T>` or a `Scratch<T>` | Compile error: one entity has no pass | [EECS081](/en/docs/guide/analyzer#eecs081) |
 
 ## Related [#related]
 

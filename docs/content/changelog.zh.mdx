@@ -24,7 +24,7 @@ icon: RotateCcwClock
   [EECS075](/zh/docs/guide/analyzer#eecs075)（实例成员，有代码修复）、[EECS076](/zh/docs/guide/analyzer#eecs076)（签名不对的钩子）和
   [EECS077](/zh/docs/guide/analyzer#eecs077)（把不是系统的类型交给 `AddSystem<T>` 等系统 API）。CS0246 上的一个代码修复把 4.7 的类系统改写成
   `[EcsSystem]` ref struct（[分析器](/zh/docs/guide/analyzer#migration-fix)）。
-- IDE 不再把 `[ForEach]`、`[ForEntity]` 和钩子方法报成未使用：包里的抑制器在这些方法上隐藏 IDE0051 和 IDE0052，这些特性还带有给 Rider 和
+- IDE 不再把 `[ForEach]`、`[EntityMethod]` 和钩子方法报成未使用：包里的抑制器在这些方法上隐藏 IDE0051 和 IDE0052，这些特性还带有给 Rider 和
   ReSharper 读的 JetBrains `[MeansImplicitUse]`。见[未使用成员警告](/zh/docs/guide/analyzer#never-used)。
 - 在另一个程序集里封闭的泛型系统（游戏里 `AddSystem<Regen<Health>>()`，库里 `Regen<T>`）由用到它的程序集注册，所以在 Native AOT
   下运行时不需要运行时生成代码。见[系统](/zh/docs/guide/systems#generic-systems)和
@@ -89,9 +89,9 @@ icon: RotateCcwClock
 - `EntityRandom`：`[ForEach]` 方法（包括并行方法）用的确定性随机数：一个存放种子和 tick 的单例，加上（种子、实体、tick、流）的纯函数：
   `Bits`、`Float`、`Range`（整数和浮点）和 `Chance`。规则 [EECS071](/zh/docs/guide/analyzer#eecs071)（警告，有改为 `EntityRandom` 的代码修复）
   报告 `[ForEach]` 方法里的 `Random.Shared` 和 `new Random()`。见[决策](/zh/docs/decisions#d79-entity-random)。
-- `world.ForParallel(count, ref job)` 对一段下标运行 `IForRange` job，`world.ForParallel(ref buffer, ref job)` 对一个列表的元素
+- `world.ParallelFor(count, ref job)` 对一段下标运行 `IForRange` job，`world.ParallelFor(ref buffer, ref job)` 对一个列表的元素
   （`Emitted<T>` 的记录）运行 `IForSpan<T>` job，都在 World 的运行器上、用它的块；EECS060 和 EECS061 也检查这些 job。
-  见[决策](/zh/docs/decisions#d80-for-parallel)。
+  见[决策](/zh/docs/decisions#d80-parallel-for)。
 - 分析器规则 [EECS060](/zh/docs/guide/analyzer#eecs060)（警告）：并行 `[ForEach]` 方法，或 `ForEachParallel`、`ForEachEntityParallel`、
   `ForEachBatchParallel` 运行的 job 的 `Execute` 写了所有线程共享的内存（静态字段、上下文参数或 job 字段引用的对象），这些写入会竞争。
   规则 [EECS061](/zh/docs/guide/analyzer#eecs061)（警告，有代码修复）：并行调用之后读 job 的字段，而它给每块跑一个副本、什么都不合并回来
@@ -113,12 +113,12 @@ icon: RotateCcwClock
   写被追踪组件时也一样。分析器规则 [EECS054](/zh/docs/guide/analyzer#eecs054) 拒绝负数，以及没有 `Parallel` 的 `ChunkRows`。见
   [多线程与并行](/zh/docs/guide/threading#chunk-rows)和[决策](/zh/docs/decisions#d67-chunk-rows)。
 
-- 静态方法标上 `[ForEntity]` 就在单个实体上运行：生成器写出 `entity.Run` 运行的 job（`ref` 参数构成 `WriteMask`，过滤特性构成过滤条件），
+- 静态方法标上 `[EntityMethod]` 就在单个实体上运行：生成器写出 `entity.Run` 运行的 job（`ref` 参数构成 `WriteMask`，过滤特性构成过滤条件），
   再写一个和方法同名的入口，接收实体和方法的其他值，返回方法有没有运行（`Requests.TakeHit(unit, damage)`）。分析器规则
   [EECS080](/zh/docs/guide/analyzer#eecs080)（建议，带代码修复）找出手写的单实体 job，连同调用一起改写；
   [EECS081](/zh/docs/guide/analyzer#eecs081) 拒绝无法在单个实体上运行的方法。见[查询](/zh/docs/guide/queries#run-on-one-entity)。
 - `entity.Run<T1..Tn, TJob>(ref job, in filter, since)` 以 `since` 作过滤条件的 tick 运行 job：和 `filter.Since(since)` 的检查一样，
-  但不拷贝过滤条件，一个 `static readonly` 过滤条件就能服务所有调用。`[ForEntity, Changed<T>]` 方法的入口就这样传过滤条件。
+  但不拷贝过滤条件，一个 `static readonly` 过滤条件就能服务所有调用。`[EntityMethod, Changed<T>]` 方法的入口就这样传过滤条件。
   见 [API](/zh/docs/api#queries)。
 - `[ForEach, Consume]` 在遍历结束时恰好销毁这次访问过的行，用于只处理一次的事件和命令实体：方法不做结构变更时整批销毁（按方法的过滤条件做一次
   `DestroyAll`），可能做结构变更时逐行销毁。分析器规则 [EECS084](/zh/docs/guide/analyzer#eecs084)（建议，带代码修复）找出以
@@ -164,7 +164,7 @@ icon: RotateCcwClock
   （开着 `MeasureSystems` 时是两次）。
 - 一段行的 `Mut<T>` 引用 job 每段行只查一次的变更 tick 列（`MutColumn`）：写入时直接给它那一行打 tick，不再查 World 的 tick、列和列的数组。
   见[变更追踪](/zh/docs/guide/change-tracking)。
-- `[ForEntity, Changed<T>]` 方法的入口把 tick 和它的静态过滤条件一起传下去，不再每次调用拷贝一份过滤条件。
+- `[EntityMethod, Changed<T>]` 方法的入口把 tick 和它的静态过滤条件一起传下去，不再每次调用拷贝一份过滤条件。
 - 瓦片 job 把找到的邻居放在 job 的字段里：不再每行先清零一个 216 字节的局部变量、再由 `TileNeighbors.Of` 清零一次。
   见[网格](/zh/docs/guide/grids#generated)。
 - 向量循环只加载它读或存的列：只用来筛选行的组件不产生加载。见[向量循环](/zh/docs/guide/systems#vector-loops)。
@@ -219,8 +219,8 @@ icon: RotateCcwClock
 
 ### 修复 [#v4-8-0-fixes]
 
-- EECS071 也报告存放在字段里的 `System.Random`；`new Random()` 交给它，EECS028 不再报告。EECS055 不再报告 `[ForEntity]` 方法（生成器从不为它们生成向量循环），
-  EECS002、EECS010、EECS025 到 EECS028 以及其他 `[ForEach]` 规则的消息会如实称 `[ForEntity]` 方法。`[ForEach]` 方法里的 EECS028 会指出
+- EECS071 也报告存放在字段里的 `System.Random`；`new Random()` 交给它，EECS028 不再报告。EECS055 不再报告 `[EntityMethod]` 方法（生成器从不为它们生成向量循环），
+  EECS002、EECS010、EECS025 到 EECS028 以及其他 `[ForEach]` 规则的消息会如实称 `[EntityMethod]` 方法。`[ForEach]` 方法里的 EECS028 会指出
   `Scratch<T>` 参数，EECS010 会指出并行方法不能接收的那个参数。
 - 只有代码保存整个 World（`Save`、`SaveWithout`）时，EECS069 才对托管单例报警告：实体存档不写单例。见[决策](/zh/docs/decisions#d99-singleton-saves)。
 - 对带值索引、唯一索引或关系索引的世界调用 `Restore`、`Load` 和 `LoadEntities`，不再每次都重新分配：加载清空索引时把列表丢掉了，而不是留给下一次加载。

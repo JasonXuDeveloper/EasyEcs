@@ -941,7 +941,7 @@ public static class Combat
 public ref struct Bleed
 {
     [ForEach(Parallel = true)]
-    static void Drain(ref Health hp)
+    static void Hurt(ref Health hp)
     {
         hp.Value -= 1;
         Combat.Damage += 1;   // every thread adds to the same long: additions are lost
@@ -963,7 +963,7 @@ public partial struct Damage : ISingletonComponent
 public ref struct Bleed
 {
     [ForEach(Parallel = true)]
-    static void Drain(ref Health hp, ref Reduce<Damage> damage)
+    static void Hurt(ref Health hp, ref Reduce<Damage> damage)
     {
         hp.Value -= 1;
         damage.Value.Total += 1;   // this chunk's count
@@ -980,7 +980,7 @@ Caught by [EECS060](/en/docs/guide/analyzer#eecs060). More in [reductions](/en/d
 public ref struct Bleed
 {
     [ForEach(Parallel = true)]
-    static void Drain(ref Health hp, ref Reduce<Damage> damage)
+    static void Hurt(ref Health hp, ref Reduce<Damage> damage)
     {
         hp.Value -= 1;
         damage.Value.Total += 1;

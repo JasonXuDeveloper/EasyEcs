@@ -312,7 +312,7 @@ public bool Run<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in Query
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-以 `since` 作为过滤条件的 tick 运行 [`Entity.Run`](/zh/docs/reference/entity#run-2)：过滤条件的 `Changed` 组件必须在 `since` 或之后被写过（`Removed` 组件在那之后被移除）。和 `filter.Since(since)` 做同样的检测，但不复制过滤条件（静态过滤条件就这样传入，`[ForEntity, Changed<T>]` 方法的入口点即如此）。O(过滤条件提到的组件数)。
+以 `since` 作为过滤条件的 tick 运行 [`Entity.Run`](/zh/docs/reference/entity#run-2)：过滤条件的 `Changed` 组件必须在 `since` 或之后被写过（`Removed` 组件在那之后被移除）。和 `filter.Since(since)` 做同样的检测，但不复制过滤条件（静态过滤条件就这样传入，`[EntityMethod, Changed<T>]` 方法的入口点即如此）。O(过滤条件提到的组件数)。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 

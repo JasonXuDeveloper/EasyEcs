@@ -47,10 +47,10 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `TargetPolicy`、`TargetPolicyExtensions` | 枚举、扩展方法 | 目标被销毁时链接怎么处理：`Keep`、`Remove`、`Destroy`。 |
 | `[EcsSystem]` | 特性 | 标在只有静态成员的 `ref struct` 上：一个系统。钩子是名为 `OnCreate`、`OnUpdate`、`OnDestroy` 的静态方法（不用特性），参数取 `World`、`SystemHandle`、两者或都不取（[系统](/zh/docs/guide/systems)）。 |
 | `SystemHandle` | readonly struct | 加入 World 的一个系统：`Enabled`、`Error`、`Stats`、`LastRunTick`、`RunCount`、`Name`、`Type`、`World`、`IsAlive`；系统移除后句柄失效（成员抛异常）。 |
-| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkSize = n`、`Slices = N`、`SimdMode = SimdMode.Auto` / `Require` / `Off`、`FloatMode = FloatMode.Exact` / `Fast`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[ForEntity]`（通过生成的入口在单个实体上运行的静态方法）。 |
+| `ForEachAttribute` 及其过滤特性 | 特性 | `[ForEach]`（`Parallel = true`、`ChunkSize = n`、`Slices = N`、`SimdMode = SimdMode.Auto` / `Require` / `Off`、`FloatMode = FloatMode.Exact` / `Fast`）、`[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]`、`[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<T1..Tn>]`、`[RemovedAny<T1..Tn>]`；`[Consume]`（遍历结束后销毁访问过的行）；`[EntityMethod]`（通过生成的入口在单个实体上运行的静态方法）。 |
 | `Maybe<T>` | ref struct | `[ForEach]` 方法的可选组件参数：`HasValue`、`Value`。 |
 | `ReadOnlyMaybe<T>` | ref struct | 只读版本：`Value` 是 `ref readonly`，从不打 tick，带索引的组件也能用；`Maybe<T>` 可以转换成它。 |
-| `[View]` | 特性 | 标在由 `ref`（写）、`ref readonly`（读）和 `Mut<T>`（在部分行上写）组件字段加业务方法组成的 `ref struct` 上：一个实体的若干组件，`[ForEach]` 和 `[ForEntity]` 方法可以把它当参数，实体用 `entity.AsX()` / `TryGetX(out X)` 拿到它。 |
+| `[View]` | 特性 | 标在由 `ref`（写）、`ref readonly`（读）和 `Mut<T>`（在部分行上写）组件字段加业务方法组成的 `ref struct` 上：一个实体的若干组件，`[ForEach]` 和 `[EntityMethod]` 方法可以把它当参数，实体用 `entity.AsX()` / `TryGetX(out X)` 拿到它。 |
 | `[Prefab]` | 特性 | 标在每个组件一个字段、字段初始化器即默认值的 partial struct 上：生成器写出 `X.Prefab`，一个由这些默认值构成的 `static readonly Prefab`，用于 `world.Instantiate(X.Prefab)`。 |
 | `Mut<T>` | ref struct | `[ForEach]` 方法的组件参数，只有方法真正写了的行才算写入：`Value`、`Write()`、`SetIfChanged(value)`（[变更追踪](/zh/docs/guide/change-tracking)）。 |
 | `Reduce<T>`、`IReduction<T>` | 结构体、接口 | `[ForEach]` 参数（按 `ref` 传入），把一次遍历归约到单例 `T`，`T` 实现 `IReduction<T>`（`Identity`、`Combine`）：`Value`、`Combine(value)`。 |
@@ -64,9 +64,9 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `IRowOrder<T>`、`RowKeys` | 接口、静态类 | 给生成代码用：顺序怎样读一行（`Key`、`Point`，静态成员），一个点按格子大小算出的 Morton 码（`RowKeys.Morton`）。 |
 | `Scratch<T>` | ref struct | `[ForEach]` 参数：方法在当前线程上的工作内存，在行、遍历和 World 之间保留：`Value`。 |
 | `Emit<T>`、`Emitted<T>` | ref struct、结构体 | `[ForEach]` 参数（按值传入），追加记录（`Add`、`AddRange`），遍历结束时按块的顺序并入单例 `Emitted<T>`（`Items`，一个 `DynamicBuffer<T>`）。 |
-| `[ForEachRecord]`、`IForEachRecord<T>` | 特性、接口 | 标在第一个参数是 `in T` 的静态方法上：生成器按顺序对 `Emitted<T>` 的每条记录运行它，然后清空（`Emitted<T>.Consume` 运行它的 job）。 |
+| `[Drain]`、`IDrain<T>` | 特性、接口 | 标在第一个参数是 `in T` 的静态方法上：生成器按顺序对 `Emitted<T>` 的每条记录运行它，然后清空（`Emitted<T>.Consume` 运行它的 job）。 |
 | `EntityRandom` | record struct | 单例（`Seed`、`Tick`）加纯静态函数：按（种子、实体、tick、流）确定的随机数：`Bits`、`Float`、`Range`、`Chance`。 |
-| `IForRange`、`IForSpan<T>` | 接口 | `world.ForParallel` 的 job：`Execute(start, end)` 处理一段下标，`Execute(start, span)` 处理一个列表的元素。 |
+| `IForRange`、`IForSpan<T>` | 接口 | `world.ParallelFor` 的 job：`Execute(start, end)` 处理一段下标，`Execute(start, span)` 处理一个列表的元素。 |
 | `Lookup<T>`、`LookupExtensions` | ref struct、静态类 | `[ForEach]` 参数，读取任意实体的组件 `T`，调度为对 `T` 的读：`this[id]`、`Read(id)`、`Has(id)`；带索引的 `T` 还可按键查找：`TryFind(key, out entity)`、`Find(key)`、`Count(key)`。 |
 | `Lanes` | 静态类 | 批处理方法的流压缩：`Compact(source, mask, destination)` 把掩码选中的元素紧挨着写出；`Rows(mask, first, destination)` 写出选中的行号。 |
 | `Tile<TCell, TTile>`、`ITile<TKey>`、`ITileShape`、`TileFaces`、`TileNeighborhood`、`TileBoundary`、`TileIds` | ref struct、接口、枚举 | `[ForEach]` 参数：实体的 `DynamicBuffer<TCell>`，连同它在 `TTile` 网格中邻居的（`TTile` 是带索引的组件，带静态的形状、光环、邻域和边界，以及每个邻居的键），被调度为两者的读：`ExchangeHalo(from, to, fill, mask)`、`Beside(face)`、`Beside(dx, dy, dz)`、`Cells`、`ChangedEdges(next, out changed)`、`Facing(edges)`。 |
@@ -172,9 +172,9 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | `world.ForEach(values…, static (ref P p, …) => …)` / `ForEachParallel(…)` | O(M + S) | lambda 遍历：生成器把每处调用编译成同参数、同方法体的 `[ForEach]` 方法会得到的 job（包括向量循环）；lambda 前最多 4 个值，成为 job 的字段（变更过滤的 tick 放在最前面）；0 B；调用没被编译时抛异常（EECS095） |
 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` | O(M + S) | job 还会拿到 `Entity` |
 | `entity.Run<T1..Tn, TJob>(ref job)` / `Run(ref job, filter)` | O(n)，过滤条件每个组件再加 O(1) | 单个实体；实体失效、缺组件或被过滤掉时返回 false；job 做结构变更后 ref 仍然有效 |
-| `entity.Run<T1..Tn, TJob>(ref job, in filter, since)` | O(n)，再加 O(过滤条件提到的组件数) | 同 `Run(ref job, filter)`，只是用 `since` 作过滤条件的 tick：和 `filter.Since(since)` 的检查一样，但不拷贝过滤条件（一个 `static readonly` 过滤条件，`[ForEntity, Changed<T>]` 的入口就这样传） |
-| `[ForEntity]` 方法：生成的 `Owner.Method(entity, values…)` | 同 `entity.Run` | 用生成的 job 调 `entity.Run`（`ref` 参数构成 `WriteMask`，过滤特性构成一个 `static readonly` 过滤条件）；返回 false 的情况同 `Run`；带 `[Changed<T>]` 的方法第二个参数是 `since`；接收单例或 `World` 的方法，对不属于任何 World 的实体返回 false |
-| `[ForEach]` / `[ForEntity]` 方法或 lambda 遍历的 `[View]` 参数 | 同把这些组件直接当参数 | job 在行上构造视图（每个字段一个 ref，不拷贝）；`ref` 字段算系统的写（被追踪的组件每个访问过的行都打 tick），`Mut<T>` 字段算只在写过的行上打 tick 的写（没有向量循环），`ref readonly` 字段算读；调用视图成员的方法，和把同样代码写在参数上一样能得到向量循环（成员被内联）；接收视图的 lambda 遍历保留标量循环；同一组件被访问两次报 EECS099 |
+| `entity.Run<T1..Tn, TJob>(ref job, in filter, since)` | O(n)，再加 O(过滤条件提到的组件数) | 同 `Run(ref job, filter)`，只是用 `since` 作过滤条件的 tick：和 `filter.Since(since)` 的检查一样，但不拷贝过滤条件（一个 `static readonly` 过滤条件，`[EntityMethod, Changed<T>]` 的入口就这样传） |
+| `[EntityMethod]` 方法：生成的 `Owner.Method(entity, values…)` | 同 `entity.Run` | 用生成的 job 调 `entity.Run`（`ref` 参数构成 `WriteMask`，过滤特性构成一个 `static readonly` 过滤条件）；返回 false 的情况同 `Run`；带 `[Changed<T>]` 的方法第二个参数是 `since`；接收单例或 `World` 的方法，对不属于任何 World 的实体返回 false |
+| `[ForEach]` / `[EntityMethod]` 方法或 lambda 遍历的 `[View]` 参数 | 同把这些组件直接当参数 | job 在行上构造视图（每个字段一个 ref，不拷贝）；`ref` 字段算系统的写（被追踪的组件每个访问过的行都打 tick），`Mut<T>` 字段算只在写过的行上打 tick 的写（没有向量循环），`ref readonly` 字段算读；调用视图成员的方法，和把同样代码写在参数上一样能得到向量循环（成员被内联）；接收视图的 lambda 遍历保留标量循环；同一组件被访问两次报 EECS099 |
 | `[View]` 生成的 `entity.AsX()` / `TryGetX(out X)` | O(字段数) | 每个字段一个 ref（`ref` 用 `Get`，`ref readonly` 和 `Mut<T>` 用 `Read`，`Mut<T>` 的写入会打 tick）；缺组件或实体不存活时 `AsX` 抛异常，`TryGetX` 返回 false；不是结构变更 |
 | `[ForEach, Consume]` | 遍历本身，之后 O(M + S)：一次 `DestroyAll`（整张表一起释放）或每行一次销毁 | 遍历结束时销毁访问过的行：方法不做结构变更时按它的过滤条件做一次 `DestroyAll`，否则在方法处理完每一行后销毁那一行；遍历期间才开始匹配的行保留；批量销毁的遍历抛异常时什么也不销毁；所在的系统独自运行；不能和 `Slices` 一起用（EECS085） |
 | `[ForEach]` 邻居对方法（`[Neighbor]` 参数） | 每次遍历 O(N + M) 画出窗口的包围盒，有窗口离开包围盒时 O(W log W + 窗口对数)，之后 O(截断距离内的对数) 次调用，方法符合条件时每次调用处理一个向量的行；N、M = 行数和邻居数，W = 每 `Vector<float>.Count` 行一个的窗口数 | 行和邻居的距离通过方法的截断判断（每行一个或统一一个）的每一对都运行，包括行自己的实体；每个通道按查询顺序遇到邻居的表、按行的顺序遇到它们的行，所以向量循环和逐对运行的方法逐位相同；第一次遍历让被比较组件的表排序（判断用到的轴上的 Morton 码）；单线程，所在的系统独自运行；预热后不分配 |
@@ -182,7 +182,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | 带向量循环的 `[ForEach]` 方法（生成的，[向量循环](/zh/docs/guide/systems#vector-loops)） | O(M + S / L + 段数)，L = 每个向量的行数（先 `Vector512`，再 `Vector<T>`；按通道大小和 CPU，2 到 64） | 行、结果（`FloatMode.Fast` 之外）、变更 tick 和读写都和逐行运行的方法相同；每段先广播一次统一值，不足 L 行的尾部由方法自己跑；单线程时按 `ForEachMasked` 运行（只有部分行通过的字，每 L 行一个带掩码的向量），并行时按 `ForEachBatchParallel` 跑每块里连续的行；2 到 4 个字段的组件每个向量多一次解交错加载和一次交错存储（没有 AVX2 或 AVX-512 时每行都由方法跑）；`Reduce<T>` 每条通道每个字段一个累加器，每段合并一次；零分配 |
 | `world.ForEachMasked<T1..Tn, TJob>(ref job, filter)` | O(M + S / 64 + 段数 + 部分通过的字数) | 同 `ForEachBatch`，但只有部分行通过的 64 行字整个交给 job，通过的行记成位（`IForEachMasked`），不再按每一段通过的行各调一次；全部通过的字并进连续段 |
 | `world.ForEachParallel<T1..Tn, TJob>(ref job, filter, chunkSize)` / `ForEachEntityParallel` / `ForEachBatchParallel`（一块中连续行的 span） | O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | `INoStructuralChanges` job；每块 1,024 到 `World.MaxChunkRows` 行（job 写被追踪组件时为 4,096 的整数倍），或 `chunkSize` 向上取整到 64（`[ForEach(ChunkSize = n)]`；这时遍历前打开 O(B) 个区段，B 为 4,096 行的区段数，每写 64 行一次原子 OR），每块一个 job 副本（job 做归约 `Reduce<T>` 时保留这些副本，按块的顺序合并，O(块数)）；只在划算时唤醒助手线程 |
-| `world.ForParallel<TJob>(count, ref job, chunkSize)` / `ForParallel<T, TJob>(ref buffer, ref job, chunkSize)` | O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | 和 `ForEachParallel` 同一个运行器、同样的块（没有表：没有变更 tick，每块 1,024 到 `World.MaxChunkRows`，或 `chunkSize` 向上取整到 64）；每块一个 job 副本，不合并回来；结构被冻结（结构变更抛异常）；每种 job 类型第一次调用之后 0 B |
+| `world.ParallelFor<TJob>(count, ref job, chunkSize)` / `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)` | O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程 | 和 `ForEachParallel` 同一个运行器、同样的块（没有表：没有变更 tick，每块 1,024 到 `World.MaxChunkRows`，或 `chunkSize` 向上取整到 64）；每块一个 job 副本，不合并回来；结构被冻结（结构变更抛异常）；每种 job 类型第一次调用之后 0 B |
 | `foreach (var item in world.Query<T1..Tn>(filter))` | O(M + S) | 指向行内的 ref：被追踪组件的每个被访问行都算写入；循环里不能 `await` |
 | `foreach (var item in world.Read<T1..Tn>(filter))` | O(M + S) | 指向行内的 `ref readonly`：不打 tick；其余同 `Query` |
 | `world.Count<T1..Tn>(filter)` | O(M)，需要测位的表再加 S / 64 | 累加表计数，或数存在位（和 tick），AVX-512 下每步 8 个字 |
@@ -221,7 +221,7 @@ EasyEcs 的每个公开类型和调用，按用途分组，并标出各自的开
 | --- | --- | --- |
 | `emit.Add(in T record)` / `AddRange(records)` | 均摊 O(1) / O(records) | 追加到这个块（单线程时是整次遍历）的列表，不加锁、无原子操作；列表来自一个池，保持在一个块用过的最大长度 |
 | 遍历结束 | O(records) | 各块的列表按块的顺序（行的顺序，和线程数无关）追加到 `Emitted<T>.Items`（没有就先添加）；单例写一次；由读它的系统清空 |
-| `[ForEachRecord]` 遍历 | O(records)，单线程 | 按发出的顺序把每条记录按 `in` 传入，然后 `Clear` 一次；没有 `Emitted<T>` 时什么都不做；抛异常的遍历不清空；零分配 |
+| `[Drain]` 遍历 | O(records)，单线程 | 按发出的顺序把每条记录按 `in` 传入，然后 `Clear` 一次；没有 `Emitted<T>` 时什么都不做；抛异常的遍历不清空；零分配 |
 
 `EntityRandom`：确定性随机数：
 

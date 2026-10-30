@@ -10,7 +10,7 @@ description: "带 Emit 参数的遍历追加的记录，每次遍历内按行的
 public struct Emitted<T> : ISingletonComponent where T : struct
 ```
 
-带 [`Emit`](/zh/docs/reference/emit) 参数的遍历追加的记录，每次遍历内按行的顺序，遍历之间按运行的顺序：一个单例，由第一次产出记录的遍历添加。应用这些记录的系统读 [`Emitted.Items`](/zh/docs/reference/emitted#items)（`foreach`、`AsReadOnlySpan`、[`World.ForParallel`](/zh/docs/reference/world#forparallel-2)），然后清空它。并行遍历交出的是各块的列表，不是记录的副本：`Count`、`Clear`、[`ForEachRecordAttribute`](/zh/docs/reference/foreachrecordattribute) 遍历和 [`World.ForParallel`](/zh/docs/reference/world#forparallel-2) 就地使用这些记录；第一次按一个 span 读（`foreach`、`AsReadOnlySpan`、索引器）或写的时候，才把它们合并成一个列表，O(记录数)，只做一次。快照和存档像复制缓冲区组件一样复制这些记录。
+带 [`Emit`](/zh/docs/reference/emit) 参数的遍历追加的记录，每次遍历内按行的顺序，遍历之间按运行的顺序：一个单例，由第一次产出记录的遍历添加。应用这些记录的系统读 [`Emitted.Items`](/zh/docs/reference/emitted#items)（`foreach`、`AsReadOnlySpan`、[`World.ParallelFor`](/zh/docs/reference/world#parallelfor-2)），然后清空它。并行遍历交出的是各块的列表，不是记录的副本：`Count`、`Clear`、[`DrainAttribute`](/zh/docs/reference/drainattribute) 遍历和 [`World.ParallelFor`](/zh/docs/reference/world#parallelfor-2) 就地使用这些记录；第一次按一个 span 读（`foreach`、`AsReadOnlySpan`、索引器）或写的时候，才把它们合并成一个列表，O(记录数)，只做一次。快照和存档像复制缓冲区组件一样复制这些记录。
 
 #### 类型参数 [#type-parameters]
 

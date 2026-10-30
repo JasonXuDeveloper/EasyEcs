@@ -76,7 +76,7 @@ EasyEcs' features to their place in this file.
 | [Ordered index, relations, target policies](/en/docs/guide/indexes-and-relations) | `Kills` leaderboard; `Friend` links, dropped when a player leaves |
 | [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) (`[UniqueKey]`, `Get` / `TryGet`) | `Account`: `Join` and `Kick` find a hero by account |
 | System groups, `[UpdateInterval(n, Phase = p)]`, ordering, lifecycle | `Replication`; `ManaSystem`, `RegenerationSystem`; `ClockSystem`; `PlanningSystem.OnCreate` |
-| [Queries](/en/docs/guide/queries), handles and [one-entity methods](/en/docs/guide/queries#run-on-one-entity) | `NearestPlayer`, `Census`, `ShotsLeft`; `Hit` calls the `[ForEntity]` method `Requests.TakeHit` |
+| [Queries](/en/docs/guide/queries), handles and [one-entity methods](/en/docs/guide/queries#run-on-one-entity) | `NearestPlayer`, `Census`, `ShotsLeft`; `Hit` calls the `[EntityMethod]` method `Requests.TakeHit` |
 | [Bulk operations](/en/docs/guide/bulk) | `Instantiate(prefab, span)`, `DestroyAll`, `RemoveAll`, `EnableAll` |
 | [Snapshots](/en/docs/guide/snapshots), [saves and moves](/en/docs/guide/saves) | `Checkpoint` / `Rewind`, `Save` / `Load`, `Transfer` |
 | Introspection, diagnostics, error policy | `Tables`, `Schedule`, `Slowest`, `Failure` |
@@ -239,7 +239,7 @@ key.
 
 `PlayersIn` counts one group's table. `Any` stops at the first match. `ShotsLeft` and `Hit` start from a handle or an
 id a client sent: a stale one answers false. `Hit` is a request on one unit, so it calls `Requests.TakeHit`, the entry point of a
-`[ForEntity]` method: one lookup for the method's components, and `[Without<Dead>]` turns a dead unit away. The method
+`[EntityMethod]` method: one lookup for the method's components, and `[Without<Dead>]` turns a dead unit away. The method
 takes `Health` by `ref`, so the hit is stamped for the next replication.
 
 <include lang="csharp" meta='tab="Queries" title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#queries</include>

@@ -274,7 +274,7 @@ public struct HealJob : IForEachBatch<Hp>, INoStructuralChanges
 `IDirectIndexed<TKey>`、`SimdMode`、`FloatMode`、`Interleaved`、`Lanes`、`IForEachMasked<…>`、`Emit<T>`、`Emitted<T>`、`EntityRandom`、
 `EntityRandomEcsExtensions`、`IForRange`、`IForSpan<T>`，瓦片相关类型（`Tile<TCell, TTile>`、`ITile<TKey>`、`ITileShape`、`TileFaces`、
 `TileNeighborhood`、`TileBoundary`、`TileIds`、`PaddedTile<TCell, TTile>`、`TileRows<TTile>`、`TileRow<TTile>`、`TileCursor<TCell, TTile>`、
-`TileReads`），以及特性 `ForEntityAttribute`、`ConsumeAttribute`、`UpdateIntervalAttribute`、`SumAttribute`、`ProductAttribute`、
+`TileReads`），以及特性 `EntityMethodAttribute`、`ConsumeAttribute`、`UpdateIntervalAttribute`、`SumAttribute`、`ProductAttribute`、
 `MinAttribute`、`MaxAttribute`、`AllAttribute`、`AnyAttribute`、`LookupKeyAttribute`、`UniqueKeyAttribute`、`GroupAttribute`、
 `GroupByAttribute`、`WhenTargetDestroyedAttribute`、`NotSavedAttribute`，以及系统相关类型（`EcsSystemAttribute`、`SystemHandle`，供生成代码使用的 `ISystemCode`、`ISystemSet`、`SystemDeclarations`、`SystemCode`、
 `GenericSystemCodeAttribute`、`MutColumn`）。某个文件引入的其他命名空间里有同名类型时，会报 CS0104（引用不明确）：写全限定名，

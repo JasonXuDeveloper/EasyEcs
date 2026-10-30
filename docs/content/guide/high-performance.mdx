@@ -93,7 +93,7 @@ OpenMP's `threadprivate`, allocated once per thread and cleared by the row; a sm
 any thread count: [random numbers](/en/docs/guide/threading#entity-random). None of them adds an atomic per row:
 [how the runner synchronizes](/en/docs/guide/threading#runner-contract). Data that is not rows (an `Emitted<T>`'s
 records, a range of indexes) runs on the same runner through
-[`world.ForParallel`](/en/docs/guide/threading#for-parallel).
+[`world.ParallelFor`](/en/docs/guide/threading#parallel-for).
 
 </Step>
 
@@ -146,7 +146,7 @@ and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what th
 | MPI one-sided `MPI_Get`, Unity `ComponentLookup` (`[ReadOnly]`) | a `Lookup<T>` parameter: `T` of any entity, as it was before the pass | [Lookups](/en/docs/guide/threading#lookups) |
 | Unity `NativeStream`, GPU stream compaction | an `Emit<T>` parameter: records per chunk, joined in row order into `Emitted<T>` | [Emit](/en/docs/guide/threading#emit) |
 | cuRAND Philox, a counter-based generator | `EntityRandom`: a pure function of (seed, entity, tick, stream) | [Random numbers](/en/docs/guide/threading#entity-random) |
-| Kokkos `RangePolicy`, Unity `IJobParallelForBatch` | `world.ForParallel(count, ref job)` with an `IForRange` / `IForSpan<T>` job | [ForParallel](/en/docs/guide/threading#for-parallel) |
+| Kokkos `RangePolicy`, Unity `IJobParallelForBatch` | `world.ParallelFor(count, ref job)` with an `IForRange` / `IForSpan<T>` job | [ParallelFor](/en/docs/guide/threading#parallel-for) |
 | MPI halo exchange (ghost cells) | `Tile<TCell, TTile>.ExchangeHalo`: the tile with a halo of its neighbors' facing edges | [Grid tiles](/en/docs/guide/grids) |
 | Burst auto-vectorization | vector loops of `[ForEach]` methods | [Vector loops](/en/docs/guide/systems#vector-loops) |
 | Burst `float4` / Unity.Mathematics by hand | a batch method with `Vector<T>` / `Vector128<T>` | [Batch methods](/en/docs/guide/systems#batch-methods) |

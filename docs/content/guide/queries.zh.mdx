@@ -12,7 +12,7 @@ icon: Funnel
 ## 什么时候用 [#when-to-use-it]
 
 <Callout type="idea" title="适合">
-  系统之外的遍历：两次更新之间的请求处理、工具、测试、一次性的遍历。单个实体上的工作（[`[ForEntity]`](#run-on-one-entity)）：
+  系统之外的遍历：两次更新之间的请求处理、工具、测试、一次性的遍历。单个实体上的工作（[`[EntityMethod]`](#run-on-one-entity)）：
   请求的处理函数、发给 actor 的消息的处理函数。计数和存在性判断（`Count`、`Any`）。批量销毁
   （`DestroyAll<T>(filter)`）。以及过滤条件本身：`[ForEach]` 方法用特性的形式使用同样的过滤。
 </Callout>
@@ -85,7 +85,7 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | 最快的临时循环 | `world.ForEach<T1..Tn, TJob>(ref job, filter)` 加[结构体 job](#foreach-a-struct-job) |
 | 需要 `Entity` 的临时循环 | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` |
 | 对成段的行做临时算术 | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` |
-| 单个实体上的工作（一个请求、一条消息） | [`[ForEntity]`](#run-on-one-entity) 方法，或 `entity.Run<T1..Tn, TJob>(ref job, filter)` |
+| 单个实体上的工作（一个请求、一条消息） | [`[EntityMethod]`](#run-on-one-entity) 方法，或 `entity.Run<T1..Tn, TJob>(ref job, filter)` |
 | 临时的重计算，多线程 | [`ForEachParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) / [`ForEachEntityParallel`](#on-several-threads-foreachparallel-and-foreachentityparallel) |
 | 写起来方便的循环（工具、测试、请求处理） | `foreach (var item in world.Query<T1..Tn>(filter))` |
 | 只读的循环（存盘、发包、报表） | [`foreach (var item in world.Read<T1..Tn>(filter))`](#read)：不打 tick |
@@ -238,9 +238,9 @@ var drift = new Drift();
 world.ForEachBatch<Position, Velocity, Drift>(ref drift, Filters.Active);
 ```
 
-### 单个实体：`[ForEntity]` 和 `entity.Run` [#run-on-one-entity]
+### 单个实体：`[EntityMethod]` 和 `entity.Run` [#run-on-one-entity]
 
-一次只处理一个实体的代码（一个请求、发给 actor 的一条消息、客户端的一个命令）写成标了 `[ForEntity]` 的静态方法，就像只在一个实体上运行的
+一次只处理一个实体的代码（一个请求、发给 actor 的一条消息、客户端的一个命令）写成标了 `[EntityMethod]` 的静态方法，就像只在一个实体上运行的
 `[ForEach]` 方法。生成器写出 job，并在方法旁边写一个同名入口，接收实体和方法的其他值，返回方法有没有运行。它拿到的 ref 和遍历时一行拿到的一样：
 所有组件只查一次表，不用每个 `Get` 查一次。`ref` 组件算作写入并打 tick，`in` 组件只读，过滤特性（`[Without<Dead>]`）像遍历的过滤条件跳过行那样
 拒绝实体；带 `[Changed<T>]` 的方法，入口的第二个参数是往回看的起始 tick，入口把它和方法的静态过滤条件一起传下去
@@ -252,7 +252,7 @@ world.ForEachBatch<Position, Velocity, Drift>(ref drift, Filters.Active);
 ```csharp
 public static class Requests
 {
-    [ForEntity, Without<Dead>]
+    [EntityMethod, Without<Dead>]
     static void TakeHit(Entity unit, ref Health hp, int damage)
     {
         if (hp.Value <= damage) unit.SetDead();   // 结构变更：hp 仍然指向这个实体的值
@@ -265,7 +265,7 @@ public static class Requests
 <Tab value="生成器写的">
 
 ```csharp doccheck=skip
-public static class RequestsForEntity
+public static class RequestsEntityMethod
 {
     extension(Requests)
     {
@@ -300,7 +300,7 @@ bool applied = Requests.TakeHit(unit, 30);   // false：已死亡、没有 Healt
 ```
 
 实体缺少某个组件、不满足过滤条件或已经不存活时，它返回 `false`，不运行方法。手写一个结构体 job、只拿去交给 `entity.Run`，
-这正是 `[ForEntity]` 会写的东西：分析器建议改成方法（[EECS080](/zh/docs/guide/analyzer#eecs080)，代码修复会把 job 和它的调用一起改掉）。
+这正是 `[EntityMethod]` 会写的东西：分析器建议改成方法（[EECS080](/zh/docs/guide/analyzer#eecs080)，代码修复会把 job 和它的调用一起改掉）。
 只适合遍历的方法（接收 span、`EntitySpan`、`Reduce<T>`、`Scratch<T>`），或者同时标了 `[ForEach]` 的方法，报
 [EECS081](/zh/docs/guide/analyzer#eecs081)。
 
@@ -332,7 +332,7 @@ var read = new ReadHealth();
 if (unit.Run<Health, ReadHealth>(ref read, Hits.Alive)) Console.WriteLine(read.Value);
 ```
 
-不带过滤条件的 `entity.Run<T1..Tn, TJob>(ref job)` 只检查实体是否存活、是否有这些组件。下面说的对 `[ForEntity]` 方法和 job 都成立：
+不带过滤条件的 `entity.Run<T1..Tn, TJob>(ref job)` 只检查实体是否存活、是否有这些组件。下面说的对 `[EntityMethod]` 方法和 job 都成立：
 
 - **job 自己做结构变更后，ref 依然有效**，和 `ForEachEntity` 一样：`Execute` 结束后，`WriteMask` 里的组件会复制到实体的新行；
   抛异常时也照样复制，异常之前写进去的值不会丢。
@@ -569,7 +569,7 @@ sum of X: 11
 | 很少用到实体却用 `ForEachEntity` | 带 `EntitySpan` 的批处理 job | 只给需要的行构造句柄 |
 | 对大量行写标量循环 | 用 `Vector<T>` 的批处理 job | JIT 不会自己向量化 |
 | `Count(...) > 0` | `Any(...)` | 找到第一个就停（[EECS032](/zh/docs/guide/analyzer#eecs032)） |
-| 每个请求几次 `Get` / `TryGetRef` 再加一次 `Has<Dead>()` | 带 `[Without<Dead>]` 的 [`[ForEntity]`](#run-on-one-entity) 方法 | 只查一次；ref 跨结构变更依然有效 |
+| 每个请求几次 `Get` / `TryGetRef` 再加一次 `Has<Dead>()` | 带 `[Without<Dead>]` 的 [`[EntityMethod]`](#run-on-one-entity) 方法 | 只查一次；ref 跨结构变更依然有效 |
 | 扫描查找某个键 | [值索引](/zh/docs/guide/indexes-and-relations) | O(匹配数)，而不是 O(行数) |
 | 用 `Read` 循环把 id 拷进 span，满了就 break | [`CollectIds`](#collect-ids) | 所有行都匹配的表只拷贝一次 |
 
@@ -620,8 +620,8 @@ sum of X: 11
 | 把 `Run` 返回 `false` 当成“死了” | 缺组件、过滤条件不满足也返回 `false` | 代码审查：查 `IsAlive` |
 | 每次调 `Run` 或查询都现建 `QueryFilter.Create()…` | 每次都重建过滤条件、重新查找 | 代码审查：放进 `static readonly` 字段 |
 | 在并行 `[ForEach]` 方法里调 `entity.Run` | 它的 job 可能在多个线程上改结构 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
-| 手写结构体 job，只为了交给 `entity.Run` | 生成器会写的代码，要手工保持同步 | [EECS080](/zh/docs/guide/analyzer#eecs080)（有代码修复）：改成 `[ForEntity]` 方法 |
-| `[ForEntity]` 方法是实例方法、同时标了 `[ForEach]`，或者接收 span、`EntitySpan`、`Reduce<T>`、`Scratch<T>` | 编译错误：单个实体没有遍历 | [EECS081](/zh/docs/guide/analyzer#eecs081) |
+| 手写结构体 job，只为了交给 `entity.Run` | 生成器会写的代码，要手工保持同步 | [EECS080](/zh/docs/guide/analyzer#eecs080)（有代码修复）：改成 `[EntityMethod]` 方法 |
+| `[EntityMethod]` 方法是实例方法、同时标了 `[ForEach]`，或者接收 span、`EntitySpan`、`Reduce<T>`、`Scratch<T>` | 编译错误：单个实体没有遍历 | [EECS081](/zh/docs/guide/analyzer#eecs081) |
 
 ## 相关页面 [#related]
 

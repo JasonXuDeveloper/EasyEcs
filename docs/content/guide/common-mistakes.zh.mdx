@@ -890,7 +890,7 @@ public static class Combat
 public ref struct Bleed
 {
     [ForEach(Parallel = true)]
-    static void Drain(ref Health hp)
+    static void Hurt(ref Health hp)
     {
         hp.Value -= 1;
         Combat.Damage += 1;   // 每个线程都加到同一个 long 上：加法会丢
@@ -911,7 +911,7 @@ public partial struct Damage : ISingletonComponent
 public ref struct Bleed
 {
     [ForEach(Parallel = true)]
-    static void Drain(ref Health hp, ref Reduce<Damage> damage)
+    static void Hurt(ref Health hp, ref Reduce<Damage> damage)
     {
         hp.Value -= 1;
         damage.Value.Total += 1;   // 这一块的计数
@@ -928,7 +928,7 @@ public ref struct Bleed
 public ref struct Bleed
 {
     [ForEach(Parallel = true)]
-    static void Drain(ref Health hp, ref Reduce<Damage> damage)
+    static void Hurt(ref Health hp, ref Reduce<Damage> damage)
     {
         hp.Value -= 1;
         damage.Value.Total += 1;

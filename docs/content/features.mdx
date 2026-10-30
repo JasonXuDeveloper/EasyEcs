@@ -27,7 +27,7 @@ after warm-up, and is covered by the unit tests and a BenchmarkDotNet benchmark.
 | [Find](#find) | [value indexes](#value-indexes), [unique keys](#unique-keys), [ordered ranges](#ordered-ranges), [table groups](#table-groups) |
 | [Structure](#structure) | [relations](#relations), [hierarchy](#hierarchy), [dynamic buffers](#dynamic-buffers), [prefabs and cloning](#prefabs-and-cloning) |
 | [Persist](#persist) | [snapshots](#snapshots), [saves](#saves), [migration](#migration), [unloading plugin types](#unloading) |
-| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [reductions](#reductions), [scratch and lookups](#scratch-and-lookups), [records out of a pass](#emit), [deterministic random numbers](#entity-random), [parallel loops over other data](#for-parallel), [grid tiles](#grid-tiles), [bulk operations](#bulk-operations) |
+| [Scale](#scale) | [one world per thread](#threading-model), [parallel systems](#parallel-systems), parallel [`[ForEach]`](#parallel-foreach), [reductions](#reductions), [scratch and lookups](#scratch-and-lookups), [records out of a pass](#emit), [deterministic random numbers](#entity-random), [parallel loops over other data](#parallel-for), [grid tiles](#grid-tiles), [bulk operations](#bulk-operations) |
 | [Build and operate](#operate) | [analyzer and code fixes](#analyzer), [per-system timing](#per-system-timing), [the schedule](#schedule), [errors](#errors), [introspection](#introspection), [giving memory back](#trim-excess), [Native AOT](#native-aot), [hosting and testing](#hosting-and-testing), [templates and samples](#templates) |
 
 ## Simulate [#simulate]
@@ -269,18 +269,18 @@ entities handles each one once, with no `entity.Destroy()` in its body.
 Iteration from any code: `foreach (var item in world.Query<T…>(filter))`, struct jobs (`world.ForEach`,
 `ForEachEntity`), `world.Count`, `world.Any`, and `world.CollectIds` for a bounded batch of matching ids. A static `[ForEach]` method outside a system gets a generated entry
 point (`Reports.CountAlive(world, ref alive)`) that runs it as a struct job with the caller's values.
-A static `[ForEntity]` method runs on one entity, with the refs a pass would give it: its entry point
+A static `[EntityMethod]` method runs on one entity, with the refs a pass would give it: its entry point
 (`Requests.TakeHit(unit, damage)`) returns `false` when the entity is not alive, lacks a component or fails the filter;
 `entity.Run<Health, TJob>(ref job, filter)` runs a hand-written job the same way. A job's `static int WriteMask` names the
 components that count as written (default: all); a job implementing `INoStructuralChanges` skips the structural
 bookkeeping.
 
-- **Use it for:** tools, tests, request handlers between updates, one-off passes; `[ForEntity]` for a request or a
+- **Use it for:** tools, tests, request handlers between updates, one-off passes; `[EntityMethod]` for a request or a
   message to one entity.
 - **Skip it for:** per-tick logic: a system is ordered, scheduled and measured.
 - **Cost:** allocation-free. `Count` sums table counts; `Any` stops at the first match; a struct job is the fastest
-  ad-hoc pass. A `[ForEntity]` entry point (`entity.Run`) is O(1), plus O(1) per component its filter names.
-- **Guide:** [Queries and filters](/en/docs/guide/queries), [`[ForEntity]`](/en/docs/guide/queries#run-on-one-entity)
+  ad-hoc pass. An `[EntityMethod]` entry point (`entity.Run`) is O(1), plus O(1) per component its filter names.
+- **Guide:** [Queries and filters](/en/docs/guide/queries), [`[EntityMethod]`](/en/docs/guide/queries#run-on-one-entity)
 
 ## React to changes [#react]
 
@@ -705,9 +705,9 @@ seed repeats them.
   [EECS088](/en/docs/guide/analyzer#eecs088) two draws of one stream.
 - **Guide:** [Threading](/en/docs/guide/threading#entity-random)
 
-### Parallel loops over other data [#for-parallel]
+### Parallel loops over other data [#parallel-for]
 
-`world.ForParallel` runs a struct job over data that is not rows of a table, on the runner of parallel `[ForEach]`
+`world.ParallelFor` runs a struct job over data that is not rows of a table, on the runner of parallel `[ForEach]`
 methods: an `IForRange` job over a range of indexes, an `IForSpan<T>` job over the elements of a `DynamicBuffer<T>`
 (the records of an `Emitted<T>`), each chunk as a writable span (Kokkos' `RangePolicy`).
 
@@ -715,7 +715,7 @@ methods: an `IForRange` job over a range of indexes, an `IForSpan<T>` job over t
 - **Skip it for:** rows of entities (a parallel `[ForEach]`) and light work over a few thousand items.
 - **Cost:** the chunks and helpers of a parallel `[ForEach]`, allocation-free after the first call per job type; a
   copy of the job per chunk ([EECS061](/en/docs/guide/analyzer#eecs061) reports a field read after the call).
-- **Guide:** [Threading](/en/docs/guide/threading#for-parallel)
+- **Guide:** [Threading](/en/docs/guide/threading#parallel-for)
 
 ### Grid tiles [#grid-tiles]
 

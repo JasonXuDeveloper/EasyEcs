@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.IForRange" source="cbe90ecd4ea6">
+  <member name="T:EasyEcs.IForRange" source="97018433e1a0">
     <summary>
-      一段下标上的 job，由 <see cref="M:EasyEcs.World.ForParallel``1(System.Int32,``0@,System.Int32)" /> 分块运行（Kokkos 的 <c>RangePolicy</c>，
+      一段下标上的 job，由 <see cref="M:EasyEcs.World.ParallelFor``1(System.Int32,``0@,System.Int32)" /> 分块运行（Kokkos 的 <c>RangePolicy</c>，
       Unity 的 <c>IJobParallelForBatch</c>）：每次调用拿到一个块。
     </summary>
   </member>

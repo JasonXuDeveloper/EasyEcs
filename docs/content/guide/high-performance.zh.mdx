@@ -72,7 +72,7 @@ Native AOT 下发布时加上 `<IlcInstructionSet>native</IlcInstructionSet>`（
 用 `Emit<T>`：每块各自追加，按行的顺序合并：[发出记录](/zh/docs/guide/threading#emit)。随机数来自 `EntityRandom`，它是实体、tick 和流的纯函数，
 所以并行的一遍在任何线程数下都抽到同样的数：[随机数](/zh/docs/guide/threading#entity-random)。这些每行都不加原子操作：
 [运行器怎样同步](/zh/docs/guide/threading#runner-contract)。不是行的数据（`Emitted<T>` 的记录、一段下标）通过
-[`world.ForParallel`](/zh/docs/guide/threading#for-parallel) 跑在同一个运行器上。
+[`world.ParallelFor`](/zh/docs/guide/threading#parallel-for) 跑在同一个运行器上。
 
 </Step>
 
@@ -119,7 +119,7 @@ span，方法自己用 `Vector<T>` 或 `Vector128<T>` 循环：相当于 Burst j
 | MPI 单边的 `MPI_Get`、Unity 的 `ComponentLookup`（`[ReadOnly]`） | `Lookup<T>` 参数：任意实体在这一遍之前的 `T` | [查找](/zh/docs/guide/threading#lookups) |
 | Unity 的 `NativeStream`、GPU 的流压缩 | `Emit<T>` 参数：每块一份记录，按行的顺序合并进 `Emitted<T>` | [发出记录](/zh/docs/guide/threading#emit) |
 | cuRAND 的 Philox，基于计数器的生成器 | `EntityRandom`：（种子、实体、tick、流）的纯函数 | [随机数](/zh/docs/guide/threading#entity-random) |
-| Kokkos 的 `RangePolicy`、Unity 的 `IJobParallelForBatch` | `world.ForParallel(count, ref job)` 配 `IForRange` / `IForSpan<T>` job | [ForParallel](/zh/docs/guide/threading#for-parallel) |
+| Kokkos 的 `RangePolicy`、Unity 的 `IJobParallelForBatch` | `world.ParallelFor(count, ref job)` 配 `IForRange` / `IForSpan<T>` job | [ParallelFor](/zh/docs/guide/threading#parallel-for) |
 | MPI 光环交换（幽灵格子） | `Tile<TCell, TTile>.ExchangeHalo`：瓦片四周填上邻居朝向它的边 | [网格瓦片](/zh/docs/guide/grids) |
 | Burst 自动向量化 | `[ForEach]` 方法的向量循环 | [向量循环](/zh/docs/guide/systems#vector-loops) |
 | Burst 里手写 `float4` / Unity.Mathematics | 用 `Vector<T>` / `Vector128<T>` 的批处理方法 | [批处理方法](/zh/docs/guide/systems#batch-methods) |

@@ -94,9 +94,9 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D77](#d77-tiles) | 网格瓦片：一个自己加载光环的参数 |
 | [D78](#d78-emit) | 遍历产出的记录是 `Emit<T>` 参数，按行的顺序追加 |
 | [D79](#d79-entity-random) | 确定性随机数是纯函数 `EntityRandom` |
-| [D80](#d80-for-parallel) | 对一段区间或一个列表的并行循环是 `world.ForParallel` |
+| [D80](#d80-parallel-for) | 对一段区间或一个列表的并行循环是 `world.ParallelFor` |
 | [D81](#d81-keyed-reductions) | 没有加入按键归约 |
-| [D82](#d82-for-entity) | 单个实体就是一个 `[ForEntity]` 方法 |
+| [D82](#d82-entity-method) | 单个实体就是一个 `[EntityMethod]` 方法 |
 | [D83](#d83-update-interval-attribute) | 系统的节奏是一个特性 |
 | [D84](#d84-consume) | `[Consume]` 能整批销毁时就整批销毁访问过的行 |
 | [D90](#d90-vector-loops-reach) | 向量循环覆盖并行方法、可选与窄通道、结构体值和宽行 |
@@ -133,6 +133,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D131](#d131-lookup-gathers) | 方法要求时（`SimdMode.Require`），向量循环用 gather 读取其他实体的字段 |
 | [D134](#d134-eecs103) | EECS103：批处理方法里手写的向量循环，报告并给出单行方法 |
 | [D135](#d135-inlined-locals) | 生成的作业不超过内联器的 32 个 IL 局部变量；超出的循环按宽度放进方法 |
+| [D141](#d141-drain-entity-method-parallel-for) | `[Drain]`、`[EntityMethod]` 和 `world.ParallelFor` |
 
 D85 到 D89、D91 到 D93 和 D96 这几个编号没有用过：编号事先分给进行中的工作，用不上也不再复用。
 
@@ -1679,16 +1680,16 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 - **Philox 或 threefry：** 这里更慢；对相互独立的输入，四轮 64 位终结函数的质量对游戏和模拟足够（它不是密码学生成器，文档也没有这样说）。
 - **只显式传种子：** 保留了（静态成员），另外加了单例，让 `[ForEach]` 方法只要一个 `in` 参数。
 
-## D80. 对一段区间或一个列表的并行循环是 `world.ForParallel` [#d80-for-parallel]
+## D80. 对一段区间或一个列表的并行循环是 `world.ParallelFor` [#d80-parallel-for]
 
-**决定。** `world.ForParallel(count, ref job)` 对下标运行 `IForRange` job（`Execute(start, end)`），`world.ForParallel(ref buffer, ref job)` 对一个
+**决定。** `world.ParallelFor(count, ref job)` 对下标运行 `IForRange` job（`Execute(start, end)`），`world.ParallelFor(ref buffer, ref job)` 对一个
 `DynamicBuffer<T>`（`Emitted<T>` 的记录）的元素运行 `IForSpan<T>` job（`Execute(start, span)`），都在 World 的运行器上：并行 `[ForEach]` 的块
 （每个线程约四块，1,024 到 `MaxChunkRows` 之间 64 的整数倍，或 `chunkSize`）、同样的认领和唤醒帮手线程的方式，调用期间结构被冻结。
 每块一个 job 副本，什么都不合并回来。EECS060 和 EECS061 检查这些 job。
 
 **原因。**
-- **记录需要在产出它们的遍历之后处理。** `ForParallelBenchmark`，4 核：每条记录一个重的步骤（几次平方根），在 10,000 / 100,000 条记录时比单线程快
-  1.2 到 2 倍（机器是共用的，所以两轮的收益不同），和在同样的块上用静态委托的 `Parallel.For` 持平（两轮中彼此都在噪声范围内），后者每次调用分配 2 KB；ForParallel 不分配。轻的步骤（一次乘加）受内存带宽限制：10,000 条记录时比单线程慢 1.7 到 1.8 倍（分发块的开销超过了工作本身），100,000 条时是单线程用时的 0.9 到 1.2 倍；这样的步骤还是写成循环。
+- **记录需要在产出它们的遍历之后处理。** `ParallelForBenchmark`，4 核：每条记录一个重的步骤（几次平方根），在 10,000 / 100,000 条记录时比单线程快
+  1.2 到 2 倍（机器是共用的，所以两轮的收益不同），和在同样的块上用静态委托的 `Parallel.For` 持平（两轮中彼此都在噪声范围内），后者每次调用分配 2 KB；ParallelFor 不分配。轻的步骤（一次乘加）受内存带宽限制：10,000 条记录时比单线程慢 1.7 到 1.8 倍（分发块的开销超过了工作本身），100,000 条时是单线程用时的 0.9 到 1.2 倍；这样的步骤还是写成循环。
 - **一个运行器。** 在 World 的运行器旁边再用 `Parallel.For`，会让两组帮手线程挤在同样的核上；运行器的自适应唤醒已经知道什么时候帮手划算。
 - **小，而且和其他 API 一致。** 两个接口、两个调用；每块一个 span，和 `ForEachBatchParallel` 给的一样。
 
@@ -1711,9 +1712,9 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 **考虑过的方案。**
 - **每个线程一组桶**（见上）和**每块一个稀疏列表**（排序后合并的键值对）：后者在同样的合并之外每块还要排序一次，所以没有实现。
 
-## D82. 单个实体就是一个 `[ForEntity]` 方法 [#d82-for-entity]
+## D82. 单个实体就是一个 `[EntityMethod]` 方法 [#d82-entity-method]
 
-**决定。** 标了 `[ForEntity]` 的静态方法在单个实体上运行：生成器写出 `entity.Run` 接收的 `IForEachEntity` job（`ref` 参数构成
+**决定。** 标了 `[EntityMethod]` 的静态方法在单个实体上运行：生成器写出 `entity.Run` 接收的 `IForEachEntity` job（`ref` 参数构成
 `WriteMask`，过滤特性构成一个 `static readonly` 过滤条件，方法不做结构变更时实现 `INoStructuralChanges`），再在方法旁边写一个和方法同名的入口
 `Owner.Method(entity, [since,] values…)`，返回方法有没有运行。
 
@@ -1721,11 +1722,11 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 - **写成 job 的请求处理代码，一行活要四处声明。** 一个结构体、它的字段、一个必须和 `ref` 参数对得上的 `WriteMask`（EECS037 检查它）、一个过滤条件字段，
   再加上每个调用处创建 job、写全类型参数调 `Run`。系统之外的 `[ForEach]` 方法本来就有生成的 job 和入口
   （[D26](#d26-generated-members-and-a-suggestion-to-use-them)）；单个实体是同一个模式，只是把 `world.ForEach` 换成 `entity.Run`。
-- **名字和 `[ForEach]` 成对。** `[ForEach]` 对每个匹配的行运行方法，`[ForEntity]` 对调用方给的那一个实体运行；两个特性都声明方法是什么，而不是
-  何时运行。工作名 `[RunOn]` 读起来像调度（在某个线程、某次更新上运行），还暗示有一个目标类型参数；`[OneEntity]` 说的是数量，没有表示“运行”的词。
+- **名字说明它是单个实体上的方法，不是遍历。** `[ForEach]` 对每个匹配的行运行方法，`[EntityMethod]` 由调用方带着它要运行的那一个实体调用；
+  两个特性都声明方法是什么，而不是何时运行（命名见 [D141](#d141-drain-entity-method-parallel-for)）。工作名 `[RunOn]` 读起来像调度（在某个线程、某次更新上运行），还暗示有一个目标类型参数；`[OneEntity]` 说的是数量，没有表示“运行”的词。
 - **入口保持其他生成入口的形状。** 它是方法所在类型的静态成员，和方法同名，第一个参数是实体；带 `[Changed<T>]` / `[Removed<T>]` 的方法，
   第二个参数是往回看的起始 tick，和 `Since` 一样；方法和 runner 一样保持 private，把名字让给入口。
-- **开销和手写 job 一样。** 生成的代码就是同一个 `entity.Run` 调用：`ForEntityBenchmark`（10,000 个单位里打 1,000 次，十分之一已死）：两轮分别是 9.80 和 9.96 µs，手写 job 加过滤条件字段是 10.04 和 9.97 µs，在误差之内，两者都是 0 B。
+- **开销和手写 job 一样。** 生成的代码就是同一个 `entity.Run` 调用：`EntityMethodBenchmark`（10,000 个单位里打 1,000 次，十分之一已死）：两轮分别是 9.80 和 9.96 µs，手写 job 加过滤条件字段是 10.04 和 9.97 µs，在误差之内，两者都是 0 B。
 
 **考虑过的方案。**
 - **`Entity` 上的扩展成员（`unit.TakeHit(30)`）：** 每个模块的每种请求都会出现在 `Entity` 的成员列表里，两个类型里同名的方法还会冲突；
@@ -1905,7 +1906,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 ## D98. EECS088：每次抽取一个流，只检查遍历代码 [#d98-random-streams]
 
 **决定。** EECS088 报告同一个方法里对同一个实体、用同一个流的两次 `EntityRandom` 抽取，以及循环里既不改变流、也不改变实体的抽取。
-它只检查遍历的代码：`[ForEach]`、`[ForEntity]` 方法和 job 的 `Execute`。代码修复给后一次抽取一个方法里还没有用过的流。
+它只检查遍历的代码：`[ForEach]`、`[EntityMethod]` 方法和 job 的 `Execute`。代码修复给后一次抽取一个方法里还没有用过的流。
 
 **原因。**
 - **同一个流的两次抽取就是同一个数。** `EntityRandom` 是种子、实体、tick 和流的纯函数（[D79](#d79-entity-random)），两个分量共用一个流的方向
@@ -2085,7 +2086,7 @@ EECS083 的描述符（`BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind
 
 ## D107. `[ForEach]` 和钩子方法不会被报成未使用 [#d107-never-used-warnings]
 
-**决定。** 包里的 `DiagnosticSuppressor` 在 `[ForEach]`、`[ForEntity]`、`[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]` 方法上隐藏 IDE0051（EECSS01）
+**决定。** 包里的 `DiagnosticSuppressor` 在 `[ForEach]`、`[EntityMethod]`、`[OnCreate]`、`[OnUpdate]` 和 `[OnDestroy]` 方法上隐藏 IDE0051（EECSS01）
 和 IDE0052（EECSS02）。这些特性带有 JetBrains 的 `[MeansImplicitUse]`（内部的一份拷贝，Rider 和 ReSharper 按名字识别），`[EcsSystem]` 带 `WithMembers`。
 
 **原因。**
@@ -2137,7 +2138,7 @@ public ref struct Poisoning
 }
 ```
 
-- **作为参数。** `[ForEach]` 或 `[ForEntity]` 方法，以及 lambda 遍历（`world.ForEach(static (Fighter f, in Poison p) => f.TakeDamage(p.PerTick))`），按值接收视图，访问拥有视图全部组件的实体。生成的 job 在行上构造视图
+- **作为参数。** `[ForEach]` 或 `[EntityMethod]` 方法，以及 lambda 遍历（`world.ForEach(static (Fighter f, in Poison p) => f.TakeDamage(p.PerTick))`），按值接收视图，访问拥有视图全部组件的实体。生成的 job 在行上构造视图
   （`new Fighter { Health = ref c1, Armor = ref c2 }`，批处理 job 里是这一段连续的行的 `Unsafe.Add`）。视图的字段和方法自己的
   `ref` / `in` 参数一样计算：调度上这个系统写 `Health`、读 `Armor`，`ref` 字段背后被追踪的组件在每个访问过的行上打 tick，`Mut<T>` 字段背后的只在通过 `Write()` 或改变了值的
   `SetIfChanged` 写过的行上打 tick（和 `Mut<T>` 参数一样，D66）。EECS053 会跟进视图成员里的写入：方法或视图成员只在部分路径上写被追踪组件的
@@ -2469,13 +2470,13 @@ public ref struct DyingSystem
   54.8、54.6 -> 73.8、73.4 µs，`ParallelForEachBenchmark.Tick` 并行 553、569 -> 647、701 µs（负载 3.3 时重跑：69.0、65.7 -> 70.0、69.6 µs，
   557、625 -> 656、617 µs）。
 - **同一时间只有一个助手线程自旋（Go 的调度器）** 在测试程序里省 CPU（每 tick 9% 到 16%），但连续遍历变慢：`ParallelSystemsBenchmark`
-  61 -> 72 到 82 µs，`ParallelForEachBenchmark.Tick` 465、525 -> 524、663 µs，`HeavyForParallel` 100,000 条记录 299、308 -> 337、388 µs。
+  61 -> 72 到 82 µs，`ParallelForEachBenchmark.Tick` 465、525 -> 524、663 µs，`HeavyParallelFor` 100,000 条记录 299、308 -> 337、388 µs。
   改由第一个助手线程（而不是 owner 线程）唤醒其余线程更差（`ParallelSystemsBenchmark` 61 -> 103 到 126 µs）。
 - **更短的自旋**（35 µs，.NET 线程池 `LowLevelLifoSemaphore` 的长度）：`ParallelSystemsBenchmark` 69 到 84 -> 104 到 111 µs，
   每 tick 只省约 3% 的 CPU。自旋保持 100 µs。
 
 **考虑过的方案。**
-- **TBB 的亲和分块**（每个线程先跑上次跑过的块，再去偷别的）：只有数据放得进缓存时才留住线程的行（`LightForParallel` 10,000 条记录
+- **TBB 的亲和分块**（每个线程先跑上次跑过的块，再去偷别的）：只有数据放得进缓存时才留住线程的行（`LightParallelFor` 10,000 条记录
   9.3、8.4 -> 7.0、6.5 µs），100,000 行的遍历反而变慢（`ParallelForEachBenchmark.Tick` 527、574 -> 635、629 µs，`EntityJob` 589、544 ->
   762、631 µs）。在共享的机器上，共享游标比固定的归属更均衡。
 - **块大小的自动调优**（Halide 的 autotuning，按任务类型：每线程试 1、2、4、8、16 块，各采样六次，保留每行耗时最少的，每 256 到 8,192 次运行重新探索）：
@@ -2634,7 +2635,7 @@ public ref struct DyingSystem
 
 ## D130. 并行遍历按测得的每行开销切块；`ChunkSize` 只用来覆盖它 [#d130-measured-chunks]
 
-**决定。** 没有设置 `ChunkSize` 的并行遍历（`[ForEach(Parallel = true)]` 方法、`ForEachParallel`、`ForParallel`）按行实际花的时间切块。
+**决定。** 没有设置 `ChunkSize` 的并行遍历（`[ForEach(Parallel = true)]` 方法、`ForEachParallel`、`ParallelFor`）按行实际花的时间切块。
 每个遍历保存每行线程时间的滑动平均：来源是执行器为了在“叫醒辅助线程”和“调用线程单独跑”之间做选择本来就会计时的那些运行，
 以及只切成一块的遍历每 16 次运行中的一次；第一次计时的运行（冷启动）丢弃。据此：每个线程四块，除非这样每块会超过 25 µs
 （行很重：每块 25 µs，每个线程最多 64 块）或短于 5 µs（遍历很短：每块 5 µs，整个遍历都更短时只切一块，在调用线程上跑），
@@ -2653,7 +2654,7 @@ public ref struct DyingSystem
   3.29、3.29 / 2.22、2.14。Heavy（转向）1,000,000 行 6,077、7,003 / 5,296、5,609。在噪声范围内持平：Light 1,000 行
   0.12、0.12 / 0.13、0.13；Light 和 Heavy 100,000 行；Uneven 1,000,000 行（63,502、63,987 / 64,417、66,965：块本来就够小）；
   `ParallelForEachBenchmark`、`ParallelSystemsBenchmark`、`RunnerBenchmark`、`ParallelRunnerBenchmark.Runner`、
-  `ForParallelBenchmark`、`WorldSimulationBenchmark`、`BattleServerBenchmark`（4,144、3,968 / 3,924、4,824 µs；更早的两轮
+  `ParallelForBenchmark`、`WorldSimulationBenchmark`、`BattleServerBenchmark`（4,144、3,968 / 3,924、4,824 µs；更早的两轮
   3,919、3,952 / 3,675、3,847）。
 - **短遍历不能为此买单。** 第一个原型在每次调用后清空按“开销可能要求的最多块数”预留的块数组，并且每次单块运行都读两次时钟：
   Light 1,000 行从 124 ns 变成 354 ns。只清空这次调用切出的块、开销已知后每 16 次单块运行只计时一次、整个遍历短于 5 µs 时跳过计算，
@@ -2881,6 +2882,30 @@ Share、Step、Cycle、UpdateCell 的掩码循环，Steer 的循环），最多�
 **考虑过的方案。** 复制实体原型分支里重写的逐行循环（每行一次元数据查找、每段一次 `StorageVersion` 递增）：单独测
 0.98-1.00x，叠在这个标注上也没有收益，没有采用。那个分支 Move 的 0.82x 来自同一处内联变化，不是来自它的循环；它的
 gather 和按位的列映射只服务于复制。
+
+## D141. `[Drain]`、`[EntityMethod]` 和 `world.ParallelFor` [#d141-drain-entity-method-parallel-for]
+
+**决定。** 4.8 新增的三种写法在发布前改名：对 `Emitted<T>` 的每条记录运行一次的方法是 `[Drain]`（它的 job 接口是 `IDrain<T>`；
+原来叫 `[ForEachRecord]` / `IForEachRecord<T>`），通过入口点在单个实体上运行的静态方法是 `[EntityMethod]`（原来叫 `[ForEntity]`），
+对一段区间或一个列表的并行循环是 `world.ParallelFor`（原来叫 `world.ForParallel`）。`IForRange`、`IForSpan<T>`、EECS 编号和生成的入口点的形式都不变。
+旧名字都没有发布过，所以没有别名、没有迁移条目，也没有代码修复：它们从来没有进过任何一个包。
+
+**原因。**
+- **几个 `ForEach*` 名字看着像，做的事却不一样。** `[ForEach]` 每次更新遍历行；`[ForEachRecord]` 把一个队列消费一次然后清空；
+  `[ForEntity]` 根本不是遍历，而是对单个实体的一次调用。读者把它们当成同一种写法的变体，总要问每个到底是哪种循环。
+- **Drain 是流处理里消费队列的说法。** Rust 的 `Vec::drain`、Go 里排空一个 channel、Bevy 的 `Events::drain`：按顺序把每一项取出一次，队列留空。
+  这正是这个遍历对 `Emitted<T>` 做的事（每条记录处理一次，然后清空）。它遍历的是记录，不是实体，只在一个线程上跑，并清空遍历过的内容：
+  这些都不是 `[ForEach]` 加个后缀能说明的。“Record” 还容易读成 C# 的 `record` 类型。中文页面叫它“排空”。
+- **`EntityMethod` 说的就是它是什么：单个实体上的方法。** 文档已经在说 `[ForEach]` 方法和邻居对方法；这个方法由代码
+  （请求处理、事件）带着要运行的实体调用，所以是“方法”，不是遍历。中文页面叫它“实体方法”。
+- **`ParallelFor` 是大家都用的词序。** .NET 的 `Parallel.For`、OpenMP 的 `parallel for`、TBB 和 Kokkos 的 `parallel_for`：
+  熟悉其中任何一个的读者都会按这个名字找。`ForParallel` 读起来像 `ForEach*Parallel` 那一族，而那一族遍历的是行，不是区间。
+
+**考虑过的方案。**
+- **`[ForEachEmitted]`：** 和 `Emit<T>` 对得上，但没说会清空。
+- **`[Handle]`：** 太笼统，任何方法都在处理点什么。
+- **保留 `[ForEntity]`**（第一轮命名时保留了它：单个实体上的调用，不是遍历）：`For` 前缀仍然把它归进 `ForEach` 一族，而它不是。
+- **为旧名字保留 `[Obsolete]` 别名或代码修复：** 旧名字都没有发布过（4.7 里一个也没有），没有要迁移的代码。
 
 ## 相关页面 [#related]
 
