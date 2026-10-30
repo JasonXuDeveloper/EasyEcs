@@ -55,6 +55,7 @@ public class MaxRowsTests
     [EcsSystem]
     public ref struct HandLoadSome
     {
+#pragma warning disable EECS119 // the hand-written form the generated one is compared with
         static void OnUpdate(World world)
         {
             Span<EntityId> ids = stackalloc EntityId[4];
@@ -71,6 +72,7 @@ public class MaxRowsTests
                 request.Destroy();
             }
         }
+#pragma warning restore EECS119
 
         static readonly QueryFilter NotParked = QueryFilter.Create().Without<Parked>();
     }
