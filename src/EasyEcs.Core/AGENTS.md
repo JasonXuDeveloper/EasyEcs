@@ -235,5 +235,5 @@ ComponentInfo.cs             per-type column operations (size, managed, create/g
 Annotations.cs               MeansImplicitUse (internal): Rider / ReSharper see systems and [ForEach] methods as used
 BitMask.cs                   256-bit SIMD bitset with overflow (component masks, query sets)
 build/EasyEcs.props          packed as build/EasyEcs.props: adds EasyEcs.Generated to InterceptorsNamespaces (lambda
-                             passes); the repository's Directory.Build.props imports it
+                             passes, tile loads); the repository's Directory.Build.props imports it
 ```

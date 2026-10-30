@@ -104,3 +104,42 @@ gap is the Tile API's checked column loads, which the by-value form pays too: ba
 VoxelServer TickBenchmark base against head, 4 interleaved rounds: within noise, 0 B.
 
 What would change the verdict: nothing left to decide; the read fix is scheduled.
+
+## Tile loads: the Laplacian gap left, and loads the generator cannot prove (feat-tile-reads, 2026-10-29)
+
+**Proposed by** the tile-reads round. The interceptor of a proven column loop leaves the Laplacian's column loop at
+48 instructions against the hand-written 33 (Laplacian 32x32 at 1 thread: ping-pong 1.14x hand, every other case at or
+below hand). What is left is index arithmetic: the JIT inlines the interceptor's `dx` (x + k) into a temporary because
+the folded-away checked branch still names it, so each column computes `x + k`, then `+ r` again, where the hand form
+adds one base and folds every k into the displacement. Tried and measured in Tier1 listings: the cursor by value
+(an interceptor of an instance method must take `this in`), a span per row (more checks), a 64-bit offset (a
+`movsxd` per column again). **Verdict: not done.** What would change it: a JIT that forward-substitutes the single
+remaining use after the branch folds (worth rechecking on each .NET release with `tools/jitdisasm.sh`), or an API
+that hands the loop's base column to the method (`c.Columns(...)`), which is public surface the owner would decide.
+
+A second proposal, **not built**: an Info rule reporting a `TileCursor` load in a loop the generator cannot prove
+(the variable written in the body, a bound it cannot read), with the reason, as EECS055 does for vector loops. Every
+such load is still correct (checked); the rule would only tell the user why it is slower. Worth it once a user's
+stencil shows up with that shape; the reasons are already the cases `TileLoad.Read` returns null for.
+
+**Reverted: the per-tile frame changes (TileSteps.Begin, Tile.Frame, the static TileRows.Visit, the unchecked
+Jacobi row of Tile.Write).** The first measurement of both halves together showed the Laplacian ping-pong at Side 512
+5-7 % slower than the base, so the halves were built apart on the base (09622ba) and run in 4 interleaved rounds of the
+Laplacian ping-pong. The frame half won nothing anywhere: 1.020x / 1.054x at Side 32, 1.012x / 1.063x at Side 512 (1 /
+4 threads). Its Tier1 says why: splitting Enter into Enter and Begin adds a call per tile and returns the Tile (a ref
+struct) through a hidden return buffer; Enter and Begin take 158 instructions with 23 stack operands against 116 and 8
+for Enter alone, more than the two thread-static reads per tile it saved. What would change the verdict: a design that
+reads the frame once without a second call (Enter handing the tile out through an out parameter the job keeps in a
+register), measured on TileActive and TileWoken, where the per-tile cost matters more than in a dense stencil.
+
+**Kept: the tile-load interceptor.** Alone against the base, 8 interleaved rounds of the Laplacian ping-pong: 0.987x and
+0.988x at Side 32, 0.997x at Side 512 on 4 threads, and at Side 512 on 1 thread the paired per-round ratios 1.029,
+1.081, 1.014, 1.032, 1.038, 1.003, 0.987, 0.964 (median 1.022, standard deviation 0.035, the base itself moving 15 %
+between rounds). In 3 more rounds of the ping-pong steps: Laplacian 0.92-0.97x, Blur9 0.94-1.01x, Side 512 on 4 threads
+0.89x / 0.95x; TileActive PingPong at Side 512 1.03-1.04x, a pass whose time is the walk over sleeping tiles, which the
+interceptor does not change. The step's loop is shorter with PGO on and off (52 against 66 and 47 against 61
+instructions, no spill, no movsxd; neither loop gets alignment padding), so no mechanism in the generated code explains
+a slower out-of-cache case: the swings at Side 512 are the size of what code the change does not touch moves on this
+machine (a 4-vCPU VM, no hardware counters, an L3 shared with other tenants). What would change the verdict: a quiet
+machine (the owner's M4 or a bare-metal x64) showing Side 512 slower in paired rounds.
+

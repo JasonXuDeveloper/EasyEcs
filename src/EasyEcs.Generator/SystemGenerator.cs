@@ -98,6 +98,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
         // world.ForEach(static (ref P p) => ...): each call intercepted by the job of its lambda (SystemGenerator.Lambdas.cs).
         InitializeLambdas(context);
+        // c.Load128<T>(x + k, dy, dz) in a column loop: checked once per loop (SystemGenerator.TileLoads.cs).
+        InitializeTileLoads(context);
 
         // What the assemblies referencing this one read back (Recorder.cs): constructors' fields, helpers' bodies.
         Recorder.Initialize(context);

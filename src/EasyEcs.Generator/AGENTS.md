@@ -66,6 +66,14 @@ SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(valu
                              EasyEcs.Generated) running the job a [ForEach] method with the lambda's parameters and body
                              gets (body copied with names qualified and constants inlined; the static delegate per
                              row where it cannot be: EECS096)
+SystemGenerator.TileLoads.cs tile loads checked once per loop: c.Load128 / Load256 / LoadVector(x + k, dy, dz) in a
+                             proven column loop -> an interceptor per loop and offset (one file per source file in
+                             EasyEcs.Generated, implementation output): Covers, the loop's first and last column against
+                             the padded row in constants the JIT folds, then a load at one zero-extended index off the
+                             row's first halo cell (the cursor's indexer checks dy, dz); else the cursor's checked load
+TileLoads.cs                 what a tile load the generator checks once is (TileLoad.Read: the loop declaring the
+                             column's variable, an int from a constant, its bound (a constant or the cursor's shape),
+                             a positive step, the variable written nowhere else, no function between loop and call)
 Views.cs                     what a [View] is, read once for the generators and the analyzer: Fields ('ref', 'ref
                              readonly' and Mut<T> fields of components), Problem (EECS098's reason), Overlap (EECS099:
                              a component reached twice through views and parameters)

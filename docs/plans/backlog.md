@@ -31,13 +31,9 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **Tile reads checked once** (owner, 2026-10-29: "先合并，再修读取"): the in-cache gap the ping-pong step
-      keeps against step + commit by hand (Laplacian 1.33x at 1 thread) is the Tile API's per-column range check and
-      sign extension in `TileCursor` loads, paid by the by-value form too; a generator rewrite of `c.Load128(x + k)`
-      into one checked base when the x loop's range is known, or an unchecked row cursor. Proof: Tier1 listings and
-      TileStencil 32 / 512 at 1 and 4 threads against hand, sparse and dense.
+Nothing running.
 
-Merged since the last update: switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
+Merged since the last update: tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
 at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
 vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the owner's M4: no case slower past

@@ -1092,7 +1092,7 @@ public class GeneratorTests
     [
         "ForEachMethods", "RecordMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
-        "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes", "LambdaPasses", "LambdaFiles", "Views", "Prefabs",
+        "GroupBy", "TargetPolicies", "NotSaved", "ForEntityMethods", "ForEntityTypes", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
         "SystemPlaces", "SystemFusions", "SetFusions", "SystemLoops", "SystemCode", "RecordedTypes",
     ];
 
@@ -1130,8 +1130,10 @@ public class GeneratorTests
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         // A lambda pass in a file of its own: its interceptor names the file's checksum, so an edit there is a new model.
         var lambdas = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class Lp { static void F(World w, int n) => w.ForEach(n, static (ref P p, int n) => p.V += n); }", Parse);
+        // A tile load in a file of its own, for the same reason.
+        var tiles = CSharpSyntaxTree.ParseText(TileLoadsFile, Parse);
         var edited = code.Contains(before) ? system : other;
-        var compilation = Compile().AddSyntaxTrees(system, other, lambdas);
+        var compilation = Compile().AddSyntaxTrees(system, other, lambdas, tiles);
 
         var driver = Driver().RunGenerators(compilation);
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(edited,
@@ -1179,9 +1181,12 @@ public class GeneratorTests
         "public static class Free { [ForEach] static void B(ref Q q) { q.V++; } }\n" +
         "public static class Report { public static int Sum(World w) { int s = 0; foreach (var i in w.Read<P, Q>()) s += i.P.V; return s; } static int N(DynamicBuffer<L> b) => b.Count; }\n";
 
+    private const string TileLoadsFile = "using EasyEcs;\npublic struct Sh : ITileShape { public static int Width => 16; public static int Depth => 16; }\n" +
+        "public static class Tl { static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = 0; x < 16; x += 4) s += c.Load128<int>(x - 1)[0]; return s; } }";
+
     private static readonly string[] ImplementationOnlyStages =
     [
-        "LambdaPasses", "LambdaFiles", "ClosedSystems", "SystemSet", "SystemPlaces", "SystemFusions", "SetFusions",
+        "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "ClosedSystems", "SystemSet", "SystemPlaces", "SystemFusions", "SetFusions",
         "SavedComponents", "SavedBuffers", "GroupBy", "TargetPolicies", "NotSaved", "ModuleInitializers", "SystemLoops", "SystemCode",
     ];
 
@@ -1198,7 +1203,8 @@ public class GeneratorTests
         var systems = CSharpSyntaxTree.ParseText(IncrementalSystems, Parse, path: "Systems.cs");
         var lambdas = CSharpSyntaxTree.ParseText("using EasyEcs;\npublic static class Lp { static void F(World w, int n) => w.ForEach(n, static (ref P p, int n) => p.V += n); }", Parse, path: "Lambdas.cs");
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse, path: "Unrelated.cs");
-        var compilation = Compile().AddSyntaxTrees(components, systems, lambdas, other);
+        var tiles = CSharpSyntaxTree.ParseText(TileLoadsFile, Parse, path: "Tiles.cs");
+        var compilation = Compile().AddSyntaxTrees(components, systems, lambdas, tiles, other);
         var edited = new[] { components, systems, other }.Single(t => t.ToString().Contains(before));
         var next = compilation.ReplaceSyntaxTree(edited, CSharpSyntaxTree.ParseText(edited.ToString().Replace(before, after), Parse, path: edited.FilePath));
         var changed = changes.Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
@@ -1962,6 +1968,75 @@ public class GeneratorTests
             CSharpSyntaxTree.ParseText(first.ToString().Replace("p.V++", "p.V += 2"), Parse, path: "A.cs")));
 
         var reasons = Steps(driver)["LambdaFiles"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1));
+        Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Modified or IncrementalStepRunReason.New), Is.EqualTo(1));
+    }
+
+    // Tile loads checked once per loop (SystemGenerator.TileLoads.cs): a load at the loop's variable plus a constant is
+    // intercepted when the loop is proven (declares an int from a constant, a bound of a constant or the cursor's shape,
+    // a positive step, nothing else writes the variable, the call in its body); every other load keeps the cursor's check.
+    private const string TileShape = "public struct Sh : ITileShape { public static int Width => 16; public static int Depth => 16; }\n";
+
+    private static (string Text, int Intercepted) TileLoads(string body)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile("using System.Runtime.Intrinsics;\n" + TileShape + "public static class U { " + body + " }"), out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, body);
+        string text = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".TileLoads.g.cs")).Select(t => t.ToString()));
+        return (text, System.Text.RegularExpressions.Regex.Matches(text, @"InterceptsLocation\(").Count);
+    }
+
+    [TestCase("static float F(TileCursor<float, Sh> c) { float s = 0; for (int x = 0; x < 16; x += 4) s += c.Load128<float>(x - 1).GetElement(0) + c.Load128<float>(x + 1, 0, 1).GetElement(0); return s; }", 2,
+        "Covers<TCell, TTile>(0, 16L, 4, -1, 16)")]
+    [TestCase("static float F<T>(TileCursor<float, T> c) where T : struct, ITileShape { float s = 0; for (int x = 0; x < T.Width; x++) { s += c.Load256<float>(1 + x).GetElement(0); } return s; }", 1,
+        "Covers<TCell, TTile>(0, TTile.Width, 1, 1, 32)")]
+    [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = -1; x <= 12; x = x + 4) s += c.LoadVector<int>(x)[0]; return s; }", 1,
+        "Covers<TCell, TTile>(-1, 12L + 1L, 4, 0, global::System.Numerics.Vector<byte>.Count)")]
+    [TestCase("static int F(TileCursor<int, Sh> c, int dy) { int s = 0; for (int x = 0; x < 16; ++x) s += c.Load128<int>(x, dy, 0).GetElement(0); return s; }", 1,
+        "c.Load128<TLane>(dx, dy, dz)")]
+    public void TileLoadsInAProvenLoopAreIntercepted(string body, int calls, string expected)
+    {
+        var (text, intercepted) = TileLoads(body);
+        Assert.That(intercepted, Is.EqualTo(calls), text);
+        Assert.That(text, Does.Contain(expected).And.Contain("this in global::EasyEcs.TileCursor<TCell, TTile> c").And.Contain("AggressiveInlining"));
+    }
+
+    [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = 0; x < 16; x += 4) { s += c.Load128<int>(x).GetElement(0); x--; } return s; }")]          // written in the body
+    [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = 0; x < 16; x += 4) s += c.Load128<int>(x).GetElement(0) + G(ref x); return s; } static int G(ref int x) => 0;")] // by ref
+    [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; int x = 0; while (x < 16) { s += c.Load128<int>(x).GetElement(0); x += 4; } return s; }")]                // no for
+    [TestCase("static int F(TileCursor<int, Sh> c, int n) { int s = 0; for (int x = 0; x < n; x += 4) s += c.Load128<int>(x).GetElement(0); return s; }")]                // a bound it cannot read
+    [TestCase("static int F(TileCursor<int, Sh> c, int a) { int s = 0; for (int x = a; x < 16; x += 4) s += c.Load128<int>(x).GetElement(0); return s; }")]               // a first it cannot read
+    [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = 16; x > 0; x -= 4) s += c.Load128<int>(x).GetElement(0); return s; }")]                     // downwards
+    [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = 0; x < 16; x += 4) s += c.Load128<int>(2 * x).GetElement(0); return s; }")]                  // not x + k
+    [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = 0, y = 0; x < 16; x += 4) s += c.Load128<int>(x).GetElement(0); return s; }")]              // two variables
+    [TestCase("static System.Func<int> F(TileCursor<int, Sh> c) { System.Func<int> f = null; for (int x = 0; x < 16; x += 4) { int v = c.Load128<int>(x).GetElement(0); f = () => v; } return f; }", 1)] // a lambda beside it: still proven
+    [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = 0; x < 16; x += 4) s += c.Load128<int>(0).GetElement(0); return s; }")]                      // a constant column: folded already
+    public void TileLoadsTheGeneratorCannotProveKeepTheirCheck(string body, int calls = 0)
+    {
+        var (text, intercepted) = TileLoads(body);
+        Assert.That(intercepted, Is.EqualTo(calls), text);
+    }
+
+    [Test]
+    public void TileLoadsInALocalFunctionOrLambdaInsideTheLoopKeepTheirCheck()
+    {
+        // The function could run after the loop, with x past its bound: the load inside it is not the loop's.
+        var (text, intercepted) = TileLoads("delegate int D(TileCursor<int, Sh> c); static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = 0; x < 16; x += 4) { D d = k => k.Load128<int>(x).GetElement(0); s += d(c); int L(TileCursor<int, Sh> k) => k.Load128<int>(x + 1).GetElement(0); s += L(c); } return s; }");
+        Assert.That(intercepted, Is.Zero, text);
+    }
+
+    // An edit in a file of tile loads changes its checksum, so its interceptors are written again; another file's stay.
+    [Test]
+    public void AnEditInATileLoadsFileLeavesTheOtherFilesCached()
+    {
+        string Loop(string name) => $"using EasyEcs;\npublic static class {name} {{ static int F(TileCursor<int, Sh> c) {{ int s = 0; for (int x = 0; x < 16; x += 4) s += c.Load128<int>(x).GetElement(0); return s; }} }}";
+        var first = CSharpSyntaxTree.ParseText(Loop("A"), Parse, path: "A.cs");
+        var second = CSharpSyntaxTree.ParseText(Loop("B"), Parse, path: "B.cs");
+        var compilation = Compile(TileShape).AddSyntaxTrees(first, second);
+        var driver = Driver().RunGenerators(compilation);
+        driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(first,
+            CSharpSyntaxTree.ParseText(first.ToString().Replace("int s = 0;", "int s = 1;"), Parse, path: "A.cs")));
+
+        var reasons = Steps(driver)["TileLoadFiles"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1));
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Modified or IncrementalStepRunReason.New), Is.EqualTo(1));
     }
