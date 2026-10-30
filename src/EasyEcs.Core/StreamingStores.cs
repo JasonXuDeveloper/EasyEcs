@@ -1,3 +1,4 @@
+using System;
 using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -118,5 +119,59 @@ public static unsafe class StreamingStores
     {
         if (Sse.IsSupported) Sse.StoreFence();
         else if (AdvSimd.Arm64.IsSupported) Interlocked.MemoryBarrier();
+    }
+
+    /// <summary>
+    /// Whether an operation that copies <paramref name="bytes"/> bytes in all (every column of a table a capture,
+    /// restore or resize copies) streams its stores (<see cref="Copy(ref byte, ref byte, nuint)"/>): the machine has AVX (VMOVNTPS of 32 or 64
+    /// bytes) and the bytes are past the last-level cache (<c>CacheSizes.LastLevel</c>; never when it is unknown). Then
+    /// none of the target's lines is still in the cache when the copy ends, so reading each line before writing it
+    /// (read for ownership) is wasted bandwidth. O(1).
+    /// </summary>
+    internal static bool CopyPays(long bytes)
+    {
+        long cache = CacheSizes.LastLevel;
+        return Avx.IsSupported && cache > 0 && bytes > cache;
+    }
+
+    /// <summary>
+    /// <paramref name="bytes"/> bytes from <paramref name="from"/> to <paramref name="to"/> (no overlap) around the
+    /// caches, shaped like glibc's large copy (<c>large_memcpy_4x</c>): the bytes up to the target's first 64-byte line
+    /// plainly, then four pages at a time, a line of each page in turn, each source line prefetched four lines ahead
+    /// (four streams of the memory's pages open, four write-combining buffers filling), the rest plainly, a fence
+    /// after. Callers check <see cref="CopyPays"/> first. O(<paramref name="bytes"/>).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    internal static void Copy(ref byte to, ref byte from, nuint bytes)
+    {
+        fixed (byte* d = &to, s = &from) // a snapshot's byte[] is not pinned, unlike a table's columns
+            Copy(d, s, bytes);
+    }
+
+    /// <summary><see cref="Copy(ref byte, ref byte, nuint)"/> between pinned addresses.</summary>
+    private static void Copy(byte* d, byte* s, nuint bytes)
+    {
+        const int Page = 4096, Ahead = 256; // a page per stream; prefetched four lines ahead
+        nuint head = Math.Min((64 - ((nuint)d & 63)) & 63, bytes), i = head;
+        Unsafe.CopyBlockUnaligned(d, s, (uint)head);
+        for (; i + 4 * Page <= bytes; i += 4 * Page)
+        {
+            byte* source = s + i, target = d + i;
+            for (int line = 0; line < Page; line += 64)
+                for (int page = 0; page < 4 * Page; page += Page)
+                {
+                    byte* at = source + page + line;
+                    Sse.Prefetch0(at + Ahead);
+                    if (Avx512F.IsSupported) Avx512F.StoreAlignedNonTemporal(target + page + line, Vector512.Load(at));
+                    else
+                    {
+                        Avx.StoreAlignedNonTemporal(target + page + line, Vector256.Load(at));
+                        Avx.StoreAlignedNonTemporal(target + page + line + 32, Vector256.Load(at + 32));
+                    }
+                }
+        }
+
+        Sse.StoreFence();
+        for (; i < bytes; i += uint.MaxValue) Unsafe.CopyBlockUnaligned(d + i, s + i, (uint)Math.Min(bytes - i, uint.MaxValue));
     }
 }
