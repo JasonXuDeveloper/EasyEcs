@@ -652,9 +652,7 @@ public sealed partial class World : IDisposable
     private static EntityMeta[] AllocateMeta(int length, bool sized)
     {
         if (!sized || length < LargeMeta) return new EntityMeta[length];
-        var meta = GC.AllocateArray<EntityMeta>(length, pinned: true);
-        HugePages.Advise(meta, (nint)length * Unsafe.SizeOf<EntityMeta>());
-        return meta;
+        return HugePages.AllocatePinned<EntityMeta>(length);
     }
 
     /// <summary>Records from which an <see cref="EntityMeta"/> array is a large object (85,000 bytes).</summary>
