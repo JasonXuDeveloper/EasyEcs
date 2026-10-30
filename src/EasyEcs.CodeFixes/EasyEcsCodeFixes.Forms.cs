@@ -223,7 +223,7 @@ public sealed partial class EasyEcsCodeFixes
             : init.ReplaceNodes(new SyntaxNode[] { span, init.DescendantNodes().OfType<GenericNameSyntax>().First(g => g.Identifier.ValueText == "Cast").TypeArgumentList.Arguments[0] },
                 (old, _) => old == span ? write : SyntaxFactory.ParseTypeName(cell));
         var declared = declaration.WithDeclaration(declaration.Declaration.WithVariables(SyntaxFactory.SingletonSeparatedList(
-            declaration.Declaration.Variables[0].WithInitializer(SyntaxFactory.EqualsValueClause(value.WithoutTrivia()))))).WithoutLeadingTrivia().WithTrailingTrivia(SyntaxFactory.ElasticCarriageReturnLineFeed);
+            declaration.Declaration.Variables[0].WithInitializer(SyntaxFactory.EqualsValueClause(value.WithoutTrivia()))))).WithoutLeadingTrivia().WithTrailingTrivia(EndOfLine(root));
 
         // Each use in the row loop: at row.Index (+ a term) becomes at the term.
         var uses = rows.Statement.DescendantNodes().Where(n => n switch
@@ -242,9 +242,12 @@ public sealed partial class EasyEcsCodeFixes
                 Term(index.ArgumentList.Arguments[0].Expression)?.WithoutTrivia() ?? SyntaxFactory.LiteralExpression(SyntaxKind.NumericLiteralExpression, SyntaxFactory.Literal(0)))))),
             _ => now,
         });
-        var loopBody = statement is BlockSyntax block ? block.WithStatements(block.Statements.Insert(0, declared))
-            : SyntaxFactory.Block(declared, statement.WithoutLeadingTrivia());
-        var stepped = body.ReplaceNode(rows, rows.WithStatement(loopBody.WithAdditionalAnnotations(Microsoft.CodeAnalysis.Formatting.Formatter.Annotation)));
+        // In a block the declaration takes the first statement's indentation; a single statement becomes a block the
+        // formatter lays out.
+        var loopBody = statement is BlockSyntax { Statements.Count: > 0 } block
+            ? block.WithStatements(block.Statements.Insert(0, declared.WithLeadingTrivia(block.Statements[0].GetLeadingTrivia().Where(t => t.IsKind(SyntaxKind.WhitespaceTrivia)))))
+            : SyntaxFactory.Block(declared, statement.WithoutLeadingTrivia()).WithAdditionalAnnotations(Microsoft.CodeAnalysis.Formatting.Formatter.Annotation);
+        var stepped = body.ReplaceNode(rows, rows.WithStatement(loopBody));
 
         // The declaration and the clears of the whole buffer go (the pass zeroes the rows the step skips).
         var gone = stepped.Statements.Where(s => s is LocalDeclarationStatementSyntax { Declaration.Variables: { Count: 1 } v } && v[0].Identifier.ValueText == intoName
