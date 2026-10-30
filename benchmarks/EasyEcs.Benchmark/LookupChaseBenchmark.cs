@@ -213,7 +213,7 @@ public class LookupChaseLoadAheadBenchmark
 
 /// <summary>
 /// #164: the chase, a plain pass and the allocations of a world with the large columns and entity records on 4 KiB
-/// pages (HugePages.Enabled forced off) against 2 MiB pages (their pinned arrays advised and collapsed onto Linux's
+/// pages (HugePages.Enabled forced off) against 2 MiB pages (their pinned arrays advised onto Linux's
 /// transparent huge pages, the default where THP is on). Setup prints the process's AnonHugePages, so a run shows the
 /// pages were huge.
 /// </summary>
@@ -259,13 +259,13 @@ public class LookupChaseHugePagesBenchmark
     [Benchmark]
     public void Drift() => Drifting.Drift(_world);
 
-    /// <summary>A world of this size made and disposed: what advising and collapsing the pages costs its allocations.</summary>
+    /// <summary>A world of this size made and disposed: what advising the pages costs its allocations.</summary>
     [Benchmark]
     public void Create() => Chase.Create(Entities).Dispose();
 
     /// <summary>
     /// A world grown to this size without a reservation, 4,096 entities a call: every doubling of a column past a huge
-    /// page allocates, advises and collapses a new array.
+    /// page allocates and advises a new array.
     /// </summary>
     [Benchmark]
     public void Grow()
