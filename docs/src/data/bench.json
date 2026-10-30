@@ -1349,7 +1349,7 @@
         }
       ]
     },
-    "ParallelForEachBenchmark": {
+    "ParallelPassBenchmark": {
       "namespace": "EasyEcs.Benchmark",
       "job": "EnvironmentVariables=DOTNET_TC_CallCountingDelayMs=0 IterationCount=8 IterationTime=250ms LaunchCount=2 WarmupCount=6",
       "rows": [
@@ -1430,7 +1430,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "ParallelFor",
+          "method": "DotNetParallelFor",
           "params": {
             "Entities": "1000"
           },
@@ -1441,7 +1441,7 @@
           "allocatedBytes": 1677
         },
         {
-          "method": "ParallelForOptions",
+          "method": "DotNetParallelForOptions",
           "params": {
             "Entities": "1000"
           },
@@ -1452,7 +1452,7 @@
           "allocatedBytes": 1676
         },
         {
-          "method": "ParallelForLocal",
+          "method": "DotNetParallelForLocal",
           "params": {
             "Entities": "1000"
           },
@@ -1485,7 +1485,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "ParallelFor",
+          "method": "DotNetParallelFor",
           "params": {
             "Entities": "10000"
           },
@@ -1496,7 +1496,7 @@
           "allocatedBytes": 2035
         },
         {
-          "method": "ParallelForOptions",
+          "method": "DotNetParallelForOptions",
           "params": {
             "Entities": "10000"
           },
@@ -1507,7 +1507,7 @@
           "allocatedBytes": 2006
         },
         {
-          "method": "ParallelForLocal",
+          "method": "DotNetParallelForLocal",
           "params": {
             "Entities": "10000"
           },
@@ -1540,7 +1540,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "ParallelFor",
+          "method": "DotNetParallelFor",
           "params": {
             "Entities": "100000"
           },
@@ -1551,7 +1551,7 @@
           "allocatedBytes": 2058
         },
         {
-          "method": "ParallelForOptions",
+          "method": "DotNetParallelForOptions",
           "params": {
             "Entities": "100000"
           },
@@ -1562,7 +1562,7 @@
           "allocatedBytes": 1992
         },
         {
-          "method": "ParallelForLocal",
+          "method": "DotNetParallelForLocal",
           "params": {
             "Entities": "100000"
           },
@@ -1742,7 +1742,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "SumParallelFor",
+          "method": "SumDotNetParallelFor",
           "params": {
             "Entities": "1000"
           },
@@ -1753,7 +1753,7 @@
           "allocatedBytes": 2239
         },
         {
-          "method": "SumParallelForOptions",
+          "method": "SumDotNetParallelForOptions",
           "params": {
             "Entities": "1000"
           },
@@ -1764,7 +1764,7 @@
           "allocatedBytes": 2140
         },
         {
-          "method": "SumParallelForChunks",
+          "method": "SumDotNetParallelForChunks",
           "params": {
             "Entities": "1000"
           },
@@ -1808,7 +1808,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "MassParallelFor",
+          "method": "MassDotNetParallelFor",
           "params": {
             "Entities": "1000"
           },
@@ -1819,7 +1819,7 @@
           "allocatedBytes": 2278
         },
         {
-          "method": "MassParallelForChunks",
+          "method": "MassDotNetParallelForChunks",
           "params": {
             "Entities": "1000"
           },
@@ -1940,7 +1940,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "SumParallelFor",
+          "method": "SumDotNetParallelFor",
           "params": {
             "Entities": "10000"
           },
@@ -1951,7 +1951,7 @@
           "allocatedBytes": 2238
         },
         {
-          "method": "SumParallelForOptions",
+          "method": "SumDotNetParallelForOptions",
           "params": {
             "Entities": "10000"
           },
@@ -1962,7 +1962,7 @@
           "allocatedBytes": 2150
         },
         {
-          "method": "SumParallelForChunks",
+          "method": "SumDotNetParallelForChunks",
           "params": {
             "Entities": "10000"
           },
@@ -2006,7 +2006,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "MassParallelFor",
+          "method": "MassDotNetParallelFor",
           "params": {
             "Entities": "10000"
           },
@@ -2017,7 +2017,7 @@
           "allocatedBytes": 2286
         },
         {
-          "method": "MassParallelForChunks",
+          "method": "MassDotNetParallelForChunks",
           "params": {
             "Entities": "10000"
           },
@@ -2138,7 +2138,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "SumParallelFor",
+          "method": "SumDotNetParallelFor",
           "params": {
             "Entities": "100000"
           },
@@ -2149,7 +2149,7 @@
           "allocatedBytes": 2243
         },
         {
-          "method": "SumParallelForOptions",
+          "method": "SumDotNetParallelForOptions",
           "params": {
             "Entities": "100000"
           },
@@ -2160,7 +2160,7 @@
           "allocatedBytes": 2148
         },
         {
-          "method": "SumParallelForChunks",
+          "method": "SumDotNetParallelForChunks",
           "params": {
             "Entities": "100000"
           },
@@ -2204,7 +2204,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "MassParallelFor",
+          "method": "MassDotNetParallelFor",
           "params": {
             "Entities": "100000"
           },
@@ -2215,7 +2215,7 @@
           "allocatedBytes": 2301
         },
         {
-          "method": "MassParallelForChunks",
+          "method": "MassDotNetParallelForChunks",
           "params": {
             "Entities": "100000"
           },
@@ -2336,7 +2336,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "SumParallelFor",
+          "method": "SumDotNetParallelFor",
           "params": {
             "Entities": "1000000"
           },
@@ -2347,7 +2347,7 @@
           "allocatedBytes": 2314
         },
         {
-          "method": "SumParallelForOptions",
+          "method": "SumDotNetParallelForOptions",
           "params": {
             "Entities": "1000000"
           },
@@ -2358,7 +2358,7 @@
           "allocatedBytes": 2149
         },
         {
-          "method": "SumParallelForChunks",
+          "method": "SumDotNetParallelForChunks",
           "params": {
             "Entities": "1000000"
           },
@@ -2402,7 +2402,7 @@
           "allocatedBytes": 0
         },
         {
-          "method": "MassParallelFor",
+          "method": "MassDotNetParallelFor",
           "params": {
             "Entities": "1000000"
           },
@@ -2413,7 +2413,7 @@
           "allocatedBytes": 2315
         },
         {
-          "method": "MassParallelForChunks",
+          "method": "MassDotNetParallelForChunks",
           "params": {
             "Entities": "1000000"
           },

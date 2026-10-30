@@ -495,7 +495,7 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 | 清理组件 | `CleanupTests` | `CleanupBenchmark` | — |
 | 系统顺序和分组 | `SystemTests` | `OrderingBenchmark` | — |
 | 分帧（`[ForEach(Slices = N)]`） | `ForEachSystemTests` | `SlicesBenchmark` | — |
-| 并行系统和 `[ForEach(Parallel = true)]` | `ParallelTests`、`ConcurrencyTests` | `ParallelSystemsBenchmark`、`ParallelForEachBenchmark` | [`ParallelSystemsComparison`](/zh/docs/comparison#parallel)、[`ParallelQueryComparison`](/zh/docs/comparison#parallel) |
+| 并行系统和 `[ForEach(Parallel = true)]` | `ParallelTests`、`ConcurrencyTests` | `ParallelSystemsBenchmark`、`ParallelPassBenchmark` | [`ParallelSystemsComparison`](/zh/docs/comparison#parallel)、[`ParallelQueryComparison`](/zh/docs/comparison#parallel) |
 | 快照 | `SnapshotTests` | `SnapshotBenchmark`（`Capture`、`Restore`） | — |
 | 存档 | `SerializationTests` | `SnapshotBenchmark`（`Save`、`Load`、`SaveWithout`、`LoadKeeping`） | [`SaveComparison`](/zh/docs/comparison#saves) |
 | 在 World 之间搬实体 | `MoveTests` | `MigrationBenchmark` | — |
@@ -606,12 +606,12 @@ tick 一次、用 `[Changed<T>]` 和 `[Removed<T>]` 做的同步。`BattleServer
 ### 线程 [#parallel-benchmarks]
 
 `ParallelSystemsBenchmark` 在 100,000 个实体上跑四个访问互不相交的 `[ForEach]` 系统，分别关闭和开启
-`WorldOptions.ParallelSystems`：开启时它们组成一个阶段同时运行。`ParallelForEachBenchmark` 跑一个繁重的方法（转向 16 个
+`WorldOptions.ParallelSystems`：开启时它们组成一个阶段同时运行。`ParallelPassBenchmark` 跑一个繁重的方法（转向 16 个
 路点中最近的一个），普通的和 `Parallel = true` 的各一次，再用带实体句柄的临时 job（`ForEachEntity` /
 `ForEachEntityParallel`）做同样的工作。
 
 <BenchChart bench="ParallelSystemsBenchmark" />
-<BenchChart bench="ParallelForEachBenchmark" />
+<BenchChart bench="ParallelPassBenchmark" />
 
 参考机器只有 4 核，这次运行的并行数字误差很大：把它们理解为“多核下更快”，不要当成精确的加速比。`ParallelSystemsBenchmark`
 还分别在关闭和打开 `MeasureSystems` 时各跑一次（`Measure`）：这就是按系统统计耗时、字节和实体数的代价。

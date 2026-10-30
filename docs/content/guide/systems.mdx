@@ -1261,9 +1261,9 @@ methods split by `With` / `Without` (`MaybeBenchmark`):
 <BenchTable bench="MaybeBenchmark" />
 
 Heavy steering over 100,000 entities, `[ForEach]` and `[ForEach(Parallel = true)]`, and the same work as an ad-hoc
-entity job (`ParallelForEachBenchmark`):
+entity job (`ParallelPassBenchmark`):
 
-<BenchTable bench="ParallelForEachBenchmark" />
+<BenchTable bench="ParallelPassBenchmark" />
 
 Four systems registered in run order, against the same four registered backwards and ordered by `[UpdateAfter<T>]`:
 the order is resolved when they are added (`OrderingBenchmark`):

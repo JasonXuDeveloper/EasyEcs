@@ -292,7 +292,7 @@ flowchart LR
 从 16 次翻倍到 1,024 次。唤醒一个停放的线程池线程要几微秒到几百微秒，所以两个 tick 之间的小遍历宁可独自跑，也不白烧
 CPU。没有自旋，也没有专用线程。
 
-<BenchChart bench="ParallelForEachBenchmark" title="驱动 100,000 个实体，单线程与并行" />
+<BenchChart bench="ParallelPassBenchmark" title="驱动 100,000 个实体，单线程与并行" />
 <BenchChart bench="ParallelSystemsBenchmark" title="四个互不相关的系统，串行与作为一个并行阶段" />
 
 参考机器只有 4 核，而且这次运行的并行数字误差很大：把它们理解为“多核下更快”，不要当成精确的加速比。

@@ -766,7 +766,7 @@ What a parallel pass costs in synchronization, and what orders a chunk's writes 
 | Per run | Two `Interlocked.Exchange` on the cursor (open and close), and per helper woken a compare-and-swap and one queued thread-pool work item. |
 | End of the run | The caller spins on `Volatile.Read` of the chunks remaining until it reads 0. The full fence of each chunk's `Decrement` orders its writes (its rows, its job copy and partial result) before the caller's merge and before the code after the pass. |
 
-`ParallelRunnerBenchmark` runs the steering pass of `ParallelForEachBenchmark` through the runner and through
+`ParallelRunnerBenchmark` runs the steering pass of `ParallelPassBenchmark` through the runner and through
 `Parallel.For` with static delegates: on a small pass the runner keeps it on the calling thread, as fast as the serial
 loop and without allocating, where `Parallel.For` is slower than serial; at 10,000 rows the runner is the faster of the
 two; at 100,000 rows they are level
@@ -1022,11 +1022,11 @@ the four worlds together.
 <BenchSource />
 
 Four independent systems over 100,000 entities, sequential and parallel (`ParallelSystemsBenchmark`), and one method
-over 100,000 rows, sequential and parallel (`ParallelForEachBenchmark`):
+over 100,000 rows, sequential and parallel (`ParallelPassBenchmark`):
 
 <BenchTable bench="ParallelSystemsBenchmark" />
 
-<BenchTable bench="ParallelForEachBenchmark" />
+<BenchTable bench="ParallelPassBenchmark" />
 
 ## What it costs [#what-it-costs]
 

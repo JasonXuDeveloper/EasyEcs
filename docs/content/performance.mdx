@@ -535,7 +535,7 @@ the feature, a head-to-head comparison that checks every library computes the sa
 | Cleanup components | `CleanupTests` | `CleanupBenchmark` | — |
 | System ordering and groups | `SystemTests` | `OrderingBenchmark` | — |
 | Slices (`[ForEach(Slices = N)]`) | `ForEachSystemTests` | `SlicesBenchmark` | — |
-| Parallel systems and `[ForEach(Parallel = true)]` | `ParallelTests`, `ConcurrencyTests` | `ParallelSystemsBenchmark`, `ParallelForEachBenchmark` | [`ParallelSystemsComparison`](/en/docs/comparison#parallel), [`ParallelQueryComparison`](/en/docs/comparison#parallel) |
+| Parallel systems and `[ForEach(Parallel = true)]` | `ParallelTests`, `ConcurrencyTests` | `ParallelSystemsBenchmark`, `ParallelPassBenchmark` | [`ParallelSystemsComparison`](/en/docs/comparison#parallel), [`ParallelQueryComparison`](/en/docs/comparison#parallel) |
 | Snapshots | `SnapshotTests` | `SnapshotBenchmark` (`Capture`, `Restore`) | — |
 | Saves | `SerializationTests` | `SnapshotBenchmark` (`Save`, `Load`, `SaveWithout`, `LoadKeeping`) | [`SaveComparison`](/en/docs/comparison#saves) |
 | Moving entities between worlds | `MoveTests` | `MigrationBenchmark` | — |
@@ -657,12 +657,12 @@ removed.
 ### Threads [#parallel-benchmarks]
 
 `ParallelSystemsBenchmark` runs four `[ForEach]` systems with disjoint access over 100,000 entities, with
-`WorldOptions.ParallelSystems` off and on: on, they form one stage and run at once. `ParallelForEachBenchmark` runs one
+`WorldOptions.ParallelSystems` off and on: on, they form one stage and run at once. `ParallelPassBenchmark` runs one
 heavy method (steering towards the nearest of 16 waypoints) plain and with `Parallel = true`, and the same work as an
 ad-hoc job with entity handles (`ForEachEntity` / `ForEachEntityParallel`).
 
 <BenchChart bench="ParallelSystemsBenchmark" />
-<BenchChart bench="ParallelForEachBenchmark" />
+<BenchChart bench="ParallelPassBenchmark" />
 
 The reference machine has 4 cores and the parallel rows carry a large error in this run: read them as "faster on
 several cores", not as a precise speed-up. `ParallelSystemsBenchmark` also runs with `MeasureSystems` off and on

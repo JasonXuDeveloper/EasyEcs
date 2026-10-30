@@ -1167,9 +1167,9 @@ run order: MoveSystem
 
 <BenchTable bench="MaybeBenchmark" />
 
-对 10 万个实体做较重的转向计算：`[ForEach]` 和 `[ForEach(Parallel = true)]`，以及同样工作的临时实体 job（`ParallelForEachBenchmark`）：
+对 10 万个实体做较重的转向计算：`[ForEach]` 和 `[ForEach(Parallel = true)]`，以及同样工作的临时实体 job（`ParallelPassBenchmark`）：
 
-<BenchTable bench="ParallelForEachBenchmark" />
+<BenchTable bench="ParallelPassBenchmark" />
 
 四个系统按运行顺序注册，对比倒序注册、再用 `[UpdateAfter<T>]` 排好顺序：顺序在添加时就确定了（`OrderingBenchmark`）：
 

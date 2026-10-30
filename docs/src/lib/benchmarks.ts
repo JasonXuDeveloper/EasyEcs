@@ -349,12 +349,12 @@ export const keys: Record<string, KeyDef> = {
     params: { N: '10000' },
   },
   'parallel.forEach.off': {
-    bench: 'ParallelForEachBenchmark',
+    bench: 'ParallelPassBenchmark',
     method: 'Tick',
     params: { Parallel: 'False' },
   },
   'parallel.forEach.on': {
-    bench: 'ParallelForEachBenchmark',
+    bench: 'ParallelPassBenchmark',
     method: 'Tick',
     params: { Parallel: 'True' },
   },

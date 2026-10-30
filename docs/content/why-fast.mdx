@@ -324,7 +324,7 @@ work, and a job that runs alone probes again after a period that doubles from 16
 thread costs from a few to a few hundred microseconds, so a small pass between ticks runs alone instead of burning
 CPU. There is no spinning and no dedicated thread.
 
-<BenchChart bench="ParallelForEachBenchmark" title="Steering 100,000 entities, one thread and parallel" />
+<BenchChart bench="ParallelPassBenchmark" title="Steering 100,000 entities, one thread and parallel" />
 <BenchChart bench="ParallelSystemsBenchmark" title="Four independent systems, sequential and as one parallel stage" />
 
 The reference machine has 4 cores, and the parallel rows of this run carry a large error: read them as "faster on

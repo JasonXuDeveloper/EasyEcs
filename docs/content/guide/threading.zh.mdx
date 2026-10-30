@@ -674,7 +674,7 @@ world.AddSystem<WanderSystem>();
 | 每次运行 | 游标上两次 `Interlocked.Exchange`（打开和关闭），每唤醒一个助手线程再加一次比较并交换和一个排队的线程池工作项。 |
 | 运行结束 | 调用线程自旋，用 `Volatile.Read` 读剩余块数，直到读到 0。每块 `Decrement` 的完整内存屏障让它的写入（它的行、它的 job 副本和部分结果）排在调用线程的合并和遍历之后的代码之前。 |
 
-`ParallelRunnerBenchmark` 把 `ParallelForEachBenchmark` 的转向遍历分别交给运行器和带静态委托的 `Parallel.For`：遍历很小时运行器留在调用线程上，
+`ParallelRunnerBenchmark` 把 `ParallelPassBenchmark` 的转向遍历分别交给运行器和带静态委托的 `Parallel.For`：遍历很小时运行器留在调用线程上，
 和串行循环一样快，而且不分配，`Parallel.For` 则比串行还慢；10,000 行时运行器是两者中更快的；100,000 行时两者持平
 （[D22](/zh/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)）。
 
@@ -905,11 +905,11 @@ unit 0 at (7.06, 7.06) with 60 hp
 
 <BenchSource />
 
-四个互不相关的系统跑 10 万个实体，顺序和并行（`ParallelSystemsBenchmark`）；一个方法跑 10 万行，顺序和并行（`ParallelForEachBenchmark`）：
+四个互不相关的系统跑 10 万个实体，顺序和并行（`ParallelSystemsBenchmark`）；一个方法跑 10 万行，顺序和并行（`ParallelPassBenchmark`）：
 
 <BenchTable bench="ParallelSystemsBenchmark" />
 
-<BenchTable bench="ParallelForEachBenchmark" />
+<BenchTable bench="ParallelPassBenchmark" />
 
 ## 开销 [#what-it-costs]
 
