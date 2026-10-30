@@ -294,6 +294,9 @@ tools/bench.sh GeneratorBenchmark
   works, and its arity is the containing type's plus the method's. The JIT puts a multi-use complex argument in a
   temporary, so `(x + k) + r` costs an add per use where the hand form folds `k` into the displacement.
 - In use: C# 14 extension members, generic attributes (`[With<T>]`), FAWMN, implementation output.
+- A fact the program needs before any pass runs (a tile's cell pool size from its `Tile<,>` parameters, which
+  `FillPool` reads at start-up) goes in a `[ModuleInitializer]` of the generated file, not in the pass: set in the
+  pass it comes too late and costs a compare per pass.
 
 ## Done means (each new generated form, on top of `feature`)
 
