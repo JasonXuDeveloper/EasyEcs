@@ -6,7 +6,8 @@ namespace EasyEcs.Benchmark;
 /// <summary>
 /// The full copies a snapshot still makes (borrowed-ideas.md item 5): a world of untracked components (80 bytes a row,
 /// no change ticks), so a capture into a reused snapshot and a restore from it copy every row of every column whole
-/// (Archetype.CopyWritten), the copies that remain after incremental Capture / Restore (backlog item 12d). 100,000
+/// (Archetype.CopyWritten), the copies that remain after incremental Capture / Restore (backlog item 12d); <c>Grow</c>
+/// resizes the table's columns twice (growth, then TrimExcess), each a copy of every row. 100,000
 /// entities (8 MB) sit in the last-level cache, 4M (320 MiB) are past it (260 MiB on the reference VM). Checked in setup:
 /// a restore brings back the captured values.
 /// </summary>
@@ -50,4 +51,12 @@ public class FullCopyBenchmark
 
     [Benchmark]
     public void Restore() => _world.Restore(_snapshot);
+
+    /// <summary>Room for as many rows again (the columns grown: every row copied), then trimmed back (copied again).</summary>
+    [Benchmark]
+    public void Grow()
+    {
+        _world.Reserve<Body, Motion>(Entities);
+        _world.TrimExcess();
+    }
 }
