@@ -398,8 +398,13 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
     public override object Box(Array column, int slot) =>
         Managed ? Unsafe.As<T[]>(column)[slot] : Unsafe.Add(ref Archetype.Row0<T>(column), slot);
 
-    public override Array Create(int capacity) =>
-        Managed ? new T[capacity] : GC.AllocateArray<byte>(capacity * Size + Archetype.CacheLine, pinned: true);
+    public override Array Create(int capacity)
+    {
+        if (Managed) return new T[capacity];
+        var column = GC.AllocateArray<byte>(capacity * Size + Archetype.CacheLine, pinned: true);
+        HugePages.Advise(column, column.Length);
+        return column;
+    }
 
     public override Array Resize(Array column, int capacity)
     {
