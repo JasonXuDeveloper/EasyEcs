@@ -31,9 +31,9 @@ names the skill:
 
 ## Running (worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-`feat-borrowed-rest` (item 7: streaming stores, roofline); `feat-field-gaps` (item 8c).
+`feat-borrowed-rest` (item 7: streaming stores, roofline).
 
-Merged since the last update: `feat-small-next` (rename leftovers, EECS033 across assemblies, recorded switches), `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
+Merged since the last update: `feat-field-gaps` (item 8c: `tile.Restart` and `tile.Sweep`, names under owner review; Linger showed 1-3 B per op at 256 springs / Hop 1, look in an audit), `feat-small-next` (rename leftovers, EECS033 across assemblies, recorded switches), `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
 at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
 vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the owner's M4: no case slower past
@@ -195,13 +195,37 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        CS8785 in the log). Repro: VoxelServer's old straight chase in a test project that references the sample
        (scratchpad `TmpRepro.cs.txt`, copy it into the test). Fix, regression test, and no generator exception may ever
        drop the other files (catch per method, report it). First in line.
-8c. [ ] **Gaps the distance field met** (feat-zombie-field report; each through `audit-generator`'s rule: build it
-       when it saves users lines or thought): a 2D tile beside a 3D one on one key (today a second tile component and
-       index); colors without generic systems (`[With<TColor>]` is CS8968; `[GaussSeidel]` removes it); EECS059 as
-       an Error where a checkerboard makes the write safe (goes with `[GaussSeidel]`); `PaddedTile` read-only (settling
-       in a tile copies it into a stackalloc by hand; no halo-row or lane-shift helper; 12a's padded storage may
-       answer it); `FillPool` ignores the up to 64 lists each thread parks (a likely cause of the in-place form's
-       allocation; done in 12d: `Fill` counts 64 lists per thread with lists of its own).
+8c. [x] **Gaps the distance field met** (feat-zombie-field report; each through `audit-generator`'s rule: build it
+       when it saves users lines or thought). Branch `feat-field-gaps` (unmerged), per gap:
+       - a 2D tile beside a 3D one on one key: answered by `Columns<TTile>` (feat-tiles-pingpong; Tile.cs,
+         `Tile<Scent, Columns<Chunk>>`, test `AGroundTileOverAChunkGridReadsTheChunksRocks`);
+       - colors without generic systems: answered by `[GaussSeidel]` (colors from the key's parities, `ITileColors` /
+         `TileColoring`, EECS117 with its fix); CS8968 stays only for per-color systems written by hand, which no field
+         needs any more;
+       - EECS059 where a checkerboard makes the write safe: answered (the in-place write is `ref Tile` + `[GaussSeidel]`
+         + `Write(row)`, which `Symbols.LookupProblem` does not report; a `Lookup<T>` of the swept cells still is, rightly);
+       - a read-only tile, settling copied into a stackalloc, halo rows: answered by `[GaussSeidel]`'s in-place texture
+         (`Write(row)` writes the texture, the generated `do ... while (Sweep)` repeats the method, halo rows are
+         `At(row).Load128(x, 0, ±1)`); **built** what the scent's settle still lacked: `tile.Restart(value)` (settle
+         from nothing, not from the last values: no count to infinity) and `tile.Sweep` (the sweep's number: rows in
+         turns of direction, setup once per step), EECS115 for both on a tile no sweep steps; names provisional
+         (owner-review "Restart and Sweep"). **Dropped**: a lane-shift helper (owner-review);
+       - `FillPool` and per-thread lists: answered in 12d (`BufferStore<T>.Fill` adds 2 x 32 per thread with lists of
+         its own, a later thread adds its share in `Joined`).
+       Numbers (TileRestartBenchmark, us, 2 rounds, 0 B; Restart / Turn / Linger, Hand by hand without sleeping
+       2,300-4,100 at 1 thread): Springs 4 Hop 8, 1 thread 716-800 / 474-479 / 1,109-1,167; 4 threads 302-351 / 245-274 /
+       506-534; Springs 256 Hop 8, 1 thread 1,960-2,006 / 1,798-1,997 / 2,412-2,520; Springs 4 Hop 1 284-295 / 199-200
+       / 302-327; but Springs 256 Hop 1 (sources creeping a cell, most plates awake) 1,064-1,126 / 1,069-1,104 / 937-1,005:
+       restarting re-settles what was nearly right, so Restart is the user's choice, not a default. Later rewrite of the
+       sample (voxel-rewrite.md step 6) drops: Scent.cs 16-18 (NextScent), 54-72 (Ground), 83-89 (Red, Black);
+       Step.cs 133 generic, 144-149 (color parameter), 159-166 and 175-177 (the stackalloc copy of the halo), 199-228's
+       loop and change test (one sweep per call), 253-254 (ChangedEdges, ScentStep), Settle.cs whole; Chunks.cs 45
+       `new Ground(pos)`, 47-48 RemoveRed / RemoveBlack, 57 NextScent's SetCount; Program.cs 114-117 (four systems ->
+       one), 175 (NextScent's pool), 192-194 (Ground, NextScent, ScentStep, Red, Black in the prefab); Hunt.cs 123
+       `With<Ground>` -> `With<Chunk>`. It needs: seeds as a cell buffer (a `Lookup<Footprint>` parameter, like the
+       `in Hunt` singleton, keeps every tile stepping: `SystemGenerator` lets a step sleep only beside Entity, Scratch,
+       tiles of its grid and tracked components), `scent.Restart()` and turning sweeps through `scent.Sweep`; Trail
+       written in each sweep or by a reader of the settled field (measure both).
 8e. [x] **Symmetric pair methods** (`voxel-rewrite.md` GA4; owner, 2026-10-27: "加，做 GA4"): each unordered pair
        visited once and both sides written (Newton's third law in MD codes: half neighbor lists), for item merging in
        VoxelServer and collisions; today a pair writing the neighbor's component it also reads of its row is refused.

@@ -101,5 +101,27 @@
       O(1)；按值接收的瓦片抛出异常。
     </summary>
   </member>
-</doc>
 
+  <member name="P:EasyEcs.Tile`2.Sweep" source="8c2b71039e98">
+    <summary>
+      瓦片的 <see cref="T:EasyEcs.GaussSeidelAttribute">[GaussSeidel]</see> 推进正在第几次扫描：第一次为 0，之后每次扫描加一
+      （Jacobi 推进只扫描一次，为 0）。用于一次推进只做一次的事（第一次扫描时把地面的掩码读进 <see cref="T:EasyEcs.Scratch`1" />，
+      格子的起点：<see cref="M:EasyEcs.Tile`2.Restart(`0)" />），以及交替方向的扫描（奇数次扫描从最后一行往回走到第一行：
+      两次扫描就让场在两个方向上穿过瓦片，即距离场的快速扫描法）。按推进计数：用完
+      <see cref="P:EasyEcs.GaussSeidelAttribute.MaxSweeps" /> 的瓦片在下一次推进里从 0 开始。O(1)；方法不推进的瓦片（按值接收）抛出异常。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.Tile`2.Restart(`0)" source="fd116a75ccd9">
+    <summary>
+      让 <see cref="T:EasyEcs.GaussSeidelAttribute">[GaussSeidel]</see> 推进从 <paramref name="value" /> 开始收敛瓦片，而不是从它的格子开始：
+      纹理里交换过的层的格子都是 <paramref name="value" />（光环仍是邻居的），扫描一直进行到从这里得到的场收敛。
+      在 <see cref="M:EasyEcs.Tile`2.ExchangeHalo(System.Int32,System.Int32,`0,System.Boolean)" /> 之后调用；和交换一样，它只在第一次扫描时生效，
+      之后的扫描保留自己写过的内容。用于源会出现和消失的场（距离场、气味）：从上次的值原地松弛时，源离开后留下的值会滞留，
+      每次扫描只减弱一步（距离向量路由的计数到无穷）；从零开始时，瓦片收敛所需的扫描次数等于穿过它的路径的转弯数。
+      推进会把收敛后的行和格子比较，所以场算出来没变的瓦片照样休眠。重新开始的瓦片如果用完 <see cref="P:EasyEcs.GaussSeidelAttribute.MaxSweeps" />，
+      会在下一次推进里再从头开始：给它足够收敛的扫描次数。O(交换过的层的格子数)；不是 [GaussSeidel] 推进正在扫描的瓦片，
+      或在交换光环之前调用时，抛出异常。
+    </summary>
+    <param name="value">瓦片格子的起点：<c>default</c>（没有气味、未到达），或求最小值时的远端值（<c>int.MaxValue</c>）。</param>
+  </member>
+</doc>

@@ -143,3 +143,29 @@ a slower out-of-cache case: the swings at Side 512 are the size of what code the
 machine (a 4-vCPU VM, no hardware counters, an L3 shared with other tenants). What would change the verdict: a quiet
 machine (the owner's M4 or a bare-metal x64) showing Side 512 slower in paired rounds.
 
+
+## Restart and Sweep: two names for the owner (feat-field-gaps, 2026-10-30)
+
+**Proposed by** backlog item 8c. Settling VoxelServer's scent with `[GaussSeidel]` needed two things the step did not
+have: start each step from nothing (a scent whose player left otherwise lingers and fades a step per sweep: count to
+infinity) and know which sweep runs (turn the row order every other sweep: a field crosses the tile both ways in two
+sweeps). Built as two members of `Tile<TCell, TTile>`, provisional names, each one identifier to rename:
+
+| Name | What | Considered | Why this one |
+| --- | --- | --- | --- |
+| `tile.Restart(TCell value = default)` | the first sweep starts from `value` in the tile's own cells, the halo kept | `Reset`, `Clear`, `StartFrom`, `ExchangeHalo(..., restart: true)`, `[GaussSeidel(FromZero = true)]` | the relaxation literature restarts an iteration; an attribute could not carry a TCell (a minimum restarts from `int.MaxValue`); a parameter of ExchangeHalo would grow its four optional parameters to five |
+| `tile.Sweep` (int) | 0 in the first sweep of a step, one more after each | `Sweeps`, `SweepIndex`, `FirstSweep` (bool) | Gauss-Seidel's own word (`MaxSweeps` counts the same thing); a bool cannot turn the direction |
+
+What would change the verdict: the owner prefers other names (rename before the release; nothing shipped).
+
+## Not built in 8c: a lane-shift helper, Rows() turning by itself (feat-field-gaps, 2026-10-30)
+
+- **A lane-shift helper** (`FromEast(v, n)` / `FromWest(v, n)` of the scent's in-row scan). Dropped: it shifts a vector
+  the method computed, not cells the tile holds (those are `Load128(x ± n)` already), so it is a general SIMD helper,
+  one `Vector128.Shuffle(v, Vector128<byte>.Indices ± n)` (PSHUFB, NEON TBL), not tile or ECS code; it saves the sample
+  two one-line helpers. What would change the verdict: a second sample or a docs example writing the same shifts.
+- **`Rows()` walking odd sweeps backwards by itself** in a `[GaussSeidel]` step. Not built: `Rows()` walks only active
+  rows and a source term walks every row by hand, so the scent would not use it; it would change the bits of every
+  `[GaussSeidel]` method that does not settle to a unique fixed point (a Laplace solve to a tolerance). `tile.Sweep`
+  lets the method turn. What would change the verdict: a measured field written with `Rows()` that settles faster
+  turning (a benchmark of the two walks).

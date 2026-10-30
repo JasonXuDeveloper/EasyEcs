@@ -1691,3 +1691,38 @@ Decision draft (zh): **EECS033 按组件本身匹配生成成员。** 该规则�
 （适用于 `entity.X` 和 `TryGetX`，不适用于不带类型的 `HasX`、`RemoveX`、`IsX`）；建议写出限定的扩展调用
 （`Lib.SpotEcsExtensions...`），比它要替换的泛型调用更长。开销：对已经绑定成功的调用，在推测绑定之后多一次名称
 比较和几次符号比较。
+
+## feat-field-gaps (backlog item 8c): `tile.Restart(value)` and `tile.Sweep` in [GaussSeidel] steps
+
+Names provisional (`docs/owner-review.md`, "Restart and Sweep"): rename everywhere below if the owner picks others.
+
+- guide/grids.mdx + zh, the [GaussSeidel] section the tiles-pingpong to-dos add:
+  - **Fields whose sources come and go** (a scent, a distance field to moving players): relaxed in place from its last
+    values, what a source that left keeps lingers and fades a step per sweep (distance-vector routing's "count to
+    infinity"); `tile.Restart()` after `ExchangeHalo()` settles each stepped tile from nothing (`Restart(value)`: a
+    minimum starts from its far value, `int.MaxValue`; give the halo the same value through
+    `ExchangeHalo(from, to, border)`). The halo stays the neighbors'; a tile whose field comes out the same still
+    sleeps. Pitfall: a restarted tile that runs out of `MaxSweeps` starts over in its next step (leave MaxSweeps at its
+    default, or high enough to settle). Full example: the springs and scent of TileTests' `SmellSystem`.
+  - **Sweeps in turns of direction** (`tile.Sweep`: 0 in the first sweep): `new TileRow<T>(0, (tile.Sweep & 1) == 0 ? k : Depth - 1 - k)`
+    crosses the tile both ways in two sweeps (the fast sweeping method of distance fields); a walk one way climbs back
+    a row per sweep. Also what a step does once per step (`if (tile.Sweep == 0)`: a mask of the ground into a
+    `Scratch<T>`). A source term walks every row, not `Rows()` (the grids page already says so for `Rows`).
+  - When to pick which: the table "Jacobi vs [GaussSeidel]" gets a row "sources that move or vanish: [GaussSeidel] +
+    Restart".
+  - Glossary (en + zh): "count to infinity" (计数到无穷), "fast sweeping" (快速扫描法), with sources (distance-vector
+    routing; Zhao 2005); check `tools/ApiDocs/zh/README.md` and lint-terms.
+- api.mdx + zh: complexity rows `Tile<TCell, TTile>.Restart(TCell)` O(cells of the layers exchanged) in the first sweep,
+  O(1) after; `Tile<TCell, TTile>.Sweep` O(1). Then regenerate the reference (the zh entries are in tools/ApiDocs/zh/tile.xml).
+- guide/analyzer.mdx + zh: EECS115's list gains "Restart on a tile no [GaussSeidel] sweep steps (taken by value, or a
+  Jacobi step)" and "Sweep of a tile taken by value"; the message examples.
+- samples/voxel-server page (with the rewrite, voxel-rewrite.md step 6): the scent as one `[GaussSeidel]` step over
+  `Tile<Scent, Columns<Chunk>>` with `Restart()` and turning sweeps; what it deletes (the list in the 8c item of the backlog).
+- performance page: TileRestartBenchmark (Hand / Restart / Turn / Linger, Springs 4 / 256, Hop 1 / 8) once the bench sync
+  ran it on the reference machine.
+- decisions.mdx + zh (drafts in the feat-field-gaps report): "A [GaussSeidel] step can start from nothing and knows its
+  sweep" (Restart, Sweep; numbers below) and "No lane-shift helper on tiles" (dropped).
+- skills/easyecs/SKILL.md: "a field read once settled whose sources move: [GaussSeidel] + `tile.Restart()`; turn the
+  row order with `tile.Sweep`".
+- Numbers (shared VM, BenchmarkDotNet default job, two rounds of the final class; sd 5-15 %; us, Restart / Turn /
+  Linger / Hand): see the 8c entry of backlog.md.

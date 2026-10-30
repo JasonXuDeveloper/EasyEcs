@@ -1027,4 +1027,309 @@ public partial class TileTests
             dist.Write().AsSpan()[pulse.At] = new Dist(1);
         }
     }
+
+    // ---------------- Restart ----------------
+
+    /// <summary>A scent: <see cref="Strength"/> on a spring, one less per cell away, 0 past its reach.</summary>
+    public record struct Smell(int V)
+    {
+        public const int Strength = 12;
+    }
+
+    /// <summary>Where the scent comes from, beside it on the same tiles: 1 on a spring.</summary>
+    public record struct Spring(byte On);
+
+    /// <summary>The scent at a cell: the spring's strength, else the strongest neighbor less one.</summary>
+    private static Smell Scented(TileCursor<Smell, DistPlate> c, TileCursor<Spring, DistPlate> s, int x) =>
+        new(s[x, 0, 0].On != 0 ? Smell.Strength
+            : Math.Max(0, Math.Max(Math.Max(c[x - 1, 0, 0].V, c[x + 1, 0, 0].V), Math.Max(c[x, 0, -1].V, c[x, 0, 1].V)) - 1));
+
+    /// <summary>The scent settled from nothing in every step: a spring that dried up leaves nothing behind in the tile.</summary>
+    [EcsSystem]
+    public ref struct SmellSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2), GaussSeidel]
+        static void Spread(ref Tile<Smell, DistPlate> smell, Tile<Spring, DistPlate> springs)
+        {
+            springs.ExchangeHalo(0, 0, mask: false);
+            smell.ExchangeHalo();
+            smell.Restart();
+            for (int z = 0; z < 16; z++) // a source term: every row
+            {
+                var row = new TileRow<DistPlate>(0, z);
+                var c = smell.At(row);
+                var s = springs.At(row);
+                var into = smell.Write(row);
+                for (int x = 0; x < 16; x++) into[x] = Scented(c, s, x);
+            }
+        }
+    }
+
+    /// <summary>The same scent relaxed from its last values: what a dried-up spring left fades a step per sweep.</summary>
+    [EcsSystem]
+    public ref struct LingerSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2), GaussSeidel]
+        static void Spread(ref Tile<Smell, DistPlate> smell, Tile<Spring, DistPlate> springs)
+        {
+            springs.ExchangeHalo(0, 0, mask: false);
+            smell.ExchangeHalo();
+            for (int z = 0; z < 16; z++)
+            {
+                var row = new TileRow<DistPlate>(0, z);
+                var c = smell.At(row);
+                var s = springs.At(row);
+                var into = smell.Write(row);
+                for (int x = 0; x < 16; x++) into[x] = Scented(c, s, x);
+            }
+        }
+    }
+
+    private static (World World, Dictionary<TilePos, Entity> Plates) SmellWorld(int threads, int size, bool restart)
+    {
+        var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var plates = new Dictionary<TilePos, Entity>();
+        foreach (var place in Box(size, 1, size, new TilePos(2, 0, 2)))
+        {
+            var plate = world.CreateEntity(new DistPlate(place));
+            plate.GetOrAdd<DynamicBuffer<Smell>>().SetCount(256);
+            plate.GetOrAdd<DynamicBuffer<Spring>>().SetCount(256);
+            plates.Add(place, plate);
+        }
+        if (restart) world.AddSystem<SmellSystem>();
+        else world.AddSystem<LingerSystem>();
+        return (world, plates);
+    }
+
+    /// <summary>Springs at <paramref name="count"/> places drawn by <paramref name="seed"/>, the others dry.</summary>
+    private static void Springs(Dictionary<TilePos, Entity> plates, int count, int seed)
+    {
+        var random = new Random(seed);
+        var places = plates.Keys.OrderBy(p => (p.X, p.Z)).ToArray();
+        foreach (var plate in plates.Values) plate.GetOrAdd<DynamicBuffer<Spring>>().AsSpan().Clear();
+        for (int i = 0; i < count; i++)
+            plates[places[random.Next(places.Length)]].GetOrAdd<DynamicBuffer<Spring>>().AsSpan()[random.Next(256)] = new Spring(1);
+    }
+
+    /// <summary>The settled scent of a 2D grid of plates: the strength less the steps to the nearest spring, 0 past it.</summary>
+    private static int[,] SettledSmell(Dictionary<TilePos, Entity> plates, int size)
+    {
+        int cells = size * 16;
+        var springs = Whole(plates, 16, 16, (Entity e, int i) => (int)e.Read<DynamicBuffer<Spring>>()[i].On, size);
+        bool Open(int x, int z) => x >= 0 && z >= 0 && x < cells && z < cells && plates.ContainsKey(new TilePos(x / 16, 0, z / 16));
+        var steps = Distances(cells * cells, i => springs[i % cells, i / cells], i =>
+        {
+            int x = i % cells, z = i / cells;
+            var next = new List<int>();
+            foreach (var (dx, dz) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) })
+                if (Open(x + dx, z + dz)) next.Add((z + dz) * cells + x + dx);
+            return next;
+        });
+        var field = new int[cells, cells];
+        for (int i = 0; i < steps.Length; i++)
+            field[i % cells, i / cells] = Open(i % cells, i / cells) && steps[i] > 0 ? Math.Max(0, Smell.Strength - (steps[i] - 1)) : 0;
+        return field;
+    }
+
+    /// <summary>The updates until the scent is <see cref="SettledSmell"/>, each update the same on one thread and on four.</summary>
+    private static int SettleSmell(World one, Dictionary<TilePos, Entity> onePlates, World four, Dictionary<TilePos, Entity> fourPlates, int size, string when)
+    {
+        var settled = SettledSmell(onePlates, size);
+        for (int updates = 1; updates <= 40; updates++)
+        {
+            one.Update();
+            four.Update();
+            var field = Whole(onePlates, 16, 16, (Entity e, int i) => e.Read<DynamicBuffer<Smell>>()[i].V, size);
+            Same(fourPlates, 16, 16, field, (Entity e, int i) => e.Read<DynamicBuffer<Smell>>()[i].V, $"{when}, update {updates}, four threads against one");
+            if (field.Cast<int>().SequenceEqual(settled.Cast<int>())) return updates;
+        }
+        Same(onePlates, 16, 16, settled, (Entity e, int i) => e.Read<DynamicBuffer<Smell>>()[i].V, when);
+        return int.MaxValue;
+    }
+
+    // Both forms settle on the same field in as many updates (a tile sweeps until it settles either way); the restarted
+    // one takes fewer sweeps per step where a spring dried up (TileRestartBenchmark).
+    [TestCase(true)]
+    [TestCase(false)]
+    public void AFieldWhoseSourcesMoveSettlesTheSameOnAnyNumberOfThreads(bool restart)
+    {
+        const int size = 6;
+        var (one, onePlates) = SmellWorld(1, size, restart);
+        var (four, fourPlates) = SmellWorld(4, size, restart);
+        using var a = one;
+        using var b = four;
+        for (int round = 0; round < 6; round++) // the springs move: most of the old scent must go
+        {
+            Springs(onePlates, 5, round);
+            Springs(fourPlates, 5, round);
+            Assert.That(SettleSmell(one, onePlates, four, fourPlates, size, $"round {round}"), Is.LessThanOrEqualTo(size * 2),
+                "a pass carries the scent across a tile of each color");
+        }
+    }
+
+    /// <summary>Steps to the nearest spring, <see cref="int.MaxValue"/> where none is reached: a minimum restarts from far.</summary>
+    public record struct Steps(int V);
+
+    [EcsSystem]
+    public ref struct StepsSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2), GaussSeidel]
+        static void Spread(ref Tile<Steps, DistPlate> steps, Tile<Spring, DistPlate> springs)
+        {
+            springs.ExchangeHalo(0, 0, mask: false);
+            steps.ExchangeHalo(0, 0, new Steps(int.MaxValue)); // the edge of the world is as far as unreached
+            steps.Restart(new Steps(int.MaxValue));
+            foreach (var row in steps.Rows(TileStencil.Layer))
+            {
+                var c = steps.At(row);
+                var s = springs.At(row);
+                var into = steps.Write(row);
+                for (int x = 0; x < 16; x++)
+                {
+                    int near = Math.Min(Math.Min(c[x - 1, 0, 0].V, c[x + 1, 0, 0].V), Math.Min(c[x, 0, -1].V, c[x, 0, 1].V));
+                    into[x] = new Steps(s[x, 0, 0].On != 0 ? 0 : near == int.MaxValue ? near : near + 1);
+                }
+            }
+        }
+    }
+
+    [TestCase(1)]
+    [TestCase(4)]
+    public void AMinimumRestartsFromItsFarValue(int threads)
+    {
+        const int size = 4;
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var plates = new Dictionary<TilePos, Entity>();
+        foreach (var place in Box(size, 1, size))
+        {
+            var plate = world.CreateEntity(new DistPlate(place));
+            plate.GetOrAdd<DynamicBuffer<Steps>>().SetCount(256);
+            plate.GetOrAdd<DynamicBuffer<Spring>>().SetCount(256);
+            plates.Add(place, plate);
+        }
+        world.AddSystem<StepsSystem>();
+        for (int round = 0; round < 3; round++)
+        {
+            Springs(plates, 3, round);
+            for (int i = 0; i < size * 2; i++) world.Update();
+            var reach = SettledSmell(plates, size); // Strength less the steps: past the reach it is 0, so compare within it
+            var steps = Whole(plates, 16, 16, (Entity e, int i) => e.Read<DynamicBuffer<Steps>>()[i].V, size);
+            for (int x = 0; x < size * 16; x++)
+            for (int z = 0; z < size * 16; z++)
+                if (reach[x, z] > 0 && steps[x, z] != Smell.Strength - reach[x, z])
+                    Assert.Fail($"round {round}, cell ({x}, {z}): {steps[x, z]} steps, expected {Smell.Strength - reach[x, z]}");
+                else if (reach[x, z] == 0 && steps[x, z] < Smell.Strength)
+                    Assert.Fail($"round {round}, cell ({x}, {z}): {steps[x, z]} steps, expected {Smell.Strength} or more");
+        }
+    }
+
+    /// <summary>The sweeps a plate's last step took.</summary>
+    public record struct Sweeps(int Count) : IComponent;
+
+    /// <summary>The distance field of <see cref="SpreadSystem"/>, its odd sweeps from the last row back to the first.</summary>
+    [EcsSystem]
+    public ref struct TurnSystem
+    {
+        [ForEach, GaussSeidel]
+        static void Spread(ref Tile<Dist, DistPlate> dist, ref Sweeps sweeps)
+        {
+            dist.ExchangeHalo();
+            sweeps.Count = dist.Sweep + 1;
+            for (int k = 0; k < 16; k++)
+            {
+                var row = new TileRow<DistPlate>(0, (dist.Sweep & 1) == 0 ? k : 15 - k);
+                var c = dist.At(row);
+                var into = dist.Write(row);
+                for (int x = 0; x < 16; x++)
+                {
+                    int here = c[x, 0, 0].V;
+                    if (here == 1) continue;
+                    into[x] = new Dist(Nearer(Nearer(Nearer(Nearer(here, c[x - 1, 0, 0].V), c[x + 1, 0, 0].V), c[x, 0, -1].V), c[x, 0, 1].V));
+                }
+            }
+        }
+    }
+
+    /// <summary>...and every sweep from the first row to the last.</summary>
+    [EcsSystem]
+    public ref struct OneWaySystem
+    {
+        [ForEach, GaussSeidel]
+        static void Spread(ref Tile<Dist, DistPlate> dist, ref Sweeps sweeps)
+        {
+            dist.ExchangeHalo();
+            sweeps.Count = dist.Sweep + 1;
+            for (int z = 0; z < 16; z++)
+            {
+                var row = new TileRow<DistPlate>(0, z);
+                var c = dist.At(row);
+                var into = dist.Write(row);
+                for (int x = 0; x < 16; x++)
+                {
+                    int here = c[x, 0, 0].V;
+                    if (here == 1) continue;
+                    into[x] = new Dist(Nearer(Nearer(Nearer(Nearer(here, c[x - 1, 0, 0].V), c[x + 1, 0, 0].V), c[x, 0, -1].V), c[x, 0, 1].V));
+                }
+            }
+        }
+    }
+
+    [Test]
+    public void SweepsInTurnsOfDirectionCrossATileBothWays()
+    {
+        Assert.That(SweepsToSettle(turn: true), Is.LessThan(SweepsToSettle(turn: false) / 2),
+            "a field that sweeps one way only climbs back a row per sweep");
+
+        // One plate, its source in the last row: the sweeps of the step that settles it, which must be the whole field.
+        static int SweepsToSettle(bool turn)
+        {
+            using var world = new World();
+            var plate = world.CreateEntity(new DistPlate(new TilePos(0, 0, 0)), new Sweeps());
+            plate.GetOrAdd<DynamicBuffer<Dist>>().SetCount(256)[15 * 16 + 7] = new Dist(1);
+            if (turn) world.AddSystem<TurnSystem>();
+            else world.AddSystem<OneWaySystem>();
+            world.Update();
+            var plates = new Dictionary<TilePos, Entity> { [new TilePos(0, 0, 0)] = plate };
+            Same(plates, 16, 16, SettledField(plates, 1), (Entity e, int i) => e.Read<DynamicBuffer<Dist>>()[i].V, $"settled in one pass, turning {turn}");
+            int sweeps = plate.Read<Sweeps>().Count;
+            TestContext.Out.WriteLine($"turning {turn}: {sweeps} sweeps");
+            return sweeps;
+        }
+    }
+
+    [Test]
+    public void ARestartIsForTheTileAStepSweeps()
+    {
+        using var world = new World();
+        var plates = Grid(world, Box(2, 1, 1), s => new DistPlate(s));
+        foreach (var plate in plates) plate.GetOrAdd<DynamicBuffer<Smell>>().SetCount(256);
+        Assert.Throws<InvalidOperationException>(() => Restart(plates[0], exchange: false), "before its halo is exchanged");
+        var notSwept = Assert.Throws<InvalidOperationException>(() => Restart(plates[0], exchange: true));
+        Assert.That(notSwept.Message, Does.Contain("[GaussSeidel]"));
+
+        static void Restart(Entity e, bool exchange)
+        {
+            var tile = TileOf<Smell, DistPlate>(e, out _);
+            if (exchange) tile.ExchangeHalo();
+            tile.Restart();
+        }
+    }
+
+    [Test]
+    public void RestartedStepsDoNotAllocate()
+    {
+        var (world, plates) = SmellWorld(4, 6, restart: true);
+        using var w = world;
+        var springs = plates[new TilePos(3, 0, 3)];
+        int tick = 0;
+        void Step() // one spring a cell further every update: the field changes around it
+        {
+            var cells = springs.GetOrAdd<DynamicBuffer<Spring>>().AsSpan();
+            cells[tick % 256] = default;
+            cells[++tick % 256] = new Spring(1);
+            world.Update();
+        }
+        Allocations.WarmUp(Step, 200);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) Step(); }), Is.Zero);
+    }
 }
