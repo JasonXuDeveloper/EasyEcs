@@ -500,7 +500,7 @@ none extra). Lines are today's line counts. Files marked "stays" keep their path
 | `RowOrderBenchmark.cs` | `OrderedTables/RowOrderBenchmark.cs` | 100 |
 | `ChunkRowsBenchmark.cs` | `Parallel/ChunkRowsBenchmark.cs` | 101 |
 | `ParallelForBenchmark.cs` | `Parallel/ParallelForBenchmark.cs` | 101 |
-| `ParallelForEachBenchmark.cs` | `Parallel/ParallelForEachBenchmark.cs` | 114 |
+| `ParallelPassBenchmark.cs` | `Parallel/ParallelPassBenchmark.cs` | 114 |
 | `ParallelRunnerBenchmark.cs` | `Parallel/ParallelRunnerBenchmark.cs` | 103 |
 | `ParallelSystemsBenchmark.cs` | `Parallel/ParallelSystemsBenchmark.cs` | 79 |
 | `EmitBenchmark.cs` | `Parameters/EmitBenchmark.cs` | 153 |

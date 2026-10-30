@@ -31,7 +31,7 @@ names the skill:
 
 ## Running (worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-`feat-small-next` (rename leftovers, EECS033 across assemblies, recorded bodies with switches); `feat-borrowed-rest` (item 7: streaming stores, roofline); `feat-field-gaps` (item 8c).
+`feat-small-next` (rename leftovers, EECS033 across assemblies, recorded bodies with switches: done, ready to merge; docs to-dos in `docs-todos.md`, "feat-small-next"); `feat-borrowed-rest` (item 7: streaming stores, roofline); `feat-field-gaps` (item 8c).
 
 Merged since the last update: `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
@@ -61,16 +61,16 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Next, in this order
 
-- [ ] **Rename leftovers** (from feat-renames, internal names, no approval needed): the benchmark methods measuring
+- [x] **Rename leftovers** (`feat-small-next`; the `ParallelFor*` methods were `ParallelRunnerBenchmark`'s, now `DotNetParallelFor*`) (from feat-renames, internal names, no approval needed): the benchmark methods measuring
   .NET's `Parallel.For` (`ParallelForEachBenchmark.ParallelFor*`, `SumParallelFor*`, `MassParallelFor*`) take the
   `DotNet` prefix like `ParallelForBenchmark`'s baselines; `ParallelForEachBenchmark` reads close to
   `ParallelForBenchmark` (proposal: `ParallelPassBenchmark`); `EmitBenchmark.EmitParallelThenRecords` ->
   `EmitParallelThenDrain`; the generated `{Owner}EntityMethod` class -> `{Owner}EntityMethods`. Site keys in
   `docs/src/data/bench.json` move with them.
-- [ ] **EECS033 across assemblies** (found by 8g): it suggested `entity.Spot` for a library component while the
+- [x] **EECS033 across assemblies** (`feat-small-next`: the bound member must sit in the component's own generated class, `GeneratedFor`; five cases reported before) (found by 8g): it suggested `entity.Spot` for a library component while the
   program declared its own `Spot`; it matches a component by name across assemblies, and the fix compiled against
   the wrong type. Match by symbol; a test with two same-named components in two assemblies.
-- [ ] **Recorded bodies with switches** (after the 8j + 8g merge): the inliner inlines switches now; check that a
+- [x] **Recorded bodies with switches** (`feat-small-next`: worked as merged, now pinned by `ForeignBodyTests` and two generator tests; no code change) (after the 8j + 8g merge): the inliner inlines switches now; check that a
   helper of another assembly with a switch expression is recorded and vectorizes, a `ForeignBodyTests` case.
 - [x] **Flaky: `PrefetchingProbesBuffersWalksAndLambdasAllocateNothing`** (fix-flaky-alloc): on-stack replacement
   compiles on the measuring thread. In the full suite the tiering backlog keeps the four probe jobs' loops at Tier0

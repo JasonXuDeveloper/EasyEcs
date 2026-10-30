@@ -1639,9 +1639,55 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
 - architecture.mdx + zh (SystemGenerator row): a runner's and an [EntityMethod]'s entry points are a source output
   (`<Type>.ForEach.EntryPoints.g.cs`, `.EntityMethod.EntryPoints.g.cs`) that call a `static partial void` pass; the
   implementation output writes the pass and the job, so the IDE keeps the members while typing.
-- guide/queries.mdx + zh, "The generator writes" tab of `[EntityMethod]` (RequestsEntityMethod): now
-  `public static partial class RequestsEntityMethod` whose `TakeHit` sets `bool ran = false;`, calls
-  `RequestsEntityMethod.__TakeHit_0(unit, damage, ref ran)` and returns `ran`; the pass (`static partial void`,
+- guide/queries.mdx + zh, "The generator writes" tab of `[EntityMethod]` (RequestsEntityMethods): now
+  `public static partial class RequestsEntityMethods` whose `TakeHit` sets `bool ran = false;`, calls
+  `RequestsEntityMethods.__TakeHit_0(unit, damage, ref ran)` and returns `ran`; the pass (`static partial void`,
   AggressiveInlining) does `if (unit.World is not { } world) return;` then builds the job and
   `ran = unit.Run<...>(ref job, in filter)`.
 - decisions.mdx + zh: the decision record of this branch (draft in the G1 report).
+
+## feat-small-next (rename leftovers, EECS033 across assemblies, recorded bodies with switches)
+
+Already moved on the branch (mechanical, so the site keeps building): `bench.json` keys and `benchmarks.ts`
+(`ParallelPassBenchmark`; `DotNetParallelFor*` of `ParallelRunnerBenchmark`; `Sum/MassDotNetParallelFor*` of
+`ReduceBenchmark`), the `<BenchChart>` / `<BenchTable>` names and prose of why-fast, performance, guide/threading and
+guide/systems (en + zh), and the `[EntityMethod]` "The generator writes" tab of guide/queries (en + zh:
+`RequestsEntityMethods`). History pages (decisions) keep the old names.
+
+- guide/threading.mdx + zh (`ParallelRunnerBenchmark` and `ReduceBenchmark` sections): if the prose names a method of
+  the table, it is `DotNetParallelFor` / `SumDotNetParallelFor` now (no page names them today; the tables show the new
+  names after the next sync).
+- architecture.mdx + zh (SystemGenerator row, if it names the class): the entry points of `[EntityMethod]` methods live
+  in `{Owner}EntityMethods` (the hint name stays `<Type>.EntityMethod.EntryPoints.g.cs`).
+- guide/analyzer.mdx + zh, EECS033: one sentence under the rule: the member it suggests is the component's own; where
+  another component of the same name has its members in scope (a library's and the program's `Spot`), it suggests
+  nothing, since `entity.Spot` there would read the other one. A troubleshooting line ("EECS033 is quiet for a
+  library component") pointing to it, if the docs pass judges users meet it.
+- changelog (Fixes) + zh: "EECS033 no longer suggests a generated member of another component of the same name (a
+  library's component beside one of the program's), whose fix read the wrong component."
+- guide/vector-loops (the part on helpers of other assemblies, 8g's docs to-dos) + zh: helpers with switch expressions
+  and switch statements whose sections return are recorded and inlined like any other body (patterns, enum members,
+  an internal static readonly field in an arm); the full example may show one.
+- decisions.mdx + zh: the record below.
+
+Decision draft (en): **EECS033 matches the generated member by its component.** The rule built the member's name
+from the type argument (`Read<Spot>()` -> `entity.Spot`) and accepted it when it bound to any generated member. A
+component of the same name in another namespace or assembly has a generated class of the same name
+(`SpotEcsExtensions`), and C# finds extension members of the innermost scope first: at the top of a file the
+program's own `Spot` members win over the ones `using Lib` imports, so `Read<Lib.Spot>()` got `entity.Spot`, and the
+fix read the program's component (found by 8g in the AOT check). The rule now checks that the bound member sits in
+the type's own generated class: its flat name, its namespace (compared level by level, since each assembly has its
+own namespace symbols) and its assembly (the type's or the one being compiled). Considered: comparing the member's
+return type (works for `entity.X` and `TryGetX`, not for `HasX`, `RemoveX` or `IsX`, which name no type); suggesting
+the qualified extension call (`Lib.SpotEcsExtensions...`), longer than the generic call it replaces. Cost: one name and
+a few symbol comparisons per call that already bound, after the speculative binding.
+
+Decision draft (zh): **EECS033 按组件本身匹配生成成员。** 该规则由类型参数拼出成员名（`Read<Spot>()` ->
+`entity.Spot`），只要能绑定到某个生成成员就接受。另一个命名空间或程序集里同名的组件有同名的生成类
+（`SpotEcsExtensions`），而 C# 先在最内层作用域查找扩展成员：在文件顶层，程序自己的 `Spot` 成员优先于
+`using Lib` 引入的成员，于是 `Read<Lib.Spot>()` 得到 `entity.Spot`，代码修复读到了程序自己的组件（8g 在 AOT
+检查中发现）。现在规则检查绑定到的成员是否位于该类型自己的生成类中：扁平名称、命名空间（逐级比较名称，因为
+每个程序集有自己的命名空间符号）以及程序集（类型所在的程序集或当前编译的程序集）。考虑过：比较成员的返回类型
+（适用于 `entity.X` 和 `TryGetX`，不适用于不带类型的 `HasX`、`RemoveX`、`IsX`）；建议写出限定的扩展调用
+（`Lib.SpotEcsExtensions...`），比它要替换的泛型调用更长。开销：对已经绑定成功的调用，在推测绑定之后多一次名称
+比较和几次符号比较。
