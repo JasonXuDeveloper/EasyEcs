@@ -243,6 +243,21 @@ tools/bench.sh GeneratorBenchmark
   its facts per `CompilationUnitSyntax` root in a `ConditionalWeakTable`: an unchanged tree keeps its root across
   compilations, so only the edited file is read again (a plain syntax provider cost 5.3 MB per edit, the cache 0).
   A stage tolerated in `AnEditRerunsOnlyTheStepsItChanges` reruns on every edit: measure it in `GeneratorBenchmark`.
+- **A `CreateSyntaxProvider` transform runs even when no output reads it**: Roslyn builds every syntax provider's
+  table at once whenever any step asks for syntax, so an IDE that skips implementation output still runs the
+  transforms of implementation-only stages. Skipping applies to the steps after it. So a stage only implementation
+  output reads returns the node from the syntax provider and binds in a later step (`SystemGenerator.BoundLater`:
+  the nodes collected, combined with the compilation, one semantic model per file). Lambda passes and tile loads
+  bound in their transforms cost the unit tests' IDE keystroke a third of its time (gen-edit-ide median 400-800 ->
+  285-290 ms, 32.7 -> 22.7 MB per edit; Kernel's exceptions per edit gone); `AnEditElsewhereInTheIdeBindsNoImplementationOnlyCall`
+  guards it (the tracking test cannot see it: a transform's step has no name of its own). FAWMN's transform is a
+  step after its syntax input, so it is skipped with its output.
+- **Facts asked of many symbols are kept per compilation**, keyed on the symbol (a `ConditionalWeakTable`: a source
+  symbol lives as long as its compilation): `Shape.Of` (each component asks for its own and its namesakes'), the
+  assemblies that give access to internals (`QueryShape`'s check of a class another assembly wrote, which searched
+  every reference by name per query call). What stays per keystroke is Roslyn building the new compilation's source
+  members (`GetMembers` on first touch, attributes, interfaces): it lands on whichever check reads them first
+  (`Symbols.IsTag`), and only fewer types read would remove it.
 - **Declaring-side output skips EasyEcs.Core**: Core runs its own generator, so a feature that writes something for
   other assemblies to read must not run on Core, or Core's API changes how user code vectorizes.
 - netstandard2.0 has no `System.Index` / `System.Range`: no list patterns or `^1` over arrays in the generator.

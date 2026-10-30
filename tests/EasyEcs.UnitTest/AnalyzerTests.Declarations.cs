@@ -423,4 +423,23 @@ public partial class AnalyzerTests
         Assert.That(declared.Where(d => !supported.Contains(d)).Select(d => d.Id), Is.Empty);
         Assert.That(EasyEcsAnalyzer.All.Select(a => a.GetType()).Distinct().Count(), Is.EqualTo(EasyEcsAnalyzer.All.Length).And.GreaterThan(1));
     }
+
+    // EECS033 binds the shorter text speculatively at every generic call (half the unit tests' EasyEcs analyzer time), and
+    // projects that keep the generic API suppress it: its own analyzer, which Roslyn then skips with its work. With
+    // the rule on, the generic call is still reported.
+    [Test]
+    public async Task ASuppressedGeneratedMemberRuleCostsNothing()
+    {
+        var reporting = EasyEcsAnalyzer.All.Where(a => a.SupportedDiagnostics.Any(d => d.Id == "EECS033")).ToArray();
+        Assert.That(reporting.Select(a => string.Join(",", a.SupportedDiagnostics.Select(d => d.Id))), Is.EqualTo(new[] { "EECS033" }));
+
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, "public static class U { public static int F(Entity e) => e.Read<P>().V; }"), out var output, out _);
+        var options = new CompilationWithAnalyzersOptions(new AnalyzerOptions([]), null, concurrentAnalysis: false, logAnalyzerExecutionTime: true);
+        var on = output.WithAnalyzers([reporting[0]], options);
+        Assert.That((await on.GetAnalyzerDiagnosticsAsync()).Select(d => d.Id), Is.EqualTo(new[] { "EECS033" }));
+        var suppressed = output.WithOptions(output.Options.WithSpecificDiagnosticOptions([new("EECS033", ReportDiagnostic.Suppress)]));
+        var off = suppressed.WithAnalyzers([reporting[0]], options);
+        Assert.That(await off.GetAnalyzerDiagnosticsAsync(), Is.Empty);
+        Assert.That((await off.GetAnalyzerTelemetryInfoAsync(reporting[0], default)).OperationActionsCount, Is.Zero, "the analyzer did not run");
+    }
 }

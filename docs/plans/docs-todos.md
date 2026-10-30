@@ -1826,3 +1826,69 @@ Decision records for the docs pass (en + zh). Number them at the docs pass (D-id
   plain (Dropped list: "streaming column resizes, a wash").
 - architecture.mdx + zh, the paragraph on cache gates (CacheSizes): the large copies of snapshots read the
   last-level gate too.
+
+## feat-roslyn-guidance (backlog Later item: analyzer and incremental generators by the official .NET guidance)
+
+Nothing user-visible in the API; no diagnostic changed (the unit tests' 109 diagnostics compared line by line before
+and after, every analyzer and code fix test unchanged).
+
+- guide/analyzer.mdx + zh, under EECS033 (one sentence): the rule has an analyzer of its own (`MemberAnalyzer`), so
+  `<NoWarn>EECS033</NoWarn>` (or `severity = none`) removes its cost from builds and the IDE; with it on, it costs
+  what it did.
+- architecture.mdx + zh, the `EasyEcsAnalyzer` row: add "members (EECS033)" to the list of areas, and "tiles, pairs"
+  (they are areas already and missing from the list).
+- architecture.mdx + zh, the generators' paragraph on keystrokes: lambda passes and tile loads are bound in a step
+  after their syntax provider, so an IDE typing never binds them (one clause).
+- Changelog (Performance): "The analyzer runs half as long on projects that turn off EECS033"; "Typing costs the
+  generators less: lambda passes and tile loads are no longer bound on every keystroke".
+- **Decision draft: costly rules a project turns off run in an analyzer of their own; implementation-only stages bind
+  after their syntax provider** (en):
+
+  > **Decision.** EECS033 runs in `MemberAnalyzer`, an area of its own, and a message's display strings are built
+  > only on the path that reports. In the generators, a stage only implementation output reads takes the node from
+  > its syntax provider and binds it in a later step (`BoundLater`: the calls collected with the compilation, one
+  > semantic model per file); facts many components ask of one type (`Shape.Of`) and the assemblies that give access
+  > to internals are kept per compilation.
+  >
+  > **Why.** Roslyn skips an analyzer only when every rule it supports is suppressed, and EECS033 runs on every
+  > invocation and property reference: inside `PerformanceAnalyzer` a project that turns it off (the unit tests
+  > do) still paid for it. ReportAnalyzer on the unit tests: EasyEcs analyzers 20.3 → 10.1 s (16.1 → 9.6 s on the
+  > second build), `PerformanceAnalyzer` 12.9 → 2.8 s, `MemberAnalyzer` under 1 ms. Roslyn builds every syntax
+  > provider's table whenever any step asks for syntax, so the transforms of lambda passes and tile loads, which
+  > bound the method around each call and ran Kernel on lambda bodies, ran on every IDE keystroke though the IDE
+  > skips their output: the unit tests' keystroke (IDE driver, two interleaved rounds) 400 / 803 → 285 / 291 ms
+  > median, 32.7 → 22.7 MB. GeneratorBenchmark (41 files, few lambda passes; base, head, base, head, OneNamespace
+  > off / on): EditMethodBodyIde 85.6 / 85.5 and 80.0 / 84.1 ms → 78.9 / 82.0 and 71.8 / 77.4 ms, 16.08 / 15.88 →
+  > 15.47 / 15.27 MB; Cold 895-927 → 869-906 ms, EditMethodBody and EditUnrelatedFile within the noise
+  > (517-560 and 487-519 ms both ways).
+  >
+  > **Considered.** Skipping suppressed rules inside one analyzer through `GetEffectiveSeverity` (severity can differ
+  > per tree through `.editorconfig`, and Roslyn already does it per analyzer); one analyzer per rule (no saving for
+  > rules nobody turns off); Kernel's control-flow exceptions (391-451 per build of the unit tests, a few
+  > milliseconds; the tracer inflates their time); moving compilation-end rules to symbol-end actions (EECS019,
+  > EECS025 for views, EECS069, EECS080, EECS086, EECS091, EECS092, EECS116 each need every use in the compilation).
+  > What a keystroke still costs is Roslyn building the new compilation's source members, which lands on the first
+  > check that reads them.
+
+  zh:
+
+  > **决定。** EECS033 放到独立的 `MemberAnalyzer` 里运行，消息里的显示字符串只在确实要报告的路径上才生成。生成器里，只供
+  > implementation output 读取的阶段从 syntax provider 只取节点，在后续步骤里绑定（`BoundLater`：收集调用后与 compilation
+  > 组合，每个文件一个 semantic model）；许多组件向同一类型询问的事实（`Shape.Of`）和向本程序集开放 internal 的程序集，
+  > 每个 compilation 只算一次。
+  >
+  > **原因。** 只有当一个分析器支持的所有规则都被关闭时，Roslyn 才会跳过它；而 EECS033 在每个调用和属性引用上都要运行：
+  > 放在 `PerformanceAnalyzer` 里时，关闭了它的项目（单元测试就是）仍然要付出它的开销。单元测试上的 ReportAnalyzer：
+  > EasyEcs 分析器 20.3 → 10.1 秒（第二次构建 16.1 → 9.6 秒），`PerformanceAnalyzer` 12.9 → 2.8 秒，`MemberAnalyzer` 不到
+  > 1 毫秒。只要任何步骤请求语法，Roslyn 就会构建所有 syntax provider 的表，所以 lambda pass 和 tile load 的 transform
+  > （绑定每个调用所在的方法，并对 lambda 体运行 Kernel）在 IDE 的每次按键时都会运行，尽管 IDE 跳过它们的输出：单元测试的
+  > 按键（IDE driver，两轮交替）中位数 400 / 803 → 285 / 291 毫秒，32.7 → 22.7 MB。GeneratorBenchmark（41 个文件，lambda
+  > pass 很少；base、head、base、head 交替，OneNamespace 关 / 开）：EditMethodBodyIde 85.6 / 85.5 和 80.0 / 84.1 毫秒 →
+  > 78.9 / 82.0 和 71.8 / 77.4 毫秒，16.08 / 15.88 → 15.47 / 15.27 MB；Cold 895-927 → 869-906 毫秒，EditMethodBody 和
+  > EditUnrelatedFile 在噪声之内（两边都是 517-560 和 487-519 毫秒）。
+  >
+  > **考虑过的方案。** 在同一个分析器里用 `GetEffectiveSeverity` 跳过被关闭的规则（严重级别可以通过 `.editorconfig`
+  > 按文件不同，而 Roslyn 已经按分析器做了这件事）；每条规则一个分析器（没人关闭的规则省不下什么）；Kernel 用于控制流的
+  > 异常（单元测试每次构建 391-451 个，几毫秒；跟踪器会夸大它们的耗时）；把 compilation-end 规则改成 symbol-end 动作
+  > （EECS019、视图的 EECS025、EECS069、EECS080、EECS086、EECS091、EECS092、EECS116 都需要整个 compilation 里的所有使用）。
+  > 按键时剩下的开销是 Roslyn 为新 compilation 构建源码成员，它落在第一个读取它们的检查上。

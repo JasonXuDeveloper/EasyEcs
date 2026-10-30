@@ -22,9 +22,7 @@ public sealed partial class SystemGenerator
 {
     private static void InitializeLambdas(IncrementalGeneratorInitializationContext context)
     {
-        var calls = context.SyntaxProvider
-            .CreateSyntaxProvider(static (node, _) => LambdaPass.IsCandidate(node), static (ctx, ct) => LambdaModel.Create(ctx, ct))
-            .Where(static m => m is not null)
+        var calls = BoundLater(context, static (node, _) => LambdaPass.IsCandidate(node), LambdaModel.Create)
             .WithTrackingName("LambdaPasses");
         // Per source file: an edit changes every location of its file (they hold its checksum), and no other file.
         var files = calls.Collect()
@@ -48,10 +46,8 @@ public sealed partial class SystemGenerator
     private sealed record LambdaModel(string File, int Position, int Version, string Data, string Where, ForEachModel Method,
         string? Body, EquatableArray<string> Usings, string Returns)
     {
-        public static LambdaModel? Create(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
+        public static LambdaModel? Create(SemanticModel model, InvocationExpressionSyntax invocation, System.Threading.CancellationToken ct)
         {
-            var model = ctx.SemanticModel;
-            var invocation = (InvocationExpressionSyntax)ctx.Node;
             if (model.GetOperation(invocation, ct) is not IInvocationOperation operation || LambdaPass.Read(operation) is not { } call
                 || LambdaPass.Problem(call, model, ct, out _) != null || model.GetInterceptableLocation(invocation, ct) is not { } location)
                 return null;

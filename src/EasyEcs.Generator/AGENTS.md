@@ -74,7 +74,8 @@ SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(valu
                              -> an interceptor per call ([InterceptsLocation], one file per source file in the namespace
                              EasyEcs.Generated) running the job a [ForEach] method with the lambda's parameters and body
                              gets (body copied with names qualified and constants inlined; the static delegate per
-                             row where it cannot be: EECS096)
+                             row where it cannot be: EECS096); its calls and the tile loads are bound after their syntax
+                             provider (SystemGenerator.BoundLater), so an IDE that skips their output never binds them
 SystemGenerator.TileLoads.cs tile loads checked once per loop: c.Load128 / Load256 / LoadVector(x + k, dy, dz) in a
                              proven column loop -> an interceptor per loop and offset (one file per source file in
                              EasyEcs.Generated, implementation output): Covers, the loop's first and last column against
@@ -117,17 +118,20 @@ EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as de
                              like a hook)
 UnusedSuppressor.cs          suppresses IDE0051 / IDE0052 on [ForEach], [EntityMethod] and hook methods (called through
                              UnsafeAccessor; Rider reads their [MeansImplicitUse])
-EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the
+EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-032, EECS034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the
                              check of EECS056):
                              code that works but costs (write access that
                              only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per
-                             update, per-entity structural changes and counting over queries, creation loops, the
-                             generated member, Update in a system, a Mut<T> of an untracked component, a Query loop
+                             update, per-entity structural changes and counting over queries, creation loops,
+                             Update in a system, a Mut<T> of an untracked component, a Query loop
                              that only reads, a Set right after a creation, a tracked ref written on some rows only
                              (through a view's 'ref' field and in view members too), a
                              method left without a vector loop; EECS025 and EECS053 for the parameters of lambda passes
                              too); each computes its fix as
                              diagnostic properties for EasyEcs.CodeFixes
+EasyEcsAnalyzer.Members.cs   EECS033 (the generated member a call or a guarded Set says shorter) in an analyzer of its
+                             own (MemberAnalyzer): the rule a project most often turns off is the costliest to run, and
+                             Roslyn skips an analyzer only when every rule it reports is suppressed
 PartGenerator.cs             [Sum]..[Any], [LookupKey]/[UniqueKey], [Group], [OrderBy] -> a part of the partial struct
                              (IReduction<T>, IIndexed<K>.Key, IGroup.Group, IOrderKey<K>.OrderKey / BoxPoint); Parts.cs: the models and Problems read once for the
                              generator and the analyzer (other generators read keys and groups through Symbols)
