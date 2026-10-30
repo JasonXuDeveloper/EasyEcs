@@ -195,13 +195,37 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        CS8785 in the log). Repro: VoxelServer's old straight chase in a test project that references the sample
        (scratchpad `TmpRepro.cs.txt`, copy it into the test). Fix, regression test, and no generator exception may ever
        drop the other files (catch per method, report it). First in line.
-8c. [ ] **Gaps the distance field met** (feat-zombie-field report; each through `audit-generator`'s rule: build it
-       when it saves users lines or thought): a 2D tile beside a 3D one on one key (today a second tile component and
-       index); colors without generic systems (`[With<TColor>]` is CS8968; `[GaussSeidel]` removes it); EECS059 as
-       an Error where a checkerboard makes the write safe (goes with `[GaussSeidel]`); `PaddedTile` read-only (settling
-       in a tile copies it into a stackalloc by hand; no halo-row or lane-shift helper; 12a's padded storage may
-       answer it); `FillPool` ignores the up to 64 lists each thread parks (a likely cause of the in-place form's
-       allocation; done in 12d: `Fill` counts 64 lists per thread with lists of its own).
+8c. [x] **Gaps the distance field met** (feat-zombie-field report; each through `audit-generator`'s rule: build it
+       when it saves users lines or thought). Branch `feat-field-gaps` (unmerged), per gap:
+       - a 2D tile beside a 3D one on one key: answered by `Columns<TTile>` (feat-tiles-pingpong; Tile.cs,
+         `Tile<Scent, Columns<Chunk>>`, test `AGroundTileOverAChunkGridReadsTheChunksRocks`);
+       - colors without generic systems: answered by `[GaussSeidel]` (colors from the key's parities, `ITileColors` /
+         `TileColoring`, EECS117 with its fix); CS8968 stays only for per-color systems written by hand, which no field
+         needs any more;
+       - EECS059 where a checkerboard makes the write safe: answered (the in-place write is `ref Tile` + `[GaussSeidel]`
+         + `Write(row)`, which `Symbols.LookupProblem` does not report; a `Lookup<T>` of the swept cells still is, rightly);
+       - a read-only tile, settling copied into a stackalloc, halo rows: answered by `[GaussSeidel]`'s in-place texture
+         (`Write(row)` writes the texture, the generated `do ... while (Sweep)` repeats the method, halo rows are
+         `At(row).Load128(x, 0, ±1)`); **built** what the scent's settle still lacked: `tile.Restart(value)` (settle
+         from nothing, not from the last values: no count to infinity) and `tile.Sweep` (the sweep's number: rows in
+         turns of direction, setup once per step), EECS115 for both on a tile no sweep steps; names provisional
+         (owner-review "Restart and Sweep"). **Dropped**: a lane-shift helper (owner-review);
+       - `FillPool` and per-thread lists: answered in 12d (`BufferStore<T>.Fill` adds 2 x 32 per thread with lists of
+         its own, a later thread adds its share in `Joined`).
+       Numbers (TileRestartBenchmark, us, 2 rounds, 0 B; Restart / Turn / Linger, Hand by hand without sleeping
+       2,300-4,100 at 1 thread): Springs 4 Hop 8, 1 thread 716-800 / 474-479 / 1,109-1,167; 4 threads 302-351 / 245-274 /
+       506-534; Springs 256 Hop 8, 1 thread 1,960-2,006 / 1,798-1,997 / 2,412-2,520; Springs 4 Hop 1 284-295 / 199-200
+       / 302-327; but Springs 256 Hop 1 (sources creeping a cell, most plates awake) 1,064-1,126 / 1,069-1,104 / 937-1,005:
+       restarting re-settles what was nearly right, so Restart is the user's choice, not a default. Later rewrite of the
+       sample (voxel-rewrite.md step 6) drops: Scent.cs 16-18 (NextScent), 54-72 (Ground), 83-89 (Red, Black);
+       Step.cs 133 generic, 144-149 (color parameter), 159-166 and 175-177 (the stackalloc copy of the halo), 199-228's
+       loop and change test (one sweep per call), 253-254 (ChangedEdges, ScentStep), Settle.cs whole; Chunks.cs 45
+       `new Ground(pos)`, 47-48 RemoveRed / RemoveBlack, 57 NextScent's SetCount; Program.cs 114-117 (four systems ->
+       one), 175 (NextScent's pool), 192-194 (Ground, NextScent, ScentStep, Red, Black in the prefab); Hunt.cs 123
+       `With<Ground>` -> `With<Chunk>`. It needs: seeds as a cell buffer (a `Lookup<Footprint>` parameter, like the
+       `in Hunt` singleton, keeps every tile stepping: `SystemGenerator` lets a step sleep only beside Entity, Scratch,
+       tiles of its grid and tracked components), `scent.Restart()` and turning sweeps through `scent.Sweep`; Trail
+       written in each sweep or by a reader of the settled field (measure both).
 8e. [x] **Symmetric pair methods** (`voxel-rewrite.md` GA4; owner, 2026-10-27: "加，做 GA4"): each unordered pair
        visited once and both sides written (Newton's third law in MD codes: half neighbor lists), for item merging in
        VoxelServer and collisions; today a pair writing the neighbor's component it also reads of its row is refused.
