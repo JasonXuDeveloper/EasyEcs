@@ -334,3 +334,52 @@ two meet. The wheel wins only against the scalar scan (2.9x to 3.5x) or with far
 vector loop can take). The tag form is worse than both: the presence flips and the pass over the tag's words cost more
 than the scan. What would change the verdict: a wait the vector loop cannot take (EECS055 reasons in the waiting
 check), or many more waiting entities per wake (1M waiting, 0.1 % waking), measured against the vector scan.
+
+### Item 5: non-temporal stores for large copies (built for Capture / Restore; resizes measured and left plain)
+
+`StreamingCopyBenchmark` (Locality/Streams.cs; a 64-byte aligned column and a target 16 bytes past a line like a
+`byte[]`'s data, or the reverse: a restore), default job, two rounds, 0 B. Xeon 2.10 GHz VM, AVX-512, LLC 260 MiB,
+glibc 2.39 (`x86_non_temporal_threshold` 131 MiB). Means r1; r2, ratio to Memmove:
+
+| Bytes (target aligned?) | Memmove | Plain NT loop | NT, four pages at a time | Memmove, glibc's streaming off |
+|---|---|---|---|---|
+| 16 MiB (no) | 1.45; 1.36 ms | 1.06; 1.08 | -; 1.11 | 1.41; 1.47 ms |
+| 16 MiB (yes) | 1.45; 1.42 ms | 1.10; 1.02 | -; 1.04 | 1.46; 1.43 ms |
+| 192 MiB (no) | 19.7; 19.2 ms | 1.46; 1.44 | -; 0.95 | 38.4; 36.6 ms |
+| 192 MiB (yes) | 22.3; 23.3 ms | 1.32; 1.22 | -; 0.93 | 39.6; 34.7 ms |
+| 512 MiB (no) | 56.9; 57.9 ms | 1.37; 1.32 | -; 1.14 | 97.4; 102.3 ms |
+| 512 MiB (yes) | 66.8; 64.4 ms | 1.25; 1.17 | -; 1.00 | 98.1; 105.0 ms |
+
+With glibc's streaming off (`GLIBC_TUNABLES=glibc.cpu.x86_non_temporal_threshold=0xffffffffffff`), the loops beat
+memmove at 192 and 512 MiB (plain loop 0.72-0.81, four pages 0.55-0.59): streaming is worth 1.5-2x there, but
+memmove already streams each copy past 131 MiB, so a loop of our own ties it at best (four pages at a time, like
+glibc's `large_memcpy_4x`) and a plain loop loses (1.17-1.46x slower).
+
+Where memmove's per-call threshold misses: an operation of several copies, each under 131 MiB, whose total is past
+the cache. Built: `StreamingStores.CopyPays` (a table's unmanaged columns past `CacheSizes.LastLevel`, AVX, once per
+table) and `StreamingStores.Copy` (four pages at a time, a fence after) in Capture / Restore (whole tables and the
+untracked columns an in-sync copy still copies whole). `FullCopyBenchmark` (80-byte rows of two untracked
+components: a 256 MiB and a 64 MiB column at 4M rows), base / head / head / base, `KernelBenchmark.IntegrateGenerated`
+as the unchanged control, means, base / head:
+
+| Case | r1 | r2 |
+|---|---|---|
+| Capture, 100,000 (gate off) | 638 / 561 us | 651 / 656 us |
+| Restore, 100,000 (gate off) | 680 / 657 us | 646 / 646 us |
+| **Capture, 4M** | 43.3 / 34.2 ms (**1.26x**) | 42.1 / 35.2 ms (**1.20x**) |
+| **Restore, 4M** | 42.5 / 35.5 ms (**1.20x**) | 41.6 / 37.4 ms (**1.11x**) |
+| Grow (4M grown then trimmed: two resizes, 1 GB allocated a call) | 337.5 / 335.0 ms | 337.7 / 335.5 ms |
+| Control: IntegrateGenerated, 100,000 | 10.10 / 9.79 us | 10.02 / 10.24 us |
+
+Load averages 1.3-3.2 at the starts. Verdict: **Capture and Restore ship** (faster past the noise in both rounds,
+the bar met by Capture in both and by Restore in r1; nothing slower inside the cache, where the gate is off and the
+code is base's apart from one O(columns) sum; 0 B). **Resizes reverted**: a wash, the fresh arrays' allocation and
+first touch outweigh the copy. ARM64 and SSE2-only machines keep memmove (no `CopyPays`); STNP for copies is not
+measured. A world whose tables are each under the cache never streams (the gate is per table).
+
+### Item 6: roofline as a measuring tool (a method in `audit-perf`)
+
+`RooflineBenchmark` / `RooflinePeakBenchmark` measure the roofs (one thread's bandwidth from the L2 and from memory,
+its peak of fused multiply-adds on the widest vector and on `Vector<float>`); `audit-perf`, "Roofline", has the
+method, this VM's roofs and KernelBenchmark's Integrate, Count, Step and Wave placed on it (Integrate and Count at the
+L2's bandwidth, Step near the ridge, Wave compute-bound).

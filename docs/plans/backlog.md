@@ -31,7 +31,7 @@ names the skill:
 
 ## Running (worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-`feat-small-next` (rename leftovers, EECS033 across assemblies, recorded bodies with switches); `feat-borrowed-rest` (item 7: streaming stores, roofline); `feat-field-gaps` (item 8c).
+`feat-small-next` (rename leftovers, EECS033 across assemblies, recorded bodies with switches); `feat-borrowed-rest` (item 7: streaming stores, roofline; done, waiting to merge); `feat-field-gaps` (item 8c).
 
 Merged since the last update: `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
@@ -176,11 +176,14 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
    arm64 keeps 16 KiB pages with no user superpages; Linux arm64 and x86 get huge pages through #164 (NativeMemory
    2 MiB + madvise). The layout answer works everywhere: L1's readers ordered by target halved the 1M chase without
    any prefetch.
-7. [ ] **Borrowed ideas** (`borrowed-ideas.md`): ghost rows between (MultiWorld done, feat-ghost-rows)
-       worlds as an example first (owner, 2026-10-27: "都做呗，voxelserver和multiworld都做": in MultiWorld and in
-       VoxelServer, two region worlds with `MoveEntities` at the border; VoxelServer's in Finish step 2a), streaming stores, roofline in `audit-perf` (timer wheel and NUMA dropped by the
-       owner: records in the docs pass). Vertical batch probes dropped after the 16M re-measure (record in the docs
-       pass); scalar group prefetching of probes is built in item 6 (index probes).
+7. [x] **Borrowed ideas** (`borrowed-ideas.md`; done on `feat-borrowed-rest`, waiting to merge): ghost rows between
+       worlds in MultiWorld (feat-ghost-rows, merged; VoxelServer's two region worlds with `MoveEntities` at the
+       border belong to Finish step 2a, owner 2026-10-27: "都做呗，voxelserver和multiworld都做"); streaming stores for
+       large copies (Capture / Restore stream a table's columns past the last-level cache: 1.20-1.26x / 1.11-1.20x at
+       4M rows of 80 bytes; resizes a wash, left plain; borrowed-ideas.md section 5, item 5); roofline as `audit-perf`'s
+       measuring method (RooflineBenchmark, worked examples). Timer wheel and NUMA dropped by the owner, vertical batch
+       probes dropped after the 16M re-measure: their records are in `docs-todos.md`, "feat-borrowed-rest", for the
+       docs pass. Scalar group prefetching of probes is built in item 6 (index probes).
 8. [x] **VoxelServer: zombies follow a distance field** (merged: step + commit form, the in-place form dropped for an
        intermittent allocation; numbers in docs-todos "feat-zombie-field") (approved by the owner, 2026-10-27: "可以做，排进去"). Today a zombie walks the straight line to its target and sticks at walls and the bots' pits. One
        field per chunk (`DynamicBuffer<PathCost>`, 16 x 16 over the surface height map, a step up of one block

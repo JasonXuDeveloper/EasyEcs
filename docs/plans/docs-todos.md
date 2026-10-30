@@ -1645,3 +1645,103 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
   AggressiveInlining) does `if (unit.World is not { } world) return;` then builds the job and
   `ran = unit.Run<...>(ref job, in filter)`.
 - decisions.mdx + zh: the decision record of this branch (draft in the G1 report).
+
+## feat-borrowed-rest (backlog item 7: streaming copies, roofline; the item's dropped ideas)
+
+Decision records for the docs pass (en + zh). Number them at the docs pass (D-ids after the last merged one).
+
+- **Records the backlog lists for item 7** (written in the docs pass, not before; the drafts with their numbers are
+  in this file already):
+  - Timer wheel: dropped ("Not added", en + zh): "Owner decisions on owner-review (2026-10-26)" above.
+  - NUMA placement and hybrid cores: dropped ("Not added", en + zh): the same section.
+  - Vertical batch probes of an index (Polychroniou, with and without refill): not added after the 16M re-measure:
+    "feat-amac" above (second bullet; numbers in locality.md 6.3).
+  - Ghost rows between worlds: MultiWorld done (feat-ghost-rows section above); VoxelServer's region worlds are
+    Finish step 2a, not this branch.
+
+- **Decision draft: snapshots stream their large copies past the last-level cache** (en):
+
+  > **Decision.** A capture into a snapshot and a restore from it copy a table's unmanaged columns with non-temporal
+  > stores when the table's columns together are past the last-level cache (`StreamingStores.CopyPays`, once per
+  > table; AVX): four pages at a time, a line of each page in turn, the source prefetched four lines ahead, a fence
+  > after (the shape of glibc's `large_memcpy_4x`). That covers whole tables and the untracked columns an in-sync
+  > capture or restore still copies whole. Everywhere else, and on ARM64, a copy is memmove.
+  >
+  > **Why.** memmove already streams, but per call: glibc 2.39 past its `x86_non_temporal_threshold` (131 MiB on
+  > the reference VM, half the 260 MiB L3). A snapshot makes one call per column, so a table of 4M rows with a
+  > 256 MiB and a 64 MiB column streamed the first and read every line of the second before writing it, though the
+  > whole copy is past the cache and none of those lines survives it. The gate counts the operation, not the call.
+  >
+  > **Numbers** (FullCopyBenchmark, 80-byte rows, base / head / head / base, default job, 0 B): Capture at 4M rows
+  > 43.3 → 34.2 and 42.1 → 35.2 ms (1.26x, 1.20x), Restore 42.5 → 35.5 and 41.6 → 37.4 ms (1.20x, 1.11x); 100,000
+  > rows (gate off) and the unchanged control (`KernelBenchmark.IntegrateGenerated`) within noise.
+  > StreamingCopyBenchmark (one copy): with glibc's streaming switched off (`GLIBC_TUNABLES`) streaming is worth
+  > 1.5-2x at 192-512 MiB; with it on, the four-page loop ties memmove (0.93-1.14x) and a plain loop of non-temporal
+  > stores loses (1.17-1.46x slower).
+  >
+  > **Considered.** Streaming each copy by its own size (memmove does that already); a plain loop of non-temporal
+  > stores (slower than glibc's); streaming column resizes (FullCopyBenchmark.Grow, growth then TrimExcess at 4M
+  > rows: 337.5 / 335.0 and 337.7 / 335.5 ms, a wash: allocating and first touching the new arrays outweigh the
+  > copy); a gate over the whole world (tables each under the cache would stream, untested); STNP on ARM64 (not
+  > measured; the owner's M4 could).
+
+  zh:
+
+  > **决定。** 捕获进快照和从快照恢复时，如果一张表的非托管列加起来超过末级缓存（`StreamingStores.CopyPays`，每张表判断一次；
+  > 需要 AVX），就用非临时存储复制这些列：一次四页，每页轮流复制一行缓存行，源数据提前四行预取，最后加一道屏障（glibc
+  > `large_memcpy_4x` 的结构）。这覆盖整表复制，以及同步状态下的捕获和恢复仍然整列复制的未跟踪列。其他地方和 ARM64 上
+  > 仍用 memmove。
+  >
+  > **原因。** memmove 本身就会流式写，但按单次调用判断：glibc 2.39 超过 `x86_non_temporal_threshold`（参考虚拟机上是
+  > 131 MiB，260 MiB L3 的一半）才流式写。快照每列调用一次，所以一张 4M 行、一列 256 MiB 一列 64 MiB 的表，前一列流式写，
+  > 后一列每行缓存行都先读再写，可是整个复制都超出缓存，这些缓存行一行也留不下来。门槛按整个操作计算，不按单次调用。
+  >
+  > **数字**（FullCopyBenchmark，每行 80 字节，基线 / 新版 / 新版 / 基线，默认作业，0 B）：4M 行的 Capture
+  > 43.3 → 34.2 和 42.1 → 35.2 ms（1.26x、1.20x），Restore 42.5 → 35.5 和 41.6 → 37.4 ms（1.20x、1.11x）；10 万行
+  > （门槛关闭）和代码没变的对照（`KernelBenchmark.IntegrateGenerated`）都在噪声内。StreamingCopyBenchmark（单次复制）：
+  > 关掉 glibc 的流式写（`GLIBC_TUNABLES`）后，流式写在 192-512 MiB 值 1.5-2x；打开时四页循环和 memmove 打平
+  > （0.93-1.14x），普通的非临时存储循环更慢（慢 1.17-1.46x）。
+  >
+  > **考虑过的方案。** 按每次复制自己的大小决定是否流式写（memmove 已经这样做）；普通的非临时存储循环（比 glibc 慢）；
+  > 列扩容也流式写（FullCopyBenchmark.Grow，4M 行扩容再 TrimExcess：337.5 / 335.0 和 337.7 / 335.5 ms，打平：分配新数组
+  > 和首次触碰的开销盖过了复制）；按整个世界判断门槛（每张表都在缓存内也会流式写，未测）；ARM64 的 STNP（未测，可以在
+  > 所有者的 M4 上测）。
+
+- **Decision draft: the roofline is a measuring method, not a feature** (en; zh below). Short record, or a line in the
+  performance page's "How we measure" if the docs pass prefers:
+
+  > **Decision.** Performance work places a pass on the machine's roofline before changing it (Williams, Waterman
+  > and Patterson 2009): bytes and operations per row, their ratio against the measured roofs (RooflineBenchmark:
+  > one thread's bandwidth from the L2 and from memory; RooflinePeakBenchmark: the peak of fused multiply-adds on
+  > the widest vector and on `Vector<float>`). Nothing in the library or the generated code changes.
+  >
+  > **Why.** It says which change can pay: KernelBenchmark's Integrate and Count already run at the L2's bandwidth
+  > (111-119 and 99-101 GB/s against a 117 GB/s roof), so only fewer bytes speed them up (fusion, narrower lanes);
+  > Wave (Sin and Exp per row) runs at 6 % of the bandwidth and is bound by its math. Reference VM: L2 135 GB/s read,
+  > 117 GB/s update; memory 11 GB/s read, 18 GB/s update; 166-172 Gflop/s at 512 bits, 102 at `Vector<float>`'s 256.
+  >
+  > **Considered.** Bytes and operations as columns of every benchmark (most cases are not one pass; the method in
+  > `audit-perf` is applied where a pass is the question).
+
+  zh:
+
+  > **决定。** 性能工作在修改一个 pass 之前先把它放到本机的 roofline 上（Williams、Waterman、Patterson 2009）：每行的字节数和
+  > 运算数，二者之比对照实测的上限（RooflineBenchmark：单线程从 L2 和从内存读写的带宽；RooflinePeakBenchmark：最宽向量和
+  > `Vector<float>` 上融合乘加的峰值）。库和生成代码都不变。
+  >
+  > **原因。** 它说明哪种改动能有收益：KernelBenchmark 的 Integrate 和 Count 已经跑在 L2 带宽上（111-119 和 99-101 GB/s，
+  > 上限 117 GB/s），只有减少字节（融合、更窄的通道）才能更快；Wave（每行 Sin 和 Exp）只用到带宽的 6 %，受限于计算。参考
+  > 虚拟机：L2 读 135 GB/s、更新 117 GB/s；内存读 11 GB/s、更新 18 GB/s；512 位 166-172 Gflop/s，`Vector<float>` 的 256 位
+  > 102 Gflop/s。
+  >
+  > **考虑过的方案。** 给每个基准测试加上字节数和运算数两列（大多数用例不是单个 pass；需要判断某个 pass 时再用
+  > `audit-perf` 的方法）。
+
+- Pages: performance.mdx + zh "What it costs" / snapshots: Capture / Restore past the last-level cache stream their
+  copies (link the decision); guide page on snapshots (guide/saves or wherever Capture is documented) + zh: one
+  sentence under "What it costs": a table past the last-level cache copies around the cache. api.mdx: nothing
+  (hidden helpers; complexities unchanged). Changelog (Performance): "Capture and Restore of tables past the
+  last-level cache are faster (non-temporal copies)". Roadmap: item 5 and 6 of the borrowed ideas done; resizes left
+  plain (Dropped list: "streaming column resizes, a wash").
+- architecture.mdx + zh, the paragraph on cache gates (CacheSizes): the large copies of snapshots read the
+  last-level gate too.
