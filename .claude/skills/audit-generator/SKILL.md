@@ -288,6 +288,11 @@ tools/bench.sh GeneratorBenchmark
   `Get` / `Has` / `Set` / `CreateEntity` / `Index` fold their type's bit as a static readonly field. Re-evaluate only
   with a measured cost at a call site that the call's own arguments do not cause, or for boilerplate: scoped inline
   queries become generated jobs ("ECS without the burden" above) when they run as fast as a `[ForEach]` method.
+  Used where a call site has a measured cost of its own: lambda passes (`SystemGenerator.Lambdas.cs`) and tile loads
+  in a provable column loop (`SystemGenerator.TileLoads.cs`, one range check per loop). An interceptor of a hot call
+  is `AggressiveInlining` (or the caller's inline budget leaves the call in the loop); a generic `this in` receiver
+  works, and its arity is the containing type's plus the method's. The JIT puts a multi-use complex argument in a
+  temporary, so `(x + k) + r` costs an add per use where the hand form folds `k` into the displacement.
 - In use: C# 14 extension members, generic attributes (`[With<T>]`), FAWMN, implementation output.
 
 ## Done means (each new generated form, on top of `feature`)

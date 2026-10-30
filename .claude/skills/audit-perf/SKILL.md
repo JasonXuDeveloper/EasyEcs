@@ -108,6 +108,11 @@ its own worktree.
      against 4,096 repeated);
    - a prototype of a sort or a space structure is checked for its structure (keys sorted, boxes small), not only for
      equal values: a sort that ended in its scratch arrays kept every value right and made the kernel 500x slower;
+   - cases past the cache drift 10-15% between rounds on the shared VM: compare paired per-round ratios (base and
+     head in the same round), not medians of medians, and keep a case whose code did not change as the control;
+   - splitting a hot per-entity or per-tile method costs a call and, for a ref struct result, a hidden return
+     buffer: measure the split before crediting the work it saves (tile reads: Enter + Begin cost more than the two
+     thread-static reads they saved);
    - long runs are scripts that resume (a done marker per class) and run one class per process, started with
      `setsid nohup` (tool background calls die at 2 h); a cut-off BDN log is read from its per-case "Mean =" lines;
    - a runtime choice between two flavors (micro-adaptivity) never trusts the first timed run (Tier0 code): it times
