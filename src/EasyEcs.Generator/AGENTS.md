@@ -12,6 +12,7 @@ ArityGenerator.cs            T1..T9 families of EasyEcs.Core (Entity.Set/Remove,
                              DestroyAll, Instantiate with components, IForEach/IForEachEntity/IForEachBatch/
                              IForEachMasked, ForEach/ForEachEntity/ForEachBatch/ForEachMasked/ForEachParallel/
                              ForEachEntityParallel/ForEachBatchParallel with their row loops, CollectIds,
+                             ForEachCollected (MaxRows: ids collected, the job run on copies outside any pass, Entity.RunCollected),
                              Query/Count/Any, QueryItem/QueryEnumerator, Filters.g.cs: QueryFilter.WithAny /
                              ChangedAny / RemovedAny and their attributes), one template each; World.Lambdas.g.cs:
                              World.ForEach / ForEachParallel(values..., Delegate), the calls lambda passes intercept
@@ -19,7 +20,8 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              the method cannot change structure; Parallel -> chunked jobs; [Changed<T>] /
                              [Removed<T>] -> Since(LastRunTick + 1) and a read of T; Mut<T> -> a write stamped per
                              write; Slices -> the slice of the run; ChunkSize -> the chunkSize argument; Lookup reads at an id of an in component, key probes (TryFind / Find / Count at an in component's key) and reads at the ids of an in buffer's elements (Chases), no vector loop -> a twin job (Job{i}Chases) over runs of rows prefetching each chase's stages k rows apart (records 2k and rows k ahead; probes by the index's representation), which the pass runs past the last-level cache (EmitChases, EmitPass; parallel: the twin is a batch job per chunk, ForEachBatchParallel); [Consume] -> DestroyAll of
-                             the filter after a pass without structural changes, a destroy per row otherwise;
+                             the filter after a pass without structural changes, a destroy per row otherwise; MaxRows -> world.ForEachCollected
+                             over the method's IForEachEntity job (no vector loop, chase twin or fusion);
                              [EntityMethod] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
                              over entity.Run; [Drain] -> an IDrain<T> job run by
                              Emitted<T>.Consume (stage RecordMethods, joined to the methods of the updates); a ref Tile -> a stepping pass (the method's colors struct, TileSteps.Of per pass, Enter / the sweeps / Leave per tile, a walk per color until Next: the tiles that woke when the pass sleeps and the method has no filter of its own, through the job's ITileStep.Step, else the query; the wakes of what else it reads; a write of its cells); [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
@@ -94,7 +96,7 @@ ComponentGenerator.cs        C# 14 extension members per component / singleton: 
                              item.X per Query<T1..Tn> shape the code calls, TypeRegistry registration (OrderBy<T, K>
                              for [OrderBy]); classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                              lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
-EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070 and EECS072-073 (the
+EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070, EECS072-073 and EECS118 (the
                              declaration and [ForEach] rules of the range EECS002-103 that are not performance rules;
                              generators never report diagnostics): DeclarationAnalyzer. Every EasyEcsAnalyzer*.cs
                              file ends with its area's analyzer (DeclarationAnalyzer, SystemAnalyzer, ...: a
@@ -183,7 +185,8 @@ EasyEcsAnalyzer.Parts.cs     EECS062-069, EECS102 (a [Prefab] the generator cann
                              combines), hand-written reductions, keys and groups the attributes could declare, a wrong
                              Identity, a setup attribute on a type it does not fit, a managed type without a Nino
                              formatter (Warning when the code saves what holds it: entity saves write no singletons)
-EasyEcsAnalyzer.Forms.cs     EECS080-085, EECS103 and EECS108-109: what the generator declares for code written by hand (a one-entity
+EasyEcsAnalyzer.Forms.cs     EECS080-085, EECS103, EECS108-109 and EECS119 (rows collected and looped over by hand in an OnUpdate:
+                             [ForEach(MaxRows = N)], its fix computed as properties): what the generator declares for code written by hand (a one-entity
                              job [EntityMethod] writes, a [ForEach] method that destroys every entity it visits: [Consume],
                              a batch method's vector loop written by hand that the method for one row gets generated,
                              the walk and Clear of Emitted<T> a [Drain] method gets generated)

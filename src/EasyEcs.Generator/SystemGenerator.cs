@@ -331,6 +331,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     walk = $"{{ if (!{local}.p{s}.{(m.Parallel ? $"StepWokenParallel(ref {local}, {m.ChunkSize})" : $"StepWoken(ref {local})")}) {walk} }}";
                 sb.Append($"{at}do {walk}\n{at}while ({local}.p{s}.Next());\n");
             }
+            else if (m.MaxRows > 0) // the first rows collected, then the method on each outside the walk
+                sb.Append($"{at}{world}.ForEachCollected<{m.ComponentTypes}, {name}>(ref {local}, {m.MaxRows}{filter});\n");
             else sb.Append($"{at}{world}.{m.ForEach}<{m.ComponentTypes}, {name}>(ref {local}{filter}{m.Chunks});\n");
             EmitReductions(sb, m, world, local, at);
             EmitConsume(sb, m, world, whole, at);
@@ -563,6 +565,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             // field test per pass otherwise, nothing in the row loop. Count takes no slice: a sliced pass reports its share.
             string count = $"world.Count<{method.ComponentTypes}>({(whole.Length == 0 ? "" : whole.Substring(2))})";
             if (method.Slices > 1) count = $"{count} / {method.Slices}";
+            if (method.MaxRows > 0) count = $"global::System.Math.Min({count}, {method.MaxRows})";
             if (method.Record.Length > 0) // the records it handles
                 count = $"(world.HasSingleton<global::EasyEcs.Emitted<{method.Record}>>() ? world.GetSingleton<global::EasyEcs.Emitted<{method.Record}>>().Items.Count : 0)";
             sb.Append($"        if (global::EasyEcs.SystemCode.Measuring(world)) global::EasyEcs.SystemCode.Visit(system, {count});\n");
@@ -1108,6 +1111,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// <summary>[ForEach(Parallel = true, ChunkSize = N)]: the rows a thread takes at a time (0: chosen by the runtime).</summary>
         public int ChunkSize { get; init; }
 
+        /// <summary>
+        /// [ForEach(MaxRows = N)]: the rows it runs on at most per run, collected first and run outside the walk
+        /// (World.ForEachCollected, its components copies); 0: every row, in one walk.
+        /// </summary>
+        public int MaxRows { get; init; }
+
         /// <summary>The chunkSize argument of a parallel call that sets it, else nothing.</summary>
         public string Chunks => Parallel && ChunkSize > 0 ? $", chunkSize: {ChunkSize}" : "";
 
@@ -1127,7 +1136,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// [Consume] after the pass, with one DestroyAll of its filter: a method that makes no structural change (or a
         /// batch method, which cannot) leaves the set of matching rows as it found it, so those rows are the ones it visited.
         /// </summary>
-        public bool ConsumesInBulk => Consume && (Stable || IsBatch);
+        public bool ConsumesInBulk => Consume && (Stable || IsBatch) && MaxRows == 0; // a budget leaves rows a DestroyAll would take
 
         /// <summary>[Consume] of a method that may change structure: each entity is destroyed after its row.</summary>
         public bool ConsumesEach => Consume && !ConsumesInBulk;
@@ -1140,7 +1149,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public string ComponentTypes => string.Join(", ", Query);
 
         /// <summary>Runs per entity with its handle: it takes the Entity, a Maybe looked up through it, a Mut that stamps through it, or a Tile of it.</summary>
-        public bool TakesEntity => One || ConsumesEach || Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Tile)
+        public bool TakesEntity => One || ConsumesEach || MaxRows > 0 || Parameters.Any(p => p.Kind is Symbols.ParamKind.Entity or Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Tile)
             || Stamps;
 
         /// <summary>A view parameter with a Mut&lt;T&gt; field: it stamps the rows it writes, as a Mut parameter does.</summary>
@@ -1204,7 +1213,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// is a batch job over each chunk's runs of rows (ForEachBatchParallel, the same chunks as ForEachParallel's), so
         /// only a method a parallel batch job can run (no Maybe, Mut or view Mut, as <see cref="Runs"/>).
         /// </summary>
-        public bool HasChaseTwin => Simd == null && !One && Chases.Length > 0 && (!Parallel || ParallelRuns);
+        public bool HasChaseTwin => Simd == null && !One && MaxRows == 0 && Chases.Length > 0 && (!Parallel || ParallelRuns);
 
         /// <summary>A parallel job can run it over runs of rows: it takes no Maybe, Mut or view Mut (stamped through the entity).</summary>
         private bool ParallelRuns => !Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable) && !Stamps;
@@ -1237,6 +1246,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         {
             if (Pair != null) return Pair.Describe(Name);
             if (Record.Length > 0) return $"{Name}: the records of Emitted<{Record.Replace("global::", "")}>, in order, then cleared";
+            if (MaxRows > 0) return $"{Name}: at most {MaxRows} rows per run, collected first, then run one by one outside the walk";
             if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(HasChaseTwin ? ", lookups prefetched past the cache" : "")}";
             var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Lane}>)" };
             if (simd.Flat != null) parts.Add("flat");
@@ -1276,7 +1286,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// method that reduces (and takes no Maybe or Mut) runs the same way, a chunk's runs at a time
         /// (ForEachBatchParallel): its partial results stay in registers instead of a load and a store per row.
         /// </summary>
-        public bool Runs => !One && Stable && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) && (Parallel
+        public bool Runs => !One && MaxRows == 0 && Stable && !Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) && (Parallel
             ? (Parameters.Any(p => p.Kind == Symbols.ParamKind.Reduction) || IsChaseTwin) && ParallelRuns
             : Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" }) || Stamps
                 || IsChaseTwin); // the rows ahead of the row it runs: their chases prefetched
@@ -1388,15 +1398,15 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 // A public entry point names only public types: its context parameters' and its constraints'.
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
-                    Slices = Symbols.Slices(method), ChunkSize = Symbols.ChunkSize(method), Identifies = identifies,
+                    Slices = Symbols.Slices(method), ChunkSize = Symbols.ChunkSize(method), MaxRows = Symbols.MaxRows(method), Identifies = identifies,
                     One = Symbols.IsEntityMethod(method), Consume = Symbols.IsConsume(method), Record = record,
                     // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
                     // One entity has no run of rows to vectorize; a system's loop is its implementation's (SystemLoops).
-                    Simd = Symbols.IsEntityMethod(method) || !outside || PairForm.IsPairMethod(method) || record.Length > 0 ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
+                    Simd = Symbols.IsEntityMethod(method) || !outside || PairForm.IsPairMethod(method) || record.Length > 0 || Symbols.MaxRows(method) > 0 ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
                     Scalar = scalar ?? "",
                     Pair = outside && PairForm.IsPairMethod(method) ? PairModel.Create(method, syntax, model, parallel, ct) : null,
                     // Reads of other entities at the row's ids, by EntityId (a keyed lookup finds through its index).
-                    Chases = Symbols.IsEntityMethod(method) || record.Length > 0 ? new([]) : Usable(Generator.Chases.Of(method, syntax, model, ct, out _), parameters),
+                    Chases = Symbols.IsEntityMethod(method) || record.Length > 0 || Symbols.MaxRows(method) > 0 ? new([]) : Usable(Generator.Chases.Of(method, syntax, model, ct, out _), parameters),
                     OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),
                     Fusion = outside || PairForm.IsPairMethod(method) || record.Length > 0 ? null : FusionSide.Of(method, stable, identifies, parallel), // a pair pass walks windows
                 };

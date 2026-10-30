@@ -1156,6 +1156,50 @@ internal static class Symbols
     /// <summary>[ForEach(ChunkSize = N)]: the rows a thread of a parallel pass takes at a time (0: chosen by the runtime).</summary>
     public static int ChunkSize(IMethodSymbol method) => ForEachArgument(method, "ChunkSize", 0);
 
+    /// <summary>
+    /// [ForEach(MaxRows = N)]: the rows the method runs on at most per run, collected before it runs and run outside the
+    /// walk (World.ForEachCollected); 0 without it (every row, in one walk).
+    /// </summary>
+    public static int MaxRows(IMethodSymbol method) => ForEachArgument(method, "MaxRows", 0);
+
+    /// <summary>
+    /// Why a method's [ForEach(MaxRows = N)] is invalid (EECS118), or null: N below 0, or a budget on a method that does
+    /// not run per entity on one thread, selects rows by change tick (the rows past the budget would lose their changes),
+    /// or takes a parameter that points into its row's table (a run of rows, a Maybe, a Mut, a view, a tile), that
+    /// belongs to a chunk of rows (Scratch) or to a pair ([Neighbor]): the method runs outside the walk on a copy of
+    /// its row, where a structural change it makes moves the rows.
+    /// </summary>
+    public static string? MaxRowsProblem(IMethodSymbol method)
+    {
+        int rows = MaxRows(method);
+        if (rows < 0) return $"MaxRows = {rows} must be 0 (every row) or more";
+        if (rows == 0) return null;
+        if (IsParallel(method)) return "it runs in parallel (Parallel = true), and the collected rows run one after another on one thread";
+        if (Slices(method) > 1) return "it visits a slice of its rows per run (Slices): a budget already spreads the rows over runs";
+        if (TracksSince(method))
+            return "it selects rows by change tick ([Changed<T>] / [Removed<T>]), and each run moves the system's last run past the changes of the rows over the budget";
+        if (IsEntityMethod(method)) return "it is an [EntityMethod], which runs on the one entity it is given";
+        if (Simd(method) == SimdRequire) return "SimdMode.Require: the collected rows run one at a time, never as a vector loop";
+        if (Fusion(method) == 1) return "FusionMode.Require: the collected rows run apart from any walk";
+        foreach (var p in method.Parameters)
+        {
+            string? what = Classify(p) switch
+            {
+                ParamKind.ComponentSpan or ParamKind.Entities => "a run of rows",
+                ParamKind.Optional => "a Maybe, which points into the row's table",
+                ParamKind.Mutable => "a Mut, which stamps through the row's table",
+                ParamKind.View => "a view, which points into the row's table",
+                ParamKind.Tile => "a tile, whose neighbors a walk finds",
+                ParamKind.Scratch => "a Scratch, which belongs to a chunk of rows",
+                ParamKind.Neighbor => "a [Neighbor], whose pairs a walk finds",
+                _ => null,
+            };
+            if (what != null) return $"it takes '{p.Name}', {what}; the method runs outside the walk on a copy of its row (take 'in' / 'ref' components and the Entity)";
+        }
+
+        return null;
+    }
+
     /// <summary>[ForEach(FusionMode = FusionMode.X)]: 0 Auto, 1 Require, 2 Off (the values of EasyEcs.FusionMode).</summary>
     public static int Fusion(IMethodSymbol method) => ForEachArgument(method, "FusionMode", 0);
 
@@ -1538,7 +1582,7 @@ internal static class Symbols
         if (!method.IsStatic || outside && EntryPointCollides(method)) return false;
         if (!outside && !IsValidSystem(type)) return false; // EECS074: no system code
         if (method.IsGenericMethod && !outside || Unnameable(method) != null) return false; // a system's method gets no type arguments
-        if (SlicesProblem(method) != null || ChunkSizeProblem(method) != null) return false;
+        if (SlicesProblem(method) != null || ChunkSizeProblem(method) != null || MaxRowsProblem(method) != null) return false;
         int components = 0;
         foreach (var p in method.Parameters)
         {

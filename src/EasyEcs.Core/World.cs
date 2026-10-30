@@ -587,6 +587,12 @@ public sealed partial class World : IDisposable
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool IsAlive(EntityId id) => TryGetEntity(id, out _);
 
+    /// <summary>
+    /// The ids <c>ForEachCollected</c> keeps on the stack (512 bytes); a larger budget rents an array of the matching
+    /// rows' size from <c>ArrayPool</c>, only when more rows than this match.
+    /// </summary>
+    internal const int CollectedOnStack = 64;
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal ref EntityMeta MetaRef(int id) => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Meta), id);
 

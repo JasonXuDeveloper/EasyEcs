@@ -161,6 +161,7 @@ internal sealed record FusionSide(string Name, EquatableArray<string> Query, Equ
         var scratches = new List<string>();
         string? blocker = Symbols.Fusion(method) == 2 ? $"{method.Name} has FusionMode.Off"
             : !stable ? $"{method.Name} may change structure"
+            : Symbols.MaxRows(method) > 0 ? $"{method.Name} runs on the rows it collects first (MaxRows)"
             : Symbols.IsConsume(method) ? $"{method.Name} is [Consume]"
             : !identifies ? $"{method.Name} uses its Entity beyond its identity"
             : null;

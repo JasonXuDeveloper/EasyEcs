@@ -173,6 +173,16 @@ public static partial class EasyEcsAnalyzer
         "more sets it (rounded up to 64). A method without Parallel = true runs on one thread and has no chunks: set " +
         "Parallel = true or drop ChunkSize.", helpLinkUri: Help("EECS054"));
 
+    public static readonly DiagnosticDescriptor BadMaxRows = new("EECS118", "Invalid [ForEach(MaxRows = N)]",
+        "[ForEach] method '{0}' cannot set MaxRows: {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "MaxRows is the rows a method runs on at most per run of its system: the first N matching rows are collected when " +
+        "the pass starts and the method runs on each outside the walk, on a copy of its row, so it may make any change " +
+        "(LoadEntities and SaveEntities included). That needs a method that runs per entity on one thread and takes its " +
+        "components by 'in' / 'ref', its Entity, the World, singletons, lookups, values, Reduce<T> and Emit<T>: no spans, " +
+        "Maybe, Mut, view, tile, Scratch or [Neighbor], no Parallel or Slices, and no change filter, whose rows past the " +
+        "budget would lose their changes. 0, the default, runs every row in one walk.", helpLinkUri: Help("EECS118"));
+
     public static readonly DiagnosticDescriptor ReductionOverwritten = new("EECS057", "A reduction whose result another write replaces",
         "Parameter '{0}' of [ForEach] method '{1}' reduces into {2}, but {3}",
         Category, DiagnosticSeverity.Error, true,
@@ -770,6 +780,8 @@ public static partial class EasyEcsAnalyzer
         if (Symbols.ChunkSizeProblem(method) is { } chunks)
             context.ReportDiagnostic(Diagnostic.Create(BadChunkSize, location, // dropped, the method runs as without it
                 ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ChunkSize"), method.Name, chunks));
+        if (Symbols.MaxRowsProblem(method) is { } budget)
+            context.ReportDiagnostic(Diagnostic.Create(BadMaxRows, location, method.Name, budget));
         if (Symbols.Unnameable(method) is { } unnameable)
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, // the type its code fix makes internal, with its containers
                 Symbols.Hidden(unnameable)?.Locations.Where(l => l.IsInSource) ?? [],
@@ -903,7 +915,7 @@ public sealed class DeclarationAnalyzer : EasyEcsAnalyzer.Area
         EasyEcsAnalyzer.BadParameter, EasyEcsAnalyzer.ComponentCount, EasyEcsAnalyzer.Generic, EasyEcsAnalyzer.NotASystem, EasyEcsAnalyzer.NotStruct, EasyEcsAnalyzer.MixedBatch,
         EasyEcsAnalyzer.NotParallel, EasyEcsAnalyzer.WriteThroughReadOnly, EasyEcsAnalyzer.BufferCopy, EasyEcsAnalyzer.HiddenStructuralChange, EasyEcsAnalyzer.OffThreadStructuralChange, EasyEcsAnalyzer.EntityInData,
         EasyEcsAnalyzer.OrderCycle, EasyEcsAnalyzer.OrderAcrossGroups, EasyEcsAnalyzer.EntryPointCollision, EasyEcsAnalyzer.FilterOutsideGroup, EasyEcsAnalyzer.LocalForEach, EasyEcsAnalyzer.BadSlices,
-        EasyEcsAnalyzer.BadChunkSize, EasyEcsAnalyzer.ReductionOverwritten, EasyEcsAnalyzer.LookupOfWritten, EasyEcsAnalyzer.BadEmit, EasyEcsAnalyzer.BadEntityMethod, EasyEcsAnalyzer.BadTileShape,
+        EasyEcsAnalyzer.BadChunkSize, EasyEcsAnalyzer.BadMaxRows, EasyEcsAnalyzer.ReductionOverwritten, EasyEcsAnalyzer.LookupOfWritten, EasyEcsAnalyzer.BadEmit, EasyEcsAnalyzer.BadEntityMethod, EasyEcsAnalyzer.BadTileShape,
         EasyEcsAnalyzer.IndexedByRef, EasyEcsAnalyzer.BadIndexedKey, EasyEcsAnalyzer.Unnameable,
         EasyEcsAnalyzer.SharedTile);
 

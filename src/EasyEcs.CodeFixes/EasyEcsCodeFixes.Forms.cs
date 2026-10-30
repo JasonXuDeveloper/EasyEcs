@@ -63,6 +63,41 @@ public sealed partial class EasyEcsCodeFixes
     }
 
     /// <summary>
+    /// EECS119: a system's OnUpdate that collects ids and loops over them becomes <c>[ForEach(MaxRows = N), With&lt;T&gt;...]
+    /// static void Name(Entity e, World world)</c> holding the loop's body (the analyzer wrote the attributes, the
+    /// parameters and the body, its lines indented from 0); the filter field the CollectIds read goes when nothing else
+    /// reads it. Returns the new root.
+    /// </summary>
+    private static SyntaxNode? Collected(SyntaxNode root, MethodDeclarationSyntax hook, System.Collections.Immutable.ImmutableDictionary<string, string?> props)
+    {
+        if (!props.TryGetValue("CollectedAttributes", out var attributes) || attributes == null || !props.TryGetValue("CollectedName", out var name) || name == null
+            || !props.TryGetValue("CollectedParameters", out var parameters) || parameters == null || !props.TryGetValue("CollectedBody", out var body) || body == null) return null;
+        var leading = hook.GetLeadingTrivia();
+        bool indented = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia);
+        string indent = indented ? leading.Last().ToFullString() : "";
+        string newline = EndOfLine(root).ToFullString();
+        var text = new StringBuilder();
+        text.Append(indent).Append('[').Append(attributes).Append(']').Append(newline);
+        text.Append(indent).Append(string.Join(" ", hook.Modifiers.Select(m => m.ValueText))).Append(hook.Modifiers.Count > 0 ? " " : "")
+            .Append("void ").Append(name).Append('(').Append(parameters).Append(')').Append(newline);
+        text.Append(indent).Append('{').Append(newline);
+        foreach (var line in body.Split('\n')) text.Append(line.Length == 0 ? "" : indent + "    " + line).Append(newline);
+        text.Append(indent).Append('}').Append(newline);
+        if (SyntaxFactory.ParseMemberDeclaration(text.ToString()) is not MethodDeclarationSyntax method || method.ContainsDiagnostics) return null;
+        // The hook's comments and blank lines stay above the method.
+        var above = SyntaxFactory.TriviaList(leading.Take(indented ? leading.Count - 1 : leading.Count));
+        method = method.WithLeadingTrivia(above.AddRange(method.GetLeadingTrivia())).WithTrailingTrivia(hook.GetTrailingTrivia());
+
+        FieldDeclarationSyntax? filter = null;
+        if (props.TryGetValue("CollectedFilter", out var field) && field != null && hook.Parent is TypeDeclarationSyntax type)
+            filter = type.Members.OfType<FieldDeclarationSyntax>().FirstOrDefault(f => f.Declaration.Variables.Count == 1 && f.Declaration.Variables[0].Identifier.ValueText == field);
+        if (filter == null) return root.ReplaceNode(hook, method);
+        var tracked = root.TrackNodes(hook, filter);
+        tracked = tracked.ReplaceNode(tracked.GetCurrentNode(hook)!, method);
+        return tracked.RemoveNode(tracked.GetCurrentNode(filter)!, SyntaxRemoveOptions.KeepNoTrivia);
+    }
+
+    /// <summary>
     /// EECS086 for a total: parameter <paramref name="parameter"/> (<c>ref T s</c>) becomes <c>ref Reduce&lt;T&gt; s</c> and
     /// each <c>s.F</c> of the method <c>s.Value.F</c>; with the property <c>Declare</c>, T's declaration (the diagnostic's
     /// additional location) gets <c>[Accumulate]</c>, so the pass's result is combined into the total.
