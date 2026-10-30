@@ -225,7 +225,7 @@ EasyEcsAnalyzer.Pairs.cs     EECS105-107: a pair method that cannot run per pair
                              generator cannot read (every pair runs), a neighbor search written by hand (a Warning
                              with PairRewrite's fix when mechanical, else Info: the grid's upkeep goes with it)
 EasyEcsAnalyzer.Tiles.cs     EECS115-117: a tile step the generator cannot write (Symbols.StepProblem, Write on a tile
-                             taken by value: Error), a second buffer and its plain commit written by hand where the
+                             taken by value, Sweep read on one, Restart outside a [GaussSeidel] step's ref tile: Error), a second buffer and its plain commit written by hand where the
                              tile could step itself (compilation end, Warning), a Min / Max relaxation stepped by Jacobi
                              that [GaussSeidel] would settle (Info, fix: [GaussSeidel] when the key colors the tiles)
 EasyEcsAnalyzer.Fusion.cs    EECS093-094: two passes over the same rows that almost share one walk (the reason

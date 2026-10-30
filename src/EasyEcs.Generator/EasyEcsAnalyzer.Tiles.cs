@@ -21,7 +21,8 @@ public static partial class EasyEcsAnalyzer
         "buffer, which the pass swaps with its cells once every tile stepped; a [GaussSeidel] step writes the cells in " +
         "place, color by color, sweep after sweep until the tile settles. So the pass steps one tile per entity over the " +
         "whole grid ([EntityMethod], Slices and [Consume] cannot), [GaussSeidel] needs that tile and a key of integer fields " +
-        "to color the tiles by, and Write is for the tile the method steps (a tile taken by value throws).",
+        "to color the tiles by, Write is for the tile the method steps (a tile taken by value throws), and Restart for " +
+        "the tile a [GaussSeidel] method sweeps.",
         helpLinkUri: Help("EECS115"));
 
     public static readonly DiagnosticDescriptor HandCommit = new("EECS116", "A tile's step and its commit written by hand",
@@ -79,16 +80,32 @@ public static partial class EasyEcsAnalyzer
             }
         });
 
-        // EECS115: Write on a tile the method takes by value (no step of it runs: it throws).
+        // EECS115: Write on a tile the method takes by value (no step of it runs: it throws), Restart on a tile no
+        // [GaussSeidel] step sweeps (a Jacobi step writes every row anyway: it throws too).
         start.RegisterOperationAction(context =>
         {
             var invocation = (IInvocationOperation)context.Operation;
-            if (invocation.TargetMethod is not { Name: "Write" } write || !Symbols.Named(write.ContainingType.OriginalDefinition, "EasyEcs.Tile<TCell, TTile>")) return;
-            if (invocation.Instance is not IParameterReferenceOperation { Parameter: { RefKind: not RefKind.Ref } tile }
+            if (invocation.TargetMethod is not { Name: "Write" or "Restart" } call || !Symbols.Named(call.ContainingType.OriginalDefinition, "EasyEcs.Tile<TCell, TTile>")) return;
+            if (invocation.Instance is not IParameterReferenceOperation { Parameter: var tile }
                 || tile.ContainingSymbol is not IMethodSymbol method || !Symbols.IsForEach(method)) return;
-            context.ReportDiagnostic(Diagnostic.Create(BadStep, invocation.Syntax.GetLocation(), Symbols.Describe(method),
-                $"writes '{tile.Name}', a tile it takes by value: Write is for the tile the method steps (ref Tile<...>), and throws for another"));
+            if (call.Name == "Write" && tile.RefKind != RefKind.Ref)
+                context.ReportDiagnostic(Diagnostic.Create(BadStep, invocation.Syntax.GetLocation(), Symbols.Describe(method),
+                    $"writes '{tile.Name}', a tile it takes by value: Write is for the tile the method steps (ref Tile<...>), and throws for another"));
+            else if (call.Name == "Restart" && (tile.RefKind != RefKind.Ref || !Symbols.IsGaussSeidel(method)))
+                context.ReportDiagnostic(Diagnostic.Create(BadStep, invocation.Syntax.GetLocation(), Symbols.Describe(method),
+                    $"restarts '{tile.Name}', which no [GaussSeidel] sweep steps: Restart is for the tile a [GaussSeidel] method takes by ref, and throws for another"));
         }, OperationKind.Invocation);
+
+        // EECS115: Sweep of a tile the method takes by value (it has no sweeps: it throws).
+        start.RegisterOperationAction(context =>
+        {
+            var read = (IPropertyReferenceOperation)context.Operation;
+            if (read.Property.Name != "Sweep" || !Symbols.Named(read.Property.ContainingType.OriginalDefinition, "EasyEcs.Tile<TCell, TTile>")) return;
+            if (read.Instance is not IParameterReferenceOperation { Parameter: { RefKind: not RefKind.Ref } tile }
+                || tile.ContainingSymbol is not IMethodSymbol method || !Symbols.IsForEach(method)) return;
+            context.ReportDiagnostic(Diagnostic.Create(BadStep, read.Syntax.GetLocation(), Symbols.Describe(method),
+                $"reads the sweep of '{tile.Name}', a tile it takes by value: Sweep is for the tile the method steps (ref Tile<...>), and throws for another"));
+        }, OperationKind.PropertyReference);
 
         start.RegisterCompilationEndAction(context =>
         {
