@@ -73,8 +73,9 @@ public static partial class EasyEcsAnalyzer
             foreach (var block in context.OperationBlocks)
             {
                 if (PlainCopy(method, block) is { } copy) copies.Enqueue((copy.Next, copy.Cells, method));
-                if (method.Parameters.Any(Symbols.IsSteppingTile) && !Symbols.IsGaussSeidel(method) && Relaxes(block))
-                    context.ReportDiagnostic(Diagnostic.Create(SuggestGaussSeidel, method.Locations.FirstOrDefault(), Symbols.Describe(method)));
+                if (method.Parameters.FirstOrDefault(Symbols.IsSteppingTile) is { } stepped && !Symbols.IsGaussSeidel(method) && Relaxes(block))
+                    context.ReportDiagnostic(Diagnostic.Create(SuggestGaussSeidel, method.Locations.FirstOrDefault(),
+                        CanColor(method, stepped) ? GaussSeidelFix : null, Symbols.Describe(method)));
             }
         });
 
@@ -125,6 +126,17 @@ public static partial class EasyEcsAnalyzer
         if (source.RefKind != RefKind.In || Symbols.Classify(source) != Symbols.ParamKind.Component || Symbols.BufferElement(source.Type) is not { } next) return null;
         return WrittenBuffer(target) is { } cells ? (next, cells) : null;
     }
+
+    /// <summary>EECS117's fix: [GaussSeidel] after [ForEach] (EasyEcs.CodeFixes).</summary>
+    private static readonly ImmutableDictionary<string, string?> GaussSeidelFix = ImmutableDictionary<string, string?>.Empty.Add("Fix", "GaussSeidel");
+
+    /// <summary>
+    /// Whether [GaussSeidel] on <paramref name="method"/> makes a step the generator writes: the step has no problem now
+    /// and the grid's key has integer fields to color the tiles by (else the fix would trade EECS117 for EECS115).
+    /// </summary>
+    private static bool CanColor(IMethodSymbol method, IParameterSymbol stepped) =>
+        Symbols.StepProblem(method) == null && Symbols.TileElements(stepped.Type) is { } tile
+        && Symbols.TileKey(tile.Grid) is { } key && Symbols.KeyParities(key, "key") is { Count: > 0 };
 
     /// <summary>A body that takes the Min or Max of values (Math, MathF, the vector types): a relaxation's shape.</summary>
     private static bool Relaxes(IOperation block) => block.Descendants().OfType<IInvocationOperation>().Any(i =>

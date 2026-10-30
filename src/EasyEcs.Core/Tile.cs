@@ -236,6 +236,29 @@ public struct TileNeighbors
         throw new ArgumentException($"The index passed is not the built index of {typeof(TTile).Name} by {typeof(TKey).Name}");
 }
 
+/// <summary>
+/// The buffers of a grid's cells, sized from the tile's shape: generated code calls <see cref="Pool{TCell, TTile}"/> when
+/// its assembly loads, once for each <see cref="Tile{TCell, TTile}"/> a method of it takes, so the pool of
+/// <c>DynamicBuffer&lt;TCell&gt;</c> keeps lists of a tile's cells (a chunk unloaded hands its lists to the next one
+/// loaded) and <see cref="DynamicBuffer{T}.FillPool"/> fills it with lists of that length, with no
+/// <see cref="DynamicBuffer{T}.MaxPooledLength"/> line in user code. Generated code uses it.
+/// </summary>
+[EditorBrowsable(EditorBrowsableState.Never)]
+public static class TileCells
+{
+    /// <summary>
+    /// <see cref="DynamicBuffer{T}.MaxPooledLength"/> of <typeparamref name="TCell"/> raised to the cells of a
+    /// <typeparamref name="TTile"/> tile (never lowered; nothing for a shape EECS072 rejects). O(1).
+    /// </summary>
+    public static void Pool<TCell, TTile>() where TCell : unmanaged where TTile : struct, ITileShape
+    {
+        if (TileShapeCheck<TTile>.Validate() != null) return; // the first exchange throws, with the reason
+        long cells = (long)TTile.Width * TTile.Depth * TTile.Height;
+        if (cells > Array.MaxLength) return;
+        if (BufferStore<TCell>.MaxPooledLength < cells) BufferStore<TCell>.MaxPooledLength = (int)cells;
+    }
+}
+
 /// <summary>The offsets around a tile of <typeparamref name="TTile"/>'s shape: slot (dx + 1) + 3 (dz + 1) + 9 (dy + 1).</summary>
 internal static class TileOffsets<TTile> where TTile : struct, ITileShape
 {

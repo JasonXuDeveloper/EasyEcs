@@ -153,8 +153,8 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     /// The state of the method's pass (the one of <typeparamref name="TColors"/>) in <paramref name="world"/>, its pass begun: the tiles that left
     /// the grid (or moved) wake the tiles that were around them; the tiles whose cells another system wrote since this
     /// pass last ran (a tile created, loaded or dug, <c>Changed&lt;DynamicBuffer&lt;TCell&gt;&gt;</c>) wake with the tiles
-    /// around them, an empty buffer sized for the shape; the pool keeps lists of the tile's cells
-    /// (<see cref="DynamicBuffer{T}.MaxPooledLength"/> at least the cells). With <paramref name="sleeps"/> (the method
+    /// around them, an empty buffer sized for the shape (the pool keeps lists of the tile's cells:
+    /// <see cref="TileCells.Pool{TCell, TTile}"/>). With <paramref name="sleeps"/> (the method
     /// reads nothing the pass cannot see change), only the tiles that may change step; else every tile does.
     /// <paramref name="maxSweeps"/>: the sweeps a Gauss-Seidel step makes at most before it waits for the next pass
     /// (0: the tile's cells). O(tiles changed by others) plus, when tiles joined or left the grid, O(tiles).
@@ -180,7 +180,6 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
             _index = index;
             _membership = -1;
         }
-        if (BufferStore<TCell>.MaxPooledLength < Cells) BufferStore<TCell>.MaxPooledLength = Cells; // the lists of a tile's cells come back to the pool
         int capacity = _world.Meta.Length;
         if (_entries.Length < capacity) Grow(capacity);
         if (_queues.Length == 0)

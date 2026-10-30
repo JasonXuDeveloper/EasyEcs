@@ -12,7 +12,7 @@ namespace EasyEcs.CodeFixes;
 
 /// <summary>
 /// The fixes that turn hand-written forms into the declarations the generator reads: a [ForEach] method's final destroy
-/// into [Consume] (EECS084), and
+/// into [Consume] (EECS084), a relaxation stepped one cell per pass into [GaussSeidel] (EECS117), and
 /// a one-entity job with its calls into an [EntityMethod] method and its entry point's calls (EECS080), and a batch method's
 /// hand-written vector loop into the method for one row the generator vectorizes (EECS103), and a total accumulated
 /// through a 'ref' singleton into a Reduce&lt;T&gt; of an [Accumulate] singleton (EECS086). The analyzer decided each
@@ -123,17 +123,29 @@ public sealed partial class EasyEcsCodeFixes
     /// </summary>
     private static MethodDeclarationSyntax Consumed(MethodDeclarationSyntax method, ExpressionStatementSyntax destroy, string? entity)
     {
-        var forEach = method.AttributeLists.SelectMany(l => l.Attributes).First(IsForEach);
-        var list = (AttributeListSyntax)forEach.Parent!;
-        var consume = SyntaxFactory.Attribute(SyntaxFactory.IdentifierName("Consume"));
+        var list = (AttributeListSyntax)method.AttributeLists.SelectMany(l => l.Attributes).First(IsForEach).Parent!;
         var updated = method.ReplaceNodes(new SyntaxNode[] { list, destroy }, (original, rewritten) => original == list
-            ? ((AttributeListSyntax)rewritten).WithAttributes(((AttributeListSyntax)rewritten).Attributes.Insert(list.Attributes.IndexOf(forEach) + 1, consume))
+            ? AfterForEach((AttributeListSyntax)rewritten, "Consume")
             : rewritten);
         // The destroy goes with its line: it is the body's last statement.
         updated = updated.RemoveNode(updated.Body!.Statements.Last(), SyntaxRemoveOptions.KeepNoTrivia)!;
         if (entity != null && updated.ParameterList.Parameters.FirstOrDefault(p => p.Identifier.ValueText == entity) is { } parameter)
             updated = updated.WithParameterList(updated.ParameterList.WithParameters(updated.ParameterList.Parameters.Remove(parameter)));
         return updated;
+    }
+
+    /// <summary><paramref name="list"/>, the attribute list holding [ForEach], with <paramref name="marker"/> right after it.</summary>
+    private static AttributeListSyntax AfterForEach(AttributeListSyntax list, string marker)
+    {
+        int at = list.Attributes.IndexOf(list.Attributes.First(IsForEach)) + 1;
+        return list.WithAttributes(list.Attributes.Insert(at, SyntaxFactory.Attribute(SyntaxFactory.IdentifierName(marker))));
+    }
+
+    /// <summary>EECS117: the method with <c>GaussSeidel</c> after <c>ForEach</c> in its attribute list.</summary>
+    private static MethodDeclarationSyntax WithGaussSeidel(MethodDeclarationSyntax method)
+    {
+        var list = (AttributeListSyntax)method.AttributeLists.SelectMany(l => l.Attributes).First(IsForEach).Parent!;
+        return method.ReplaceNode(list, AfterForEach(list, "GaussSeidel"));
     }
 
     /// <summary>

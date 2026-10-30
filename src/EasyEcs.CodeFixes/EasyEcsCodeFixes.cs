@@ -26,7 +26,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS055", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "CS0234", "CS0246", "CS0305", "CS0592",
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "CS0234", "CS0246", "CS0305", "CS0592",
             "CS0200", "CS0272", "CS1501", "CS1729", "CS1739");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -138,6 +138,10 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     diagnostic.Properties.TryGetValue("DropEntity", out var dropEntity);
                     if (dropEntity != null && await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false)) dropEntity = null;
                     Register(context, diagnostic, "Consume its rows with [Consume]", root, method, Consumed(method, destroy, dropEntity));
+                    break;
+                case "EECS117" when kind == "GaussSeidel" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } relaxed
+                                    && relaxed.AttributeLists.SelectMany(l => l.Attributes).Any(IsForEach):
+                    Register(context, diagnostic, "Settle each tile in place with [GaussSeidel]", root, relaxed, WithGaussSeidel(relaxed));
                     break;
                 case "EECS109" when kind == "Drain" && node.FirstAncestorOrSelf<ForEachStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax hook } } records
                                     && RecordMethod(root, hook, records, diagnostic.Properties) is { } handle:

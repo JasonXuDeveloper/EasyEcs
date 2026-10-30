@@ -149,7 +149,25 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
         sb.Append("}\n");
         if (system) EmitSystemCode(sb, model);
+        EmitTilePools(sb, model);
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// The pools of the tiles' cells, raised when the assembly loads (TileCells.Pool) for each closed
+    /// <c>Tile&lt;TCell, TTile&gt;</c> the type's methods take: a buffer of a tile's cells comes back to the pool, and a
+    /// FillPool at startup fills it with lists of that length, with no MaxPooledLength line in user code.
+    /// </summary>
+    private static void EmitTilePools(StringBuilder sb, UpdateModel model)
+    {
+        var pools = model.Methods.SelectMany(m => m.Parameters)
+            .Where(p => p.Kind == Symbols.ParamKind.Tile && p.Pooled)
+            .Select(p => $"global::EasyEcs.TileCells.Pool<{p.Cell}, {p.Shape}>();")
+            .Distinct().OrderBy(p => p, System.StringComparer.Ordinal).ToArray();
+        if (pools.Length == 0) return;
+        sb.Append($"\nfile static class __TilePools\n{{\n    {Code.ModuleInitializer}\n    internal static void Pool()\n    {{\n");
+        foreach (var pool in pools) sb.Append("        ").Append(pool).Append('\n');
+        sb.Append("    }\n}\n");
     }
 
     /// <summary>The code struct of a system (<c>__Movement_SystemCode</c>), public for a public generic system, whose closed types other assemblies' sets name.</summary>
@@ -1068,7 +1086,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <param name="Wakes">What else wakes a stepping tile: "cells:T" (another tile of the grid, its buffer of T) or "component:T" (a tracked component of the entity).</param>
     private sealed record ParamModel(Symbols.ParamKind Kind, string Type, string RefKind, string Name, string Declared, bool Tracked = false, string Key = "",
         string Cell = "", string Grid = "", EquatableArray<ViewFieldModel> Fields = default, bool Accumulates = false, string Shape = "",
-        string Colors = "", int Sweeps = 0, bool Sleeps = false, EquatableArray<string> Wakes = default, bool Woken = false);
+        string Colors = "", int Sweeps = 0, bool Sleeps = false, EquatableArray<string> Wakes = default, bool Woken = false, bool Pooled = false);
 
     /// <summary>A view's component field: its name, its component, and "ref" (written) or "in" (read).</summary>
     /// <summary>A view's field: its name, component, and how the job sets it: "ref", "in" (ref readonly) or "mut" (a Mut&lt;T&gt;).</summary>
@@ -1451,7 +1469,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         }
         return new ParamModel(Symbols.ParamKind.Tile, $"global::EasyEcs.DynamicBuffer<{cellName}>", steps ? "ref" : "in", p.Name, declared,
             Key: key.ToDisplayString(Symbols.Fqn), Cell: cellName, Grid: grid.ToDisplayString(Symbols.Fqn), Shape: shape.ToDisplayString(Symbols.Fqn),
-            Colors: colors, Sweeps: steps ? Symbols.MaxSweeps(method) : 0);
+            Colors: colors, Sweeps: steps ? Symbols.MaxSweeps(method) : 0,
+            Pooled: !Symbols.ContainsTypeParameter(cell) && !Symbols.ContainsTypeParameter(shape));
     }
 
     /// <summary>

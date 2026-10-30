@@ -76,7 +76,8 @@ StreamingStores.cs           the non-temporal stores of generated vector loops (
                              one), Store (AVX-512 / AVX / SSE2 VMOVNTPS where aligned, ARM64 STNP, plain otherwise), Fence
 Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                              Columns<TTile> (a 2D tile of a 3D grid's key), Tile<TCell, TTile> (a [ForEach] parameter:
-                             up to 26 neighbors found by generated code, TileNeighbors), ExchangeHalo into the thread's
+                             up to 26 neighbors found by generated code, TileNeighbors; TileCells.Pool: the pool of a
+                             tile's cell buffers sized from its shape when the assembly loads), ExchangeHalo into the thread's
                              TileFrame (a texture padded with the halo, a row mask per layer, the state of the tile it
                              steps), Rows (TZCNT walk), At / the indexer, Write (a stepped tile's row), TileCursor.Load128,
                              ChangedEdges / Facing (sleeping tiles written by hand)
