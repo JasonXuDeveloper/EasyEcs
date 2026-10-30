@@ -60,10 +60,9 @@ public static class Startup
     public static World Create(RegionFiles regions, in Capacity capacity, bool measure)
     {
         // #region options
-        // A chunk's blocks, its water and the water's next step are 8 KB each, more than a buffer's pool keeps by
-        // default: let each chunk loaded reuse the lists of one that was unloaded.
-        DynamicBuffer<Block>.MaxPooledLength = Terrain.BlocksPerChunk;
-        DynamicBuffer<Fluid>.MaxPooledLength = Terrain.BlocksPerChunk;
+        // The water's next step is 8 KB, more than a buffer's pool keeps by default: let each chunk loaded reuse the
+        // lists of one that was unloaded. (The blocks and the water are a chunk's tiles, Tile<Block, Chunk>: their pools
+        // are sized from the tile's shape when the program loads.)
         DynamicBuffer<NextFluid>.MaxPooledLength = Terrain.BlocksPerChunk;
         DynamicBuffer<Surface>.MaxPooledLength = Terrain.Size * Terrain.Size;
         DynamicBuffer<ItemStack>.MaxPooledLength = Rules.InventorySlots;
