@@ -42,7 +42,7 @@ public sealed partial class SystemGenerator
         {
             try
             {
-                if (TileLoad.Read(invocation, model, ct) is not { } load
+                if (TileLoad.Read(invocation, model, ct, out _) is not { } load
                     || model.GetInterceptableLocation(invocation, ct) is not { } location)
                     return null;
                 return new TileLoadCall(invocation.SyntaxTree.FilePath, invocation.SpanStart, location.Version, location.Data,
