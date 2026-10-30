@@ -155,6 +155,14 @@ public partial class AnalyzerTests
     [TestCase("public static class U { public static void F(World w, Entity[] more) { var all = new Entity[64]; all = more; for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P { V = i }); } }", "EECS031")]
     [TestCase("public static class U { public static void F(World w, Prefab p, Entity[] all) { for (int i = 0; i < all.Length; i++) all[i] = w.Instantiate(p, new P()); } }", "EECS031")]
     [TestCase("public static class U { public static void F(World w, Prefab p, int n) { for (int i = 0; i < n; i++) w.Instantiate(p, new P { V = i }); } }")] // no table to reserve
+    // EECS031 on nested loops: the product of the counts decides, reported once on the outermost loop.
+    [TestCase("public static class U { public static void F(World w, int side) { for (int x = 0; x < side; x++) for (int y = 0; y < side; y++) w.CreateEntity(new P { V = x + y }); } }", "EECS031")]
+    [TestCase("public static class U { const int Side = 100; public static void F(World w) { for (int x = 0; x < Side; x++) { for (int y = 0; y < Side; y++) w.CreateEntity(new P { V = x + y }); } } }", "EECS031")] // 10,000 rows
+    [TestCase("public static class U { public static void F(World w, int n) { for (int x = 0; x < 64; x++) for (int y = 0; y < n; y++) w.CreateEntity(new P()); } }", "EECS031")]
+    [TestCase("public static class U { const int Side = 60; public static void F(World w) { for (int x = 0; x < Side; x++) for (int y = 0; y < Side; y++) w.CreateEntity(new P()); } }")] // 3,600 rows: small
+    [TestCase("public static class U { public static void F(World w, int n) { for (int x = 0; x < n; x++) for (int y = 0; y < x; y++) w.CreateEntity(new P()); } }", "EECS031")] // a triangle: the inner loop's own count
+    [TestCase("public static class U { public static void F(World w, int n) { w.Reserve<P>(n * n); for (int x = 0; x < n; x++) for (int y = 0; y < n; y++) w.CreateEntity(new P()); } }")] // reserved before the outer loop
+    [TestCase("public static class U { public static void F(World w, Entity[] all) { for (int r = 0; r < 10; r++) { for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P { V = i }); for (int i = 0; i < all.Length; i++) all[i].Destroy(); } } }", "EECS031")] // a churn: the inner loop's count
     [TestCase("public static class U { public static void F(World w, Prefab p, Entity[] all, int n) { for (int i = 0; i < n; i++) w.Instantiate(p, all, new P()); } }")] // batches
     // EECS032: query work the world does in one call.
     [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 0; }", "EECS032")]
@@ -264,7 +272,6 @@ public partial class AnalyzerTests
     [TestCase("public static class U { public static void F(World w) { for (int i = 0; i < 100; i++) w.CreateEntity(new P()); } }")]
     [TestCase("public static class U { public static void F(World w) { var all = new Entity[100]; for (int i = 0; i < all.Length; i++) all[i] = w.CreateEntity(new P { V = i }); } }")]
     [TestCase("public static class U { public static void F(World w, int n) { for (int i = 0; i < n; i++) if (w.Count<P>() < i) w.CreateEntity(new P { V = i }); } }")]   // now and then
-    [TestCase("public static class U { public static void F(World w, int n) { for (int r = 0; r < n; r++) for (int i = 0; i < 8; i++) w.CreateEntity(new P { V = i }); } }")]   // the inner loop's
     [TestCase("public static class U { public static void F(World w, int n) { w.Reserve<P>(n); for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i }); } }")]
     [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) { for (int i = 0; i < world.Clock.Ticks; i++) world.CreateEntity(new P()); } }")]
     [TestCase("public static class U { public static bool F(World w) => w.Count<P>() > 2; }")]

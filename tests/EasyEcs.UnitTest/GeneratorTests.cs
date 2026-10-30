@@ -997,6 +997,36 @@ public class GeneratorTests
         Assert.That(generated, Does.Not.Contain("GeneratedUpdate").And.Not.Contain("GeneratedAccess"));
     }
 
+    // A using alias names the type, so the entry point (an extension member of the type) binds through it wherever the
+    // type's namespace is in scope, as through the type's name; an alias alone does not bring the namespace (EECS120).
+    internal const string Runners = """
+        namespace Game
+        {
+            public static partial class R
+            {
+                [ForEach] public static void A(ref P p) { }
+                [ForEach] static void B(ref P p) { }
+                [ForEach] public static void C(in P p, ref Q q, Lookup<P> ps) { }
+                [EntityMethod] public static void D(ref P p, int by) => p.V += by;
+                public static class Inner { [ForEach] public static void E(ref Q q) { } }
+            }
+            public static class G<X> { [ForEach] public static void F(ref P p) { } }
+        }
+        """;
+
+    [TestCase("using Game; using Alias = Game.R; namespace Other; public static class Use { public static void Run(World w) => Alias.A(w); }")]
+    [TestCase("using Game; namespace Other { using Alias = Game.R; public static class Use { public static void Run(World w) => Alias.C(w); } }")]
+    [TestCase("using Game; using Alias = Game.R; namespace Other; public static class Use { public static bool Run(Entity e) => Alias.D(e, 2); }")]
+    [TestCase("using Game; using Alias = Game.R.Inner; namespace Other; public static class Use { public static void Run(World w) => Alias.E(w); }")]
+    [TestCase("using Game; using Alias = Game.G<int>; namespace Other; public static class Use { public static void Run(World w) => Alias.F(w); }")]
+    [TestCase("using Alias = Game.R; namespace Game.Sub { public static class Use { public static void Run(World w) => Alias.A(w); } }")] // the namespace encloses the call
+    [TestCase("using Game; using Alias = Game.R; namespace Other; public static class Use { public static void Run(World w) => Alias.A(w); } public static class Near { [ForEach] public static void A(ref Q q) { } }")] // a namesake's entry point nearer
+    public void UsingAliasesBindEntryPoints(string use)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Runners, use), out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+    }
+
     // Skipped by the generator == reported: a method the analyzer rejects gets no job.
     [TestCase("[ForEach(Slices = 0)] static void A(ref P p) { }")]                                    // EECS035
     [TestCase("[ForEach(ChunkSize = 64)] static void A(ref P p) { }")]                                // EECS054: not parallel
