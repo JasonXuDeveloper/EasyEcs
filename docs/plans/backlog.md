@@ -423,12 +423,16 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 
 ## Later
 
-- [ ] **Analyzer and incremental generators by the official .NET guidance** (owner, 2026-10-25; phase 2 above is
-      its first part): refactor what does not follow it (incremental pipeline: ForAttributeWithMetadataName, equatable symbol-free
-      models, no CompilationProvider in a pipeline that runs per edit, cached steps proven by tracking names;
-      analyzer: RegisterSymbolStartAction / operation actions over syntax walks where cheaper, no per-node semantic
-      model work, compilation-end rules only where needed, `EnableConcurrentExecution`, generated code skipped).
-      Measured before and after (GeneratorBenchmark, ReportAnalyzer: UnitTest analyzer 40 s, generators 4 s).
+- [x] **Analyzer and incremental generators by the official .NET guidance** (owner, 2026-10-25; phase 2 above is
+      its first part; done on `feat-roslyn-guidance`): EECS033 in an analyzer of its own (`MemberAnalyzer`; the unit
+      tests suppress it: EasyEcs analyzers 20.3 -> 10.1 s in ReportAnalyzer), display strings only when reporting;
+      lambda passes and tile loads bound after their syntax provider (`BoundLater`: Roslyn runs every syntax
+      provider's transform even when the IDE skips its output; unit tests' IDE keystroke 400-803 -> 285-291 ms,
+      32.7 -> 22.7 MB), `Shape.Of` and the friend assemblies of `QueryShape` per compilation. Audited and kept: FAWMN
+      everywhere an attribute marks the input, symbol-free equatable models, the two CompilationProvider Selects
+      (narrow, a string compare), compilation-end rules (each needs every use), `EnableConcurrentExecution` and
+      `ConfigureGeneratedCodeAnalysis(None)` in `Area`, the shared caches (ConditionalWeakTable, thread-safe).
+      Docs to-dos and the decision draft: `docs-todos.md` "feat-roslyn-guidance".
 - [ ] **Inner loops** (`inner-loops.md`), in this order (WP0b done): WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
       WP5 `Cell<TCell,TTile>` (bar: hand-written speed), WP5b (per-tile results, several inputs/outputs, VoxelServer
       `Flow.cs`), WP1 InlineArray, WP4 ParallelFor lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
