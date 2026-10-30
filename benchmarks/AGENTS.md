@@ -40,9 +40,14 @@ benchmarks/EasyEcs.Benchmark/  BenchmarkDotNet: WorldSimulationBenchmark / Multi
                                Locality/Operators.cs), TimerWheel
                                (borrowed-ideas.md item 2: scans of wake ticks against a timer wheel; Locality/Timers.cs), StreamingStore
                                (borrowed-ideas.md item 5: a write-only column with plain against non-temporal stores, in and past
-                               the last-level cache; Locality/Streams.cs) and StreamingStoreGate (the generated loops'
+                               the last-level cache; Locality/Streams.cs), StreamingStoreGate (the generated loops'
                                streaming stores in two worlds, a write-only pass with and without the pass reading its
-                               column, in and past the last-level cache, the gate Auto / Off / On).
+                               column, in and past the last-level cache, the gate Auto / Off / On), StreamingCopy (a large
+                               copy: memmove against loops of non-temporal stores, in and past the last-level cache;
+                               Locality/Streams.cs) and FullCopy (the whole-column copies snapshots still make: Capture /
+                               Restore of untracked components, in and past the cache). Roofline (+ RooflinePeak): the
+                               roofs of audit-perf's roofline, one thread's bandwidth from the L2 and from memory and its
+                               peak of fused multiply-adds.
                                Every kernel picks 8 lanes when Vector256.IsHardwareAccelerated, else 4 (ARM64's NEON),
                                and guards each intrinsic; Locality/Isa.cs names the ISA (printed by setup), IsaColumn.cs
                                shows it as a column ([IsaColumn]).
