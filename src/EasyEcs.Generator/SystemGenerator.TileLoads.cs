@@ -19,9 +19,7 @@ public sealed partial class SystemGenerator
 {
     private static void InitializeTileLoads(IncrementalGeneratorInitializationContext context)
     {
-        var loads = context.SyntaxProvider
-            .CreateSyntaxProvider(static (node, _) => TileLoad.IsCandidate(node), static (ctx, ct) => TileLoadCall.Create(ctx, ct))
-            .Where(static m => m is not null)
+        var loads = BoundLater(context, static (node, _) => TileLoad.IsCandidate(node), TileLoadCall.Create)
             .WithTrackingName("TileLoads");
         // Per source file: an edit changes every location of its file (they hold its checksum), and no other file.
         var files = loads.Collect()
@@ -40,13 +38,12 @@ public sealed partial class SystemGenerator
     /// <param name="Where">The call as a reader finds it (<c>Heat.cs(12,9)</c>).</param>
     private sealed record TileLoadCall(string File, int Position, int Version, string Data, string Where, TileLoad Load)
     {
-        public static TileLoadCall? Create(GeneratorSyntaxContext ctx, System.Threading.CancellationToken ct)
+        public static TileLoadCall? Create(SemanticModel model, InvocationExpressionSyntax invocation, System.Threading.CancellationToken ct)
         {
-            var invocation = (InvocationExpressionSyntax)ctx.Node;
             try
             {
-                if (TileLoad.Read(invocation, ctx.SemanticModel, ct) is not { } load
-                    || ctx.SemanticModel.GetInterceptableLocation(invocation, ct) is not { } location)
+                if (TileLoad.Read(invocation, model, ct) is not { } load
+                    || model.GetInterceptableLocation(invocation, ct) is not { } location)
                     return null;
                 return new TileLoadCall(invocation.SyntaxTree.FilePath, invocation.SpanStart, location.Version, location.Data,
                     LambdaPass.Where(invocation.GetLocation()), load);

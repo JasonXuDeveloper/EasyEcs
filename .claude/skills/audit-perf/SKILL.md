@@ -230,8 +230,12 @@ its own worktree.
      targets file that sets `<IlcInstructionSet>native</IlcInstructionSet>` for the AOT runs;
    - before choosing what to change in a pass, place it on the roofline (below, "Roofline"): a memory-bound pass gains
      from fewer bytes only, a compute-bound one from the loop and the math;
-4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss or a wash is reverted and gets a
-   decision record (what was tried, the numbers, why not); the roadmap's "Dropped" list names it.
+4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss, a wash or an allocation is first
+   explained, not reverted on sight (AGENTS.md, "Try it now; research a problem"): diff the Tier1 listings of base
+   and head (`tools/jitdisasm.sh`: spills, calls, range checks, a longer loop), read the generated source and the
+   allocation trace, and build and measure the fix the cause points to. Only what still loses after that is
+   reverted and gets a decision record (what was tried, the cause found, the numbers); the roadmap's "Dropped" list
+   names it.
    A plan's bar (1.2x, 1.5x, 20 %) decides what to build and try first, not whether a measured change ships (owner,
    2026-10-27: "门槛不用严格卡，有收益就行"): faster beyond the job's noise in both rounds, 0 B, nothing slower ships
    even under its bar. A gain inside the noise is a wash, not a win.

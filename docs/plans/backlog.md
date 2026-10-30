@@ -31,9 +31,9 @@ names the skill:
 
 ## Running (worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-Nothing running.
+`feat-roslyn-guidance` (Later: analyzer and generators by the .NET guidance); `feat-later-small` (using alias, EECS031 nested loops, inliner check in CI, #153, quiet rechecks); `feat-later-memory` (#164 NativeMemory columns, Native AOT class-init check, x64 part).
 
-Merged since the last update: `feat-borrowed-rest` (item 7: snapshots stream large copies past the LLC, Capture 1.20-1.26x / Restore 1.11-1.20x at 4M rows, resizes stay memmove; roofline in audit-perf), `feat-field-gaps` (item 8c: `tile.Restart` and `tile.Sweep`, names kept by the owner on 2026-10-30; Linger showed 1-3 B per op at 256 springs / Hop 1, look in an audit), `feat-small-next` (rename leftovers, EECS033 across assemblies, recorded switches), `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
+Merged since the last update: `feat-borrowed-rest` (item 7: snapshots stream large copies past the LLC, Capture 1.20-1.26x / Restore 1.11-1.20x at 4M rows, resizes stay memmove; roofline in audit-perf), `feat-field-gaps` (item 8c: `tile.Restart` and `tile.Sweep`, names kept by the owner on 2026-10-30; Linger showed 1-3 B per op at 256 springs / Hop 1: owner (2026-10-30) "需要修复，不应该有分配", fixing on feat-later-small), `feat-small-next` (rename leftovers, EECS033 across assemblies, recorded switches), `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
 at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
 vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the owner's M4: no case slower past
@@ -423,12 +423,16 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 
 ## Later
 
-- [ ] **Analyzer and incremental generators by the official .NET guidance** (owner, 2026-10-25; phase 2 above is
-      its first part): refactor what does not follow it (incremental pipeline: ForAttributeWithMetadataName, equatable symbol-free
-      models, no CompilationProvider in a pipeline that runs per edit, cached steps proven by tracking names;
-      analyzer: RegisterSymbolStartAction / operation actions over syntax walks where cheaper, no per-node semantic
-      model work, compilation-end rules only where needed, `EnableConcurrentExecution`, generated code skipped).
-      Measured before and after (GeneratorBenchmark, ReportAnalyzer: UnitTest analyzer 40 s, generators 4 s).
+- [x] **Analyzer and incremental generators by the official .NET guidance** (owner, 2026-10-25; phase 2 above is
+      its first part; done on `feat-roslyn-guidance`): EECS033 in an analyzer of its own (`MemberAnalyzer`; the unit
+      tests suppress it: EasyEcs analyzers 20.3 -> 10.1 s in ReportAnalyzer), display strings only when reporting;
+      lambda passes and tile loads bound after their syntax provider (`BoundLater`: Roslyn runs every syntax
+      provider's transform even when the IDE skips its output; unit tests' IDE keystroke 400-803 -> 285-291 ms,
+      32.7 -> 22.7 MB), `Shape.Of` and the friend assemblies of `QueryShape` per compilation. Audited and kept: FAWMN
+      everywhere an attribute marks the input, symbol-free equatable models, the two CompilationProvider Selects
+      (narrow, a string compare), compilation-end rules (each needs every use), `EnableConcurrentExecution` and
+      `ConfigureGeneratedCodeAnalysis(None)` in `Area`, the shared caches (ConditionalWeakTable, thread-safe).
+      Docs to-dos and the decision draft: `docs-todos.md` "feat-roslyn-guidance".
 - [ ] **Inner loops** (`inner-loops.md`), in this order (WP0b done): WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
       WP5 `Cell<TCell,TTile>` (bar: hand-written speed), WP5b (per-tile results, several inputs/outputs, VoxelServer
       `Flow.cs`), WP1 InlineArray, WP4 ParallelFor lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
@@ -508,6 +512,20 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
       the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
+- [ ] **Owner's calls on `owner-review.md` (2026-10-30), each built, measured and kept only if it pays:**
+      (a) `CopyEntities<TTag>(target, ids, set)`: a measured prototype (ghost rows, a column copy per run of rows,
+      the originals kept) against the hand-written `CreateEntity` loop of `samples/MultiWorld/Border.cs`;
+      (b) EECS116's code fix limited to the step method (`ref Tile`, writes become `Write(row)`; the commit method and
+      the `TNext` buffer are left for the user, the compiler reports their stale writes);
+      (c) a public `c.Columns(...)` handing a proven column loop its base column, to close the Laplacian 32x32 gap
+      (48 against 33 instructions; Tier1 listing and TileRestart / ping-pong benchmarks before and after);
+      (d) an Info rule naming why a `TileCursor` load runs checked (the loop the generator cannot prove: the variable
+      written in the body, an unreadable bound; the reasons `TileLoad.Read` returns null for), as EECS055 does.
+      (e) the per-tile frame read once without a second call (`Enter` handing the tile out through an out parameter
+      the job keeps in a register; the reverted Begin/Frame split's untried design), measured on TileActive and
+      TileWoken; (f) a benchmark of `Rows()` walking odd `[GaussSeidel]` sweeps backwards against forwards, to settle
+      the 8c drop with numbers. (e) and (f) by the owner's rule "try it now" (AGENTS.md, 2026-10-30).
+      (c) and (d) edit the generator: after `feat-roslyn-guidance` merges.
 
 ## Finish
 

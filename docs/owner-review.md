@@ -7,6 +7,8 @@ leave this file; it is not published on the site.
 
 ## Ghost rows between worlds: `CopyEntities` with a component set (borrowed-ideas item 4, backlog item 7)
 
+**Owner (2026-10-30): build the measured prototype** (backlog Later, owner's calls (a)).
+
 **Proposed by** the ghost-rows round (2026-10-28), after writing the halo exchange in `samples/MultiWorld` with the
 current API (`Border.cs`). **Verdict: not a feature yet**; one small primitive is worth a measured prototype.
 
@@ -79,6 +81,8 @@ loop vs `SaveEntitiesWith` + `LoadEntities` vs a prototype `CopyEntities`) showi
 noticeable share of a tick, or a second sample (VoxelServer's two region worlds) writing the same copy loop.
 ## EECS116's code fix (feat-tiles-pingpong, 2026-10-28)
 
+**Owner (2026-10-30): build the fix limited to the step method** (backlog Later, owner's calls (b)).
+
 Item 11 asked for a rule and a code fix for a hand-written commit that is a plain copy. The rule shipped (EECS116,
 Warning, reported at the end of the compilation on the commit method, naming the step that writes the second buffer);
 the fix did not. The rewrite is not local: it changes the step method (its by-value `Tile<TCells, ...>` becomes `ref`,
@@ -106,6 +110,8 @@ VoxelServer TickBenchmark base against head, 4 interleaved rounds: within noise,
 What would change the verdict: nothing left to decide; the read fix is scheduled.
 
 ## Tile loads: the Laplacian gap left, and loads the generator cannot prove (feat-tile-reads, 2026-10-29)
+
+**Owner (2026-10-30): add `c.Columns(...)` and the Info rule now** (backlog Later, owner's calls (c), (d)).
 
 **Proposed by** the tile-reads round. The interceptor of a proven column loop leaves the Laplacian's column loop at
 48 instructions against the hand-written 33 (Laplacian 32x32 at 1 thread: ping-pong 1.14x hand, every other case at or

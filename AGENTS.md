@@ -149,9 +149,17 @@ owner has asked for once must be written where the next session will find it.
   when it should have gets the missing trigger added.
 - **Decide, then record what you did not do.** The owner has delegated judgment: do what clearly fits the
   project's rules and goals without asking (public API changes included, with their migration); ask only for what is
-  truly the owner's to decide. A proposal you judge not worth doing (or not yet) goes into `docs/owner-review.md`
-  with the reason and what would change the verdict, so the owner can review it later; settled choices still get
-  their decision record.
+  truly the owner's to decide. A proposal you judge not worth doing goes into `docs/owner-review.md` with the reason
+  and what would change the verdict, so the owner can review it later; settled choices still get their decision
+  record. "Not worth doing" is a verdict reached after trying or after finding the cause (next rule), never "not yet".
+- **Try it now; research a problem, never skip it** (owner, 2026-10-30: "做什么都不要defer，应该立马去尝试，遇到问题不应该
+  跳过问题，而是研究为什么会出现这个问题"). An idea within reach is tried in the same session, not parked as "later",
+  "worth it once ..." or "a follow-up". When something goes wrong (a slower case, an allocation, a wash, a form that
+  stays scalar, a failing test), find out why before deciding anything: read the Tier1 assembly
+  (`tools/jitdisasm.sh`), the generated source, a profile or the allocation trace, then build the fix the cause
+  points to and measure it. Work stops only at a cause shown to be out of reach (a JIT limit visible in the listing,
+  the hardware, a public API only the owner can approve, which is then asked at once), and the record names the
+  cause found, not a guess.
 - **The open work is `docs/plans/backlog.md`**: what is running (and in which worktree), what comes next in the
   owner's order, what is left before a release. A session starts by reading it and keeps it current on every start,
   merge or drop.
