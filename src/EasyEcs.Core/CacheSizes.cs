@@ -12,7 +12,8 @@ namespace EasyEcs;
 /// past the L2 a prefetch costs them more than it hides); the forms that pay as soon as the data leaves the L2 (the
 /// row form's chases of other entities, on one thread, in parallel, in fused walks and over a buffer's elements; the
 /// core's lists of ids) past <see cref="L2OrLastLevel"/>.
-/// A generated vector loop streams a column it only writes past <see cref="LastLevel"/> (<see cref="StreamingStores"/>).
+/// A generated vector loop streams a column it only writes past <see cref="LastLevel"/> (<see cref="StreamingStores"/>), and
+/// so do the core's large copies of a table's columns (snapshots).
 /// Read only where a prefetch exists (<see cref="Prefetching.IsSupported"/>: x86, ARM64 with SVE), the last level also
 /// where a non-temporal store does (every ARM64): WebAssembly never reads them. 0 means unknown: an operating system not listed, a read that fails or returns nothing.
 /// </summary>

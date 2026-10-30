@@ -980,10 +980,9 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Resize(int capacity)
     {
-        bool stream = StreamingStores.CopyPays(UnmanagedBytes(Math.Min(capacity, Slots.Length))); // the rows kept
         Array.Resize(ref Slots, capacity);
         for (int i = 0; i < Columns.Length; i++)
-            ByBit[Components[i]].Set(Columns[i] = _infos[i].Resize(Columns[i], capacity, stream), _infos[i].Managed);
+            ByBit[Components[i]].Set(Columns[i] = _infos[i].Resize(Columns[i], capacity), _infos[i].Managed);
         foreach (short c in _bitColumns)
         {
             Array.Resize(ref Present[c], (capacity + 63) >> 6);
@@ -1353,8 +1352,8 @@ internal sealed class Archetype
     }
 
     /// <summary>
-    /// The bytes of this table's unmanaged columns over <paramref name="rows"/> rows: what a capture, restore or resize
-    /// of them copies in all, the measure <see cref="StreamingStores.CopyPays"/> compares with the last-level cache.
+    /// The bytes of this table's unmanaged columns over <paramref name="rows"/> rows: what a capture or restore of them
+    /// copies in all, the measure <see cref="StreamingStores.CopyPays"/> compares with the last-level cache.
     /// O(columns).
     /// </summary>
     private long UnmanagedBytes(int rows)

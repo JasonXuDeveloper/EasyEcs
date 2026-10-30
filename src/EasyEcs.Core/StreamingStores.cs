@@ -16,7 +16,9 @@ namespace EasyEcs;
 /// generator calls them; a [ForEach] method never does. They pay only when the pass's columns are past the last-level
 /// cache (<see cref="Pays"/>, once per run): there a plain store reads every line it writes, and the line is gone again
 /// before the next pass reads it (StreamingStoreBenchmark: 1.47x past the cache, a tie inside). In the cache they would
-/// evict what the next pass reads, so the loop keeps plain stores.
+/// evict what the next pass reads, so the loop keeps plain stores. The core's large copies (a snapshot's capture and
+/// restore of whole columns) stream the same way past the cache (<see cref="CopyPays"/>,
+/// <see cref="Copy(ref byte, ref byte, nuint)"/>).
 /// </summary>
 /// <remarks>
 /// x86: <c>VMOVNTPS</c> of 64, 32 or 16 bytes (AVX-512, AVX, SSE2), which faults on an address that is not aligned
@@ -122,8 +124,8 @@ public static unsafe class StreamingStores
     }
 
     /// <summary>
-    /// Whether an operation that copies <paramref name="bytes"/> bytes in all (every column of a table a capture,
-    /// restore or resize copies) streams its stores (<see cref="Copy(ref byte, ref byte, nuint)"/>): the machine has AVX (VMOVNTPS of 32 or 64
+    /// Whether an operation that copies <paramref name="bytes"/> bytes in all (every column of a table a capture or
+    /// restore copies) streams its stores (<see cref="Copy(ref byte, ref byte, nuint)"/>): the machine has AVX (VMOVNTPS of 32 or 64
     /// bytes) and the bytes are past the last-level cache (<c>CacheSizes.LastLevel</c>; never when it is unknown). Then
     /// none of the target's lines is still in the cache when the copy ends, so reading each line before writing it
     /// (read for ownership) is wasted bandwidth. O(1).
