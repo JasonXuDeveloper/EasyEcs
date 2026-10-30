@@ -254,7 +254,19 @@ tools/bench.sh GeneratorBenchmark
   desugared view), host it in a speculative model of the method body (a new local function can change the method's
   parameters). A copy of the compilation per method cost +80 ms and +19 MB per keystroke for 40 view methods.
 - **Body facts belong in implementation-only stages** (`SystemLoops`, merged back by `SystemCode`): what a method
-  body vectorizes to is never computed in the declaration transform, which reruns on every IDE keystroke.
+  body vectorizes to is never computed in the declaration transform, which reruns on every IDE keystroke. They are a
+  model per method (`ForEachBodies`, `RecordBodies`, `EntityMethodBodies`), merged per kind: one shared Bodies value
+  makes every body edit rerun every merge. A member users call is declared by the source output and filled by the
+  implementation output through a `static partial void` with no accessibility modifier, so the IDE drops the call
+  while typing and the member still exists. A stage that legitimately regroups after a body edit is marked `~` in the
+  tracking test (Cached or Unchanged).
+- **A `Collect()` over an empty or `SelectMany` provider reports Unchanged on every run** (not a cache hit): make it
+  one value provider and `Select` into an `EquatableArray` (SetFusions).
+- **One `SemanticModel` per tree per compilation** (`Kernel.ModelOf`): `GetSemanticModel` per call rebuilds it.
+- **Extension blocks cost the compiler per block in scope** (G6, synthetic binding benchmark: 400 components with a
+  block each 287 ms, one block per receiver 40 ms; one partial class with a block per file does not help). One block
+  per receiver needs an assembly-level Collect regenerated on any component change: measure GeneratorBenchmark Cold
+  and a real project before building it.
 - **Measure the analyzer too**: when more methods vectorize, report CompileAndAnalyze − Compile next to the
   generator numbers; a full translation costs more than an early bail.
 - **No display strings**: `Symbols.Named(symbol, "Ns.Type<T>")`, never `ToDisplayString() ==`.
