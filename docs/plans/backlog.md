@@ -31,7 +31,7 @@ names the skill:
 
 ## Running (worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-Nothing running.
+`feat-small-next` (rename leftovers, EECS033 across assemblies, recorded bodies with switches); `feat-borrowed-rest` (item 7: streaming stores, roofline); `feat-field-gaps` (item 8c).
 
 Merged since the last update: `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
@@ -202,12 +202,12 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        in a tile copies it into a stackalloc by hand; no halo-row or lane-shift helper; 12a's padded storage may
        answer it); `FillPool` ignores the up to 64 lists each thread parks (a likely cause of the in-place form's
        allocation; done in 12d: `Fill` counts 64 lists per thread with lists of its own).
-8e. [ ] **Symmetric pair methods** (`voxel-rewrite.md` GA4; owner, 2026-10-27: "加，做 GA4"): each unordered pair
+8e. [x] **Symmetric pair methods** (`voxel-rewrite.md` GA4; owner, 2026-10-27: "加，做 GA4"): each unordered pair
        visited once and both sides written (Newton's third law in MD codes: half neighbor lists), for item merging in
        VoxelServer and collisions; today a pair writing the neighbor's component it also reads of its row is refused.
        With or after item 1 (the pair agent), `feature` + `audit-vector-loops`: bit for bit against the per-pair walk,
        deterministic order, parallel only where the halves cannot race, 0 B, analyzer reasons and naming (`audit-naming`).
-       Status: built on branch `feat-symmetric-pairs` (from 5b8f926), waiting for merge: inferred from `ref` +
+       Status: merged (`feat-symmetric-pairs`): inferred from `ref` +
        `[Neighbor] ref` of one component (`IPairJob.Symmetric`), half lists, one pair at a time; in parallel
        (`Parallel = true`, owner 2026-10-28) chunks of 256 rows colored at distance two, color by color (both designs
        built and measured, per-chunk buffers dropped); its vector loop measured and dropped (docs-todos
@@ -347,7 +347,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        `[ForEach, GaussSeidel]` when the key has integer fields to color by. TileStencil / TileActive / TileWoken, two
        interleaved rounds against 2669d2d: every case within its control's spread (Blur9_Tile, AlwaysOn, Hand), 0 B.
        Not built: EECS116's fix (owner-review verdict stands).
-12. [ ] **Fewer memory copies** (owner, 2026-10-27: "看看还有什么类似的能做的减少内存拷贝的做法"; a-e approved: "这些都可以做"). Each one measured
+12. [x] **Fewer memory copies** (owner, 2026-10-27: "看看还有什么类似的能做的减少内存拷贝的做法"; a-e approved: "这些都可以做"). Each one measured
        (two rounds, 0 B, nothing slower) and done by the generator or the core where users would otherwise copy:
        a. [x] **Tiles stored padded, halos exchanged** (MPI's ghost cells; the grids page's TODO(water overlap)): today
           `Pad()` copies the whole tile and its neighbors' edges into a thread texture every pass. Keep each tile's
