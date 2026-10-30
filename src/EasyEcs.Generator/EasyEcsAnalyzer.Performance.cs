@@ -1408,13 +1408,14 @@ public static partial class EasyEcsAnalyzer
             && !BufferNamedElsewhere(core, buffered.Name, syntax)) return;
 
         var receiverType = call.Instance?.Syntax == access.Expression ? call.Instance.Type : null;
+        var component = (INamedTypeSymbol)method.TypeArguments[0];
         string replacement = receiver + "." + candidate + (property ? "" : args);
-        if (!Binds(model, syntax, replacement, out var bound, receiverType) || !Symbols.IsGenerated(bound!)) return;
+        if (!Binds(model, syntax, replacement, out var bound, receiverType) || !GeneratedFor(bound!, component, model.Compilation)) return;
         // The same access: Get<T>() is a 'ref' (a watched component's property is 'ref readonly'; its writer is WriteX()).
         if (method.Name == "Get" && bound is IPropertySymbol { RefKind: not RefKind.Ref })
         {
             replacement = receiver + ".Write" + candidate + "()";
-            if (!Binds(model, syntax, replacement, out bound, receiverType) || !Symbols.IsGenerated(bound!)) return;
+            if (!Binds(model, syntax, replacement, out bound, receiverType) || !GeneratedFor(bound!, component, model.Compilation)) return;
             candidate = "Write" + candidate + "()";
         }
 
@@ -1444,9 +1445,11 @@ public static partial class EasyEcsAnalyzer
         IOperation? value = null;
         if (Symbols.IsGenerated(method) && method.Name.StartsWith("Set") && method.Parameters.Length == 1)
         {
-            // The generated writer names its component: the struct of that name in scope where the if is.
+            // The generated writer names its component: the struct of that name in scope where the if is, whose
+            // generated class holds the writer (a same-named struct of another namespace or assembly does not).
             component = conditional.SemanticModel!.LookupNamespacesAndTypes(syntax.SpanStart, name: method.Name.Substring("Set".Length))
-                .OfType<INamedTypeSymbol>().FirstOrDefault(t => t.TypeKind == TypeKind.Struct && Symbols.Implements(t, Symbols.Component));
+                .OfType<INamedTypeSymbol>().FirstOrDefault(t => t.TypeKind == TypeKind.Struct && Symbols.Implements(t, Symbols.Component)
+                    && GeneratedFor(method, t, conditional.SemanticModel.Compilation));
             value = set.Arguments[0].Value;
         }
         else if (core.Is(method.ContainingType, core.Entity) && method is { Name: "Set", TypeArguments.Length: 1 }
@@ -1467,7 +1470,7 @@ public static partial class EasyEcsAnalyzer
         if (Receiver(read, component) is not { } readFrom || readFrom != receiver) return;
 
         string replacement = receiver + ".Set" + component.Name + "IfChanged(" + Unwrap(value).Syntax + ")";
-        if (!Binds(conditional.SemanticModel!, syntax, replacement, out var bound) || !Symbols.IsGenerated(bound!)) return;
+        if (!Binds(conditional.SemanticModel!, syntax, replacement, out var bound) || !GeneratedFor(bound!, component, conditional.SemanticModel!.Compilation)) return;
         context.ReportDiagnostic(Diagnostic.Create(GeneratedMember, syntax.GetLocation(), Fix(replacement + ";", "Use .Set" + component.Name + "IfChanged"),
             Shorten(syntax), replacement));
 
@@ -1489,6 +1492,32 @@ public static partial class EasyEcsAnalyzer
                 when SymbolEqualityComparer.Default.Equals(read.TypeArguments[0], component) => access.Expression.ToString(),
             _ => null,
         };
+    }
+
+    /// <summary>
+    /// Whether <paramref name="member"/> is one the generator wrote for <paramref name="type"/> (a component, singleton,
+    /// buffer or relation): it sits in the type's generated class (<c>{FlatName}EcsExtensions</c>, a buffer element's
+    /// <c>{FlatName}EcsBufferExtensions</c>), in the type's namespace, written by the type's assembly or this one. A
+    /// member that binds by name is not enough: a component of the same name in another namespace or assembly has a
+    /// generated class of the same name, and its member binds wherever that class is in scope (EECS033 suggested the
+    /// program's <c>entity.Spot</c> for a library's <c>Read&lt;Lib.Spot&gt;()</c>, and the fix read the wrong component).
+    /// </summary>
+    private static bool GeneratedFor(ISymbol member, INamedTypeSymbol type, Compilation compilation)
+    {
+        if (!Symbols.IsGenerated(member)) return false;
+        var element = Symbols.BufferElement(type) as INamedTypeSymbol;
+        var owner = (element ?? type).OriginalDefinition;
+        var generated = member.ContainingType;
+        while (generated?.ContainingType != null) generated = generated.ContainingType; // an extension block's class
+        if (generated == null || generated.Name != Symbols.FlatName(owner) + (element != null ? ComponentGenerator.Classes.Buffer : ComponentGenerator.Classes.Members)
+            || !SymbolEqualityComparer.Default.Equals(generated.ContainingAssembly, owner.ContainingAssembly)
+            && !SymbolEqualityComparer.Default.Equals(generated.ContainingAssembly, compilation.Assembly))
+            return false;
+        // The same namespace by name, level by level (each assembly has its own namespace symbols).
+        INamespaceSymbol? a = generated.ContainingNamespace, b = owner.ContainingNamespace;
+        for (; a is { IsGlobalNamespace: false } && b is { IsGlobalNamespace: false }; a = a.ContainingNamespace, b = b.ContainingNamespace)
+            if (a.Name != b.Name) return false;
+        return a is { IsGlobalNamespace: true } && b is { IsGlobalNamespace: true };
     }
 
     /// <summary>
