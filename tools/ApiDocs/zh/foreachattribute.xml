@@ -76,4 +76,24 @@
       （EECS094）；<see cref="F:EasyEcs.FusionMode.Off" />：方法单独遍历。默认 <see cref="F:EasyEcs.FusionMode.Auto" />。
     </summary>
   </member>
+
+  <member name="P:EasyEcs.ForEachAttribute.MaxRows" source="5c044e1e10f4">
+    <summary>
+      方法每次运行最多处理的行数：给一次处理所有行代价太高的工作一个预算（这个 tick 要加载或保存的区块、服务器每个 tick
+      处理的请求）。遍历开始时按 <c>Query</c> 访问的顺序收集前 N 个匹配的行，然后在遍历之外对每一行运行方法
+      （<see cref="M:EasyEcs.World.ForEachCollected``2(``1@,System.Int32,EasyEcs.QueryFilter@)" />），所以方法可以做任何变更：
+      可以调用 <c>LoadEntities</c>、<c>SaveEntities</c> 和遍历中不允许的其他调用。超出预算的行等下一次运行；配合
+      <see cref="T:EasyEcs.ConsumeAttribute">[Consume]</see>，每一行在方法运行之后销毁，下一次运行取后面的行。前面某一行的方法
+      销毁了的行，或者改得不再匹配的行，会跳过。方法拿到的组件是行里组件的副本，<c>ref</c> 的组件在方法运行之后写回
+      （写到实体移到的行，除非实体失去了这些组件）。逐个实体、在一个线程上运行：不能和
+      <see cref="P:EasyEcs.ForEachAttribute.Parallel" />、<see cref="P:EasyEcs.ForEachAttribute.Slices" />、组件 span、
+      <c>[Changed&lt;T&gt;]</c> / <c>[Removed&lt;T&gt;]</c>（超出预算的行会丢掉它们的变化）、<see cref="T:EasyEcs.Mut`1" />、
+      <see cref="T:EasyEcs.Maybe`1" />、视图、瓦片、<see cref="T:EasyEcs.Scratch`1" /> 或 <c>[Neighbor]</c> 一起用（EECS118）。
+      默认 0：所有行，一次遍历。
+      <code>
+            [ForEach(MaxRows = 8), Consume]
+            static void Load(in LoadRequest request, World world) =&gt; world.LoadEntities(Files.Read(request.Pos));   // 8 a tick
+            </code>
+    </summary>
+  </member>
 </doc>
