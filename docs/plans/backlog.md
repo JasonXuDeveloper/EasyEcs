@@ -135,7 +135,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        reason. Generator cost (the owner's condition): callee bodies read only in the implementation-output pipeline,
        once per callee per compilation (cache keyed by the method symbol), syntax-first rejection before any bind, no
        compilation copy per caller (Kernel.Views copies it today: measure first, IDE and build cases).
-4. [ ] **G1** (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
+4. [ ] **G1** (ready to merge: branch `feat-generator-cost`, gate green, A/B in the G1 report) (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
        implementation-only body facts; SystemUpdates without Collect; SetFusions reruns; Systems / SystemPlaces share
        one FAWMN; Kernel's GetSemanticModel calls. G6 (C# 14 extension lookup cost) research only.
 5. [x] **Generated code tuned for the machine** (merged 9161797, branch `feat-microarch`) (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
