@@ -1892,3 +1892,144 @@ and after, every analyzer and code fix test unchanged).
   > 异常（单元测试每次构建 391-451 个，几毫秒；跟踪器会夸大它们的耗时）；把 compilation-end 规则改成 symbol-end 动作
   > （EECS019、视图的 EECS025、EECS069、EECS080、EECS086、EECS091、EECS092、EECS116 都需要整个 compilation 里的所有使用）。
   > 按键时剩下的开销是 Roslyn 为新 compilation 构建源码成员，它落在第一个读取它们的检查上。
+
+## feat-later-memory (#164 huge pages; the Native AOT class-init check, x64 part; the slower kernel cases)
+
+Decision records for the docs pass (en + zh); number them at the docs pass (D-ids after the last merged one). Nothing
+user-visible in the API: `HugePages` is internal, `ComponentInfo.Create` / `Resize` gained a `sized` flag (both hidden
+helpers).
+
+- **Decision draft: large tables on 2 MiB pages (Linux)** (en):
+
+  > **Decision.** On Linux with transparent huge pages not set to `never`, the large pinned arrays of a table whose
+  > size was decided up front (a reservation, the initial entity capacity, a copy of a table such as a snapshot's)
+  > are put on 2 MiB pages: allocated uninitialized, their 2 MiB-aligned interior advised `MADV_HUGEPAGE` before
+  > anything touches it, each 2 MiB the process never touched dropped (`MADV_DONTNEED`, found with `mincore`) so its
+  > first touch faults one zeroed huge page, each 2 MiB the GC hands out again zeroed in place. The steps of a
+  > doubling and a trim stay plain pinned arrays. They stay arrays the GC frees, so a `ref` kept across a resize
+  > still reads live memory. Elsewhere (other systems, THP `never`, a libc without `madvise`) nothing changes.
+  >
+  > **Why.** A random lookup across a large world (a `Lookup<T>` chase, `TryGetEntity`) misses the TLB on nearly
+  > every read once its arrays pass the second-level TLB's reach: 1,536-2,048 entries reach 6-8 MiB of 4 KiB pages,
+  > 3-4 GiB of 2 MiB ones. 16M entity records alone are 256 MiB.
+  >
+  > **Numbers** (LookupChaseHugePagesBenchmark, default job, two rounds, 4 KiB / 2 MiB pages in one binary, 0 B):
+  > at 16M entities ChaseGathered 929 → 575 ms (1.62x, 1.67x), ChaseSerial 972 → 596 ms (1.63x, 1.58x), ChaseWorld
+  > 1.39 → 1.06 s (1.31x, 1.30x), ChaseRows 1.32 → 1.01 s (1.30x, 1.28x); at 1M the chases 1.12-1.40x; a walk in
+  > row order (Drift) 1.07-1.16x at 16M; a world created at 16M 1.02x / 0.99x and grown to 16M 0.98x / 1.05x, at 1M
+  > 1.00-1.08x.
+  >
+  > **Considered.** Native 2 MiB blocks (`NativeMemory.AlignedAlloc` + `madvise`): a `ref` kept across a resize would
+  > read freed memory unless the free were deferred, and the GC's own accounting would miss the memory. Advising the
+  > array after the GC zeroed it: the pages its zeroing touched stay small, a world created at 16M was 1.18-1.28x
+  > slower. Collapsing (`MADV_COLLAPSE`): 13-19 ms of kernel time per huge page, a world grown to 1M 1.1-1.4x slower,
+  > the chases gained no more. Dropping every 2 MiB, resident ones too: memory the GC hands out again is faulted back
+  > from the kernel, a world grown to 16M 1.2-1.5x slower. Huge pages for every doubling step: a table grown row by
+  > row discards them one after another, each paying the huge page's fault. Hugetlbfs: needs pages reserved by the
+  > administrator.
+
+  zh:
+
+  > **决定。** 在 Linux 上、透明大页没有设为 `never` 时，大小事先确定的表的大型固定数组（预留、初始实体容量、表的复制，例如
+  > 快照）放在 2 MiB 页上：先不初始化地分配，在任何访问之前把按 2 MiB 对齐的内部区域标记为 `MADV_HUGEPAGE`；进程从未访问过的
+  > 每个 2 MiB（用 `mincore` 判断）直接丢弃（`MADV_DONTNEED`），首次访问时缺页得到一张清零的大页；GC 重新分出的、已经驻留的
+  > 每个 2 MiB 原地清零。倍增扩容的中间数组和裁剪仍是普通固定数组。它们仍是 GC 释放的数组，所以跨扩容保留的 `ref` 读到的仍是
+  > 有效内存。其他环境（其他系统、THP 为 `never`、没有 `madvise` 的 libc）不变。
+  >
+  > **原因。** 大世界里的随机查找（`Lookup<T>` 追踪、`TryGetEntity`）在数组超出二级 TLB 覆盖范围后几乎每次读都 TLB 未命中：
+  > 1,536-2,048 个表项覆盖 6-8 MiB 的 4 KiB 页，或 3-4 GiB 的 2 MiB 页。仅 16M 个实体记录就有 256 MiB。
+  >
+  > **数字**（LookupChaseHugePagesBenchmark，默认作业，两轮，同一程序内 4 KiB / 2 MiB 页，0 B）：16M 实体时 ChaseGathered
+  > 929 → 575 ms（1.62x、1.67x），ChaseSerial 972 → 596 ms（1.63x、1.58x），ChaseWorld 1.39 → 1.06 s（1.31x、1.30x），
+  > ChaseRows 1.32 → 1.01 s（1.30x、1.28x）；1M 时各追踪 1.12-1.40x；按行顺序遍历（Drift）16M 时 1.07-1.16x；16M 时创建
+  > 世界 1.02x / 0.99x，扩容到 16M 0.98x / 1.05x，1M 时 1.00-1.08x。
+  >
+  > **考虑过的方案。** 原生 2 MiB 内存块（`NativeMemory.AlignedAlloc` + `madvise`）：除非推迟释放，跨扩容保留的 `ref` 会读到
+  > 已释放的内存，而且 GC 统计不到这部分内存。GC 清零之后再标记：清零时访问过的页仍是小页，16M 时创建世界慢 1.18-1.28x。
+  > 合并（`MADV_COLLAPSE`）：每张大页 13-19 ms 内核时间，扩容到 1M 的世界慢 1.1-1.4x，追踪没有多得收益。连驻留的部分也全部
+  > 丢弃：GC 重新分出的内存要从内核重新缺页，扩容到 16M 的世界慢 1.2-1.5x。倍增扩容的每一步都用大页：逐行增长的表会一个接
+  > 一个地丢弃它们，每个都付一次大页缺页的代价。hugetlbfs：需要管理员预留页。
+
+- **Decision draft: x64 permute tables and lane masks as vectors of literals** (en):
+
+  > **Decision.** The vector loops' x64 constants (the AVX2 `Load3` / `Store3` permutes, the 512-bit deinterleave
+  > tables, the 256- and 512-bit lane masks, the generator's AVX-512 permutes of wide components) are vectors of
+  > literals written in place, not `static readonly` fields built by code. The 128-bit forms (ARM64's NEON, x64
+  > without AVX) keep their static masks and TBL tables, initialized when the module loads.
+  >
+  > **Why.** Native AOT compiles every loop before any class is initialized, and its compiler preinitializes a static
+  > readonly vector of literals but not one built by code, so Move2's masked 512-bit loop called the static-base
+  > helper twice per vector and spilled a dozen zmm registers around the calls. Under the JIT the tables are
+  > initialized before Tier1 compiles the loop and both forms read an RWD constant.
+  >
+  > **Numbers** (KernelBenchmark Generated, default job, two rounds base / head, AVX-512, 0 B): Native AOT
+  > Move2Gaps 1.43x / 1.18x at 1,000 entities and 1.44x / 1.17x at 100,000, Move3Gaps 1.19x / 1.19x at 1,000,
+  > Seek 1.22x / 1.22x and 1.13x / 1.24x; Move2 0.98x at 1,000 and 0.97x at 100,000 over the means of 12 launches, the launches' ranges overlapping (22.5-28.0 against 23.8-27.5 us), within the spread; the JIT within the cases' spread (see the next draft).
+  >
+  > **Considered.** `InitializeTables` at module load (already there; it cannot help Native AOT, which compiled the
+  > loop earlier); the NEON tables as literals too (left until the owner's M4 measures them: qemu proves correctness,
+  > never speed).
+
+  zh:
+
+  > **决定。** 向量循环在 x64 上的常量（AVX2 的 `Load3` / `Store3` 置换、512 位解交错表、256 位和 512 位通道掩码、生成器为
+  > 宽组件写的 AVX-512 置换）都是就地写出的字面量向量，不再是由代码构造的 `static readonly` 字段。128 位形式（ARM64 的
+  > NEON、没有 AVX 的 x64）仍用静态掩码和 TBL 表，在模块加载时初始化。
+  >
+  > **原因。** Native AOT 在任何类初始化之前就编译所有循环，它的编译器能预初始化字面量构成的静态只读向量，却不能预初始化由
+  > 代码构造的向量，所以 Move2 的 512 位掩码循环每个向量调用两次静态基址辅助函数，并在调用前后溢出十几个 zmm 寄存器。JIT 下
+  > 这些表在 Tier1 编译循环之前已经初始化，两种写法读的都是 RWD 常量。
+  >
+  > **数字**（KernelBenchmark 的 Generated 用例，默认作业，两轮基线 / 新版，AVX-512，0 B）：Native AOT 下 Move2Gaps 在
+  > 1,000 实体时 1.43x / 1.18x，100,000 时 1.44x / 1.17x；Move3Gaps 1,000 时 1.19x / 1.19x；Seek 1.22x / 1.22x 和
+  > 1.13x / 1.24x；Move2 在 12 次启动的均值上 1,000 时 0.98x、100,000 时 0.97x，各次启动的范围重叠（22.5-28.0 对 23.8-27.5 us），在波动范围内；JIT 在各用例自身的波动范围内（见下一条）。
+  >
+  > **考虑过的方案。** 模块加载时的 `InitializeTables`（已经有了；Native AOT 更早就编译了循环，帮不上）；NEON 的表也改成
+  > 字面量（等所有者的 M4 测过再定：qemu 只证明正确，不证明速度）。
+
+- **Measuring note (performance page "How we measure", or a short record): 100k kernel worlds vary with their
+  physical pages.** KernelBenchmark at 100,000 entities (1.2-1.6 MB, most of a 2 MiB L2) varies 20-30 % between
+  processes of one binary and between worlds made again in one process with the same compiled code (Step medians
+  20.6-30.0 us, 1.45x apart; Move2 and Glide alike): L2 sets are physically indexed and a guest cannot see or choose
+  host-physical pages (guest-physical colour overload against time: r = -0.09). With six launches in interleaved
+  base / head rounds the "slower" cases of this branch were equal: JIT Step 100k 1.02x (a single 17.5 us base launch
+  had made the earlier 0.75x), Move2 100k 1.06x, Seek 100k 1.02x, at 1,000 0.99-1.05x; Tier1 listings and tiers
+  identical. Rule kept in `audit-perf`. zh: 100,000 实体的 KernelBenchmark 世界（1.2-1.6 MB，占 2 MiB L2 的大部分）在同一程序的
+  不同进程之间、以及同一进程内用同样的编译代码重建世界之间相差 20-30 %：L2 组按物理地址索引，虚拟机看不到也选不了宿主机的
+  物理页。比较这类用例要用 `--launchCount 6` 交替跑基线和新版。
+
+- **Wording notes.** Say "2 MiB pages" or "huge pages (Linux transparent huge pages)", never "large pages" (Windows'
+  term, not used). Say "advised", not "requested" or "enabled": the kernel may still back a range with 4 KiB pages
+  (fragmented memory, memory the GC reused). Numbers of first touch with huge pages on the reference VM are a lower
+  bound: it reports free 2 MiB blocks to the host (virtio-balloon free page reporting, order 9), so a huge page
+  faulted from a block freed seconds earlier touches at 0.3 GiB/s against 6.6 GiB/s for one reused at once and
+  2 GiB/s for 4 KiB pages (`audit-perf`). Do not promise a speed-up to walks in row order (the hardware prefetcher
+  hides the page walks there) nor to Windows / macOS (macOS arm64 has 16 KiB pages and no user superpages).
+- **Pages.** performance.mdx + zh ("What it costs" or the memory section): large worlds' random lookups on 2 MiB
+  pages on Linux, link the decision, the 16M numbers from bench.json once LookupChaseHugePagesBenchmark is synced
+  (add the class to `tools/bench.sh --site`). architecture.mdx + zh, the memory section: which arrays are advised
+  (reserved / copied, not doubling steps), arrays the GC frees. faq.mdx + zh: "Does EasyEcs use huge pages?" (Linux
+  THP `madvise` or `always`; nothing to configure; `never` turns it off). guide page on reservations (`Reserve` /
+  `InitialEntityCapacity`) + zh: one sentence that a reserved large world gets huge pages on Linux, a world grown row
+  by row does not. Changelog (Performance): "random lookups across large worlds 1.1-1.7x faster on Linux (2 MiB
+  pages)"; "Native AOT: vector loops over two- and three-float components up to 1.4x faster". Roadmap: #164 done.
+  api.mdx: nothing (internal; complexities unchanged).
+- **M4 run (owner): the vector-loop tables on ARM64 and the kernel cases of this branch.** On the M4:
+
+  ```bash
+  git worktree add ../ecs-base 99e7a2c
+  git worktree add ../ecs-head feat-later-memory
+  # in each worktree, JIT then Native AOT:
+  dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter \
+    '*KernelBenchmark.Move2Generated' '*KernelBenchmark.Move3Generated' '*KernelBenchmark.Move4Generated' \
+    '*KernelBenchmark.Move2GapsGenerated' '*KernelBenchmark.Move3GapsGenerated' '*KernelBenchmark.StepGenerated' \
+    '*KernelBenchmark.IntegrateGenerated' '*KernelBenchmark.GlideGenerated' '*KernelBenchmark.SeekGenerated'
+  dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --runtimes nativeaot10.0 --filter <same filters>
+  ```
+
+  For Native AOT, export `CustomAfterMicrosoftCommonTargets` naming a targets file with
+  `<PropertyGroup><IlcInstructionSet>native</IlcInstructionSet></PropertyGroup>` (BenchmarkDotNet 0.15 passes ILC an
+  instruction set it refuses and its generated project ignores `Directory.Build.targets`). Run base and head
+  alternately, twice; add `--launchCount 6` to the 100k cases if one differs (placement spread above). The NEON
+  forms did not change on this branch: the run checks nothing regressed and gives the baseline for moving
+  `Masks.Narrow` and the `__y` TBL tables to literals too.

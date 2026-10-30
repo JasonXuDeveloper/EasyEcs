@@ -507,8 +507,9 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       methods, `Maybe<T>` in parallel methods and with narrow lanes, masked words of narrow lanes and wide rows,
       `Atan2` / `Asin` / `Pow` lowerings; each ships only where it measures faster, `audit-vector-loops`). Not
       actionable here: Unity support waits for a Unity release on .NET 10; the toolchain item is a standing rule.
-- [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 NativeMemory 2 MiB columns (research
-      first); #157 the #138 recommendations; #159 remaining research.
+- [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 2 MiB columns done on `feat-later-memory` (pinned arrays
+      advised before first touch, reserved and copied ones only; 16M chases 1.28-1.67x, Create / Grow equal; docs-todos
+      "feat-later-memory"); #157 the #138 recommendations; #159 remaining research.
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
       the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
