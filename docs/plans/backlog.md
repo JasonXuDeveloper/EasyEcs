@@ -508,6 +508,16 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
       the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
+- [ ] **Owner's calls on `owner-review.md` (2026-10-30), each built, measured and kept only if it pays:**
+      (a) `CopyEntities<TTag>(target, ids, set)`: a measured prototype (ghost rows, a column copy per run of rows,
+      the originals kept) against the hand-written `CreateEntity` loop of `samples/MultiWorld/Border.cs`;
+      (b) EECS116's code fix limited to the step method (`ref Tile`, writes become `Write(row)`; the commit method and
+      the `TNext` buffer are left for the user, the compiler reports their stale writes);
+      (c) a public `c.Columns(...)` handing a proven column loop its base column, to close the Laplacian 32x32 gap
+      (48 against 33 instructions; Tier1 listing and TileRestart / ping-pong benchmarks before and after);
+      (d) an Info rule naming why a `TileCursor` load runs checked (the loop the generator cannot prove: the variable
+      written in the body, an unreadable bound; the reasons `TileLoad.Read` returns null for), as EECS055 does.
+      (c) and (d) edit the generator: after `feat-roslyn-guidance` merges.
 
 ## Finish
 
