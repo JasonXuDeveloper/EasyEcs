@@ -295,6 +295,15 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        drain. Analyzer rule and code fix for the hand-written form; proof: VoxelServer lines before / after, tests,
        0 B steady state. The form carries a per-tick budget (`voxel-rewrite.md` GA9: VoxelServer caps requests per
        tick, `Rules.MaxRequests`; the owner wants the cap kept).
+       **Built on `feat-deferred-consume`, not merged** (names await the owner's review): `[ForEach(MaxRows = N)]`
+       collects the first N rows (Query order) and runs the method on each outside the walk
+       (`World.ForEachCollected`), so it may load and save; `[Consume]` destroys per row. EECS118 (invalid MaxRows),
+       EECS119 (hand-written CollectIds + loop in OnUpdate, code fix), EECS041 names the budget; ids provisional.
+       VoxelServer: ChunkRead / ChunkGenerate / ChunkSave as methods, Systems/Chunks.cs 143 -> 103 lines, output
+       unchanged. TickBenchmark base / head (two rounds, ms, 0 B): 50: 57.4 / 53.9, 54.8 / 55.5; 500: 85.8 / 83.9,
+       85.3 / 86.5; 2000: 133.5 / 147.7, 133.5 / 116.8 (inside the noise). MaxRowsBenchmark generated / hand:
+       1.06-1.14x at budget 64, 1.18-1.30x at 256 (6-10 ns a row: the per-row destroy and lookup), 0 B. Docs to-dos
+       in docs-todos.md (feat-deferred-consume).
 10. [x] **Streaming stores in generated loops, gated** (merged 1b1aa12: Predict 0.86-0.94x, Mix 0.90-0.92x past the
        cache with the reader counted in, gate off inside; the owner's M4 run, 2026-10-29, one round, 0 B: Auto is the
        fastest of Auto / Off / On in all 8 cases, 0.80-0.87x of Off at 1M rows and 0.75-0.87x at 16M, so STNP stays gated
