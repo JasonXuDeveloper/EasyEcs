@@ -35,6 +35,36 @@ public static class Physics
     /// <summary>An extension method reading an internal type's field.</summary>
     public static float Cool(this float v, float by) => v - by * Tables.Gain;
 
+    /// <summary>A switch expression of relational patterns: the first arm that matches wins.</summary>
+    public static float Band(float v) => v switch
+    {
+        < -5 => -1,
+        > 5 => 1,
+        _ => v * s_scale,
+    };
+
+    /// <summary>A switch statement whose sections return, over an int.</summary>
+    public static float Damp(float v, int mode)
+    {
+        switch (mode)
+        {
+            case 0:
+                return v;
+            case 1:
+                return v * s_scale;
+            default:
+                return 0;
+        }
+    }
+
+    /// <summary>A switch expression over an enum's members (constants other assemblies read by value).</summary>
+    public static float Draft(Phase phase) => phase switch
+    {
+        Phase.Cold => 0,
+        Phase.Warm => 0.25f,
+        _ => Tables.Gain,
+    };
+
     /// <summary>A loop: recorded with its reason, the caller stays scalar.</summary>
     public static float Steps(float n)
     {
@@ -43,6 +73,12 @@ public static class Physics
         return s;
     }
 }
+
+/// <summary>The state of a <see cref="Kiln"/>.</summary>
+public enum Phase { Cold, Warm, Hot }
+
+/// <summary>A component with an enum field, read as its integer's lanes.</summary>
+public record struct Kiln(Phase Phase, float Heat) : IComponent;
 
 internal static class Tables
 {

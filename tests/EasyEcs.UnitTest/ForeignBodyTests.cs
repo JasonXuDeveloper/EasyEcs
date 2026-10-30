@@ -6,7 +6,7 @@ namespace EasyEcs.UnitTest;
 
 /// <summary>
 /// Methods calling constructors and helpers of another assembly (EasyEcs.Aot.Library, compiled against its reference
-/// assembly), each required to get a vector loop: what that assembly's generator recorded is inlined (Recorded.cs).
+/// assembly; helpers with switch expressions and a switch statement among them), each required to get a vector loop: what that assembly's generator recorded is inlined (Recorded.cs).
 /// <see cref="ForeignRulesByRow"/> runs the same bodies one row at a time; the two worlds must end alike, bit for bit.
 /// </summary>
 [EcsSystem]
@@ -24,6 +24,15 @@ public ref struct ForeignRules
 
     [ForEach(SimdMode = SimdMode.Require)]
     static void Chill(ref Ember s) => s.Y = s.Y.Cool(0.5f);
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    static void Band(ref Ember s) => s.X = Physics.Band(s.X);
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    static void Damp(ref Ember s) => s.Y = Physics.Damp(s.Y, s.X > 0 ? 1 : s.X < 0 ? 0 : 2);
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    static void Fire(ref Kiln k) => k.Heat += Physics.Draft(k.Phase);
 }
 
 /// <summary><see cref="ForeignRules"/> one row at a time.</summary>
@@ -42,6 +51,15 @@ public ref struct ForeignRulesByRow
 
     [ForEach(SimdMode = SimdMode.Off)]
     static void Chill(ref Ember s) => s.Y = s.Y.Cool(0.5f);
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    static void Band(ref Ember s) => s.X = Physics.Band(s.X);
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    static void Damp(ref Ember s) => s.Y = Physics.Damp(s.Y, s.X > 0 ? 1 : s.X < 0 ? 0 : 2);
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    static void Fire(ref Kiln k) => k.Heat += Physics.Draft(k.Phase);
 }
 
 public class ForeignBodyTests
@@ -50,9 +68,10 @@ public class ForeignBodyTests
     {
         var world = new World();
         var random = new Random(seed);
-        world.Reserve<Ember, Furnace>(count);
+        world.Reserve<Ember, Furnace, Kiln>(count);
         for (int i = 0; i < count; i++)
-            entities[i] = world.CreateEntity(new Ember(random.Next(-50, 50) * 0.25f, random.Next(-50, 50) * 0.75f), new Furnace(random.Next(-10, 10) * 0.125f));
+            entities[i] = world.CreateEntity(new Ember(random.Next(-50, 50) * 0.25f, random.Next(-50, 50) * 0.75f), new Furnace(random.Next(-10, 10) * 0.125f),
+                new Kiln((Phase)random.Next(0, 3), random.Next(-10, 10) * 0.5f));
         world.AddSystem<TSystem>();
         return world;
     }
@@ -88,6 +107,7 @@ public class ForeignBodyTests
                 Assert.That(BitConverter.SingleToInt32Bits(p.X), Is.EqualTo(BitConverter.SingleToInt32Bits(q.X)), at);
                 Assert.That(BitConverter.SingleToInt32Bits(p.Y), Is.EqualTo(BitConverter.SingleToInt32Bits(q.Y)), at);
                 Assert.That(BitConverter.SingleToInt32Bits(a[i].Read<Furnace>().Degrees), Is.EqualTo(BitConverter.SingleToInt32Bits(b[i].Read<Furnace>().Degrees)), at);
+                Assert.That(BitConverter.SingleToInt32Bits(a[i].Read<Kiln>().Heat), Is.EqualTo(BitConverter.SingleToInt32Bits(b[i].Read<Kiln>().Heat)), at);
             }
         }
     }

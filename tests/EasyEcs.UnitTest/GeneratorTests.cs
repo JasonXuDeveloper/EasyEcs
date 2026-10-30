@@ -1628,7 +1628,12 @@ public class GeneratorTests
             public static float Cool(this float v, float by) => v - by * Tables.Gain;
             public static float Steps(float n) { float s = 0; for (int i = 0; i < n; i++) s += i; return s; }
             public static float Noise(float v) { Hidden h = default; return v + h.Bias; }
+            public static float Band(float v) => v switch { < -5 => -1, > 5 => 1, _ => v * s_scale };
+            public static float Damp(float v, int mode) { switch (mode) { case 0: return v; case 1: return v * s_scale; default: return 0; } }
+            public static float Draft(Phase phase) => phase switch { Phase.Cold => 0, Phase.Warm => 0.25f, _ => Tables.Gain };
         }
+        public enum Phase { Cold, Warm, Hot }
+        public record struct Kiln(Phase Phase, float Heat) : IComponent;
         internal static class Tables { public static readonly float Gain = 2f; }
         internal struct Hidden { public float Bias; }
         public struct Warmth : IComponent { public float Value; public Warmth(float value) => Value = value * 2; }
@@ -1684,6 +1689,33 @@ public class GeneratorTests
         Assert.That(records, Does.Contain("\"M:Lib.Heat.Warm(System.Single)\"").And.Contain("ref global::Lib.Heat @this").And.Contain("field|Lib.Heat|_degrees"), records);
         Assert.That(records, Does.Contain("\"M:Lib.Physics.Noise(System.Single)\", \"\", Reason = \"it names Hidden, which other assemblies cannot name\""), records);
         Assert.That(records, Does.Not.Contain("Lib.Tables.Gain"), records); // internal: a placeholder, never its name
+        // Switches: an expression of relational patterns, a statement whose sections return, an enum's members by value.
+        foreach (var id in new[] { "M:Lib.Physics.Band(System.Single)", "M:Lib.Physics.Damp(System.Single,System.Int32)", "M:Lib.Physics.Draft(Lib.Phase)" })
+            Assert.That(records, Does.Contain($"\"{id}\"").And.Not.Contain($"\"{id}\", \"\", Reason"), records);
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public async Task HelpersOfAnotherAssemblyWithSwitchesAreInlinedIntoVectorLoops(bool reference)
+    {
+        // The recorded bodies hold a switch expression (relational patterns; an enum's members) and a switch statement
+        // whose sections return: the inliner lowers them as it lowers its own helpers', and every method gets its loop.
+        const string built = """
+            using Lib;
+            [EcsSystem] public ref struct Bands
+            {
+                [ForEach] static void A(ref Spot s) => s.X = Physics.Band(s.X);
+                [ForEach] static void B(ref Spot s) => s.Y = Physics.Damp(s.Y, s.X > 0 ? 1 : 0);
+                [ForEach] static void C(ref Kiln k) => k.Heat += Physics.Draft(k.Phase);
+            }
+            """;
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(built).AddReferences(ForeignLibrary(reference: reference, source: ForeignHelpers)), out var output, out _);
+        string code = output.SyntaxTrees.Single(IsCode).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, code);
+        var reasons = (await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync()).Where(d => d.Id is "EECS055" or "EECS056").Select(d => d.GetMessage());
+        Assert.That(reasons, Is.Empty, code);
+        const string loop = "for (nint last = rows - global::System.Numerics.Vector<";
+        Assert.That((code.Length - code.Replace(loop, "").Length) / loop.Length, Is.GreaterThanOrEqualTo(3), code); // a loop per method
     }
 
     [Test]
