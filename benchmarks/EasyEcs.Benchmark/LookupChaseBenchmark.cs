@@ -210,3 +210,76 @@ public class LookupChaseLoadAheadBenchmark
     [Benchmark]
     public int LoadAhead() => Chase.LoadAhead(_world, Distance);
 }
+
+/// <summary>
+/// #164: the chase, a plain pass and the allocations of a world with the large columns and entity records on 4 KiB
+/// pages (HugePages.Enabled forced off) against 2 MiB pages (their pinned arrays advised and collapsed onto Linux's
+/// transparent huge pages, the default where THP is on). Setup prints the process's AnonHugePages, so a run shows the
+/// pages were huge.
+/// </summary>
+[MemoryDiagnoser]
+public class LookupChaseHugePagesBenchmark
+{
+    [Params(1_000_000, 16_000_000)] public int Entities;
+
+    [Params(false, true)] public bool HugePages;
+
+    private World _world;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        Isa.Print();
+        typeof(World).Assembly.GetType("EasyEcs.HugePages")!
+            .GetField("Enabled", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.SetValue(null, HugePages);
+        _world = Chase.Create(Entities);
+        foreach (var line in System.IO.File.ReadAllLines("/proc/self/smaps_rollup"))
+            if (line.StartsWith("AnonHugePages", StringComparison.Ordinal)) Console.WriteLine($"// {line}");
+        for (int i = 0; i < 3; i++) Chase.Hunt(_world);
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark(Baseline = true)]
+    public void ChaseWorld() => LookupChaseBenchmark.Hunting.ByWorld(_world);
+
+    /// <summary>The generated job (its prefetches as the gate decides).</summary>
+    [Benchmark]
+    public void ChaseSerial() => Chase.Hunt(_world);
+
+    /// <summary>Row by row, no prefetch: the TLB's cost bare.</summary>
+    [Benchmark]
+    public void ChaseRows() => Chase.Rows(_world, 0);
+
+    [Benchmark]
+    public void ChaseGathered() => Chase.HuntGathered(_world);
+
+    /// <summary>A plain pass in row order over two columns: what huge pages do to a walk that never chases.</summary>
+    [Benchmark]
+    public void Drift() => Drifting.Drift(_world);
+
+    /// <summary>A world of this size made and disposed: what advising and collapsing the pages costs its allocations.</summary>
+    [Benchmark]
+    public void Create() => Chase.Create(Entities).Dispose();
+
+    /// <summary>
+    /// A world grown to this size without a reservation, 4,096 entities a call: every doubling of a column past a huge
+    /// page allocates, advises and collapses a new array.
+    /// </summary>
+    [Benchmark]
+    public void Grow()
+    {
+        using var world = new World();
+        var batch = new Entity[4096];
+        for (int made = 0; made < Entities; made += batch.Length)
+            world.CreateEntities(batch, new Chase.Position(1, 2), new Chase.Prey(), new Chase.Heading());
+    }
+
+    public static class Drifting
+    {
+        [ForEach]
+        public static void Drift(ref Chase.Position position, in Chase.Heading heading) =>
+            position = new Chase.Position(position.X + heading.X * 0.01f, position.Y + heading.Y * 0.01f);
+    }
+}
