@@ -61,6 +61,12 @@ CI runs the unit tests on ARM64 (b1dbdb0).
 
 ## Next, in this order
 
+- [ ] **Rename leftovers** (from feat-renames, internal names, no approval needed): the benchmark methods measuring
+  .NET's `Parallel.For` (`ParallelForEachBenchmark.ParallelFor*`, `SumParallelFor*`, `MassParallelFor*`) take the
+  `DotNet` prefix like `ParallelForBenchmark`'s baselines; `ParallelForEachBenchmark` reads close to
+  `ParallelForBenchmark` (proposal: `ParallelPassBenchmark`); `EmitBenchmark.EmitParallelThenRecords` ->
+  `EmitParallelThenDrain`; the generated `{Owner}EntityMethod` class -> `{Owner}EntityMethods`. Site keys in
+  `docs/src/data/bench.json` move with them.
 - [ ] **EECS033 across assemblies** (found by 8g): it suggested `entity.Spot` for a library component while the
   program declared its own `Spot`; it matches a component by name across assemblies, and the fix compiled against
   the wrong type. Match by symbol; a test with two same-named components in two assemblies.

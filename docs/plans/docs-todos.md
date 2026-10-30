@@ -1561,3 +1561,9 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
   check per loop; say which loops qualify (an int from a constant, a constant or the shape's extent as the bound, a
   positive step, x written nowhere else, no lambda or local function around the load) and that other loads stay
   checked; the decision record (draft in the agent's report) next to D-tiles.
+
+## feat-renames
+
+- README line about `ChunkRows` says the old name (now `ChunkSize`).
+- decisions index table: no D136 row.
+- The record pass's docs (guide/emit, threading; listed under feat-generator-gaps) are still open, now as `[Drain]`.
