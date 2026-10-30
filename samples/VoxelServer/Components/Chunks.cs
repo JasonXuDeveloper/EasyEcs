@@ -36,8 +36,8 @@ public partial record struct Chunk([UniqueKey] ChunkPos Pos) : IComponent, IDire
 }
 
 // A chunk a player needs that is not loaded: AoiViewSystem records it as an entity, one per chunk (the unique index), and
-// ChunkReadSystem reads it from the region files or ChunkGenerateSystem generates it, after the pass (a pass may not
-// load or create entities, EECS041).
+// ChunkReadSystem reads it from the region files or ChunkGenerateSystem generates it, a budget a tick, outside the walk
+// (a walk may not load entities, EECS041).
 public partial record struct LoadRequest([UniqueKey] ChunkPos Pos) : IComponent;
 
 // A tag on a LoadRequest whose chunk the region files have: ChunkReadSystem reads those, ChunkGenerateSystem generates
@@ -50,7 +50,7 @@ public struct Saved : IComponent;
 public struct Fresh : IComponent;
 
 // A tag on a chunk nobody saw for a while: ChunkSaveSystem writes it and what is in it to the region files and
-// destroys them, after the pass.
+// destroys them, outside the walk.
 public struct Unloading : IComponent;
 
 // The players that have the chunk in view, and since when none has: who is sent what happens in it, and whether it can
