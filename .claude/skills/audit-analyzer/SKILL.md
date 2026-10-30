@@ -51,8 +51,12 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
   - `EnableConcurrentExecution`, `ConfigureGeneratedCodeAnalysis(None)`; symbols resolved once per compilation
     (`RegisterCompilationStartAction`); `Symbols.Named` / `SymbolEqualityComparer.Default`, never display strings.
   - **One `DiagnosticAnalyzer` per area file**: Roslyn skips an analyzer only when every diagnostic it supports is
-    suppressed, so one class for every rule makes a user's `NoWarn` save nothing (the unit tests' `NoWarn` EECS033
-    still paid 40 % of the analyzer's time). Each area's `SupportedDiagnostics` lists every descriptor its actions
+    suppressed, so one class for every rule makes a user's `NoWarn` save nothing. A costly rule projects often turn
+    off gets an analyzer of its own, so that turning it off removes its actions: EECS033 (`MemberAnalyzer`,
+    EasyEcsAnalyzer.Members.cs) runs on every invocation and property reference, and while it sat in
+    `PerformanceAnalyzer` it cost the unit tests, which suppress it, half the analyzer's time (ReportAnalyzer's
+    EasyEcs total 20 s, 10 s after the split; `ASuppressedGeneratedMemberRuleCostsNothing` checks that it registers
+    no action when suppressed). Each area's `SupportedDiagnostics` lists every descriptor its actions
     report, shared ones included (otherwise the report surfaces as AD0001); `EveryRuleBelongsToAnAreaAnalyzer` checks
     that each descriptor is in some area. `EasyEcsAnalyzer.All` is a property, not a field: static initializers of
     partial files run in an order the compiler picks.
@@ -69,8 +73,18 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
     with its descriptor tagged `CompilationEnd` (RS1037) and its own descriptor when other cases of the same id
     report live.
   - No LINQ, closures over loop state or per-node lists in callbacks; pass the cancellation token on.
+  - **Messages and display strings only when reporting**: `ToDisplayString`, `string.Join` over types and other
+    message text are built after the last check that can return, not eagerly for a path that mostly reports nothing.
   - Find the cost per action, not per analyzer: ReportAnalyzer sums thread time under concurrent execution, so time
-    each registered action alone (phase 1's harness method: `docs/plans/backlog.md`).
+    each registered action alone. The method: a console program reads the unit tests' `csc` command line (from a
+    `-v d` build log), builds the compilation with the generators' output, and runs each area analyzer on its own
+    without concurrent execution through `CompilationWithAnalyzers`, its `Initialize` handed a wrapping
+    `AnalysisContext` / `CompilationStartAnalysisContext` that times every registered delegate (count and total per
+    action, two rounds: the first pays JIT and binding). The binding of a body lands on the first action that asks
+    for its semantic model, so an action's share moves when another area binds first: compare totals, and compare
+    the diagnostics both versions report (dumped one per line) to prove nothing changed. `dotnet-trace`
+    (`dotnet-sampled-thread-time`, speedscope output) of the same program shows which callee costs; its exception
+    handling time is inflated by the tracer, so count first-chance exceptions before blaming them.
 
 ## Look for
 

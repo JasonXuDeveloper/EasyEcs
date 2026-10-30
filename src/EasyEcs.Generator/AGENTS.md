@@ -74,7 +74,8 @@ SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(valu
                              -> an interceptor per call ([InterceptsLocation], one file per source file in the namespace
                              EasyEcs.Generated) running the job a [ForEach] method with the lambda's parameters and body
                              gets (body copied with names qualified and constants inlined; the static delegate per
-                             row where it cannot be: EECS096)
+                             row where it cannot be: EECS096); its calls and the tile loads are bound after their syntax
+                             provider (SystemGenerator.BoundLater), so an IDE that skips their output never binds them
 SystemGenerator.TileLoads.cs tile loads checked once per loop: c.Load128 / Load256 / LoadVector(x + k, dy, dz) in a
                              proven column loop -> an interceptor per loop and offset (one file per source file in
                              EasyEcs.Generated, implementation output): Covers, the loop's first and last column against
