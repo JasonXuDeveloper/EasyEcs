@@ -84,5 +84,7 @@ A name is the first doc a reader sees. This audit covers every name, not only th
   migration entry, alias or code fix: the coming version's changelog and the pages just use the new name, and the
   decision record says what it was (D141). A released one also gets a code fix from the compiler's error on the old
   form (`RenamedAttributes`, `RenamedArguments` in `EasyEcsCodeFixes.Declarations.cs`).
+- **Find the declaration before renaming**: a plan's note on where a member lives can be wrong (the `ParallelFor*`
+  baselines were `ParallelRunnerBenchmark`'s); grep for the member itself.
 - **Stale names**: `grep -rn "<old>" docs/content AGENTS.md README.md samples templates demo` must show only the
   history pages (changelog, migration, decisions).

@@ -105,7 +105,9 @@ done. Each round checks coverage per rule, not in total:
 - **Edge cases per rule**, each a test where it applies: generic components and systems; `ref readonly`, `in`, `ref`,
   `Mut<T>` and `Maybe<T>` / `ReadOnlyMaybe<T>` parameters; lambdas and local functions; partial and nested types;
   generated members against generic calls (`entity.Health` vs `Get<Health>()`); code in another assembly or
-  `[GeneratedCode]`; loops with `break` / `return` / `continue`; conditional and ternary paths; the code right after a
+  `[GeneratedCode]`; the same component name in another namespace or assembly (a rule that suggests a generated
+  member checks it sits in the type's own generated class, `GeneratedFor`: a member that merely binds may be the
+  innermost scope's namesake); loops with `break` / `return` / `continue`; conditional and ternary paths; the code right after a
   structural change; explicit and `var` types; `#if` / preprocessor; an empty body; attributes on the wrong target;
   the rule's threshold just below and just above (sizes, counts, cadence).
 - **Pairs**: every pair of rules that can fire on one snippet is pinned in `GeneratorTests.OneMistakeIsReportedOnce`.
