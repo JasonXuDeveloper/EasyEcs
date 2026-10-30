@@ -1567,3 +1567,27 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
 - README line about `ChunkRows` says the old name (now `ChunkSize`).
 - decisions index table: no D136 row.
 - The record pass's docs (guide/emit, threading; listed under feat-generator-gaps) are still open, now as `[Drain]`.
+
+## feat-tiles-rest (items 11, 12a, 12b leftovers: tile pools at load, EECS117's fix)
+
+- guide/dynamic-buffers.mdx + zh, "#pool": the cells of a tile need no `MaxPooledLength` line: for each
+  `Tile<TCell, TTile>` a `[ForEach]` method takes (by value or by ref, closed types), the generator raises
+  `DynamicBuffer<TCell>.MaxPooledLength` to the tile's cells when the assembly loads (never lowers it; a larger
+  shape of the same cell wins), so `FillPool` at start-up fills lists of a whole tile. The example at line ~317
+  (`DynamicBuffer<Block>.MaxPooledLength = ChunkBlocks`) and the tables at ~459 / ~503 say "unless the buffer is a
+  tile's cells". A buffer only read as another buffer (`NextFluid`, a side buffer like `Trail`) still needs it.
+- guide/grids.mdx + zh: "Costs" / the pool line: the pool of a tile's cells is sized from its shape at load (GA3);
+  remove any `MaxPooledLength` line from tile examples. Line ~504: remove the TODO(water overlap) comment and say
+  in "What it costs" why there is no interior / ring overlap (below).
+- guide/analyzer.mdx + zh, EECS117: a code fix adds `[GaussSeidel]` after `[ForEach]`, offered when the grid's key
+  has integer fields to color the tiles by (a key with a string gets no fix, it would be EECS115).
+- decisions.mdx + zh: the two drafts in the feat-tiles-rest report (tile pools at load; no interior / ring overlap).
+- decisions.mdx + zh (prose, not fences): lines ~1965 (`returns a PaddedTile`) and ~2470 (`tile.Load()` →
+  `tile.Pad()`) describe the API before the rename: say `ExchangeHalo()` fills the thread's texture and the tile
+  reads it (`Rows`, `At`, the indexer); add the later rename `Pad()` → `ExchangeHalo()`, `PaddedTile` folded into
+  `Tile` (both unreleased: no migration entry, v4.7.0 has no tile API).
+- migration.mdx + zh, "#v4-8-new-types": drop `PaddedTile<TCell, TTile>` from the list of new types (it no longer
+  exists); add nothing for `TileCells` (EditorBrowsable(Never), generated code only).
+- api.mdx + zh: `TileCells.Pool` is generated-code API (hidden): no complexity row, like `TileNeighbors.Of`.
+- samples/voxel-server page + README: the options region lost the Block and Fluid `MaxPooledLength` lines (the page
+  includes the file; check the walkthrough's sentence about the pools).

@@ -31,7 +31,7 @@ names the skill:
 
 ## Running (3 agents, worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-Nothing running.
+`feat-tiles-rest` (items 11, 12a, 12b leftovers): finished, waiting for the merge (docs-todos "feat-tiles-rest").
 
 Merged since the last update: tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
@@ -303,7 +303,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        column's bytes are past `CacheSizes.LastLevel`. Measured in a real world with the next pass reading that column
        counted in; ships when faster in both rounds and never slower (StreamingStoreBenchmark: 1.47x past the cache,
        a tie inside).
-11. [ ] **Ping-pong steps instead of a commit copy** (owner, 2026-10-27: MPI's u / v buffers swapped after a sweep;
+11. [x] **Ping-pong steps instead of a commit copy** (owner, 2026-10-27: MPI's u / v buffers swapped after a sweep;
        part of #157's "ping-pong buffer"). Today a tile shader writes `DynamicBuffer<NextX>` and a commit system copies
        it into `DynamicBuffer<X>` (VoxelServer `WaterCommitSystem`, the grids page's `CommitHeatSystem`): one full copy
        of every stepped tile per tick. Swap the two buffers' stores instead (O(1) per tile, under the gate; X marked
@@ -330,9 +330,17 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        Water Wake); GA3 `MaxPooledLength` inferred for those buffers; GA12 tile sleep and wake owned by the tile pass
        (from the step's edges and `Changed<cell buffer>`) instead of `foreach (id in tile.Facing(e))
        world.GetEntity(id).SetX()`, written four times in the sample, for Jacobi as `[GaussSeidel]` already does.
+    Done (feat-tiles-rest): ping-pong with zero rows, `[GaussSeidel]`, GA12 sleep / wake and GA10 (the pass sizes the
+       buffers) were already in; this branch added GA3 (c5ffee7): for each `Tile<TCell, TTile>` a method takes, by value
+       or by ref, closed types, the generated file's module initializer raises `DynamicBuffer<TCell>.MaxPooledLength`
+       to the tile's cells (never lowers it), so `FillPool` at start-up fills whole tiles and the pass no longer checks
+       the size; VoxelServer drops the Block / Fluid `MaxPooledLength` lines. EECS117 gets a code fix to
+       `[ForEach, GaussSeidel]` when the key has integer fields to color by. TileStencil / TileActive / TileWoken, two
+       interleaved rounds against 2669d2d: every case within its control's spread (Blur9_Tile, AlwaysOn, Hand), 0 B.
+       Not built: EECS116's fix (owner-review verdict stands).
 12. [ ] **Fewer memory copies** (owner, 2026-10-27: "看看还有什么类似的能做的减少内存拷贝的做法"; a-e approved: "这些都可以做"). Each one measured
        (two rounds, 0 B, nothing slower) and done by the generator or the core where users would otherwise copy:
-       a. **Tiles stored padded, halos exchanged** (MPI's ghost cells; the grids page's TODO(water overlap)): today
+       a. [x] **Tiles stored padded, halos exchanged** (MPI's ghost cells; the grids page's TODO(water overlap)): today
           `Pad()` copies the whole tile and its neighbors' edges into a thread texture every pass. Keep each tile's
           cells padded in its own buffer (the halo stored beside them), so a step reads its buffer in place and a
           pass copies only the neighbors' edges into the halo, only the edges that changed (`ChangedEdges` already
@@ -340,9 +348,13 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
           step and its padded buffer ping-pong. Cost to weigh: the halo's memory (27 % of a 16 x 16 tile at r = 1).
           Renames with it (owner, 2026-10-27): `Pad()` becomes `ExchangeHalo()` (MPI's halo exchange), and
           `PaddedTile` folds into the tile itself.
-       b. **Changed edges found while stepping**: `ChangedEdges` reads the cells and the step again after the step
+          Settled (feat-tiles-rest): `ExchangeHalo()` and the fold are in (unreleased, no migration: v4.7.0 has no
+          tile API). The interior / ring overlap is not built: in shared memory there is no latency to hide (one
+          thread: exchange 261 us against 253 us for the padded read), and it needs a cursor with two strides.
+       b. [x] **Changed edges found while stepping**: `ChangedEdges` reads the cells and the step again after the step
           (O(cells), both buffers). The generated step compares each row it writes with the row it read (one vector
           compare per row it already holds in registers) and returns the faces, so no second pass.
+          Settled: the step compares while the rows are in L1 (already in before this branch); nothing left.
        c. [x] **Re-sorts swap columns instead of copying back**: `Archetype.Permute` writes each column into a rented
           scratch and copies it back (and the slots, the presence bits). Write into a spare pinned column and swap it
           in; the old column becomes the spare (one spare per column size per world, kept for the next sort).
