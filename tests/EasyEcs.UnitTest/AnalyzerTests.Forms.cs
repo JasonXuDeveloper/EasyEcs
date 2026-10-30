@@ -4,7 +4,7 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
-// EasyEcsAnalyzer.Forms.cs: [ForEntity], [UpdateInterval] and [Consume] where they cannot apply (EECS081, EECS083,
+// EasyEcsAnalyzer.Forms.cs: [EntityMethod], [UpdateInterval] and [Consume] where they cannot apply (EECS081, EECS083,
 // EECS085) at their edges; the hand-written forms they replace (EECS080, EECS084) are FormTests'.
 public partial class AnalyzerTests
 {
@@ -17,7 +17,7 @@ public partial class AnalyzerTests
     [TestCase("[UpdateInterval(4, Phase = 3)] [EcsSystem] public ref struct S<X> { }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach, Consume] static void A(ref P p, in Q q) => p.V += q.V; }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach, Consume, With<T>] static void A(Entity e) { } }")]
-    [TestCase("public static class R { [ForEntity] static void A(Entity e, ref P p, in Q q, Maybe<T> t, int n) => p.V = q.V + n; }")]
+    [TestCase("public static class R { [EntityMethod] static void A(Entity e, ref P p, in Q q, Maybe<T> t, int n) => p.V = q.V + n; }")]
     public Task FormRulesLeaveAlone(string source) => AssertClean(GeneratorTests.Components, source);
 }
 

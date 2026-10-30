@@ -62,7 +62,7 @@ public class HotColdTests
     [TestCase(Body, "[EcsSystem] public ref struct M { [ForEach(Slices = 4)] static void Move(ref Body b) => b.X += b.VX; }")] // a slice per update
     [TestCase(Body, "[EcsSystem] public ref struct M { [ForEach] static void Move(ref Body b) { b.X += b.VX; Log(in b); } static void Log(in Body b) { } }")] // used whole
     [TestCase(Body, "[EcsSystem] public ref struct M { [ForEach] static void Move(ref Body b) { ref var r = ref b; r.X += r.VX; } }")] // a ref local: whole
-    [TestCase(Body, "public static class M { [ForEntity] public static void Move(ref Body b) => b.X += b.VX; }")] // one entity: no column walked
+    [TestCase(Body, "public static class M { [EntityMethod] public static void Move(ref Body b) => b.X += b.VX; }")] // one entity: no column walked
     [TestCase("public struct Hot : IComponent { public float X, VX; public string Name; public int Born; public long Kind; public float Y; }", // 24 of 40 bytes hot
         "[EcsSystem] public ref struct M { [ForEach] static void Move(ref Hot h) { h.X += h.VX; h.Y = h.X; h.Born++; h.Kind = h.Born; } }")] // cold under half
     [TestCase("public struct Owned : IComponent, IIndexed<EntityId> { public EntityId Owner; public float X, VX; public string Name; public long Born; EntityId IIndexed<EntityId>.Key => Owner; }",

@@ -11,10 +11,10 @@ using static EasyEcs.UnitTest.GeneratorTests;
 namespace EasyEcs.UnitTest;
 
 // EasyEcsAnalyzer.Usage.cs: calls and declarations that compile but do not do what they say (EECS037-038, EECS040-045,
-// EECS047-051), in lambdas, local functions, generated members and [ForEntity] methods.
+// EECS047-051), in lambdas, local functions, generated members and [EntityMethod] methods.
 public partial class AnalyzerTests
 {
-    [TestCase("public struct Named : IComponent, ITracked { public string Name; } public static class R { [ForEntity] static void A(Mut<Named> n, in P p) { if (p.V > 0) n.SetIfChanged(default); } }", "EECS040")]
+    [TestCase("public struct Named : IComponent, ITracked { public string Name; } public static class R { [EntityMethod] static void A(Mut<Named> n, in P p) { if (p.V > 0) n.SetIfChanged(default); } }", "EECS040")]
     [TestCase("public static class U { public static System.Action F(World w) => () => { foreach (var item in w.Query<P>()) w.TrimExcess(); }; }", "EECS041")]   // in a lambda
     [TestCase("public static class U { public static void F(World w) { foreach (var item in w.Read<P>()) w.Restore(default!); } }", "EECS041")]
     [TestCase("public static class U { public static void F(World w) { void Walk() { foreach (var e in w.OwnedIndex.Find(default)) e.SetOwned(default); } Walk(); } }", "EECS042")] // a local function
@@ -22,7 +22,7 @@ public partial class AnalyzerTests
     [TestCase("public static class U { public static void F(Entity e) => e.Set(new Retired()); }", "EECS045")]
     [TestCase("public static class U { public static void F(Entity e) { void G() { ref var p = ref e.Get<P>(); e.Set(new Q()); p.V = 1; } G(); } }", "EECS047")]
     [TestCase("public static class U { public static void F(Entity e) { ref var p = ref e.Get<P>(); e.Destroy(); p.V = 1; } }", "EECS047")]
-    [TestCase("public static class R { [ForEntity] static void A(ref P p, World w) { if (p.V < 0) w.Update(); } }", "EECS051")]
+    [TestCase("public static class R { [EntityMethod] static void A(ref P p, World w) { if (p.V < 0) w.Update(); } }", "EECS051")]
     [TestCase("public static class R { [ForEach, With<Q>, Without<Q>] static void A(ref P p) => p.V++; }", "EECS049")]                                       // a runner
     public Task UsageRulesReport(string source, string id) => AssertReports(id, GeneratorTests.Components, Extra, source);
 
@@ -54,8 +54,8 @@ public partial class AnalyzerTests
         "[ForEach] method 'A' requires 'Q' (e.AsPQ() builds view PQ over its entity) and excludes it ([Without<Q>]): no entity it visits has it, so e.AsPQ() throws on every one")]
     [TestCase(Pq + "public struct G : ISystemGroup, ISystemGroupWithout<P>; [UpdateInGroup<G>] [EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref T t) { if (e.TryGetPQ(out var v)) t.V = v.Q.V; } }",
         "excludes it (ISystemGroupWithout<P> on its group G): no entity it visits has it, so e.TryGetPQ(out var v) finds none")]
-    [TestCase(Pq + "public static class R { [ForEntity, Without<P>] static void A(Entity e, ref T t) => t.V = e.AsPQ().Q.V; }",
-        "[ForEntity] method 'A' requires 'P'")]
+    [TestCase(Pq + "public static class R { [EntityMethod, Without<P>] static void A(Entity e, ref T t) => t.V = e.AsPQ().Q.V; }",
+        "[EntityMethod] method 'A' requires 'P'")]
     public async Task FiltersNoEntityPassesAreReported(string source, string message)
     {
         await AssertReports("EECS049", GeneratorTests.Components, source);

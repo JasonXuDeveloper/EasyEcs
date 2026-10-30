@@ -235,17 +235,17 @@ public class CodeFixTests
     [TestCase("EECS007", "Make it readonly",
         "[EcsSystem] public ref struct S { private static int _limit; static S() { _limit = 3; } public static int Limit => _limit; }",
         "private static readonly int _limit;")]
-    [TestCase("EECS080", "Write it as a [ForEntity] method",
+    [TestCase("EECS080", "Write it as an [EntityMethod] method",
         "public struct Closed : IComponent;\npublic struct Buy : IForEachEntity<P, Q>\n{\n    public int Quantity;\n    public static int WriteMask => 0b01;\n\n    // Sells and closes the shop when it runs out.\n    public void Execute(Entity shop, ref P p, ref Q q)\n    {\n        p.V -= Quantity;\n        if (p.V == 0) shop.Set(new Closed());\n    }\n}\n"
         + "public static class Mailman\n{\n    private static readonly QueryFilter Open = QueryFilter.Create().Without<Closed>();\n\n    public static bool Send(Entity shop, int quantity)\n    {\n        var buy = new Buy { Quantity = quantity };\n        return shop.Run<P, Q, Buy>(ref buy, Open);\n    }\n}",
-        "public static class Buy\n{\n    // Sells and closes the shop when it runs out.\n    [ForEntity, With<Q>, Without<Closed>]\n    static void Run(Entity shop, ref P p, int quantity)\n    {\n        p.V -= quantity;\n        if (p.V == 0) shop.Set(new Closed());\n    }\n}\npublic static class Mailman\n{\n    public static bool Send(Entity shop, int quantity)\n    {\n        return Buy.Run(shop, quantity);\n    }\n}")]
-    [TestCase("EECS080", "Write it as a [ForEntity] method",
+        "public static class Buy\n{\n    // Sells and closes the shop when it runs out.\n    [EntityMethod, With<Q>, Without<Closed>]\n    static void Run(Entity shop, ref P p, int quantity)\n    {\n        p.V -= quantity;\n        if (p.V == 0) shop.Set(new Closed());\n    }\n}\npublic static class Mailman\n{\n    public static bool Send(Entity shop, int quantity)\n    {\n        return Buy.Run(shop, quantity);\n    }\n}")]
+    [TestCase("EECS080", "Write it as an [EntityMethod] method",
         "public struct Read : IForEachEntity<P> { public int Scale; public static int WriteMask => 0; public void Execute(Entity e, ref P p) => System.Console.WriteLine(p.V * Scale); }\n"
         + "public static class U { public static void F(Entity a, Entity b) { var r = new Read { Scale = 2 }; a.Run<P, Read>(ref r); var s = new Read(); b.Run<P, Read>(ref s); } }",
         "static void Run(in P p, int scale) => System.Console.WriteLine(p.V * scale);")]
     [TestCase("EECS081", "Make it static",
-        "public static class R { [ForEntity] void A(ref P p) => p.V++; }",
-        "[ForEntity] static void A(ref P p)")]
+        "public static class R { [EntityMethod] void A(ref P p) => p.V++; }",
+        "[EntityMethod] static void A(ref P p)")]
     [TestCase("EECS084", "Consume its rows with [Consume]",
         "public struct Hit : IComponent { public int Amount; }\n[EcsSystem] public ref struct S\n{\n    [ForEach]\n    static void A(Entity e, in Hit hit, ref P p)\n    {\n        p.V -= hit.Amount;\n        e.Destroy();\n    }\n}",
         "    [ForEach, Consume]\n    static void A(in Hit hit, ref P p)\n    {\n        p.V -= hit.Amount;\n    }")]
@@ -394,8 +394,8 @@ public class CodeFixTests
         "[EcsSystem] public ref struct S { [ForEach] static void A(ref T t, in P p) { if (p.V > t.V) t.V = p.V; } }",
         "static void A(Mut<T> t, in P p) { if (p.V > t.Value.V) t.Write().V = p.V; } }")]                              // a read: Value
     [TestCase("EECS053", "Take it as a Mut<T>",
-        "public static class H { [ForEntity] static void A(ref T t, int v) { if (v > 0) t.V = v; } }",
-        "static void A(Mut<T> t, int v) { if (v > 0) t.Write().V = v; } }")]                                            // [ForEntity]
+        "public static class H { [EntityMethod] static void A(ref T t, int v) { if (v > 0) t.V = v; } }",
+        "static void A(Mut<T> t, int v) { if (v > 0) t.Write().V = v; } }")]                                            // [EntityMethod]
     [TestCase("EECS053", "Take it as a Mut<T>",
         "public static class Inc { public static void By(ref int v) => v++; } [EcsSystem] public ref struct S { [ForEach] static void A(ref T t, in P p) { if (p.V > 0) Inc.By(ref t.V); } }",
         "static void A(Mut<T> t, in P p) { if (p.V > 0) Inc.By(ref t.Write().V); } }")]                                // passed by ref
@@ -417,15 +417,15 @@ public class CodeFixTests
         "[Accumulate] public struct Tot : ISingletonComponent, IReduction<Tot> { public long N; public static Tot Identity => default; public static Tot Combine(Tot a, Tot b) => new() { N = a.N + b.N }; }\n"
         + "[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Tot t) => t.N += p.V; }",
         "static void A(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }")]
-    [TestCase("EECS109", "Handle each record in a [ForEachRecord] method",                                                 // a block
+    [TestCase("EECS109", "Handle each record in a [Drain] method",                                                 // a block
         "public record struct Rec(int V); public struct Tot : ISingletonComponent { public long N; }\n[EcsSystem] public ref struct S\n{\n    static void OnUpdate(World world)\n    {\n"
         + "        ref var tot = ref world.GetOrAddSingleton<Tot>();\n        ref var records = ref world.GetOrAddSingleton<Emitted<Rec>>().Items;\n"
         + "        foreach (ref readonly var record in records.AsReadOnlySpan())\n        {\n            if (record.V > 0)\n                tot.N += record.V;\n        }\n        records.Clear();\n    }\n}",
-        "{\n    [ForEachRecord]\n    static void Handle(in Rec record, ref Tot tot)\n    {\n        if (record.V > 0)\n            tot.N += record.V;\n    }\n}")]
-    [TestCase("EECS109", "Handle each record in a [ForEachRecord] method",                                                 // one statement, the World
+        "{\n    [Drain]\n    static void Handle(in Rec record, ref Tot tot)\n    {\n        if (record.V > 0)\n            tot.N += record.V;\n    }\n}")]
+    [TestCase("EECS109", "Handle each record in a [Drain] method",                                                 // one statement, the World
         "public record struct Rec(EntityId Id); \n[EcsSystem] public ref struct S\n{\n    static void OnUpdate(World world)\n    {\n"
         + "        ref var records = ref world.GetSingleton<Emitted<Rec>>().Items;\n        foreach (var r in records)\n            world.GetEntity(r.Id).Destroy();\n        records.Clear();\n    }\n}",
-        "{\n    [ForEachRecord]\n    static void Handle(in Rec r, World world) => world.GetEntity(r.Id).Destroy();\n}")]
+        "{\n    [Drain]\n    static void Handle(in Rec r, World world) => world.GetEntity(r.Id).Destroy();\n}")]
     [TestCase("EECS025", "Make it 'ref readonly'",                                                                           // a view's field nothing writes
         "[View] internal ref struct V { public ref P P; } [EcsSystem] public ref struct S { [ForEach] static void A(V v, ref Q q) => q.V = v.P.V; }",
         "[View] internal ref struct V { public ref readonly P P; }")]
@@ -564,7 +564,7 @@ public class CodeFixTests
     [TestCase("EECS027", "public static class R { [ForEach] public static void A(Entity e, ref P p) => p.V = e.Get<Q>().V; public static void Call(Entity e) { P p = default; A(e, ref p); } }")] // a caller
     [TestCase("EECS061", "public struct Sum : IForEach<P>, INoStructuralChanges { public int Total; public void Execute(ref P p) => Total += p.V; }\n"
                          + "public static class U { public static int F(World w) { var s = new Sum(); w.ForEachParallel<P, Sum>(ref s, default, 64); return s.Total; } }")] // its chunk size: chosen for threads
-    [TestCase("EECS081", "public class R { int x = 1; [ForEntity] void A(ref P p) => p.V += x; }")]                              // uses its instance
+    [TestCase("EECS081", "public class R { int x = 1; [EntityMethod] void A(ref P p) => p.V += x; }")]                              // uses its instance
     [TestCase("EECS053", "public static class R { [ForEach] public static void A(ref T t, in P p) { if (p.V > 0) t.V = p.V; }\n"
                          + "  public static void Call() { T t = default; A(ref t, default); } }")]                                     // a caller passes 'ref'
     [TestCase("EECS053", "public static class Run { public static void F(World world) => world.ForEach(static (ref T t, in Q q) => { if (q.V > 0) t.V = q.V; }); }")] // a lambda: the Mut fix rewrites methods
@@ -753,8 +753,8 @@ public class CodeFixTests
         "=> new EntityRandom(Seed: 1);", "Drop the tick: the world advances it on every update")]
     [TestCase("CS0246", "[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkRows = 64)] static void M(ref P p) { } }",
         "[ForEach(Parallel = true, ChunkSize = 64)]", "Rename it to ChunkSize")]
-    [TestCase("CS1739", "public struct J : IForRange { public void Execute(int start, int end) { } } public static class C { public static void Go(World w) { var j = new J(); w.ForParallel(10, ref j, chunkRows: 64); } }",
-        "w.ForParallel(10, ref j, chunkSize: 64);", "Rename it to chunkSize")]
+    [TestCase("CS1739", "public struct J : IForRange { public void Execute(int start, int end) { } } public static class C { public static void Go(World w) { var j = new J(); w.ParallelFor(10, ref j, chunkRows: 64); } }",
+        "w.ParallelFor(10, ref j, chunkSize: 64);", "Rename it to chunkSize")]
     public async Task MigratesADeclarationOfTheOldForm(string id, string source, string expected, string title)
     {
         var document = Document(Data + source);

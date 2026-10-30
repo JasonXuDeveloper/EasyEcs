@@ -199,7 +199,7 @@ using (var crowd = new World())
     Check(same, "a parallel pair method writing both sides counts each row's neighbors");
 }
 
-// The generator gaps' forms: an [Accumulate] total, a [ForEachRecord] pass over Emitted<T>, vector loops of enum and
+// The generator gaps' forms: an [Accumulate] total, a [Drain] pass over Emitted<T>, vector loops of enum and
 // bool lanes, and the buffer pools a prefab's instances take.
 using (var forms = new World())
 {
@@ -214,7 +214,7 @@ using (var forms = new World())
     forms.GetOrAddSingleton<Emitted<Hit>>().Items.Add(new Hit { Amount = 4 });
     long hits = 0;
     Forms.Book(forms, ref hits);
-    Check(hits == 7 && forms.GetSingleton<Emitted<Hit>>().Items.Count == 0, "a [ForEachRecord] pass");
+    Check(hits == 7 && forms.GetSingleton<Emitted<Hit>>().Items.Count == 0, "a [Drain] pass");
     var prefab = new Prefab().Set(new Coin()).SetBuffer<Hit>();
     forms.ReserveBuffers(prefab, 10);
     forms.Instantiate(prefab).Get<DynamicBuffer<Hit>>().Add(new Hit { Amount = 1 });
@@ -430,6 +430,6 @@ static class Forms
         if (awake.Value && mood.Value == Moods.Calm) mood.Value = Moods.Wary;
     }
 
-    [ForEachRecord]
+    [Drain]
     public static void Book(in Hit hit, ref long total) => total += hit.Amount;
 }

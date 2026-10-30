@@ -7,7 +7,7 @@ namespace EasyEcs.UnitTest;
 
 /// <summary>
 /// The suggestions to declare with attributes what code writes by hand: a one-entity job and its entity.Run calls
-/// ([ForEntity], EECS080) and a [ForEach] method that destroys every entity it visits ([Consume], EECS084). Their fixes
+/// ([EntityMethod], EECS080) and a [ForEach] method that destroys every entity it visits ([Consume], EECS084). Their fixes
 /// are in CodeFixTests. And the parameters that do what a [ForEach] method does by hand: a singleton accumulated row by
 /// row (Reduce&lt;T&gt;, EECS086), other entities' components read through the World (Lookup&lt;T&gt;, EECS087),
 /// records appended to a singleton's list (Emit&lt;T&gt;, EECS089).
@@ -172,7 +172,7 @@ public class FormTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Slices = 4)] static void A(in P p, ref Peak k) => k.High += p.V; }")]            // a result per slice
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(System.Span<P> p, ref Peak k) => k.High += p.Length; }")]          // a batch
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Peak k, in Peak last) => k.High += p.V; }")]          // another access
-    [TestCase("public static class H { [ForEntity] static void A(in P p, ref Peak k) => k.High += p.V; }")]                          // one entity
+    [TestCase("public static class H { [EntityMethod] static void A(in P p, ref Peak k) => k.High += p.V; }")]                          // one entity
     public async Task OtherSingletonWritesAreLeftAlone(string source) =>
         Assert.That(await Hand(source, "EECS086"), Is.Empty);
 
@@ -191,7 +191,7 @@ public class FormTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Link l, World w) { if (w.TryGetEntity(l.Target, out var t)) p.V = t.Read<Q>().V; w.CreateEntity(); } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Link l, World w) { if (w.TryGetEntity(l.Target, out var t)) p.V = t.Id.Index; } }")] // the handle itself
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Link l, World w) { if (w.TryGetEntity(l.Target, out var t) && t.TryGet(out Q q)) p.V = q.V; } }")]
-    [TestCase("public static class H { [ForEntity] static void A(ref P p, in Link l, World w) => p.V = w.GetEntity(l.Target).Q.V; }")]
+    [TestCase("public static class H { [EntityMethod] static void A(ref P p, in Link l, World w) => p.V = w.GetEntity(l.Target).Q.V; }")]
     public async Task OtherWorldUsesAreLeftAlone(string source) =>
         Assert.That(await Hand(source, "EECS087"), Is.Empty);
 
@@ -215,7 +215,7 @@ public class FormTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Log log) { log.Hits.Add(new Hit { Amount = p.V }); log.Count++; } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(in P p, ref Log log) => log.Hits.Add(new Hit { Amount = p.V }); }")] // EECS010's
     [TestCase("public struct Names : ISingletonComponent { public System.Collections.Generic.List<string> All; } [EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Names n) => n.All.Add(\"x\"); }")] // not a struct
-    [TestCase("public static class H { [ForEntity] static void A(in P p, ref Log log) => log.Hits.Add(new Hit { Amount = p.V }); }")]
+    [TestCase("public static class H { [EntityMethod] static void A(in P p, ref Log log) => log.Hits.Add(new Hit { Amount = p.V }); }")]
     public async Task OtherListWritesAreLeftAlone(string source) =>
         Assert.That(await Hand(source, "EECS089"), Is.Empty);
 }
