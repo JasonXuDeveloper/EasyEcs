@@ -417,6 +417,19 @@ public class CodeFixTests
         "[Accumulate] public struct Tot : ISingletonComponent, IReduction<Tot> { public long N; public static Tot Identity => default; public static Tot Combine(Tot a, Tot b) => new() { N = a.N + b.N }; }\n"
         + "[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Tot t) => t.N += p.V; }",
         "static void A(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }")]
+    [TestCase("EECS119", "Run the rows in a [ForEach(MaxRows = N)] method",                                      // a guard, a filter field, a declaration, continue, the id
+        "[EcsSystem] public ref struct SaveSystem\n{\n    static void OnUpdate(World world)\n    {\n        if (!world.Any<Boss>()) return;\n"
+        + "        System.Span<EntityId> ids = stackalloc EntityId[4];\n        int count = world.CollectIds<P>(ids, Marked);\n        var limit = 3;\n"
+        + "        foreach (var id in ids[..count])\n        {\n            var e = world.GetEntity(id);\n            if (id.Index > limit) continue;\n"
+        + "            world.CreateEntity(new Q { V = id.Index });\n            e.Remove<Boss>();\n        }\n    }\n\n"
+        + "    static readonly QueryFilter Marked = QueryFilter.Create().With<Boss>();\n}",
+        "{\n    [ForEach(MaxRows = 4), With<P>, With<Boss>]\n    static void Save(Entity e, World world)\n    {\n        var limit = 3;\n"
+        + "        if (e.Id.Index > limit) return;\n        world.CreateEntity(new Q { V = e.Id.Index });\n        e.Remove<Boss>();\n    }\n}")]
+    [TestCase("EECS119", "Run the rows in a [ForEach(MaxRows = N)] method",                                      // no filter, the World alone
+        "[EcsSystem] public ref struct Spawner\n{\n    static void OnUpdate(World world)\n    {\n        System.Span<EntityId> ids = stackalloc EntityId[8];\n"
+        + "        int count = world.CollectIds<Boss>(ids);\n        if (count == 0) return;\n        foreach (var id in ids[..count])\n        {\n"
+        + "            var e = world.GetEntity(id);\n            world.CreateEntity(new Q());\n        }\n    }\n}",
+        "{\n    [ForEach(MaxRows = 8), With<Boss>]\n    static void Run(World world)\n    {\n        world.CreateEntity(new Q());\n    }\n}")]
     [TestCase("EECS109", "Handle each record in a [Drain] method",                                                 // a block
         "public record struct Rec(int V); public struct Tot : ISingletonComponent { public long N; }\n[EcsSystem] public ref struct S\n{\n    static void OnUpdate(World world)\n    {\n"
         + "        ref var tot = ref world.GetOrAddSingleton<Tot>();\n        ref var records = ref world.GetOrAddSingleton<Emitted<Rec>>().Items;\n"
