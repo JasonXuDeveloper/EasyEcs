@@ -109,7 +109,8 @@ generators write does. Every generated form is checked for:
   masked block stays only where its outcome is predictable; conditions that pick rows belong in data (tags), and the
   analyzer says so.
 - **Caches**: each row loaded once (fusion), columns walked in order, chunks on 64-row multiples, chases prefetched,
-  write-only streams past the cache not read for ownership.
+  write-only streams past the cache not read for ownership. Which of chains, branches or caches bounds a form is read
+  on the roofline first (`audit-perf`, "Roofline": bytes and operations per row against the machine's roofs).
 - **Front end**: cold code out of line, bodies within the inliner's budget.
 - **A form that pays only past a size is a twin, chosen per pass**: never replace the job for every pass. Emit a
   second job and let the call site pick it from a gate read once per pass (the VectorTail `Rows` twin, the

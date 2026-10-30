@@ -220,7 +220,9 @@ form to support.
 Every loop is also checked against `audit-generator`, "Tuned for the machine" (chains, branches, caches, front end):
 run `llvm-mca -mcpu=icelake-server` (and `znver4`) on the Tier1 loop body to see whether it is bound by a dependency
 chain, by ports or by memory before choosing a change (`tools/loopbound.sh <class>` does it for every loop of a
-benchmark class). A uop the model saves is not a win until BenchmarkDotNet shows one on the worlds: the masked skip
+benchmark class). First place the pass on the roofline (`audit-perf`, "Roofline"): a loop whose bytes per row already
+run at the L2's or memory's bandwidth (KernelBenchmark's Integrate and Count at 100k rows) gains nothing from fewer
+uops, only from fewer bytes. A uop the model saves is not a win until BenchmarkDotNet shows one on the worlds: the masked skip
 tested on the word's bits modelled 8-20 % faster per vector and was 9-10 % slower on BattleServer, a branch the
 model counts as free in front of every vector while real words rarely skip. Ablate one change at a time against the
 same head.

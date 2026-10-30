@@ -1,6 +1,6 @@
 ---
 name: audit-perf
-description: "Look for the next performance win in EasyEcs - borrow from Burst, CUDA, stencil codes, OpenMP, MPI, OS schedulers, databases, HPC runtimes (Halide, Kokkos, TBB, Legion), LLM serving (vLLM) and newer .NET (10) features, find where the runtime or the generated code leaves speed on the table, and prove every change with BenchmarkDotNet. Use for a performance round, before a release, or when asked to \"optimize further\" or to research an idea. Triggers: \"faster\", \"optimize\", BenchmarkDotNet, A/B, regression, allocation, NativeMemory, mimalloc, 性能, 优化, 更快, 基准, 研究一下."
+description: "Look for the next performance win in EasyEcs - borrow from Burst, CUDA, stencil codes, OpenMP, MPI, OS schedulers, databases, HPC runtimes (Halide, Kokkos, TBB, Legion), LLM serving (vLLM) and newer .NET (10) features, find where the runtime or the generated code leaves speed on the table, and prove every change with BenchmarkDotNet. Use for a performance round, before a release, or when asked to \"optimize further\" or to research an idea. Triggers: \"faster\", \"optimize\", BenchmarkDotNet, A/B, regression, allocation, NativeMemory, mimalloc, roofline, memory-bound, compute-bound, bandwidth, arithmetic intensity, 性能, 优化, 更快, 基准, 研究一下, 带宽, 访存瓶颈, 计算瓶颈."
 metadata:
   internal: true
 ---
@@ -191,6 +191,17 @@ its own worktree.
    - `tools/bench.sh <classes> --sync` runs classes one process each (resumable, under the lock) and merges them into
      the site's numbers, listing rows that moved 15 % or allocate differently; `--site` runs every class the site
      shows, `--all` adds the A/B-only classes. A full run takes hours: run what the change touches.
+   - a large copy is measured against the C runtime's memmove, which streams by itself past its own per-call
+     threshold (glibc 2.39: `x86_non_temporal_threshold`, 131 MiB on this VM, `ld.so --list-tunables`); run the
+     class once more with `GLIBC_TUNABLES=glibc.cpu.x86_non_temporal_threshold=0xffffffffffff` to see what
+     streaming alone is worth (1.5-2x at 192-512 MiB here). A copy loop of our own wins only where that threshold
+     misses: an operation of several copies each under it whose total is past the last-level cache (a snapshot of
+     a table's columns: Capture 1.20-1.26x, Restore 1.11-1.20x), so its gate counts the operation's bytes; it must
+     be shaped like the libc's large copy (four pages at a time, the source prefetched), since a plain loop of
+     non-temporal stores was 1.25-1.46x slower than glibc's; and a copy into arrays just allocated (a resize) is
+     bound by the allocation and first touch, where streaming was a wash (feat-borrowed-rest);
+   - before choosing what to change in a pass, place it on the roofline (below, "Roofline"): a memory-bound pass gains
+     from fewer bytes only, a compute-bound one from the loop and the math;
 4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss or a wash is reverted and gets a
    decision record (what was tried, the numbers, why not); the roadmap's "Dropped" list names it.
    A plan's bar (1.2x, 1.5x, 20 %) decides what to build and try first, not whether a measured change ships (owner,
@@ -224,6 +235,68 @@ its own worktree.
   run; the child inherits them). A scratch driver with other components compiles differently (9.5 vs 11.9 KB).
 - **Make a pass-safety test discriminate**: a test that a pass survives arrivals fixes `InitialEntityCapacity`, or
   `Grow`'s own `StorageVersion` bump hides a missing one.
+
+## Roofline: is a pass bound by memory or by compute (Williams, Waterman, Patterson 2009)
+
+Before choosing the next change to a pass, place it on this machine's roofline; it says which kind of change can
+pay. A measuring method, not a feature (borrowed-ideas.md item 6).
+
+1. **Bytes and operations per row.** Bytes: each column the pass reads (its size), each column it writes (its size,
+   plus the size again for the read for ownership when the store is plain and the column is not also read; nothing
+   extra when streamed, `StreamingStores`), presence bits and change ticks it touches (a bit and 8 bytes per row,
+   usually amortized per 64-row word). Operations: the arithmetic of one row as the vector loop runs it, a lane each
+   (a fused multiply-add counts 2, a compare, min, max, select or blend 1). A call with no cheap count (`Sin`, `Exp`,
+   a gather) is counted from the Tier1 loop: `tools/loopbound.sh` gives the instructions per vector.
+2. **Arithmetic intensity** I = operations / bytes.
+3. **The roofs, measured on the machine and session that measures the pass** (BenchmarkDotNet, one thread):
+   `RooflineBenchmark` (`Read`: 4 bytes a float, `Update` (`a += b * k`): 12 bytes a float, at 256 KiB a column (the
+   L2) and 512 MiB (memory, past the last-level cache): bandwidth = bytes / mean) and `RooflinePeakBenchmark`
+   (`Fma` on the widest vector, `FmaVector` on `Vector<float>`, the width of the generated loops: 8 floats on x86
+   even with AVX-512; flops = 2^20 x 8 x lanes x 2 / mean). Use the roof of the level the pass's columns live in (the
+   sum of the bytes of every column it moves against the L2 and `CacheSizes.LastLevel`) and of its shape (read-only:
+   `Read`; read and write: `Update`). A parallel pass shares the memory roof: four threads do not get four times
+   the one-thread bandwidth from memory; measure the roof with the same thread count before reading a parallel pass.
+4. **Ridge** = peak / bandwidth. Attainable = min(peak, I x bandwidth). Measured: bytes x rows / mean against the
+   bandwidth roof, operations x rows / mean against the peak.
+5. **Reading it:**
+   - I below the ridge and the pass near the bandwidth roof: **memory-bound**. More lanes, unrolling or cheaper math
+     change nothing; fewer bytes do: fuse passes that move the same columns (`FusionMode`), narrower lanes (`Half`,
+     `short`, `byte` columns), split the hot fields from cold ones (EECS091), skip unwritten words (change ticks),
+     stream a write-only column past the last-level cache, and fewer passes per tick.
+   - I above the ridge and the pass near the peak: **compute-bound**. The vector loop (EECS055 reasons keep a method
+     scalar), wider vectors (the 512-bit peak against `Vector<T>`'s), cheaper math (`FloatMode.Fast`, a division by a
+     constant), fewer operations per row, threads.
+   - Far below both roofs: **neither**. Latency (a chase: prefetch, `Lookup<T>` gathers), overhead (per run, chunk,
+     table or system: few rows per run, `SystemDispatchBenchmark`), a scalar loop (EECS055), or a dependency chain
+     (`tools/loopbound.sh`, `audit-vector-loops`). Fix that first; the roofline is not the bound yet.
+
+Roofs of the reference VM (Xeon 2.10 GHz, AVX-512, L2 2 MiB per core, LLC 260 MiB, .NET 10.0.13, 2026-10-30,
+default job, two runs: r1 / r2):
+
+| Roof | Mean | Roof |
+|---|---|---|
+| L2 read (256 KiB) | 1.94 us (r2; r1 measured 1 MiB, 7.91 us: 132 GB/s) | 135 GB/s |
+| L2 update (2 x 256 KiB, 12 B a float) | 6.70 us (r2; r1's 2 x 1 MiB filled the L2: 70 GB/s, not a roof) | 117 GB/s |
+| Memory read (512 MiB) | 49.3 / 48.8 ms | 10.9-11.0 GB/s |
+| Memory update (2 x 512 MiB) | 86.3 / 88.4 ms | 18.2-18.7 GB/s |
+| Peak, 512-bit FMA | 1.56 / 1.61 ms | 166-172 Gflop/s |
+| Peak, `Vector<float>` FMA (8 lanes) | 1.31 ms (r2) | 102 Gflop/s |
+
+Ridge of the generated loops: 102 / 117 = 0.87 flop per byte from the L2, 102 / 18.2 = 5.6 from memory.
+
+Worked examples (`KernelBenchmark`, generated vector loops, 100,000 rows: 400 KB a column, the L2):
+
+| Pass | Bytes / ops per row | I | Mean r1 / r2 | Measured | Verdict |
+|---|---|---|---|---|---|
+| `Integrate` (`heat += speed * Dt`) | 12 B (read 2 columns, write 1 of them) / 2 | 0.17 | 10.1 / 10.8 us | 111-119 GB/s, 19 Gflop/s | at the L2 update roof (95-100 %): memory-bound. Unrolling or 512-bit lanes cannot help; fusing it with the next pass over `Heat`, or a narrower column, can |
+| `Count` (`ticks.Value++`) | 8 B / 1 | 0.13 | 7.95 / 8.09 us | 99-101 GB/s | 85 % of the update roof: memory-bound |
+| `Step` (a clamp, a branch as a blend) | 20 B (read 3, write 2) / about 11 | 0.55 | 23.5 / 22.3 us | 85-90 GB/s, 47-49 Gop/s | below the ridge, attainable 64 Gop/s: 75 % of it. Near the roof; the rest is the blend's chain (`tools/loopbound.sh`), not bandwidth |
+| `Wave` (`Sin` and `Exp` per row) | 12 B / not countable by hand | high | 193 / 175 us | 6.2-6.9 GB/s, 5-6 % of the L2 roof | compute-bound: at the `Vector<float>` peak the row costs as much as 180-200 flops (.NET's vector `Sin` / `Exp` of floats work in doubles). The levers are the math and the width, never the memory |
+
+What it said here: the cheap generated loops are already at the L2's bandwidth, so the next step for them is fewer
+bytes (fusion, narrower lanes), not instructions; past the last-level cache the same `Integrate` would run at the
+memory roof (18 GB/s, six times slower per byte), where a write-only column's streaming store and fusion pay most.
+Only passes with real math per row (`Wave`) gain from the vector loop's width.
 
 ## Report
 
