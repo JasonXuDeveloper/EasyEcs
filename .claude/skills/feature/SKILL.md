@@ -14,6 +14,8 @@ part names the skill that audits it.
 
 - One shared non-generic core with thin typed wrappers; T1..T9 variants come from `ArityGenerator` templates.
 - Hot paths allocate nothing and run no LINQ, closures, boxing, `params object[]`, string formatting or iterators.
+- A `[GaussSeidel]` sweep stops when no row changed against `Before` (taken at the sweep's start): anything that
+  resets a tile's cells also resets `Before` and marks the rows written (`tile.Restart`), or the sweep stops early.
 - Each invariant that skips a bounds check is documented next to the code.
 - Structural changes go through the gate; `StorageVersion` is bumped where a pass must notice; per-entity state is
   `EntityMeta` only; id-keyed APIs validate the version.
@@ -70,6 +72,9 @@ Every rule whose fix is mechanical, including converting hand-written patterns t
 The analyzer computes the fix as diagnostic properties; a `CodeFixTests` case covers it.
 
 ## 5. Tests (`tests/EasyEcs.UnitTest`, one file per feature)
+
+A test of how fast something settles (a field, a relaxation) counts sweeps or time, not updates: each tile
+settles within one pass either way, so update counts come out equal.
 
 A test project that references a sample builds the sample's generated code: when hundreds of unrelated CS7036 /
 CS0122 errors appear, look for CS8785 first (a generator exception dropped every generated file).
