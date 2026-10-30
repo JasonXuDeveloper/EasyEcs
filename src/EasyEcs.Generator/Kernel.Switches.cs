@@ -231,7 +231,7 @@ internal sealed partial class Kernel
         if (deconstruct.IsImplicitlyDeclared && type.IsRecord || KnownVector(type))
             for (int i = 0; i < set.Length; i++) set[i] = Named(deconstruct.Parameters[i].Name);
         else if (deconstruct.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is MethodDeclarationSyntax syntax && _compilation != null
-                 && _compilation.GetSemanticModel(syntax.SyntaxTree).GetOperation(syntax) is IMethodBodyOperation body)
+                 && ModelOf(_compilation, syntax.SyntaxTree).GetOperation(syntax) is IMethodBodyOperation body)
         {
             var statements = body.BlockBody?.Operations ?? (body.ExpressionBody != null ? body.ExpressionBody.Operations : []);
             foreach (var statement in statements)

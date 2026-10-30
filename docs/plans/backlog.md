@@ -29,11 +29,11 @@ names the skill:
 | docs pass | `audit-docs` |
 | bench sync, master | `verify` |
 
-## Running (1 agent, worktree under `.claude/worktrees/`; merge with the `audit` triage checks)
+## Running (worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-`feat-generator-cost` (G1, the generator's per-keystroke cost).
+Nothing running.
 
-Merged since the last update: `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
+Merged since the last update: `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
 at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
 vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the owner's M4: no case slower past
@@ -135,7 +135,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
        reason. Generator cost (the owner's condition): callee bodies read only in the implementation-output pipeline,
        once per callee per compilation (cache keyed by the method symbol), syntax-first rejection before any bind, no
        compilation copy per caller (Kernel.Views copies it today: measure first, IDE and build cases).
-4. [ ] **G1** (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
+4. [x] **G1** (merged; G6 researched, its option in audit-generator) (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
        implementation-only body facts; SystemUpdates without Collect; SetFusions reruns; Systems / SystemPlaces share
        one FAWMN; Kernel's GetSemanticModel calls. G6 (C# 14 extension lookup cost) research only.
 5. [x] **Generated code tuned for the machine** (merged 9161797, branch `feat-microarch`) (`microarch.md`): M0 llvm-mca over every kernel shape, then M1

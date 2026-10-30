@@ -16,6 +16,9 @@ public class GeneratorTests
     /// <summary>A file of generated [ForEach] code: a system's (<c>.System.g.cs</c>) or another type's (<c>.ForEach.g.cs</c>).</summary>
     internal static bool IsCode(SyntaxTree tree) => tree.FilePath.EndsWith(".System.g.cs") || tree.FilePath.EndsWith(".ForEach.g.cs");
 
+    /// <summary>A file of entry points (source output: declarations only, each calling its pass in the code's file).</summary>
+    internal static bool IsEntryPoints(SyntaxTree tree) => tree.FilePath.EndsWith(".EntryPoints.g.cs");
+
     // The interceptors of lambda passes are taken from EasyEcs.Generated, as the package's build files set it (EasyEcs.props).
     internal static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview)
         .WithFeatures([new("InterceptorsNamespaces", "EasyEcs.Generated")]);
@@ -848,12 +851,12 @@ public class GeneratorTests
         + "public struct Map : IActor<Map>; [UpdateInGroup<Map>] [EcsSystem] public ref struct S { [ForEach] static void A(ref P p) { } }",
         ".With<global::In<global::Map>>()", ".Without<global::Q>()")] // the group's filters through a generic interface
     [TestCase("public static class R<T> where T : struct, IComponent { [ForEach] static void A(in T t, ref int n) { } }",
-        "extension<T>(global::R<T>) where T : struct, global::EasyEcs.IComponent", "new __ForEach<T>.AJob0 { x1 = ref n }", "public static class R_1ForEach")]
+        "extension<T>(global::R<T>) where T : struct, global::EasyEcs.IComponent", "new __ForEach<T>.AJob0 { x1 = ref n }", "public static partial class R_1ForEach")]
     public void GenericSystemsAndRunnersAreGenerated(string source, params string[] expected)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, source), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
-        string generated = string.Concat(output.SyntaxTrees.Where(t => IsCode(t) || t.FilePath.EndsWith("SystemCode.g.cs") || t.FilePath.EndsWith("__EasyEcsSystems.g.cs"))
+        string generated = string.Concat(output.SyntaxTrees.Where(t => IsCode(t) || IsEntryPoints(t) || t.FilePath.EndsWith("SystemCode.g.cs") || t.FilePath.EndsWith("__EasyEcsSystems.g.cs"))
             .Select(t => t.ToString()));
         foreach (var line in expected) Assert.That(generated, Does.Contain(line), generated);
     }
@@ -986,7 +989,7 @@ public class GeneratorTests
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"public static partial class R {{ {members} }}"),
             out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
-        string generated = output.SyntaxTrees.Single(t => IsCode(t)).ToString();
+        string generated = output.SyntaxTrees.Single(t => IsEntryPoints(t)) + "\n" + output.SyntaxTrees.Single(t => IsCode(t));
         foreach (var line in expected) Assert.That(generated, Does.Contain(line), generated);
         Assert.That(generated, Does.Not.Contain("GeneratedUpdate").And.Not.Contain("GeneratedAccess"));
     }
@@ -1094,8 +1097,9 @@ public class GeneratorTests
     [
         "ForEachMethods", "RecordMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
-        "GroupBy", "TargetPolicies", "NotSaved", "EntityMethods", "EntityMethodTypes", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
-        "SystemPlaces", "SystemFusions", "SetFusions", "SystemLoops", "SystemCode", "RecordedTypes",
+        "GroupBy", "TargetPolicies", "NotSaved", "EntityMethods", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
+        "SystemPlaces", "SystemFusions", "SetFusions", "ForEachBodies", "RecordBodies", "EntityMethodBodies", "SystemCode", "ForEachCode", "RecordCode",
+        "EntityMethodCode", "RecordedTypes",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -1127,7 +1131,8 @@ public class GeneratorTests
             "[EcsSystem] public ref struct F1 { [ForEach] static void Fa(ref Q q, Entity e) => q.V += e.Id.Index; [ForEach] static void Fb(ref Q q, Entity e) => q.V += 2 + e.Id.Index; } [EcsSystem] public ref struct F2 { [ForEach] static void Fc(ref Q q) => q.V++; }" +
             "public struct Fp : IComponent { public float X, Y; } [EcsSystem] public ref struct Pr { [ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X, dy = p.Y - o.Y, d2 = dx * dx + dy * dy; if (d2 >= 4f) return; q.V++; } }" +
             "[Accumulate, Sum] public partial struct Tot : ISingletonComponent { public long N; } [EcsSystem] public ref struct Ac { [ForEach] static void T(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }" +
-            "public record struct Hit(int V); [EcsSystem] public ref struct Rc { [Drain] static void H(in Hit h, ref Clock c) => c.Ticks += h.V; }";
+            "public record struct Hit(int V); [EcsSystem] public ref struct Rc { [Drain] static void H(in Hit h, ref Clock c) => c.Ticks += h.V; }" +
+            "public static class Rn { [ForEach] static void R(ref P p) => p.V++; } public static class Rd { [Drain] static void H(in Hit h, ref Clock c) => c.Ticks -= h.V; }";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         // A lambda pass in a file of its own: its interceptor names the file's checksum, so an edit there is a new model.
@@ -1169,18 +1174,21 @@ public class GeneratorTests
     }
 
     // Realistic keystrokes, in a build (every output) and as the IDE runs the generators while typing (implementation
-    // outputs skipped: the steps only they read never run). A tracked step either takes every output from the cache
-    // or is one the edit really changes. Unchanged is not a cache hit: the step ran again and returned an equal value,
-    // so a step the edit does not change must not report it. Allowed: in a step the edit changes, the other outputs of a
-    // Collect it regroups; IsEasyEcsCore, a narrow Select of the compilation, which reruns per compilation by design (a
-    // string compare) so that its consumers stay cached; SetFusions, which regroups on every compilation
-    // (SystemGenerator.Fusion.cs, the declaration/body split's to fix).
+    // outputs skipped: the steps only they read never run). A tracked step, and each of the two outputs, either takes
+    // every output from the cache or is one the edit really changes. Unchanged is not a cache hit: the step ran again
+    // and returned an equal value, so a step the edit does not change must not report it. Allowed: in a step the edit
+    // changes, the other outputs of a Collect it regroups; IsEasyEcsCore, a narrow Select of the compilation, which
+    // reruns per compilation by design (a string compare) so that its consumers stay cached. A stage listed with '~'
+    // regroups what the edit changed and may find it equal (SystemFusions pairs the systems' code again). An edit inside
+    // a body changes no source output: what a body decides is read only by implementation output
+    // (SystemGenerator.Kernels.cs).
     private const string IncrementalComponents = "using EasyEcs;\npublic struct P : IComponent { public int V; }\npublic struct Q : IComponent { public int V; }\n" +
         "public struct L;\npublic struct Clock : ISingletonComponent { public int Ticks; }\n";
     private const string IncrementalSystems = "using EasyEcs;\n" +
         "[EcsSystem] public ref struct Move { [ForEach] static void A(ref P p, in Q q) { p.V += q.V; } }\n" +
         "[EcsSystem] public ref struct Turn { [ForEach] static void C(ref Q q) { q.V--; } }\n" +
         "public static class Free { [ForEach] static void B(ref Q q) { q.V++; } }\n" +
+        "public static class Heal { [EntityMethod] static void H(ref P p, int n) { p.V += n; } }\n" +
         "public static class Report { public static int Sum(World w) { int s = 0; foreach (var i in w.Read<P, Q>()) s += i.P.V; return s; } static int N(DynamicBuffer<L> b) => b.Count; }\n";
 
     private const string TileLoadsFile = "using EasyEcs;\npublic struct Sh : ITileShape { public static int Width => 16; public static int Depth => 16; }\n" +
@@ -1189,16 +1197,19 @@ public class GeneratorTests
     private static readonly string[] ImplementationOnlyStages =
     [
         "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "ClosedSystems", "SystemSet", "SystemPlaces", "SystemFusions", "SetFusions",
-        "SavedComponents", "SavedBuffers", "GroupBy", "TargetPolicies", "NotSaved", "ModuleInitializers", "SystemLoops", "SystemCode",
+        "SavedComponents", "SavedBuffers", "GroupBy", "TargetPolicies", "NotSaved", "ModuleInitializers", "ForEachBodies", "RecordBodies", "EntityMethodBodies",
+        "SystemCode", "ForEachCode", "RecordCode", "EntityMethodCode", "ImplementationSourceOutput",
     ];
 
-    [TestCase("a [ForEach] body", "p.V += q.V;", "p.V += 2 * q.V;", "SystemLoops SystemCode")]
-    [TestCase("a switch in a [ForEach] body", "p.V += q.V;", "p.V = q.V switch { 0 => 1, > 3 => q.V, _ => p.V };", "SystemLoops SystemCode")]
+    [TestCase("a [ForEach] body", "p.V += q.V;", "p.V += 2 * q.V;", "ForEachBodies SystemCode ~SystemFusions ImplementationSourceOutput")]
+    [TestCase("a switch in a [ForEach] body", "p.V += q.V;", "p.V = q.V switch { 0 => 1, > 3 => q.V, _ => p.V };", "ForEachBodies SystemCode ~SystemFusions ImplementationSourceOutput")]
+    [TestCase("a runner's [ForEach] body", "q.V++;", "q.V += 2;", "ForEachBodies ForEachCode ImplementationSourceOutput")]
+    [TestCase("an [EntityMethod] body", "p.V += n;", "p.V += 2 * n;", "")]
     [TestCase("an unrelated file", "public class Unrelated { }", "public class Unrelated { int x; }", "")]
     [TestCase("whitespace", "\npublic static class Free", "\n\npublic static class Free", "")]
     [TestCase("a new component field", "P : IComponent { public int V; }", "P : IComponent { public int V; public int W; }",
-        "Components SavedComponents SystemLoops SystemCode LambdaPasses LambdaFiles")]
-    [TestCase("a new query shape", "return s;", "foreach (var i in w.Query<Q>()) i.Q.V++; return s;", "QueryShapes")]
+        "Components SavedComponents ForEachBodies SystemCode ~SystemFusions LambdaPasses LambdaFiles SourceOutput ImplementationSourceOutput")]
+    [TestCase("a new query shape", "return s;", "foreach (var i in w.Query<Q>()) i.Q.V++; return s;", "QueryShapes SourceOutput")]
     public void AnEditRerunsOnlyTheStepsItChanges(string edit, string before, string after, string changes)
     {
         var components = CSharpSyntaxTree.ParseText(IncrementalComponents, Parse, path: "Components.cs");
@@ -1209,10 +1220,12 @@ public class GeneratorTests
         var compilation = Compile().AddSyntaxTrees(components, systems, lambdas, tiles, other);
         var edited = new[] { components, systems, other }.Single(t => t.ToString().Contains(before));
         var next = compilation.ReplaceSyntaxTree(edited, CSharpSyntaxTree.ParseText(edited.ToString().Replace(before, after), Parse, path: edited.FilePath));
-        var changed = changes.Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
+        var listed = changes.Split(' ', System.StringSplitOptions.RemoveEmptyEntries);
+        var changed = listed.Where(n => n[0] != '~').ToArray();
+        var regrouped = listed.Where(n => n[0] == '~').Select(n => n.Substring(1)).ToArray();
         // RecordedTypes: a syntax provider over compilation units, rerun for an edited file (their bodies filtered by
         // size and syntax before any is bound); its facts compare equal, so nothing is emitted again.
-        string[] tolerated = ["IsEasyEcsCore", "SetFusions", "RecordedTypes"];
+        string[] tolerated = ["IsEasyEcsCore", "RecordedTypes"];
 
         foreach (bool ide in new[] { false, true })
         {
@@ -1227,8 +1240,13 @@ public class GeneratorTests
             foreach (var (name, runs) in steps)
             {
                 if (name.Contains('_') || name is "Compilation" or "CompilationOptions" or "ParseOptions") continue; // Roslyn's own
-                bool output = name is "SourceOutput" or "ImplementationSourceOutput";
-                if (changed.Contains(name) || output && changed.Length > 0 || tolerated.Contains(name)) continue; // asserted below
+                if (changed.Contains(name) || tolerated.Contains(name)) continue; // asserted below
+                if (regrouped.Contains(name) && !ide)
+                {
+                    Assert.That(runs.SelectMany(s => s.Outputs).Select(o => o.Reason), Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged),
+                        $"{name} after {edit}{mode}");
+                    continue;
+                }
                 Assert.That(runs.SelectMany(s => s.Outputs).Select(o => o.Reason), Is.All.EqualTo(IncrementalStepRunReason.Cached),
                     $"{name} after {edit}{mode}");
             }
@@ -1236,7 +1254,7 @@ public class GeneratorTests
                 Assert.That(steps[name].SelectMany(s => s.Outputs).Select(o => o.Reason),
                     Has.Some.AnyOf(IncrementalStepRunReason.New, IncrementalStepRunReason.Modified), $"{edit} changes {name}{mode}");
             if (ide) // implementation outputs skipped: the steps only they read do not run at all
-                Assert.That(steps.Keys.Intersect(ImplementationOnlyStages), Is.Empty, edit);
+                Assert.That(steps.Keys.Intersect(ImplementationOnlyStages.Where(n => n != "ImplementationSourceOutput")), Is.Empty, edit);
         }
     }
 
@@ -1303,7 +1321,7 @@ public class GeneratorTests
         var reasons = Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
-        Assert.That(Steps(driver)["EntityMethodTypes"].SelectMany(s => s.Outputs).Select(o => o.Reason),
+        Assert.That(Steps(driver)["EntityMethods"].SelectMany(s => s.Outputs).Select(o => o.Reason),
             Is.All.AnyOf(IncrementalStepRunReason.Cached, IncrementalStepRunReason.Unchanged));
         Assert.That(driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("struct __S_SystemCode")), Does.Contain("public static int Interval => 5;\n\n    public static int Phase => 2;"));
     }
@@ -1330,8 +1348,9 @@ public class GeneratorTests
         Assert.That(all, Does.Contain("public static int Interval => 4;\n\n    public static int Phase => 3;").And.Contain("public static int Interval => 2;\n\n    public static int Phase => 0;"));
         Assert.That(all, Does.Contain("systems.Add<global::G<global::P>, global::__G_1_SystemCode<global::P>>();"));
         Assert.That(all, Does.Contain("public static bool C(global::EasyEcs.Entity e, ulong since, int n)"));
-        Assert.That(all, Does.Contain("if (e.World is not { } world) return false;"));
-        Assert.That(all, Does.Contain("return e.Run<global::P, __ForEach.CJob0>(ref job, in __ForEach.CFilter0, since);"));
+        Assert.That(all, Does.Contain("bool ran = false;\n            OEntityMethod.__C_0(e, since, n, ref ran);\n            return ran;"));  // the entry point calls its pass
+        Assert.That(all, Does.Contain("if (e.World is not { } world) return;"));
+        Assert.That(all, Does.Contain("ran = e.Run<global::P, __ForEach.CJob0>(ref job, in __ForEach.CFilter0, since);"));
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, all);
     }
 

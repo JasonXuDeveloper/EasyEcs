@@ -26,40 +26,59 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 {
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        var methods = context.SyntaxProvider
-            .ForAttributeWithMetadataName(Symbols.ForEachAttribute,
-                static (node, _) => node is MethodDeclarationSyntax,
-                static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ctx.SemanticModel, ct))
-            .Where(static m => m is not null)
-            .WithTrackingName("ForEachMethods");
-
-        // [EcsSystem] ref structs: their hooks and [UpdateInterval(n, Phase = p)], declarations only.
+        // Declarations only: a transform reruns on each compilation for every node it matches, so none of these binds a
+        // body. One model per type, built by the transform of the node that holds the type's first attribute of its
+        // kind (no Collect regrouping): an [EcsSystem] ref struct with its [ForEach] / [Drain] methods, hooks,
+        // [UpdateInterval(n, Phase = p)] and where it is declared (for pairing systems); the [ForEach] / [Drain]
+        // methods of another type; a type's [EntityMethod] methods.
         var systems = context.SyntaxProvider
             .ForAttributeWithMetadataName(Symbols.EcsSystemAttribute,
                 static (node, _) => node is StructDeclarationSyntax,
-                static (ctx, _) => SystemModel.Create((INamedTypeSymbol)ctx.TargetSymbol))
+                static (ctx, ct) => SystemDeclaration.Create(ctx, ct))
             .Where(static m => m is not null)
             .WithTrackingName("Systems");
-
-        // [Drain] methods: passes over the records of Emitted<T>, in the same models as [ForEach] methods.
+        var updates = systems.Select(static (d, _) => d!.Update).WithTrackingName("SystemUpdates");
+        var places = systems.Select(static (d, _) => d!.Place!).Where(static p => p is not null).WithTrackingName("SystemPlaces");
+        var runners = context.SyntaxProvider
+            .ForAttributeWithMetadataName(Symbols.ForEachAttribute,
+                static (node, _) => node is MethodDeclarationSyntax,
+                static (ctx, ct) => UpdateModel.Runner(ctx, ct))
+            .Where(static m => m is not null)
+            .Select(static (m, _) => m!)
+            .WithTrackingName("ForEachMethods");
+        // [Drain] methods: passes over the records of Emitted<T>, in the same models as [ForEach] methods (a type with
+        // both is ForEachMethods').
         var records = context.SyntaxProvider
             .ForAttributeWithMetadataName(Symbols.DrainAttribute,
                 static (node, _) => node is MethodDeclarationSyntax,
-                static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ctx.SemanticModel, ct))
+                static (ctx, ct) => UpdateModel.Records(ctx, ct))
             .Where(static m => m is not null)
+            .Select(static (m, _) => m!)
             .WithTrackingName("RecordMethods");
+        // [EntityMethod] methods: entry points that run the method's job on one entity (entity.Run), in a system too.
+        var ones = context.SyntaxProvider
+            .ForAttributeWithMetadataName(Symbols.EntityMethodAttribute,
+                static (node, _) => node is MethodDeclarationSyntax,
+                static (ctx, ct) => UpdateModel.EntityMethods(ctx, ct))
+            .Where(static m => m is not null)
+            .Select(static (m, _) => m!)
+            .WithTrackingName("EntityMethods");
 
-        // Group per type: Collect re-runs this cheap step on any change, but each grouped model is equatable, so
-        // RegisterSourceOutput only re-emits types whose methods or declaration actually changed.
-        var updates = methods.Collect().Combine(records.Collect()).Combine(systems.Collect())
-            .SelectMany(static (pair, _) => UpdateModel.Group(pair.Left.Left.AddRange(pair.Left.Right)!, pair.Right!))
-            .WithTrackingName("SystemUpdates");
-        // A system's code is reached only through the set's module initializer: implementation output, which IDEs skip
-        // while typing. Entry points of other types are API the user's code calls.
-        // Its vector loops too: they read the methods' bodies and their helpers' (SystemGenerator.Kernels.cs).
-        var systemUpdates = WithLoops(context, updates.Where(static m => m.Owner.IsSystem));
-        context.RegisterImplementationSourceOutput(systemUpdates, static (spc, model) => Add(spc, model));
-        context.RegisterSourceOutput(updates.Where(static m => !m.Owner.IsSystem), static (spc, model) => Add(spc, model));
+        // Entry points are API the user's code calls: source output, from declarations alone. Each calls a partial
+        // method whose body the implementation output writes (with the jobs), so an IDE typing, which skips
+        // implementation output, never reads a body, and an edit inside one changes no source output.
+        context.RegisterSourceOutput(runners, static (spc, model) => AddEntryPoints(spc, model));
+        context.RegisterSourceOutput(records, static (spc, model) => AddEntryPoints(spc, model));
+        context.RegisterSourceOutput(ones, static (spc, model) => AddEntryPoints(spc, model));
+
+        // What the bodies say (SystemGenerator.Kernels.cs): each method's vector loop, structural changes, chases, ...,
+        // in stages only implementation output reads, put back into its type's model before the code is written.
+        var bodies = BodiesOf(context);
+        var systemCode = WithBodies(updates, bodies.Systems, "SystemCode");
+        context.RegisterImplementationSourceOutput(systemCode, static (spc, model) => Add(spc, model));
+        context.RegisterImplementationSourceOutput(WithBodies(runners, bodies.Runners, "ForEachCode"), static (spc, model) => Add(spc, model));
+        context.RegisterImplementationSourceOutput(WithBodies(records, bodies.Records, "RecordCode"), static (spc, model) => Add(spc, model));
+        context.RegisterImplementationSourceOutput(WithBodies(ones, bodies.Ones, "EntityMethodCode"), static (spc, model) => Add(spc, model));
 
         // The assembly's system set: its non-generic systems and the closed generic systems it names (its own generic
         // systems' and those of referenced assemblies' public ones), registered without runtime code generation.
@@ -68,33 +87,22 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             .Where(static e => e is not null)
             .WithTrackingName("ClosedSystems")
             .Collect();
-        var set = systems.Where(static s => s!.Owner.TypeParameters.Length == 0)
-            .Select(static (s, _) => new SetEntry(s!.Owner.FullName, CodeName(s.Owner)))
+        var set = updates.Where(static s => s.Owner.TypeParameters.Length == 0)
+            .Select(static (s, _) => new SetEntry(s.Owner.FullName, CodeName(s.Owner)))
             .Collect().Combine(closed)
             .Select(static (pair, _) => new EquatableArray<SetEntry>(pair.Left.Concat(pair.Right!).Distinct()
                 .OrderBy(e => e!.System, System.StringComparer.Ordinal).ToArray()!))
             .WithTrackingName("SystemSet");
         // Pairs of systems that may share one walk (SystemGenerator.Fusion.cs): their code, and the set's declarations.
-        var fusions = FusionPairs(context, systemUpdates);
-        context.RegisterImplementationSourceOutput(fusions, static (spc, pair) => AddFusion(spc, pair));
-        var declared = fusions.Select(static (p, _) => new SetFusion(p.First.Owner.FullName, p.Second.Owner.FullName, p.FullCodeName))
-            .Collect().WithTrackingName("SetFusions");
+        // The pairs are one value, not a Collect of them: a Collect over no pair runs again on every compilation.
+        var fusions = FusionPairs(systemCode, places);
+        context.RegisterImplementationSourceOutput(fusions.SelectMany(static (all, _) => all), static (spc, pair) => AddFusion(spc, pair));
+        var declared = fusions.Select(static (all, _) => new EquatableArray<SetFusion>(
+            all.Select(p => new SetFusion(p.First.Owner.FullName, p.Second.Owner.FullName, p.FullCodeName)).ToArray())).WithTrackingName("SetFusions");
         context.RegisterImplementationSourceOutput(set.Combine(declared), static (spc, input) =>
         {
             if (input.Left.Length > 0) spc.AddSource("__EasyEcsSystems.g.cs", SourceText.From(EmitSet(input.Left, input.Right), Encoding.UTF8));
         });
-
-        // [EntityMethod] methods: entry points that run the method's job on one entity (entity.Run), in a system too.
-        var ones = context.SyntaxProvider
-            .ForAttributeWithMetadataName(Symbols.EntityMethodAttribute,
-                static (node, _) => node is MethodDeclarationSyntax,
-                static (ctx, ct) => ForEachModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ctx.SemanticModel, ct))
-            .Where(static m => m is not null)
-            .WithTrackingName("EntityMethods");
-        var entityTypes = ones.Collect()
-            .SelectMany(static (all, _) => UpdateModel.Group(all!, [], entryPoints: true).Select(m => m with { One = true }))
-            .WithTrackingName("EntityMethodTypes");
-        context.RegisterSourceOutput(entityTypes, static (spc, model) => Add(spc, model));
 
         // world.ForEach(static (ref P p) => ...): each call intercepted by the job of its lambda (SystemGenerator.Lambdas.cs).
         InitializeLambdas(context);
@@ -104,6 +112,10 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         // What the assemblies referencing this one read back (Recorder.cs): constructors' fields, helpers' bodies.
         Recorder.Initialize(context);
     }
+
+    /// <summary>The entry points of a type that is not a system, or of a type's [EntityMethod] methods: declarations only.</summary>
+    private static void AddEntryPoints(SourceProductionContext context, UpdateModel model) =>
+        context.AddSource($"{model.Owner.HintName}.{(model.One ? "EntityMethod" : "ForEach")}.EntryPoints.g.cs", SourceText.From(EmitEntryPoints(model), Encoding.UTF8));
 
     private static void Add(SourceProductionContext context, UpdateModel model)
     {
@@ -122,15 +134,15 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <summary>
     /// One file per type with [ForEach] methods or [EcsSystem], outside the type (which needs no partial): a file-local
     /// class holds an UnsafeAccessor per method (private methods too), its struct job and its filter. A system gets its
-    /// code struct (<see cref="EmitSystemCode"/>), which the set calls; any other type gets entry points, static
-    /// extension members of the type.
+    /// code struct (<see cref="EmitSystemCode"/>), which the set calls; any other type gets the passes of its entry
+    /// points (<see cref="EmitPasses"/>; the entry points themselves are source output, <see cref="EmitEntryPoints"/>).
     /// </summary>
     private static string Emit(UpdateModel model)
     {
         var owner = model.Owner;
         var sb = new StringBuilder(Header).Append('\n');
         if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
-        if (model.One || !owner.IsSystem) EmitEntryPoints(sb, model, model.One);
+        if (model.One || !owner.IsSystem) EmitPasses(sb, model);
 
         // Generic over the owner's type parameters (a generic system or runner type): one instantiation per closed type.
         sb.Append($"file static class __ForEach{owner.TypeParameters}{owner.Constraints}\n{{\n");
@@ -181,7 +193,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// The assembly's system set: its systems numbered in name order, a module initializer that registers it, and one
     /// switch per hook whose cases call each system's code directly (a direct call the JIT may inline).
     /// </summary>
-    private static string EmitSet(EquatableArray<SetEntry> entries, ImmutableArray<SetFusion> fusions)
+    private static string EmitSet(EquatableArray<SetEntry> entries, EquatableArray<SetFusion> fusions)
     {
         var sb = new StringBuilder(Header).Append('\n');
         const string world = "global::EasyEcs.World", handle = "global::EasyEcs.SystemHandle";
@@ -241,66 +253,52 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// The entry points of a type that is not a system, static extension members of the type. [ForEach] methods run
-    /// the job over the world (taking the world, the change tick for [Changed&lt;T&gt;] / [Removed&lt;T&gt;], the slice of
-    /// a sliced method); [EntityMethod] methods (<paramref name="perEntity"/>) run it on the entity they take with
-    /// <c>entity.Run</c> and return whether it ran. Both take the method's context parameters.
+    /// The names an entry point of method <paramref name="m"/> gives its parameters, free of the method's own context
+    /// parameters and type parameters, its signature, and how it passes them on to its pass (<see cref="EntryPass"/>).
     /// </summary>
-    private static void EmitEntryPoints(StringBuilder sb, UpdateModel model, bool perEntity)
+    private sealed class Entry
     {
-        var owner = model.Owner;
-        sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
-        sb.Append($"{(owner.IsPublic ? "public" : "internal")} static class {owner.FlatName}{(perEntity ? "EntityMethod" : "ForEach")}\n{{\n");
-        sb.Append($"    extension{owner.TypeParameters}({owner.FullName}){owner.Constraints}\n    {{\n");
-        for (int m = 0; m < model.Methods.Length; m++)
+        public readonly string Entity, World, Since, Slice, Local, Ran, Pass, TypeArguments;
+        public readonly bool Sliced;
+        public readonly List<string> Signature = [];
+        public readonly List<string> Arguments = [];
+
+        public Entry(OwnerModel owner, ForEachModel method, int m, bool perEntity)
         {
-            var method = model.Methods[m];
             var contexts = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Context).ToArray();
             var names = new HashSet<string>(contexts.Select(p => p.Name).Concat(method.TypeParameterNames));
             // The entity keeps the name the method gives it (Buy(Entity shop, ...) -> Buy(shop, ...)).
-            string entity = perEntity ? Free(method.Parameters.FirstOrDefault(p => p.Kind == Symbols.ParamKind.Entity)?.Name ?? "entity") : "";
-            if (perEntity) names.Add(entity);
-            string world = Free("world"), since = Free("since"), slice = Free("slice"), local = Free("job");
-            bool sliced = !perEntity && method.Slices > 1;
-            var signature = new List<string> { perEntity ? $"global::EasyEcs.Entity {Escape(entity)}" : $"global::EasyEcs.World {world}" };
-            if (method.Since) signature.Add($"ulong {since}");
-            if (sliced) signature.Add($"int {slice}");
-            signature.AddRange(contexts.Select(p => $"{p.Declared} {Escape(p.Name)}"));
-
-            string forEach = "__ForEach" + owner.TypeParameters, job = $"{forEach}.{method.Name}Job{m}{method.TypeParameters}";
-            // A pass takes its filter field, even an empty one (NoFilter); entity.Run without a filter tests none.
-            string filter = method.Since
-                ? perEntity ? $", in {forEach}.{method.Name}Filter{m}, {since}" : $", {forEach}.{method.Name}Filter{m}.Since({since})" // the static filter and the tick: no copy per call
-                : method.HasFilter || !perEntity ? $", in {forEach}.{method.Name}Filter{m}" : "";
-            if (sliced) filter = method.Sliced($"{forEach}.{method.Name}Filter{m}", slice);
-            if (perEntity)
+            Entity = perEntity ? Free(method.Parameters.FirstOrDefault(p => p.Kind == Symbols.ParamKind.Entity)?.Name ?? "entity") : "";
+            if (perEntity) names.Add(Entity);
+            World = Free("world");
+            Since = Free("since");
+            Slice = Free("slice");
+            Local = Free("job");
+            Ran = perEntity ? Free("ran") : "";
+            Sliced = !perEntity && method.Slices > 1;
+            Signature.Add(perEntity ? $"global::EasyEcs.Entity {Escape(Entity)}" : $"global::EasyEcs.World {World}");
+            Arguments.Add(perEntity ? Escape(Entity) : World);
+            if (method.Since)
             {
-                string which = method.Since ? $" and its filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>"
-                    : method.HasFilter ? " and passes its filters" : "";
-                sb.Append($"        /// <summary>Runs <c>{method.Name}</c> on <paramref name=\"{entity}\"/> when it is alive, has the method's components{which}: true when it ran. Owner thread only.</summary>\n");
-            }
-            else if (method.Record.Length > 0)
-                sb.Append($"        /// <summary>Runs <c>{method.Name}</c> on each record of <paramref name=\"{world}\"/>'s Emitted, in the order they were emitted, then clears them. Owner thread only.</summary>\n");
-            else
-            {
-                string which = method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{since}\"/>"
-                    : sliced ? $" in slice <paramref name=\"{slice}\"/> (0 to {method.Slices - 1}) of each matching table's rows" : "";
-                sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{world}\"/>{which}. Owner thread only.</summary>\n");
+                Signature.Add($"ulong {Since}");
+                Arguments.Add(Since);
             }
 
-            sb.Append($"        {Code.GeneratedCode(Symbols.GeneratorName)}\n");
-            sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static {(perEntity ? "bool" : "void")} {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", signature)}){method.Constraints}\n        {{\n");
-            // The world, for singletons, lookups and a World parameter: a default handle has none (Run returns false for it).
-            if (perEntity && (method.NeedsWorld || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Singleton)))
-                sb.Append($"            if ({Escape(entity)}.World is not {{ }} {world}) return false;\n");
-            if (perEntity)
+            if (Sliced)
             {
-                sb.Append($"            var {local} = new {job}{Fields(method, world)};\n");
-                sb.Append($"            return {Escape(entity)}.Run<{method.ComponentTypes}, {job}>(ref {local}{filter});\n");
+                Signature.Add($"int {Slice}");
+                Arguments.Add(Slice);
             }
-            else EmitPass(sb, method, forEach, m, world, local, filter, filter, "            ");
 
-            sb.Append("        }\n\n");
+            foreach (var p in contexts)
+            {
+                Signature.Add($"{p.Declared} {Escape(p.Name)}");
+                Arguments.Add((p.Declared.StartsWith("ref readonly ", System.StringComparison.Ordinal) ? "in " : p.RefKind == "ref" ? "ref " : "") + Escape(p.Name));
+            }
+
+            // The pass: a partial method of the entry points' class, generic over the owner's and the method's type parameters.
+            Pass = $"__{method.Name}_{m}";
+            TypeArguments = Joined(owner.TypeParameters, method.TypeParameters);
 
             string Free(string name)
             {
@@ -309,7 +307,110 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             }
         }
 
-        sb.Append("    }\n}\n\n");
+        /// <summary>Two type parameter lists (<c>&lt;T&gt;</c>, or "") as one.</summary>
+        private static string Joined(string a, string b) =>
+            a.Length == 0 ? b : b.Length == 0 ? a : a.Substring(0, a.Length - 1) + ", " + b.Substring(1);
+    }
+
+    /// <summary>The class of a type's entry points (<c>MoverForEach</c>, <c>ShopEntityMethod</c>).</summary>
+    private static string EntryClass(UpdateModel model) => model.Owner.FlatName + (model.One ? "EntityMethod" : "ForEach");
+
+    /// <summary>
+    /// The entry points of a type that is not a system, static extension members of the type, written from declarations
+    /// alone (source output: the user's code calls them). [ForEach] methods run the job over the world (taking the world,
+    /// the change tick for [Changed&lt;T&gt;] / [Removed&lt;T&gt;], the slice of a sliced method); [EntityMethod] methods
+    /// run it on the entity they take with <c>entity.Run</c> and return whether it ran. Both take the method's context
+    /// parameters. Each calls its pass, a partial method whose body the implementation output writes
+    /// (<see cref="EmitPasses"/>): where that output is skipped (an IDE while typing) the call compiles to nothing.
+    /// </summary>
+    private static string EmitEntryPoints(UpdateModel model)
+    {
+        var owner = model.Owner;
+        bool perEntity = model.One;
+        var sb = new StringBuilder(Header).Append('\n');
+        if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
+        sb.Append("[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\n");
+        sb.Append($"{(owner.IsPublic ? "public" : "internal")} static partial class {EntryClass(model)}\n{{\n");
+        sb.Append($"    extension{owner.TypeParameters}({owner.FullName}){owner.Constraints}\n    {{\n");
+        for (int m = 0; m < model.Methods.Length; m++)
+        {
+            var method = model.Methods[m];
+            var entry = new Entry(owner, method, m, perEntity);
+            if (perEntity)
+            {
+                string which = method.Since ? $" and its filtered components changed (or went) at or after tick <paramref name=\"{entry.Since}\"/>"
+                    : method.HasFilter ? " and passes its filters" : "";
+                sb.Append($"        /// <summary>Runs <c>{method.Name}</c> on <paramref name=\"{entry.Entity}\"/> when it is alive, has the method's components{which}: true when it ran. Owner thread only.</summary>\n");
+            }
+            else if (method.Record.Length > 0)
+                sb.Append($"        /// <summary>Runs <c>{method.Name}</c> on each record of <paramref name=\"{entry.World}\"/>'s Emitted, in the order they were emitted, then clears them. Owner thread only.</summary>\n");
+            else
+            {
+                string which = method.Since ? $" whose filtered components changed (or went) at or after tick <paramref name=\"{entry.Since}\"/>"
+                    : entry.Sliced ? $" in slice <paramref name=\"{entry.Slice}\"/> (0 to {method.Slices - 1}) of each matching table's rows" : "";
+                sb.Append($"        /// <summary>Runs <c>{method.Name}</c> for every matching entity of <paramref name=\"{entry.World}\"/>{which}. Owner thread only.</summary>\n");
+            }
+
+            sb.Append($"        {Code.GeneratedCode(Symbols.GeneratorName)}\n");
+            sb.Append($"        {(method.PublicEntry ? "public" : "internal")} static {(perEntity ? "bool" : "void")} {Escape(method.Name)}{method.TypeParameters}({string.Join(", ", entry.Signature)}){method.Constraints}\n        {{\n");
+            string call = $"{EntryClass(model)}.{entry.Pass}{entry.TypeArguments}({string.Join(", ", entry.Arguments)}{(perEntity ? $", ref {entry.Ran}" : "")});";
+            if (perEntity) sb.Append($"            bool {entry.Ran} = false;\n            {call}\n            return {entry.Ran};\n");
+            else sb.Append($"            {call}\n");
+            sb.Append("        }\n\n");
+        }
+
+        sb.Append("    }\n");
+        for (int m = 0; m < model.Methods.Length; m++)
+        {
+            var entry = new Entry(owner, model.Methods[m], m, perEntity);
+            sb.Append($"\n    static partial void {PassSignature(model, model.Methods[m], entry)};\n");
+        }
+
+        sb.Append("}\n");
+        return sb.ToString();
+    }
+
+    /// <summary>The signature of an entry point's pass (<see cref="Entry.Pass"/>), with the owner's and the method's constraints.</summary>
+    private static string PassSignature(UpdateModel model, ForEachModel method, Entry entry) =>
+        $"{entry.Pass}{entry.TypeArguments}({string.Join(", ", entry.Signature)}{(model.One ? $", ref bool {entry.Ran}" : "")}){model.Owner.Constraints}{method.Constraints}";
+
+    /// <summary>
+    /// The passes of the entry points (<see cref="EmitEntryPoints"/>), implementation output: the bodies of their partial
+    /// methods, inlined into the entry points. A [ForEach] method's runs the job over the world; an [EntityMethod]
+    /// method's runs it on the entity (<c>entity.Run</c>), setting whether it ran.
+    /// </summary>
+    private static void EmitPasses(StringBuilder sb, UpdateModel model)
+    {
+        var owner = model.Owner;
+        bool perEntity = model.One;
+        sb.Append($"static partial class {EntryClass(model)}\n{{\n");
+        for (int m = 0; m < model.Methods.Length; m++)
+        {
+            var method = model.Methods[m];
+            var entry = new Entry(owner, method, m, perEntity);
+            string forEach = "__ForEach" + owner.TypeParameters, job = $"{forEach}.{method.Name}Job{m}{method.TypeParameters}";
+            // A pass takes its filter field, even an empty one (NoFilter); entity.Run without a filter tests none.
+            string filter = method.Since
+                ? perEntity ? $", in {forEach}.{method.Name}Filter{m}, {entry.Since}" : $", {forEach}.{method.Name}Filter{m}.Since({entry.Since})" // the static filter and the tick: no copy per call
+                : method.HasFilter || !perEntity ? $", in {forEach}.{method.Name}Filter{m}" : "";
+            if (entry.Sliced) filter = method.Sliced($"{forEach}.{method.Name}Filter{m}", entry.Slice);
+            if (m > 0) sb.Append('\n');
+            sb.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
+            sb.Append($"    static partial void {PassSignature(model, method, entry)}\n    {{\n");
+            if (perEntity)
+            {
+                // The world, for singletons, lookups and a World parameter: a default handle has none (Run returns false for it).
+                if (method.NeedsWorld || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Singleton))
+                    sb.Append($"        if ({Escape(entry.Entity)}.World is not {{ }} {entry.World}) return;\n");
+                sb.Append($"        var {entry.Local} = new {job}{Fields(method, entry.World)};\n");
+                sb.Append($"        {entry.Ran} = {Escape(entry.Entity)}.Run<{method.ComponentTypes}, {job}>(ref {entry.Local}{filter});\n");
+            }
+            else EmitPass(sb, method, forEach, m, entry.World, entry.Local, filter, filter, "        ");
+
+            sb.Append("    }\n");
+        }
+
+        sb.Append("}\n\n");
     }
 
     /// <summary>
@@ -1309,7 +1410,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             : Parameters.Any(p => p.Kind is Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.Reduction || p is { Kind: Symbols.ParamKind.Context, RefKind: "ref" }) || Stamps
                 || IsChaseTwin); // the rows ahead of the row it runs: their chases prefetched
 
-        public static ForEachModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
+        /// <summary>
+        /// The method as its declaration says (signature, attributes, parameter kinds, owner): no body is read, so what
+        /// a body decides keeps its default here (stable, parallel, identities, a Lookup's key, chases, the vector loop,
+        /// the pair job, out of line, fusion) until <see cref="WithBody"/> puts it in, in implementation output.
+        /// </summary>
+        public static ForEachModel? Declare(IMethodSymbol method, Compilation compilation, System.Threading.CancellationToken ct)
         {
             if (!Symbols.IsValidForEach(method)) return null;
             ct.ThrowIfCancellationRequested();
@@ -1338,8 +1444,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     Symbols.ParamKind.Scratch => new ParamModel(Symbols.ParamKind.Scratch, Symbols.ScratchElement(p.Type)!.ToDisplayString(Symbols.Fqn), "", p.Name, declared),
                     Symbols.ParamKind.Emit => new ParamModel(Symbols.ParamKind.Emit, // a write of Emitted<T>, once per pass
                         Symbols.EmitElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared),
-                    Symbols.ParamKind.Lookup => new ParamModel(Symbols.ParamKind.Lookup, Symbols.LookupElement(p.Type)!.ToDisplayString(Symbols.Fqn), "in", p.Name, declared,
-                        Key: Symbols.LookupKey(p, Symbols.WithBody(method, syntax, model).Item1 is { } declaration ? (SyntaxNode?)declaration.Body ?? declaration.ExpressionBody : null)?.ToDisplayString(Symbols.Fqn) ?? ""),
+                    Symbols.ParamKind.Lookup => new ParamModel(Symbols.ParamKind.Lookup, Symbols.LookupElement(p.Type)!.ToDisplayString(Symbols.Fqn), "in", p.Name, declared), // its Key: BodyModel
                     Symbols.ParamKind.Tile => TileModel(p, declared),
                     Symbols.ParamKind.View => ViewParameter(p, declared),
                     Symbols.ParamKind.Context => new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn),
@@ -1374,7 +1479,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 if (Symbols.TileElements(p.Type) is { } tile && Symbols.Classify(p) == Symbols.ParamKind.Tile)
                 {
                     Add(Symbols.FilterKind.With, tile.Grid);
-                    if (model.Compilation.GetTypeByMetadataName("EasyEcs.DynamicBuffer`1") is { } buffer) Add(Symbols.FilterKind.With, buffer.Construct(tile.Cell));
+                    if (compilation.GetTypeByMetadataName("EasyEcs.DynamicBuffer`1") is { } buffer) Add(Symbols.FilterKind.With, buffer.Construct(tile.Cell));
                 }
 
             var query = parameters.Where(p => p.Kind is Symbols.ParamKind.Component or Symbols.ParamKind.ComponentSpan or Symbols.ParamKind.Mutable)
@@ -1397,13 +1502,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             if (record.Length == 0) foreach (var (kind, type, _, _) in Symbols.GroupFilters(method)) Add(kind, type);
             if (query.Count > 0) with.RemoveAll(query.Contains); // a group's [With<T>] (or a Tile's) the method already queries
 
-            bool stable = Symbols.IsStable(method, syntax, model);
-            bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
-            bool identifies = Symbols.OnlyIdentifies(method, syntax, model);
-                        // Declaration order by member index: a text position would change (and re-emit the file) on any edit above it.
+            // Declaration order by member index: a text position would change (and re-emit the file) on any edit above it.
             int order = method.ContainingType.GetMembers().IndexOf(method);
-            string? scalar = null; // why the method runs scalar; an [EntityMethod] method has no loop to explain
-            return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, stable, parallel, order,
+            return new ForEachModel(OwnerModel.From(method.ContainingType), method.Name, method.IsStatic, false, false, order,
                 new EquatableArray<string>(query.ToArray()),
                 new EquatableArray<ParamModel>(parameters), new EquatableArray<string>(with.ToArray()),
                 new EquatableArray<string>(without.ToArray()), new EquatableArray<string>(withAny.ToArray()),
@@ -1416,18 +1517,23 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 // A public entry point names only public types: its context parameters' and its constraints'.
                 method.Parameters.Where(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Context).All(p => Symbols.IsPublic(p.Type))
                     && method.TypeParameters.SelectMany(t => t.ConstraintTypes).All(Symbols.IsPublic)) {
-                    Slices = Symbols.Slices(method), ChunkSize = Symbols.ChunkSize(method), MaxRows = Symbols.MaxRows(method), Identifies = identifies,
+                    Slices = Symbols.Slices(method), ChunkSize = Symbols.ChunkSize(method), MaxRows = Symbols.MaxRows(method),
                     One = Symbols.IsEntityMethod(method), Consume = Symbols.IsConsume(method), Record = record,
-                    // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
-                    // One entity has no run of rows to vectorize; a system's loop is its implementation's (SystemLoops).
-                    Simd = Symbols.IsEntityMethod(method) || !outside || PairForm.IsPairMethod(method) || record.Length > 0 || Symbols.MaxRows(method) > 0 ? null : VectorLoop(method, syntax, model, parallel, ct, out scalar),
-                    Scalar = scalar ?? "",
-                    Pair = outside && PairForm.IsPairMethod(method) ? PairModel.Create(method, syntax, model, parallel, ct) : null,
-                    // Reads of other entities at the row's ids, by EntityId (a keyed lookup finds through its index).
-                    Chases = Symbols.IsEntityMethod(method) || record.Length > 0 || Symbols.MaxRows(method) > 0 ? new([]) : Usable(Generator.Chases.Of(method, syntax, model, ct, out _), parameters),
-                    OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LoopsOrCalls(syntax),
-                    Fusion = outside || PairForm.IsPairMethod(method) || record.Length > 0 ? null : FusionSide.Of(method, stable, identifies, parallel), // a pair pass walks windows
                 };
+        }
+
+        /// <summary>The method with what its body decides (<see cref="BodyModel"/>) put in.</summary>
+        public ForEachModel WithBody(BodyModel body)
+        {
+            var parameters = Parameters.ToArray();
+            for (int i = 0; i < parameters.Length && i < body.Keys.Length; i++)
+                if (body.Keys[i].Length > 0) parameters[i] = parameters[i] with { Key = body.Keys[i] };
+            return this with
+            {
+                Stable = body.Stable, Parallel = body.Parallel, Identifies = body.Identifies, Parameters = new EquatableArray<ParamModel>(parameters),
+                Simd = body.Simd, Scalar = body.Scalar, Pair = body.Pair, Chases = Usable(body.Chases, parameters), OutOfLine = body.OutOfLine,
+                Fusion = body.Fusion,
+            };
         }
 
         /// <summary>
@@ -1456,7 +1562,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             }, ct, out scalar);
 
         /// <summary>The body has a loop or a call (syntax only: a call's target is not resolved).</summary>
-        private static bool LoopsOrCalls(MethodDeclarationSyntax syntax) =>
+        public static bool LoopsOrCalls(MethodDeclarationSyntax syntax) =>
             ((SyntaxNode?)syntax.Body ?? syntax.ExpressionBody)?.DescendantNodes().Any(static n => n is ForStatementSyntax
                 or ForEachStatementSyntax or ForEachVariableStatementSyntax or WhileStatementSyntax or DoStatementSyntax
                 or InvocationExpressionSyntax) == true;
@@ -1538,42 +1644,80 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// <summary>The system's hooks.</summary>
         public EquatableArray<HookModel> Hooks { get; init; } = new([]);
 
-        /// <summary>
-        /// One model per type with [ForEach] methods, and per system (with or without methods), its methods in
-        /// declaration order. A [ForEach] method of an [EcsSystem] the generator writes no code for (EECS074, EECS022)
-        /// is left out; <paramref name="entryPoints"/> ([EntityMethod] methods) keeps every owner, a system's too, since
-        /// its entry points need no system code.
-        /// </summary>
-        public static IEnumerable<UpdateModel> Group(ImmutableArray<ForEachModel> methods, ImmutableArray<SystemModel> systems, bool entryPoints = false)
-        {
-            var owners = new List<OwnerModel>();
-            var byOwner = new Dictionary<OwnerModel, List<ForEachModel>>();
-            var bySystem = new Dictionary<OwnerModel, SystemModel>();
-            foreach (var system in systems)
-            {
-                if (bySystem.ContainsKey(system.Owner)) continue; // a partial type: one attribute (AllowMultiple = false)
-                bySystem[system.Owner] = system;
-                byOwner[system.Owner] = [];
-                owners.Add(system.Owner);
-            }
+        /// <summary>The attributes of the methods a type's passes run: [ForEach] and [Drain].</summary>
+        public static readonly string[] Passes = [Symbols.ForEachAttribute, Symbols.DrainAttribute];
+        private static readonly string[] ForEachAttributes = [Symbols.ForEachAttribute];
+        private static readonly string[] EntityMethodAttributes = [Symbols.EntityMethodAttribute];
 
+        /// <summary>
+        /// The [ForEach] and [Drain] methods of a type that is not a system, in declaration order, built by the transform
+        /// of the method that holds the type's first [ForEach] (null from every other: one model per type, without a
+        /// Collect regrouping them). A type whose methods are all invalid has none.
+        /// </summary>
+        public static UpdateModel? Runner(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
+        {
+            var type = ((IMethodSymbol)ctx.TargetSymbol).ContainingType;
+            return Symbols.IsSystem(type) ? null : Of(ctx, type, ForEachAttributes, Passes, ct);
+        }
+
+        /// <summary>
+        /// The [Drain] methods of a type that is not a system and has no [ForEach] method (whose model holds them,
+        /// <see cref="Runner"/>), built by the transform of the method that holds the first.
+        /// </summary>
+        public static UpdateModel? Records(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
+        {
+            var type = ((IMethodSymbol)ctx.TargetSymbol).ContainingType;
+            return Symbols.IsSystem(type) || MethodsWith(type, ForEachAttributes).Count > 0 ? null : Of(ctx, type, Passes, Passes, ct);
+        }
+
+        /// <summary>The [EntityMethod] methods of a type (a system's too: they need no system code), as <see cref="Runner"/> builds them.</summary>
+        public static UpdateModel? EntityMethods(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct) =>
+            Of(ctx, ((IMethodSymbol)ctx.TargetSymbol).ContainingType, EntityMethodAttributes, EntityMethodAttributes, ct) is { } model ? model with { One = true } : null;
+
+        /// <summary>
+        /// The model of the methods of <paramref name="type"/> carrying one of <paramref name="attributes"/>, when the
+        /// transform's node holds the first of <paramref name="keys"/> on the type's first method carrying one.
+        /// </summary>
+        private static UpdateModel? Of(GeneratorAttributeSyntaxContext ctx, INamedTypeSymbol type, string[] keys, string[] attributes, System.Threading.CancellationToken ct)
+        {
+            var keyed = MethodsWith(type, keys);
+            if (keyed.Count == 0 || !HoldsFirst(ctx, keyed[0], keys)) return null;
+            var models = Declared(MethodsWith(type, attributes), ctx.SemanticModel.Compilation, ct);
+            return models.Length == 0 ? null : new UpdateModel(OwnerModel.From(type), new EquatableArray<ForEachModel>(models));
+        }
+
+        /// <summary>The methods of <paramref name="type"/> carrying one of <paramref name="attributes"/>, in declaration order.</summary>
+        public static List<IMethodSymbol> MethodsWith(INamedTypeSymbol type, string[] attributes)
+        {
+            var methods = new List<IMethodSymbol>();
+            foreach (var member in type.GetMembers())
+                if (member is IMethodSymbol method && method.GetAttributes().Any(a => attributes.Any(n => Symbols.Named(a.AttributeClass, n))))
+                    methods.Add(method);
+            return methods;
+        }
+
+        /// <summary>The declaration models of the valid ones of <paramref name="methods"/>, in their order.</summary>
+        public static ForEachModel[] Declared(List<IMethodSymbol> methods, Compilation compilation, System.Threading.CancellationToken ct)
+        {
+            var models = new List<ForEachModel>();
             foreach (var method in methods)
             {
-                if (!byOwner.TryGetValue(method.Owner, out var list))
-                {
-                    if (method.Owner.IsSystem && !entryPoints) continue; // a valid system always has its model
-                    byOwner[method.Owner] = list = [];
-                    owners.Add(method.Owner);
-                }
-
-                list.Add(method);
+                ct.ThrowIfCancellationRequested();
+                if (ForEachModel.Declare(method, compilation, ct) is { } model) models.Add(model);
             }
+            return models.ToArray();
+        }
 
-            foreach (var owner in owners)
-            {
-                var model = new UpdateModel(owner, new EquatableArray<ForEachModel>(byOwner[owner].OrderBy(m => m.Order).ToArray()));
-                yield return bySystem.TryGetValue(owner, out var s) ? model with { Interval = s.Interval, Phase = s.Phase, Hooks = s.Hooks } : model;
-            }
+        /// <summary>
+        /// Whether the node the transform runs for holds the first of <paramref name="attributes"/> on
+        /// <paramref name="symbol"/> (a partial declaration's parts each match on their own): exactly one node builds the model.
+        /// </summary>
+        public static bool HoldsFirst(GeneratorAttributeSyntaxContext ctx, ISymbol symbol, string[] attributes)
+        {
+            foreach (var attribute in symbol.GetAttributes())
+                if (attributes.Any(n => Symbols.Named(attribute.AttributeClass, n)))
+                    return attribute.ApplicationSyntaxReference is { } at && at.SyntaxTree == ctx.TargetNode.SyntaxTree && ctx.TargetNode.Span.Contains(at.Span);
+            return false;
         }
     }
 
@@ -1581,21 +1725,30 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     private sealed record HookModel(string Kind, string Name, string Arguments);
 
     /// <summary>
-    /// A system the generator writes code for: its valid [UpdateInterval(n, Phase = p)] (an invalid one is EECS083's,
-    /// and the system runs every update) and its valid hooks (EECS077 otherwise). Declarations only, no body.
+    /// A system the generator writes code for, from its declaration alone: its model (<see cref="Update"/>: its
+    /// [ForEach] / [Drain] methods, its valid hooks (EECS077 otherwise), its valid [UpdateInterval(n, Phase = p)] (an
+    /// invalid one is EECS083's, and the system runs every update)) and where it is declared, for pairing
+    /// (<see cref="Place"/>, null for a generic or partial system). One transform reads both; each consumer
+    /// selects its part, so a system moved in its file changes no code of its own.
     /// </summary>
-    private sealed record SystemModel(OwnerModel Owner, int Interval, int Phase, EquatableArray<HookModel> Hooks)
+    private sealed record SystemDeclaration(UpdateModel Update, SystemPlace? Place)
     {
-        public static SystemModel? Create(INamedTypeSymbol type)
+        private static readonly string[] Attribute = [Symbols.EcsSystemAttribute];
+
+        public static SystemDeclaration? Create(GeneratorAttributeSyntaxContext ctx, System.Threading.CancellationToken ct)
         {
-            if (!Symbols.GeneratesSystem(type)) return null;
+            var type = (INamedTypeSymbol)ctx.TargetSymbol;
+            if (!Symbols.GeneratesSystem(type) || !UpdateModel.HoldsFirst(ctx, type, Attribute)) return null; // a partial type: one attribute (AllowMultiple = false)
             var (interval, phase) = Symbols.ScheduleProblem(type) == null && Symbols.Schedule(type) is var (i, p, _) ? (i, p) : (0, 0);
             var hooks = new List<HookModel>();
             foreach (var method in type.GetMembers().OfType<IMethodSymbol>())
                 if (Symbols.Hook(method) is var kind and not Symbols.HookKind.None && Symbols.HookProblem(method) == null)
                     hooks.Add(new HookModel(kind.ToString(), method.Name,
-                        new string(method.Parameters.Select(p => Symbols.Named(p.Type, Symbols.World) ? 'W' : 'S').ToArray())));
-            return new SystemModel(OwnerModel.From(type), interval, phase, new EquatableArray<HookModel>(hooks.ToArray()));
+                        new string(method.Parameters.Select(q => Symbols.Named(q.Type, Symbols.World) ? 'W' : 'S').ToArray())));
+            var methods = UpdateModel.Declared(UpdateModel.MethodsWith(type, UpdateModel.Passes), ctx.SemanticModel.Compilation, ct);
+            var update = new UpdateModel(OwnerModel.From(type), new EquatableArray<ForEachModel>(methods))
+                { Interval = interval, Phase = phase, Hooks = new EquatableArray<HookModel>(hooks.ToArray()) };
+            return new SystemDeclaration(update, SystemPlace.Create(type, ctx.TargetNode));
         }
     }
 

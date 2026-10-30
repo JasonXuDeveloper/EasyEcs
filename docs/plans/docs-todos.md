@@ -1628,3 +1628,20 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
 - decisions.mdx + zh: the decision record (draft in the item-9 report); roadmap: item 9 done; changelog (New) and
   README "What's new".
 - glossary: "budget" (a cap of rows per run, game engines' time-sliced work) if the docs pass keeps the word.
+
+## feat-generator-cost (G1): declaration models apart from body facts
+
+- architecture.mdx + zh (generator section, the paragraph on the incremental rules): type models (runners, record
+  passes, [EntityMethod] types, systems) are built from declarations only, one per type by the node holding its
+  first attribute (no Collect regroup); body facts (stable, parallel, lookups, vector loop, pair, chases, fusion
+  side) are a model per method merged only into implementation outputs, so a keystroke inside a body reruns no
+  source output; one SemanticModel per syntax tree per compilation for the vector loops.
+- architecture.mdx + zh (SystemGenerator row): a runner's and an [EntityMethod]'s entry points are a source output
+  (`<Type>.ForEach.EntryPoints.g.cs`, `.EntityMethod.EntryPoints.g.cs`) that call a `static partial void` pass; the
+  implementation output writes the pass and the job, so the IDE keeps the members while typing.
+- guide/queries.mdx + zh, "The generator writes" tab of `[EntityMethod]` (RequestsEntityMethod): now
+  `public static partial class RequestsEntityMethod` whose `TakeHit` sets `bool ran = false;`, calls
+  `RequestsEntityMethod.__TakeHit_0(unit, damage, ref ran)` and returns `ran`; the pass (`static partial void`,
+  AggressiveInlining) does `if (unit.World is not { } world) return;` then builds the job and
+  `ran = unit.Run<...>(ref job, in filter)`.
+- decisions.mdx + zh: the decision record of this branch (draft in the G1 report).
