@@ -229,7 +229,7 @@ using (var forms = new World())
     Forms.Serve(forms, ref served);
     Check(served == 70 && forms.Count<Order>() == 30, "a budget of 70 rows, consumed");
     Forms.Serve(forms, ref served);
-    Check(served == 100 && forms.Count<Order>() == 0, "the rows over the budget wait a run");
+    Check(served == 100 && !forms.Any<Order>(), "the rows over the budget wait a run");
 }
 
 // Stepping tiles: a Jacobi step into the tile's second buffer (a blur that empties out) and a [GaussSeidel] distance
