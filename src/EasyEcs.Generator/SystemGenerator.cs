@@ -312,8 +312,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             a.Length == 0 ? b : b.Length == 0 ? a : a.Substring(0, a.Length - 1) + ", " + b.Substring(1);
     }
 
-    /// <summary>The class of a type's entry points (<c>MoverForEach</c>, <c>ShopEntityMethod</c>).</summary>
-    private static string EntryClass(UpdateModel model) => model.Owner.FlatName + (model.One ? "EntityMethod" : "ForEach");
+    /// <summary>The class of a type's entry points (<c>MoverForEach</c>, <c>ShopEntityMethods</c>).</summary>
+    private static string EntryClass(UpdateModel model) => model.Owner.FlatName + (model.One ? "EntityMethods" : "ForEach");
 
     /// <summary>
     /// The entry points of a type that is not a system, static extension members of the type, written from declarations
