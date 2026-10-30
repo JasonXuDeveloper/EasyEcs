@@ -32,9 +32,15 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              masked walk) and pairs of systems declared or ordered one after the other as one job
                              (__A__B_Fusion, run by the set's RunFused switch when both are adjacent, enabled and due); a walk with a chasing
                              method gets a twin walk (..._FusedNChases) of its methods' twins, picked past the cache;
-                             SystemGenerator.Kernels.cs: a system method's vector loop in a stage of its own that only
-                             implementation output reads (SystemLoops, put back into the system's model by SystemCode),
-                             so an IDE typing never binds the bodies of the method and its helpers;
+                             the type models (systems, other types' [ForEach] / [Drain], [EntityMethod]) are built from
+                             declarations alone by the transform of the node holding the type's first attribute (no
+                             Collect); entry points are source output calling a partial pass whose body the
+                             implementation output writes;
+                             SystemGenerator.Kernels.cs: what a method's body decides (vector loop, stable, parallel,
+                             identities, a Lookup's key, chases, pair job, out of line, fusion side: BodyModel) in
+                             stages only implementation output reads (ForEachBodies, RecordBodies, EntityMethodBodies,
+                             put back into each type's model by SystemCode / ForEachCode / RecordCode / EntityMethodCode),
+                             so an IDE typing never binds a body and a body's edit changes no source output;
                              SystemGenerator.Loops.cs: the loops of a job's Execute Kernel translated (each width's
                              vector loop, the flat loops, the vector tail), in Execute while it declares at most 32 IL
                              locals (Locals counts them), else each in an AggressiveInlining method of the job (D135);

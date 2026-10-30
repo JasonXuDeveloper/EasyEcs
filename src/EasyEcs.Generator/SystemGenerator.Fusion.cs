@@ -381,21 +381,13 @@ public sealed partial class SystemGenerator
 
     /// <summary>
     /// The pairs of systems of the assembly that may share one walk (<see cref="FusionPair"/>): from each system's
-    /// generated model and its place in the schedule's declarations (group, orderings, file and position).
+    /// model with its bodies and its place in the schedule's declarations (group, orderings, file and position).
     /// </summary>
-    private static IncrementalValuesProvider<FusionPair> FusionPairs(IncrementalGeneratorInitializationContext context,
-        IncrementalValuesProvider<UpdateModel> updates)
-    {
-        var places = context.SyntaxProvider
-            .ForAttributeWithMetadataName(Symbols.EcsSystemAttribute,
-                static (node, _) => node is StructDeclarationSyntax,
-                static (ctx, _) => SystemPlace.Create((INamedTypeSymbol)ctx.TargetSymbol, ctx.TargetNode))
-            .Where(static p => p is not null)
-            .WithTrackingName("SystemPlaces");
-        return updates.Where(static m => m.Owner.IsSystem).Collect().Combine(places.Collect())
-            .SelectMany(static (pair, _) => FusionPair.Find(pair.Left, pair.Right!))
+    private static IncrementalValueProvider<EquatableArray<FusionPair>> FusionPairs(IncrementalValuesProvider<UpdateModel> systems,
+        IncrementalValuesProvider<SystemPlace> places) =>
+        systems.Collect().Combine(places.Collect())
+            .Select(static (pair, _) => new EquatableArray<FusionPair>(FusionPair.Find(pair.Left, pair.Right).ToArray()))
             .WithTrackingName("SystemFusions");
-    }
 
     /// <summary>
     /// Where a system is declared, for pairing (declarations only): its group, the systems its orderings name, where it

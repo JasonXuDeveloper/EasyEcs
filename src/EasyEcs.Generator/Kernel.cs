@@ -1459,7 +1459,7 @@ internal sealed partial class Kernel
             .FirstOrDefault(m => m.IsStatic && m.Parameters.Length == 2 && m.Parameters.All(q => SymbolEqualityComparer.Default.Equals(q.Type, type)));
         if (combine?.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(ct) is not MethodDeclarationSyntax syntax)
             throw new Unsupported($"{name}.Combine is not declared in this compilation, so its lanes cannot be combined field by field");
-        if (compilation.GetSemanticModel(syntax.SyntaxTree).GetOperation(syntax, ct) is not IMethodBodyOperation body)
+        if (ModelOf(compilation, syntax.SyntaxTree).GetOperation(syntax, ct) is not IMethodBodyOperation body)
             throw new Unsupported($"{name}.Combine has no body");
         var block = body.ExpressionBody ?? body.BlockBody;
         IOperation? returned = block is { Operations.Length: 1 } && block.Operations[0] is IReturnOperation { ReturnedValue: var e } ? e : null;

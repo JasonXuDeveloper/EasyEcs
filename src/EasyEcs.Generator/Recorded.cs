@@ -145,7 +145,7 @@ internal sealed class Recorded
         }
 
         if (syntax is not ConstructorDeclarationSyntax { Initializer: null } declaration
-            || compilation.GetSemanticModel(declaration.SyntaxTree).GetOperation(declaration, ct) is not IConstructorBodyOperation body)
+            || Kernel.ModelOf(compilation, declaration.SyntaxTree).GetOperation(declaration, ct) is not IConstructorBodyOperation body)
             return (null, $"{type.Name}'s constructor is not declared in this compilation, so the fields it sets are not known");
         // => _x = x: the block of its one statement
         var statements = body.BlockBody?.Operations ?? body.ExpressionBody?.Operations ?? [];

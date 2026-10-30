@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
@@ -6,55 +7,114 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The vector loops of systems' [ForEach] methods, in a stage only implementation output reads: a loop reads the
-/// method's body and the bodies of the helpers it calls (Kernel.Inlining.cs), and a system's code is implementation
-/// output, so an IDE that skips that output while the user types (Visual Studio, Rider) never binds them. The
-/// declaration models (<see cref="ForEachModel"/>) leave a system method's loop out; <see cref="WithLoops"/> puts each
-/// back into its system's model before the code is written. Runner types' loops stay in their models: their entry
-/// points are API the user's code calls, written as source output.
+/// What a method's body decides, in stages only implementation output reads: its vector loop (which reads the bodies of
+/// the helpers it calls too, Kernel.Inlining.cs), whether it changes structure, uses its entity only as an identity,
+/// runs in parallel, finds a Lookup by key, chases other entities, runs out of line, and what pass fusion knows of it.
+/// The code of systems and the passes of entry points are implementation output, so an IDE that skips that output while
+/// the user types (Visual Studio, Rider) never binds a body. The declaration models (<see cref="ForEachModel.Declare"/>)
+/// leave all of it out; <see cref="WithBodies"/> puts each method's back into its type's model before the code is
+/// written.
 /// </summary>
 public sealed partial class SystemGenerator
 {
-    /// <summary>A system method's vector loop: its owner (<see cref="OwnerModel.FullName"/>), its declaration order, the loop or the reason.</summary>
-    private sealed record LoopModel(string Owner, int Order, Kernel.Code? Simd, string Scalar, PairModel? Pair)
+    /// <summary>
+    /// What the body of a method says: its owner (<see cref="OwnerModel.FullName"/>) and declaration order, then the
+    /// facts <see cref="ForEachModel.WithBody"/> puts in (<see cref="Keys"/>: per parameter, a Lookup's index key
+    /// when the pass builds its index, else "").
+    /// </summary>
+    private sealed record BodyModel(string Owner, int Order, bool InSystem, bool Stable, bool Parallel, bool Identifies, EquatableArray<string> Keys,
+        EquatableArray<Chase> Chases, Kernel.Code? Simd, string Scalar, PairModel? Pair, bool OutOfLine, FusionSide? Fusion)
     {
-        public static LoopModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
+        public static BodyModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {
-            if (Symbols.IsRunner(method) || !Symbols.GeneratesSystem(method.ContainingType)) return null;
-            string owner = OwnerModel.From(method.ContainingType).FullName;
-            int order = method.ContainingType.GetMembers().IndexOf(method);
-            bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model) == null;
-            // A pair method's loop is its pair job's (SystemGenerator.Pairs.cs).
-            if (PairForm.IsPairMethod(method)) return new LoopModel(owner, order, null, "", PairModel.Create(method, syntax, model, parallel, ct));
-            var simd = ForEachModel.VectorLoop(method, syntax, model, parallel, ct, out string? scalar);
-            return new LoopModel(owner, order, simd, scalar ?? "", null);
+            if (!Symbols.IsValidForEach(method)) return null;
+            ct.ThrowIfCancellationRequested();
+            bool outside = Symbols.IsRunner(method), one = Symbols.IsEntityMethod(method), record = Symbols.IsDrain(method), pair = PairForm.IsPairMethod(method);
+            bool stable = Symbols.IsStable(method, syntax, model);
+            bool parallel = Symbols.IsParallel(method) && Symbols.ParallelProblem(method, syntax, model, stable) == null;
+            bool identifies = Symbols.OnlyIdentifies(method, syntax, model);
+            var body = Symbols.WithBody(method, syntax, model).Item1 is { } declaration ? (SyntaxNode?)declaration.Body ?? declaration.ExpressionBody : null;
+            var keys = new string[method.Parameters.Length];
+            for (int i = 0; i < keys.Length; i++)
+                keys[i] = !(i == 0 && record) && Symbols.Classify(method.Parameters[i], outside) == Symbols.ParamKind.Lookup
+                    ? Symbols.LookupKey(method.Parameters[i], body)?.ToDisplayString(Symbols.Fqn) ?? "" : "";
+            string? scalar = null; // why the method runs scalar; an [EntityMethod] method has no loop to explain
+            // Kernel.Vectorize decides alone (static, stable, its body; in parallel too): the analyzer reports its reasons.
+            // One entity has no run of rows to vectorize; a pair method's loop is its pair job's (SystemGenerator.Pairs.cs).
+            var simd = one || pair || record ? null : ForEachModel.VectorLoop(method, syntax, model, parallel, ct, out scalar);
+            return new BodyModel(OwnerModel.From(method.ContainingType).FullName, method.ContainingType.GetMembers().IndexOf(method), !outside,
+                stable, parallel, identifies, new EquatableArray<string>(keys),
+                // Reads of other entities at the row's ids, by EntityId (a keyed lookup finds through its index).
+                one || record ? new([]) : Generator.Chases.Of(method, syntax, model, ct, out _),
+                simd, scalar ?? "",
+                pair && !record ? PairModel.Create(method, syntax, model, parallel, ct) : null,
+                method.Parameters.Any(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Scratch) && ForEachModel.LoopsOrCalls(syntax),
+                outside || pair || record ? null : FusionSide.Of(method, stable, identifies, parallel)); // a pair pass walks windows
         }
     }
 
-    /// <summary>The systems' models with each method's vector loop (<see cref="LoopModel"/>) put back.</summary>
-    private static IncrementalValuesProvider<UpdateModel> WithLoops(IncrementalGeneratorInitializationContext context, IncrementalValuesProvider<UpdateModel> systems)
+    /// <summary>
+    /// The bodies of the [ForEach], [Drain] and [EntityMethod] methods, by owner and declaration order: per kind of
+    /// type, so a body's edit reruns only the merge of its own kind (<see cref="WithBodies"/>): systems' passes, other
+    /// types' passes ([ForEach] and [Drain]), the [Drain] methods of types without a [ForEach] method, entity methods.
+    /// </summary>
+    private static (IncrementalValueProvider<Bodies> Systems, IncrementalValueProvider<Bodies> Runners, IncrementalValueProvider<Bodies> Records,
+        IncrementalValueProvider<Bodies> Ones) BodiesOf(IncrementalGeneratorInitializationContext context)
     {
-        var loops = context.SyntaxProvider
-            .ForAttributeWithMetadataName(Symbols.ForEachAttribute,
+        IncrementalValuesProvider<BodyModel> Of(string attribute, string name) => context.SyntaxProvider
+            .ForAttributeWithMetadataName(attribute,
                 static (node, _) => node is MethodDeclarationSyntax,
-                static (ctx, ct) => LoopModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ctx.SemanticModel, ct))
+                static (ctx, ct) => BodyModel.Create((IMethodSymbol)ctx.TargetSymbol, (MethodDeclarationSyntax)ctx.TargetNode, ctx.SemanticModel, ct))
             .Where(static m => m is not null)
-            .WithTrackingName("SystemLoops");
-        return systems.Combine(loops.Collect())
-            .Select(static (pair, _) => With(pair.Left, pair.Right!))
-            .WithTrackingName("SystemCode");
+            .Select(static (m, _) => m!)
+            .WithTrackingName(name);
+        var passes = Of(Symbols.ForEachAttribute, "ForEachBodies");
+        var records = Of(Symbols.DrainAttribute, "RecordBodies");
+        var runnerRecords = records.Where(static b => !b.InSystem).Collect();
+        return (passes.Where(static b => b.InSystem).Collect().Combine(records.Where(static b => b.InSystem).Collect()).Select(static (all, _) => new Bodies(all.Left, all.Right)),
+            passes.Where(static b => !b.InSystem).Collect().Combine(runnerRecords).Select(static (all, _) => new Bodies(all.Left, all.Right)),
+            runnerRecords.Select(static (all, _) => new Bodies(all, [])),
+            Of(Symbols.EntityMethodAttribute, "EntityMethodBodies").Collect().Select(static (all, _) => new Bodies(all, [])));
     }
 
-    private static UpdateModel With(UpdateModel system, ImmutableArray<LoopModel> loops)
+    /// <summary>
+    /// Bodies found by owner and declaration order. Equal when its arrays are the same ones (the Collects cached): a body
+    /// that changed makes a new one, and every model of its kind is put together again.
+    /// </summary>
+    private sealed class Bodies : System.IEquatable<Bodies>
     {
-        var methods = new ForEachModel[system.Methods.Length];
+        private readonly ImmutableArray<BodyModel> _first, _second;
+        private readonly Dictionary<(string, int), BodyModel> _byMethod = new();
+
+        public Bodies(ImmutableArray<BodyModel> first, ImmutableArray<BodyModel> second)
+        {
+            (_first, _second) = (first, second);
+            foreach (var body in first.Concat(second)) _byMethod[(body.Owner, body.Order)] = body;
+        }
+
+        public BodyModel? Of(ForEachModel method) => _byMethod.TryGetValue((method.Owner.FullName, method.Order), out var body) ? body : null;
+
+        public bool Equals(Bodies? other) => other != null && _first == other._first && _second == other._second;
+
+        public override bool Equals(object? obj) => Equals(obj as Bodies);
+
+        public override int GetHashCode() => _first.GetHashCode();
+    }
+
+    /// <summary>The types' models with each method's body (<see cref="BodyModel"/>) put back.</summary>
+    private static IncrementalValuesProvider<UpdateModel> WithBodies(IncrementalValuesProvider<UpdateModel> types, IncrementalValueProvider<Bodies> bodies, string name) =>
+        types.Combine(bodies).Select(static (pair, ct) => With(pair.Left, pair.Right, ct)).WithTrackingName(name);
+
+    private static UpdateModel With(UpdateModel type, Bodies bodies, System.Threading.CancellationToken ct)
+    {
+        var methods = new ForEachModel[type.Methods.Length];
         for (int i = 0; i < methods.Length; i++)
         {
-            var method = system.Methods[i];
-            var loop = loops.FirstOrDefault(l => l.Order == method.Order && l.Owner == method.Owner.FullName);
-            methods[i] = loop == null ? method : method with { Simd = loop.Simd, Scalar = loop.Scalar, Pair = loop.Pair };
+            ct.ThrowIfCancellationRequested();
+            var method = type.Methods[i];
+            methods[i] = bodies.Of(method) is { } body ? method.WithBody(body) : method;
         }
 
-        return system with { Methods = new EquatableArray<ForEachModel>(methods) };
+        return type with { Methods = new EquatableArray<ForEachModel>(methods) };
     }
 }

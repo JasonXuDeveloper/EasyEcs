@@ -79,6 +79,13 @@ internal sealed partial class Kernel
     /// <summary>What in a body keeps a vector loop from inlining it, from its syntax alone (null: nothing); Recorder.cs records it.</summary>
     internal static string? BodyRefusal(SyntaxNode body) => Callee.Refused(body);
 
+    /// <summary>
+    /// The semantic model of <paramref name="tree"/> in <paramref name="compilation"/>, one per tree (<see cref="Callees"/>):
+    /// what it binds (a Combine, a constructor, a Deconstruct read by every method that uses them) is bound once per
+    /// compilation, not once per method, as a new model from <c>Compilation.GetSemanticModel</c> would.
+    /// </summary>
+    internal static SemanticModel ModelOf(Compilation compilation, SyntaxTree tree) => Callees.Of(compilation).ModelOf(tree);
+
     /// <summary>A lambda pass's body is translated (it inlines no call).</summary>
     private bool _lambda;
 
