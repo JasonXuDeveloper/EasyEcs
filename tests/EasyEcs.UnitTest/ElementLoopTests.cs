@@ -11,8 +11,8 @@ public record struct Ember2(float Heat, float Glow);
 
 public struct Rate : IComponent { public float Value; }
 
-/// <summary>What <see cref="ElementRules"/>' loops sum into variables of the method: sums, a Min, a Max, a count.</summary>
-public struct Spread : IComponent { public int Sum; public long Wide; public float Low, High; public int Above; public float Total; }
+/// <summary>What <see cref="ElementRules"/>' loops sum into variables of the method: sums, a Min, a Max, a count, the steps between neighbors.</summary>
+public struct Spread : IComponent { public int Sum; public long Wide; public float Low, High; public int Above; public float Total; public long Steps; }
 
 /// <summary>
 /// [ForEach] methods that run row by row and loop over their buffers' spans (Kernel.Loops.cs): the generator copies
@@ -91,6 +91,17 @@ public ref struct ElementRules
     {
         var d = to.AsSpan();
         for (int i = 1; i < d.Length; i++) d[i] += i * 5;
+    }
+
+    [ForEach]
+    static void Smooth(in DynamicBuffer<int> from, ref DynamicBuffer<long> to, ref Spread spread)
+    {
+        var src = from.AsReadOnlySpan();
+        var dst = to.AsSpan();
+        for (int i = 2; i < dst.Length - 2; i++) dst[i] = src[i - 2] + 2L * src[i - 1] + 3L * src[i] - src[i + 1] + src[2 + i] + i; // neighbors at offsets
+        long steps = 0;
+        for (int i = 1; i < src.Length; i++) steps += (long)src[i] - src[i - 1];
+        spread.Steps = steps;
     }
 
     [ForEach]
@@ -176,6 +187,17 @@ public ref struct ElementRulesByRow
     }
 
     [ForEach(SimdMode = SimdMode.Off)]
+    static void Smooth(in DynamicBuffer<int> from, ref DynamicBuffer<long> to, ref Spread spread)
+    {
+        var src = from.AsReadOnlySpan();
+        var dst = to.AsSpan();
+        for (int i = 2; i < dst.Length - 2; i++) dst[i] = src[i - 2] + 2L * src[i - 1] + 3L * src[i] - src[i + 1] + src[2 + i] + i; // neighbors at offsets
+        long steps = 0;
+        for (int i = 1; i < src.Length; i++) steps += (long)src[i] - src[i - 1];
+        spread.Steps = steps;
+    }
+
+    [ForEach(SimdMode = SimdMode.Off)]
     static void Ease(Span<Rate> rates)
     {
         for (int i = 0; i < rates.Length; i++) rates[i].Value = rates[i].Value * 0.5f + 0.75f; // a batch method's loop over its rows
@@ -197,6 +219,16 @@ public static class ElementPasses
     {
         float k = rate.Value;
         foreach (ref float h in heat.AsSpan()) h = h * k - 0.5f;
+    }
+
+    // a stream read one element ahead: its guard (end <= from.Length - 1) fails on buffers of one length, so the loop as
+    // written runs and throws at its last element
+    [ForEach]
+    internal static void Ahead(in DynamicBuffer<int> from, ref DynamicBuffer<long> to)
+    {
+        var src = from.AsReadOnlySpan();
+        var dst = to.AsSpan();
+        for (int i = 0; i < dst.Length; i++) dst[i] = src[i + 1];
     }
 
     private static readonly float Bias = 0.25f;
@@ -287,7 +319,7 @@ public class ElementLoopTests
                 Assert.That(a[n].Read<Rate>().Value, Is.EqualTo(b[n].Read<Rate>().Value), at);
                 var u = a[n].Read<Spread>();
                 var v = b[n].Read<Spread>();
-                Assert.That((u.Sum, u.Wide, u.Above), Is.EqualTo((v.Sum, v.Wide, v.Above)), at);
+                Assert.That((u.Sum, u.Wide, u.Above, u.Steps), Is.EqualTo((v.Sum, v.Wide, v.Above, v.Steps)), at);
                 Assert.That(BitConverter.SingleToInt32Bits(u.Low), Is.EqualTo(BitConverter.SingleToInt32Bits(v.Low)), at);
                 Assert.That(BitConverter.SingleToInt32Bits(u.High), Is.EqualTo(BitConverter.SingleToInt32Bits(v.High)), at);
                 Assert.That(u.Total, Is.EqualTo(v.Total).Within(1e-3f * (1 + Math.Abs(v.Total))), at);
@@ -374,7 +406,7 @@ public class ElementLoopTests
                 }
                 """, GeneratorTests.Parse, path: "/src/S.cs")), out var output, out _).GetRunResult().GeneratedTrees.Select(t => t.ToString()));
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
-        Assert.That(generated, Does.Contain("static nint __Elements0(ref float r1, nint i, nint rows)"));
+        Assert.That(generated, Does.Contain("static nint __Elements0(ref float r1, nint i, nint rows, int at)"));
     }
 
     [TestCase(1)]
@@ -437,8 +469,8 @@ public class ElementLoopTests
         string generated = string.Concat(output.SyntaxTrees.Where(GeneratorTests.IsCode).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("#nullable restore\n    internal static void A_0(")                // the copy, under the accessor's name, inlined as the method is
             .And.Contain("int __at0 = (__span0.Length) >= global::System.Numerics.Vector<float>.Count ? (int)__Elements0(") // short spans skip the call
-            .And.Contain("static nint __Elements0(ref float r1, nint i, nint rows, float x1)")         // the vector form, k as its value
-            .And.Contain("__Elements0(ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(__span0), 0, __span0.Length, k)")
+            .And.Contain("static nint __Elements0(ref float r1, nint i, nint rows, int at, float x1)")         // the vector form, k as its value
+            .And.Contain("__Elements0(ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(__span0), 0, __span0.Length, 0, k)")
             .And.Contain("__span0.Slice(__at0)")                                                        // the loop as written runs the rest
             .And.Contain("#line 8 \"/src/Loops.cs\"").And.Contain("#line hidden").And.Contain("#line default")
             .And.Not.Contain("static extern void A_0("), generated);
@@ -449,7 +481,8 @@ public class ElementLoopTests
     [TestCase("float t = 0; foreach (var x in b.AsSpan()) { t += x; x.ToString(t.ToString()); } b.Add(t);", "it writes 't', a variable of the method, other than as a sum, a Min or a Max ('t += e', 't = Math.Min(t, e)'): a vector loop writes the elements and such variables only")]
     [TestCase("int n = 0; foreach (var x in b.AsSpan()) n = n * 2 + (int)x; b.Add(n);", "it writes 'n', a variable of the method, other than as a sum, a Min or a Max ('n += e', 'n = Math.Min(n, e)'): a vector loop writes the elements and such variables only")]
     [TestCase("var s = b.AsSpan(); var t = new float[4]; for (int i = 0; i < s.Length; i++) s[i] = t[i];", "it reads its index 'i' as a value ('t[i]'), not only as the index of a span (s[i])")]
-    [TestCase("var s = b.AsSpan(); for (int i = 1; i < s.Length; i++) s[i] = s[i - 1];", "it reads its index 'i' as a value ('i - 1'), not only as the index of a span (s[i])")]
+    [TestCase("var s = b.AsSpan(); for (int i = 1; i < s.Length; i++) s[i] = s[i - 1];", "it writes span 's' and reads it at another index ('s[i - 1]'): each element would read what the loop wrote, or is about to write, one element before; write into another span")]
+    [TestCase("var s = b.AsSpan(); for (int i = 1; i < s.Length; i++) s[i] = s[i * 2];", "it reads its index 'i' as a value ('i * 2'), not only as the index of a span (s[i])")]
     public void LoopsLeftScalarNameTheirReason(string body, string reason)
     {
         var diagnostics = GeneratorTests.Analyze([GeneratorTests.Components, $"public static class R {{ [ForEach] static void A(ref DynamicBuffer<float> b) {{ {body} }} }}"]).Result
@@ -468,6 +501,22 @@ public class ElementLoopTests
     {
         var ids = GeneratorTests.Analyze([GeneratorTests.Components, $"public static class R {{ {members} }}"]).Result.Select(d => d.Id);
         Assert.That(ids, Has.None.EqualTo("EECS055"));
+    }
+
+    [Test]
+    public void ANeighborPastTheEndThrowsAsTheLoopDoes()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new DynamicBuffer<int>(), new DynamicBuffer<long>());
+        for (int i = 0; i < 40; i++) e.Get<DynamicBuffer<int>>().Add(i);
+        for (int i = 0; i < 40; i++) e.Get<DynamicBuffer<long>>().Add(-1);
+        Assert.Throws<IndexOutOfRangeException>(() => ElementPasses.Ahead(world));
+        var to = e.Read<DynamicBuffer<long>>().AsReadOnlySpan();
+        for (int i = 0; i < 39; i++) Assert.That(to[i], Is.EqualTo(i + 1L)); // the loop as written got that far
+        Assert.That(to[39], Is.EqualTo(-1L));
+        e.Get<DynamicBuffer<int>>().Add(40);
+        ElementPasses.Ahead(world); // one longer: the vector form runs
+        Assert.That(e.Read<DynamicBuffer<long>>()[39], Is.EqualTo(40L));
     }
 
     [Test]
