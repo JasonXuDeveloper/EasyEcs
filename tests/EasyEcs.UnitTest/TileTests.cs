@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using NUnit.Framework;
@@ -589,6 +590,83 @@ public partial class TileTests
                     ? (col.Load128<int>(dx, dy, dz).GetElement(0) == c[col.X + dx, dy, dz].V ? 0 : 1)
                     : (col[dx, dy, dz].V == c[col.X + dx, dy, dz].V ? 0 : 1);
             return wrong;
+        }
+    }
+
+    // col.Store(vector, into) writes the vector into the row from the column, unchecked under the walk's invariant: it
+    // writes what the checked value.CopyTo(into.Slice(col.X)) writes, for every width of vector and every column, and
+    // throws for a step that would let the last column's store end past the row, or a row shorter than Width.
+
+    [Test]
+    public void AStoreFromAColumnWritesWhatCopyToWrites()
+    {
+        using var world = new World();
+        var wide = Grid(world, Box(1, 1, 1), s => new WidePlate(s));
+        var deep = Grid(world, Box(1, 1, 1), s => new DeepColumn(s));
+        Compare<WidePlate>(wide[0], 5, 128);                                            // 5 ints a row: one column
+        foreach (int step in new[] { 4, 8 }) Compare<DeepColumn>(deep[0], step, 128);  // 8 ints a row
+        Compare<DeepColumn>(deep[0], 8, 256);
+        if (Vector<int>.Count <= 8) Compare<DeepColumn>(deep[0], Vector<int>.Count, 0);   // the machine's width
+
+        static void Compare<TTile>(Entity e, int step, int bits) where TTile : struct, IComponent, ITile<TilePos>
+        {
+            var tile = TileOf<Cell, TTile>(e, out _);
+            tile.ExchangeHalo();
+            int w = TTile.Width;
+            var stored = new Cell[w + 8];
+            var copied = new Cell[w + 8];
+            foreach (var col in tile.At(new TileRow<TTile>(0, 1)).Columns(step))
+            {
+                // Lanes distinct per column, so a store at the wrong column or of the wrong lanes shows.
+                var into = stored.AsSpan(0, w);
+                var copy = MemoryMarshal.Cast<Cell, int>(copied.AsSpan(0, w)).Slice(col.X);
+                if (bits == 128)
+                {
+                    var v = Vector128.Create(col.X * 100) + Vector128.Create(1, 2, 3, 4);
+                    col.Store(v, into);
+                    v.CopyTo(copy);
+                }
+                else if (bits == 256)
+                {
+                    var v = Vector256.Create(col.X * 100) + Vector256.Create(1, 2, 3, 4, 5, 6, 7, 8);
+                    col.Store(v, into);
+                    v.CopyTo(copy);
+                }
+                else
+                {
+                    var v = new Vector<int>(col.X * 100) + Vector<int>.Indices;
+                    col.Store(v, into);
+                    v.CopyTo(copy);
+                }
+            }
+            Assert.That(stored, Is.EqualTo(copied), $"{typeof(TTile).Name}, step {step}, {bits} bits");
+            Assert.That(stored.AsSpan(w).ToArray(), Is.All.EqualTo(default(Cell)), "nothing past the row");
+        }
+    }
+
+    [Test]
+    public void AStoreFromAColumnThrowsPastTheRow()
+    {
+        using var world = new World();
+        var wide = Grid(world, Box(1, 1, 1), s => new WidePlate(s));
+        // WidePlate: rows of 5 ints. A store of 4 from the last column of a walk by 4 (column 4) would end at 8.
+        Assert.Throws<ArgumentOutOfRangeException>(() => Store(wide[0], 4, 5));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Store(wide[0], 2, 5));
+        Assert.That(Store(wide[0], 5, 5), Is.EqualTo(1));                                     // one column, 0 to 3
+        Assert.Throws<ArgumentException>(() => Store(wide[0], 5, 4));                         // a row of 4 cells, not 5
+
+        static int Store(Entity e, int step, int length)
+        {
+            var tile = TileOf<Cell, WidePlate>(e, out _);
+            tile.ExchangeHalo();
+            var into = new Cell[length];
+            int stores = 0;
+            foreach (var col in tile.At(new TileRow<WidePlate>(0, 0)).Columns(step))
+            {
+                col.Store(Vector128.Create(7), into);
+                stores++;
+            }
+            return stores;
         }
     }
 
