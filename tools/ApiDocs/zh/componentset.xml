@@ -1,9 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.ComponentSet" source="1fe87b1e8dcb">
+  <member name="T:EasyEcs.ComponentSet" source="edf504e18536">
     <summary>
       一组组件和单例类型，建一次就一直留着（放在 <c>static readonly</c> 字段里）：存档要写的组件
-      （<see cref="M:EasyEcs.World.SaveEntitiesWith(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId},EasyEcs.ComponentSet@)" />），也就是只记录需要持久化的数据、不带周围运行时状态的那份记录；
+      （<see cref="M:EasyEcs.World.SaveEntitiesWith(System.Buffers.IBufferWriter{System.Byte},System.ReadOnlySpan{EasyEcs.EntityId},EasyEcs.ComponentSet@)" />）或复制要带上的组件
+      （<see cref="M:EasyEcs.World.CopyEntities``1(EasyEcs.World,System.ReadOnlySpan{EasyEcs.EntityId},EasyEcs.ComponentSet@,System.Span{EasyEcs.Entity})" />），也就是只记录需要持久化的数据、不带周围运行时状态的那份记录；
       或者在重启时，整个 World 的存档要排除的类型（<see cref="M:EasyEcs.World.SaveWithout(System.Buffers.IBufferWriter{System.Byte},EasyEcs.ComponentSet@)" />）
       和加载时要保留的单例（<see cref="M:EasyEcs.World.LoadKeeping(System.ReadOnlySpan{System.Byte},EasyEcs.ComponentSet@,System.Boolean)" />）。
       <c>ComponentSet.Create().With&lt;Bank&gt;().WithSingleton&lt;Rates&gt;()</c>；注册时才知道类型的框架按 <see cref="T:System.Type" /> 添加。
