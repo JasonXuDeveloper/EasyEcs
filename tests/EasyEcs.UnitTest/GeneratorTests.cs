@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Linq;
 using System.Threading.Tasks;
+using EasyEcs.Benchmark;
 using EasyEcs.Generator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -1025,6 +1026,23 @@ public class GeneratorTests
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Runners, use), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+    }
+
+    /// <summary>
+    /// GeneratorBenchmark's corpus (the battle server and 40 modules) compiles with the generators' output, every module
+    /// gets its generated files, and the analyzer has nothing to say about it: its code is written as users should, so a
+    /// rule that starts reporting it is a false positive or the corpus needs fixing (never a filter). Checked here once
+    /// instead of in each of the benchmark's processes.
+    /// </summary>
+    [TestCase(false), TestCase(true)]
+    public void TheBenchmarkCorpusIsClean(bool oneNamespace)
+    {
+        var trees = GeneratorCorpus.Sources(oneNamespace).Select((s, i) => CSharpSyntaxTree.ParseText(s, GeneratorCorpus.Parse, path: $"File{i}.cs"));
+        var compilation = GeneratorCorpus.Compilation([.. trees], GeneratorCorpus.References());
+        var driver = GeneratorCorpus.Driver().RunGeneratorsAndUpdateCompilation(compilation, out var generated, out _);
+        Assert.That(driver.GetRunResult().GeneratedTrees.Length, Is.GreaterThanOrEqualTo(GeneratorCorpus.Modules * 15), "every module generated");
+        Assert.That(generated.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+        Assert.That(GeneratorCorpus.Findings(generated).Select(d => d.ToString()), Is.Empty);
     }
 
     // Skipped by the generator == reported: a method the analyzer rejects gets no job.
