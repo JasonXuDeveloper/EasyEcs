@@ -1332,4 +1332,46 @@ public partial class TileTests
         Allocations.WarmUp(Step, 200);
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) Step(); }), Is.Zero);
     }
+
+    // A spring wandering into plates its scent never reached (TileRestartBenchmark's Linger) allocates nothing: a tile
+    // changing for the first time long after it joined finds the ids of the tiles around it set up (Entry.Around), and
+    // more tiles of a color waking at once than ever before find the queue and the walk sized for the grid. Measured in
+    // a world of its own: the state that must not grow belongs to each world (its TileSteps). Whole walks, each in a new
+    // world, run first until the JIT has settled: what runs once per world (setting up, a tile joining) stays at Tier0
+    // after one walk. This thread's bytes, as every allocation check: on 4 threads it steps tiles too (before the fix
+    // the cases measured 1016 B, and 696 B on 4 threads without restarts), and the process's count also takes the test
+    // host's own threads (168 B now and then at 1 thread, with every method of the walk compiled).
+    [TestCase(1, true)]
+    [TestCase(4, true)]
+    [TestCase(1, false)]
+    [TestCase(4, false)]
+    public void ATileThatChangesLateDoesNotAllocate(int threads, bool restart)
+    {
+        Allocations.WarmUp(() => Walk(threads, restart, null), 2);
+        long bytes = -1;
+        Walk(threads, restart, away => bytes = Allocations.Of(away));
+        Assert.That(bytes, Is.Zero, "into plates the scent never reached");
+    }
+
+    /// <summary>
+    /// A spring wandering along the first row of plates of a new world: back and forth in the first until its scent
+    /// settled there, then to the last (<paramref name="measure"/> runs that part, or null: it runs unmeasured).
+    /// </summary>
+    private static void Walk(int threads, bool restart, Action<Action> measure)
+    {
+        var (world, plates) = SmellWorld(threads, 8, restart);
+        using var w = world;
+        int x = 4;
+        void Put(int to) // the spring moved from cell x to cell to
+        {
+            plates[new TilePos(x >> 4, 0, 0)].GetOrAdd<DynamicBuffer<Spring>>().AsSpan()[4 * 16 + (x & 15)] = default;
+            plates[new TilePos(to >> 4, 0, 0)].GetOrAdd<DynamicBuffer<Spring>>().AsSpan()[4 * 16 + (to & 15)] = new Spring(1);
+            x = to;
+            world.Update();
+        }
+        void Away() { for (int to = x + 1; to < 8 * 16 - 4; to++) Put(to); }
+        for (int i = 0; i < 32; i++) Put(i % 2 == 0 ? 4 : 5);
+        if (measure == null) Away();
+        else measure(Away);
+    }
 }
