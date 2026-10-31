@@ -5,7 +5,8 @@ using NUnit.Framework;
 namespace EasyEcs.UnitTest;
 
 // EasyEcsAnalyzer.Tiles.cs: a tile step the generator cannot write (EECS115), a second buffer and its commit written by
-// hand (EECS116), a relaxation stepped one cell per pass (EECS117); and the tile edges of EECS059 and EECS073.
+// hand (EECS116), a relaxation stepped one cell per pass (EECS117), a load the generator cannot prove (EECS120), a buffer
+// no method writes copied over a tile's cells (EECS121); and the tile edges of EECS059 and EECS073.
 public partial class AnalyzerTests
 {
     internal const string TileParts = """
@@ -112,6 +113,35 @@ public partial class AnalyzerTests
         var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, source])).Where(d => d.Id == "EECS120").ToArray();
         Assert.That(found, Has.Length.EqualTo(1));
         Assert.That(found[0].GetMessage(), Does.Contain(reason));
+    }
+
+    // EECS121: what a commit leaves once its step takes the tile by ref (EECS116's fix when it cannot delete the commit,
+    // or a step rewritten by hand): a copy of a buffer no method writes over the cells of a tile.
+    private const string SteppedByRef = "[EcsSystem] public ref struct Step { [ForEach] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); foreach (var row in t.Rows()) t.Write(row).Clear(); } }";
+    private const string Commit = " [EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); }";
+
+    [TestCase(Commit)]                                                                                                          // the plain commit
+    [TestCase(Commit + " public static class Made { public static void Size(Entity e) { e.GetOrAdd<DynamicBuffer<NB>>().SetCount(16); e.Get<DynamicBuffer<NB>>().Clear(); } }")] // sized when made: no write
+    [TestCase(" [EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells, ref P p) { if (p.V > 0) next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); p.V++; } }")] // more than the copy
+    [TestCase(" [EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, ref DynamicBuffer<byte> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.AsSpan())); }")] // into a ref buffer
+    public Task ACopyOfABufferNoMethodWritesOverATilesCellsReports(string commit) => ReportsOnTiles("EECS121", SteppedByRef + commit);
+
+    [TestCase(" [EcsSystem] public ref struct Fill { [ForEach] static void A(Mut<DynamicBuffer<NB>> next) => next.Write().AsSpan().Fill(new NB(1)); }")]   // a pass writes it
+    [TestCase(" public static class Fill { public static void Set(Entity e) => e.Get<DynamicBuffer<NB>>().Add(new NB(2)); }")]                             // code outside a pass writes it
+    [TestCase(" public static class Fill { public static void Set(Entity e) => e.Get<DynamicBuffer<NB>>().SetCount(4)[0] = new NB(3); }")]                 // the span SetCount hands out
+    [TestCase(" public static class Fill { public static void Set(ref DynamicBuffer<NB> b) { } }")]                                                         // a method that may write it
+    public Task ACopyOfABufferSomeMethodWritesIsClean(string writer) => AssertClean(GeneratorTests.Components, TileParts, SteppedByRef + Commit + writer);
+
+    [TestCase(" [EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<int>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<int, NB>(cells.Write().AsSpan())); }")] // no tile of int cells
+    [TestCase(" [EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) { } }")]           // no copy
+    public Task OtherCopiesAreClean(string commit) => AssertClean(GeneratorTests.Components, TileParts, SteppedByRef + commit);
+
+    [Test]
+    public async Task AHandWrittenCommitIsReportedOnce()
+    {
+        // The step writes NB by hand: EECS116, never EECS121 as well.
+        Assert.That(await Count("EECS116", GeneratorTests.Components, TileParts, Stepper + Commit), Is.EqualTo(1));
+        Assert.That(await Count("EECS121", GeneratorTests.Components, TileParts, Stepper + Commit), Is.Zero);
     }
 
     [Test]

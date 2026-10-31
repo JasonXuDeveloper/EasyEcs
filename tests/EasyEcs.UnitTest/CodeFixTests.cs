@@ -257,20 +257,32 @@ public class CodeFixTests
         + "        t.ExchangeHalo();\n        foreach (var row in t.Rows())\n        {\n            var c = t.At(row);\n            var into = t.Write(row);\n"
         + "            for (int x = 0; x < 4; x++) into[x] = (byte)System.Math.Min(c[x, 0, 0], c[x - 1, 0, 0] + 1);\n        }\n    }\n}",
         "    [ForEach(Parallel = true), GaussSeidel]\n    static void A(ref Tile<byte, G> t)")]
-    [TestCase("EECS116", "Step the tile by ref and write its rows with Write(row) (then delete this commit and the buffer it copies)",                                                    // an index at row.Index: the buffer's element through a cast
+    [TestCase("EECS116", "Step the tile by ref and write its rows with Write(row), deleting this commit (NB stays: other code names it)",                                         // an index at row.Index: the buffer's element through a cast
         AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct Step\n{\n    [ForEach(Parallel = true)]\n    static void A(Tile<byte, G> t, Mut<DynamicBuffer<NB>> next)\n    {\n"
         + "        t.ExchangeHalo();\n        var into = next.Write().AsSpan();\n        foreach (var row in t.Rows()) into[row.Index] = new NB(t[0, 0, row.Z]);\n    }\n}" + "\n[EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); }",
         "    static void A(ref Tile<byte, G> t)\n    {\n        t.ExchangeHalo();\n        foreach (var row in t.Rows())\n        {\n            var into = System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(t.Write(row));\n            into[0] = new NB(t[0, 0, row.Z]);\n        }\n    }")]
-    [TestCase("EECS116", "Step the tile by ref and write its rows with Write(row) (then delete this commit and the buffer it copies)",                                                    // cast to the cells' type, a clear, an index at row.Index + x
+    [TestCase("EECS116", "Step the tile by ref and write its rows with Write(row), deleting this commit and NB",                                                                  // cast to the cells' type, a clear, an index at row.Index + x
         AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct Step\n{\n    [ForEach]\n    static void A(Tile<byte, G> t, Mut<DynamicBuffer<NB>> next)\n    {\n"
         + "        var into = System.Runtime.InteropServices.MemoryMarshal.Cast<NB, byte>(next.Write().AsSpan());\n        into.Clear();\n        t.ExchangeHalo();\n"
         + "        foreach (var row in t.Rows())\n        {\n            var c = t.At(row);\n            for (int x = 0; x < 4; x++) into[row.Index + x] = c[x, 0, 0];\n        }\n    }\n}" + "\n[EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); }",
         "            var into = t.Write(row);\n            var c = t.At(row);\n            for (int x = 0; x < 4; x++) into[x] = c[x, 0, 0];")]
-    [TestCase("EECS116", "Step the tile by ref and write its rows with Write(row) (then delete this commit and the buffer it copies)",                                                    // a ref buffer, a slice at row.Index
+    [TestCase("EECS116", "Step the tile by ref and write its rows with Write(row), deleting this commit and NB",                                                                  // a ref buffer, a slice at row.Index
         AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct Step\n{\n    [ForEach]\n    static void A(in G g, Tile<byte, G> t, ref DynamicBuffer<NB> next)\n    {\n"
         + "        t.ExchangeHalo();\n        var into = System.Runtime.InteropServices.MemoryMarshal.Cast<NB, byte>(next.AsSpan());\n"
         + "        foreach (var row in t.Rows())\n        {\n            t.Cells.Slice(row.Index, 4).CopyTo(into.Slice(row.Index));\n        }\n    }\n}" + "\n[EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); }",
         "    static void A(in G g, ref Tile<byte, G> t)\n    {\n        t.ExchangeHalo();\n        foreach (var row in t.Rows())\n        {\n            var into = t.Write(row);\n            t.Cells.Slice(row.Index, 4).CopyTo(into);")]
+    [TestCase("EECS116", "Step the tile by ref and write its rows with Write(row), deleting this commit and NB",                                                                  // the statements that add the commit's system go with it
+        AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct Step\n{\n    [ForEach]\n    static void A(Tile<byte, G> t, Mut<DynamicBuffer<NB>> next)\n    {\n        var into = System.Runtime.InteropServices.MemoryMarshal.Cast<NB, byte>(next.Write().AsSpan());\n        t.ExchangeHalo();\n        foreach (var row in t.Rows()) into[row.Index] = 0;\n    }\n}" + "\n[EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); }" + "\npublic static class Setup { public static void Add(World w) { w.AddSystem<Step>(); w.AddSystem<Commit>(); } }",
+        "public static class Setup { public static void Add(World w) { w.AddSystem<Step>(); } }")]
+    [TestCase("EECS116", "Step the tile by ref and write its rows with Write(row), deleting this commit and NB",                                                                  // a system that holds more keeps it
+        AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct Step\n{\n    [ForEach]\n    static void A(Tile<byte, G> t, Mut<DynamicBuffer<NB>> next)\n    {\n        var into = System.Runtime.InteropServices.MemoryMarshal.Cast<NB, byte>(next.Write().AsSpan());\n        t.ExchangeHalo();\n        foreach (var row in t.Rows()) into[row.Index] = 0;\n    }\n}" + "\n[EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); [ForEach] static void B(ref P p) => p.V++; }",
+        "public ref struct Commit { [ForEach] static void B(ref P p) => p.V++; }")]
+    [TestCase("EECS116", "Step the tile by ref and write its rows with Write(row), deleting this commit (NB stays: other code names it)",                                         // NB sized where entities are made
+        AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct Step\n{\n    [ForEach]\n    static void A(Tile<byte, G> t, Mut<DynamicBuffer<NB>> next)\n    {\n        var into = System.Runtime.InteropServices.MemoryMarshal.Cast<NB, byte>(next.Write().AsSpan());\n        t.ExchangeHalo();\n        foreach (var row in t.Rows()) into[row.Index] = 0;\n    }\n}" + "\n[EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); }" + "\npublic static class Made { public static void Size(Entity e) => e.GetOrAdd<DynamicBuffer<NB>>().SetCount(16); }",
+        "            var into = t.Write(row);\n            into[0] = 0;")]
+    [TestCase("EECS116", "Step the tile by ref and write its rows with Write(row) (then delete this commit and the buffer it copies)",                                           // the commit named elsewhere: it stays, EECS121 reports its copy
+        AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct Step\n{\n    [ForEach]\n    static void A(Tile<byte, G> t, Mut<DynamicBuffer<NB>> next)\n    {\n        var into = System.Runtime.InteropServices.MemoryMarshal.Cast<NB, byte>(next.Write().AsSpan());\n        t.ExchangeHalo();\n        foreach (var row in t.Rows()) into[row.Index] = 0;\n    }\n}" + "\n[EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); }" + "\npublic static class Order { public static System.Type Of => typeof(Commit); }",
+        "            var into = t.Write(row);\n            into[0] = 0;")]
     [TestCase("EECS017", "Store its EntityId",
         "public struct Target : IComponent { public Entity Of; }\npublic static class U { public static bool F(Entity e, Entity other) { e.Set(new Target { Of = other }); return e.Read<Target>().Of.Id == other.Id; } }",
         "public struct Target : IComponent { public EntityId Of; }")]
@@ -523,6 +535,26 @@ public class CodeFixTests
         Assert.That(await Offered(fixedDocument, id), Has.None.EqualTo(title), "the fix again: " + text); // idempotent
     }
 
+    // EECS116's fix deletes the commit and the buffer's element type it no longer needs, in the other documents too.
+    [Test]
+    public async Task TheStepFixDeletesTheCommitAndItsBufferInEveryDocument()
+    {
+        var document = Document(Data + AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct Step { [ForEach] static void A(Tile<byte, G> t, Mut<DynamicBuffer<NB>> next) { var into = System.Runtime.InteropServices.MemoryMarshal.Cast<NB, byte>(next.Write().AsSpan()); t.ExchangeHalo(); foreach (var row in t.Rows()) into[row.Index] = 0; } }", generate: true);
+        document = document.Project.AddDocument("Commit.cs", "using EasyEcs;\n[EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); }\n"
+            + "public static class Setup { public static void Add(World w) { w.AddSystem<Step>(); w.AddSystem<Commit>(); } }").Project.GetDocument(document.Id)!;
+        var diagnostic = (await Analyze(document)).Single(d => d.Id == "EECS116");
+        var actions = new List<CodeAction>();
+        await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document.Project.Solution.GetDocument(diagnostic.Location.SourceTree)!, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        Assert.That(actions.Select(a => a.Title), Is.EqualTo(new[] { "Step the tile by ref and write its rows with Write(row), deleting this commit and NB" }));
+        var solution = (await actions[0].GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single().ChangedSolution;
+        var texts = new List<string>();
+        foreach (var changed in solution.Projects.Single().Documents) texts.Add((await changed.GetTextAsync()).ToString());
+        string all = string.Join("\n", texts);
+        Assert.That(all, Does.Not.Contain("struct Commit").And.Not.Contain("AddSystem<Commit>").And.Not.Contain("record struct NB").And.Contain("w.AddSystem<Step>();"), all);
+        var errors = (await solution.Projects.Single().GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
+        Assert.That(errors, Is.Empty, all);
+    }
+
     /// <summary>The case's own EasyEcs diagnostics (not Data's), counted per id.</summary>
     private static async Task<Dictionary<string, int>> Counts(Document document) =>
         (await Analyze(document)).Where(d => d.Location.SourceSpan.Start >= Data.Length).GroupBy(d => d.Id).ToDictionary(g => g.Key, g => g.Count());
@@ -531,11 +563,12 @@ public class CodeFixTests
     /// The diagnostics a rule defers to (one mistake, one diagnostic: D60), which its fix lets through: an instance
     /// method made static can be judged for its vector loop (EECS055), a key written by hand is then a key [LookupKey]
     /// could declare (EECS067), a lambda reaching the private member it names can be judged for its loop (EECS097), a
-    /// singleton written row by row on one thread is a total [Accumulate] could hold (EECS086).
+    /// singleton written row by row on one thread is a total [Accumulate] could hold (EECS086), a commit EECS116's fix
+    /// cannot delete copies a buffer no method writes once the step is by ref (EECS121).
     /// </summary>
     private static readonly Dictionary<string, string[]> Deferred = new()
     {
-        ["EECS005"] = ["EECS055"], ["EECS043"] = ["EECS067"], ["EECS096"] = ["EECS097"], ["EECS010"] = ["EECS086"],
+        ["EECS005"] = ["EECS055"], ["EECS043"] = ["EECS067"], ["EECS096"] = ["EECS097"], ["EECS010"] = ["EECS086"], ["EECS116"] = ["EECS121"],
     };
 
     /// <summary>
