@@ -2033,3 +2033,39 @@ helpers).
   alternately, twice; add `--launchCount 6` to the 100k cases if one differs (placement spread above). The NEON
   forms did not change on this branch: the run checks nothing regressed and gives the baseline for moving
   `Masks.Narrow` and the `__y` TBL tables to literals too.
+
+## feat-page-faults (backlog Later: fewer page faults on top of huge pages)
+
+Nothing user-visible in the API: `HugePages.Prefault` / `HugePages.Populate` are internal. What a user sees: a
+reservation (`Reserve<T..>`, `Reserve(prefab, n)`, `EnsureEntityCapacity`, a large `InitialEntityCapacity`) now commits
+its memory at once on Linux (RSS grows at the reservation, not as rows are written).
+
+- **Decision draft: a reservation faults its pages in (Linux)**: DECISION-DRAFT-PREFAULT
+
+- **GC settings for large worlds (a users' to-do, performance page "What it costs" or the FAQ; en + zh).** The library
+  sets none of them: they are the host's (`runtimeconfig.json` / `DOTNET_*` variables). Measured at 16M entities
+  (PageFaultBenchmark, `--dev`, one launch each, the reference VM): the defaults (regions, workstation or server GC)
+  are the right choice; `GCRetainVM` changes nothing for a world's arrays (the faults left are not memory the GC
+  decommitted); `GCgen0size` nothing (the arrays live on the large and pinned heaps); `GCConserveMemory` (5) makes
+  creating, growing, loading and snapshotting a large world 1.2-1.6x slower with 20-65 % more page faults (it compacts
+  the large object heap); the segments GC (`GCName=libclrgc.so`) faults three times as much on a load and makes a
+  capture 1.5x slower (it releases large segments at once). Say: keep the defaults; a server that creates and drops
+  large worlds over and over gets no faults back from GC settings, and `Reserve` is where to pay them up front.
+  zh：大型世界的 GC 设置（给用户的说明，性能页"开销"一节或 FAQ）。库不设置其中任何一项：它们由宿主决定
+  （`runtimeconfig.json` / `DOTNET_*` 环境变量）。16M 实体实测（PageFaultBenchmark，`--dev`，各一次启动，参考虚拟机）：默认值
+  （regions，工作站或服务器 GC）就是最好的选择；`GCRetainVM` 对世界的数组没有影响（剩下的缺页不是 GC 归还的内存）；
+  `GCgen0size` 没有影响（数组在大对象堆和固定对象堆上）；`GCConserveMemory`（5）让创建、扩容、加载和快照大型世界慢 1.2-1.6x，
+  缺页多 20-65 %（它压缩大对象堆）；segments GC（`GCName=libclrgc.so`）加载时缺页是三倍，快照慢 1.5x（它立即释放大段）。
+  结论：保持默认；反复创建和丢弃大型世界的服务器无法靠 GC 设置减少缺页，要提前付出就用 `Reserve`。
+- **Wording notes.** Say "faulted in" / "committed at once" (zh：预先缺页 / 立即提交), not "pre-allocated" (the arrays
+  were allocated before too). Do not promise faster creation: with 2 MiB pages populating costs what the first touch
+  costs; the gain is that the tick filling a reservation pays no fault, and with 4 KiB pages one call is cheaper than a
+  fault per page. On the reference VM a huge page faulted from memory freed seconds earlier costs about 8x a 4 KiB
+  one (the host's free page reporting, `feat-later-memory`): numbers of 16M creates and loads there are bimodal.
+- **Pages.** architecture.mdx + zh, the memory section (with feat-later-memory's huge pages): reserved arrays are
+  advised and faulted in when allocated; the steps of a doubling are not. Guide page on reservations (`Reserve` /
+  `InitialEntityCapacity`) + zh: one sentence that a reservation commits its memory at once on Linux, so the tick that
+  fills it pays no page fault (link the decision). faq.mdx + zh: "Which GC settings for large worlds?" (the
+  bullet above). Changelog (Performance): "a reservation faults its pages in on Linux: spawning into it pays no page
+  fault" (link the decision). api.mdx: `Reserve` / `EnsureEntityCapacity` complexity unchanged (O(capacity) for the
+  faults, as the first touch was). Roadmap: the backlog item done.

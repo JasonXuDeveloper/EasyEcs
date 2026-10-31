@@ -175,3 +175,36 @@ What would change the verdict: the owner prefers other names (rename before the 
   `[GaussSeidel]` method that does not settle to a unique fixed point (a Laplace solve to a tolerance). `tile.Sweep`
   lets the method turn. What would change the verdict: a measured field written with `Rows()` that settles faster
   turning (a benchmark of the two walks).
+
+## Page faults: what was tried and not kept (feat-page-faults, 2026-10-31)
+
+The owner asked for fewer page faults on top of huge pages. Counted first (PageFaultBenchmark with the
+`PageFaultDiagnoser` columns: `minflt` / `stime` of the process, `thp_fault_alloc` and the other THP counters of the
+machine, per op). Kept: the arrays a reservation sizes are faulted in when allocated (`MADV_POPULATE_WRITE`, see the
+decision draft in `docs/plans/docs-todos.md`, "feat-page-faults"). Not kept, each with the cause found:
+
+- **Prefault to cut the cost of huge-page faults.** One `MADV_POPULATE_WRITE` call costs what the first touch costs
+  with 2 MiB pages: 128 MiB of memory freed 4 s earlier, 536 ms touched against 572 ms populated (PrefaultTouchBenchmark,
+  the spread 41-50 ms). The time is the host's, not the guest's: the reference VM (Firecracker, virtio-balloon free
+  page reporting at order 9) hands free 2 MiB blocks back to its host, a huge page needs exactly such a block, and the
+  host faults it back 4 KiB at a time (stime 187 ms of the 536). With 4 KiB pages the same touch takes 67 ms (most
+  4 KiB allocations come from blocks never reported), and populating them saves the trap per page (53 ms, 1.27x). So
+  prefault moves the faults (what is kept: out of the tick that fills a reservation) but cannot make a huge page
+  cheaper on such a VM. What would change the verdict: a host that does not report free pages (bare metal, most
+  cloud VMs), where a huge page faults at memory speed and nothing is left to cut.
+- **Keeping a disposed world's columns for the next world** (a process-wide spare list of exact lengths, 1 GiB at most,
+  given at `Dispose`, taken by `ComponentInfo.Create`). The allocations halved (Create 16M 732 → 366 MB) but the faults
+  did not move (31,252 against 31,257 per op) and the ops were no faster (Create 16M 1.06x slower, InstantiateEach 16M
+  1.08x slower, `--dev`): the GC already hands a freed large array's memory back resident (a 128 MiB pinned array
+  allocated again after a collection faults 0 pages), so the spares only replaced the GC's own reuse and added a
+  clear. The faults left come from the other arrays (entity records, a table's entity rows, the free-id list: other
+  types, which a typed spare cannot serve) and from the GC committing a new region while the previous world is not yet
+  collected. Reusing a column inside one world (its next resize) never meets a spare of the size: doubling only grows.
+  What would change the verdict: a workload that disposes and recreates worlds of one shape faster than the GC
+  collects (a match server whose matches are past the large object heap's budget), measured.
+- **The GC's settings** (host choices, never set by the library; written up for users in the docs to-dos): at 16M
+  entities `GCRetainVM` changed no count (the faults are not memory the GC decommitted), `GCgen0size` none (the
+  arrays are on the large and pinned heaps), `GCConserveMemory=5` added 20-65 % faults and made Grow, Load, Capture
+  and InstantiateEach 1.2-1.6x slower, the segments GC (`GCName=libclrgc.so`) tripled the faults of a load and an
+  InstantiateEach (it releases large segments at once) and made Capture 1.5x and InstantiateEach 1.2x slower
+  (`--dev`, one launch each).
