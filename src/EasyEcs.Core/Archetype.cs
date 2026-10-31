@@ -951,7 +951,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Add(int entityId, int version)
     {
-        if (Count >= Slots.Length) Resize(Slots.Length * 2, false);
+        if (Count >= Slots.Length) Resize(Slots.Length * 2, false, false);
         int slot = Count++;
         // slot < Slots.Length (grown above): no bounds check.
         ref var row = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Slots), slot);
@@ -995,13 +995,15 @@ internal sealed class Archetype
     /// rounded up to whole presence words (64 rows), or to twice the capacity when that is more, so tables that grow by
     /// many reservations still double. Not to the next power of two: the 100,000 rows of a start-up are 100,032 rows,
     /// not 131,072 (each column and the entity rows are large-object allocations, which count toward the full
-    /// collections a process pays for; see decision D28, docs/content/decisions.mdx).
+    /// collections a process pays for; see decision D28, docs/content/decisions.mdx). <paramref name="prefault"/> when
+    /// the rows are written later (a user's reservation): their pages are faulted in now (<see cref="HugePages.Populate{T}(T[])"/>);
+    /// a call writing them at once (a creation, a load, a restore) leaves them to the first touch.
     /// </summary>
-    public void Reserve(int rows)
+    public void Reserve(int rows, bool prefault)
     {
         if (rows <= Slots.Length) return;
         int asked = (rows + 63) & ~63;
-        Resize(Math.Max(asked, Slots.Length * 2), asked >= Slots.Length * 2);
+        Resize(Math.Max(asked, Slots.Length * 2), asked >= Slots.Length * 2, prefault);
     }
 
     /// <summary>
@@ -1017,7 +1019,7 @@ internal sealed class Archetype
         Order?.Trim();
         long capacity = Math.Max(InitialCapacity, (long)BitOperations.RoundUpToPowerOf2((ulong)Count));
         if (capacity >= Slots.Length) return false;
-        Resize((int)capacity, false);
+        Resize((int)capacity, false, false);
         return true;
     }
 
@@ -1026,14 +1028,18 @@ internal sealed class Archetype
     /// <see cref="Count"/> (cold path: growth, <see cref="Trim"/>). <paramref name="sized"/> when the capacity is the
     /// one a reservation asked for, not a doubling step or a trim: only those columns go onto huge pages, as the entity
     /// records (World.AllocateMeta), so a table grown row by row allocates what it did without them.
+    /// <paramref name="prefault"/>: the entity rows and unmanaged columns faulted in (<see cref="Reserve"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Resize(int capacity, bool sized)
+    private void Resize(int capacity, bool sized, bool prefault)
     {
         Array.Resize(ref Slots, capacity);
-        if (sized) HugePages.Populate(Slots); // the rows a reservation made room for, written without a fault per page
+        if (prefault) HugePages.Populate(Slots); // the rows a reservation made room for, written without a fault per page
         for (int i = 0; i < Columns.Length; i++)
+        {
             ByBit[Components[i]].Set(Columns[i] = _infos[i].Resize(Columns[i], capacity, sized), _infos[i].Managed);
+            if (prefault && !_infos[i].Managed) HugePages.Populate(Unsafe.As<byte[]>(Columns[i])); // unmanaged: byte[]
+        }
         foreach (short c in _bitColumns)
         {
             Array.Resize(ref Present[c], (capacity + 63) >> 6);
@@ -1537,7 +1543,7 @@ internal sealed class Archetype
             ReleaseRows(count, Count - count);
         }
 
-        Reserve(count);
+        Reserve(count, false); // the copy writes every row next
         if (rows != null)
         {
             bool stream = StreamingStores.CopyPays(UnmanagedBytes(count));

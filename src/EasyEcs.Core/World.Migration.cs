@@ -543,8 +543,8 @@ public sealed partial class World
         ReadOnlySpan<int> rows = default, bool map = true)
     {
         var target = shape < 0 ? TableFor(table) : CopyTableFor(table, shape);
-        target.Reserve(target.Count + count);
-        ReserveIds(count);
+        target.Reserve(target.Count + count, false); // written next
+        ReserveIds(count, false);
         int to = target.Count;
         var slots = table.Slots;
         for (int r = 0; r < count; r++)
