@@ -513,6 +513,16 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
       the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
+- [ ] **Fewer page faults on top of huge pages** (owner, 2026-10-31: "大页内存然后减少缺页呢，你要不研究一下改一下"; next
+      free agent slot, before the other Later items): count first (`minflt` / `majflt` from `/proc/self/stat`, `thp_fault_alloc`,
+      `thp_fault_fallback`, `compact_stall` around each op, in a BenchmarkDotNet column) on Create / Grow / Reserve / Load /
+      Capture-Restore / InstantiateEach at 1M and 16M, then try each and keep what pays: prefault a sized array in one call
+      (`MADV_POPULATE_WRITE`, Linux 5.14+, on the 2 MiB interior, instead of one fault per page on first touch) off the hot
+      path (Reserve / load) and its cost against first touch; keep a world's grown arrays instead of handing them back
+      (reuse the old column for the next resize of the same size class, no refault of memory the GC or the host reclaimed);
+      the GC's own settings (`GCRetainVM`, `GCConserveMemory`, regions and `GCgen0size`: a host's choice, measured and written
+      up for users, never set by the library); the free page reporting cause of `feat-later-memory` (does prefault after a
+      pause beat touch?). Each with the cause read before any verdict (perf counters, Tier1 where code changed).
 - [ ] **Owner's calls on `owner-review.md` (2026-10-30), each built, measured and kept only if it pays:**
       (a) `CopyEntities<TTag>(target, ids, set)`: a measured prototype (ghost rows, a column copy per run of rows,
       the originals kept) against the hand-written `CreateEntity` loop of `samples/MultiWorld/Border.cs`;
