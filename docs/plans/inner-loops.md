@@ -377,7 +377,13 @@ demo's rewrite or keeping the batch form under its pragma is the owner's call).
 ## 5. Work packages in build order
 Agents per the `audit` skill (at most three; pair the one that measures with ones that do not). WP6a touches only analyzer files and can run beside WP1. Kernel work should not run beside the AVX2 wide-rows work, since it touches the same files.
 
-**WP0: Kernel `Binding`, `EmitVectorLoop` with names as parameters, `BodyCopy.cs` moved out of `LambdaPass`. No behavior change.**
+**WP0: Kernel `Binding`, `EmitVectorLoop` with names as parameters, `BodyCopy.cs` moved out of `LambdaPass`. No behavior change: shipped (feat-inner-loops).**
+`BodyCopy.cs` (Copy with a statement hook, Usings, Unreachable, Constant) and Kernel's `LaneField` / `Lane.Kind` /
+`Lane.Streams` (a lane without a field, the parameters a desugared body names as streams). Gate met: the generated
+text of `EasyEcs.Benchmark` and the unit tests identical to the base but for the schedule's new loop lines. The
+`Binding` record and `EmitVectorLoop` with names as parameters were not needed: element loops reuse `Vectorize` with
+a `Lane` whose streams are the desugared function's parameters, and `SystemGenerator.Elements.cs` emits the widths
+through the same `Wide` / `Narrow` / `Constants` / `FlatLoops`.
 - Tests: all `KernelTests`, `LambdaPassTests`, `GeneratorTests` (the generated text for `WorldSimulation.cs`, `BattleServer.cs` and samples identical), caching assertions.
 - Benchmarks: `GeneratorBenchmark.EditMethodBody`, level.
 - Risk: drift in the text the JIT sees (D126 lesson: even a text cleanup changed inlining). Gate: identical generated text, or identical Tier1 for `World:Masked` runners (`tools/jitdisasm.sh`, `DOTNET_TieredPGO=0`).
@@ -394,6 +400,11 @@ through `EmitLoops`, which splits them into methods when the count says so.
 - Risk: **inlining budget** (D135): an unrolled body ×8 declares locals per element; past 32 IL locals `EmitLoops` moves each width's loop into a method, and a single loop past 32 is not split further, so `World.Masked` would call it per run or per 64-row word. Count the translated body's locals (`SystemGenerator.Locals`), cap N and fall back with a reason rather than lose; `tools/inlining.sh` checks the runners.
 
 **WP2: element loops in `[ForEach]` methods (per-row with buffers, batch-method loops, lambda passes), through the body copy.**
+Shipped in part (feat-inner-loops): per-row methods, `for` and `foreach` over Span / ReadOnlySpan / DynamicBuffer
+(Kernel.Loops.cs, SystemGenerator.Elements.cs), bounds and alias guards, `#line`, the schedule's loop lines, EECS055
+at loops left scalar (a second descriptor of the id), ElementLoopTests, ElementLoopBenchmark. Open: reductions into
+outer locals (SumInts / SumFloatsFast), the index as a value, batch methods, lambda passes, private helpers through
+accessors, HeightMap's port.
 - Tests:
   - new `tests/EasyEcs.UnitTest/ElementLoopTests.cs`: equivalence (Lengths, edges, empty buffer, a buffer shared copy-on-write written in the loop, `Mut.Write` stamps once); integer, Min/Max and float-Fast reductions; bounds failure throws at the same element; private helper reached through a generated accessor; 0 B; 1 vs 4 threads.
   - `GeneratorTests`: the copy, `#line`, caching.

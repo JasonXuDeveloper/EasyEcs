@@ -676,7 +676,7 @@ public sealed partial class World
         {
             var info = table.Info(c);
             ref var column = ref rows.Columns[c];
-            if (info.Managed) column = column == null ? info.Create(count) : info.Resize(column, count);
+            if (info.Managed) column = column == null ? info.Create(count) : info.Resize(column, count, false);
             else
             {
                 var bytes = new byte[count * info.Size];

@@ -722,4 +722,23 @@
       只能在所有者线程调用。
     </summary>
   </member>
+
+  <member name="M:EasyEcs.World.CopyEntities``1(EasyEcs.World,System.ReadOnlySpan{EasyEcs.EntityId},EasyEcs.ComponentSet@,System.Span{EasyEcs.Entity})" source="183f2db95074">
+    <summary>
+      把 <paramref name="entities" />（失效的 id、重复的 id 和退休实体都跳过）复制到 <paramref name="target" />，即同一线程上的另一个 World：
+      新实体只带 <paramref name="components" /> 里它们有的组件（<see cref="T:EasyEcs.Disabled`1" /> 标签跟着它的组件走），
+      再加上默认值的 <typeparamref name="TTag" />：邻居边界的幽灵行、只读副本、复制到客户端 World 的兴趣区域。原实体保持不变。
+      表里前后相连的行作为一段一起复制，每列一次块复制。副本里（组件和缓冲元素中）指向被复制实体的 <see cref="T:EasyEcs.EntityId" />
+      字段改为指向它的副本，其余的都成为 <see cref="P:EasyEcs.EntityId.Null" />；父实体没被复制的 <see cref="T:EasyEcs.ChildOf" /> 会被移除，
+      和 <see cref="M:EasyEcs.World.LoadEntities(System.ReadOnlySpan{System.Byte},System.Span{EasyEcs.Entity})" /> 及
+      <see cref="M:EasyEcs.World.MoveEntities(EasyEcs.World,System.ReadOnlySpan{EasyEcs.EntityId},System.Span{EasyEcs.Entity})" /> 一样。
+      清理组件（<see cref="T:EasyEcs.ICleanupComponent" />）从不复制：它们持有的资源由原实体释放。索引和分组会认识这些副本，
+      副本的组件算一次写入，和 <c>CreateEntity</c> 一样。新句柄按顺序写进 <paramref name="copied" />（放得下多少写多少，跳过的 id 对应
+      <see cref="T:EasyEcs.Entity" /> 的 default）；返回复制的数量。id 列表写成 <c>CollectionsMarshal.AsSpan(list)</c>，不复制；
+      组件集合放在 <c>static readonly</c> 字段里。目标 World 的表已存在、缓冲足够大之后不分配内存。O(实体数 × 集合中的组件数)。
+      调用线程必须同时是两个 World 的所有者线程；任何一个 World 正在遍历时都可以调用（副本是新行，之前开始的遍历不会访问它们）。
+    </summary>
+    <exception cref="T:System.ArgumentException"><paramref name="target" /> 就是本 World，<paramref name="components" /> 含有单例类型，或 <typeparamref name="TTag" /> 是唯一组件。</exception>
+    <exception cref="T:System.InvalidOperationException">被复制的实体有一个唯一键（<see cref="T:EasyEcs.IUniqueIndexed`1" />），而 <paramref name="target" /> 里已有实体持有它：什么都不复制。</exception>
+  </member>
 </doc>

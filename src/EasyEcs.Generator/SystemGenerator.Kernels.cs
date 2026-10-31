@@ -23,7 +23,7 @@ public sealed partial class SystemGenerator
     /// when the pass builds its index, else "").
     /// </summary>
     private sealed record BodyModel(string Owner, int Order, bool InSystem, bool Stable, bool Parallel, bool Identifies, EquatableArray<string> Keys,
-        EquatableArray<Chase> Chases, Kernel.Code? Simd, string Scalar, PairModel? Pair, bool OutOfLine, FusionSide? Fusion)
+        EquatableArray<Chase> Chases, Kernel.Code? Simd, string Scalar, PairModel? Pair, bool OutOfLine, FusionSide? Fusion, ElementCode? Elements)
     {
         public static BodyModel? Create(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
         {
@@ -50,7 +50,9 @@ public sealed partial class SystemGenerator
                 simd, scalar ?? "",
                 pair && !record ? PairModel.Create(method, syntax, model, parallel, ct) : null,
                 method.Parameters.Any(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Scratch) && ForEachModel.LoopsOrCalls(syntax),
-                outside || pair || record ? null : FusionSide.Of(method, stable, identifies, parallel)); // a pair pass walks windows
+                outside || pair || record ? null : FusionSide.Of(method, stable, identifies, parallel), // a pair pass walks windows
+                // Loops over spans inside a method that runs row by row (Kernel.Loops.cs): the method copied with their vector forms.
+                simd == null && !pair && !record && !Symbols.IsBatch(method) ? ElementsOf(method, syntax, model, ct) : null); // a batch method's loops: EECS103, or the method for one row
         }
     }
 

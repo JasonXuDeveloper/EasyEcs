@@ -763,7 +763,7 @@ internal sealed partial class Kernel
         {
             // The body moves into the generated job, outside the callee's type and file: what only they reach cannot go.
             if (Inlined && Hidden(node) is { } hidden)
-                throw new NotInlined($"whose body names {LambdaPass.Describe(hidden)}: make it internal", true);
+                throw new NotInlined($"whose body names {BodyCopy.Describe(hidden)}: make it internal", true);
             if (node.Parent is MemberAccessExpressionSyntax access && access.Name == node || node.Parent is QualifiedNameSyntax qualified && qualified.Right == node
                 || node.Parent is AliasQualifiedNameSyntax // global::Game, as a recorded body writes every name
                 || NamesSubpattern(node))
@@ -827,7 +827,7 @@ internal sealed partial class Kernel
             IFieldSymbol { IsConst: true } => null,
             IMethodSymbol method when owner.Callees.Candidate(method) != null => null,
             IPropertySymbol property when owner.Callees.Candidate(property.GetMethod) != null && owner.Callees.Candidate(property.SetMethod ?? property.GetMethod) != null => null,
-            var symbol => LambdaPass.Blocking(symbol),
+            var symbol => BodyCopy.Blocking(symbol),
         };
 
         private static bool Of(ISymbol symbol, IMethodSymbol method)

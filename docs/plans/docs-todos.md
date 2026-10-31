@@ -1854,3 +1854,348 @@ EECS120's id is provisional: renumber everywhere below if a merge takes it.
 - The committed API reference lags the merged features (seen in feat-later-small's gate, ApiDocs 0 problems): a
   regeneration adds `ForEachAttribute.MaxRows`, `World.ForEachCollected` and `Tile.Restart` / `Tile.Sweep` (6 files,
   en + zh). Regenerate it in the docs pass (`dotnet run --project tools/ApiDocs`).
+
+## feat-roslyn-guidance (backlog Later item: analyzer and incremental generators by the official .NET guidance)
+
+Nothing user-visible in the API; no diagnostic changed (the unit tests' 109 diagnostics compared line by line before
+and after, every analyzer and code fix test unchanged).
+
+- guide/analyzer.mdx + zh, under EECS033 (one sentence): the rule has an analyzer of its own (`MemberAnalyzer`), so
+  `<NoWarn>EECS033</NoWarn>` (or `severity = none`) removes its cost from builds and the IDE; with it on, it costs
+  what it did.
+- architecture.mdx + zh, the `EasyEcsAnalyzer` row: add "members (EECS033)" to the list of areas, and "tiles, pairs"
+  (they are areas already and missing from the list).
+- architecture.mdx + zh, the generators' paragraph on keystrokes: lambda passes and tile loads are bound in a step
+  after their syntax provider, so an IDE typing never binds them (one clause).
+- Changelog (Performance): "The analyzer runs half as long on projects that turn off EECS033"; "Typing costs the
+  generators less: lambda passes and tile loads are no longer bound on every keystroke".
+- **Decision draft: costly rules a project turns off run in an analyzer of their own; implementation-only stages bind
+  after their syntax provider** (en):
+
+  > **Decision.** EECS033 runs in `MemberAnalyzer`, an area of its own, and a message's display strings are built
+  > only on the path that reports. In the generators, a stage only implementation output reads takes the node from
+  > its syntax provider and binds it in a later step (`BoundLater`: the calls collected with the compilation, one
+  > semantic model per file); facts many components ask of one type (`Shape.Of`) and the assemblies that give access
+  > to internals are kept per compilation.
+  >
+  > **Why.** Roslyn skips an analyzer only when every rule it supports is suppressed, and EECS033 runs on every
+  > invocation and property reference: inside `PerformanceAnalyzer` a project that turns it off (the unit tests
+  > do) still paid for it. ReportAnalyzer on the unit tests: EasyEcs analyzers 20.3 → 10.1 s (16.1 → 9.6 s on the
+  > second build), `PerformanceAnalyzer` 12.9 → 2.8 s, `MemberAnalyzer` under 1 ms. Roslyn builds every syntax
+  > provider's table whenever any step asks for syntax, so the transforms of lambda passes and tile loads, which
+  > bound the method around each call and ran Kernel on lambda bodies, ran on every IDE keystroke though the IDE
+  > skips their output: the unit tests' keystroke (IDE driver, two interleaved rounds) 400 / 803 → 285 / 291 ms
+  > median, 32.7 → 22.7 MB. GeneratorBenchmark (41 files, few lambda passes; base, head, base, head, OneNamespace
+  > off / on): EditMethodBodyIde 85.6 / 85.5 and 80.0 / 84.1 ms → 78.9 / 82.0 and 71.8 / 77.4 ms, 16.08 / 15.88 →
+  > 15.47 / 15.27 MB; Cold 895-927 → 869-906 ms, EditMethodBody and EditUnrelatedFile within the noise
+  > (517-560 and 487-519 ms both ways).
+  >
+  > **Considered.** Skipping suppressed rules inside one analyzer through `GetEffectiveSeverity` (severity can differ
+  > per tree through `.editorconfig`, and Roslyn already does it per analyzer); one analyzer per rule (no saving for
+  > rules nobody turns off); Kernel's control-flow exceptions (391-451 per build of the unit tests, a few
+  > milliseconds; the tracer inflates their time); moving compilation-end rules to symbol-end actions (EECS019,
+  > EECS025 for views, EECS069, EECS080, EECS086, EECS091, EECS092, EECS116 each need every use in the compilation).
+  > What a keystroke still costs is Roslyn building the new compilation's source members, which lands on the first
+  > check that reads them.
+
+  zh:
+
+  > **决定。** EECS033 放到独立的 `MemberAnalyzer` 里运行，消息里的显示字符串只在确实要报告的路径上才生成。生成器里，只供
+  > implementation output 读取的阶段从 syntax provider 只取节点，在后续步骤里绑定（`BoundLater`：收集调用后与 compilation
+  > 组合，每个文件一个 semantic model）；许多组件向同一类型询问的事实（`Shape.Of`）和向本程序集开放 internal 的程序集，
+  > 每个 compilation 只算一次。
+  >
+  > **原因。** 只有当一个分析器支持的所有规则都被关闭时，Roslyn 才会跳过它；而 EECS033 在每个调用和属性引用上都要运行：
+  > 放在 `PerformanceAnalyzer` 里时，关闭了它的项目（单元测试就是）仍然要付出它的开销。单元测试上的 ReportAnalyzer：
+  > EasyEcs 分析器 20.3 → 10.1 秒（第二次构建 16.1 → 9.6 秒），`PerformanceAnalyzer` 12.9 → 2.8 秒，`MemberAnalyzer` 不到
+  > 1 毫秒。只要任何步骤请求语法，Roslyn 就会构建所有 syntax provider 的表，所以 lambda pass 和 tile load 的 transform
+  > （绑定每个调用所在的方法，并对 lambda 体运行 Kernel）在 IDE 的每次按键时都会运行，尽管 IDE 跳过它们的输出：单元测试的
+  > 按键（IDE driver，两轮交替）中位数 400 / 803 → 285 / 291 毫秒，32.7 → 22.7 MB。GeneratorBenchmark（41 个文件，lambda
+  > pass 很少；base、head、base、head 交替，OneNamespace 关 / 开）：EditMethodBodyIde 85.6 / 85.5 和 80.0 / 84.1 毫秒 →
+  > 78.9 / 82.0 和 71.8 / 77.4 毫秒，16.08 / 15.88 → 15.47 / 15.27 MB；Cold 895-927 → 869-906 毫秒，EditMethodBody 和
+  > EditUnrelatedFile 在噪声之内（两边都是 517-560 和 487-519 毫秒）。
+  >
+  > **考虑过的方案。** 在同一个分析器里用 `GetEffectiveSeverity` 跳过被关闭的规则（严重级别可以通过 `.editorconfig`
+  > 按文件不同，而 Roslyn 已经按分析器做了这件事）；每条规则一个分析器（没人关闭的规则省不下什么）；Kernel 用于控制流的
+  > 异常（单元测试每次构建 391-451 个，几毫秒；跟踪器会夸大它们的耗时）；把 compilation-end 规则改成 symbol-end 动作
+  > （EECS019、视图的 EECS025、EECS069、EECS080、EECS086、EECS091、EECS092、EECS116 都需要整个 compilation 里的所有使用）。
+  > 按键时剩下的开销是 Roslyn 为新 compilation 构建源码成员，它落在第一个读取它们的检查上。
+
+## feat-owner-calls (the owner's calls (a)-(f) of 2026-10-30 and the answers of 2026-10-31)
+
+Kept: `c.Columns(step)` (`TileColumnWalk<TCell, TTile>` and its `Cursor`, with `col.Store(vector, into)`), EECS120,
+EECS116's fix deleting the commit, EECS121, `World.CopyEntities<TTag>`. Reverted with their cause in
+`docs/owner-review.md`: (e) `Enter` handing the tile out, (f) `Rows()` turning odd sweeps.
+
+- guide/grids.mdx + zh, the stencil section: the column walk as the fast form of a stencil's row loop:
+  `foreach (var col in c.Columns(4)) { ... col.Load128<float>(k, dy) ...; col.Store(v, into); }` with
+  `var into = tile.Write(row)`; offsets are constants from the column, so the JIT checks loads by itself and a store
+  costs one compare of the row's length; the step must be at least the vector's cells for a store (it throws past the
+  row). When to pick it over the plain `for (x...) c.Load128(x + k)` loop (the generator proves that one too; the walk
+  also folds every offset into the load). Pitfall: `col.Store` writes the row the step writes, never the cells being
+  read (Jacobi: `tile.Write(row)`). Full example: the Laplacian of `TileStencilBenchmark` (ColumnWaveSystem).
+- guide/analyzer.mdx + zh: EECS120 (Info: a `TileCursor` load checked on every call, with the reason the loop is
+  not proven: the eight reasons of `TileLoad.Read`, and `c.Columns(step)` as the walk that needs no proof); EECS121
+  (Warning: a buffer no method writes copied over a tile's cells; sizing is not a write; no fix, because deleting the
+  copy changes what the pass does); EECS116's fix now also deletes the commit method, its system when the commit was
+  all it held with the `AddSystem<T>()` statements naming it, and the buffer's element type when nothing else names it
+  (the three titles of the fix; it leaves the commit when anything else names it, and EECS121 reports the copy then).
+- guide/worlds (or the MultiWorld sample page) + zh: `CopyEntities<TTag>(target, ids, set, copied)`: ghost rows, read
+  replicas, an area of interest copied to a per-client world; the components named once in a `ComponentSet`; links
+  into the set remapped, links out nulled; when it pays (several components, rows in runs) and when the plain
+  `CreateEntity` loop is as fast (one narrow component, scattered rows: MultiWorld's `Border` stays the loop).
+  Pitfall: copied ids are new each exchange.
+- api.mdx + zh: complexity rows `TileCursor.Columns(step)` O(1) per column; `TileColumnWalk.Cursor` loads O(1),
+  `Store` O(1); `World.CopyEntities<TTag>` O(ids × components of the set), a column copy per run of rows. Then
+  regenerate the reference (zh entries: tilecolumnwalk.xml, tilecolumnwalk-cursor.xml, tilecursor.xml, world.xml,
+  componentset.xml).
+- performance page: TileStencil's Columns rows and TileRestart's RestartColumns, GhostCopyBenchmark, once the bench
+  sync ran them on the reference machine.
+- skills/easyecs/SKILL.md: "a stencil's row loop: `foreach (var col in c.Columns(step))`, loads at constant offsets,
+  `col.Store(v, tile.Write(row))`"; "ghost rows into another world: `CopyEntities<TTag>` with a `ComponentSet`".
+- changelog: New (`c.Columns`, `col.Store`, EECS120, EECS121, `CopyEntities<TTag>`), Changes (EECS116's fix deletes
+  the commit). No migration entry: `TileColumns` / `TileColumn` never shipped.
+- glossary (en + zh): column walk (列遍历).
+
+Decision drafts (ids provisional; numbers: shared 4-vCPU VM, BenchmarkDotNet default job, two rounds):
+
+**A stencil's columns are walked by `c.Columns(step)`, and stored by `col.Store(v, into)`.**
+Decision: the cursor hands a proven column loop its base column (`TileColumnWalk<TCell, TTile>`, `foreach (var col in
+c.Columns(step))`), whose loads take constant offsets from the column and whose `Store` writes the row the step writes
+at the column. Why: the interceptor of a plain column loop takes `x + k` as an argument it uses twice, so the JIT
+spills it and each load computes its own address (Laplacian column loop 52 instructions; hand 33); the walk computes
+the column's address once and folds every offset into the load (39), and `Store` replaces `CopyTo(into.Slice(col.X))`
+(two slice checks) by one compare of the row's length (34). Considered: the cursor by value, a span per row, 64-bit
+offsets (each measured longer in Tier1). Numbers, Columns with Store against Hand (round 1): Blur9 / Laplacian at
+Side 32, 1 thread 1.01x / 1.07x; Side 512, 1 thread 0.83x / 0.85x; Side 32, 4 threads 0.80x / 0.84x; Side 512, 4
+threads 0.75x / 0.90x; RestartColumns 0.88-0.97x of Restart (0.10-0.48x of the hand sweep). The 1-thread 32x32
+Laplacian gap left is the ping-pong pass around the loop (PingPong is 1.07-1.19x of Hand there), not the loop.
+
+**一行模板的各列由 `c.Columns(step)` 遍历，由 `col.Store(v, into)` 写回。**
+决定：游标把已证明的列循环的基准列交给方法（`TileColumnWalk<TCell, TTile>`，`foreach (var col in c.Columns(step))`），
+加载用相对这一列的常量偏移，`Store` 把向量写进步进写的那一行的这一列。原因：普通列循环的拦截器把 `x + k` 当作用到两次的参数，
+JIT 先把它放进临时变量，每次加载各算一遍地址（Laplacian 列循环 52 条指令，手写 33 条）；遍历只算一次列地址，每个偏移折进加载指令
+（39 条），`Store` 用一次行长比较代替 `CopyTo(into.Slice(col.X))` 的两次切片检查（34 条）。考虑过：按值传游标、每行一个 span、
+64 位偏移（Tier1 里都更长）。数据见英文稿。1 线程 32x32 Laplacian 剩下的差距在循环外的 ping-pong 过程（PingPong 在那里是 Hand 的
+1.07-1.19 倍），不在循环里。
+
+**EECS121: a buffer no method writes, copied over a tile's cells, is reported; EECS116's fix deletes the commit.**
+Decision: the owner's "both" (2026-10-31): the fix of the plain commit EECS116 matches rewrites the step by ref and
+deletes the commit (and its system and `AddSystem<T>()` when that empties it) and the buffer type when nothing else
+names it; every other commit form, and a commit the fix must keep, is reported by EECS121 at the end of the
+compilation. Why: a step that writes `tile.Write(row)` leaves the old commit copying a buffer nobody fills over the
+cells (a silent reset each tick). Considered: a fix for EECS121 (deleting the copy changes what a pass does), counting
+`SetCount` / `Clear` / `EnsureCapacity` as writes (sizing is not a write; a used `SetCount` hands out a span and is).
+
+**EECS121：表格格子被一个没有方法写入的缓冲区覆盖时报告；EECS116 的修复删除提交方法。**
+决定：所有者 2026-10-31 的 "both"：EECS116 匹配的普通提交，修复把步进改为 ref 并删除提交方法（若系统因此为空，连同系统和
+`AddSystem<T>()`）及无人再引用的缓冲区类型；其余提交形式以及修复必须保留的提交，由 EECS121 在编译结束时报告。原因：步进改写
+`tile.Write(row)` 后，旧提交会把一个没人填的缓冲区复制到格子上（每帧悄悄清零）。考虑过：为 EECS121 提供修复（删掉复制会改变
+过程的行为）；把 `SetCount` / `Clear` / `EnsureCapacity` 算作写入（设大小不是写入；返回值被使用的 `SetCount` 交出 span，算写入）。
+
+**`World.CopyEntities<TTag>` copies rows into another world with a component set.**
+Decision: kept (owner's call (a)). Copy / CreateEntity loop, two rounds (GhostCopyBenchmark, 500 / 1,000 / 5,000
+border rows): 1 component scattered 0.93-1.14x (a wash), 1 component sorted 0.84-0.97x, 3 components 0.70-0.93x; 0 B.
+Why: the ghost's components named once, a column copy per run of rows; the one-component scattered case gains
+nothing because scattered reads and the extra collect pass cost what the block copy saves (audit-perf), so
+MultiWorld's `Border` keeps its loop. Considered: `SaveEntitiesWith` + `LoadEntities` (1.4-4.3x of the loop).
+
+**`World.CopyEntities<TTag>` 按组件集把行复制到另一个 World。**
+决定：保留（所有者的 (a)）。复制 / CreateEntity 循环，两轮：1 个组件散布 0.93-1.14 倍（持平），1 个组件有序 0.84-0.97 倍，
+3 个组件 0.70-0.93 倍；0 B。原因：幽灵行带的组件只写一次，每段连续行一次列复制；1 个组件散布时，散读和多出的收集遍历抵掉了块复制
+省下的，所以 MultiWorld 的 `Border` 保留循环。考虑过：`SaveEntitiesWith` + `LoadEntities`（循环的 1.4-4.3 倍）。
+
+**Dropped: `Enter` handing the stepped tile out; `Rows()` turning odd sweeps by itself** (owner-review has the
+listings and numbers). (e): one thread-static read less per tile, paid back by an out tile built on the stack and
+copied (Enter 709 to 802 bytes); two rounds a wash. (f): turning saves rows only where few rows are active (4 springs:
+0.93-0.95x) and loses up to 14 % where all are (256 springs, identical work counted).
+
+**放弃：`Enter` 交出步进的瓦片；`Rows()` 自己反向走奇数次扫描**（列表和数据见 owner-review）。(e)：每个瓦片少一次线程静态
+读取，却换来栈上构造再复制出去的 out 瓦片（Enter 从 709 到 802 字节）；两轮持平。(f)：只有活跃行少时反向才省行（4 个泉：
+0.93-0.95 倍），所有行都活跃时（256 个泉，计数的工作量相同）最多慢 14%。
+
+## feat-later-memory (#164 huge pages; the Native AOT class-init check, x64 part; the slower kernel cases)
+
+Decision records for the docs pass (en + zh); number them at the docs pass (D-ids after the last merged one). Nothing
+user-visible in the API: `HugePages` is internal, `ComponentInfo.Create` / `Resize` gained a `sized` flag (both hidden
+helpers).
+
+- **Decision draft: large tables on 2 MiB pages (Linux)** (en):
+
+  > **Decision.** On Linux with transparent huge pages not set to `never`, the large pinned arrays of a table whose
+  > size was decided up front (a reservation, the initial entity capacity, a copy of a table such as a snapshot's)
+  > are put on 2 MiB pages: allocated uninitialized, their 2 MiB-aligned interior advised `MADV_HUGEPAGE` before
+  > anything touches it, each 2 MiB the process never touched dropped (`MADV_DONTNEED`, found with `mincore`) so its
+  > first touch faults one zeroed huge page, each 2 MiB the GC hands out again zeroed in place. The steps of a
+  > doubling and a trim stay plain pinned arrays. They stay arrays the GC frees, so a `ref` kept across a resize
+  > still reads live memory. Elsewhere (other systems, THP `never`, a libc without `madvise`) nothing changes.
+  >
+  > **Why.** A random lookup across a large world (a `Lookup<T>` chase, `TryGetEntity`) misses the TLB on nearly
+  > every read once its arrays pass the second-level TLB's reach: 1,536-2,048 entries reach 6-8 MiB of 4 KiB pages,
+  > 3-4 GiB of 2 MiB ones. 16M entity records alone are 256 MiB.
+  >
+  > **Numbers** (LookupChaseHugePagesBenchmark, default job, two rounds, 4 KiB / 2 MiB pages in one binary, 0 B):
+  > at 16M entities ChaseGathered 929 → 575 ms (1.62x, 1.67x), ChaseSerial 972 → 596 ms (1.63x, 1.58x), ChaseWorld
+  > 1.39 → 1.06 s (1.31x, 1.30x), ChaseRows 1.32 → 1.01 s (1.30x, 1.28x); at 1M the chases 1.12-1.40x; a walk in
+  > row order (Drift) 1.07-1.16x at 16M; a world created at 16M 1.02x / 0.99x and grown to 16M 0.98x / 1.05x, at 1M
+  > 1.00-1.08x.
+  >
+  > **Considered.** Native 2 MiB blocks (`NativeMemory.AlignedAlloc` + `madvise`): a `ref` kept across a resize would
+  > read freed memory unless the free were deferred, and the GC's own accounting would miss the memory. Advising the
+  > array after the GC zeroed it: the pages its zeroing touched stay small, a world created at 16M was 1.18-1.28x
+  > slower. Collapsing (`MADV_COLLAPSE`): 13-19 ms of kernel time per huge page, a world grown to 1M 1.1-1.4x slower,
+  > the chases gained no more. Dropping every 2 MiB, resident ones too: memory the GC hands out again is faulted back
+  > from the kernel, a world grown to 16M 1.2-1.5x slower. Huge pages for every doubling step: a table grown row by
+  > row discards them one after another, each paying the huge page's fault. Hugetlbfs: needs pages reserved by the
+  > administrator.
+
+  zh:
+
+  > **决定。** 在 Linux 上、透明大页没有设为 `never` 时，大小事先确定的表的大型固定数组（预留、初始实体容量、表的复制，例如
+  > 快照）放在 2 MiB 页上：先不初始化地分配，在任何访问之前把按 2 MiB 对齐的内部区域标记为 `MADV_HUGEPAGE`；进程从未访问过的
+  > 每个 2 MiB（用 `mincore` 判断）直接丢弃（`MADV_DONTNEED`），首次访问时缺页得到一张清零的大页；GC 重新分出的、已经驻留的
+  > 每个 2 MiB 原地清零。倍增扩容的中间数组和裁剪仍是普通固定数组。它们仍是 GC 释放的数组，所以跨扩容保留的 `ref` 读到的仍是
+  > 有效内存。其他环境（其他系统、THP 为 `never`、没有 `madvise` 的 libc）不变。
+  >
+  > **原因。** 大世界里的随机查找（`Lookup<T>` 追踪、`TryGetEntity`）在数组超出二级 TLB 覆盖范围后几乎每次读都 TLB 未命中：
+  > 1,536-2,048 个表项覆盖 6-8 MiB 的 4 KiB 页，或 3-4 GiB 的 2 MiB 页。仅 16M 个实体记录就有 256 MiB。
+  >
+  > **数字**（LookupChaseHugePagesBenchmark，默认作业，两轮，同一程序内 4 KiB / 2 MiB 页，0 B）：16M 实体时 ChaseGathered
+  > 929 → 575 ms（1.62x、1.67x），ChaseSerial 972 → 596 ms（1.63x、1.58x），ChaseWorld 1.39 → 1.06 s（1.31x、1.30x），
+  > ChaseRows 1.32 → 1.01 s（1.30x、1.28x）；1M 时各追踪 1.12-1.40x；按行顺序遍历（Drift）16M 时 1.07-1.16x；16M 时创建
+  > 世界 1.02x / 0.99x，扩容到 16M 0.98x / 1.05x，1M 时 1.00-1.08x。
+  >
+  > **考虑过的方案。** 原生 2 MiB 内存块（`NativeMemory.AlignedAlloc` + `madvise`）：除非推迟释放，跨扩容保留的 `ref` 会读到
+  > 已释放的内存，而且 GC 统计不到这部分内存。GC 清零之后再标记：清零时访问过的页仍是小页，16M 时创建世界慢 1.18-1.28x。
+  > 合并（`MADV_COLLAPSE`）：每张大页 13-19 ms 内核时间，扩容到 1M 的世界慢 1.1-1.4x，追踪没有多得收益。连驻留的部分也全部
+  > 丢弃：GC 重新分出的内存要从内核重新缺页，扩容到 16M 的世界慢 1.2-1.5x。倍增扩容的每一步都用大页：逐行增长的表会一个接
+  > 一个地丢弃它们，每个都付一次大页缺页的代价。hugetlbfs：需要管理员预留页。
+
+- **Decision draft: x64 permute tables and lane masks as vectors of literals** (en):
+
+  > **Decision.** The vector loops' x64 constants (the AVX2 `Load3` / `Store3` permutes, the 512-bit deinterleave
+  > tables, the 256- and 512-bit lane masks, the generator's AVX-512 permutes of wide components) are vectors of
+  > literals written in place, not `static readonly` fields built by code. The 128-bit forms (ARM64's NEON, x64
+  > without AVX) keep their static masks and TBL tables, initialized when the module loads.
+  >
+  > **Why.** Native AOT compiles every loop before any class is initialized, and its compiler preinitializes a static
+  > readonly vector of literals but not one built by code, so Move2's masked 512-bit loop called the static-base
+  > helper twice per vector and spilled a dozen zmm registers around the calls. Under the JIT the tables are
+  > initialized before Tier1 compiles the loop and both forms read an RWD constant.
+  >
+  > **Numbers** (KernelBenchmark Generated, default job, two rounds base / head, AVX-512, 0 B): Native AOT
+  > Move2Gaps 1.43x / 1.18x at 1,000 entities and 1.44x / 1.17x at 100,000, Move3Gaps 1.19x / 1.19x at 1,000,
+  > Seek 1.22x / 1.22x and 1.13x / 1.24x; Move2 0.98x at 1,000 and 0.97x at 100,000 over the means of 12 launches, the launches' ranges overlapping (22.5-28.0 against 23.8-27.5 us), within the spread; the JIT within the cases' spread (see the next draft).
+  >
+  > **Considered.** `InitializeTables` at module load (already there; it cannot help Native AOT, which compiled the
+  > loop earlier); the NEON tables as literals too (left until the owner's M4 measures them: qemu proves correctness,
+  > never speed).
+
+  zh:
+
+  > **决定。** 向量循环在 x64 上的常量（AVX2 的 `Load3` / `Store3` 置换、512 位解交错表、256 位和 512 位通道掩码、生成器为
+  > 宽组件写的 AVX-512 置换）都是就地写出的字面量向量，不再是由代码构造的 `static readonly` 字段。128 位形式（ARM64 的
+  > NEON、没有 AVX 的 x64）仍用静态掩码和 TBL 表，在模块加载时初始化。
+  >
+  > **原因。** Native AOT 在任何类初始化之前就编译所有循环，它的编译器能预初始化字面量构成的静态只读向量，却不能预初始化由
+  > 代码构造的向量，所以 Move2 的 512 位掩码循环每个向量调用两次静态基址辅助函数，并在调用前后溢出十几个 zmm 寄存器。JIT 下
+  > 这些表在 Tier1 编译循环之前已经初始化，两种写法读的都是 RWD 常量。
+  >
+  > **数字**（KernelBenchmark 的 Generated 用例，默认作业，两轮基线 / 新版，AVX-512，0 B）：Native AOT 下 Move2Gaps 在
+  > 1,000 实体时 1.43x / 1.18x，100,000 时 1.44x / 1.17x；Move3Gaps 1,000 时 1.19x / 1.19x；Seek 1.22x / 1.22x 和
+  > 1.13x / 1.24x；Move2 在 12 次启动的均值上 1,000 时 0.98x、100,000 时 0.97x，各次启动的范围重叠（22.5-28.0 对 23.8-27.5 us），在波动范围内；JIT 在各用例自身的波动范围内（见下一条）。
+  >
+  > **考虑过的方案。** 模块加载时的 `InitializeTables`（已经有了；Native AOT 更早就编译了循环，帮不上）；NEON 的表也改成
+  > 字面量（等所有者的 M4 测过再定：qemu 只证明正确，不证明速度）。
+
+- **Measuring note (performance page "How we measure", or a short record): 100k kernel worlds vary with their
+  physical pages.** KernelBenchmark at 100,000 entities (1.2-1.6 MB, most of a 2 MiB L2) varies 20-30 % between
+  processes of one binary and between worlds made again in one process with the same compiled code (Step medians
+  20.6-30.0 us, 1.45x apart; Move2 and Glide alike): L2 sets are physically indexed and a guest cannot see or choose
+  host-physical pages (guest-physical colour overload against time: r = -0.09). With six launches in interleaved
+  base / head rounds the "slower" cases of this branch were equal: JIT Step 100k 1.02x (a single 17.5 us base launch
+  had made the earlier 0.75x), Move2 100k 1.06x, Seek 100k 1.02x, at 1,000 0.99-1.05x; Tier1 listings and tiers
+  identical. Rule kept in `audit-perf`. zh: 100,000 实体的 KernelBenchmark 世界（1.2-1.6 MB，占 2 MiB L2 的大部分）在同一程序的
+  不同进程之间、以及同一进程内用同样的编译代码重建世界之间相差 20-30 %：L2 组按物理地址索引，虚拟机看不到也选不了宿主机的
+  物理页。比较这类用例要用 `--launchCount 6` 交替跑基线和新版。
+
+- **Wording notes.** Say "2 MiB pages" or "huge pages (Linux transparent huge pages)", never "large pages" (Windows'
+  term, not used). Say "advised", not "requested" or "enabled": the kernel may still back a range with 4 KiB pages
+  (fragmented memory, memory the GC reused). Numbers of first touch with huge pages on the reference VM are a lower
+  bound: it reports free 2 MiB blocks to the host (virtio-balloon free page reporting, order 9), so a huge page
+  faulted from a block freed seconds earlier touches at 0.3 GiB/s against 6.6 GiB/s for one reused at once and
+  2 GiB/s for 4 KiB pages (`audit-perf`). Do not promise a speed-up to walks in row order (the hardware prefetcher
+  hides the page walks there) nor to Windows / macOS (macOS arm64 has 16 KiB pages and no user superpages).
+- **Pages.** performance.mdx + zh ("What it costs" or the memory section): large worlds' random lookups on 2 MiB
+  pages on Linux, link the decision, the 16M numbers from bench.json once LookupChaseHugePagesBenchmark is synced
+  (add the class to `tools/bench.sh --site`). architecture.mdx + zh, the memory section: which arrays are advised
+  (reserved / copied, not doubling steps), arrays the GC frees. faq.mdx + zh: "Does EasyEcs use huge pages?" (Linux
+  THP `madvise` or `always`; nothing to configure; `never` turns it off). guide page on reservations (`Reserve` /
+  `InitialEntityCapacity`) + zh: one sentence that a reserved large world gets huge pages on Linux, a world grown row
+  by row does not. Changelog (Performance): "random lookups across large worlds 1.1-1.7x faster on Linux (2 MiB
+  pages)"; "Native AOT: vector loops over two- and three-float components up to 1.4x faster". Roadmap: #164 done.
+  api.mdx: nothing (internal; complexities unchanged).
+- **M4 run (owner): the vector-loop tables on ARM64 and the kernel cases of this branch.** On the M4:
+
+  ```bash
+  git worktree add ../ecs-base 99e7a2c
+  git worktree add ../ecs-head feat-later-memory
+  # in each worktree, JIT then Native AOT:
+  dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter \
+    '*KernelBenchmark.Move2Generated' '*KernelBenchmark.Move3Generated' '*KernelBenchmark.Move4Generated' \
+    '*KernelBenchmark.Move2GapsGenerated' '*KernelBenchmark.Move3GapsGenerated' '*KernelBenchmark.StepGenerated' \
+    '*KernelBenchmark.IntegrateGenerated' '*KernelBenchmark.GlideGenerated' '*KernelBenchmark.SeekGenerated'
+  dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --runtimes nativeaot10.0 --filter <same filters>
+  ```
+
+  For Native AOT, export `CustomAfterMicrosoftCommonTargets` naming a targets file with
+  `<PropertyGroup><IlcInstructionSet>native</IlcInstructionSet></PropertyGroup>` (BenchmarkDotNet 0.15 passes ILC an
+  instruction set it refuses and its generated project ignores `Directory.Build.targets`). Run base and head
+  alternately, twice; add `--launchCount 6` to the 100k cases if one differs (placement spread above). The NEON
+  forms did not change on this branch: the run checks nothing regressed and gives the baseline for moving
+  `Masks.Narrow` and the `__y` TBL tables to literals too.
+
+## feat-inner-loops (element loops, WP0 + WP2 core) — docs to-dos
+
+- **systems.mdx + zh, vector loops section ("Loops inside a method"):** a [ForEach] method that runs row by row and
+  loops over a span or a buffer gets the loop's vector form. What qualifies: `foreach (ref var x in span)` over a
+  Span, ReadOnlySpan or DynamicBuffer, `for (int i = start; i < end; i++)` reading its spans only at `[i]`; a body
+  that does not leave early, holds no loop and writes none of the method's variables (reductions are next); elements
+  of plain values. Results bit for bit; the loop as written runs the elements left (tail, a vector a lane of which
+  would throw). Show "You write / The generator writes" with the Decay method and the generated `__Elements0` call.
+  The schedule's loop lines (`DescribeSchedule`: `loop File.cs(L,C): vector (...)` / `scalar (reason)`).
+- **dynamic-buffers.mdx + zh:** one paragraph and a link to the section above: a loop over a buffer's span inside a
+  [ForEach] method is vectorized; a `for` over two buffers needs the target at least as long as the bound (else the
+  loop as written runs and throws where it would).
+- **analyzer.mdx + zh, EECS055:** the second message, at the loop's keyword: "This loop of [ForEach] method 'A' runs
+  one element at a time, without a vector loop: {reason}" (Info; SimdMode.Off silences it). Examples: a `break`, a
+  sum into a local (until reductions land), the index read as a value.
+- **api.mdx + zh:** no public API change (no complexity row).
+- **performance.mdx + zh:** ElementLoopBenchmark (Decay / Widen, 4 / 64 / 1,024 elements) once synced; add the class to
+  `tools/bench.sh --site`.
+- **Changelog (New):** "Loops over spans and buffers inside [ForEach] methods run as vector loops"; link systems.mdx.
+- **Roadmap:** element loops (inner-loops.md WP2) shipped in part: reductions, offsets (WP3), lambda passes and batch
+  methods still open.
+- **Decision D132 (draft, en):** *Element loops share the vector-loop core; the method is copied.* A loop over a
+  span inside a method that runs row by row is desugared into a static local function whose ref parameters are the
+  elements and translated by the same Kernel as a row loop (each element a lane). The generator copies the method
+  into its generated file in place of the UnsafeAccessor (BodyCopy: names qualified, constants inlined, `#line` to the
+  user's file so breakpoints and errors land there), with each loop preceded by a NoInlining local function (called when the span holds a whole vector)
+  that runs whole vectors and returns the index it stopped at; the loop as written runs the rest. Considered: a copy
+  of the compilation with the loop rewritten (costly per keystroke), intercepting the method (interceptors are only for
+  lambda passes, D63), an `Element<T>` parameter (declined by the owner). Numbers: ElementLoopBenchmark.
+- **Decision D132 (draft, zh):** *元素循环共用向量循环核心；方法体被复制。* 按行运行的方法中遍历 span 的循环，被改写为静态局部函数
+  （元素作为 ref 参数），由与行循环相同的 Kernel 翻译（每个元素一条 lane）。生成器把方法复制进生成文件，替代
+  UnsafeAccessor（BodyCopy：名称全限定、常量内联、`#line` 指回用户文件，断点和错误落在用户代码上）；每个循环之前调用一个
+  NoInlining 局部函数（span 至少容纳一个完整向量时才调用），按整向量运行并返回停下的位置，剩余元素由原循环处理。考虑过：改写循环后的编译副本（每次按键代价高）、
+  拦截方法（拦截器只用于 lambda pass，D63）、`Element<T>` 参数（所有者已否决）。数字：ElementLoopBenchmark。
+- **Numbers for D132 (ElementLoopBenchmark, 10k entities, this machine, round 1 after the inlining fix, round 2 within 0.05; ratio to
+  Scalar):** Decay 4 / 64 / 1,024 elements: Generated 1.07 / 0.42 / 0.27, HandWritten 1.05 / 0.37 / 0.29. Widen
+  (int to long across two buffers): Generated 1.00 / 0.69 / 0.62 of WidenScalar, HandWritten 1.41 / 0.75 / 0.67.
+  Before the fix the 4-element cases cost 1.19-1.23x: the copy was NoInlining while the method's small body inlines
+  into its job through the accessor. The copy now takes the accessor's inlining, the vector form is a NoInlining root
+  called only for a span of a whole vector. D132 says so (the rule: a copy of user code inlines as the code would).
+- **Generator cost (GeneratorBenchmark, base c2beddf against this branch, two interleaved rounds):** level. Cold
+  906 / 961 -> 913 / 971 ms (one namespace: 938 / 922 -> 938 / 938), EditMethodBody 574 / 555 -> 555 / 513 ms
+  (516 / 561 -> 541 / 531), CompileAndAnalyze 5,738 / 5,562 -> 5,678 / 5,725 ms (7,607 / 7,326 -> 7,508 / 7,182);
+  allocations within 0.4 %. Methods without loops pay one syntax walk for a loop keyword.

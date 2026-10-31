@@ -108,6 +108,17 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   `DynamicBuffer<T>`'s elements, an `[InlineArray]` or fixed buffer field, an `IForSpan<T>` / `IForRange` body, a
   neighbor list. One core for every element loop; the per-row loop and the element loop share the same lowering of
   the body. Inferred, no declaration (`audit-generator`, declaration surface: inference first).
+  Built for methods run row by row (Kernel.Loops.cs, SystemGenerator.Elements.cs): the loop body is desugared into a
+  static local function (elements as ref parameters, `Lane.Streams`; the method's unwritten variables as values) and
+  translated by `Vectorize`; the method is copied (BodyCopy) with a NoInlining `__Elements{k}` (called for a span of a whole vector) before each
+  loop that returns the index it stopped at, so the loop as written runs the tail and any vector a lane of which would
+  throw. A for-loop runs the vector form only under its guard (bound within every span, written spans apart:
+  `__Apart`), else the loop as written runs and throws where it would. Each loop left scalar is a schedule line and
+  an EECS055 at its keyword with the reason (a second descriptor of the id; loops that walk no span are not reported).
+  Check a new element-loop form against the method under SimdMode.Off bit for bit (ElementLoopTests), empty and short
+  buffers, 1 and 4 threads, 0 B; and the generated text of existing code unchanged but for the loop lines (dump both
+  trees with EmitCompilerGeneratedFiles: file names of lambda and tile-load files hash the source path, compare those by
+  content).
 - **Cells of a tile** (the shader form, built on the inner loop): a method that computes one cell from its neighbors
   by offset; the generator writes the pad, the row walk and the element loop, the neighbor reads unaligned loads at
   offsets in the padded texture, so users write no `Load128`.
@@ -243,8 +254,17 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   Glide 166 -> 263 ns at 1,000 entities); both were reverted. A change to a NEON path or to how a loop reaches its
   constants ships only after a BenchmarkDotNet A/B on real ARM64 hardware (the owner's M4: before and after
   worktrees, `KernelBenchmark` `*Generated` filters); qemu proves correctness, never speed. The Native AOT cost of a
-  `static readonly` vector read in a loop (a class-initialization check per iteration) is real and still open: a fix
-  must be measured under JIT on x64 and ARM64 and under Native AOT before it lands.
+  `static readonly` vector read in a loop (a class-initialization check per iteration) is real: Native AOT compiles
+  every loop before any class is initialized, so `InitializeTables` cannot help there. The ILC preinitializes a
+  static readonly vector of literals (the generated `__x` permutes were read through a held static base, no check) but
+  not one built by code (`Tables32` / `Tables64` from `Tables.LoadN`, `Masks` from a loop): those cost two helper
+  checks and a dozen zmm spills per vector of Move2's masked loop. The x64 forms (AVX2 `Permute3*`, the 512-bit
+  tables, the 256/512-bit lane masks, the generated `__x`) are vectors of literals in place (feat-later-memory); the
+  NEON forms (`Masks.Narrow`, the `__y` TBL tables) keep their statics until the owner's M4 measures a change. Read
+  an AOT loop with `<IlcArg Include="--codegenopt:JitDisasm=*Masked*" />` in a scratch harness project and
+  `dotnet publish -v:n` (the listing lands in the build log; `JitStdOutFile` keeps only the last method ILC
+  compiled): `CORINFO_HELP_READYTORUN_NONGCSTATIC_BASE` inside a loop's blocks is the check. A static the loop reads
+  once per run (`__layoutN`) is fine.
 
 - **Copies in the text are free, shuffles are not**: `var __c = __s;` and `__t` temporaries for a whole-value
   assignment vanish (the JIT copy-propagates them) once the method is compiled, but each one is an IL local, and

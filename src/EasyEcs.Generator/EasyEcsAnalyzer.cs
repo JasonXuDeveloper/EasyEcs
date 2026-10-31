@@ -18,7 +18,7 @@ public static partial class EasyEcsAnalyzer
     /// <summary>A new instance of every analyzer of EasyEcs, one per area (what a host loading the package runs).</summary>
     public static ImmutableArray<DiagnosticAnalyzer> All => ImmutableArray.Create<DiagnosticAnalyzer>(
         new DeclarationAnalyzer(), new SystemAnalyzer(), new PerformanceAnalyzer(), new UsageAnalyzer(), new ParallelAnalyzer(),
-        new PartAnalyzer(), new FormAnalyzer(), new LambdaPassAnalyzer(), new ViewAnalyzer(), new RecordAnalyzer(), new FusionAnalyzer(), new PairAnalyzer(), new TileAnalyzer());
+        new PartAnalyzer(), new FormAnalyzer(), new LambdaPassAnalyzer(), new ViewAnalyzer(), new RecordAnalyzer(), new FusionAnalyzer(), new PairAnalyzer(), new TileAnalyzer(), new MemberAnalyzer());
 
     /// <summary>The analyzer of one area: the settings every area shares, then its own registrations.</summary>
     public abstract class Area : DiagnosticAnalyzer

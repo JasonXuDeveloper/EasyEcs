@@ -48,7 +48,13 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              vector loop, the flat loops, the vector tail), in Execute while it declares at most 32 IL
                              locals (Locals counts them), else each in an AggressiveInlining method of the job (D135);
                              StreamLoop: a NoInlining method of the job (__Stream) streaming the write-only columns,
-                             called once per run past the last-level cache (StreamingStores.Pays)
+                             called once per run past the last-level cache (StreamingStores.Pays);
+                             SystemGenerator.Elements.cs: a method left scalar whose loops over spans have vector forms
+                             (Kernel.Loops.cs) copied into the generated file (BodyCopy, #line to the user's file) in
+                             place of its UnsafeAccessor, each such loop preceded by a call of its NoInlining
+                             local function (__Elements{k}: whole vectors from the index given, the index it stopped at
+                             returned to the loop as written), a for-loop's under its bounds and alias guard (__Apart);
+                             a line per loop in the schedule
 SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): the pass (world.ForPairs), the order
                              struct (Morton key of the compared component over the axes the test names), the job
                              (the cutoff from the test, per row or one; Width; Rows: the method per pair, over the row's
@@ -74,7 +80,8 @@ SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(valu
                              -> an interceptor per call ([InterceptsLocation], one file per source file in the namespace
                              EasyEcs.Generated) running the job a [ForEach] method with the lambda's parameters and body
                              gets (body copied with names qualified and constants inlined; the static delegate per
-                             row where it cannot be: EECS096)
+                             row where it cannot be: EECS096); its calls and the tile loads are bound after their syntax
+                             provider (SystemGenerator.BoundLater), so an IDE that skips their output never binds them
 SystemGenerator.TileLoads.cs tile loads checked once per loop: c.Load128 / Load256 / LoadVector(x + k, dy, dz) in a
                              proven column loop -> an interceptor per loop and offset (one file per source file in
                              EasyEcs.Generated, implementation output): Covers, the loop's first and last column against
@@ -82,7 +89,8 @@ SystemGenerator.TileLoads.cs tile loads checked once per loop: c.Load128 / Load2
                              row's first halo cell (the cursor's indexer checks dy, dz); else the cursor's checked load
 TileLoads.cs                 what a tile load the generator checks once is (TileLoad.Read: the loop declaring the
                              column's variable, an int from a constant, its bound (a constant or the cursor's shape),
-                             a positive step, the variable written nowhere else, no function between loop and call)
+                             a positive step, the variable written nowhere else, no function between loop and call;
+                             else the reason it is not, EECS120's)
 Views.cs                     what a [View] is, read once for the generators and the analyzer: Fields ('ref', 'ref
                              readonly' and Mut<T> fields of components), Problem (EECS098's reason), Overlap (EECS099:
                              a component reached twice through views and parameters)
@@ -94,8 +102,12 @@ PrefabGenerator.cs           [Prefab] -> a part of the struct: static readonly P
                              initializers (one Set per nine components) and the constructor they need
 LambdaPass.cs                what a lambda pass call is, read once for the generator and the analyzer: Read (the call,
                              its values, lambda, filters; a change filter's tick first), Problem (EECS095's reason and
-                             the captured values), Unreachable (EECS096's reason), IsStable, Discards (an expression
-                             lambda's dropped value)
+                             the captured values), Unreachable (EECS096's reason, through BodyCopy), IsStable, Discards
+                             (an expression lambda's dropped value)
+BodyCopy.cs                  user code copied into a generated file (a lambda pass's body, a method with element loops):
+                             Copy (names of types, namespaces and static members qualified, constants as their values,
+                             statements a caller replaces), Usings (the directives extension calls need), Unreachable /
+                             Blocking (a name another file cannot reach), Constant
 ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
                              tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), SetXIfChanged, RemoveX,
                              tags IsX,
@@ -117,17 +129,20 @@ EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as de
                              like a hook)
 UnusedSuppressor.cs          suppresses IDE0051 / IDE0052 on [ForEach], [EntityMethod] and hook methods (called through
                              UnsafeAccessor; Rider reads their [MeansImplicitUse])
-EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the
+EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-032, EECS034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the
                              check of EECS056):
                              code that works but costs (write access that
                              only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per
-                             update, per-entity structural changes and counting over queries, creation loops, the
-                             generated member, Update in a system, a Mut<T> of an untracked component, a Query loop
+                             update, per-entity structural changes and counting over queries, creation loops,
+                             Update in a system, a Mut<T> of an untracked component, a Query loop
                              that only reads, a Set right after a creation, a tracked ref written on some rows only
                              (through a view's 'ref' field and in view members too), a
                              method left without a vector loop; EECS025 and EECS053 for the parameters of lambda passes
                              too); each computes its fix as
                              diagnostic properties for EasyEcs.CodeFixes
+EasyEcsAnalyzer.Members.cs   EECS033 (the generated member a call or a guarded Set says shorter) in an analyzer of its
+                             own (MemberAnalyzer): the rule a project most often turns off is the costliest to run, and
+                             Roslyn skips an analyzer only when every rule it reports is suppressed
 PartGenerator.cs             [Sum]..[Any], [LookupKey]/[UniqueKey], [Group], [OrderBy] -> a part of the partial struct
                              (IReduction<T>, IIndexed<K>.Key, IGroup.Group, IOrderKey<K>.OrderKey / BoxPoint); Parts.cs: the models and Problems read once for the
                              generator and the analyzer (other generators read keys and groups through Symbols)
@@ -170,6 +185,11 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              Kernel.Streams.cs: the columns a loop writes without reading (WriteOnly, read off the
                              loop's text: Code.Streamed, FlatCode.Streamed) and the streaming loop's text (Streaming:
                              their loads dropped, their stores StreamingStores.Store);
+                             Kernel.Loops.cs: element loops, the for / foreach loops over spans and buffers inside a
+                             method (ElementLoops: each loop's vector code or its ScalarReason; a for-loop indexing its
+                             spans at its counter only, a bound the loop does not write; the body desugared into a
+                             static local function whose ref parameters are the elements (Lane.Streams) and translated
+                             by Kernel; break, return, nested loops and values the loop writes stay scalar);
                              Kernel.Switches.cs: patterns and switches as lane masks (relational, constant, and / or /
                              not, property, positional, tuple, type and var patterns; a switch expression first match
                              wins from its arms' masks, the lanes no arm matches sent to the method; a switch statement's
@@ -225,10 +245,14 @@ EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted
 EasyEcsAnalyzer.Pairs.cs     EECS105-107: a pair method that cannot run per pair (Error), one whose cutoff test the
                              generator cannot read (every pair runs), a neighbor search written by hand (a Warning
                              with PairRewrite's fix when mechanical, else Info: the grid's upkeep goes with it)
-EasyEcsAnalyzer.Tiles.cs     EECS115-117: a tile step the generator cannot write (Symbols.StepProblem, Write on a tile
+EasyEcsAnalyzer.Tiles.cs     EECS115-117, EECS120-121: a tile step the generator cannot write (Symbols.StepProblem, Write on a tile
                              taken by value, Sweep read on one, Restart outside a [GaussSeidel] step's ref tile: Error), a second buffer and its plain commit written by hand where the
-                             tile could step itself (compilation end, Warning), a Min / Max relaxation stepped by Jacobi
-                             that [GaussSeidel] would settle (Info, fix: [GaussSeidel] when the key colors the tiles)
+                             tile could step itself (compilation end, Warning; StepRewrite: the step method's rewrite
+                             to a ref tile writing Write(row), the fix's properties), a Min / Max relaxation stepped by Jacobi
+                             that [GaussSeidel] would settle (Info, fix: [GaussSeidel] when the key colors the tiles),
+                             a tile load the generator cannot check once (Info: TileLoad.Read's reason), a buffer no method
+                             writes copied over a tile's cells (compilation end, Warning: what a commit leaves once its
+                             step is by ref; sizing it with SetCount as a statement, Clear or EnsureCapacity is no write)
 EasyEcsAnalyzer.Fusion.cs    EECS093-094: two passes over the same rows that almost share one walk (the reason
                              Fusion.Problem gives), a FusionMode.Require method left apart (Error)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)

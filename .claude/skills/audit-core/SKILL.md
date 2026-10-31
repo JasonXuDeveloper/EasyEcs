@@ -46,7 +46,11 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
 - **Platforms**: x64 and arm64 intrinsics with a scalar fallback (`IsSupported` checks), Native AOT (no reflection or
   generic recursion it cannot see, `tests/EasyEcs.Aot`), WebAssembly (the demo: Mono AOT, single-threaded, so the
   runner and `Workers` must run everything on the caller), Godot desktop and mobile; native memory freed on every
-  path (World dispose, snapshots, collectible unload).
+  path (World dispose, snapshots, collectible unload). Huge pages come from advising the large pinned arrays
+  (`HugePages`: Linux only, off after a failed call), never from native blocks: the GC frees the arrays, so a `ref`
+  kept across a resize never reads freed memory; a new large unmanaged array of a table goes through
+  `ComponentInfo.Create` (or calls `HugePages.AllocatePinned`), with `sized` false for a doubling step or a trim
+  (only arrays a reservation or a copy sized take huge pages, as `World.AllocateMeta` does for the records).
 - **Unbounded memory**: a list, pool or log that grows without a cap or a release (`TrimExcess`, pool limits, the
   destroy log's capacity); per-entity state outside `EntityMeta`.
 - **Per-thread pools and copy-on-write**: whichever thread makes the first write to a shared list pays the copy from

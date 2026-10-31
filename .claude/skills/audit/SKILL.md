@@ -54,6 +54,9 @@ what it left undone, which goes on the same list (nothing is dropped silently).
 - At most three code agents at once (the owner's limit). Benchmarks run one at a time under the machine's lock
   (`audit-perf`), and every build and test waits while one runs, so pair an agent that measures with agents that need
   no BenchmarkDotNet (tests, analyzer, naming) instead of starting three that queue on the lock.
+- Tell each agent the owner's rule (AGENTS.md, "Try it now; research a problem, never skip it"): nothing it finds is
+  deferred to "later"; a slower case, an allocation or a failing form is explained from the assembly, the generated
+  source or a profile and fixed in the same branch; its report lists only what stopped at a cause out of reach.
 - Tell each agent: never end its turn while its own background command (a test run, an A/B) still runs; wait for it
   with Monitor or an until-loop. An agent that ends its turn early stalls until it is messaged again.
 - Two agents whose files overlap (a file both edit, such as `GeneratorTests.cs` or `Kernel.cs`) do not run at once;

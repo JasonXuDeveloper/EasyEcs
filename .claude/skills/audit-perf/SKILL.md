@@ -207,10 +207,42 @@ its own worktree.
      be shaped like the libc's large copy (four pages at a time, the source prefetched), since a plain loop of
      non-temporal stores was 1.25-1.46x slower than glibc's; and a copy into arrays just allocated (a resize) is
      bound by the allocation and first touch, where streaming was a wash (feat-borrowed-rest);
+   - a random chase past the TLB's reach (4 KiB pages: 6-8 MiB) pays a page walk per read on top of its cache miss;
+     check the pages before crediting a prefetch or a layout (`AnonHugePages` in `/proc/self/smaps_rollup`, printed by
+     LookupChaseHugePagesBenchmark's setup). Huge pages (`HugePages`, Linux THP) made the 16M chases 1.3-1.7x faster
+     and left a walk in row order alone; a prefetch that misses the TLB is worth less, so the prefetched forms gained
+     the most (feat-later-memory). Compare pages off / on inside one binary (an internal switch set in setup), never
+     base against head. How an array gets its huge pages decides what its allocation costs (HugePageTouchBenchmark,
+     `HugePages.AllocatePinned`): advised before the first touch, never after the GC zeroed it (pages it touched stay
+     small: Create 16M 1.2-1.3x slower); never collapsed (`MADV_COLLAPSE`: 13-19 ms of kernel time per page); untouched
+     2 MiB dropped (`MADV_DONTNEED`), resident ones zeroed in place (dropping memory the GC hands out again and faulting
+     it back made Grow 16M 1.2-1.5x slower); and only arrays a reservation sized, not the steps of a doubling. When an
+     allocation path is slower, read the kernel's side before guessing (perf is not available on the shared VM):
+     `stime` / `minflt` from `/proc/self/stat` and the `thp_*` / `compact_stall` counters of `/proc/vmstat` around N
+     repetitions in a small console program, then time the fix with BenchmarkDotNet. On the reference VM those
+     counters swing 3x between runs of one binary: it reports free 2 MiB blocks to the host (virtio-balloon free page
+     reporting, `/sys/module/page_reporting/parameters/page_reporting_order` = 9), which discards them, so a huge
+     page faulted from a block freed seconds earlier touches at 0.3 GiB/s against 6.6 GiB/s for one reused at once
+     and 2 GiB/s for 4 KiB pages (feat-later-memory). Numbers of first touch with huge pages there are a lower bound;
+   - a vector loop over a table that fills most of a core's L2 (100k entities of KernelBenchmark: 1.2-1.6 MB against
+     2 MiB) varies 20-30 % between processes and between worlds made again in one process with the same compiled
+     code (the physical pages the columns land on: L2 sets are physically indexed): before calling such a case slower,
+     run it with `--launchCount 6` in interleaved base / head rounds and compare the spread of the launches, and check
+     the Tier1 listings and tiers (`DOTNET_JitDisasmSummary=1`) are the same (feat-later-memory: Step 100k "0.75x"
+     was one fast base launch);
+   - Native AOT is measured by BenchmarkDotNet with `--runtimes nativeaot10.0` (one publish per case, minutes each:
+     filter to the methods the change touches); the JIT and AOT runs of one A/B go in one round, interleaved.
+     BenchmarkDotNet 0.15 passes ILC 10 an instruction set it refuses ("Unrecognized instruction set sse") and its
+     generated project ignores `Directory.Build.targets`: export `CustomAfterMicrosoftCommonTargets` naming a scratch
+     targets file that sets `<IlcInstructionSet>native</IlcInstructionSet>` for the AOT runs;
    - before choosing what to change in a pass, place it on the roofline (below, "Roofline"): a memory-bound pass gains
      from fewer bytes only, a compute-bound one from the loop and the math;
-4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss or a wash is reverted and gets a
-   decision record (what was tried, the numbers, why not); the roadmap's "Dropped" list names it.
+4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss, a wash or an allocation is first
+   explained, not reverted on sight (AGENTS.md, "Try it now; research a problem"): diff the Tier1 listings of base
+   and head (`tools/jitdisasm.sh`: spills, calls, range checks, a longer loop), read the generated source and the
+   allocation trace, and build and measure the fix the cause points to. Only what still loses after that is
+   reverted and gets a decision record (what was tried, the cause found, the numbers); the roadmap's "Dropped" list
+   names it.
    A plan's bar (1.2x, 1.5x, 20 %) decides what to build and try first, not whether a measured change ships (owner,
    2026-10-27: "门槛不用严格卡，有收益就行"): faster beyond the job's noise in both rounds, 0 B, nothing slower ships
    even under its bar. A gain inside the noise is a wash, not a win.
@@ -238,6 +270,16 @@ its own worktree.
   (11.9 KB → 3.7 KB), not from the rewritten copy (D136).
 - **A per-run helper called from several sites of a structural method gets `NoInlining`**, like a cold path: it runs
   once per run of rows, and each inlined copy bloats the caller's loops over ids.
+- **An argument a generated helper uses twice is a temp, and its constants stop folding.** The tile-load interceptor
+  takes the column (`x + k`) and both checks it and adds it to the address, so the JIT evaluates `x + k` into a
+  register first: each load of a stencil got its own add and sign extension, and the loads of a column did not share
+  one base address (Laplacian column loop 52 instructions through the interceptor, 33 by hand). A walk that hands
+  out the base (`c.Columns(step)`: the column's address once, the offsets as constants of each call) lets every
+  offset fold into the load's displacement (39). The store goes the same way: a `Span.CopyTo` into the row checks
+  its slice twice (start and length, 9 instructions), a store whose bound is proven by the walk (`col.Store(v, into)`:
+  the store's end checked against the tile's width once per shape, the row's length by one compare) leaves one
+  compare in the loop (34). Before building a helper around a hot load or store, read whether its argument is used
+  once and which of its checks the JIT can prove.
 - **Read Tier1 code from the benchmark process** (BDN `--dev`, `DOTNET_JitDisasm` and `DOTNET_JitStdOutFile` set on the
   run; the child inherits them). A scratch driver with other components compiles differently (9.5 vs 11.9 KB).
 - **Make a pass-safety test discriminate**: a test that a pass survives arrivals fixes `InitialEntityCapacity`, or

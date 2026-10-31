@@ -71,6 +71,12 @@ CacheSizes.cs                the last-level cache and one core's L2, read once p
                              form: index probes and vector loops' chases past the last level; the row form's chases
                              (parallel, fused walks and buffers too) and DestroyEntities' id list past the L2
                              (L2OrLastLevel); the last level also where a non-temporal store exists (StreamingStores)
+HugePages.cs                 the large pinned arrays of the tables on 2 MiB pages (Linux transparent huge pages):
+                             AllocatePinned, for the unmanaged columns and entity records a reservation, the initial
+                             capacity or a copy sized (not doubling steps): allocated uninitialized, the 2 MiB-aligned
+                             interior advised MADV_HUGEPAGE, each untouched 2 MiB dropped (MADV_DONTNEED), each resident
+                             one (mincore) zeroed in place; not collapsed (MADV_COLLAPSE costs kernel time); Enabled
+                             where THP is not "never", off after a failed call
 StreamingStores.cs           the non-temporal stores of generated vector loops (a column the method writes without
                              reading, past the last-level cache): Pays (the gate, once per run: MinRows, the table's rows
                              of the method's columns past CacheSizes.LastLevel), Head (the rows to the first aligned
@@ -85,6 +91,8 @@ Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo
                              TileFrame (a texture padded with the halo, a row mask per layer, the state of the tile it
                              steps), Rows (TZCNT walk), At / the indexer, Write (a stepped tile's row), Sweep / Restart (a [GaussSeidel]
                              step's sweep count, its cells started from a value: TileFrame.Restart), TileCursor.Load128,
+                             TileCursor.Columns (TileColumnWalk and its Cursor: a row's columns, loads at constant
+                             offsets of the column and Store into the row the step writes, checked once for the walk),
                              ChangedEdges / Facing (sleeping tiles written by hand)
 TileSteps.cs                 a stepping tile's pass (ref Tile, TileSteps<TCell, TTile, TGrid, TKey, TColors>, one per
                              world and method): the second buffer of a Jacobi step swapped in after the pass, the rows

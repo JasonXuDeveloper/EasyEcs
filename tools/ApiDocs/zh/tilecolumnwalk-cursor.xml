@@ -1,0 +1,38 @@
+<doc>
+  <member name="T:EasyEcs.TileColumnWalk`2.Cursor" source="955d358ddcd2">
+    <summary>
+      遍历停在行中某一列：它周围的格子，一次一个或一个向量，偏移从这一列算起；还能把一个向量从这一列存进步进写的那一行。
+      偏移以格子计：dx 从 −r 起，到从遍历的最后一列加载仍在行后最后一个 halo 格子（Width + r − 1）处或之前结束为止；
+      dy 和 dz 从 −r 到 r（2D 瓦片 dy 为 0），r 是形状的 <see cref="P:EasyEcs.ITileShape.Halo" />。
+      遍历的每一列都通过同一个检查，所以步长是常量时，常量偏移由 JIT 检查，其他偏移用一次比较。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.TileColumnWalk`2.Cursor.X" source="8190720c123a">
+    <summary>这一列：它的格子在瓦片一行中的起点（<c>into[col.X]</c>）。</summary>
+  </member>
+  <member name="P:EasyEcs.TileColumnWalk`2.Cursor.Item(System.Int32,System.Int32,System.Int32)" source="d6e4754b7b68">
+    <summary>从这一列的格子偏移 (dx, dy, dz) 处的格子。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.TileColumnWalk`2.Cursor.Load128``1(System.Int32,System.Int32,System.Int32)" source="081a9690d886">
+    <summary>从这一列偏移 (dx, dy, dz) 开始的 128 位格子，按 <typeparamref name="TLane" /> 分道。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.TileColumnWalk`2.Cursor.Load256``1(System.Int32,System.Int32,System.Int32)" source="935084202a49">
+    <summary>从这一列偏移 (dx, dy, dz) 开始的 256 位格子，按 <typeparamref name="TLane" /> 分道。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.TileColumnWalk`2.Cursor.LoadVector``1(System.Int32,System.Int32,System.Int32)" source="0236470a42e2">
+    <summary>从这一列偏移 (dx, dy, dz) 开始的一个 <c>Vector&lt;TLane&gt;</c> 格子（机器的向量宽度）。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.TileColumnWalk`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector128{``0},System.Span{`0})" source="f9c95bac199d">
+    <summary>
+      把 <paramref name="value" /> 从这一列的格子起存进 <paramref name="into" />，即步进写的一行（<see cref="M:EasyEcs.Tile`2.Write(EasyEcs.TileRow{`1})" />）：
+      写的内容和 <c>value.CopyTo(into.Slice(col.X))</c> 一样。从遍历的最后一列起，这 128 位必须在行的最后一个格子处或之前结束（步长至少是它们的格子数）；
+      步长是常量时由 JIT 单独检查，<paramref name="into" /> 是否有 Width 个格子用一次比较。O(1)。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.TileColumnWalk`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector256{``0},System.Span{`0})" source="2d23b5c82ca0">
+    <summary>把 <paramref name="value" /> 的 256 位从这一列的格子起存进行 <paramref name="into" />，同 <see cref="M:EasyEcs.TileColumnWalk`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector128{``0},System.Span{`0})" />。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.TileColumnWalk`2.Cursor.Store``1(System.Numerics.Vector{``0},System.Span{`0})" source="1e4b4f30bab8">
+    <summary>把一个 <c>Vector&lt;TLane&gt;</c> 从这一列的格子起存进行 <paramref name="into" />，同 <see cref="M:EasyEcs.TileColumnWalk`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector128{``0},System.Span{`0})" />。O(1)。</summary>
+  </member>
+</doc>
