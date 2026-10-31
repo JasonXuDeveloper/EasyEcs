@@ -98,7 +98,7 @@ public sealed partial class SystemGenerator
             if (rewritten is ForEachStatementSyntax each)
             {
                 call.Append($"{{\n{hidden}var __span{k} = ({each.Expression.WithoutTrivia()}){loop.Streams[0].Span};\n");
-                call.Append($"int __at{k} = {Whole(loop, $"__span{k}.Length")} ? (int)__Elements{k}(ref {Marshal}.GetReference(__span{k}), 0, __span{k}.Length{values}) : 0;\n");
+                call.Append($"int __at{k} = {Whole(loop, $"__span{k}.Length")} ? (int)__Elements{k}(ref {Marshal}.GetReference(__span{k}), 0, __span{k}.Length, 0{values}) : 0;\n");
                 call.Append(Line(original));
                 call.Append(each.WithExpression(SyntaxFactory.ParseExpression($"__span{k}.Slice(__at{k})")).WithoutLeadingTrivia().WithoutTrailingTrivia().ToFullString());
                 call.Append(" }");
@@ -108,19 +108,28 @@ public sealed partial class SystemGenerator
             var loopFor = (ForStatementSyntax)rewritten;
             var variable = loopFor.Declaration!.Variables[0];
             string index = variable.Identifier.ValueText, end = $"({((BinaryExpressionSyntax)loopFor.Condition!).Right.WithoutTrivia()})";
+            // Every stream's elements index + k .. end + k lie in its span (each comparison free of overflow: index >= 0,
+            // end <= a length, |k| <= 64), so the vector form reads none past either end.
             var guard = new List<string> { $"{index} >= 0", Whole(loop, $"{end} - {index}") };
-            foreach (var stream in loop.Streams) guard.Add($"{end} <= {stream.Span}.Length");
-            // A written span that overlaps another one at a shift would read its own writes in the loop as written.
+            foreach (var stream in loop.Streams)
+            {
+                if (stream.Offset < 0) guard.Add($"{index} >= {-stream.Offset}");
+                guard.Add(stream.Offset > 0 ? $"{end} <= {stream.Span}.Length - {stream.Offset}" : $"{end}{Kernel.Shift(stream.Offset)} <= {stream.Span}.Length");
+            }
+            // A written span that overlaps another one at a shift would read its own writes in the loop as written. Two
+            // streams of one span are both read (Kernel keeps a span written and read at another offset scalar).
             for (int a = 0; a < loop.Streams.Length; a++)
             for (int b = 0; b < loop.Streams.Length; b++)
-                if (a != b && loop.Streams[a].Written && (b > a || !loop.Streams[b].Written))
+                if (a != b && loop.Streams[a].Written && (b > a || !loop.Streams[b].Written) && loop.Streams[a].Span != loop.Streams[b].Span)
                 {
                     guard.Add($"__Apart<{loop.Streams[a].Element}, {loop.Streams[b].Element}>({loop.Streams[a].Span}, {loop.Streams[b].Span})");
                     apart = true;
                 }
             call.Append($"{{\n{hidden}{loopFor.Declaration.WithoutTrivia()};\n");
-            string refs = string.Concat(loop.Streams.Select(s => $"ref {Marshal}.GetReference({s.Span}), "));
-            call.Append($"if ({string.Join(" && ", guard)}) {index} = (int)__Elements{k}({refs}{index}, {end}{values});\n");
+            // Each stream from its element at index + k, so the vector form walks 0 .. end - index of all of them (a ref
+            // before a span's first element would point outside its object), and adds the index to its own lanes.
+            string refs = string.Concat(loop.Streams.Select(s => $"ref {Unsafe}.Add(ref {Marshal}.GetReference({s.Span}), {index}{Kernel.Shift(s.Offset)}), "));
+            call.Append($"if ({string.Join(" && ", guard.Distinct())}) {index} += (int)__Elements{k}({refs}0, {end} - {index}, {index}{values});\n");
             call.Append(Line(original));
             call.Append(loopFor.WithDeclaration(null).WithoutLeadingTrivia().WithoutTrailingTrivia().ToFullString());
             call.Append(" }");
@@ -175,6 +184,7 @@ public sealed partial class SystemGenerator
         for (int s = 0; s < loop.Streams.Length; s++) parameters.Add($"ref {loop.Streams[s].Element} r{s + 1}");
         parameters.Add("nint i");
         parameters.Add("nint rows");
+        parameters.Add("int at");
         for (int v = 0; v < loop.Values.Length; v++) parameters.Add($"{(loop.Values[v].Sum ? "ref " : "")}{loop.Values[v].Type} x{loop.Streams.Length + v}");
         sb.Append(NoInlining).Append('\n');
         sb.Append($"static nint __Elements{k}({string.Join(", ", parameters)})\n{{\n");
@@ -203,7 +213,7 @@ public sealed partial class SystemGenerator
             loopText.Append(Indent(simd.Stores)).Append("}\n");
             loopText.Append(simd.Fold);
             Constants(loopText);
-            string body = loopText.Replace(Kernel.Row, "(int)i").Replace(Kernel.Visited, "ulong.MaxValue").ToString();
+            string body = loopText.Replace(Kernel.Row, "(at + (int)i)").Replace(Kernel.Visited, "ulong.MaxValue").ToString();
             string guard = $"{Hardware(simd)} && rows - i >= {vector}.Count";
             text.Append($"if ({Wide(guard, null)})\n{{\n").Append(Indent(Wide(body, null))).Append("}\n");
             text.Append($"if ({Narrow(guard, null)})\n{{\n").Append(Indent(Narrow(body, null))).Append("}\n");

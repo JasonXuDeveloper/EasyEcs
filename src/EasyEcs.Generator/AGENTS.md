@@ -56,8 +56,9 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              (BodyCopy.Accessors), each such loop preceded by a call of its NoInlining local function
                              (__Elements{k}: whole vectors from the index given, a sum's lanes folded into its
                              variable, the index it stopped at returned to the loop as written), a for-loop's under its
-                             bounds and alias guard (__Apart); a lambda pass's body the same way (WithElementLoops);
-                             a line per loop in the schedule
+                             bounds and alias guard (__Apart), each stream from its element at the index plus its
+                             offset; a lambda pass's body the same way (WithElementLoops); a line per loop in the
+                             schedule
 SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): the pass (world.ForPairs), the order
                              struct (Morton key of the compared component over the axes the test names), the job
                              (the cutoff from the test, per row or one; Width; Rows: the method per pair, over the row's
@@ -191,7 +192,9 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              their loads dropped, their stores StreamingStores.Store);
                              Kernel.Loops.cs: element loops, the for / foreach loops over spans and buffers inside a
                              method or a lambda pass (ElementLoops: each loop's vector code or its ScalarReason; a
-                             for-loop indexing its spans at its counter, the counter also read as a value (lanes of
+                             for-loop indexing its spans at its counter or a constant from it (s[i - 1]: a stream
+                             per offset; a span written and read at another offset stays scalar), the counter also
+                             read as a value (lanes of
                              the indexes, WideIndex for 8-byte integers), a bound the loop does not write; variables of
                              the method written only as sums, Mins or Maxes (SumOf: Lane.Sums, Kernel.Summed's
                              reductions folded into the variable); the body desugared into a static local function

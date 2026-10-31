@@ -32,11 +32,12 @@ internal sealed partial class Kernel
     /// stream's element type and how the call site reaches its first element, the values' declarations and arguments.
     /// </summary>
     /// <param name="Streams">Per stream: the C# naming the span at the call site (a local, a parameter, or the foreach's
-    /// span), its element type (fully qualified), and whether the loop writes it.</param>
+    /// span), its element type (fully qualified), whether the loop writes it, and the constant the loop adds to its
+    /// index to read it (<c>s[i - 1]</c>: -1; a span read at several offsets is a stream per offset).</param>
     /// <param name="Values">Per value: its type (fully qualified), its name at the call site, and whether the loop sums
     /// into it (passed by ref; its lanes fold into it).</param>
     /// <param name="ForEach">The loop is a foreach (else a for over an index).</param>
-    internal sealed record ElementLoop(Code Code, (string Span, string Element, bool Written)[] Streams, (string Type, string Name, bool Sum)[] Values, bool ForEach)
+    internal sealed record ElementLoop(Code Code, (string Span, string Element, bool Written, int Offset)[] Streams, (string Type, string Name, bool Sum)[] Values, bool ForEach)
     {
         /// <summary>A for loop's end as written (it is read again at the call site), else null.</summary>
         public string? Bound { get; init; }
@@ -127,7 +128,7 @@ internal sealed partial class Kernel
         }
 
         // The elements: what each stream symbol stands for in the body, and the names they take as parameters.
-        var streams = new List<(ISymbol Symbol, ITypeSymbol Element, bool Writable, string Span)>();
+        var streams = new List<(ISymbol Symbol, ITypeSymbol Element, bool Writable, string Span, int Offset)>();
         ILocalSymbol? index = null;
         bool indexValue = false; // the index read as a value (s[i] = i): a parameter of the body whose lanes are the indexes
         SyntaxNode desugared;
@@ -146,7 +147,7 @@ internal sealed partial class Kernel
                 return null;
             }
             bool writable = variable.RefKind == RefKind.Ref && Symbols.Named(((INamedTypeSymbol)spanType).ConstructedFrom, "System.Span<T>");
-            streams.Add((variable, element, writable, BufferElement(spanType) != null ? ".AsReadOnlySpan()" : "")); // the call site's span
+            streams.Add((variable, element, writable, BufferElement(spanType) != null ? ".AsReadOnlySpan()" : "", 0)); // the call site's span
             desugared = body;
         }
         else
@@ -163,12 +164,14 @@ internal sealed partial class Kernel
                 reason = Why($"it writes its index '{variable.Name}'");
                 return null;
             }
-            // Every use of the index is the index of a span (s[i]) or a value (i * 2), not inside another index.
+            // Every use of the index is the index of a span (s[i], s[i + 1], s[i - 2]: a constant apart) or a value
+            // (i * 2), not inside another index.
             var replace = new Dictionary<SyntaxNode, SyntaxNode>();
             foreach (var name in body.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
             {
                 if (!SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(name, ct).Symbol, variable)) continue;
-                if (name.Parent is not ArgumentSyntax { Parent: BracketedArgumentListSyntax { Arguments.Count: 1, Parent: ElementAccessExpressionSyntax access } }
+                var (argument, offset) = OffsetOf(name, model, ct);
+                if (argument.Parent is not ArgumentSyntax { Parent: BracketedArgumentListSyntax { Arguments.Count: 1, Parent: ElementAccessExpressionSyntax access } }
                     || access.Expression is not IdentifierNameSyntax spanName
                     || model.GetSymbolInfo(spanName, ct).Symbol is not { } span || span is not (ILocalSymbol or IParameterSymbol)
                     || Symbols.SpanElement(TypeOf(span)) is not { } element)
@@ -183,9 +186,9 @@ internal sealed partial class Kernel
                     reason = Why($"it reads its index '{variable.Name}' as a value ('{use}'), not only as the index of a span (s[{variable.Name}])");
                     return null;
                 }
-                if (!streams.Any(s => SymbolEqualityComparer.Default.Equals(s.Symbol, span)))
-                    streams.Add((span, element, Symbols.Named(((INamedTypeSymbol)TypeOf(span)).ConstructedFrom, "System.Span<T>"), span.Name));
-                replace[access] = IdentifierName(StreamName(span)).WithTriviaFrom(access);
+                if (!streams.Any(s => SymbolEqualityComparer.Default.Equals(s.Symbol, span) && s.Offset == offset))
+                    streams.Add((span, element, Symbols.Named(((INamedTypeSymbol)TypeOf(span)).ConstructedFrom, "System.Span<T>"), span.Name, offset));
+                replace[access] = IdentifierName(StreamName(span, offset: offset)).WithTriviaFrom(access);
             }
             if (streams.Count == 0)
             {
@@ -246,7 +249,7 @@ internal sealed partial class Kernel
         // The body as a static local function of the elements and the values, bound where the method's body is.
         var parameters = new List<ParameterSyntax>();
         foreach (var s in streams)
-            parameters.Add(Parameter(Identifier(StreamName(s.Symbol, loop is ForEachStatementSyntax)))
+            parameters.Add(Parameter(Identifier(StreamName(s.Symbol, loop is ForEachStatementSyntax, s.Offset)))
                 .WithType(ParseTypeName(s.Element.ToDisplayString(Symbols.Fqn)))
                 .WithModifiers(TokenList(Token(s.Writable ? SyntaxKind.RefKeyword : SyntaxKind.InKeyword))));
         foreach (var v in values)
@@ -305,8 +308,18 @@ internal sealed partial class Kernel
             return null;
         }
 
+        // A span written and read at another offset: the loop as written reads elements it wrote (s[i] = s[i - 1]), or
+        // reads ahead what a vector's stores would have changed first; the vector form loads a whole vector before it
+        // stores one, so it stays scalar.
+        for (int s = 0; s < streams.Count; s++)
+            if (code.Written.Contains(s + 1) && streams.FirstOrDefault(o => SymbolEqualityComparer.Default.Equals(o.Symbol, streams[s].Symbol) && o.Offset != streams[s].Offset) is { Symbol: not null } other)
+            {
+                reason = Why($"it writes span '{streams[s].Symbol.Name}' and reads it at another index ('{streams[s].Symbol.Name}[{index!.Name}{Shift(other.Offset)}]'): each element would read what the loop wrote, or is about to write, one element before; write into another span");
+                return null;
+            }
+
         return new ElementLoop(code,
-            streams.Select(s => (s.Span, s.Element.ToDisplayString(Symbols.Fqn), code.Written.Contains(streams.IndexOf(s) + 1))).ToArray(),
+            streams.Select(s => (s.Span, s.Element.ToDisplayString(Symbols.Fqn), code.Written.Contains(streams.IndexOf(s) + 1), s.Offset)).ToArray(),
             values.Select(v => (TypeOf(v).ToDisplayString(Symbols.Fqn), global::EasyEcs.Generator.Code.Escape(v.Name), sums.ContainsKey(v))).ToArray(),
             loop is ForEachStatementSyntax) { Bound = boundText };
     }
@@ -384,7 +397,24 @@ internal sealed partial class Kernel
     }
 
     /// <summary>The name a stream takes as a parameter: a foreach's variable keeps its own; a span read at the index is <c>__e_s</c>.</summary>
-    private static string StreamName(ISymbol span, bool forEach = false) => forEach ? global::EasyEcs.Generator.Code.Escape(span.Name) : "__e_" + span.Name;
+    private static string StreamName(ISymbol span, bool forEach = false, int offset = 0) =>
+        forEach ? global::EasyEcs.Generator.Code.Escape(span.Name) : "__e_" + span.Name + (offset == 0 ? "" : offset < 0 ? $"_m{-offset}" : $"_p{offset}");
+
+    /// <summary><c> + k</c> / <c> - k</c> as C# writes an offset after the index, "" for 0.</summary>
+    internal static string Shift(int offset) => offset == 0 ? "" : offset < 0 ? $" - {-offset}" : $" + {offset}";
+
+    /// <summary>
+    /// The expression an index use <paramref name="name"/> is the whole of (<c>i</c>, <c>i + k</c>, <c>k + i</c>, <c>i - k</c>
+    /// for an int constant k up to 64), with k; else the name itself and 0.
+    /// </summary>
+    private static (ExpressionSyntax Expression, int Offset) OffsetOf(IdentifierNameSyntax name, SemanticModel model, System.Threading.CancellationToken ct)
+    {
+        if (name.Parent is BinaryExpressionSyntax { RawKind: (int)SyntaxKind.AddExpression or (int)SyntaxKind.SubtractExpression } b
+            && (b.Left == name || b.IsKind(SyntaxKind.AddExpression))
+            && model.GetConstantValue(b.Left == name ? b.Right : b.Left, ct) is { HasValue: true, Value: int k } && k is >= -64 and <= 64)
+            return (b, b.IsKind(SyntaxKind.SubtractExpression) ? -k : k);
+        return (name, 0);
+    }
 
     private static ITypeSymbol TypeOf(ISymbol variable) => variable switch
     {
