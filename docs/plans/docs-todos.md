@@ -2167,3 +2167,7 @@ helpers).
   Before the fix the 4-element cases cost 1.19-1.23x: the copy was NoInlining while the method's small body inlines
   into its job through the accessor. The copy now takes the accessor's inlining, the vector form is a NoInlining root
   called only for a span of a whole vector. D132 says so (the rule: a copy of user code inlines as the code would).
+- **Generator cost (GeneratorBenchmark, base c2beddf against this branch, two interleaved rounds):** level. Cold
+  906 / 961 -> 913 / 971 ms (one namespace: 938 / 922 -> 938 / 938), EditMethodBody 574 / 555 -> 555 / 513 ms
+  (516 / 561 -> 541 / 531), CompileAndAnalyze 5,738 / 5,562 -> 5,678 / 5,725 ms (7,607 / 7,326 -> 7,508 / 7,182);
+  allocations within 0.4 %. Methods without loops pay one syntax walk for a loop keyword.
