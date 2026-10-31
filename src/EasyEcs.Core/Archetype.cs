@@ -985,6 +985,7 @@ internal sealed class Archetype
     private void Resize(int capacity, bool sized)
     {
         Array.Resize(ref Slots, capacity);
+        if (sized) HugePages.Populate(Slots); // the rows a reservation made room for, written without a fault per page
         for (int i = 0; i < Columns.Length; i++)
             ByBit[Components[i]].Set(Columns[i] = _infos[i].Resize(Columns[i], capacity, sized), _infos[i].Managed);
         foreach (short c in _bitColumns)

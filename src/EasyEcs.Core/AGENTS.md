@@ -76,7 +76,10 @@ HugePages.cs                 the large pinned arrays of the tables on 2 MiB page
                              capacity or a copy sized (not doubling steps): allocated uninitialized, the 2 MiB-aligned
                              interior advised MADV_HUGEPAGE, each untouched 2 MiB dropped (MADV_DONTNEED), each resident
                              one (mincore) zeroed in place; not collapsed (MADV_COLLAPSE costs kernel time); Enabled
-                             where THP is not "never", off after a failed call
+                             where THP is not "never", off after a failed call; Populate: those arrays, and a sized
+                             table's entity rows and the free-id list, faulted in when allocated (MADV_POPULATE_WRITE,
+                             Linux 5.14+, on 4 KiB pages too), so the rows a reservation made room for are written
+                             without a fault; Prefault off after a failed call
 StreamingStores.cs           the non-temporal stores of generated vector loops (a column the method writes without
                              reading, past the last-level cache): Pays (the gate, once per run: MinRows, the table's rows
                              of the method's columns past CacheSizes.LastLevel), Head (the rows to the first aligned

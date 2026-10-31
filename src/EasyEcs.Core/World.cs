@@ -632,7 +632,11 @@ public sealed partial class World : IDisposable
         Meta = grown;
         // As many ids as the records may be free at once (all destroyed): the free list grows with the records, so
         // destroying what a reservation made room for grows nothing. 4 bytes per id beside the record's 16.
-        if (_freeIds.Length < capacity) Array.Resize(ref _freeIds, capacity);
+        if (_freeIds.Length < capacity)
+        {
+            Array.Resize(ref _freeIds, capacity);
+            if (sized) HugePages.Populate(_freeIds);
+        }
         var indexes = _indexes;
         for (int i = 0; i < indexes.Length; i++) indexes[i]?.Reserve(capacity);
         StorageVersion++;
