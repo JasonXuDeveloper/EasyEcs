@@ -1892,3 +1892,96 @@ and after, every analyzer and code fix test unchanged).
   > 异常（单元测试每次构建 391-451 个，几毫秒；跟踪器会夸大它们的耗时）；把 compilation-end 规则改成 symbol-end 动作
   > （EECS019、视图的 EECS025、EECS069、EECS080、EECS086、EECS091、EECS092、EECS116 都需要整个 compilation 里的所有使用）。
   > 按键时剩下的开销是 Roslyn 为新 compilation 构建源码成员，它落在第一个读取它们的检查上。
+
+## feat-owner-calls (the owner's calls (a)-(f) of 2026-10-30 and the answers of 2026-10-31)
+
+Kept: `c.Columns(step)` (`TileColumnWalk<TCell, TTile>` and its `Cursor`, with `col.Store(vector, into)`), EECS120,
+EECS116's fix deleting the commit, EECS121, `World.CopyEntities<TTag>`. Reverted with their cause in
+`docs/owner-review.md`: (e) `Enter` handing the tile out, (f) `Rows()` turning odd sweeps.
+
+- guide/grids.mdx + zh, the stencil section: the column walk as the fast form of a stencil's row loop:
+  `foreach (var col in c.Columns(4)) { ... col.Load128<float>(k, dy) ...; col.Store(v, into); }` with
+  `var into = tile.Write(row)`; offsets are constants from the column, so the JIT checks loads by itself and a store
+  costs one compare of the row's length; the step must be at least the vector's cells for a store (it throws past the
+  row). When to pick it over the plain `for (x...) c.Load128(x + k)` loop (the generator proves that one too; the walk
+  also folds every offset into the load). Pitfall: `col.Store` writes the row the step writes, never the cells being
+  read (Jacobi: `tile.Write(row)`). Full example: the Laplacian of `TileStencilBenchmark` (ColumnWaveSystem).
+- guide/analyzer.mdx + zh: EECS120 (Info: a `TileCursor` load checked on every call, with the reason the loop is
+  not proven: the eight reasons of `TileLoad.Read`, and `c.Columns(step)` as the walk that needs no proof); EECS121
+  (Warning: a buffer no method writes copied over a tile's cells; sizing is not a write; no fix, because deleting the
+  copy changes what the pass does); EECS116's fix now also deletes the commit method, its system when the commit was
+  all it held with the `AddSystem<T>()` statements naming it, and the buffer's element type when nothing else names it
+  (the three titles of the fix; it leaves the commit when anything else names it, and EECS121 reports the copy then).
+- guide/worlds (or the MultiWorld sample page) + zh: `CopyEntities<TTag>(target, ids, set, copied)`: ghost rows, read
+  replicas, an area of interest copied to a per-client world; the components named once in a `ComponentSet`; links
+  into the set remapped, links out nulled; when it pays (several components, rows in runs) and when the plain
+  `CreateEntity` loop is as fast (one narrow component, scattered rows: MultiWorld's `Border` stays the loop).
+  Pitfall: copied ids are new each exchange.
+- api.mdx + zh: complexity rows `TileCursor.Columns(step)` O(1) per column; `TileColumnWalk.Cursor` loads O(1),
+  `Store` O(1); `World.CopyEntities<TTag>` O(ids × components of the set), a column copy per run of rows. Then
+  regenerate the reference (zh entries: tilecolumnwalk.xml, tilecolumnwalk-cursor.xml, tilecursor.xml, world.xml,
+  componentset.xml).
+- performance page: TileStencil's Columns rows and TileRestart's RestartColumns, GhostCopyBenchmark, once the bench
+  sync ran them on the reference machine.
+- skills/easyecs/SKILL.md: "a stencil's row loop: `foreach (var col in c.Columns(step))`, loads at constant offsets,
+  `col.Store(v, tile.Write(row))`"; "ghost rows into another world: `CopyEntities<TTag>` with a `ComponentSet`".
+- changelog: New (`c.Columns`, `col.Store`, EECS120, EECS121, `CopyEntities<TTag>`), Changes (EECS116's fix deletes
+  the commit). No migration entry: `TileColumns` / `TileColumn` never shipped.
+- glossary (en + zh): column walk (列遍历).
+
+Decision drafts (ids provisional; numbers: shared 4-vCPU VM, BenchmarkDotNet default job, two rounds):
+
+**A stencil's columns are walked by `c.Columns(step)`, and stored by `col.Store(v, into)`.**
+Decision: the cursor hands a proven column loop its base column (`TileColumnWalk<TCell, TTile>`, `foreach (var col in
+c.Columns(step))`), whose loads take constant offsets from the column and whose `Store` writes the row the step writes
+at the column. Why: the interceptor of a plain column loop takes `x + k` as an argument it uses twice, so the JIT
+spills it and each load computes its own address (Laplacian column loop 52 instructions; hand 33); the walk computes
+the column's address once and folds every offset into the load (39), and `Store` replaces `CopyTo(into.Slice(col.X))`
+(two slice checks) by one compare of the row's length (34). Considered: the cursor by value, a span per row, 64-bit
+offsets (each measured longer in Tier1). Numbers, Columns with Store against Hand (round 1): Blur9 / Laplacian at
+Side 32, 1 thread 1.01x / 1.07x; Side 512, 1 thread 0.83x / 0.85x; Side 32, 4 threads 0.80x / 0.84x; Side 512, 4
+threads 0.75x / 0.90x; RestartColumns 0.88-0.97x of Restart (0.10-0.48x of the hand sweep). The 1-thread 32x32
+Laplacian gap left is the ping-pong pass around the loop (PingPong is 1.07-1.19x of Hand there), not the loop.
+
+**一行模板的各列由 `c.Columns(step)` 遍历，由 `col.Store(v, into)` 写回。**
+决定：游标把已证明的列循环的基准列交给方法（`TileColumnWalk<TCell, TTile>`，`foreach (var col in c.Columns(step))`），
+加载用相对这一列的常量偏移，`Store` 把向量写进步进写的那一行的这一列。原因：普通列循环的拦截器把 `x + k` 当作用到两次的参数，
+JIT 先把它放进临时变量，每次加载各算一遍地址（Laplacian 列循环 52 条指令，手写 33 条）；遍历只算一次列地址，每个偏移折进加载指令
+（39 条），`Store` 用一次行长比较代替 `CopyTo(into.Slice(col.X))` 的两次切片检查（34 条）。考虑过：按值传游标、每行一个 span、
+64 位偏移（Tier1 里都更长）。数据见英文稿。1 线程 32x32 Laplacian 剩下的差距在循环外的 ping-pong 过程（PingPong 在那里是 Hand 的
+1.07-1.19 倍），不在循环里。
+
+**EECS121: a buffer no method writes, copied over a tile's cells, is reported; EECS116's fix deletes the commit.**
+Decision: the owner's "both" (2026-10-31): the fix of the plain commit EECS116 matches rewrites the step by ref and
+deletes the commit (and its system and `AddSystem<T>()` when that empties it) and the buffer type when nothing else
+names it; every other commit form, and a commit the fix must keep, is reported by EECS121 at the end of the
+compilation. Why: a step that writes `tile.Write(row)` leaves the old commit copying a buffer nobody fills over the
+cells (a silent reset each tick). Considered: a fix for EECS121 (deleting the copy changes what a pass does), counting
+`SetCount` / `Clear` / `EnsureCapacity` as writes (sizing is not a write; a used `SetCount` hands out a span and is).
+
+**EECS121：表格格子被一个没有方法写入的缓冲区覆盖时报告；EECS116 的修复删除提交方法。**
+决定：所有者 2026-10-31 的 "both"：EECS116 匹配的普通提交，修复把步进改为 ref 并删除提交方法（若系统因此为空，连同系统和
+`AddSystem<T>()`）及无人再引用的缓冲区类型；其余提交形式以及修复必须保留的提交，由 EECS121 在编译结束时报告。原因：步进改写
+`tile.Write(row)` 后，旧提交会把一个没人填的缓冲区复制到格子上（每帧悄悄清零）。考虑过：为 EECS121 提供修复（删掉复制会改变
+过程的行为）；把 `SetCount` / `Clear` / `EnsureCapacity` 算作写入（设大小不是写入；返回值被使用的 `SetCount` 交出 span，算写入）。
+
+**`World.CopyEntities<TTag>` copies rows into another world with a component set.**
+Decision: kept (owner's call (a)). Copy / CreateEntity loop, two rounds (GhostCopyBenchmark, 500 / 1,000 / 5,000
+border rows): 1 component scattered 0.93-1.14x (a wash), 1 component sorted 0.84-0.97x, 3 components 0.70-0.93x; 0 B.
+Why: the ghost's components named once, a column copy per run of rows; the one-component scattered case gains
+nothing because scattered reads and the extra collect pass cost what the block copy saves (audit-perf), so
+MultiWorld's `Border` keeps its loop. Considered: `SaveEntitiesWith` + `LoadEntities` (1.4-4.3x of the loop).
+
+**`World.CopyEntities<TTag>` 按组件集把行复制到另一个 World。**
+决定：保留（所有者的 (a)）。复制 / CreateEntity 循环，两轮：1 个组件散布 0.93-1.14 倍（持平），1 个组件有序 0.84-0.97 倍，
+3 个组件 0.70-0.93 倍；0 B。原因：幽灵行带的组件只写一次，每段连续行一次列复制；1 个组件散布时，散读和多出的收集遍历抵掉了块复制
+省下的，所以 MultiWorld 的 `Border` 保留循环。考虑过：`SaveEntitiesWith` + `LoadEntities`（循环的 1.4-4.3 倍）。
+
+**Dropped: `Enter` handing the stepped tile out; `Rows()` turning odd sweeps by itself** (owner-review has the
+listings and numbers). (e): one thread-static read less per tile, paid back by an out tile built on the stack and
+copied (Enter 709 to 802 bytes); two rounds a wash. (f): turning saves rows only where few rows are active (4 springs:
+0.93-0.95x) and loses up to 14 % where all are (256 springs, identical work counted).
+
+**放弃：`Enter` 交出步进的瓦片；`Rows()` 自己反向走奇数次扫描**（列表和数据见 owner-review）。(e)：每个瓦片少一次线程静态
+读取，却换来栈上构造再复制出去的 out 瓦片（Enter 从 709 到 802 字节）；两轮持平。(f)：只有活跃行少时反向才省行（4 个泉：
+0.93-0.95 倍），所有行都活跃时（256 个泉，计数的工作量相同）最多慢 14%。

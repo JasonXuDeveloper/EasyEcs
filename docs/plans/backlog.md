@@ -512,7 +512,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
       the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
-- [ ] **Owner's calls on `owner-review.md` (2026-10-30), each built, measured and kept only if it pays:**
+- [x] **Owner's calls on `owner-review.md` (2026-10-30), each built, measured and kept only if it pays:**
       (a) `CopyEntities<TTag>(target, ids, set)`: a measured prototype (ghost rows, a column copy per run of rows,
       the originals kept) against the hand-written `CreateEntity` loop of `samples/MultiWorld/Border.cs`;
       (b) EECS116's code fix limited to the step method (`ref Tile`, writes become `Write(row)`; the commit method and
@@ -526,6 +526,13 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       TileWoken; (f) a benchmark of `Rows()` walking odd `[GaussSeidel]` sweeps backwards against forwards, to settle
       the 8c drop with numbers. (e) and (f) by the owner's rule "try it now" (AGENTS.md, 2026-10-30).
       (c) and (d) edit the generator: after `feat-roslyn-guidance` merges.
+      Done on `feat-owner-calls` (owner's answers 2026-10-31 included): (a) kept, `World.CopyEntities<TTag>`
+      (3 components 0.70-0.93x of the loop, 1 component scattered a wash; MultiWorld keeps its loop); (b) EECS116's fix
+      deletes the commit, its system and `AddSystem<T>()` and the buffer type, and EECS121 reports the other forms;
+      (c) `c.Columns(step)` (`TileColumnWalk` and its `Cursor`) with `col.Store(v, into)`: Laplacian column loop 52 ->
+      34 instructions (hand 33), 0.75-0.90x of Hand past 32x32 at 1 thread and at 4; (d) EECS120 (Info, the
+      reasons of `TileLoad.Read`); (e) and (f) built, measured and reverted (owner-review). Docs: docs-todos
+      "feat-owner-calls".
 
 ## Finish
 
