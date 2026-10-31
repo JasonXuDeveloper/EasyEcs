@@ -692,9 +692,7 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
     {
         var frame = Exchanged();
         if (!frame.Masked) TileLayout.ThrowNoMask();
-        // The prototype of backlog 8c's turn (TileTurnBenchmark): odd sweeps of a [GaussSeidel] step from the last row back.
-        bool back = TileTurn.OddSweeps && (frame.Sweep & 1) != 0 && frame.Next == null && frame.Stepping == _entity.Id;
-        return new TileRows<TTile>(ref MemoryMarshal.GetArrayDataReference(frame.Masks), frame.From, frame.To, reads, back);
+        return new TileRows<TTile>(ref MemoryMarshal.GetArrayDataReference(frame.Masks), frame.From, frame.To, reads);
     }
 
     /// <summary>
@@ -1109,19 +1107,17 @@ public ref struct TileRows<TTile> where TTile : struct, ITileShape
     private readonly ref TileMask _masks;
     private readonly int _base, _last;
     private readonly TileStencil _reads;
-    private readonly bool _back;
     private int _layer;
     private ulong _rows;
     private int _z;
 
-    internal TileRows(ref TileMask masks, int from, int to, TileStencil reads, bool back = false)
+    internal TileRows(ref TileMask masks, int from, int to, TileStencil reads)
     {
         int hy = TTile.Height > 1 ? TTile.Halo : 0;
         _masks = ref masks;
         _base = from - hy;            // the layer of texture layer 0
-        _back = back;
-        _layer = back ? to - from + hy + 1 : hy - 1; // the texture layer before the first the walk visits
-        _last = back ? hy : to - from + hy;          // the last it visits
+        _layer = hy - 1;              // the texture layer before From's
+        _last = to - from + hy;       // To's
         _reads = reads;
         _rows = 0;
         _z = 0;
@@ -1144,15 +1140,9 @@ public ref struct TileRows<TTile> where TTile : struct, ITileShape
         while (_rows == 0)
         {
             if (_layer == _last) return false;
-            _rows = Visit(_back ? --_layer : ++_layer);
+            _rows = Visit(++_layer);
         }
 
-        if (_back)
-        {
-            _z = 63 - BitOperations.LeadingZeroCount(_rows);
-            _rows &= ~(1UL << _z);
-            return true;
-        }
         _z = BitOperations.TrailingZeroCount(_rows);
         _rows &= _rows - 1;
         return true;
@@ -1262,12 +1252,6 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
         // displacement, so the loads of one column share one sign extension instead of one each.
         return (nint)dx + (dy * TileLayout.Layer<TTile>() + dz * TileLayout.Row<TTile>());
     }
-}
-
-/// <summary>The prototype switch of backlog 8c's turn: Rows() walks the odd sweeps of a [GaussSeidel] step backwards (TileTurnBenchmark sets it by reflection).</summary>
-internal static class TileTurn
-{
-    public static bool OddSweeps;
 }
 
 /// <summary>
