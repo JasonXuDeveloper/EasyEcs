@@ -125,7 +125,11 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   bail after the vector's lanes are set back; a float sum only under FloatMode.Fast, two chains as a row loop's);
   the index read as a value (`_index`: lanes `Row + Indices` of int; widened to an 8-byte integer through
   `WideIndex`, which keeps the int's low 32 bits and sign-extends as the conversion does); a batch method's loops over
-  its rows; a lambda pass's body (`WithElementLoops`); calls inlined as a method's; a method's private static helpers
+  its rows; neighbors at constant offsets (`s[i ± k]`, |k| <= 64: a stream per (span, offset), passed from its
+  element at index + k so no ref points before a span's start, outside its object; a guard per offset; a span
+  written and read at another offset stays scalar, since a vector loads before it stores while the loop as written
+  reads what it just wrote; aliasing between different spans is `__Apart` at run time, not a proof from roots); a
+  lambda pass's body (`WithElementLoops`); calls inlined as a method's; a method's private static helpers
   and fields through accessors of the copy (`BodyCopy.Accessors`). Not reported by EECS055 (`WalksElements`): a loop
   computing with vector types (written by hand: EECS103's in a batch method), a method whose body names one (its loops
   are the hand-written loop's tail), a loop holding another (each inner loop is its own), elements that are not plain
