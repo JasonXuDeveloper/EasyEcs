@@ -1851,3 +1851,6 @@ EECS120's id is provisional: renumber everywhere below if a merge takes it.
   owner's namespace", "The default benchmark job keeps its warm-up", "GeneratorBenchmark runs one process"), after
   D141.
 - performance page: nothing (TileRestartBenchmark's numbers come with the bench sync of feat-field-gaps).
+- The committed API reference lags the merged features (seen in feat-later-small's gate, ApiDocs 0 problems): a
+  regeneration adds `ForEachAttribute.MaxRows`, `World.ForEachCollected` and `Tile.Restart` / `Tile.Sweep` (6 files,
+  en + zh). Regenerate it in the docs pass (`dotnet run --project tools/ApiDocs`).
