@@ -161,6 +161,35 @@ public static partial class EasyEcsAnalyzer
         "SimdMode = SimdMode.Off to keep the method scalar without this message, or SimdMode.Require to make it an error.",
         helpLinkUri: Help("EECS055"));
 
+    public static readonly DiagnosticDescriptor ScalarElementLoop = new("EECS055", "A loop over a span that runs one element at a time",
+        "This loop of [ForEach] method '{0}' runs one element at a time, without a vector loop: {1}",
+        Category, DiagnosticSeverity.Warning, true,
+        "Inside a [ForEach] method that runs row by row, the generator turns a for or foreach loop over the elements of a " +
+        "Span, a ReadOnlySpan or a DynamicBuffer into a Vector<T> loop (several elements per instruction, the same results " +
+        "bit for bit), and the loop as written runs the elements left. It needs: 'foreach (ref var x in span)', or " +
+        "'for (int i = start; i < end; i++)' reading its spans only at [i]; a body that does not leave the loop early, " +
+        "holds no loop of its own and writes none of the method's variables; elements of plain values (numbers, structs of " +
+        "them) and operations with an exact vector counterpart, as a vector loop over rows does. This loop misses one: the " +
+        "message names the first. A warning when the loop can be rewritten for the vector form, a suggestion when what " +
+        "stops it is what the loop computes. Set SimdMode = SimdMode.Off on the method to keep its loops as written " +
+        "without this message.",
+        helpLinkUri: Help("EECS055"));
+
+    /// <summary>
+    /// EECS055 at each loop over spans of a method left to run row by row that runs element by element, with the reason
+    /// <see cref="Kernel.ElementLoops"/> gives (the call the generator makes, SystemGenerator.Elements.cs), so a loop
+    /// reported is exactly a loop left scalar. Loops that walk no span (<see cref="Kernel.WalksElements"/>) are not meant
+    /// for one and stay unreported.
+    /// </summary>
+    private static void ReportElementLoops(SyntaxNodeAnalysisContext context, IMethodSymbol method, MethodDeclarationSyntax syntax)
+    {
+        if (syntax.Body == null || !syntax.Body.DescendantNodes().Any(static n => n is ForStatementSyntax or ForEachStatementSyntax)) return;
+        foreach (var (loop, vector, reason) in Kernel.ElementLoops(method, syntax, context.SemanticModel, context.CancellationToken))
+            if (vector == null && reason != null && Kernel.WalksElements(loop, context.SemanticModel, context.CancellationToken))
+                context.ReportDiagnostic(Diagnostic.Create(ScalarElementLoop, SystemGenerator.LoopKeyword(loop),
+                    reason.IsFixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info, null, null, method.Name, reason.Text));
+    }
+
     /// <summary>
     /// EECS055 and EECS056: a [ForEach] method the generator leaves without a vector loop, with the reason
     /// <see cref="Kernel.Vectorize(IMethodSymbol, MethodDeclarationSyntax, SemanticModel, System.Func{int, Symbols.ParamKind, string}, System.Threading.CancellationToken, out Kernel.ScalarReason?)"/> gives, the same call the generator makes, so a method reported is exactly a
@@ -179,9 +208,11 @@ public static partial class EasyEcsAnalyzer
         if (mode == Symbols.SimdOff || mode == Symbols.SimdAuto && !Kernel.LooksEligible(method))
         {
             ReportChases(context, method, syntax);
+            if (mode != Symbols.SimdOff && !(PairForm.IsPairMethod(method) || Symbols.IsDrain(method) || Symbols.IsBatch(method))) ReportElementLoops(context, method, syntax);
             return;
         }
         if (Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out Kernel.ScalarReason? reason) != null) return;
+        if (!(PairForm.IsPairMethod(method) || Symbols.IsDrain(method) || Symbols.IsBatch(method))) ReportElementLoops(context, method, syntax);
         if (ReportChases(context, method, syntax)
             || mode == Symbols.SimdAuto && AccumulatesByHand(method, syntax, context.SemanticModel, context.CancellationToken)) return; // EECS086's
 
@@ -1878,7 +1909,7 @@ public sealed class PerformanceAnalyzer : EasyEcsAnalyzer.Area
         EasyEcsAnalyzer.Allocation, EasyEcsAnalyzer.CreateInLoop, EasyEcsAnalyzer.CreateThenSet,
         EasyEcsAnalyzer.IndexedByRef, EasyEcsAnalyzer.NoVectorLoop,
         EasyEcsAnalyzer.PerEntityChange, EasyEcsAnalyzer.QueryByHand, EasyEcsAnalyzer.ReadOnlyQuery,
-        EasyEcsAnalyzer.RowLookup, EasyEcsAnalyzer.ScalarLoop, EasyEcsAnalyzer.ScratchEscape,
+        EasyEcsAnalyzer.RowLookup, EasyEcsAnalyzer.ScalarLoop, EasyEcsAnalyzer.ScalarElementLoop, EasyEcsAnalyzer.ScratchEscape,
         EasyEcsAnalyzer.SomeRowsWritten, EasyEcsAnalyzer.UntrackedMut, EasyEcsAnalyzer.UnusedParameter,
         EasyEcsAnalyzer.UpdateInSystem, EasyEcsAnalyzer.WriteAccessOnlyReads, EasyEcsAnalyzer.HandWrittenEmit,
         EasyEcsAnalyzer.HandWrittenLookup, EasyEcsAnalyzer.HandWrittenReduce, EasyEcsAnalyzer.HandWrittenTotal, EasyEcsAnalyzer.ColdFields);

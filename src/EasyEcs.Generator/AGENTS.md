@@ -48,7 +48,13 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              vector loop, the flat loops, the vector tail), in Execute while it declares at most 32 IL
                              locals (Locals counts them), else each in an AggressiveInlining method of the job (D135);
                              StreamLoop: a NoInlining method of the job (__Stream) streaming the write-only columns,
-                             called once per run past the last-level cache (StreamingStores.Pays)
+                             called once per run past the last-level cache (StreamingStores.Pays);
+                             SystemGenerator.Elements.cs: a method left scalar whose loops over spans have vector forms
+                             (Kernel.Loops.cs) copied into the generated file (BodyCopy, #line to the user's file) in
+                             place of its UnsafeAccessor, each such loop preceded by a call of its AggressiveInlining
+                             local function (__Elements{k}: whole vectors from the index given, the index it stopped at
+                             returned to the loop as written), a for-loop's under its bounds and alias guard (__Apart);
+                             a line per loop in the schedule
 SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): the pass (world.ForPairs), the order
                              struct (Morton key of the compared component over the axes the test names), the job
                              (the cutoff from the test, per row or one; Width; Rows: the method per pair, over the row's
@@ -95,8 +101,12 @@ PrefabGenerator.cs           [Prefab] -> a part of the struct: static readonly P
                              initializers (one Set per nine components) and the constructor they need
 LambdaPass.cs                what a lambda pass call is, read once for the generator and the analyzer: Read (the call,
                              its values, lambda, filters; a change filter's tick first), Problem (EECS095's reason and
-                             the captured values), Unreachable (EECS096's reason), IsStable, Discards (an expression
-                             lambda's dropped value)
+                             the captured values), Unreachable (EECS096's reason, through BodyCopy), IsStable, Discards
+                             (an expression lambda's dropped value)
+BodyCopy.cs                  user code copied into a generated file (a lambda pass's body, a method with element loops):
+                             Copy (names of types, namespaces and static members qualified, constants as their values,
+                             statements a caller replaces), Usings (the directives extension calls need), Unreachable /
+                             Blocking (a name another file cannot reach), Constant
 ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
                              tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), SetXIfChanged, RemoveX,
                              tags IsX,
@@ -174,6 +184,11 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              Kernel.Streams.cs: the columns a loop writes without reading (WriteOnly, read off the
                              loop's text: Code.Streamed, FlatCode.Streamed) and the streaming loop's text (Streaming:
                              their loads dropped, their stores StreamingStores.Store);
+                             Kernel.Loops.cs: element loops, the for / foreach loops over spans and buffers inside a
+                             method (ElementLoops: each loop's vector code or its ScalarReason; a for-loop indexing its
+                             spans at its counter only, a bound the loop does not write; the body desugared into a
+                             static local function whose ref parameters are the elements (Lane.Streams) and translated
+                             by Kernel; break, return, nested loops and values the loop writes stay scalar);
                              Kernel.Switches.cs: patterns and switches as lane masks (relational, constant, and / or /
                              not, property, positional, tuple, type and var patterns; a switch expression first match
                              wins from its arms' masks, the lanes no arm matches sent to the method; a switch statement's

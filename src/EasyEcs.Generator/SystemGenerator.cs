@@ -169,7 +169,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     private static string Emit(UpdateModel model)
     {
         var owner = model.Owner;
-        var sb = new StringBuilder(Header).Append('\n');
+        var sb = new StringBuilder(Header);
+        // The using directives the copies of methods with element loops need for their extension calls.
+        foreach (var u in model.Methods.Where(m => m.Elements is { Body.Length: > 0 }).SelectMany(m => m.Elements!.Usings).Distinct().OrderBy(u => u, System.StringComparer.Ordinal))
+            sb.Append(u).Append('\n');
+        sb.Append('\n');
         if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
         if (model.One || !owner.IsSystem) EmitPasses(sb, model);
 
@@ -266,6 +270,17 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         // The instance parameter must not take the name of one of the method's own parameters (CS0100).
         string self = "owner";
         while (method.Parameters.Any(p => p.Name == self)) self = "_" + self;
+        if (method.Elements is { Body.Length: > 0 } elements)
+        {
+            // The method copied with its element loops' vector forms (Kernel.Loops.cs), under the accessor's name, so
+            // the jobs call it as they call the method. Its own JIT root (D77): the job stays small, the loops inline
+            // into it. Warnings and nullable annotations are the method's, reported there.
+            sb.Append("#pragma warning disable\n#nullable restore\n");
+            sb.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]\n");
+            sb.Append($"    internal static {method.Returns} {method.Name}_{index}({owner.AccessorParameter} {self}{parameters})\n");
+            sb.Append(elements.Body).Append("\n#nullable disable\n#pragma warning restore\n\n");
+            return;
+        }
         // A stencil over a tile is compiled as a root of its own, so the JIT spends its inlining budget (a multiple of
         // the root's size) on the method's loop, its samples and the helpers they call: inlined into this small
         // accessor (or the job), a method of that size uses up the budget and calls its samples. The accessor runs
@@ -1350,6 +1365,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public PairModel? Pair { get; init; }
 
         /// <summary>
+        /// The method's loops over spans (Kernel.Loops.cs): the body copied with their vector forms, which the generated
+        /// file runs in place of the method itself, and a line per loop; null when it has none.
+        /// </summary>
+        public ElementCode? Elements { get; init; }
+
+        /// <summary>
         /// Its reads of other entities at ids its rows hold (<see cref="Generator.Chases"/>). Without a
         /// vector loop, a pass past the cache of its form (ChaseGate) runs its twin job (<see cref="IsChaseTwin"/>), which walks
         /// runs of rows and prefetches them <see cref="ChaseDistance"/> rows ahead; any other pass runs today's job.
@@ -1395,7 +1416,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             if (Pair != null) return Pair.Describe(Name);
             if (Record.Length > 0) return $"{Name}: the records of Emitted<{Record.Replace("global::", "")}>, in order, then cleared";
             if (MaxRows > 0) return $"{Name}: at most {MaxRows} rows per run, collected first, then run one by one outside the walk";
-            if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(HasChaseTwin ? ", lookups prefetched past the cache" : "")}";
+            if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(HasChaseTwin ? ", lookups prefetched past the cache" : "")}"
+                + (Elements is { } elements ? string.Concat(elements.Loops.Select(l => "; " + l)) : "");
             var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Lane}>)" };
             if (simd.Flat != null) parts.Add("flat");
             else if (simd.Interleaves) parts.Add("interleaved fields");
@@ -1561,7 +1583,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             {
                 Stable = body.Stable, Parallel = body.Parallel, Identifies = body.Identifies, Parameters = new EquatableArray<ParamModel>(parameters),
                 Simd = body.Simd, Scalar = body.Scalar, Pair = body.Pair, Chases = Usable(body.Chases, parameters), OutOfLine = body.OutOfLine,
-                Fusion = body.Fusion,
+                Fusion = body.Fusion, Elements = body.Elements,
             };
         }
 
