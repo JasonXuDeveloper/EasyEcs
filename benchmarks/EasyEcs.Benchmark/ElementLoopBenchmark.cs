@@ -13,6 +13,7 @@ namespace EasyEcs.Benchmark;
 /// <c>Widen</c>: ints read from one buffer, written as longs into another (two spans, the bound and alias guards).
 /// <c>SumInts</c>: the ints of a buffer summed into a variable of the method (exact: integer sums wrap).
 /// <c>SumFloats</c>: the floats summed under FloatMode.Fast (one sum per lane, two chains).
+/// <c>Smooth</c>: ints read at three neighboring indexes (i - 1, i, i + 1: a stream per offset), weighted into longs.
 /// Elements = 4 is the call per row on a buffer shorter than a vector; it must stay within noise of Scalar.
 /// </summary>
 [MemoryDiagnoser]
@@ -61,6 +62,9 @@ public class ElementLoopBenchmark
     [Benchmark] public void SumFloatsScalar() => ElementPasses.SumFloatsScalar(_world);
     [Benchmark] public void SumFloatsGenerated() => ElementPasses.SumFloatsGenerated(_world);
     [Benchmark] public void SumFloatsHandWritten() => ElementPasses.SumFloatsHandWritten(_world);
+    [Benchmark] public void SmoothScalar() => ElementPasses.SmoothScalar(_world);
+    [Benchmark] public void SmoothGenerated() => ElementPasses.SmoothGenerated(_world);
+    [Benchmark] public void SmoothHandWritten() => ElementPasses.SmoothHandWritten(_world);
 }
 
 /// <summary>
@@ -268,6 +272,42 @@ public static class ElementPasses
             }
         }
         for (; i < src.Length; i++) dst[i] = src[i] * 3L + 1;
+    }
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    internal static void SmoothScalar(in DynamicBuffer<int> from, ref DynamicBuffer<long> to)
+    {
+        var src = from.AsReadOnlySpan();
+        var dst = to.AsSpan();
+        for (int i = 1; i < src.Length - 1; i++) dst[i] = src[i - 1] + 2L * src[i] + src[i + 1];
+    }
+
+    [ForEach]
+    internal static void SmoothGenerated(in DynamicBuffer<int> from, ref DynamicBuffer<long> to)
+    {
+        var src = from.AsReadOnlySpan();
+        var dst = to.AsSpan();
+        for (int i = 1; i < src.Length - 1; i++) dst[i] = src[i - 1] + 2L * src[i] + src[i + 1];
+    }
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    internal static void SmoothHandWritten(in DynamicBuffer<int> from, ref DynamicBuffer<long> to)
+    {
+        var src = from.AsReadOnlySpan();
+        var dst = to.AsSpan();
+        int i = 1;
+        if (Vector.IsHardwareAccelerated && dst.Length >= src.Length)
+        {
+            for (; i <= src.Length - 1 - Vector<int>.Count; i += Vector<int>.Count)
+            {
+                Vector.Widen(new Vector<int>(src.Slice(i - 1)), out var l0, out var h0);
+                Vector.Widen(new Vector<int>(src.Slice(i)), out var l1, out var h1);
+                Vector.Widen(new Vector<int>(src.Slice(i + 1)), out var l2, out var h2);
+                (l0 + l1 + l1 + l2).CopyTo(dst.Slice(i));
+                (h0 + h1 + h1 + h2).CopyTo(dst.Slice(i + Vector<long>.Count));
+            }
+        }
+        for (; i < src.Length - 1; i++) dst[i] = src[i - 1] + 2L * src[i] + src[i + 1];
     }
 
     [ForEach(SimdMode = SimdMode.Off)]
