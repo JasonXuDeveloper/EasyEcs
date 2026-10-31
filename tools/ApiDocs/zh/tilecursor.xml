@@ -21,4 +21,14 @@
   <member name="M:EasyEcs.TileCursor`2.LoadVector``1(System.Int32,System.Int32,System.Int32)" source="31eeba1903d7">
     <summary>从 (dx, dy, dz) 开始的一个 <c>Vector&lt;TLane&gt;</c> 格子（机器的向量宽度）。O(1)。</summary>
   </member>
+
+  <member name="M:EasyEcs.TileCursor`2.Columns(System.Int32)" source="e45a8ae062e4">
+    <summary>
+      这一行从 0 起、每 <paramref name="step" /> 个格子一列、直到 Width 为止的各列，用 <c>foreach</c> 遍历
+      （<c>foreach (var col in c.Columns(4))</c>，每列一个 4 个 float 的向量）：每一列是停在该列的游标，加载的偏移从这一列算起。
+      遍历知道自己的第一列和最后一列，所以常量偏移只由 JIT 检查；同一列的加载共用一个地址，每个偏移折进指令里：
+      正是模板手写在自己纹理上的那种循环。每列 O(1)；<paramref name="step" /> 不在 1 到 Width 之间时抛出异常。
+    </summary>
+  </member>
 </doc>
+

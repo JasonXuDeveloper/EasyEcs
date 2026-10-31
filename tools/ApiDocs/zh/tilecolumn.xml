@@ -1,0 +1,27 @@
+<doc>
+  <member name="T:EasyEcs.TileColumn`2" source="500564d643eb">
+    <summary>
+      瓦片一行中的一列（<see cref="M:EasyEcs.TileCursor`2.Columns(System.Int32)" />）：它周围的格子，一次一个或一个向量，
+      偏移从这一列算起。偏移以格子计：dx 从 −r 起，到从遍历的最后一列加载仍在行后最后一个 halo 格子（Width + r − 1）处或之前结束为止；
+      dy 和 dz 从 −r 到 r（2D 瓦片 dy 为 0），r 是形状的 <see cref="P:EasyEcs.ITileShape.Halo" />。
+      遍历的每一列都通过同一个检查，所以步长是常量时，常量偏移由 JIT 检查，其他偏移用一次比较。
+    </summary>
+    <typeparam name="TCell">格子。</typeparam>
+    <typeparam name="TTile">瓦片的组件和形状。</typeparam>
+  </member>
+  <member name="P:EasyEcs.TileColumn`2.X" source="12cfbd31f37a">
+    <summary>这一列：它的格子在瓦片一行中的起点（<c>into.Slice(col.X)</c>）。</summary>
+  </member>
+  <member name="P:EasyEcs.TileColumn`2.Item(System.Int32,System.Int32,System.Int32)" source="d6e4754b7b68">
+    <summary>从这一列的格子偏移 (dx, dy, dz) 处的格子。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.TileColumn`2.Load128``1(System.Int32,System.Int32,System.Int32)" source="081a9690d886">
+    <summary>从这一列偏移 (dx, dy, dz) 开始的 128 位格子，按 <typeparamref name="TLane" /> 分道。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.TileColumn`2.Load256``1(System.Int32,System.Int32,System.Int32)" source="935084202a49">
+    <summary>从这一列偏移 (dx, dy, dz) 开始的 256 位格子，按 <typeparamref name="TLane" /> 分道。O(1)。</summary>
+  </member>
+  <member name="M:EasyEcs.TileColumn`2.LoadVector``1(System.Int32,System.Int32,System.Int32)" source="0236470a42e2">
+    <summary>从这一列偏移 (dx, dy, dz) 开始的一个 <c>Vector&lt;TLane&gt;</c> 格子（机器的向量宽度）。O(1)。</summary>
+  </member>
+</doc>

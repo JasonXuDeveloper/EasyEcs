@@ -83,7 +83,8 @@ SystemGenerator.TileLoads.cs tile loads checked once per loop: c.Load128 / Load2
                              row's first halo cell (the cursor's indexer checks dy, dz); else the cursor's checked load
 TileLoads.cs                 what a tile load the generator checks once is (TileLoad.Read: the loop declaring the
                              column's variable, an int from a constant, its bound (a constant or the cursor's shape),
-                             a positive step, the variable written nowhere else, no function between loop and call)
+                             a positive step, the variable written nowhere else, no function between loop and call;
+                             else the reason it is not, EECS120's)
 Views.cs                     what a [View] is, read once for the generators and the analyzer: Fields ('ref', 'ref
                              readonly' and Mut<T> fields of components), Problem (EECS098's reason), Overlap (EECS099:
                              a component reached twice through views and parameters)
@@ -228,10 +229,12 @@ EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted
 EasyEcsAnalyzer.Pairs.cs     EECS105-107: a pair method that cannot run per pair (Error), one whose cutoff test the
                              generator cannot read (every pair runs), a neighbor search written by hand (a Warning
                              with PairRewrite's fix when mechanical, else Info: the grid's upkeep goes with it)
-EasyEcsAnalyzer.Tiles.cs     EECS115-117: a tile step the generator cannot write (Symbols.StepProblem, Write on a tile
+EasyEcsAnalyzer.Tiles.cs     EECS115-117, EECS120: a tile step the generator cannot write (Symbols.StepProblem, Write on a tile
                              taken by value, Sweep read on one, Restart outside a [GaussSeidel] step's ref tile: Error), a second buffer and its plain commit written by hand where the
-                             tile could step itself (compilation end, Warning), a Min / Max relaxation stepped by Jacobi
-                             that [GaussSeidel] would settle (Info, fix: [GaussSeidel] when the key colors the tiles)
+                             tile could step itself (compilation end, Warning; StepRewrite: the step method's rewrite
+                             to a ref tile writing Write(row), the fix's properties), a Min / Max relaxation stepped by Jacobi
+                             that [GaussSeidel] would settle (Info, fix: [GaussSeidel] when the key colors the tiles),
+                             a tile load the generator cannot check once (Info: TileLoad.Read's reason)
 EasyEcsAnalyzer.Fusion.cs    EECS093-094: two passes over the same rows that almost share one walk (the reason
                              Fusion.Problem gives), a FusionMode.Require method left apart (Error)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
