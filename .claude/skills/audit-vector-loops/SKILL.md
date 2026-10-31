@@ -110,7 +110,7 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   the body. Inferred, no declaration (`audit-generator`, declaration surface: inference first).
   Built for methods run row by row (Kernel.Loops.cs, SystemGenerator.Elements.cs): the loop body is desugared into a
   static local function (elements as ref parameters, `Lane.Streams`; the method's unwritten variables as values) and
-  translated by `Vectorize`; the method is copied (BodyCopy) with an AggressiveInlining `__Elements{k}` before each
+  translated by `Vectorize`; the method is copied (BodyCopy) with a NoInlining `__Elements{k}` (called for a span of a whole vector) before each
   loop that returns the index it stopped at, so the loop as written runs the tail and any vector a lane of which would
   throw. A for-loop runs the vector form only under its guard (bound within every span, written spans apart:
   `__Apart`), else the loop as written runs and throws where it would. Each loop left scalar is a schedule line and
