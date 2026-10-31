@@ -235,6 +235,16 @@ its own worktree.
   (11.9 KB → 3.7 KB), not from the rewritten copy (D136).
 - **A per-run helper called from several sites of a structural method gets `NoInlining`**, like a cold path: it runs
   once per run of rows, and each inlined copy bloats the caller's loops over ids.
+- **An argument a generated helper uses twice is a temp, and its constants stop folding.** The tile-load interceptor
+  takes the column (`x + k`) and both checks it and adds it to the address, so the JIT evaluates `x + k` into a
+  register first: each load of a stencil got its own add and sign extension, and the loads of a column did not share
+  one base address (Laplacian column loop 52 instructions through the interceptor, 33 by hand). A walk that hands
+  out the base (`c.Columns(step)`: the column's address once, the offsets as constants of each call) lets every
+  offset fold into the load's displacement (39). The store goes the same way: a `Span.CopyTo` into the row checks
+  its slice twice (start and length, 9 instructions), a store whose bound is proven by the walk (`col.Store(v, into)`:
+  the store's end checked against the tile's width once per shape, the row's length by one compare) leaves one
+  compare in the loop (34). Before building a helper around a hot load or store, read whether its argument is used
+  once and which of its checks the JIT can prove.
 - **Read Tier1 code from the benchmark process** (BDN `--dev`, `DOTNET_JitDisasm` and `DOTNET_JitStdOutFile` set on the
   run; the child inherits them). A scratch driver with other components compiles differently (9.5 vs 11.9 KB).
 - **Make a pass-safety test discriminate**: a test that a pass survives arrivals fixes `InitialEntityCapacity`, or
