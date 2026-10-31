@@ -7,8 +7,9 @@ namespace EasyEcs;
 
 // Arrivals: entities of another world become new entities of this one. Their rows are copied table by table, like an
 // instantiated prefab; EntityId fields that pointed at an entity that came along point at its new entity, the others
-// become EntityId.Null. Three callers share it: LoadEntities (the bytes load into a world of their own first),
-// MoveEntities (rows of a live world) and prefab groups (the prefab's own world).
+// become EntityId.Null. Four callers share it: LoadEntities (the bytes load into a world of their own first),
+// MoveEntities (rows of a live world), CopyEntities (some of their components, the originals staying) and prefab
+// groups (the prefab's own world).
 public sealed partial class World
 {
     // The world the bytes of a LoadEntities load into, reused by every migration.
@@ -273,6 +274,178 @@ public sealed partial class World
     }
 
     /// <summary>
+    /// Copy <paramref name="entities"/> (stale ids, repeats and retired entities are skipped) into
+    /// <paramref name="target"/>, another world of this thread, as new entities holding only the components of
+    /// <paramref name="components"/> they have (a <see cref="Disabled{T}"/> tag goes with its component), plus
+    /// <typeparamref name="TTag"/> at its default value: ghost rows of a neighbor's border, a read replica, an area of
+    /// interest copied to a client's world. The originals stay as they are. Rows that follow each other in a table are
+    /// copied as one run, a block copy per column. <see cref="EntityId"/> fields of the copies (components and buffer
+    /// elements) that named a copied entity name its copy, every other one is <see cref="EntityId.Null"/>, and a
+    /// <see cref="ChildOf"/> whose parent was not copied is removed, as <see cref="LoadEntities"/> and
+    /// <see cref="MoveEntities"/> do. Cleanup components (<see cref="ICleanupComponent"/>) are never copied: the
+    /// original releases what they hold. Indexes and groups learn the copies, and their components count as written,
+    /// as with <c>CreateEntity</c>. The new handles are written in order into <paramref name="copied"/> (as many as fit,
+    /// <see cref="Entity"/> default for a skipped id); returns how many were copied. A list of ids goes as
+    /// <c>CollectionsMarshal.AsSpan(list)</c>, no copy; keep the set in a <c>static readonly</c> field. Allocates
+    /// nothing once the target's tables exist and the buffers are large enough. O(entities × components of the set). Owner thread of both worlds; a pass
+    /// may iterate either (the copies are new rows, which a pass that started earlier does not visit).
+    /// </summary>
+    /// <exception cref="ArgumentException"><paramref name="target"/> is this world, <paramref name="components"/> holds a singleton type, or <typeparamref name="TTag"/> is a unique component.</exception>
+    /// <exception cref="InvalidOperationException">A copied entity has a unique key (<see cref="IUniqueIndexed{TKey}"/>) an entity of <paramref name="target"/> has: nothing is copied.</exception>
+    public int CopyEntities<TTag>(World target, ReadOnlySpan<EntityId> entities, in ComponentSet components, Span<Entity> copied = default)
+        where TTag : struct, IComponent =>
+        CopyEntities(target, entities, in components, ComponentType<TTag>.Bit, copied);
+
+    private int CopyEntities(World target, ReadOnlySpan<EntityId> entities, in ComponentSet components, ushort tag, Span<Entity> copied)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        if (ReferenceEquals(target, this)) throw new ArgumentException("A copy goes to another world: use Clone in this one", nameof(target));
+        if (components.HasSingletons)
+            throw new ArgumentException("A copy of entities carries no singletons: its set names components only", nameof(components));
+        if (ComponentInfo.Of(tag).Unique) throw new ArgumentException("The tag of a copy cannot be a unique component: every copy holds its default value");
+        int count = 0;
+        using (Structural())
+        {
+            using (target.Structural())
+            {
+                int shape = target.CopyShape(in components, tag);
+                if (target._copyShapes[shape].Unique) // the copies' unique keys, before the first row is copied
+                    foreach (var id in entities)
+                        if (Moves(id, out var table, out int slot) && table.Unique)
+                            target.ClaimCopied(table, slot, in components);
+                target.BeginArrival(this);
+                // Ids that follow each other in one table go as one gather (a run when their rows follow each other
+                // too): the target's rows of a gather are one run, written column by column.
+                if (_gatherRows.Length < entities.Length) _gatherRows = new int[Math.Max(entities.Length, _gatherRows.Length * 2)];
+                var rows = _gatherRows;
+                // Each id is mapped to its copy when something reads the map: the caller's handles, or a component of
+                // the set whose references are rewritten. Without a map, ids in rising order cannot repeat, so they
+                // need no stamp until one comes out of order (a query's ids mostly rise).
+                bool map = !copied.IsEmpty || target._copyShapes[shape].Remaps;
+                bool rising = !map;
+                int last = -1;
+                Archetype run = null;
+                int length = 0;
+                bool contiguous = true;
+                for (int i = 0; i < entities.Length; i++)
+                {
+                    var id = entities[i];
+                    if (!Moves(id, out var table, out int slot)) continue;
+                    if (rising && id.Index > last) last = id.Index;
+                    else
+                    {
+                        if (rising) // the first id out of order: the ones before it are stamped now
+                        {
+                            rising = false;
+                            foreach (var before in entities[..i])
+                                if (Moves(before, out _, out _)) target.Stamp(before);
+                        }
+
+                        if (target.HasArrived(id)) continue; // a repeat
+                        target.Stamp(id);
+                    }
+
+                    if (table != run)
+                    {
+                        if (length != 0) target.ArriveCopies(run, rows.AsSpan(0, length), contiguous, shape, map);
+                        (run, length, contiguous) = (table, 0, true);
+                    }
+                    else contiguous &= slot == rows[length - 1] + 1;
+
+                    rows[length++] = slot;
+                    count++;
+                }
+
+                if (length != 0) target.ArriveCopies(run, rows.AsSpan(0, length), contiguous, shape, map);
+                target.EndArrival(this);
+            }
+
+            for (int i = 0; i < Math.Min(entities.Length, copied.Length); i++)
+                copied[i] = IsAlive(entities[i]) && target.HasArrived(entities[i]) ? target.Arrived(entities[i]) : default;
+        }
+
+        target.RootOrphans();
+        return count;
+    }
+
+    // The rows of the source table a gather of CopyEntities copies (reused: grows to the longest list of ids).
+    private int[] _gatherRows = [];
+
+    // Copies of the source rows of table: one run when the rows follow each other, else one gather.
+    private void ArriveCopies(Archetype table, ReadOnlySpan<int> rows, bool contiguous, int shape, bool map)
+    {
+        if (contiguous) ArriveRows(table, rows[0], rows.Length, shape: shape, map: map);
+        else ArriveRows(table, 0, rows.Length, shape: shape, rows: rows, map: map);
+    }
+
+    // The (component set, tag) pairs copies into this world were made with, whether the set holds a unique component
+    // and whether it holds one whose references are rewritten (ComponentInfo.Remaps): a pair's index names its tables
+    // in _prefabTables (as -2 - index), found once per source table. Grows by the distinct sets a program uses.
+    private List<(BitMask Components, ushort Tag, bool Unique, bool Remaps)> _copyShapes;
+
+    /// <summary>The index of (<paramref name="components"/>, <paramref name="tag"/>) in <see cref="_copyShapes"/>, added when new. Inside the structural gate.</summary>
+    private int CopyShape(in ComponentSet components, ushort tag)
+    {
+        var shapes = _copyShapes ??= [];
+        var bits = components.Components;
+        for (int i = 0; i < shapes.Count; i++)
+            if (shapes[i].Tag == tag && shapes[i].Components.Equals(in bits))
+                return i;
+        bool unique = false, remaps = false;
+        foreach (ushort bit in bits.ToBitArray()) // cold: once per shape
+        {
+            unique |= ComponentInfo.Of(bit).Unique;
+            remaps |= ComponentInfo.Of(bit).Remaps;
+        }
+
+        shapes.Add((bits, tag, unique, remaps));
+        return shapes.Count - 1;
+    }
+
+    /// <summary>
+    /// This world's table for copies of rows of <paramref name="source"/> (a table of another world) made with shape
+    /// <paramref name="shape"/>: the source's components in the set (a <see cref="Disabled{T}"/> tag with its
+    /// component, no cleanup component) and the tag, cached per both. Inside the structural gate.
+    /// </summary>
+    private Archetype CopyTableFor(Archetype source, int shape)
+    {
+        var key = new PrefabKey(source, -2 - shape);
+        if (_prefabTables != null && _prefabTables.TryGetValue(key, out var target)) return target;
+        return NewCopyTable(source, shape, key);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)] // once per source table and shape
+    private Archetype NewCopyTable(Archetype source, int shape, PrefabKey key)
+    {
+        var (set, tag, _, _) = _copyShapes[shape];
+        var mask = default(BitMask);
+        foreach (ushort bit in source.Components)
+        {
+            var info = ComponentInfo.Of(bit);
+            if (info.Owner >= 0) continue; // a change-tick column: the table gets those of its tracked components
+            int component = info.DisabledOf >= 0 ? info.DisabledOf : bit;
+            if (set.HasBit(component) && !ComponentInfo.Of(component).Cleanup) mask.SetBit(bit);
+        }
+
+        mask.SetBit(tag);
+        return (_prefabTables ??= new())[key] = GetOrCreateArchetype(in mask, source);
+    }
+
+    /// <summary>
+    /// Row <paramref name="slot"/> of <paramref name="table"/> (another world's) is about to be copied with the
+    /// components of <paramref name="components"/>: claim the keys of its unique ones in this world. Inside the
+    /// structural gate.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)] // tables with unique components only
+    private void ClaimCopied(Archetype table, int slot, in ComponentSet components)
+    {
+        var bits = table.Components;
+        for (int c = 0; c < bits.Length; c++)
+            if (ComponentInfo.Of(bits[c]) is { Unique: true, Cleanup: false } && components.Contains(bits[c]))
+                UniqueIndex(bits[c]).ClaimRows(table, c, slot, 1, 1, -1);
+    }
+
+    /// <summary>
     /// Whether <paramref name="id"/> names an entity <see cref="MoveEntities"/> moves (alive, not retired), and its
     /// table and row. Inside the structural gate.
     /// </summary>
@@ -359,27 +532,36 @@ public sealed partial class World
     private void Stamp(EntityId id) => _arrivedStamp[id.Index] = _arrival;
 
     // Rows [first, +count) of a source table, as one run of new rows; moving ones (MoveEntities) leave their cleanup
-    // components behind; taken ones (a load's private world) give up their buffer lists (Archetype.CopyRun).
+    // components behind; taken ones (a load's private world) give up their buffer lists (Archetype.CopyRun); copies
+    // (CopyEntities, shape >= 0) take the components of their shape and its tag. With rows, the count rows it lists
+    // instead (a gather, first unused). Without map, the source ids are not mapped to the new ones (nothing reads
+    // the map: no column rewrites references and the caller reads no handle).
     // Called once per run, not per row: inlined (with CopyRun) into both call sites of MoveEntities, it made that
     // method's Tier1 code 3.3x larger and the move 1.2x slower (MigrationBenchmark Move).
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void ArriveRows(Archetype table, int first, int count, bool moving = false, bool take = false)
+    private void ArriveRows(Archetype table, int first, int count, bool moving = false, bool take = false, int shape = -1,
+        ReadOnlySpan<int> rows = default, bool map = true)
     {
-        var target = TableFor(table);
+        var target = shape < 0 ? TableFor(table) : CopyTableFor(table, shape);
         target.Reserve(target.Count + count);
         ReserveIds(count);
         int to = target.Count;
         var slots = table.Slots;
-        for (int r = first; r < first + count; r++)
+        for (int r = 0; r < count; r++)
         {
-            int id = AllocateId();
-            Place(id, target);
-            int source = slots[r].Index;
-            _arrived[source] = new EntityId(id, MetaRef(id).Version);
+            int id = AllocateId(); // no growth: the ids and the rows were reserved
+            ref var meta = ref MetaRef(id);
+            meta.Slot = target.Add(id, meta.Version);
+            meta.Archetype = target;
+            if (!map) continue;
+            int source = slots[rows.IsEmpty ? first + r : rows[r]].Index;
+            _arrived[source] = new EntityId(id, meta.Version);
             _arrivedStamp[source] = _arrival;
         }
 
-        target.CopyRun(table, first, to, count, _changeTick, take);
+        StorageVersion++; // once for the run (Place bumps it per row)
+
+        target.CopyRun(table, first, to, count, _changeTick, take, rows);
         if (moving && target.HasCleanup) target.DropCleanup(to, count);
         _arrivedRows.Add((target, to, count));
     }

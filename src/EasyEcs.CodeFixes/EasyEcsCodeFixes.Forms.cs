@@ -184,6 +184,183 @@ public sealed partial class EasyEcsCodeFixes
     }
 
     /// <summary>
+    /// EECS116: what the fix deletes besides the step it rewrites (the diagnostic's additional location): the commit (the
+    /// method the diagnostic is on, a plain copy) when nothing else names it, with its system when it is the system's only
+    /// member and the system is named only by <c>AddSystem&lt;T&gt;()</c> statements (which go too), and the buffer's
+    /// element type (TNext) when it is declared in source and named only in what the fix deletes or rewrites away. Null
+    /// when the commit stays: the fix then rewrites the step alone, and EECS121 reports the copy it leaves.
+    /// </summary>
+    private static async Task<CommitRemoval?> RemovalOf(Document document, Diagnostic diagnostic, CancellationToken token)
+    {
+        var solution = document.Project.Solution;
+        var root = await document.GetSyntaxRootAsync(token).ConfigureAwait(false);
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        if (root?.FindNode(diagnostic.Location.SourceSpan).FirstAncestorOrSelf<MethodDeclarationSyntax>() is not { } commitSyntax
+            || model?.GetDeclaredSymbol(commitSyntax, token) is not { } commit || commit.DeclaringSyntaxReferences.Length != 1
+            || commitSyntax.Parent is not TypeDeclarationSyntax systemSyntax)
+            return null;
+        if (await Named(commit, solution, token).ConfigureAwait(false) is not { Count: 0 }) return null;
+
+        // The commit's system goes with it when the commit is all it holds; then AddSystem<T>() statements are its only names.
+        var gone = new List<SyntaxReference>();
+        var system = commit.ContainingType;
+        if (systemSyntax.Members.Count == 1 && system.DeclaringSyntaxReferences.Length == 1)
+        {
+            foreach (var at in await Named(system, solution, token).ConfigureAwait(false) ?? [])
+            {
+                var name = (await at.SourceTree!.GetRootAsync(token).ConfigureAwait(false)).FindNode(at.SourceSpan, getInnermostNodeForTie: true);
+                if (name.Parent is not TypeArgumentListSyntax { Arguments.Count: 1, Parent: GenericNameSyntax { Identifier.ValueText: "AddSystem" } add }
+                    || add.Parent is not MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax { ArgumentList.Arguments.Count: 0, Parent: ExpressionStatementSyntax statement } })
+                    return null;
+                gone.Add(statement.GetReference());
+            }
+            gone.Add(systemSyntax.GetReference());
+        }
+        else gone.Add(commitSyntax.GetReference());
+
+        // The buffer's element: named only in the commit (gone), the step's buffer parameter and the span it declares (both
+        // rewritten away), and not in the rewritten step itself (a step that wrote TNext values keeps it, cast from the row).
+        ITypeSymbol? next = commit.Parameters.FirstOrDefault(p => p.RefKind == RefKind.In)?.Type is INamedTypeSymbol { TypeArguments.Length: 1 } buffer ? buffer.TypeArguments[0] : null;
+        SyntaxReference? nextSyntax = null;
+        if (next is INamedTypeSymbol { DeclaringSyntaxReferences.Length: 1 } declared && diagnostic.Properties.TryGetValue("Lane", out var lane) && lane != null
+            && diagnostic.Properties["Next"] is { } nextName && diagnostic.Properties["Into"] is { } intoName
+            && declared.DeclaringSyntaxReferences[0].GetSyntax(token) is BaseTypeDeclarationSyntax nextDeclaration
+            && diagnostic.AdditionalLocations[0].SourceTree is { } stepTree)
+        {
+            var step = (await stepTree.GetRootAsync(token).ConfigureAwait(false)).FindNode(diagnostic.AdditionalLocations[0].SourceSpan).FirstAncestorOrSelf<MethodDeclarationSyntax>();
+            bool rewrittenAway = true;
+            foreach (var at in await Named(declared, solution, token).ConfigureAwait(false) ?? [])
+            {
+                var name = (await at.SourceTree!.GetRootAsync(token).ConfigureAwait(false)).FindNode(at.SourceSpan, getInnermostNodeForTie: true);
+                bool inGone = gone.Any(g => g.SyntaxTree == at.SourceTree && g.Span.Contains(at.SourceSpan));
+                bool inStep = step != null && step.SyntaxTree == at.SourceTree && step.Span.Contains(at.SourceSpan)
+                    && (name.FirstAncestorOrSelf<ParameterSyntax>()?.Identifier.ValueText == nextName
+                        || name.FirstAncestorOrSelf<LocalDeclarationStatementSyntax>() is { Declaration.Variables: { Count: 1 } v } && v[0].Identifier.ValueText == intoName);
+                if (!inGone && !inStep && !nextDeclaration.Span.Contains(at.SourceSpan)) rewrittenAway = false;
+            }
+            if (rewrittenAway) nextSyntax = nextDeclaration.GetReference();
+        }
+        bool nextGone = nextSyntax != null;
+        if (nextSyntax != null && !gone.Any(g => g.SyntaxTree == nextSyntax.SyntaxTree && g.Span.Contains(nextSyntax.Span))) gone.Add(nextSyntax);
+        return new CommitRemoval(gone, nextGone, next?.Name ?? "");
+    }
+
+    /// <summary>What EECS116's fix deletes besides the step: the commit (or its system and its AddSystem statements), and TNext's declaration when nothing else names it.</summary>
+    private sealed class CommitRemoval(List<SyntaxReference> gone, bool nextGone, string nextName)
+    {
+        public List<SyntaxReference> Gone { get; } = gone;
+        public bool NextGone { get; } = nextGone;
+        public string NextName { get; } = nextName;
+    }
+
+    /// <summary>
+    /// The places of the user's documents that name <paramref name="symbol"/> (its declaration aside), or null when one is
+    /// outside source. Generated code is not the user's: the generator writes it again from what the fix leaves.
+    /// </summary>
+    private static async Task<List<Location>?> Named(ISymbol symbol, Solution solution, CancellationToken token)
+    {
+        var found = new List<Location>();
+        foreach (var reference in await Microsoft.CodeAnalysis.FindSymbols.SymbolFinder.FindReferencesAsync(symbol, solution, token).ConfigureAwait(false))
+        foreach (var at in reference.Locations)
+        {
+            if (!at.Location.IsInSource) return null;
+            if (solution.GetDocument(at.Location.SourceTree) is { } named and not SourceGeneratedDocument) found.Add(at.Location);
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// EECS116: the step that writes a second buffer beside its tile (the diagnostic's additional location, in any
+    /// document) steps the tile by ref: the tile parameter becomes 'ref', the buffer parameter goes, the body's
+    /// <c>var into = ...next...;</c> and <c>into.Clear();</c> go, and the row loop declares <c>into</c> over
+    /// <c>tile.Write(row)</c> (through <c>MemoryMarshal.Cast</c> to the lanes it was cast to, or to the buffer's element),
+    /// each slice or index at <c>row.Index</c> (+ a term) taken at the term. With <paramref name="removal"/>, the commit
+    /// (or its system and the statements that add it) and TNext's declaration go too, in whichever documents they are.
+    /// </summary>
+    private static async Task<Solution> SteppedByRef(Document document, Diagnostic diagnostic, CommitRemoval? removal, CancellationToken token)
+    {
+        var solution = document.Project.Solution;
+        var where = diagnostic.AdditionalLocations[0];
+        var target = solution.GetDocument(where.SourceTree) ?? document;
+        var root = await target.GetSyntaxRootAsync(token).ConfigureAwait(false);
+        if (root?.FindNode(where.SourceSpan).FirstAncestorOrSelf<MethodDeclarationSyntax>() is not { Body: not null } method
+            || SteppedMethod(root, method, diagnostic.Properties) is not { } rewritten)
+            return solution;
+        var editor = new SolutionEditor(solution);
+        (await editor.GetDocumentEditorAsync(target.Id, token).ConfigureAwait(false)).ReplaceNode(method, rewritten);
+        if (removal != null)
+            foreach (var gone in removal.Gone)
+                if (solution.GetDocument(gone.SyntaxTree) is { } at)
+                    (await editor.GetDocumentEditorAsync(at.Id, token).ConfigureAwait(false)).RemoveNode(await gone.GetSyntaxAsync(token).ConfigureAwait(false), SyntaxRemoveOptions.KeepNoTrivia);
+        return editor.GetChangedSolution();
+    }
+
+    /// <summary>The step of <see cref="SteppedByRef"/> rewritten by ref, or null when the analyzer's properties no longer match it.</summary>
+    private static MethodDeclarationSyntax? SteppedMethod(SyntaxNode root, MethodDeclarationSyntax method, System.Collections.Immutable.ImmutableDictionary<string, string?> props)
+    {
+        if (method.Body is not { } body || props["Tile"] is not { } tileName || props["Next"] is not { } nextName || props["Into"] is not { } intoName
+            || props["Cell"] is not { } cell || props["NextCell"] is not { } nextCell)
+            return null;
+        props.TryGetValue("Lane", out var lane);
+
+        var declaration = body.Statements.OfType<LocalDeclarationStatementSyntax>()
+            .FirstOrDefault(s => s.Declaration.Variables is { Count: 1 } v && v[0].Identifier.ValueText == intoName);
+        var rows = body.DescendantNodes().OfType<ForEachStatementSyntax>().FirstOrDefault(f =>
+            f.Expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Rows", Expression: IdentifierNameSyntax t } }
+            && t.Identifier.ValueText == tileName && f.Statement.DescendantNodes().OfType<IdentifierNameSyntax>().Any(i => i.Identifier.ValueText == intoName));
+        if (declaration?.Declaration.Variables[0].Initializer?.Value is not { } init || rows == null) return null;
+        string row = rows.Identifier.ValueText;
+
+        // The new initializer: the span of the next buffer becomes the row Write hands out, cast as before.
+        var write = SyntaxFactory.ParseExpression($"{tileName}.Write({row})");
+        var span = init.DescendantNodesAndSelf().OfType<InvocationExpressionSyntax>().First(i =>
+            i.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "AsSpan" } a && a.Expression.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>().Any(n => n.Identifier.ValueText == nextName));
+        bool qualified = root.DescendantNodes().OfType<UsingDirectiveSyntax>().Any(u => u.Name?.ToString() == "System.Runtime.InteropServices");
+        string marshal = qualified ? "MemoryMarshal" : "System.Runtime.InteropServices.MemoryMarshal";
+        var value = lane == null ? SyntaxFactory.ParseExpression($"{marshal}.Cast<{cell}, {nextCell}>({write})")
+            : lane == cell ? write
+            : init.ReplaceNodes(new SyntaxNode[] { span, init.DescendantNodes().OfType<GenericNameSyntax>().First(g => g.Identifier.ValueText == "Cast").TypeArgumentList.Arguments[0] },
+                (old, _) => old == span ? write : SyntaxFactory.ParseTypeName(cell));
+        var declared = declaration.WithDeclaration(declaration.Declaration.WithVariables(SyntaxFactory.SingletonSeparatedList(
+            declaration.Declaration.Variables[0].WithInitializer(SyntaxFactory.EqualsValueClause(value.WithoutTrivia()))))).WithoutLeadingTrivia().WithTrailingTrivia(EndOfLine(root));
+
+        // Each use in the row loop: at row.Index (+ a term) becomes at the term.
+        var uses = rows.Statement.DescendantNodes().Where(n => n switch
+        {
+            InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Slice", Expression: IdentifierNameSyntax i } } => i.Identifier.ValueText == intoName,
+            ElementAccessExpressionSyntax { Expression: IdentifierNameSyntax i } => i.Identifier.ValueText == intoName,
+            _ => false,
+        }).ToArray();
+        static ExpressionSyntax? Term(ExpressionSyntax at) => at is BinaryExpressionSyntax sum ? sum.Right : null; // row.Index alone: no term
+        var statement = rows.Statement.ReplaceNodes(uses, (_, now) => now switch
+        {
+            InvocationExpressionSyntax slice => Term(slice.ArgumentList.Arguments[0].Expression) is { } term
+                ? slice.WithArgumentList(slice.ArgumentList.WithArguments(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(term.WithoutTrivia()))))
+                : ((MemberAccessExpressionSyntax)slice.Expression).Expression.WithTriviaFrom(slice),
+            ElementAccessExpressionSyntax index => index.WithArgumentList(index.ArgumentList.WithArguments(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Argument(
+                Term(index.ArgumentList.Arguments[0].Expression)?.WithoutTrivia() ?? SyntaxFactory.LiteralExpression(SyntaxKind.NumericLiteralExpression, SyntaxFactory.Literal(0)))))),
+            _ => now,
+        });
+        // In a block the declaration takes the first statement's indentation; a single statement becomes a block the
+        // formatter lays out.
+        var loopBody = statement is BlockSyntax { Statements.Count: > 0 } block
+            ? block.WithStatements(block.Statements.Insert(0, declared.WithLeadingTrivia(block.Statements[0].GetLeadingTrivia().Where(t => t.IsKind(SyntaxKind.WhitespaceTrivia)))))
+            : SyntaxFactory.Block(declared, statement.WithoutLeadingTrivia()).WithAdditionalAnnotations(Microsoft.CodeAnalysis.Formatting.Formatter.Annotation);
+        var stepped = body.ReplaceNode(rows, rows.WithStatement(loopBody));
+
+        // The declaration and the clears of the whole buffer go (the pass zeroes the rows the step skips).
+        var gone = stepped.Statements.Where(s => s is LocalDeclarationStatementSyntax { Declaration.Variables: { Count: 1 } v } && v[0].Identifier.ValueText == intoName
+            || s is ExpressionStatementSyntax { Expression: InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Clear", Expression: IdentifierNameSyntax i } } } && i.Identifier.ValueText == intoName);
+        stepped = stepped.RemoveNodes(gone, SyntaxRemoveOptions.KeepNoTrivia)!;
+
+        var parameters = method.ParameterList.Parameters;
+        var tile = parameters.First(p => p.Identifier.ValueText == tileName);
+        parameters = parameters.Replace(tile, Modify(tile, SyntaxKind.RefKeyword));
+        parameters = parameters.Remove(parameters.First(p => p.Identifier.ValueText == nextName));
+        return method.WithBody(stepped).WithParameterList(method.ParameterList.WithParameters(parameters));
+    }
+
+    /// <summary>
     /// EECS080: the job struct as a static class with an [EntityMethod] method Run (the job's fields its last parameters,
     /// in their order), each creation and Run call as one call of the entry point, and the filter field gone once
     /// nothing else uses it.

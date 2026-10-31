@@ -36,32 +36,69 @@ internal sealed record TileLoad(string Load, int First, string End, int Step, in
     /// constant), tests it against a constant or the cursor's shape and adds a positive constant to it; nothing else
     /// writes it, and the call runs in the loop's body itself (not in a lambda or local function there, which could run
     /// after the loop). Those make every column the call reads one the loop reaches; the interceptor's check of the
-    /// loop's first and last does the rest.
+    /// loop's first and last does the rest. <paramref name="reason"/> says why a load at a column that is not a constant
+    /// is not proven (EECS120 reports it); null for a load it proves, a constant column (the JIT checks it) or a call
+    /// that is no cursor's load.
     /// </summary>
-    public static TileLoad? Read(InvocationExpressionSyntax invocation, SemanticModel model, CancellationToken ct)
+    public static TileLoad? Read(InvocationExpressionSyntax invocation, SemanticModel model, CancellationToken ct, out string? reason)
     {
+        reason = null;
         if (model.GetOperation(invocation, ct) is not IInvocationOperation call || !Loads.Contains(call.TargetMethod.Name)
             || call.TargetMethod.ContainingType is not { Name: "TileCursor", Arity: 2, ContainingNamespace: { Name: "EasyEcs", ContainingNamespace.IsGlobalNamespace: true } } cursor)
             return null;
         var dx = call.Arguments.FirstOrDefault(a => a.Parameter?.Name == "dx");
-        if (dx == null || dx.ArgumentKind != ArgumentKind.Explicit || Column(dx.Value) is not ({ } x, var offset)) return null;
+        if (dx == null || dx.ArgumentKind != ArgumentKind.Explicit || dx.Value.ConstantValue.HasValue) return null;
+        if (Column(dx.Value) is not ({ } x, var offset))
+        {
+            reason = "its column is not the variable of a for loop, alone or plus a constant";
+            return null;
+        }
 
         // The loop that declares the variable, with no function between it and the call.
         ForStatementSyntax? loop = null;
         for (var node = invocation.Parent; node != null && loop == null; node = node.Parent)
         {
-            if (node is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax or MemberDeclarationSyntax) return null;
+            if (node is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax)
+            {
+                reason = $"it runs in a {(node is LocalFunctionStatementSyntax ? "local function" : "lambda")} inside the loop of '{x.Name}', which could run after the loop";
+                return null;
+            }
+            if (node is MemberDeclarationSyntax) break;
             if (node is ForStatementSyntax { Declaration.Variables: { Count: 1 } only } f && SymbolEqualityComparer.Default.Equals(model.GetDeclaredSymbol(only[0], ct), x))
                 loop = f;
         }
-        if (loop == null || !loop.Statement.Span.Contains(invocation.Span)) return null;
+        if (loop == null)
+        {
+            reason = $"'{x.Name}' is not declared by a for loop around the call";
+            return null;
+        }
+        if (!loop.Statement.Span.Contains(invocation.Span))
+        {
+            reason = $"it is in the header of the loop of '{x.Name}', not its body";
+            return null;
+        }
         var declarator = loop.Declaration!.Variables[0];
         if (x.Type.SpecialType != SpecialType.System_Int32 || declarator.Initializer == null
             || model.GetConstantValue(declarator.Initializer.Value, ct) is not { HasValue: true, Value: int first })
+        {
+            reason = $"'{x.Name}' is not an int that starts from a constant";
             return null;
-        if (Bound(loop.Condition, x, cursor.TypeArguments[1], model, ct) is not { } end) return null;
-        if (loop.Incrementors.Count != 1 || Increment(loop.Incrementors[0], x, model, ct) is not (> 0 and var step)) return null;
-        if (!Unwritten(loop.Statement, x, model)) return null;
+        }
+        if (Bound(loop.Condition, x, cursor.TypeArguments[1], model, ct) is not { } end)
+        {
+            reason = $"the loop's condition is not '{x.Name} < bound' or '{x.Name} <= bound' with a constant or the shape's Width, Depth, Height or Halo";
+            return null;
+        }
+        if (loop.Incrementors.Count != 1 || Increment(loop.Incrementors[0], x, model, ct) is not (> 0 and var step))
+        {
+            reason = $"the loop does not add one positive constant to '{x.Name}'";
+            return null;
+        }
+        if (!Unwritten(loop.Statement, x, model))
+        {
+            reason = $"the loop's body writes '{x.Name}' or takes a reference to it";
+            return null;
+        }
         return new TileLoad(call.TargetMethod.Name, first, end, step, offset);
     }
 
