@@ -268,8 +268,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     {
         string parameters = string.Concat(method.Parameters.Select(p => $", {p.Declared} {Escape(p.Name)}"));
         // The instance parameter must not take the name of one of the method's own parameters (CS0100).
-        string self = "owner";
-        while (method.Parameters.Any(p => p.Name == self)) self = "_" + self;
+        string self = SelfName(method.Parameters.Select(p => p.Name));
         if (method.Elements is { Body.Length: > 0 } elements)
         {
             // The method copied with its element loops' vector forms (Kernel.Loops.cs), under the accessor's name, so
@@ -279,7 +278,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             sb.Append("#pragma warning disable\n#nullable restore\n");
             if (method.OutOfLine) sb.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]\n");
             sb.Append($"    internal static {method.Returns} {method.Name}_{index}({owner.AccessorParameter} {self}{parameters})\n");
-            sb.Append(elements.Body).Append("\n#nullable disable\n#pragma warning restore\n\n");
+            string prefix = $"{method.Name}_{index}";
+            sb.Append(elements.Body.Replace(AccessorPrefix, prefix)).Append("\n#nullable disable\n#pragma warning restore\n\n");
+            sb.Append(elements.Accessors.Replace(AccessorPrefix, prefix)); // the private helpers and fields it reaches
             return;
         }
         // A stencil over a tile is compiled as a root of its own, so the JIT spends its inlining budget (a multiple of

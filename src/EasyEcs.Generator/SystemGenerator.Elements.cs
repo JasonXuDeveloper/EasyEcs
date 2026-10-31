@@ -14,9 +14,21 @@ public sealed partial class SystemGenerator
     /// <summary>
     /// A method's element loops: <paramref name="Body"/>, the method's body as C# with the loops' vector forms (its
     /// helpers at the end), or "" when it is not copied; the using directives its extension calls need; one line per
-    /// loop (for the schedule).
+    /// loop (for the schedule); the UnsafeAccessor externs through which the copy reaches the type's private static
+    /// helpers and fields (BodyCopy.Accessors), named after <see cref="AccessorPrefix"/>.
     /// </summary>
-    private sealed record ElementCode(string Body, EquatableArray<string> Usings, EquatableArray<string> Loops);
+    private sealed record ElementCode(string Body, EquatableArray<string> Usings, EquatableArray<string> Loops, string Accessors = "");
+
+    /// <summary>The token EmitAccessor replaces with the accessor's name (<c>Cool_3</c>): the prefix of the copy's own accessors.</summary>
+    internal const string AccessorPrefix = "__EasyEcsAccessorOf"; // an identifier: the copy is parsed with it
+
+    /// <summary>The name of an accessor's parameter for the type, free of the method's parameter names (CS0100).</summary>
+    private static string SelfName(IEnumerable<string> parameters)
+    {
+        string self = "owner";
+        while (parameters.Contains(self)) self = "_" + self;
+        return self;
+    }
 
     private const string Unsafe = "global::System.Runtime.CompilerServices.Unsafe", Marshal = "global::System.Runtime.InteropServices.MemoryMarshal",
         NoInlining = "[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]";
@@ -30,7 +42,7 @@ public sealed partial class SystemGenerator
     {
         var loops = new List<string>();
         var code = Copied(method, syntax, model, ct, loops);
-        return loops.Count == 0 ? null : new ElementCode(code?.Body ?? "", code?.Usings ?? new([]), new(loops.ToArray()));
+        return loops.Count == 0 ? null : new ElementCode(code?.Body ?? "", code?.Usings ?? new([]), new(loops.ToArray()), code?.Accessors ?? "");
     }
 
     private static ElementCode? Copied(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct,
@@ -38,17 +50,17 @@ public sealed partial class SystemGenerator
     {
         if (syntax.Body == null || Symbols.Simd(method) == Symbols.SimdOff) return null;
         if (!syntax.Body.DescendantNodes().Any(static n => n is ForStatementSyntax or ForEachStatementSyntax)) return null;
-        var found = Kernel.ElementLoops(method, syntax, model, ct);
+        var found = Kernel.ElementLoops(method, syntax.Body, model, ct);
         foreach (var (loop, vector, reason) in found)
             if (vector != null || Kernel.WalksElements(loop, model, ct)) // a loop over no span is not meant for one (EECS055 leaves it too)
-                loops.Add(vector != null ? $"loop '{LoopHeader(loop)}': vector ({(vector.Code.Flat != null ? "flat, " : "")}Vector512 or Vector<{vector.Code.Lane}>)"
+                loops.Add(vector != null ? $"loop '{LoopHeader(loop)}': vector ({(vector.Code.Flat != null ? "flat, " : "")}Vector512 or Vector<{vector.Code.Lane}>{(vector.Code.Cold is { } cold ? $"; the elements of a vector with a lane that takes a cold branch run as written: {cold}" : "")})"
                 : $"loop '{LoopHeader(loop)}': scalar ({reason?.Text})");
         if (!found.Any(f => f.Vector != null)) return null;
         string? copyProblem = !method.ReturnsVoid ? "it returns a value"
             : method.IsGenericMethod || Symbols.ContainsTypeParameter(method.ContainingType) ? "it is generic"
             : method.Parameters.Any(p => Symbols.Classify(p, Symbols.IsRunner(method)) == Symbols.ParamKind.Tile) ? "it takes a tile"
             : method.PartialDefinitionPart != null || method.PartialImplementationPart != null ? "it is partial"
-            : BodyCopy.Unreachable(syntax.Body, method, model, ct, out _);
+            : BodyCopy.Unreachable(syntax.Body, method, model, ct, out _, accessors: true);
         if (copyProblem != null)
         {
             for (int i = 0; i < loops.Count; i++)
@@ -56,10 +68,23 @@ public sealed partial class SystemGenerator
             return null;
         }
 
+        var accessors = new BodyCopy.Accessors(SelfName(method.Parameters.Select(p => p.Name)), OwnerModel.From(method.ContainingType).AccessorParameter, AccessorPrefix);
+        return new ElementCode(WithElementLoops(method, syntax.Body, model, found, syntax.SyntaxTree.FilePath, ct, accessors),
+            new(BodyCopy.Usings(syntax).Distinct().OrderBy(u => u, System.StringComparer.Ordinal).ToArray()), new([]), accessors.Declarations);
+    }
+
+    /// <summary>
+    /// <paramref name="block"/>, the body of a method or a lambda pass's lambda, copied (BodyCopy) with each loop of
+    /// <paramref name="found"/> that has a vector form preceded by the call of its helper, the helpers at its end; with
+    /// <c>#line</c> back to <paramref name="path"/> when it is not "".
+    /// </summary>
+    internal static string WithElementLoops(IMethodSymbol method, BlockSyntax block, SemanticModel model,
+        List<(StatementSyntax Loop, Kernel.ElementLoop? Vector, Kernel.ScalarReason? Reason)> found, string path, System.Threading.CancellationToken ct,
+        BodyCopy.Accessors? accessors = null)
+    {
         var numbers = new Dictionary<SyntaxNode, (int K, Kernel.ElementLoop Loop)>();
         foreach (var (loop, vector, _) in found)
             if (vector != null) numbers[loop] = (numbers.Count, vector);
-        string path = syntax.SyntaxTree.FilePath;
         bool lines = path.Length > 0;
         string Line(SyntaxNode node) => lines ? $"#line {node.GetLocation().GetLineSpan().StartLinePosition.Line + 1} \"{path.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"\n" : "";
         string hidden = lines ? "#line hidden\n" : "";
@@ -69,7 +94,7 @@ public sealed partial class SystemGenerator
             if (!numbers.TryGetValue(original, out var found)) return null;
             var (k, loop) = found;
             var call = new StringBuilder();
-            string values = string.Concat(loop.Values.Select(v => ", " + v.Name));
+            string values = string.Concat(loop.Values.Select(v => (v.Sum ? ", ref " : ", ") + v.Name));
             if (rewritten is ForEachStatementSyntax each)
             {
                 call.Append($"{{\n{hidden}var __span{k} = ({each.Expression.WithoutTrivia()}){loop.Streams[0].Span};\n");
@@ -102,7 +127,7 @@ public sealed partial class SystemGenerator
             return call.ToString();
         }
 
-        string body = BodyCopy.Copy(syntax.Body, method, model, Replace, ct);
+        string body = BodyCopy.Copy(block, method, model, Replace, ct, accessors);
         var helpers = new StringBuilder();
         foreach (var (k, loop) in numbers.Values.OrderBy(n => n.K)) helpers.Append(ElementHelper(k, loop));
         if (apart)
@@ -111,8 +136,7 @@ public sealed partial class SystemGenerator
                 + $"    return d == 0 && {Unsafe}.SizeOf<A>() == {Unsafe}.SizeOf<B>() || d >= (nint)a.Length * {Unsafe}.SizeOf<A>() || -d >= (nint)b.Length * {Unsafe}.SizeOf<B>();\n}}\n");
         int close = body.LastIndexOf('}');
         body = body.Substring(0, close) + hidden + helpers + body.Substring(close);
-        return new ElementCode((lines ? Line(syntax.Body) : "") + body.TrimStart(' ', '\t') + (lines ? "\n#line default" : ""),
-            new(BodyCopy.Usings(syntax).Distinct().OrderBy(u => u, System.StringComparer.Ordinal).ToArray()), new([]));
+        return (lines ? Line(block) : "") + body.TrimStart(' ', '\t') + (lines ? "\n#line default" : "");
     }
 
     /// <summary>
@@ -151,7 +175,7 @@ public sealed partial class SystemGenerator
         for (int s = 0; s < loop.Streams.Length; s++) parameters.Add($"ref {loop.Streams[s].Element} r{s + 1}");
         parameters.Add("nint i");
         parameters.Add("nint rows");
-        for (int v = 0; v < loop.Values.Length; v++) parameters.Add($"{loop.Values[v].Type} x{loop.Streams.Length + v}");
+        for (int v = 0; v < loop.Values.Length; v++) parameters.Add($"{(loop.Values[v].Sum ? "ref " : "")}{loop.Values[v].Type} x{loop.Streams.Length + v}");
         sb.Append(NoInlining).Append('\n');
         sb.Append($"static nint __Elements{k}({string.Join(", ", parameters)})\n{{\n");
         var text = new StringBuilder();
@@ -168,10 +192,16 @@ public sealed partial class SystemGenerator
             string vector = $"{Kernel.V}<{simd.Lane}>";
             var loopText = new StringBuilder();
             foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) loopText.Append(line).Append('\n');
+            Paired(loopText, simd, vector, loop.Streams.Length); // a float sum, Min or Max: two chains
             loopText.Append($"for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{{\n");
             loopText.Append(Indent(simd.Body));
-            if (simd.Bails) loopText.Append("    if (__bail) return i; // the loop as written runs this vector's elements and the rest\n");
+            // A sum's lanes fold into its variable when the vectors stop: after the loop, or at a bail with the vector's
+            // own lanes set back (the loop as written then adds that vector's elements).
+            if (simd.Bails)
+                loopText.Append("    if (__bail)\n    {\n").Append(Indent(Indent(simd.Restore + simd.Fold)))
+                    .Append("        return i; // the loop as written runs this vector's elements and the rest\n    }\n");
             loopText.Append(Indent(simd.Stores)).Append("}\n");
+            loopText.Append(simd.Fold);
             Constants(loopText);
             string body = loopText.Replace(Kernel.Row, "(int)i").Replace(Kernel.Visited, "ulong.MaxValue").ToString();
             string guard = $"{Hardware(simd)} && rows - i >= {vector}.Count";
