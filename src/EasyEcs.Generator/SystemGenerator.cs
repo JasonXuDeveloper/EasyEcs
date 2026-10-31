@@ -945,10 +945,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             // A stepping tile: the tiles of the color running that may change step (Enter), each sweep of a Gauss-Seidel
             // step until one changes nothing (Sweep), then the step's change is recorded (Leave).
             var tile = method.Parameters[steps];
-            // Enter hands the tile out with the thread's frame, read once per tile (no second call, no thread-static read
-            // in the tile, Sweep or Leave).
-            string sweep = tile.Colors.Length > 0 ? $"do {call} while (p{steps}.Sweep({tileEntity}, in w{steps})); " : call + " ";
-            call = $"if (p{steps}.Enter({tileEntity}, out var e{steps})) {{ {grids}var w{steps} = new global::EasyEcs.Tile<{tile.Cell}, {tile.Shape}>(in e{steps}, in n{method.GridOf(steps)}); {sweep}p{steps}.Leave({tileEntity}, in n{method.GridOf(steps)}, in w{steps}); }}";
+            string sweep = tile.Colors.Length > 0 ? $"do {call} while (p{steps}.Sweep({tileEntity})); " : call + " ";
+            call = $"if (p{steps}.Enter({tileEntity})) {{ {grids}var w{steps} = new global::EasyEcs.Tile<{tile.Cell}, {tile.Shape}>({tileEntity}, in n{method.GridOf(steps)}); {sweep}p{steps}.Leave({tileEntity}, in n{method.GridOf(steps)}); }}";
             if (runs) call = $"{{ {call} }}";
         }
         else if (grids.Length > 0) call = runs ? $"{{ {grids}{call} }}" : grids + call;

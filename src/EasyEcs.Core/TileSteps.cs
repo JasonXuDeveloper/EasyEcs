@@ -327,13 +327,10 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     /// <summary>
     /// Whether <paramref name="tile"/> steps now (its color's turn, and it may change, or the pass does not sleep), and
     /// if so its step begun on this thread: the frame's second buffer (Jacobi) or its sweeps (Gauss-Seidel). A tile that
-    /// steps for the first time wakes. Called per tile, on the thread that steps it: <paramref name="stepped"/> hands
-    /// the tile out with the thread's frame, read once here (the method's tile, <see cref="Sweep"/> and
-    /// <see cref="Leave"/> take it from there).
+    /// steps for the first time wakes. Called per tile, on the thread that steps it.
     /// </summary>
-    public bool Enter(Entity tile, out Tile<TCell, TTile> stepped)
+    public bool Enter(Entity tile)
     {
-        stepped = default;
         int i = tile.Index;
         if ((uint)i >= (uint)_entries.Length) Grow(i + 1); // created by the method itself: a serial pass
         ref var entry = ref _entries[i];
@@ -342,7 +339,6 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         if (_sleeps && !entry.Dirty) return false;
         entry.Dirty = false;
         var frame = TileFrame<TCell, TTile>.Current;
-        stepped = new Tile<TCell, TTile>(tile, frame);
         frame.Stepping = tile.Id;
         frame.Sweep = 0;
         Clear(frame.Written);
@@ -498,9 +494,9 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     /// and it made fewer sweeps than the most). The rows written get their masks back, so the next sweep visits the rows
     /// the stencil now reaches.
     /// </summary>
-    public bool Sweep(Entity tile, in Tile<TCell, TTile> stepped)
+    public bool Sweep(Entity tile)
     {
-        var frame = stepped.Frame;
+        var frame = TileFrame<TCell, TTile>.Current;
         int width = TTile.Width, depth = TTile.Depth, hy = TTile.Height > 1 ? TTile.Halo : 0;
         bool changed = false;
         for (int y = 0; y < TTile.Height; y++)
@@ -539,9 +535,9 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     /// compared with the cells: a change and the edges it touched. Gauss-Seidel: the rows the sweeps wrote are compared
     /// with the cells and copied into them where they differ. A tile that changed is recorded for <see cref="Next"/>.
     /// </summary>
-    public void Leave(Entity tile, in TileNeighbors around, in Tile<TCell, TTile> stepped)
+    public void Leave(Entity tile, in TileNeighbors around)
     {
-        var frame = stepped.Frame;
+        var frame = TileFrame<TCell, TTile>.Current;
         frame.Stepping = default;
         frame.Sweep = 0;
         ref var entry = ref _entries[tile.Index];

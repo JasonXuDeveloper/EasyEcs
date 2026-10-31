@@ -396,33 +396,6 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
         _frame = TileFrame<TCell, TTile>.Current;
     }
 
-    /// <summary>
-    /// The tile <see cref="TileSteps{TCell, TTile, TGrid, TKey, TColors}.Enter"/> handed out, with its neighbors
-    /// <paramref name="around"/>: the thread's frame taken from it, not read again. Generated code calls this.
-    /// </summary>
-    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Tile(in Tile<TCell, TTile> entered, ref readonly TileNeighbors around)
-    {
-        _entity = entered._entity;
-        _around = ref around;
-        _frame = entered._frame;
-    }
-
-    /// <summary>A stepping tile without its neighbors yet (<see cref="TileSteps{TCell, TTile, TGrid, TKey, TColors}.Enter"/>).</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal Tile(Entity entity, TileFrame<TCell, TTile> frame)
-    {
-        _entity = entity;
-        _frame = frame;
-    }
-
-    /// <summary>The thread's frame this tile reads and steps.</summary>
-    internal readonly TileFrame<TCell, TTile> Frame
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _frame;
-    }
-
     /// <summary>The tile's own cells, in the layout of <see cref="ITileShape"/>. O(1).</summary>
     public readonly ReadOnlySpan<TCell> Cells
     {
