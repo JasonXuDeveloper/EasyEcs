@@ -1254,16 +1254,17 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
     /// <summary>
     /// The columns of the row from 0, every <paramref name="step"/> cells while under Width, walked with <c>foreach</c>
     /// (<c>foreach (var col in c.Columns(4))</c>, a vector of four floats per column): each a cursor at its column,
-    /// whose loads take offsets from that column. The walk knows its first and last column, so a load at constant
-    /// offsets is checked by the JIT alone, and the loads of one column share one address with each offset folded into
-    /// the instruction: the loop a stencil would write by hand over its own texture. O(1) per column; throws when
+    /// whose loads take offsets from that column and whose <c>col.Store(vector, into)</c> writes the row the step
+    /// writes at the column. The walk knows its first and last column, so a load at constant offsets is checked by the
+    /// JIT alone, a store by one compare of the row's length, and the loads of one column share one address with each offset folded into the
+    /// instruction: the loop a stencil would write by hand over its own texture. O(1) per column; throws when
     /// <paramref name="step"/> is not 1 to Width.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TileColumns<TCell, TTile> Columns(int step)
+    public TileColumnWalk<TCell, TTile> Columns(int step)
     {
         if ((uint)(step - 1) >= (uint)TTile.Width) TileLayout.ThrowStep(step);
-        return new TileColumns<TCell, TTile>(ref _at, step);
+        return new TileColumnWalk<TCell, TTile>(ref _at, step);
     }
 
     /// <summary>
@@ -1297,18 +1298,18 @@ internal static class TileTurn
 }
 
 /// <summary>
-/// The columns of a tile's row (<see cref="TileCursor{TCell, TTile}.Columns"/>), walked with <c>foreach</c>: 0, step,
-/// 2 step, ... while under Width.
+/// A walk of the columns of a tile's row (<see cref="TileCursor{TCell, TTile}.Columns"/>), with <c>foreach</c>: 0, step,
+/// 2 step, ... while under Width, a <see cref="Cursor"/> at each.
 /// </summary>
 /// <typeparam name="TCell">The cell.</typeparam>
 /// <typeparam name="TTile">The tile's component and shape.</typeparam>
-public ref struct TileColumns<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
+public ref struct TileColumnWalk<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
 {
     private readonly ref TCell _row;
     private readonly int _step, _last;
     private int _x;
 
-    internal TileColumns(ref TCell row, int step)
+    internal TileColumnWalk(ref TCell row, int step)
     {
         _row = ref row;
         _step = step;
@@ -1317,10 +1318,10 @@ public ref struct TileColumns<TCell, TTile> where TCell : unmanaged where TTile 
     }
 
     /// <summary>Itself: <c>foreach</c> walks it.</summary>
-    public readonly TileColumns<TCell, TTile> GetEnumerator() => this;
+    public readonly TileColumnWalk<TCell, TTile> GetEnumerator() => this;
 
     /// <summary>The column the walk is at.</summary>
-    public readonly TileColumn<TCell, TTile> Current
+    public readonly Cursor Current
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => new(ref Unsafe.Add(ref _row, (nint)_x), _x, _last);
@@ -1333,71 +1334,104 @@ public ref struct TileColumns<TCell, TTile> where TCell : unmanaged where TTile 
         _x += _step; // no overflow: _x is under Width and the step at most Width
         return _x < TTile.Width;
     }
-}
-
-/// <summary>
-/// A column of a tile's row (<see cref="TileCursor{TCell, TTile}.Columns"/>): the cells around it, one or a vector at
-/// a time, at offsets from the column. An offset is in cells: dx from −r up to where a load from the walk's last column
-/// still ends by the row's last halo cell (Width + r − 1), dy and dz from −r to r (dy 0 for a 2D tile), r the shape's
-/// <see cref="ITileShape.Halo"/>. Every column of the walk passes the same check, so constant offsets with a constant
-/// step are checked by the JIT, others by a compare.
-/// </summary>
-/// <typeparam name="TCell">The cell.</typeparam>
-/// <typeparam name="TTile">The tile's component and shape.</typeparam>
-public readonly ref struct TileColumn<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
-{
-    private readonly ref TCell _at;
-    private readonly int _last;
-
-    internal TileColumn(ref TCell at, int x, int last)
-    {
-        _at = ref at;
-        X = x;
-        _last = last;
-    }
-
-    /// <summary>The column: where its cells start in a row of the tile (<c>into.Slice(col.X)</c>).</summary>
-    public int X { get; }
-
-    /// <summary>The cell at (dx, dy, dz) from the column's cell. O(1).</summary>
-    public ref readonly TCell this[int dx, int dy, int dz]
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Unsafe.SizeOf<TCell>()));
-    }
-
-    /// <summary>The 128 bits of cells from (dx, dy, dz) of the column as lanes of <typeparamref name="TLane"/>. O(1).</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Vector128<TLane> Load128<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
-        Vector128.LoadUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Vector128<byte>.Count))));
-
-    /// <summary>The 256 bits of cells from (dx, dy, dz) of the column as lanes of <typeparamref name="TLane"/>. O(1).</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Vector256<TLane> Load256<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
-        Vector256.LoadUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Vector256<byte>.Count))));
-
-    /// <summary>A <c>Vector&lt;TLane&gt;</c> of cells from (dx, dy, dz) of the column (the machine's vector width). O(1).</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Vector<TLane> LoadVector<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
-        Vector.LoadUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Vector<byte>.Count))));
 
     /// <summary>
-    /// The offset in cells of (dx, dy, dz) from the column, whose <paramref name="bytes"/> stay inside the padded row
-    /// from any column of the walk: from the first (0, so dx ≥ −r) to the last (<c>_last</c>, so the load ends by the
-    /// row's last halo cell). That invariant lets the loads skip their bounds check; with a constant step every term is
-    /// a constant, and the check folds away.
+    /// The walk at a column of the row: the cells around it, one or a vector at a time, at offsets from the column, and
+    /// the store of a vector into the row the step writes at the column. An offset is in cells: dx from −r up to where a
+    /// load from the walk's last column still ends by the row's last halo cell (Width + r − 1), dy and dz from −r to r
+    /// (dy 0 for a 2D tile), r the shape's <see cref="ITileShape.Halo"/>. Every column of the walk passes the same
+    /// check, so constant offsets with a constant step are checked by the JIT, others by a compare.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private nint Offset(int dx, int dy, int dz, int bytes)
+    public readonly ref struct Cursor
     {
-        int size = Unsafe.SizeOf<TCell>(), r = TTile.Halo, row = TileLayout.Row<TTile>() * size;
-        // The last offset a load of `bytes` may start at, counted from the first halo cell before column 0.
-        int last = row < bytes ? -1 : (row - bytes) / size - _last;
-        if (last < 0 || (uint)(dz + r) > (uint)(2 * r)
-            || (TTile.Height > 1 ? (uint)(dy + r) > (uint)(2 * r) : dy != 0))
-            TileLayout.ThrowOffset();
-        if ((uint)(dx + r) > (uint)last) TileLayout.ThrowOffset();
-        return (nint)dx + (dy * TileLayout.Layer<TTile>() + dz * TileLayout.Row<TTile>());
+        private readonly ref TCell _at;
+        private readonly int _last;
+
+        internal Cursor(ref TCell at, int x, int last)
+        {
+            _at = ref at;
+            X = x;
+            _last = last;
+        }
+
+        /// <summary>The column: where its cells start in a row of the tile (<c>into[col.X]</c>).</summary>
+        public int X { get; }
+
+        /// <summary>The cell at (dx, dy, dz) from the column's cell. O(1).</summary>
+        public ref readonly TCell this[int dx, int dy, int dz]
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Unsafe.SizeOf<TCell>()));
+        }
+
+        /// <summary>The 128 bits of cells from (dx, dy, dz) of the column as lanes of <typeparamref name="TLane"/>. O(1).</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector128<TLane> Load128<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
+            Vector128.LoadUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Vector128<byte>.Count))));
+
+        /// <summary>The 256 bits of cells from (dx, dy, dz) of the column as lanes of <typeparamref name="TLane"/>. O(1).</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector256<TLane> Load256<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
+            Vector256.LoadUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Vector256<byte>.Count))));
+
+        /// <summary>A <c>Vector&lt;TLane&gt;</c> of cells from (dx, dy, dz) of the column (the machine's vector width). O(1).</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector<TLane> LoadVector<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
+            Vector.LoadUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Vector<byte>.Count))));
+
+        /// <summary>
+        /// Stores <paramref name="value"/> into <paramref name="into"/>, a row the step writes (<see cref="Tile{TCell, TTile}.Write"/>),
+        /// from the column's cell: what <c>value.CopyTo(into.Slice(col.X))</c> writes. Its 128 bits must end by the row's
+        /// last cell from the walk's last column (a step of at least their cells); checked with a constant step by the JIT
+        /// alone, and <paramref name="into"/> holding Width cells by one compare. O(1).
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Store<TLane>(Vector128<TLane> value, Span<TCell> into) =>
+            value.StoreUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref MemoryMarshal.GetReference(into), Within(into, Vector128<byte>.Count))));
+
+        /// <summary>Stores 256 bits of <paramref name="value"/> into the row <paramref name="into"/> from the column's cell, as <see cref="Store{TLane}(Vector128{TLane}, Span{TCell})"/> does. O(1).</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Store<TLane>(Vector256<TLane> value, Span<TCell> into) =>
+            value.StoreUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref MemoryMarshal.GetReference(into), Within(into, Vector256<byte>.Count))));
+
+        /// <summary>Stores a <c>Vector&lt;TLane&gt;</c> into the row <paramref name="into"/> from the column's cell, as <see cref="Store{TLane}(Vector128{TLane}, Span{TCell})"/> does. O(1).</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Store<TLane>(Vector<TLane> value, Span<TCell> into) =>
+            value.StoreUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref MemoryMarshal.GetReference(into), Within(into, Vector<byte>.Count))));
+
+        /// <summary>
+        /// The column as an offset into <paramref name="into"/>, whose <paramref name="bytes"/> from any column of the
+        /// walk end by the row's last cell: the walk's last column plus the store fits in Width cells (constants with a
+        /// constant step: the JIT drops the check), and <paramref name="into"/> holds Width cells (one compare of its
+        /// length with a constant). That invariant lets the store skip its bounds check.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private nint Within(Span<TCell> into, int bytes)
+        {
+            int size = Unsafe.SizeOf<TCell>();
+            if (TTile.Width * size < bytes || _last > (TTile.Width * size - bytes) / size) TileLayout.ThrowStore(bytes / size);
+            if (into.Length < TTile.Width) TileLayout.ThrowRow(into.Length);
+            return X;
+        }
+
+        /// <summary>
+        /// The offset in cells of (dx, dy, dz) from the column, whose <paramref name="bytes"/> stay inside the padded
+        /// row from any column of the walk: from the first (0, so dx ≥ −r) to the last (<c>_last</c>, so the load ends
+        /// by the row's last halo cell). That invariant lets the loads skip their bounds check; with a constant step every
+        /// term is a constant, and the check folds away.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private nint Offset(int dx, int dy, int dz, int bytes)
+        {
+            int size = Unsafe.SizeOf<TCell>(), r = TTile.Halo, row = TileLayout.Row<TTile>() * size;
+            // The last offset a load of `bytes` may start at, counted from the first halo cell before column 0.
+            int last = row < bytes ? -1 : (row - bytes) / size - _last;
+            if (last < 0 || (uint)(dz + r) > (uint)(2 * r)
+                || (TTile.Height > 1 ? (uint)(dy + r) > (uint)(2 * r) : dy != 0))
+                TileLayout.ThrowOffset();
+            if ((uint)(dx + r) > (uint)last) TileLayout.ThrowOffset();
+            return (nint)dx + (dy * TileLayout.Layer<TTile>() + dz * TileLayout.Row<TTile>());
+        }
     }
 }
 
@@ -1797,6 +1831,12 @@ internal static class TileLayout
 
     [DoesNotReturn, StackTraceHidden] // a call that never returns: see ThrowOffset
     public static void ThrowStep(int step) => throw new ArgumentOutOfRangeException(nameof(step), $"A walk of a row's columns steps 1 to the tile's Width cells, not {step}");
+
+    [DoesNotReturn, StackTraceHidden] // a call that never returns: see ThrowOffset
+    public static void ThrowStore(int cells) => throw new ArgumentOutOfRangeException("value", $"A store of {cells} cells from the walk's last column ends past the row: walk the row with a step of at least {cells}");
+
+    [DoesNotReturn, StackTraceHidden] // a call that never returns: see ThrowOffset
+    public static void ThrowRow(int length) => throw new ArgumentException($"A row of the tile holds Width cells, not {length}: pass the row Write(row) hands out", "into");
 
     [DoesNotReturn, StackTraceHidden] // a call that never returns: see ThrowOffset
     public static void ThrowNoMask() => throw new InvalidOperationException("The tile's halo was exchanged without its mask (mask: false): it has no active rows");
