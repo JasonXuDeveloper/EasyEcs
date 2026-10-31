@@ -108,6 +108,17 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   `DynamicBuffer<T>`'s elements, an `[InlineArray]` or fixed buffer field, an `IForSpan<T>` / `IForRange` body, a
   neighbor list. One core for every element loop; the per-row loop and the element loop share the same lowering of
   the body. Inferred, no declaration (`audit-generator`, declaration surface: inference first).
+  Built for methods run row by row (Kernel.Loops.cs, SystemGenerator.Elements.cs): the loop body is desugared into a
+  static local function (elements as ref parameters, `Lane.Streams`; the method's unwritten variables as values) and
+  translated by `Vectorize`; the method is copied (BodyCopy) with an AggressiveInlining `__Elements{k}` before each
+  loop that returns the index it stopped at, so the loop as written runs the tail and any vector a lane of which would
+  throw. A for-loop runs the vector form only under its guard (bound within every span, written spans apart:
+  `__Apart`), else the loop as written runs and throws where it would. Each loop left scalar is a schedule line and
+  an EECS055 at its keyword with the reason (a second descriptor of the id; loops that walk no span are not reported).
+  Check a new element-loop form against the method under SimdMode.Off bit for bit (ElementLoopTests), empty and short
+  buffers, 1 and 4 threads, 0 B; and the generated text of existing code unchanged but for the loop lines (dump both
+  trees with EmitCompilerGeneratedFiles: file names of lambda and tile-load files hash the source path, compare those by
+  content).
 - **Cells of a tile** (the shader form, built on the inner loop): a method that computes one cell from its neighbors
   by offset; the generator writes the pad, the row walk and the element loop, the neighbor reads unaligned loads at
   offsets in the padded texture, so users write no `Load128`.
