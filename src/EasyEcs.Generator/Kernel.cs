@@ -877,6 +877,21 @@ internal sealed partial class Kernel
         {
             // a variable: lane by lane into it as the loop writes it (Min / Max as Math does, a sum that wraps)
             string t = (r.Type ?? r.Fields[0].Type).ToDisplayString(Symbols.Fqn);
+            if (r.Type == null && r.Ops[0] == "+")
+            {
+                // a sum into a variable: the lanes' horizontal sum, added once (the lanes are of the variable's type, so
+                // an integer wraps as the loop's own adds do; a float sum is FloatMode.Fast's, any order). Lane by lane
+                // through the variable's ref cost a call of the vector form more than the whole loop on short spans.
+                string acc = $"__a{r.Index}_0";
+                foreach (var h in Suffixes(kernel.IsDoubled(r.Fields[0].Type)))
+                {
+                    held.Append($"var __h{r.Index}_0{h} = {acc}{h};\n");
+                    restore.Append($"{acc}{h} = __h{r.Index}_0{h};\n");
+                    if (h.Length > 0) masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, Elem(r.Fields[0].Type))}, {acc}{h}, __h{r.Index}_0{h});\n");
+                    fold.Append($"{r.Partial} = unchecked(({t})({r.Partial} + {V}.Sum({acc}{h})));\n");
+                }
+                continue;
+            }
             fold.Append($"for (int __j = 0; __j < {count}; __j++)\n{{\n    var __v = default({t});\n");
             for (int f = 0; f < r.Fields.Length; f++)
             {
