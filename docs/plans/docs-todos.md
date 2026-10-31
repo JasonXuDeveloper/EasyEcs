@@ -2126,3 +2126,44 @@ helpers).
   alternately, twice; add `--launchCount 6` to the 100k cases if one differs (placement spread above). The NEON
   forms did not change on this branch: the run checks nothing regressed and gives the baseline for moving
   `Masks.Narrow` and the `__y` TBL tables to literals too.
+
+## feat-inner-loops (element loops, WP0 + WP2 core) — docs to-dos
+
+- **systems.mdx + zh, vector loops section ("Loops inside a method"):** a [ForEach] method that runs row by row and
+  loops over a span or a buffer gets the loop's vector form. What qualifies: `foreach (ref var x in span)` over a
+  Span, ReadOnlySpan or DynamicBuffer, `for (int i = start; i < end; i++)` reading its spans only at `[i]`; a body
+  that does not leave early, holds no loop and writes none of the method's variables (reductions are next); elements
+  of plain values. Results bit for bit; the loop as written runs the elements left (tail, a vector a lane of which
+  would throw). Show "You write / The generator writes" with the Decay method and the generated `__Elements0` call.
+  The schedule's loop lines (`DescribeSchedule`: `loop File.cs(L,C): vector (...)` / `scalar (reason)`).
+- **dynamic-buffers.mdx + zh:** one paragraph and a link to the section above: a loop over a buffer's span inside a
+  [ForEach] method is vectorized; a `for` over two buffers needs the target at least as long as the bound (else the
+  loop as written runs and throws where it would).
+- **analyzer.mdx + zh, EECS055:** the second message, at the loop's keyword: "This loop of [ForEach] method 'A' runs
+  one element at a time, without a vector loop: {reason}" (Info; SimdMode.Off silences it). Examples: a `break`, a
+  sum into a local (until reductions land), the index read as a value.
+- **api.mdx + zh:** no public API change (no complexity row).
+- **performance.mdx + zh:** ElementLoopBenchmark (Decay / Widen, 4 / 64 / 1,024 elements) once synced; add the class to
+  `tools/bench.sh --site`.
+- **Changelog (New):** "Loops over spans and buffers inside [ForEach] methods run as vector loops"; link systems.mdx.
+- **Roadmap:** element loops (inner-loops.md WP2) shipped in part: reductions, offsets (WP3), lambda passes and batch
+  methods still open.
+- **Decision D132 (draft, en):** *Element loops share the vector-loop core; the method is copied.* A loop over a
+  span inside a method that runs row by row is desugared into a static local function whose ref parameters are the
+  elements and translated by the same Kernel as a row loop (each element a lane). The generator copies the method
+  into its generated file in place of the UnsafeAccessor (BodyCopy: names qualified, constants inlined, `#line` to the
+  user's file so breakpoints and errors land there), with each loop preceded by a NoInlining local function (called when the span holds a whole vector)
+  that runs whole vectors and returns the index it stopped at; the loop as written runs the rest. Considered: a copy
+  of the compilation with the loop rewritten (costly per keystroke), intercepting the method (interceptors are only for
+  lambda passes, D63), an `Element<T>` parameter (declined by the owner). Numbers: ElementLoopBenchmark.
+- **Decision D132 (draft, zh):** *元素循环共用向量循环核心；方法体被复制。* 按行运行的方法中遍历 span 的循环，被改写为静态局部函数
+  （元素作为 ref 参数），由与行循环相同的 Kernel 翻译（每个元素一条 lane）。生成器把方法复制进生成文件，替代
+  UnsafeAccessor（BodyCopy：名称全限定、常量内联、`#line` 指回用户文件，断点和错误落在用户代码上）；每个循环之前调用一个
+  NoInlining 局部函数（span 至少容纳一个完整向量时才调用），按整向量运行并返回停下的位置，剩余元素由原循环处理。考虑过：改写循环后的编译副本（每次按键代价高）、
+  拦截方法（拦截器只用于 lambda pass，D63）、`Element<T>` 参数（所有者已否决）。数字：ElementLoopBenchmark。
+- **Numbers for D132 (ElementLoopBenchmark, 10k entities, this machine, round 1 after the inlining fix, round 2 within 0.05; ratio to
+  Scalar):** Decay 4 / 64 / 1,024 elements: Generated 1.07 / 0.42 / 0.27, HandWritten 1.05 / 0.37 / 0.29. Widen
+  (int to long across two buffers): Generated 1.00 / 0.69 / 0.62 of WidenScalar, HandWritten 1.41 / 0.75 / 0.67.
+  Before the fix the 4-element cases cost 1.19-1.23x: the copy was NoInlining while the method's small body inlines
+  into its job through the accessor. The copy now takes the accessor's inlining, the vector form is a NoInlining root
+  called only for a span of a whole vector. D132 says so (the rule: a copy of user code inlines as the code would).
