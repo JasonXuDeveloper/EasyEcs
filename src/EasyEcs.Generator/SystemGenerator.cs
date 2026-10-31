@@ -273,10 +273,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         if (method.Elements is { Body.Length: > 0 } elements)
         {
             // The method copied with its element loops' vector forms (Kernel.Loops.cs), under the accessor's name, so
-            // the jobs call it as they call the method. Its own JIT root (D77): the job stays small, the loops inline
-            // into it. Warnings and nullable annotations are the method's, reported there.
+            // the jobs call it as they call the method, inlined as the method would be (its loops' vector forms are
+            // calls of their own, made only for a span of a whole vector). Warnings and nullable annotations are the
+            // method's, reported there.
             sb.Append("#pragma warning disable\n#nullable restore\n");
-            sb.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]\n");
+            if (method.OutOfLine) sb.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]\n");
             sb.Append($"    internal static {method.Returns} {method.Name}_{index}({owner.AccessorParameter} {self}{parameters})\n");
             sb.Append(elements.Body).Append("\n#nullable disable\n#pragma warning restore\n\n");
             return;

@@ -51,7 +51,7 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              called once per run past the last-level cache (StreamingStores.Pays);
                              SystemGenerator.Elements.cs: a method left scalar whose loops over spans have vector forms
                              (Kernel.Loops.cs) copied into the generated file (BodyCopy, #line to the user's file) in
-                             place of its UnsafeAccessor, each such loop preceded by a call of its AggressiveInlining
+                             place of its UnsafeAccessor, each such loop preceded by a call of its NoInlining
                              local function (__Elements{k}: whole vectors from the index given, the index it stopped at
                              returned to the loop as written), a for-loop's under its bounds and alias guard (__Apart);
                              a line per loop in the schedule

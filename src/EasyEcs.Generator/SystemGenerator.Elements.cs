@@ -19,7 +19,7 @@ public sealed partial class SystemGenerator
     private sealed record ElementCode(string Body, EquatableArray<string> Usings, EquatableArray<string> Loops);
 
     private const string Unsafe = "global::System.Runtime.CompilerServices.Unsafe", Marshal = "global::System.Runtime.InteropServices.MemoryMarshal",
-        AggressiveInlining = "[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]";
+        NoInlining = "[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]";
 
     /// <summary>
     /// The method's copy with its element loops' vector forms, or null when it has none: no loop of it vectorizes, or the
@@ -73,7 +73,7 @@ public sealed partial class SystemGenerator
             if (rewritten is ForEachStatementSyntax each)
             {
                 call.Append($"{{\n{hidden}var __span{k} = ({each.Expression.WithoutTrivia()}){loop.Streams[0].Span};\n");
-                call.Append($"int __at{k} = (int)__Elements{k}(ref {Marshal}.GetReference(__span{k}), 0, __span{k}.Length{values});\n");
+                call.Append($"int __at{k} = {Whole(loop, $"__span{k}.Length")} ? (int)__Elements{k}(ref {Marshal}.GetReference(__span{k}), 0, __span{k}.Length{values}) : 0;\n");
                 call.Append(Line(original));
                 call.Append(each.WithExpression(SyntaxFactory.ParseExpression($"__span{k}.Slice(__at{k})")).WithoutLeadingTrivia().WithoutTrailingTrivia().ToFullString());
                 call.Append(" }");
@@ -83,7 +83,7 @@ public sealed partial class SystemGenerator
             var loopFor = (ForStatementSyntax)rewritten;
             var variable = loopFor.Declaration!.Variables[0];
             string index = variable.Identifier.ValueText, end = $"({((BinaryExpressionSyntax)loopFor.Condition!).Right.WithoutTrivia()})";
-            var guard = new List<string> { $"{index} >= 0" };
+            var guard = new List<string> { $"{index} >= 0", Whole(loop, $"{end} - {index}") };
             foreach (var stream in loop.Streams) guard.Add($"{end} <= {stream.Span}.Length");
             // A written span that overlaps another one at a shift would read its own writes in the loop as written.
             for (int a = 0; a < loop.Streams.Length; a++)
@@ -140,7 +140,8 @@ public sealed partial class SystemGenerator
     /// element, the index to start at and the end, and the loop's values; it runs whole vectors (Vector512 where the
     /// hardware has it, then Vector&lt;T&gt;) and returns the index of the first element it left, which the loop as
     /// written then runs. A vector with a lane that would throw or take a cold branch is left to the loop as written,
-    /// with the elements after it.
+    /// with the elements after it. A JIT root of its own (NoInlining, D77's rule for loop routines): the copy stays as
+    /// small as the method and inlines into its job like it, and a span shorter than a vector never calls it.
     /// </summary>
     private static string ElementHelper(int k, Kernel.ElementLoop loop)
     {
@@ -151,7 +152,7 @@ public sealed partial class SystemGenerator
         parameters.Add("nint i");
         parameters.Add("nint rows");
         for (int v = 0; v < loop.Values.Length; v++) parameters.Add($"{loop.Values[v].Type} x{loop.Streams.Length + v}");
-        sb.Append(AggressiveInlining).Append('\n');
+        sb.Append(NoInlining).Append('\n');
         sb.Append($"static nint __Elements{k}({string.Join(", ", parameters)})\n{{\n");
         var text = new StringBuilder();
         for (int s = 1; s <= loop.Streams.Length; s++)
@@ -181,6 +182,13 @@ public sealed partial class SystemGenerator
         sb.Append(Indent(text.ToString())).Append("}\n");
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Whether <paramref name="count"/> elements hold one whole vector of the narrowest width the loop runs: shorter
+    /// spans skip the call of its vector form, so a method over short buffers costs what the loop as written costs.
+    /// </summary>
+    private static string Whole(Kernel.ElementLoop loop, string count) =>
+        $"({count}){(loop.Code.Flat is { } flat ? $" * {flat.Fields}" : "")} >= global::System.Numerics.Vector<{loop.Code.Lane}>.Count";
 
     private static string Indent(string text)
     {
