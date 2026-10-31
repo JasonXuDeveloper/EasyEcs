@@ -144,9 +144,15 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     Register(context, diagnostic, "Settle each tile in place with [GaussSeidel]", root, relaxed, WithGaussSeidel(relaxed));
                     break;
                 case "EECS116" when kind == "Step" && diagnostic.AdditionalLocations.Count == 1:
-                    context.RegisterCodeFix(CodeAction.Create("Step the tile by ref and write its rows with Write(row) (then delete this commit and the buffer it copies)",
-                        token => SteppedByRef(context.Document, diagnostic, token), diagnostic.Id + "Step"), diagnostic);
+                {
+                    var removal = await RemovalOf(context.Document, diagnostic, context.CancellationToken).ConfigureAwait(false);
+                    string stepTitle = removal == null ? "Step the tile by ref and write its rows with Write(row) (then delete this commit and the buffer it copies)"
+                        : removal.NextGone ? $"Step the tile by ref and write its rows with Write(row), deleting this commit and {removal.NextName}"
+                        : $"Step the tile by ref and write its rows with Write(row), deleting this commit ({removal.NextName} stays: other code names it)";
+                    context.RegisterCodeFix(CodeAction.Create(stepTitle, token => SteppedByRef(context.Document, diagnostic, removal, token),
+                        diagnostic.Id + "Step" + (removal == null ? "" : removal.NextGone ? "Commit" + removal.NextName : "Commit")), diagnostic);
                     break;
+                }
                 case "EECS119" when kind == "Collected" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } hook
                                     && Collected(root, hook, diagnostic.Properties) is { } collected:
                     context.RegisterCodeFix(CodeAction.Create("Run the rows in a [ForEach(MaxRows = N)] method",
