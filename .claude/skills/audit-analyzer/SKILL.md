@@ -128,8 +128,9 @@ done. Each round checks coverage per rule, not in total:
 - **A test case triggers only its own rule**: write each case so neighboring rules stay quiet (EECS075 static,
   EECS003 no component, EECS106 unread cutoff, EECS002 by-ref), or the test asserts on the wrong diagnostic.
 - **A new or widened case runs over BattleServer and the samples, Info included**: builds do not show Info, but
-  GeneratorBenchmark fails on any finding in its code. Fix the example (it must be exemplary), never add a filter
-  exception except as a tracked, temporary item.
+  `GeneratorTests.TheBenchmarkCorpusIsClean` fails on any finding in GeneratorBenchmark's corpus
+  (`benchmarks/EasyEcs.Benchmark/GeneratorCorpus.cs`: BattleServer.cs and 40 modules). Fix the example (it must be
+  exemplary), never add a filter exception except as a tracked, temporary item (`GeneratorCorpus.Findings`).
 
 ## Done means
 
@@ -141,8 +142,5 @@ done. Each round checks coverage per rule, not in total:
 
 ## Open findings
 
-- EECS031 suggests `Reserve(n)` with the inner loop's bound for nested creation loops (`Reserve(Side)` where
-  `Side * Side` rows are created) and fires only once that bound is not a constant (feat-tiles-pingpong): check the
-  product of nested bounds, or say nothing.
 - EECS021 fires on `[ForEach]` methods of a partial static runner class (feat-stage-catch): a false positive to
   reproduce and fix.
