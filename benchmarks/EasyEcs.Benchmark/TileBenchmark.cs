@@ -457,7 +457,7 @@ internal static class TileSystems
         }
     }
 
-    /// <summary>The blur stepped by ref, its columns walked by the cursor (c.Columns): one address per column, the offsets in the loads.</summary>
+    /// <summary>The blur stepped by ref, its columns walked by the cursor (c.Columns): one address per column, the offsets in the loads, the result stored unchecked (col.Store).</summary>
     [EcsSystem]
     public ref struct ColumnBlurSystem
     {
@@ -467,12 +467,11 @@ internal static class TileSystems
             warmth.ExchangeHalo();
             foreach (var row in warmth.Rows(TileStencil.Layer))
             {
-                var into = MemoryMarshal.Cast<Warmth, float>(warmth.Write(row));
+                var into = warmth.Write(row);
                 foreach (var col in warmth.At(row).Columns(4))
-                    ((col.Load128<float>(-1, 0, -1) + col.Load128<float>(0, 0, -1) + col.Load128<float>(1, 0, -1)
+                    col.Store((col.Load128<float>(-1, 0, -1) + col.Load128<float>(0, 0, -1) + col.Load128<float>(1, 0, -1)
                       + col.Load128<float>(-1) + col.Load128<float>() + col.Load128<float>(1)
-                      + col.Load128<float>(-1, 0, 1) + col.Load128<float>(0, 0, 1) + col.Load128<float>(1, 0, 1)) * (1f / 9))
-                        .CopyTo(into.Slice(col.X));
+                      + col.Load128<float>(-1, 0, 1) + col.Load128<float>(0, 0, 1) + col.Load128<float>(1, 0, 1)) * (1f / 9), into);
             }
         }
     }
@@ -487,13 +486,13 @@ internal static class TileSystems
             warmth.ExchangeHalo();
             foreach (var row in warmth.Rows(TileStencil.Layer))
             {
-                var into = MemoryMarshal.Cast<Warmth, float>(warmth.Write(row));
+                var into = warmth.Write(row);
                 foreach (var col in warmth.At(row).Columns(4))
                 {
                     var here = col.Load128<float>();
                     var alongX = -col.Load128<float>(-2) + 16f * col.Load128<float>(-1) - 30f * here + 16f * col.Load128<float>(1) - col.Load128<float>(2);
                     var alongZ = -col.Load128<float>(0, 0, -2) + 16f * col.Load128<float>(0, 0, -1) - 30f * here + 16f * col.Load128<float>(0, 0, 1) - col.Load128<float>(0, 0, 2);
-                    (here + (alongX + alongZ) * (1f / 12) * Rate).CopyTo(into.Slice(col.X));
+                    col.Store(here + (alongX + alongZ) * (1f / 12) * Rate, into);
                 }
             }
         }
