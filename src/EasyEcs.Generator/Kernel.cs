@@ -184,7 +184,7 @@ internal sealed partial class Kernel
     private int _size;      // bytes per lane: 1, 2, 4 or 8 (twice _base while a half of a pair is translated)
     private string _mask;   // the lane type of masks: sbyte, short, int or long (all bits set where true)
     /// <summary>The components: their index (job column k), their lane fields in memory order, and whether they are written.</summary>
-    private readonly Dictionary<IParameterSymbol, (int Index, IFieldSymbol[] Fields, bool Ref)> _components = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<IParameterSymbol, (int Index, LaneField[] Fields, bool Ref)> _components = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<IParameterSymbol, string> _uniformParams = new(SymbolEqualityComparer.Default);
     /// <summary>The Reduce&lt;T&gt; parameters: T's fields, how T.Combine combines each ("+", "Min", "Max"), the run's partial result.</summary>
     private readonly Dictionary<IParameterSymbol, Reduction> _reductions = new(SymbolEqualityComparer.Default);
@@ -197,7 +197,7 @@ internal sealed partial class Kernel
     /// The Maybe&lt;T&gt; / ReadOnlyMaybe&lt;T&gt; parameters: their position i (the job's column <c>m{i}</c>) and T's lane
     /// fields. Each is a lane mask <c>__has{i}</c> (the rows that have T) and one vector per field <c>__q{i}_{f}</c>.
     /// </summary>
-    private readonly Dictionary<IParameterSymbol, (int Index, IFieldSymbol[] Fields)> _optionals = new(SymbolEqualityComparer.Default);
+    private readonly Dictionary<IParameterSymbol, (int Index, LaneField[] Fields)> _optionals = new(SymbolEqualityComparer.Default);
     /// <summary>The paths from each component (or optional's T) to its lanes, in lane order (<see cref="Paths"/>).</summary>
     private readonly Dictionary<IParameterSymbol, IFieldSymbol[][]> _paths = new(SymbolEqualityComparer.Default);
     private readonly HashSet<int> _writtenOptionals = new();
@@ -466,6 +466,19 @@ internal sealed partial class Kernel
     {
         /// <summary>A pair method ([Neighbor] parameters): the loop is the body of one neighbor against a cluster of rows (Kernel.Neighbors.cs).</summary>
         public bool Pairs { get; init; }
+
+        /// <summary>
+        /// An element loop's body (Kernel.Loops.cs): its parameters that stand for the elements of a span (the loop's
+        /// columns, one lane per element) are these; every other parameter is a value of the loop, the same for every
+        /// element (a variable of the method the loop does not write). Null for a [ForEach] method or a lambda pass.
+        /// </summary>
+        public HashSet<IParameterSymbol>? Streams { get; init; }
+
+        /// <summary>What parameter <paramref name="p"/> is to the loop: <see cref="Symbols.Classify(IParameterSymbol, bool)"/>'s kind, or an element loop's.</summary>
+        public Symbols.ParamKind Kind(IParameterSymbol p) => Streams == null ? Symbols.Classify(p, Outside)
+            : Streams.Contains(p) ? Symbols.ParamKind.Component
+            : p.Type.IsRefLikeType || p.RefKind != RefKind.None ? Symbols.ParamKind.Invalid
+            : Symbols.ParamKind.Context;
     }
 
     /// <summary>
@@ -597,10 +610,10 @@ internal sealed partial class Kernel
     {
         var (method, model) = (lane.Method, lane.Model);
         ITypeSymbol? first = null;
-        var components = new List<IFieldSymbol[]>();
+        var components = new List<LaneField[]>();
         var componentTypes = new List<ITypeSymbol>();
         var wides = new List<WideLayout?>();
-        var optionals = new List<IFieldSymbol[]>();
+        var optionals = new List<LaneField[]>();
         bool outside = lane.Outside;
         HashSet<IParameterSymbol>? whole = null;
         Dictionary<IParameterSymbol, List<(IFieldSymbol[] Path, ISymbol[] Access)>>? touched = null;
@@ -616,24 +629,24 @@ internal sealed partial class Kernel
         }
         foreach (var p in method.Parameters)
         {
-            var kind = Symbols.Classify(p, outside);
+            var kind = lane.Kind(p);
             switch (kind)
             {
                 case Symbols.ParamKind.Component:
-                    IFieldSymbol[] fields;
+                    LaneField[] fields;
                     WideLayout? wide = null;
                     try
                     {
                         fields = Lanes(p.Type);
                         if (fields.Length > 1 && fields.FirstOrDefault(f => IsBool(f.Type)) is { } flag)
-                            throw new Unsupported($"field {p.Type.Name}.{Symbols.MemberName(flag)} is a bool among {fields.Length} fields: a vector loop takes a bool in a component of its own (one byte per row)"); // inherent until the samples split theirs (owner-review)
+                            throw new Unsupported($"field {p.Type.Name}.{flag.Name} is a bool among {fields.Length} fields: a vector loop takes a bool in a component of its own (one byte per row)"); // inherent until the samples split theirs (owner-review)
                         if (fields.Any(f => SizeOf(f.Type) != SizeOf(fields[0].Type)))
                             throw new Unsupported($"lane types {fields[0].Type.ToDisplayString()} and {fields.First(f => SizeOf(f.Type) != SizeOf(fields[0].Type)).Type.ToDisplayString()} differ in size");
                     }
                     catch (Unsupported unsupported)
                     {
                         wide = WideOr(p, unsupported);
-                        fields = wide.Paths.Select(path => path[path.Length - 1]).ToArray();
+                        fields = wide.Paths.Select(path => LaneField.Of(path[path.Length - 1])).ToArray();
                     }
                     components.Add(fields);
                     componentTypes.Add(p.Type);
@@ -669,7 +682,7 @@ internal sealed partial class Kernel
             if (SizeOf(first) != SizeOf(field.Type))
                 throw new Unsupported($"lane types {first.ToDisplayString()} and {field.Type.ToDisplayString()} differ in size");
         if (SizeOf(first) < 4 && optionals.Count > 0)
-            throw new Unsupported($"it takes a Maybe<{Symbols.MaybeElement(method.Parameters.First(q => Symbols.Classify(q, outside) == Symbols.ParamKind.Optional).Type)?.Name}> of {first.ToDisplayString()} lanes: optional columns have vector loops of 4- and 8-byte lanes");
+            throw new Unsupported($"it takes a Maybe<{Symbols.MaybeElement(method.Parameters.First(q => lane.Kind(q) == Symbols.ParamKind.Optional).Type)?.Name}> of {first.ToDisplayString()} lanes: optional columns have vector loops of 4- and 8-byte lanes");
 
         // The parameters of a kernel: the main one, and one per field of a flat loop (Flat) with the same setup.
         Kernel Make(bool reductions)
@@ -680,13 +693,13 @@ internal sealed partial class Kernel
             for (int i = 0, k = 0, o = 0; i < method.Parameters.Length; i++)
             {
                 var p = method.Parameters[i];
-                var kind = Symbols.Classify(p, outside);
+                var kind = lane.Kind(p);
                 if (kind == Symbols.ParamKind.Component)
                 {
                     made._components[p] = (k + 1, components[k], p.RefKind == RefKind.Ref);
                     if (SizeOf(components[k][0].Type) > SizeOf(first)) made._doubled.Add(k + 1);
                     if (wides[k] is { } wide) (made._paths[p], made._wideOf[p]) = (wide.Paths, wide);
-                    else made._paths[p] = Paths(p.Type, p.Type.Name);
+                    else made._paths[p] = IsLaneType(p.Type) ? [[]] : Paths(p.Type, p.Type.Name); // an element stream of numbers: the lane is the value itself
                     k++;
                     continue;
                 }
@@ -878,7 +891,7 @@ internal sealed partial class Kernel
         {
             whole ??= new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
             touched ??= Touched(body, whole);
-            throw Advised($"component {several[0].ContainingType.Name} has {several.Length} fields of {several[0].Type.ToDisplayString()}: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field",
+            throw Advised($"component {several[0].Owner.Name} has {several.Length} fields of {several[0].Type.ToDisplayString()}: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field",
                 narrow.Type, !whole.Contains(narrow) && touched.TryGetValue(narrow, out var used) ? used.Select(u => u.Path).ToArray() : null, false);
         }
         // The passing rows of a masked word as masks of a pair's halves, for the stores and the lanes of what it writes.
@@ -999,14 +1012,24 @@ internal sealed partial class Kernel
     /// that is a struct of lanes (<c>System.Numerics.Vector3</c>, another struct of floats) gives its own lanes in its
     /// place. Otherwise the reason it has no lanes.
     /// </summary>
-    private static IFieldSymbol[] Lanes(ITypeSymbol type)
+    private static LaneField[] Lanes(ITypeSymbol type)
     {
+        if (IsLaneType(type)) return [new LaneField(type, "", type)]; // an element stream of numbers (Kernel.Loops.cs): one lane, the value
         if (type is not INamedTypeSymbol { TypeKind: TypeKind.Struct } named) throw new Unsupported($"component {type.Name} is not a struct");
         if (named.GetAttributes().Any(a => a.AttributeClass?.Name == "StructLayoutAttribute"))
             throw new Unsupported($"component {type.Name} sets its layout ([StructLayout])");
         var paths = Paths(type, $"component {type.Name}");
         if (paths.Length > MaxFields) throw new Unsupported($"component {type.Name} has {paths.Length} fields (a vector loop splits up to {MaxFields})");
-        return paths.Select(p => p[p.Length - 1]).ToArray();
+        return paths.Select(p => LaneField.Of(p[p.Length - 1])).ToArray();
+    }
+
+    /// <summary>
+    /// A lane of a component or element (<see cref="Lanes"/>): its type, the name of the field that holds it ("" for an
+    /// element that is the lane itself, a number of an element loop's span) and the type declaring that field.
+    /// </summary>
+    private sealed record LaneField(ITypeSymbol Type, string Name, ITypeSymbol Owner)
+    {
+        public static LaneField Of(IFieldSymbol field) => new(field.Type, Symbols.MemberName(field), field.ContainingType);
     }
 
     /// <summary>
@@ -1588,7 +1611,8 @@ internal sealed partial class Kernel
     /// </summary>
     private (int Index, int Field, bool Ref)? LaneOf(IOperation op)
     {
-        if (Chain(op) is not ({ } root, { Length: > 0 } members) || root is not IParameterReferenceOperation { Parameter: var parameter }
+        // members is empty only for an element stream of numbers, whose one path is empty (Kernel.Loops.cs)
+        if (Chain(op) is not ({ } root, var members) || root is not IParameterReferenceOperation { Parameter: var parameter }
             || !_components.TryGetValue(parameter, out var c))
             return null;
         int f = Leaf(_paths[parameter], members);
@@ -1748,8 +1772,8 @@ internal sealed partial class Kernel
             // An enum to its integer or back (or another enum, or another integer of its size): the bits, as C# converts them unchecked.
             case IConversionOperation { IsChecked: false, OperatorMethod: null } c when IsEnumConversion(c) && IsLane(c.Type) && IsLane(c.Operand.Type):
                 return Convert(Expr(c.Operand), Under(c.Operand.Type!), Under(c.Type!)) ?? throw Not(c);
-            case IFieldReferenceOperation or IPropertyReferenceOperation or IInvocationOperation when LaneOf(op) is { } c:
-                return ComponentLane(c.Index, c.Field, op);
+            case IFieldReferenceOperation or IPropertyReferenceOperation or IInvocationOperation or IParameterReferenceOperation when LaneOf(op) is { } c:
+                return ComponentLane(c.Index, c.Field, op); // a parameter itself: an element of a span of numbers (Kernel.Loops.cs)
             case IPropertyReferenceOperation { Property.Name: "HasValue", Instance: IParameterReferenceOperation { Parameter: var p } } when _optionals.TryGetValue(p, out var o):
                 return $"__has{o.Index}";
             case IFieldReferenceOperation or IPropertyReferenceOperation when OptionalLane(op) is { } q:

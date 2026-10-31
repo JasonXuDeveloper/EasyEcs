@@ -128,7 +128,7 @@ public sealed partial class SystemGenerator
             };
             return new LambdaModel(invocation.SyntaxTree.FilePath, invocation.SpanStart, location.Version, location.Data,
                 LambdaPass.Where(invocation.GetLocation()), method, body,
-                new EquatableArray<string>(body == null ? [] : LambdaPass.Usings(invocation).Distinct().OrderBy(u => u, System.StringComparer.Ordinal).ToArray()),
+                new EquatableArray<string>(body == null ? [] : BodyCopy.Usings(invocation).Distinct().OrderBy(u => u, System.StringComparer.Ordinal).ToArray()),
                 lambda.ReturnsVoid ? "void" : lambda.ReturnType.ToDisplayString(Symbols.Fqn));
         }
     }
