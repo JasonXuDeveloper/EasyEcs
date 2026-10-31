@@ -1826,3 +1826,28 @@ Decision records for the docs pass (en + zh). Number them at the docs pass (D-id
   plain (Dropped list: "streaming column resizes, a wash").
 - architecture.mdx + zh, the paragraph on cache gates (CacheSizes): the large copies of snapshots read the
   last-level gate too.
+
+## feat-later-small (backlog: alias entry points, EECS031 nested, inlining.sh, #153, quiet rechecks, Linger's allocation)
+
+EECS120's id is provisional: renumber everywhere below if a merge takes it.
+
+- guide/analyzer.mdx + zh:
+  - EECS031's section: nested counted loops are reported at the outermost loop that always runs the inner one with
+    invariant bounds and destroys nothing, with `Reserve(outer * inner)` (three levels and more multiply); a constant
+    product below the small count is not reported; a loop that destroys the rows its body made stops the climb. Its
+    example gains the nested form (doccheck=expect-EECS031) and the code fix's result.
+  - New section and table row EECS120 (Warning, "A generated entry point outside the namespaces in scope"): `Owner.Method(world, ...)`
+    of a [ForEach], [Drain] or [EntityMethod] method binds to the method itself (CS7036 or a wrong overload) when the
+    generated entry point's namespace (the owner's) is not imported, for example in a file that only aliases the owner
+    (`using Alias = Game.Hunters;`). Fix: `using Game;` (the code fix adds it). A `using` alias binds like the name
+    itself once the namespace is in scope.
+- The page on generated entry points (guide/systems.mdx or wherever `Owner.Method(world)` is introduced) + zh: one
+  line: the entry points are C# 14 extension members in the owner's namespace; import it where you call them.
+- skills/easyecs/SKILL.md: "call a [ForEach] method's entry point where the owner's namespace is imported (EECS120)".
+- changelog (Analyzer): "EECS031 reports nested creation loops with the product to reserve"; "EECS120: a generated
+  entry point called where its namespace is not in scope". (Fixed): "A [GaussSeidel] tile that changes for the first
+  time long after it joined no longer allocates in the pass".
+- decisions.mdx + zh: the three drafts of the feat-later-small report ("Generated entry points are found through the
+  owner's namespace", "The default benchmark job keeps its warm-up", "GeneratorBenchmark runs one process"), after
+  D141.
+- performance page: nothing (TileRestartBenchmark's numbers come with the bench sync of feat-field-gaps).

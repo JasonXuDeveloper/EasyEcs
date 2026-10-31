@@ -33,7 +33,7 @@ names the skill:
 
 Nothing running.
 
-Merged since the last update: `feat-borrowed-rest` (item 7: snapshots stream large copies past the LLC, Capture 1.20-1.26x / Restore 1.11-1.20x at 4M rows, resizes stay memmove; roofline in audit-perf), `feat-field-gaps` (item 8c: `tile.Restart` and `tile.Sweep`, names kept by the owner on 2026-10-30; Linger showed 1-3 B per op at 256 springs / Hop 1, look in an audit), `feat-small-next` (rename leftovers, EECS033 across assemblies, recorded switches), `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
+Merged since the last update: `feat-borrowed-rest` (item 7: snapshots stream large copies past the LLC, Capture 1.20-1.26x / Restore 1.11-1.20x at 4M rows, resizes stay memmove; roofline in audit-perf), `feat-field-gaps` (item 8c: `tile.Restart` and `tile.Sweep`, names kept by the owner on 2026-10-30; Linger showed 1-3 B per op at 256 springs / Hop 1: fixed in feat-later-small, d666b0d, Entry.Around set up in Join and the walk and queues sized for the grid in Check; probe 0 B per op in every case, TileRestartBenchmark 0 B in two rounds), `feat-small-next` (rename leftovers, EECS033 across assemblies, recorded switches), `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
 `ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
 at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
 vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the owner's M4: no case slower past
@@ -454,10 +454,14 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
   not built (owner-review.md). Names approved by the owner (2026-10-27): `[Accumulate]`, `[Drain]` +
   `IDrain<T>`, `World.ReserveBuffers`. Docs pass: docs-todos.md "feat-generator-gaps". G1 / G2 come with inner-loops WP5 /
   WP2; G8 / G9 with L2.
-- [ ] **A `using` alias to a system does not bind its generated entry point**: `using Alias = Hunters;` then
-  `Alias.Hunt(world)` fails with CS7036 (found by feat-locality-core). Find whether the generator or the interceptor
-  matches the call by the written name; fix it (an alias is ordinary C#), with a generator test, or have the
-  analyzer say so if it cannot be fixed.
+- [x] **A `using` alias to a system does not bind its generated entry point** (feat-later-small): the cause is not the
+  alias. The entry point is a C# 14 extension member of `{FlatName}ForEach` / `{FlatName}EntityMethods` in the owner's
+  namespace, so `Alias.Hunt(world)` binds wherever that namespace is imported, alias or not (GeneratorTests
+  `UsingAliasesBindEntryPoints`, 7 cases: alias to a system, a nested type, a generic owner, `[Drain]`,
+  `[EntityMethod]`, global alias, file-scoped namespace). feat-locality-core's CS7036 came from a file that aliased
+  the owner without importing its namespace: then the call binds to the method itself. EECS120 (provisional id,
+  Warning) reports exactly that call (failed binding, the owner has such a method, the entry points' class not in
+  scope) and its code fix adds `using {namespace};`. LookupOrderBenchmark now calls `Hunters.Hunt(_hunters)`.
 - [x] **Flaky: `ParallelReductionsScratchAndLookupsDoNotAllocate`** (fix-flaky-alloc): the same path as the
   prefetching test. Its window saw OSR compiles on the measuring thread (updates 53, 62 and 81, in 2 of 4 instrumented
   full runs; none with OSR off); the other paths were ruled out (the measuring thread made its `Scratch` list during
@@ -483,9 +487,10 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] **The inliner's limit, checked instead of assumed** (owner, 2026-10-26: "is a fixed JIT budget right when SIMD
       width differs?"). Answer: `MAX_INL_LCLS = 32` is RyuJIT's implementation constant with no target condition
       (`inline.h`, release/10.0 and main), the same for x64, ARM64, ReadyToRun and Native AOT, and it counts IL
-      locals, which no vector width changes; per-width register pressure is M1's (`microarch.md`). Left to do:
-      `tools/inlining.sh` in CI on the x64 and arm64 jobs (fails when a runner stops inlining a job, so a runtime
-      that changes the limit is seen at once). Mono (the WebAssembly demo; `mini/method-to-ir.c`,
+      locals, which no vector width changes; per-width register pressure is M1's (`microarch.md`). CI runs
+      `tools/inlining.sh` on the x64 and arm64 jobs (ci.yml; checked in feat-later-small: exit 0 as committed, 89
+      benchmark methods, 87 s with its build; the generator's split turned off, `InlinedLocals = 1000`: 22 failed
+      inlines, "too many locals", exit 1; a failed build now prints its errors and exits 2 instead of a silent 1). Mono (the WebAssembly demo; `mini/method-to-ir.c`,
       `mono_method_check_inlining`, release/10.0) read: no limit on locals at all ("also consider num_locals?"), an IL
       size limit of 20 bytes (30 LLVM AOT, 100 LLVM JIT) that `AggressiveInlining` lifts, an inline depth of 10, no
       inlining in gsharedvt code or of methods with exception clauses: the 32-locals split costs Mono nothing, and
@@ -494,8 +499,11 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] **`[Accumulate]` users that do not conflict** (`voxel-rewrite.md` GA2): systems that only add into one
       `[Accumulate]` singleton share a stage, combined in registration order at the stage end. Built only if the
       VoxelServer rewrite's `--schedule` shows stages lost to its `Stats` (step 2 of that plan); otherwise a record.
-- [ ] **EECS031 on nested creation loops** (feat-tiles-pingpong): suggests `Reserve(inner bound)` where
-      `outer × inner` rows are created, and only once the bound is not a constant (`audit-analyzer`, "Open findings").
+- [x] **EECS031 on nested creation loops** (feat-tiles-pingpong; done in feat-later-small): EECS031 climbs the counted
+      loops enclosing a creation loop while they always run it, keep its bounds invariant and destroy nothing, and
+      reports at the outermost with `Reserve(outer * inner)` (three levels and more); a constant product below the
+      small count is not reported, a loop that destroys the rows of its body stops the climb. Tests: nested positive,
+      three levels, constant product, churn negative, code fix.
 - [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
 - [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
       push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with
@@ -505,9 +513,43 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       actionable here: Unity support waits for a Unity release on .NET 10; the toolchain item is a standing rule.
 - [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 NativeMemory 2 MiB columns (research
       first); #157 the #138 recommendations; #159 remaining research.
-- [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
-      the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
-- [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
+- [ ] **Linger at Hop 8 after d666b0d** (feat-later-small): TileRestartBenchmark's Linger 4 threads / 256 springs /
+      Hop 8 read 6-14 % slower than tip in four rounds (865 / 906 / 1013 / 919 us against 989 / 969 / 1071 / 989,
+      sd 8-12 %), 1 / 4 / 8 likewise; the other cases mixed. Cause found in the Tier1 code (DOTNET_JitDisasm, both
+      builds): `Leave` lost its allocation path and became small enough for the JIT to inline it into the job's
+      `Execute` (849 -> 1219 B; only `LeaveInPlace` stays a call); nothing else on the path changed (Settle, Wake,
+      WakeAround, Next within a few bytes). Candidate: `[MethodImpl(NoInlining)]` on `Leave`, tip's code without the
+      allocation; one round: 1 / 4 / 8 back to tip (1115 vs 1123 us, fix 1245), 4 / 256 / 8 not (1029, fix 1033, tip
+      971); its second round ran at load 5 and read 4 / 4 / 8 at 807 us against ~470 in every other run, so the
+      verdict needs the A/B (tip, fix, fix + NoInlining, `--filter '*TileRestartBenchmark.Linger*'`, two rounds) on
+      a machine no other agent is benchmarking.
+- [ ] **Flaky: `NeighborTests.PassesWithResultsAndMutsAllocateNothingOnceWarm`** (seen in feat-later-small's gate,
+      normal mode, 8216 B; passed with AVX off): 8216 B is an `int[2048]`, the size `Pairs.cs` grows a pair list's
+      `Near` to from 1024 (`Array.Resize(ref near, Math.Max(64, found * 2))`, "grows to the densest list"): a moving
+      crowd reaching a denser list than in its 200 fixed warm-up passes, the class of TileSteps' late tiles
+      (d666b0d). Not reproduced or fixed here (outside this branch's code); also the fixed warm-up tests/AGENTS.md
+      names.
+- [x] #153 (feat-later-small): the `--dev` job is in (screening). The default job stays (Warmup 6, 8 x 250 ms, 2
+      processes): Warmup 3 / 150 ms took 244 / 238 s against 375 / 371 s for a fast, a parallel and a memory-bound
+      class, but ParallelPassBenchmark's Tick moved +9-10 % (Parallel=False) in both rounds and +19 % (Parallel=True),
+      EntityJob +28 % in one: the parallel classes keep speeding up for 2-4 s of each process (warmups 1.62-1.70 ms,
+      measured iterations falling to 1.23 ms), which 0.45 s of warm-up cuts off. GeneratorBenchmark: 1188 / 1206 s a
+      run on the default job, of which 801 s operations (Compile and CompileAndAnalyze, 2.6-7 s each, most of it) and
+      16 s per process outside them (24 processes): the corpus checks (compile errors, the analyzer over everything) left
+      the setup for `GeneratorTests.TheBenchmarkCorpusIsClean` (HEAD on the default job: 1960 s, means within the runs' spread). One process
+      (a mutator: BenchmarkDotNet applies an `AsDefault` job over a class's own job) took 642 / 674 s but was not
+      adopted: the default job's two processes differed up to 9 % on Compile (OneNamespace, 3809 vs 4155 ms, sd ~3 %
+      within each), which one process hides, and both one-process rounds read it higher (4262 / 4501 ms against
+      3834 / 3979). Warmups stay too: the generator cases settle in their fifth (Cold 1.3 s -> 0.83 s). For a
+      generator change, run the cases it touches (`audit-generator`).
+- [x] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle (feat-later-small, base 2db351d vs
+      tip 99e7a2c, default job, two rounds). Scan: 797 ± 123 vs 814 ± 111 us, then 745 ± 64 vs 712 ± 64: the sign
+      flips, no regression. Toggle: 427 ± 33 vs 449 ± 35, then 458 ± 36 vs 469 ± 27, so the Tier1 code was diffed:
+      the per-row path is the same code (AddBit 279 / 281 B, SetRow, MoveTo's IL identical, World.Components.cs
+      unchanged); tip adds RowOrder.Shrink calls in RemoveRow / Archetype.Remove and a larger World.Run (394 -> 953 B:
+      ThreadSetup.Run, SortDue per update), neither on Toggle's path. Tip leaves MoveTo, CopyRow and GetAddEdge at
+      instrumented Tier0 longer, but 2000 Toggles timed directly are equal tiered (485.8 vs 483.8 us, 460.7 vs 460.7)
+      and fully optimized (509.9 vs 504.0, 522.1 vs 463.6 with base the slower): the BenchmarkDotNet gap is noise.
 
 ## Finish
 
