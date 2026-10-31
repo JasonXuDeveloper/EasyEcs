@@ -35,6 +35,8 @@ adding or changing one (CI runs `tools/agents.sh --check`).
 | Directory | Read its AGENTS.md when |
 |---|---|
 | [`benchmarks/`](benchmarks/AGENTS.md) | adding, changing or running a benchmark |
+| [`benchmarks/`](benchmarks/AGENTS.md) | adding, changing or running a benchmark |
+| [`benchmarks/`](benchmarks/AGENTS.md) | adding, changing or running a benchmark |
 | [`docs/`](docs/AGENTS.md) | changing the docs site or a page of `docs/content` (en or zh) |
 | [`src/EasyEcs.Core/`](src/EasyEcs.Core/AGENTS.md) | reading or changing anything in `src/EasyEcs.Core` (entities, tables, queries, systems, the parallel runner, indexes, saves) |
 | [`src/EasyEcs.Generator/`](src/EasyEcs.Generator/AGENTS.md) | reading or changing the generators, the vector loops (`Kernel*.cs`) or the analyzer |

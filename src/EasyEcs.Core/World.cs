@@ -649,8 +649,11 @@ public sealed partial class World : IDisposable
     /// object heap left to the entity rows and the caller's own arrays (the handle span of <c>CreateEntities</c>). See
     /// decision D28 (docs/content/decisions.mdx).
     /// </summary>
-    private static EntityMeta[] AllocateMeta(int length, bool sized) =>
-        sized && length >= LargeMeta ? GC.AllocateArray<EntityMeta>(length, pinned: true) : new EntityMeta[length];
+    private static EntityMeta[] AllocateMeta(int length, bool sized)
+    {
+        if (!sized || length < LargeMeta) return new EntityMeta[length];
+        return HugePages.AllocatePinned<EntityMeta>(length);
+    }
 
     /// <summary>Records from which an <see cref="EntityMeta"/> array is a large object (85,000 bytes).</summary>
     private const int LargeMeta = 85_000 / 16;

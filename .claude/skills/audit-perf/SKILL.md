@@ -200,6 +200,34 @@ its own worktree.
      be shaped like the libc's large copy (four pages at a time, the source prefetched), since a plain loop of
      non-temporal stores was 1.25-1.46x slower than glibc's; and a copy into arrays just allocated (a resize) is
      bound by the allocation and first touch, where streaming was a wash (feat-borrowed-rest);
+   - a random chase past the TLB's reach (4 KiB pages: 6-8 MiB) pays a page walk per read on top of its cache miss;
+     check the pages before crediting a prefetch or a layout (`AnonHugePages` in `/proc/self/smaps_rollup`, printed by
+     LookupChaseHugePagesBenchmark's setup). Huge pages (`HugePages`, Linux THP) made the 16M chases 1.3-1.7x faster
+     and left a walk in row order alone; a prefetch that misses the TLB is worth less, so the prefetched forms gained
+     the most (feat-later-memory). Compare pages off / on inside one binary (an internal switch set in setup), never
+     base against head. How an array gets its huge pages decides what its allocation costs (HugePageTouchBenchmark,
+     `HugePages.AllocatePinned`): advised before the first touch, never after the GC zeroed it (pages it touched stay
+     small: Create 16M 1.2-1.3x slower); never collapsed (`MADV_COLLAPSE`: 13-19 ms of kernel time per page); untouched
+     2 MiB dropped (`MADV_DONTNEED`), resident ones zeroed in place (dropping memory the GC hands out again and faulting
+     it back made Grow 16M 1.2-1.5x slower); and only arrays a reservation sized, not the steps of a doubling. When an
+     allocation path is slower, read the kernel's side before guessing (perf is not available on the shared VM):
+     `stime` / `minflt` from `/proc/self/stat` and the `thp_*` / `compact_stall` counters of `/proc/vmstat` around N
+     repetitions in a small console program, then time the fix with BenchmarkDotNet. On the reference VM those
+     counters swing 3x between runs of one binary: it reports free 2 MiB blocks to the host (virtio-balloon free page
+     reporting, `/sys/module/page_reporting/parameters/page_reporting_order` = 9), which discards them, so a huge
+     page faulted from a block freed seconds earlier touches at 0.3 GiB/s against 6.6 GiB/s for one reused at once
+     and 2 GiB/s for 4 KiB pages (feat-later-memory). Numbers of first touch with huge pages there are a lower bound;
+   - a vector loop over a table that fills most of a core's L2 (100k entities of KernelBenchmark: 1.2-1.6 MB against
+     2 MiB) varies 20-30 % between processes and between worlds made again in one process with the same compiled
+     code (the physical pages the columns land on: L2 sets are physically indexed): before calling such a case slower,
+     run it with `--launchCount 6` in interleaved base / head rounds and compare the spread of the launches, and check
+     the Tier1 listings and tiers (`DOTNET_JitDisasmSummary=1`) are the same (feat-later-memory: Step 100k "0.75x"
+     was one fast base launch);
+   - Native AOT is measured by BenchmarkDotNet with `--runtimes nativeaot10.0` (one publish per case, minutes each:
+     filter to the methods the change touches); the JIT and AOT runs of one A/B go in one round, interleaved.
+     BenchmarkDotNet 0.15 passes ILC 10 an instruction set it refuses ("Unrecognized instruction set sse") and its
+     generated project ignores `Directory.Build.targets`: export `CustomAfterMicrosoftCommonTargets` naming a scratch
+     targets file that sets `<IlcInstructionSet>native</IlcInstructionSet>` for the AOT runs;
    - before choosing what to change in a pass, place it on the roofline (below, "Roofline"): a memory-bound pass gains
      from fewer bytes only, a compute-bound one from the loop and the math;
 4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss, a wash or an allocation is first

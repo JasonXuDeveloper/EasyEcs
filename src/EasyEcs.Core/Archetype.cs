@@ -951,7 +951,7 @@ internal sealed class Archetype
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int Add(int entityId, int version)
     {
-        if (Count >= Slots.Length) Resize(Slots.Length * 2);
+        if (Count >= Slots.Length) Resize(Slots.Length * 2, false);
         int slot = Count++;
         // slot < Slots.Length (grown above): no bounds check.
         ref var row = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Slots), slot);
@@ -999,7 +999,9 @@ internal sealed class Archetype
     /// </summary>
     public void Reserve(int rows)
     {
-        if (rows > Slots.Length) Resize(Math.Max((rows + 63) & ~63, Slots.Length * 2));
+        if (rows <= Slots.Length) return;
+        int asked = (rows + 63) & ~63;
+        Resize(Math.Max(asked, Slots.Length * 2), asked >= Slots.Length * 2);
     }
 
     /// <summary>
@@ -1015,20 +1017,22 @@ internal sealed class Archetype
         Order?.Trim();
         long capacity = Math.Max(InitialCapacity, (long)BitOperations.RoundUpToPowerOf2((ulong)Count));
         if (capacity >= Slots.Length) return false;
-        Resize((int)capacity);
+        Resize((int)capacity, false);
         return true;
     }
 
     /// <summary>
     /// Resize the entity rows (<see cref="Slots"/>) and every column to <paramref name="capacity"/> rows, at least
-    /// <see cref="Count"/> (cold path: growth, <see cref="Trim"/>).
+    /// <see cref="Count"/> (cold path: growth, <see cref="Trim"/>). <paramref name="sized"/> when the capacity is the
+    /// one a reservation asked for, not a doubling step or a trim: only those columns go onto huge pages, as the entity
+    /// records (World.AllocateMeta), so a table grown row by row allocates what it did without them.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Resize(int capacity)
+    private void Resize(int capacity, bool sized)
     {
         Array.Resize(ref Slots, capacity);
         for (int i = 0; i < Columns.Length; i++)
-            ByBit[Components[i]].Set(Columns[i] = _infos[i].Resize(Columns[i], capacity), _infos[i].Managed);
+            ByBit[Components[i]].Set(Columns[i] = _infos[i].Resize(Columns[i], capacity, sized), _infos[i].Managed);
         foreach (short c in _bitColumns)
         {
             Array.Resize(ref Present[c], (capacity + 63) >> 6);

@@ -221,10 +221,17 @@ internal abstract class ComponentInfo
     /// <summary>The component type (error messages).</summary>
     public abstract Type Type { get; }
 
-    public abstract Array Create(int capacity);
+    /// <summary>
+    /// A column of <paramref name="capacity"/> rows. <paramref name="sized"/> when the capacity is the one asked for (a
+    /// reservation, a copy of a table), not a doubling step: only those go onto huge pages (<see cref="HugePages"/>).
+    /// </summary>
+    public abstract Array Create(int capacity, bool sized = true);
 
-    /// <summary>A copy of <paramref name="column"/> with <paramref name="capacity"/> rows: grown, or shrunk to rows that hold no value any more.</summary>
-    public abstract Array Resize(Array column, int capacity);
+    /// <summary>
+    /// A copy of <paramref name="column"/> with <paramref name="capacity"/> rows: grown, or shrunk to rows that hold no
+    /// value any more; <paramref name="sized"/> as in <see cref="Create"/>.
+    /// </summary>
+    public abstract Array Resize(Array column, int capacity, bool sized);
 
     public abstract void CopyManaged(Array source, int sourceSlot, Array target, int targetSlot);
 
@@ -403,10 +410,14 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
     public override object Box(Array column, int slot) =>
         Managed ? Unsafe.As<T[]>(column)[slot] : Unsafe.Add(ref Archetype.Row0<T>(column), slot);
 
-    public override Array Create(int capacity) =>
-        Managed ? new T[capacity] : GC.AllocateArray<byte>(capacity * Size + Archetype.CacheLine, pinned: true);
+    public override Array Create(int capacity, bool sized = true)
+    {
+        if (Managed) return new T[capacity];
+        int bytes = capacity * Size + Archetype.CacheLine;
+        return sized ? HugePages.AllocatePinned<byte>(bytes) : GC.AllocateArray<byte>(bytes, pinned: true);
+    }
 
-    public override Array Resize(Array column, int capacity)
+    public override Array Resize(Array column, int capacity, bool sized)
     {
         if (Managed)
         {
@@ -415,7 +426,7 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
             return typed;
         }
 
-        var resized = Create(capacity);
+        var resized = Create(capacity, sized);
         // The smaller capacity in bytes: both arrays have a line of slack before their aligned rows.
         int bytes = Math.Min(Unsafe.As<byte[]>(column).Length, Unsafe.As<byte[]>(resized).Length) - Archetype.CacheLine;
         Unsafe.CopyBlockUnaligned(ref Archetype.Aligned(resized), ref Archetype.Aligned(column), (uint)bytes);

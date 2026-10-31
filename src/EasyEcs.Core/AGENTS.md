@@ -71,6 +71,12 @@ CacheSizes.cs                the last-level cache and one core's L2, read once p
                              form: index probes and vector loops' chases past the last level; the row form's chases
                              (parallel, fused walks and buffers too) and DestroyEntities' id list past the L2
                              (L2OrLastLevel); the last level also where a non-temporal store exists (StreamingStores)
+HugePages.cs                 the large pinned arrays of the tables on 2 MiB pages (Linux transparent huge pages):
+                             AllocatePinned, for the unmanaged columns and entity records a reservation, the initial
+                             capacity or a copy sized (not doubling steps): allocated uninitialized, the 2 MiB-aligned
+                             interior advised MADV_HUGEPAGE, each untouched 2 MiB dropped (MADV_DONTNEED), each resident
+                             one (mincore) zeroed in place; not collapsed (MADV_COLLAPSE costs kernel time); Enabled
+                             where THP is not "never", off after a failed call
 StreamingStores.cs           the non-temporal stores of generated vector loops (a column the method writes without
                              reading, past the last-level cache): Pays (the gate, once per run: MinRows, the table's rows
                              of the method's columns past CacheSizes.LastLevel), Head (the rows to the first aligned
