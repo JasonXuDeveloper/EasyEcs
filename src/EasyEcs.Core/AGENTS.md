@@ -85,6 +85,8 @@ Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo
                              TileFrame (a texture padded with the halo, a row mask per layer, the state of the tile it
                              steps), Rows (TZCNT walk), At / the indexer, Write (a stepped tile's row), Sweep / Restart (a [GaussSeidel]
                              step's sweep count, its cells started from a value: TileFrame.Restart), TileCursor.Load128,
+                             TileCursor.Columns (TileColumnWalk and its Cursor: a row's columns, loads at constant
+                             offsets of the column and Store into the row the step writes, checked once for the walk),
                              ChangedEdges / Facing (sleeping tiles written by hand)
 TileSteps.cs                 a stepping tile's pass (ref Tile, TileSteps<TCell, TTile, TGrid, TKey, TColors>, one per
                              world and method): the second buffer of a Jacobi step swapped in after the pass, the rows

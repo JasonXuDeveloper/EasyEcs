@@ -229,12 +229,14 @@ EasyEcsAnalyzer.Records.cs   EECS092 (compilation end): an Emit<T> whose Emitted
 EasyEcsAnalyzer.Pairs.cs     EECS105-107: a pair method that cannot run per pair (Error), one whose cutoff test the
                              generator cannot read (every pair runs), a neighbor search written by hand (a Warning
                              with PairRewrite's fix when mechanical, else Info: the grid's upkeep goes with it)
-EasyEcsAnalyzer.Tiles.cs     EECS115-117, EECS120: a tile step the generator cannot write (Symbols.StepProblem, Write on a tile
+EasyEcsAnalyzer.Tiles.cs     EECS115-117, EECS120-121: a tile step the generator cannot write (Symbols.StepProblem, Write on a tile
                              taken by value, Sweep read on one, Restart outside a [GaussSeidel] step's ref tile: Error), a second buffer and its plain commit written by hand where the
                              tile could step itself (compilation end, Warning; StepRewrite: the step method's rewrite
                              to a ref tile writing Write(row), the fix's properties), a Min / Max relaxation stepped by Jacobi
                              that [GaussSeidel] would settle (Info, fix: [GaussSeidel] when the key colors the tiles),
-                             a tile load the generator cannot check once (Info: TileLoad.Read's reason)
+                             a tile load the generator cannot check once (Info: TileLoad.Read's reason), a buffer no method
+                             writes copied over a tile's cells (compilation end, Warning: what a commit leaves once its
+                             step is by ref; sizing it with SetCount as a statement, Clear or EnsureCapacity is no write)
 EasyEcsAnalyzer.Fusion.cs    EECS093-094: two passes over the same rows that almost share one walk (the reason
                              Fusion.Problem gives), a FusionMode.Require method left apart (Error)
 Uses.cs                      whether a use of a value may write it (EECS025's conservative read/write test)
