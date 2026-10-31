@@ -10,9 +10,10 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// EECS115-117: stepping tiles (<c>ref Tile&lt;TCell, TTile&gt;</c>, Jacobi or [GaussSeidel]). A step the generator cannot
-/// write (Error), a second buffer and its commit written by hand where the tile could step itself (Warning), and a
-/// relaxation stepped one cell per neighbor per pass that [GaussSeidel] would settle in place (Info).
+/// EECS115-117, EECS120-121: stepping tiles (<c>ref Tile&lt;TCell, TTile&gt;</c>, Jacobi or [GaussSeidel]). A step the
+/// generator cannot write (Error), a second buffer and its commit written by hand where the tile could step itself
+/// (Warning), a relaxation stepped one cell per neighbor per pass that [GaussSeidel] would settle in place (Info), a
+/// cursor's load the generator cannot prove (Info), and a buffer copied over a tile's cells that no method writes (Warning).
 /// </summary>
 public static partial class EasyEcsAnalyzer
 {
@@ -60,6 +61,18 @@ public static partial class EasyEcsAnalyzer
         "loads at constant offsets of the column, checked by the JIT alone.",
         helpLinkUri: Help("EECS120"));
 
+    public static readonly DiagnosticDescriptor StaleCommit = new("EECS121", "A tile's cells overwritten by a buffer no method writes",
+        "{0} copies {1} over the cells of {2}, but no method writes {1}: every pass puts back what {1} held when it was made; delete the copy (a tile stepped by ref swaps its own buffers), or write {1} where the step runs",
+        Category, DiagnosticSeverity.Warning, true,
+        "A commit copies a second buffer (NextHeat) over a tile's cells (Heat) after the step wrote it. When no method " +
+        "writes that buffer (no Mut<DynamicBuffer<T>> or ref DynamicBuffer<T> parameter, no AsSpan, Add, Insert or " +
+        "RemoveAt on it, no SetCount whose span is used), the copy puts the same values back every pass: what is left of " +
+        "a commit once its step took the tile by ref and writes its rows with Write(row), whose pass swaps the buffers " +
+        "itself. Sizing the buffer (SetCount, Clear, EnsureCapacity) when entities are made does not count as a write. " +
+        "Deleting the copy changes what the pass does (the cells stop being reset), so there is no code fix: delete the " +
+        "copy, its method and the buffer, or write the buffer in the step.",
+        helpLinkUri: Help("EECS121"), customTags: WellKnownDiagnosticTags.CompilationEnd);
+
     internal static void InitializeTiles(AnalysisContext context) => context.RegisterCompilationStartAction(AnalyzeTiles);
 
     private static void AnalyzeTiles(CompilationStartAnalysisContext start)
@@ -68,10 +81,19 @@ public static partial class EasyEcsAnalyzer
         var steps = new ConcurrentQueue<(ITypeSymbol Next, ITypeSymbol Cells, IMethodSymbol Method)>();
         var copies = new ConcurrentQueue<(ITypeSymbol Next, ITypeSymbol Cells, IMethodSymbol Method)>();
 
+        // EECS121: the cells of tiles, the buffers some method writes, and the copies of a buffer over a buffer it writes.
+        var cellTypes = new ConcurrentDictionary<ITypeSymbol, byte>(SymbolEqualityComparer.Default);
+        var written = new ConcurrentDictionary<ITypeSymbol, byte>(SymbolEqualityComparer.Default);
+        var overwrites = new ConcurrentQueue<(ITypeSymbol Next, ITypeSymbol Cells, IMethodSymbol Method, Location At)>();
+
         start.RegisterSymbolAction(context =>
         {
             var method = (IMethodSymbol)context.Symbol;
+            foreach (var p in method.Parameters)
+                if (p.Type is INamedTypeSymbol { Name: "Mut" or "DynamicBuffer" } && WrittenBuffer(p) is { } buffer) written.TryAdd(buffer, 0);
             if (!Symbols.IsForEach(method) && !Symbols.IsEntityMethod(method)) return;
+            foreach (var p in method.Parameters)
+                if (Symbols.TileElements(p.Type) is { } cells) cellTypes.TryAdd(cells.Cell, 0);
             if (Symbols.StepProblem(method) is { } problem)
                 context.ReportDiagnostic(Diagnostic.Create(BadStep, method.Locations.FirstOrDefault(), Symbols.Describe(method), problem));
             foreach (var tile in method.Parameters)
@@ -99,6 +121,7 @@ public static partial class EasyEcsAnalyzer
             foreach (var block in context.OperationBlocks)
             {
                 if (PlainCopy(method, block) is { } copy) copies.Enqueue((copy.Next, copy.Cells, method));
+                foreach (var over in Overwrites(method, block)) overwrites.Enqueue((over.Next, over.Cells, method, over.At));
                 if (method.Parameters.FirstOrDefault(Symbols.IsSteppingTile) is { } stepped && !Symbols.IsGaussSeidel(method) && Relaxes(block))
                     context.ReportDiagnostic(Diagnostic.Create(SuggestGaussSeidel, method.Locations.FirstOrDefault(),
                         CanColor(method, stepped) ? GaussSeidelFix : null, Symbols.Describe(method)));
@@ -107,6 +130,15 @@ public static partial class EasyEcsAnalyzer
 
         // EECS115: Write on a tile the method takes by value (no step of it runs: it throws), Restart on a tile no
         // [GaussSeidel] step sweeps (a Jacobi step writes every row anyway: it throws too).
+        // EECS121: a write of a buffer's elements through the buffer's extensions (sizing it alone is no write).
+        start.RegisterOperationAction(context =>
+        {
+            var invocation = (IInvocationOperation)context.Operation;
+            if (invocation.TargetMethod is { IsExtensionMethod: true, ContainingType.Name: "DynamicBufferExtensions", TypeArguments.Length: 1 } extension
+                && extension.ContainingNamespace?.Name == "EasyEcs" && WritesElements(invocation))
+                written.TryAdd(extension.TypeArguments[0], 0);
+        }, OperationKind.Invocation);
+
         start.RegisterOperationAction(context =>
         {
             var invocation = (IInvocationOperation)context.Operation;
@@ -144,6 +176,9 @@ public static partial class EasyEcsAnalyzer
 
         start.RegisterCompilationEndAction(context =>
         {
+            foreach (var (next, cells, method, at) in overwrites)
+                if (cellTypes.ContainsKey(cells) && !written.ContainsKey(next))
+                    context.ReportDiagnostic(Diagnostic.Create(StaleCommit, at, Symbols.Describe(method), next.Name, cells.Name));
             foreach (var (next, cells, method) in copies)
             {
                 var step = steps.FirstOrDefault(s => SymbolEqualityComparer.Default.Equals(s.Next, next) && SymbolEqualityComparer.Default.Equals(s.Cells, cells));
@@ -181,6 +216,42 @@ public static partial class EasyEcsAnalyzer
         if (source.RefKind != RefKind.In || Symbols.Classify(source) != Symbols.ParamKind.Component || Symbols.BufferElement(source.Type) is not { } next) return null;
         return WrittenBuffer(target) is { } cells ? (next, cells) : null;
     }
+
+    /// <summary>
+    /// The CopyTo calls of a [ForEach] body that copy one buffer parameter it reads (<c>in DynamicBuffer&lt;TNext&gt;</c>) into
+    /// one it writes (TCells), through spans and casts, whatever else the body does.
+    /// </summary>
+    private static System.Collections.Generic.IEnumerable<(ITypeSymbol Next, ITypeSymbol Cells, Location At)> Overwrites(IMethodSymbol method, IOperation block)
+    {
+        bool reads = false, writes = false;
+        foreach (var p in method.Parameters)
+        {
+            reads |= p.RefKind is RefKind.In or RefKind.None && Symbols.Classify(p) == Symbols.ParamKind.Component && Symbols.BufferElement(p.Type) != null;
+            writes |= WrittenBuffer(p) != null;
+        }
+        if (!reads || !writes) yield break;
+        foreach (var copy in block.Descendants().OfType<IInvocationOperation>())
+        {
+            if (copy.TargetMethod.Name != "CopyTo" || copy.Instance == null) continue;
+            var from = copy.Instance.DescendantsAndSelf().OfType<IParameterReferenceOperation>().Select(r => r.Parameter).Distinct(SymbolEqualityComparer.Default).ToArray();
+            var into = copy.Arguments.SelectMany(a => a.DescendantsAndSelf()).OfType<IParameterReferenceOperation>().Select(r => r.Parameter).Distinct(SymbolEqualityComparer.Default).ToArray();
+            if (from is not { Length: 1 } || into is not { Length: 1 } || from[0] is not IParameterSymbol source || into[0] is not IParameterSymbol target) continue;
+            if (source.RefKind is not (RefKind.In or RefKind.None) || Symbols.Classify(source) != Symbols.ParamKind.Component || Symbols.BufferElement(source.Type) is not { } next) continue;
+            if (WrittenBuffer(target) is { } cells) yield return (next, cells, copy.Syntax.GetLocation());
+        }
+    }
+
+    /// <summary>
+    /// Whether a call of a DynamicBuffer extension writes the buffer's elements: AsSpan, Add, AddRange, Insert,
+    /// RemoveAt, RemoveAtSwapBack, and SetCount when the span it hands out is used; Clear, EnsureCapacity, TrimExcess
+    /// and a SetCount as a statement only size it (zeroes, made when the entity is).
+    /// </summary>
+    private static bool WritesElements(IInvocationOperation call) => call.TargetMethod.Name switch
+    {
+        "Clear" or "EnsureCapacity" or "TrimExcess" => false,
+        "SetCount" => call.Parent is not IExpressionStatementOperation,
+        _ => true,
+    };
 
     /// <summary>Equality of (step, buffer) keys by symbol.</summary>
     private sealed class StepKeys : System.Collections.Generic.IEqualityComparer<(IMethodSymbol Method, ITypeSymbol Next)>
@@ -300,7 +371,7 @@ public static partial class EasyEcsAnalyzer
 public sealed class TileAnalyzer : EasyEcsAnalyzer.Area
 {
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
-        EasyEcsAnalyzer.BadStep, EasyEcsAnalyzer.HandCommit, EasyEcsAnalyzer.SuggestGaussSeidel, EasyEcsAnalyzer.CheckedTileLoad);
+        EasyEcsAnalyzer.BadStep, EasyEcsAnalyzer.HandCommit, EasyEcsAnalyzer.SuggestGaussSeidel, EasyEcsAnalyzer.CheckedTileLoad, EasyEcsAnalyzer.StaleCommit);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeTiles(context);
 }
