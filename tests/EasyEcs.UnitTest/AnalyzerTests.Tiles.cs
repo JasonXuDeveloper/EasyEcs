@@ -1,5 +1,6 @@
 using System.Linq;
 using System.Threading.Tasks;
+using Microsoft.CodeAnalysis;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -53,6 +54,40 @@ public partial class AnalyzerTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, G> t, Tile<byte, G> u) { } }")]                         // the step and a read of its cells
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Tile<byte, G> t, Tile<byte, Columns<G>> u, Mut<DynamicBuffer<int>> b) => b.Write(); }")] // one buffer, two shapes
     public Task TwoTilesOfOneBufferReport(string source) => ReportsOnTiles("EECS073", source);
+
+    // Cell methods: a cell read and written in one pass (EECS059), a cell beside a tile of its buffer (EECS073), the
+    // reason a cell's rows run cell by cell (EECS055 / EECS056), and the shapes that are clean.
+
+    [Test]
+    public Task ACellWritingItsOwnBufferReports() => ReportsOnTiles("EECS059",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<NB, G> c, out NB next) => next = c[1, 0, 0]; }");
+
+    [Test]
+    public Task ACellBesideATileOfItsBufferReports() => ReportsOnTiles("EECS073",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, Tile<byte, G> t, out NB next) => next = new NB(c.Value); }");
+
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, out NB next) => next = new NB((byte)(c[-1, 0, 0] + c[1, 0, 0])); }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(Cell<float, G> c, out double next, in G g) => next = c.Value * g.Pos + c.X + c.Z; }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Off)] static void A(Cell<byte, G> c, out NB next) { int k = c.X % 2; next = new NB(c[k, 0, 0]); } }")]
+    public async Task CellMethodsAreClean(string source)
+    {
+        await AssertClean(GeneratorTests.Components, TileParts, source);
+        Assert.That(await Count("EECS055", GeneratorTests.Components, TileParts, source) + await Count("EECS056", GeneratorTests.Components, TileParts, source), Is.Zero);
+    }
+
+    [TestCase("int k = c.X % 2; next = new NB(c[k, 0, 0]);", "other than at constant offsets", DiagnosticSeverity.Warning)]       // an offset the generator cannot read
+    [TestCase("Use(c); next = default;", "other than at constant offsets", DiagnosticSeverity.Warning)]                             // the cell handed on
+    [TestCase("next = new NB((byte)(c.Value / (c[1, 0, 0] + 1)));", "", DiagnosticSeverity.Info)]                                   // what it computes
+    public async Task ACellLeftScalarSaysWhy(string body, string reason, DiagnosticSeverity severity)
+    {
+        string source = $"[EcsSystem] public ref struct S {{ [ForEach] static void A(Cell<byte, G> c, out NB next) {{ {body} }} static void Use(Cell<byte, G> c) {{ }} }}";
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, source])).Where(d => d.Id == "EECS055").ToArray();
+        Assert.That(found, Has.Length.EqualTo(1), string.Join(", ", found.Select(d => d.GetMessage())));
+        Assert.That(found[0].GetMessage(), Does.Contain(reason));
+        Assert.That(found[0].Severity, Is.EqualTo(severity));
+        string required = source.Replace("[ForEach]", "[ForEach(SimdMode = SimdMode.Require)]");
+        Assert.That(await Count("EECS056", GeneratorTests.Components, TileParts, required), Is.EqualTo(1));
+    }
 
     private const string Stepper = "[EcsSystem] public ref struct Step { [ForEach(Parallel = true)] static void A(Tile<byte, G> t, Mut<DynamicBuffer<NB>> next) { t.ExchangeHalo(); var into = next.Write().AsSpan(); foreach (var row in t.Rows()) into[row.Index] = new NB(t[0, 0, row.Z]); } }";
 
