@@ -139,7 +139,28 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   numeric conversions, a C# `case A or B when c` guarding both patterns).
 - **Cells of a tile** (the shader form, built on the inner loop): a method that computes one cell from its neighbors
   by offset; the generator writes the pad, the row walk and the element loop, the neighbor reads unaligned loads at
-  offsets in the padded texture, so users write no `Load128`.
+  offsets in the padded texture, so users write no `Load128`. Built (Kernel.Cells.cs, SystemGenerator.Cells.cs): a
+  `[ForEach]` method taking a `Cell<TCell, TTile>` by value and an `out TOut` (the entity's `DynamicBuffer<TOut>`);
+  its body is an element loop over a row: each constant offset `w[dx, dy, dz]` / `w.Value` a stream from the row's
+  start plus `Cell.Offset`, the out cell a written stream, `X` the index's lanes, `Y` / `Z` and the method's other
+  parameters values. What keeps it scalar: the cell used other than at a constant offset (handed to a helper, a
+  variable offset: fixable), a parameter by ref or ref-like, a wide cell, gathers, records, structural changes; the
+  reason is the schedule line and EECS055 / EECS056 on the method. Rows the offsets do not read (no `X`/`Y`/`Z`) are
+  skipped and get what the method computes on `Cell.Blank` (exact for any body, no f(0) = 0 assumption). The bar is
+  the hand-written `Load128` tile method (TileBenchmark: Blur9_Cell, Laplacian_Cell, TileActive's Cell), checked in
+  Tier1 (one load per offset folded into the arithmetic, no call in the row). Lessons kept:
+  - The row's loop runs inline in the pass, not as an AggressiveInlining local function: the JIT inlines no callee with
+    more than 32 locals (three widths of nine streams are more), and a call per row of 16 cells costs as much as the
+    row. Inline, the loop's names (`e1`, `i`, `rows`, `at`, `x{n}`, and Kernel's own `__p{n}` copies of the values)
+    share the pass's scope, so the pass names its parameters `__arg{n}` and its locals with two underscores.
+  - Each width (Vector512, Vector<T>, Vector128) is emitted; the constants fold the ones a row of 16 bytes cannot take,
+    so a byte row runs one Vector128 iteration on AVX2 and AVX-512 alike.
+  - A column the loop only writes is not loaded (`Kernel.Unloaded`: the JIT keeps a dead load, which may fault); every
+    element loop does the same.
+  - A target-typed `new(...)` is a conversion to its own type around the creation (`Keeps`), as a switch expression is.
+  - Byte lanes: a sum of non-negative values that may pass 255 (Life's count of eight neighbors) is followed as its
+    saturated lanes too (`Wide.Saturated`: a chain of AddSaturate, exact since every partial sum is non-negative), and a
+    comparison with a constant below 255 reads those (`count == 3` is one `vpaddusb` chain and a `vpcmpeqb`).
 - **Not kernels** (measured or overlapping, D90): parent transforms stay scalar, and so do `Lookup<T>` reads in
   `SimdMode.Auto` (above, D131); a per-element parameter for buffers would say what an inner loop says.
 - **Hand-written SIMD where the plain form vectorizes** is reported (`audit-analyzer`, written by hand where the
