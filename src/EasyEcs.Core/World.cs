@@ -42,6 +42,7 @@ public sealed partial class World : IDisposable
     {
         _options = options ?? new WorldOptions();
         Meta = AllocateMeta(Math.Max(1, _options.InitialEntityCapacity), true);
+        HugePages.Populate(Meta); // the initial capacity is a reservation: its records written without a fault per page
         _queryLookup = _queryCache.GetAlternateLookup<QueryLookup>();
         _emptyArchetype = GetOrCreateArchetype(default);
         ArgumentOutOfRangeException.ThrowIfNegative(_options.DestroyLogCapacity, nameof(options));
@@ -61,7 +62,7 @@ public sealed partial class World : IDisposable
         using (Structural())
         {
             if (Meta.Length < capacity)
-                Grow(capacity, true);
+                Grow(capacity, true, true);
         }
     }
 
@@ -80,11 +81,11 @@ public sealed partial class World : IDisposable
             {
                 if (tables[i].Count == 0) continue;
                 var target = TableFor(tables[i]);
-                target.Reserve(target.Count + tables[i].Count * count);
+                target.Reserve(target.Count + tables[i].Count * count, true);
                 ReserveBeside(target, tables[i].Count * count);
             }
 
-            ReserveIds(prefab.Store.EntityCount * count);
+            ReserveIds(prefab.Store.EntityCount * count, true);
             StorageVersion++; // columns may have moved: a pass in progress refreshes its refs
         }
     }
@@ -274,8 +275,8 @@ public sealed partial class World : IDisposable
     /// </summary>
     private int PlaceRows(Archetype target, Span<Entity> entities)
     {
-        ReserveIds(entities.Length);
-        target.Reserve(target.Count + entities.Length);
+        ReserveIds(entities.Length, false); // written next
+        target.Reserve(target.Count + entities.Length, false);
         int first = target.Count; // new rows go to the end, one after another
         for (int e = 0; e < entities.Length; e++)
         {
@@ -547,14 +548,14 @@ public sealed partial class World : IDisposable
 
     /// <summary>
     /// Make room for <paramref name="count"/> more entities (one growth: to what they need, or to twice the capacity when
-    /// that is more, as <see cref="Archetype.Reserve"/>). Inside the structural gate.
+    /// that is more, as <see cref="Archetype.Reserve"/>; <paramref name="prefault"/> as there). Inside the structural gate.
     /// </summary>
-    private void ReserveIds(int count)
+    private void ReserveIds(int count, bool prefault)
     {
         int needed = _nextId + Math.Max(0, count - _freeIdCount);
         if (needed <= Meta.Length) return;
         int doubled = Meta.Length * 2;
-        Grow(Math.Max(needed, doubled), needed >= doubled);
+        Grow(Math.Max(needed, doubled), needed >= doubled, prefault);
     }
 
     /// <summary>
@@ -615,24 +616,31 @@ public sealed partial class World : IDisposable
         _entityCount++;
         if (_freeIdCount > 0) return _freeIds[--_freeIdCount];
         int id = _nextId++;
-        if (id == Meta.Length) Grow(Meta.Length * 2, false);
+        if (id == Meta.Length) Grow(Meta.Length * 2, false, false);
         MetaRef(id).Version = 1; // versions start at 1: EntityId.Null (version 0) never names an entity
         return id;
     }
 
     /// <summary>
     /// Grow entity metadata to <paramref name="capacity"/> (cold path): <paramref name="sized"/> when the capacity is
-    /// the one asked for (a reservation, a restore), not a doubling step (see <see cref="AllocateMeta"/>).
+    /// the one asked for (a reservation, a restore), not a doubling step (see <see cref="AllocateMeta"/>);
+    /// <paramref name="prefault"/> when the records are written later (a user's reservation): the records and the free-id
+    /// list faulted in now (<see cref="HugePages.Populate{T}(T[])"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private void Grow(int capacity, bool sized)
+    private void Grow(int capacity, bool sized, bool prefault)
     {
         var grown = AllocateMeta(capacity, sized);
+        if (prefault) HugePages.Populate(grown);
         Meta.AsSpan().CopyTo(grown);
         Meta = grown;
         // As many ids as the records may be free at once (all destroyed): the free list grows with the records, so
         // destroying what a reservation made room for grows nothing. 4 bytes per id beside the record's 16.
-        if (_freeIds.Length < capacity) Array.Resize(ref _freeIds, capacity);
+        if (_freeIds.Length < capacity)
+        {
+            Array.Resize(ref _freeIds, capacity);
+            if (prefault) HugePages.Populate(_freeIds);
+        }
         var indexes = _indexes;
         for (int i = 0; i < indexes.Length; i++) indexes[i]?.Reserve(capacity);
         StorageVersion++;

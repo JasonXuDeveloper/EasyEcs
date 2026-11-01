@@ -2165,27 +2165,137 @@ helpers).
   forms did not change on this branch: the run checks nothing regressed and gives the baseline for moving
   `Masks.Narrow` and the `__y` TBL tables to literals too.
 
-## feat-inner-loops (element loops, WP0 + WP2 core) — docs to-dos
+## feat-page-faults (backlog Later: fewer page faults on top of huge pages)
+
+Nothing user-visible in the API: `HugePages.Prefault` / `HugePages.Populate` are internal. What a user sees: a
+reservation (`Reserve<T..>`, `Reserve(prefab, n)`, `EnsureEntityCapacity`, a large `InitialEntityCapacity`) now commits
+its memory at once on Linux (RSS grows at the reservation, not as rows are written); loads, restores, snapshots and
+`CreateEntities` are as before.
+
+- **Decision draft: a reservation faults its pages in (Linux)** (en):
+
+  > **Decision.** On Linux 5.14 and later, the arrays a user's reservation sizes (`Reserve<T..>`, `Reserve(prefab, n)`,
+  > `EnsureEntityCapacity`, `InitialEntityCapacity`: the tables' columns and entity rows, the entity records, the free-id
+  > list) are faulted in at the reservation, one `MADV_POPULATE_WRITE` call per run of 2 MiB windows not yet resident
+  > (`mincore`), with 4 KiB and with 2 MiB pages. Arrays a call writes whole as it allocates them (a load, a restore, a
+  > snapshot, `CreateEntities`, a move between worlds) are left to the first touch. Elsewhere (other systems, an older
+  > kernel, a libc without `madvise`) nothing changes; the first failed call turns it off.
+  >
+  > **Why.** A reservation is there to pay before the tick that fills it, and with first-touch faults that tick paid
+  > them: one trap per 4 KiB page, or one huge page zeroed per 2 MiB, in the middle of a wave of spawns. Faulted in at
+  > the reservation, the tick only writes. One call also costs less than a trap per page with 4 KiB pages (128 MiB of
+  > memory freed 4 s earlier: 67-68 ms touched, 53 ms populated, PrefaultTouchBenchmark).
+  >
+  > **Numbers** (PageFaultBenchmark, default job, two rounds, prefault off / on in one binary, 0 B; 4 KiB pages /
+  > 2 MiB pages): the tick filling a reservation (Wave: 1M or 16M spawns into a world reserved on memory freed 4 s
+  > earlier) at 1M 38.0 → 17.0 and 36.0 → 16.5 ms (2.2x) / 85.7 → 15.9 and 67.0 → 15.8 ms (4.2-5.4x); at 16M 857 → 219
+  > and 965 → 218 ms (3.9-4.4x) / 2.52 s → 224 and 221 ms (11.3-11.4x). The reservation itself at 16M 269 → 209 and 275
+  > → 209 ms (1.29-1.32x, the populate call against the traps) / 140 → 146 and 286 → 153 ms; at 1M 1.24-1.36x / equal.
+  > A reserve-and-fill create at 16M 502 → 452 and 514 → 447 ms (1.11-1.15x) / 876 → 734 and 885 → 731 ms (spread
+  > 0.4-0.6 s: the host refaults free blocks, below); at 1M within 5 % either way. Load, Capture and Restore, which do
+  > not prefault, equal within their spread. Page faults per op at 16M with 4 KiB pages: Reserve 41.7-44.9k → 31.3k,
+  > Wave (its reservation included) 87-91k → 65-68k.
+  >
+  > **Considered.** Prefaulting every sized array, copies included: a load at 1M with 2 MiB pages 1.04-1.06x slower
+  > in two rounds (populating zeroes the whole array before the copy writes it, out of the cache by then; a first-touch
+  > fault zeroes each page right before the copy writes it) and nothing to gain, since the same call writes every row.
+  > Populating resident memory too: the GC hands most freed large memory back resident, and walking its pages again
+  > made creating a reserved 1M-entity world 1.05x slower until resident 2 MiB windows were skipped. Prefault to make
+  > huge-page faults cheaper: one call costs what the first touch costs with 2 MiB pages (536-592 ms touched against
+  > 572-592 ms populated, 128 MiB freed 4 s earlier); on the reference VM the time is the host's (free page reporting
+  > hands free 2 MiB blocks back, the host faults them back), which no guest call avoids. Keeping a disposed world's
+  > columns for the next world: allocations halved, page faults unchanged (the GC already reuses that memory resident),
+  > creating 1.06x and instantiating 1.08x slower. The GC's settings: the host's choice (`GCRetainVM`, `GCgen0size`
+  > change nothing; `GCConserveMemory` and the segments GC fault more and are slower), written up for users.
+
+  zh:
+
+  > **决定。** 在 Linux 5.14 及以上，用户预留所确定大小的数组（`Reserve<T..>`、`Reserve(prefab, n)`、`EnsureEntityCapacity`、
+  > `InitialEntityCapacity`：表的列和实体行、实体记录、空闲 id 列表）在预留时预先缺页：对尚未驻留（`mincore`）的连续 2 MiB
+  > 窗口各调用一次 `MADV_POPULATE_WRITE`，4 KiB 页和 2 MiB 页都如此。分配后立即被整体写满的数组（加载、恢复、快照、
+  > `CreateEntities`、在世界间移动）留给首次访问。其他环境（其他系统、更旧的内核、没有 `madvise` 的 libc）不变；第一次调用
+  > 失败即关闭。
+  >
+  > **原因。** 预留就是为了在填充它的那一帧之前付出代价，而首次访问缺页时这笔代价落在了那一帧：每个 4 KiB 页一次陷入，或每
+  > 2 MiB 清零一张大页，发生在一波生成的中途。在预留时预先缺页后，那一帧只剩写入。对 4 KiB 页，一次调用也比每页一次陷入更
+  > 便宜（4 秒前释放的 128 MiB 内存：首次访问 67-68 ms，预先缺页 53 ms，PrefaultTouchBenchmark）。
+  >
+  > **数字**（PageFaultBenchmark，默认作业，两轮，同一程序内关闭 / 开启预先缺页，0 B；4 KiB 页 / 2 MiB 页）：填充预留的那一帧
+  > （Wave：向一个在 4 秒前释放的内存上预留的世界生成 1M 或 16M 个实体）1M 时 38.0 → 17.0 和 36.0 → 16.5 ms（2.2x）/
+  > 85.7 → 15.9 和 67.0 → 15.8 ms（4.2-5.4x）；16M 时 857 → 219 和 965 → 218 ms（3.9-4.4x）/ 2.52 s → 224 和 221 ms
+  > （11.3-11.4x）。预留本身 16M 时 269 → 209 和 275 → 209 ms（1.29-1.32x，一次调用对比逐页陷入）/ 140 → 146 和 286 → 153 ms；
+  > 1M 时 1.24-1.36x / 持平。先预留再填充的创建 16M 时 502 → 452 和 514 → 447 ms（1.11-1.15x）/ 876 → 734 和 885 → 731 ms
+  > （波动 0.4-0.6 s：宿主重新缺页空闲块，见下）；1M 时上下 5 % 以内。不预先缺页的加载、快照和恢复在波动范围内持平。16M、
+  > 4 KiB 页时每次操作的缺页数：Reserve 41.7-44.9k → 31.3k，Wave（含其预留）87-91k → 65-68k。
+  >
+  > **考虑过的方案。** 所有确定大小的数组都预先缺页，包括复制：2 MiB 页下 1M 的加载两轮都慢 1.04-1.06x（预先缺页在复制写入
+  > 之前把整个数组清零，写入时已不在缓存中；首次访问缺页则在复制写入每一页之前才清零它），而且没有收益，因为同一个调用会
+  > 写满每一行。连已驻留的内存也预先缺页：GC 交回的大块已释放内存大多仍驻留，再走一遍它的页让创建一个预留的 1M 实体世界慢
+  > 1.05x，直到跳过已驻留的 2 MiB 窗口。用预先缺页降低大页缺页的代价：2 MiB 页下一次调用的代价与首次访问相同（4 秒前释放的
+  > 128 MiB：首次访问 536-592 ms，预先缺页 572-592 ms）；在参考虚拟机上这段时间属于宿主（空闲页上报把空闲的 2 MiB 块交还宿主，
+  > 宿主再把它们缺页回来），客户机的任何调用都无法避免。把已销毁世界的列留给下一个世界：分配减半，缺页不变（GC 已经以驻留
+  > 状态复用这些内存），创建慢 1.06x，实例化慢 1.08x。GC 设置：由宿主决定（`GCRetainVM`、`GCgen0size` 没有影响；
+  > `GCConserveMemory` 和 segments GC 缺页更多、更慢），写给用户的说明见下。
+
+- **GC settings for large worlds (a users' to-do, performance page "What it costs" or the FAQ; en + zh).** The library
+  sets none of them: they are the host's (`runtimeconfig.json` / `DOTNET_*` variables). Measured at 16M entities
+  (PageFaultBenchmark, `--dev`, one launch each, the reference VM): the defaults (regions, workstation or server GC)
+  are the right choice; `GCRetainVM` changes nothing for a world's arrays (the faults left are not memory the GC
+  decommitted); `GCgen0size` nothing (the arrays live on the large and pinned heaps); `GCConserveMemory` (5) makes
+  creating, growing, loading and snapshotting a large world 1.2-1.6x slower with 20-65 % more page faults (it compacts
+  the large object heap); the segments GC (`GCName=libclrgc.so`) faults three times as much on a load and makes a
+  capture 1.5x slower (it releases large segments at once). Say: keep the defaults; a server that creates and drops
+  large worlds over and over gets no faults back from GC settings, and `Reserve` is where to pay them up front.
+  zh：大型世界的 GC 设置（给用户的说明，性能页"开销"一节或 FAQ）。库不设置其中任何一项：它们由宿主决定
+  （`runtimeconfig.json` / `DOTNET_*` 环境变量）。16M 实体实测（PageFaultBenchmark，`--dev`，各一次启动，参考虚拟机）：默认值
+  （regions，工作站或服务器 GC）就是最好的选择；`GCRetainVM` 对世界的数组没有影响（剩下的缺页不是 GC 归还的内存）；
+  `GCgen0size` 没有影响（数组在大对象堆和固定对象堆上）；`GCConserveMemory`（5）让创建、扩容、加载和快照大型世界慢 1.2-1.6x，
+  缺页多 20-65 %（它压缩大对象堆）；segments GC（`GCName=libclrgc.so`）加载时缺页是三倍，快照慢 1.5x（它立即释放大段）。
+  结论：保持默认；反复创建和丢弃大型世界的服务器无法靠 GC 设置减少缺页，要提前付出就用 `Reserve`。
+- **Wording notes.** Say "faulted in" / "committed at once" (zh：预先缺页 / 立即提交), not "pre-allocated" (the arrays
+  were allocated before too). Do not promise faster creation: with 2 MiB pages populating costs what the first touch
+  costs; the gain is that the tick filling a reservation pays no fault, and with 4 KiB pages one call is cheaper than a
+  fault per page. On the reference VM a huge page faulted from memory freed seconds earlier costs about 8x a 4 KiB
+  one (the host's free page reporting, `feat-later-memory`): numbers of 16M creates and loads there are bimodal.
+- **Pages.** architecture.mdx + zh, the memory section (with feat-later-memory's huge pages): sized arrays are
+  advised (the steps of a doubling are not); a user's reservation's arrays are also faulted in at the reservation,
+  skipping resident memory; arrays a load, restore, snapshot or `CreateEntities` writes at once are left to the first
+  touch. Guide page on reservations (`Reserve` /
+  `InitialEntityCapacity`) + zh: one sentence that a reservation commits its memory at once on Linux, so the tick that
+  fills it pays no page fault (link the decision). faq.mdx + zh: "Which GC settings for large worlds?" (the
+  bullet above). Changelog (Performance): "a reservation faults its pages in on Linux: spawning into it pays no page
+  fault" (link the decision). api.mdx: `Reserve` / `EnsureEntityCapacity` complexity unchanged (O(capacity) for the
+  faults, as the first touch was). Roadmap: the backlog item done.
+
+## feat-inner-loops (element loops, WP0 + WP2 + WP3) — docs to-dos
 
 - **systems.mdx + zh, vector loops section ("Loops inside a method"):** a [ForEach] method that runs row by row and
   loops over a span or a buffer gets the loop's vector form. What qualifies: `foreach (ref var x in span)` over a
   Span, ReadOnlySpan or DynamicBuffer, `for (int i = start; i < end; i++)` reading its spans only at `[i]`; a body
-  that does not leave early, holds no loop and writes none of the method's variables (reductions are next); elements
-  of plain values. Results bit for bit; the loop as written runs the elements left (tail, a vector a lane of which
+  that does not leave early, holds no loop and writes the method's variables only as sums, Mins or Maxes
+  (`t += x`, `lo = Math.Min(lo, x)`; a float sum needs FloatMode.Fast); the index also read as a value
+  (`s[i] = i * 0.5f`); neighbors at constant offsets (`s[i - 1] + s[i + 1]`, |k| <= 64, a span written must not be
+  read at another offset); elements of plain values. Also: a batch method's loops over its rows, the body of a lambda
+  pass, calls of the type's private static helpers (inlined into the loop, reached from the copy through accessors). Results bit for bit; the loop as written runs the elements left (tail, a vector a lane of which
   would throw). Show "You write / The generator writes" with the Decay method and the generated `__Elements0` call.
   The schedule's loop lines (`DescribeSchedule`: `loop File.cs(L,C): vector (...)` / `scalar (reason)`).
 - **dynamic-buffers.mdx + zh:** one paragraph and a link to the section above: a loop over a buffer's span inside a
-  [ForEach] method is vectorized; a `for` over two buffers needs the target at least as long as the bound (else the
-  loop as written runs and throws where it would).
+  [ForEach] method is vectorized; a `for` over two buffers needs the target at least as long as the bound, and a
+  neighbor read at i + k needs the span to reach end + k (else the loop as written runs and throws where it would).
+  A stencil over one buffer writes into a second one (Smooth: `dst[i] = src[i - 1] + 2 * src[i] + src[i + 1]`).
 - **analyzer.mdx + zh, EECS055:** the second message, at the loop's keyword: "This loop of [ForEach] method 'A' runs
   one element at a time, without a vector loop: {reason}" (Info; SimdMode.Off silences it). Examples: a `break`, a
-  sum into a local (until reductions land), the index read as a value.
+  float sum without FloatMode.Fast, a variable written other than as a sum, a span written and read at another
+  offset ("it writes span 's' and reads it at another index ('s[i - 1]'): ... write into another span"), the index
+  inside another expression of an index (`s[i * 2]`).
 - **api.mdx + zh:** no public API change (no complexity row).
 - **performance.mdx + zh:** ElementLoopBenchmark (Decay / Widen, 4 / 64 / 1,024 elements) once synced; add the class to
   `tools/bench.sh --site`.
 - **Changelog (New):** "Loops over spans and buffers inside [ForEach] methods run as vector loops"; link systems.mdx.
-- **Roadmap:** element loops (inner-loops.md WP2) shipped in part: reductions, offsets (WP3), lambda passes and batch
-  methods still open.
+- **Roadmap:** element loops (inner-loops.md WP2, WP3) shipped: sums, the index, offsets, batch methods, lambda
+  passes, private helpers; the Cell form (WP5) next.
+- **VoxelServer page (samples/voxel-server.mdx + zh):** the height map is now a plain loop the generator vectorizes
+  (HeightMap.cs); its walkthrough names the form instead of the Vector128 code.
 - **Decision D132 (draft, en):** *Element loops share the vector-loop core; the method is copied.* A loop over a
   span inside a method that runs row by row is desugared into a static local function whose ref parameters are the
   elements and translated by the same Kernel as a row loop (each element a lane). The generator copies the method
@@ -2193,12 +2303,23 @@ helpers).
   user's file so breakpoints and errors land there), with each loop preceded by a NoInlining local function (called when the span holds a whole vector)
   that runs whole vectors and returns the index it stopped at; the loop as written runs the rest. Considered: a copy
   of the compilation with the loop rewritten (costly per keystroke), intercepting the method (interceptors are only for
-  lambda passes, D63), an `Element<T>` parameter (declined by the owner). Numbers: ElementLoopBenchmark.
+  lambda passes, D63), an `Element<T>` parameter (declined by the owner). A variable of the method summed in the loop
+  is a reduction of the same core folded into the variable when the vectors stop (at a bail, after the vector's own
+  lanes are set back); the index read as a value is a lane of indexes; a span read at i + k is a stream of its own
+  from its element at index + k (no ref before a span's start, which would point outside its object), guarded per
+  offset at run time; aliasing is checked at run time (`__Apart`) rather than proven from roots, so a Slice of one
+  buffer written into another Slice of it runs as written. Private static helpers and fields of the method's type are
+  reached from the copy through UnsafeAccessor externs. Numbers: ElementLoopBenchmark, HeightMapLoopBenchmark,
+  BatchLoopBenchmark.
 - **Decision D132 (draft, zh):** *元素循环共用向量循环核心；方法体被复制。* 按行运行的方法中遍历 span 的循环，被改写为静态局部函数
   （元素作为 ref 参数），由与行循环相同的 Kernel 翻译（每个元素一条 lane）。生成器把方法复制进生成文件，替代
   UnsafeAccessor（BodyCopy：名称全限定、常量内联、`#line` 指回用户文件，断点和错误落在用户代码上）；每个循环之前调用一个
   NoInlining 局部函数（span 至少容纳一个完整向量时才调用），按整向量运行并返回停下的位置，剩余元素由原循环处理。考虑过：改写循环后的编译副本（每次按键代价高）、
-  拦截方法（拦截器只用于 lambda pass，D63）、`Element<T>` 参数（所有者已否决）。数字：ElementLoopBenchmark。
+  拦截方法（拦截器只用于 lambda pass，D63）、`Element<T>` 参数（所有者已否决）。循环中累加的方法变量是同一核心的归约，向量结束时
+  （在退出点先还原该向量自身的 lane）折叠进变量；作为值读取的下标是一条下标 lane；在 i + k 读取的 span 是一条独立的流，从
+  index + k 处的元素传入（不在 span 起点之前取 ref，那会指向对象之外），每个偏移在运行时检查边界；别名在运行时检查（`__Apart`），
+  不从根推导，所以同一 buffer 的一个 Slice 写入它的另一个 Slice 时按原循环运行。方法所在类型的私有静态辅助方法和字段通过
+  UnsafeAccessor extern 从副本访问。数字：ElementLoopBenchmark、HeightMapLoopBenchmark、BatchLoopBenchmark。
 - **Numbers for D132 (ElementLoopBenchmark, 10k entities, this machine, round 1 after the inlining fix, round 2 within 0.05; ratio to
   Scalar):** Decay 4 / 64 / 1,024 elements: Generated 1.07 / 0.42 / 0.27, HandWritten 1.05 / 0.37 / 0.29. Widen
   (int to long across two buffers): Generated 1.00 / 0.69 / 0.62 of WidenScalar, HandWritten 1.41 / 0.75 / 0.67.
@@ -2209,3 +2330,16 @@ helpers).
   906 / 961 -> 913 / 971 ms (one namespace: 938 / 922 -> 938 / 938), EditMethodBody 574 / 555 -> 555 / 513 ms
   (516 / 561 -> 541 / 531), CompileAndAnalyze 5,738 / 5,562 -> 5,678 / 5,725 ms (7,607 / 7,326 -> 7,508 / 7,182);
   allocations within 0.4 %. Methods without loops pay one syntax walk for a loop keyword.
+- **Numbers for D132, WP2 rest + WP3 (this branch at 9f89ff8, one round; ratio to the loop as written, SimdMode.Off):**
+  10k entities, 4 / 64 / 1,024 elements: SumInts Generated 1.08 / 0.46 / 0.33 (HandWritten 1.22 / 0.55 / 0.43);
+  SumFloats (FloatMode.Fast) 1.03 / 0.34 / 0.09 (HandWritten 0.91 / 0.33 / 0.11); Smooth (three neighbors, int to
+  long) 1.05 / 0.64 / 0.74 (HandWritten 1.03 / 0.71 / 0.70; 1,024 is memory-bound: 120 MB per pass); Decay
+  1.02 / 0.41 / 0.36; Widen 0.92 / 0.76 / 0.62. HeightMapLoopBenchmark (1,000 chunks): Generated 0.020 of the plain loop,
+  HandWritten (the sample's old Vector128 loop) 0.029. BatchLoopBenchmark (100k rows): a batch method's loop
+  Generated 0.21, the method for one row 0.21. 0 B everywhere. A first round before 9f89ff8 had SumInts at 64
+  elements at 1.25x of the loop as written: the sum's lanes were folded lane by lane through the variable's ref
+  (a variable-index extract of a Vector512 per lane); one horizontal Sum fixed it (0.46). The second round of the
+  loop classes did not run: the bench lock was held by other agents' runs past the 2 h limit twice.
+- **Generator cost after WP2 rest + WP3 (GeneratorBenchmark, base bad2017 two rounds, head one round):** level.
+  Cold 913 / 876 -> 872 ms, CompileAndAnalyze 7,463 / 7,038 -> 6,958 ms, EditMethodBody 510 / 491 -> 519 ms,
+  EditMethodBodyIde 91 / 70 -> 70 ms, EditUnrelatedFile 556 / 523 -> 473 ms; allocations within 0.4 %.

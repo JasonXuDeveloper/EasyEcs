@@ -281,11 +281,13 @@ internal sealed partial class Kernel
     private static string MaskOf(int size) => size switch { 1 => "sbyte", 2 => "short", 4 => "int", _ => "long" };
 
     /// <param name="Index">The parameter's position: its accumulators are <c>__a{Index}_{field}</c>.</param>
-    /// <param name="Type">T, the singleton reduced into.</param>
-    /// <param name="Fields">T's fields, in declaration order.</param>
-    /// <param name="Ops">How T.Combine combines each field: "+", "Min" or "Max".</param>
-    /// <param name="Partial">The run's partial result (a <c>Reduce&lt;T&gt;</c> local of the job).</param>
-    private sealed record Reduction(int Index, INamedTypeSymbol Type, IFieldSymbol[] Fields, string[] Ops, string Partial);
+    /// <param name="Name">T's name, or the variable's: for messages.</param>
+    /// <param name="Fields">T's fields, in declaration order; or the one lane of a variable an element loop sums into.</param>
+    /// <param name="Ops">How T.Combine combines each field: "+", "Min" or "Max"; or how the loop writes the variable.</param>
+    /// <param name="Partial">The run's partial result (a <c>Reduce&lt;T&gt;</c> local of the job), or the variable.</param>
+    /// <param name="Type">T, the singleton reduced into; null for a variable of the method an element loop sums into
+    /// (Kernel.Loops.cs), whose lanes fold into the variable itself.</param>
+    private sealed record Reduction(int Index, string Name, LaneField[] Fields, string[] Ops, string Partial, INamedTypeSymbol? Type);
 
     /// <summary>
     /// Why the method runs one row at a time: the first construct the vector loop cannot express. <c>IsFixable</c> when
@@ -474,9 +476,19 @@ internal sealed partial class Kernel
         /// </summary>
         public HashSet<IParameterSymbol>? Streams { get; init; }
 
+        /// <summary>
+        /// An element loop's body: its parameters that stand for variables of the method the loop sums into (by ref), with
+        /// the operation ("+", "Min", "Max"): reductions whose lanes fold into the variable (<see cref="Summed"/>).
+        /// </summary>
+        public Dictionary<IParameterSymbol, string>? Sums { get; init; }
+
+        /// <summary>An element loop's body: its parameter that is the loop's index read as a value (<c>s[i] = i</c>), or null.</summary>
+        public IParameterSymbol? Index { get; init; }
+
         /// <summary>What parameter <paramref name="p"/> is to the loop: <see cref="Symbols.Classify(IParameterSymbol, bool)"/>'s kind, or an element loop's.</summary>
         public Symbols.ParamKind Kind(IParameterSymbol p) => Streams == null ? Symbols.Classify(p, Outside)
             : Streams.Contains(p) ? Symbols.ParamKind.Component
+            : Sums != null && Sums.ContainsKey(p) ? Symbols.ParamKind.Reduction
             : p.Type.IsRefLikeType || p.RefKind != RefKind.None ? Symbols.ParamKind.Invalid
             : Symbols.ParamKind.Context;
     }
@@ -693,6 +705,11 @@ internal sealed partial class Kernel
             for (int i = 0, k = 0, o = 0; i < method.Parameters.Length; i++)
             {
                 var p = method.Parameters[i];
+                if (SymbolEqualityComparer.Default.Equals(p, lane.Index))
+                {
+                    made._index = p; // an element loop's index read as a value: its lanes are the elements' indexes
+                    continue;
+                }
                 var kind = lane.Kind(p);
                 if (kind == Symbols.ParamKind.Component)
                 {
@@ -718,7 +735,9 @@ internal sealed partial class Kernel
                 if (kind == Symbols.ParamKind.View) continue; // desugared: its fields are the component parameters at the end
                 if (kind == Symbols.ParamKind.Reduction)
                 {
-                    if (reductions) made._reductions[p] = made.Reduced(p, i, fieldOf(i, kind), lane.Fast, model.Compilation, ct);
+                    if (reductions) made._reductions[p] = lane.Sums != null && lane.Sums.TryGetValue(p, out var op)
+                        ? made.Summed(p, i, op, fieldOf(i, kind), lane.Fast)
+                        : made.Reduced(p, i, fieldOf(i, kind), lane.Fast, model.Compilation, ct);
                     continue;
                 }
                 if (kind == Symbols.ParamKind.Entity)
@@ -856,7 +875,23 @@ internal sealed partial class Kernel
         string count = $"{Vec(Column(first))}.Count";
         foreach (var r in kernel._reductions.Values.OrderBy(r => r.Index))
         {
-            string t = r.Type.ToDisplayString(Symbols.Fqn);
+            // a variable: lane by lane into it as the loop writes it (Min / Max as Math does, a sum that wraps)
+            string t = (r.Type ?? r.Fields[0].Type).ToDisplayString(Symbols.Fqn);
+            if (r.Type == null && r.Ops[0] == "+")
+            {
+                // a sum into a variable: the lanes' horizontal sum, added once (the lanes are of the variable's type, so
+                // an integer wraps as the loop's own adds do; a float sum is FloatMode.Fast's, any order). Lane by lane
+                // through the variable's ref cost a call of the vector form more than the whole loop on short spans.
+                string acc = $"__a{r.Index}_0";
+                foreach (var h in Suffixes(kernel.IsDoubled(r.Fields[0].Type)))
+                {
+                    held.Append($"var __h{r.Index}_0{h} = {acc}{h};\n");
+                    restore.Append($"{acc}{h} = __h{r.Index}_0{h};\n");
+                    if (h.Length > 0) masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, Elem(r.Fields[0].Type))}, {acc}{h}, __h{r.Index}_0{h});\n");
+                    fold.Append($"{r.Partial} = unchecked(({t})({r.Partial} + {V}.Sum({acc}{h})));\n");
+                }
+                continue;
+            }
             fold.Append($"for (int __j = 0; __j < {count}; __j++)\n{{\n    var __v = default({t});\n");
             for (int f = 0; f < r.Fields.Length; f++)
             {
@@ -869,11 +904,14 @@ internal sealed partial class Kernel
                     if (h.Length > 0) masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, type)}, {acc}{h}, __h{r.Index}_{f}{h});\n");
                 }
                 // lane j of the loop's vectors: lane j of a pair's lower half, or lane j - Count of its upper one
+                string member = r.Type == null ? "" : "." + r.Fields[f].Name;
                 fold.Append(pair
-                    ? $"    __v.{r.Fields[f].Name} = __j < {Vec(type)}.Count ? {acc}_0[__j] : {acc}_1[__j - {Vec(type)}.Count];\n"
-                    : $"    __v.{r.Fields[f].Name} = {acc}[__j];\n");
+                    ? $"    __v{member} = __j < {Vec(type)}.Count ? {acc}_0[__j] : {acc}_1[__j - {Vec(type)}.Count];\n"
+                    : $"    __v{member} = {acc}[__j];\n");
             }
-            fold.Append($"    {r.Partial}.Combine(__v);\n}}\n");
+            fold.Append(r.Type != null ? $"    {r.Partial}.Combine(__v);\n}}\n"
+                : r.Ops[0] == "+" ? $"    {r.Partial} = unchecked(({t})({r.Partial} + __v));\n}}\n"
+                : $"    {r.Partial} = global::System.Math.{r.Ops[0]}({r.Partial}, __v);\n}}\n");
         }
         string prologue = kernel._bails ? "bool __bail = false;\n" : "";
         string hold = kernel._bails || kernel._lookups.Count > 0 ? held.ToString() : ""; // a lookup sends unresolved vectors to the method too (Kernel.RunRows)
@@ -931,7 +969,7 @@ internal sealed partial class Kernel
     /// </summary>
     private static FlatCode? Flat(Kernel main, IOperation root, System.Func<Kernel> make)
     {
-        if (main._change != null || main._emits.Count > 0 || main._bails || main._lookups.Count > 0 || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._structs.Count > 0 || main._optionals.Count > 0 || main._wideOf.Count > 0) return null;
+        if (main._change != null || main._emits.Count > 0 || main._bails || main._index != null || main._lookups.Count > 0 || main._alive != null || main._reductions.Count > 0 || main._locals.Count > 0 || main._wides.Count > 0 || main._structs.Count > 0 || main._optionals.Count > 0 || main._wideOf.Count > 0) return null;
         var components = main._components.Values.ToArray();
         var type = components[0].Fields[0].Type;
         int fields = components[0].Fields.Length;
@@ -1437,7 +1475,39 @@ internal sealed partial class Kernel
         for (int f = 0; f < fields.Length; f++)
             foreach (var h in Suffixes(IsDoubled(fields[f].Type)))
                 _setup.Append($"var __a{index}_{f}{h} = {V}.Create<{Elem(fields[f].Type)}>(__id{index}.{fields[f].Name});\n");
-        return new Reduction(index, type, fields, ops, partial);
+        return new Reduction(index, name, fields.Select(LaneField.Of).ToArray(), ops, partial, type);
+    }
+
+    /// <summary>
+    /// A variable of the method that an element loop writes only as a sum (<c>t += e</c>, <c>-=</c>, <c>++</c>,
+    /// <c>--</c>) or as its Min or Max (<c>t = Math.Min(t, e)</c>), found by Kernel.Loops.cs: <paramref name="op"/>. Its
+    /// lanes start at the operation's identity (0, or -0 for a float sum, which keeps a -0; the type's largest or
+    /// smallest value, infinities for floats) and fold into <paramref name="variable"/> after the loop. An integer sum
+    /// wraps, so any order gives the loop's result; Min and Max of floats follow IEEE 754:2019 as Math does; a float sum
+    /// adds in another order (one sum per lane): only with FloatMode.Fast.
+    /// </summary>
+    private Reduction Summed(IParameterSymbol p, int index, string op, string variable, bool fast)
+    {
+        var type = p.Type;
+        string name = p.Name;
+        if (!IsLane(type) && !IsDoubled(type))
+            throw new Unsupported($"it sums into '{name}', a {type.ToDisplayString()}, not a lane type of {LaneSizes} bytes");
+        if (IsDoubled(type)) _pairs = true;
+        if (op == "+" && IsFloat(type) && !fast)
+            throw new Unsupported($"it sums floats into '{name}' in the order of the elements, which one sum per lane does not keep: set FloatMode = FloatMode.Fast to accept a sum that is not bit for bit the loop's");
+        string t = type.ToDisplayString(Symbols.Fqn);
+        string identity = (op, IsFloat(type)) switch
+        {
+            ("+", true) => $"-({t})0",
+            ("+", false) => $"({t})0",
+            ("Min", true) => $"{t}.PositiveInfinity",
+            ("Max", true) => $"{t}.NegativeInfinity",
+            ("Min", false) => $"{t}.MaxValue",
+            _ => $"{t}.MinValue",
+        };
+        foreach (var h in Suffixes(IsDoubled(type)))
+            _setup.Append($"var __a{index}_0{h} = {V}.Create<{Elem(type)}>({identity});\n");
+        return new Reduction(index, name, [new LaneField(type, "", type)], [op], variable, null);
     }
 
     /// <summary>
@@ -1524,9 +1594,11 @@ internal sealed partial class Kernel
     /// <summary>The reduction and field <paramref name="op"/> names: <c>r.Value.F</c> of a Reduce&lt;T&gt; parameter r.</summary>
     private (Reduction Reduction, int Field)? Accumulator(IOperation op)
     {
+        if (op is IParameterReferenceOperation { Parameter: var variable } && _reductions.TryGetValue(variable, out var summed) && summed.Type == null)
+            return (summed, 0); // a variable an element loop sums into
         if (op is not IFieldReferenceOperation { Field: var field, Instance: IFieldReferenceOperation { Field.Name: "Value", Instance: IParameterReferenceOperation { Parameter: var p } } }
-            || !_reductions.TryGetValue(p, out var r)) return null;
-        int f = System.Array.FindIndex(r.Fields, x => SymbolEqualityComparer.Default.Equals(x, field));
+            || !_reductions.TryGetValue(p, out var r) || r.Type == null) return null;
+        int f = System.Array.FindIndex(r.Fields, x => x.Name == field.Name && SymbolEqualityComparer.Default.Equals(x.Owner, field.ContainingType));
         return f < 0 ? null : (r, f);
     }
 
@@ -1545,21 +1617,21 @@ internal sealed partial class Kernel
             _ => null,
         };
         if (op is IInvocationOperation { Instance: IParameterReferenceOperation { Parameter: var p }, TargetMethod.Name: "Combine", Arguments.Length: 1 } call
-            && _reductions.TryGetValue(p, out var reduction))
+            && _reductions.TryGetValue(p, out var reduction) && reduction.Type != null)
         {
             var value = call.Arguments[0].Value;
             while (value is IConversionOperation { Conversion.IsIdentity: true } c) value = c.Operand;
             if (value is not IObjectCreationOperation { Arguments.Length: 0, Initializer: { } initializer })
-                throw new Unsupported($"it combines '{Text(value)}', not new {reduction.Type.Name} {{ ... }} with every field set");
+                throw new Unsupported($"it combines '{Text(value)}', not new {reduction.Name} {{ ... }} with every field set");
             var values = new IOperation?[reduction.Fields.Length];
             foreach (var init in initializer.Initializers)
                 if (init is ISimpleAssignmentOperation { Target: IMemberReferenceOperation { Member: var member } } a
-                    && System.Array.FindIndex(reduction.Fields, f => SymbolEqualityComparer.Default.Equals(f, member)) is >= 0 and var f)
+                    && System.Array.FindIndex(reduction.Fields, f => f.Name == member.Name && SymbolEqualityComparer.Default.Equals(f.Owner, member.ContainingType)) is >= 0 and var f)
                     values[f] = a.Value;
-                else throw new Unsupported($"it combines '{Text(init)}', which sets no field of {reduction.Type.Name}");
+                else throw new Unsupported($"it combines '{Text(init)}', which sets no field of {reduction.Name}");
             for (int f = 0; f < values.Length; f++)
             {
-                if (values[f] == null) throw new Unsupported($"it combines a {reduction.Type.Name} without {reduction.Fields[f].Name}, which then is not its identity");
+                if (values[f] == null) throw new Unsupported($"it combines a {reduction.Name} without {reduction.Fields[f].Name}, which then is not its identity");
                 var given = values[f]!;
                 if (IsDoubled(reduction.Fields[f].Type)) EachHalf(() => Fold(reduction, f, Expr(given), mask));
                 else Fold(reduction, f, Expr(given), mask);
@@ -1570,7 +1642,8 @@ internal sealed partial class Kernel
 
         string acc = Acc(r, field), op2 = r.Ops[field];
         var type = r.Fields[field].Type;
-        string NotCombined(string what) => $"it {what} '{Text(op)}', where {r.Type.Name}.Combine takes the {(op2 == "+" ? "sum" : op2)} of {r.Fields[field].Name}";
+        string NotCombined(string what) => r.Type == null ? $"it {what} '{Text(op)}', where the loop takes the {(op2 == "+" ? "sum" : op2)} of '{r.Name}'"
+            : $"it {what} '{Text(op)}', where {r.Name}.Combine takes the {(op2 == "+" ? "sum" : op2)} of {r.Fields[field].Name}";
         switch (op)
         {
             case ICompoundAssignmentOperation { OperatorKind: BinaryOperatorKind.Add or BinaryOperatorKind.Subtract, IsChecked: false, OperatorMethod: null } a
@@ -1767,11 +1840,21 @@ internal sealed partial class Kernel
                 return Truncate(WideOf(c.Operand), Under(c.Type!), c); // (E)(a + b) of a narrow enum: the same low bits
             case IConversionOperation c when Keeps(c) && (IsLane(c.Type) || IsBool(c.Type)):
                 return Expr(c.Operand);
+            case IConversionOperation { Conversion.IsNumeric: true, OperatorMethod: null, IsChecked: false } c
+                when _index != null && IsLane(c.Type) && !IsFloat(c.Type) && SizeOf(c.Type!) == 8 && IsInt(c.Operand.Type) && WideIndex(c.Operand, Elem(c.Type!)) is { } wide:
+                // an int of the index widened (d[i] += i * 5 over longs): computed in lanes of the elements' size, its low
+                // 32 bits the int's (a sum, difference, product or bitwise operation keeps them), sign-extended as the
+                // conversion does (an int that wraps wraps the same)
+                return wide.Exact ? wide.Text : $"{V}.ShiftRightArithmetic({V}.ShiftLeft({wide.Text}, 32), 32)";
             case IConversionOperation { Conversion.IsNumeric: true, IsChecked: false, OperatorMethod: null } c when IsLane(c.Type) && IsLane(c.Operand.Type):
                 return Convert(Expr(c.Operand), c.Operand.Type!, c.Type!) ?? throw Not(c);
             // An enum to its integer or back (or another enum, or another integer of its size): the bits, as C# converts them unchecked.
             case IConversionOperation { IsChecked: false, OperatorMethod: null } c when IsEnumConversion(c) && IsLane(c.Type) && IsLane(c.Operand.Type):
                 return Convert(Expr(c.Operand), Under(c.Operand.Type!), Under(c.Type!)) ?? throw Not(c);
+            case IParameterReferenceOperation { Parameter: var index } when SymbolEqualityComparer.Default.Equals(index, _index):
+                // lane j holds the index of the vector's element j; an int, so only lanes of its size hold it
+                if (!IsLane(op.Type)) throw new Unsupported($"it reads its index '{index.Name}' as a value, an int, in a loop over elements of {_size} bytes: the index's lanes would be 4 bytes");
+                return $"({V}.Create<int>({Row}) + {Vec("int")}.Indices)";
             case IFieldReferenceOperation or IPropertyReferenceOperation or IInvocationOperation or IParameterReferenceOperation when LaneOf(op) is { } c:
                 return ComponentLane(c.Index, c.Field, op); // a parameter itself: an element of a span of numbers (Kernel.Loops.cs)
             case IPropertyReferenceOperation { Property.Name: "HasValue", Instance: IParameterReferenceOperation { Parameter: var p } } when _optionals.TryGetValue(p, out var o):
@@ -2285,10 +2368,12 @@ internal sealed partial class Kernel
             case IPropertyReferenceOperation { Property: { IsStatic: false, Parameters.Length: 0 } p, Instance: { } instance }
                 when Symbols.BackingField(p) != null:
                 return $"{Scalar(instance)}.{p.Name}"; // an auto-property: a field read, no code of its own
-            case IConversionOperation { OperatorMethod: null, IsTryCast: false, Conversion.IsNumeric: true } or IConversionOperation { Conversion.IsIdentity: true }
-                or IConversionOperation { OperatorMethod: null, IsTryCast: false } when IsEnumConversion((IConversionOperation)op):
+            // (a case's 'when' guards each of its patterns: the enum conversions are a case of their own)
+            case IConversionOperation { OperatorMethod: null, IsTryCast: false, IsChecked: false, Conversion.IsNumeric: true } or IConversionOperation { Conversion.IsIdentity: true }:
                 var c = (IConversionOperation)op;
                 return $"(({c.Type!.ToDisplayString(Symbols.Fqn)})({Scalar(c.Operand)}))";
+            case IConversionOperation { OperatorMethod: null, IsTryCast: false } e when IsEnumConversion(e):
+                return $"(({e.Type!.ToDisplayString(Symbols.Fqn)})({Scalar(e.Operand)}))";
             case IBinaryOperation { OperatorMethod: null, IsChecked: false } b when b.OperatorKind is not (BinaryOperatorKind.Divide or BinaryOperatorKind.Remainder) || IsFloat(b.Type):
                 return $"({Scalar(b.LeftOperand)} {BinaryText(b.OperatorKind)} {Scalar(b.RightOperand)})";
             case IUnaryOperation { OperatorMethod: null, IsChecked: false } u:

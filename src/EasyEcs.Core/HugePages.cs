@@ -24,6 +24,15 @@ namespace EasyEcs;
 /// pages it touched stay small, and a 16M-entity world was made 1.2-1.3x slower. Not collapsed (<c>MADV_COLLAPSE</c>): each synchronous collapse
 /// costs 13-19 ms of kernel time and the chases gain the same without it.
 /// </para>
+/// <para>
+/// The arrays a user's reservation sized (<c>Reserve</c>, <c>EnsureEntityCapacity</c>, the initial capacity: their
+/// columns, entity rows, records and free-id list) are then faulted in, in one call per run of 2 MiB windows not yet
+/// resident (<see cref="Populate{T}(T[])"/>: <c>MADV_POPULATE_WRITE</c>, Linux 5.14+, with 4 KiB pages too): a
+/// reservation is there to pay before the tick that fills it, and with first-touch faults that tick paid them
+/// (PageFaultBenchmark.Wave). Arrays written whole by the call that allocates them (a load, a restore, a snapshot, the
+/// rows of <c>CreateEntities</c>) are not: each first touch faults a page right before the copy writes it, still in
+/// the cache, where populating them all first zeroes the whole array ahead of the copy.
+/// </para>
 /// The arrays stay ordinary pinned arrays the GC frees, so a <c>ref</c> kept across a resize still reads live memory: no
 /// native block to free late. Nothing elsewhere: other systems, THP set to <c>never</c>, a libc without
 /// <c>madvise</c> or <c>mincore</c> (the first failure turns it off).
@@ -42,6 +51,13 @@ internal static unsafe partial class HugePages
     private const int BasePage = 4096;
     private const int MadvDontNeed = 4;
     private const int MadvHugePage = 14;
+    private const int MadvPopulateWrite = 23;
+
+    /// <summary>
+    /// Whether the arrays a user's reservation sized are faulted in (<see cref="Populate{T}(T[])"/>): Linux, until a call
+    /// fails. Settable by tests and the benchmark's off / on comparison.
+    /// </summary>
+    internal static bool Prefault = OperatingSystem.IsLinux();
 
     /// <summary>
     /// A zeroed array of <paramref name="length"/> elements on the pinned object heap, its whole 2 MiB pages on huge
@@ -51,38 +67,110 @@ internal static unsafe partial class HugePages
     internal static T[] AllocatePinned<T>(int length) where T : struct
     {
         nint bytes = (nint)length * Unsafe.SizeOf<T>();
-        if (!Enabled || bytes < 2 * Page) return GC.AllocateArray<T>(length, pinned: true);
-        // An element with references (EntityMeta's table) comes zeroed by the GC whatever is asked: advised as it is.
-        bool zeroed = RuntimeHelpers.IsReferenceOrContainsReferences<T>();
+        if (bytes < 2 * Page) return GC.AllocateArray<T>(length, pinned: true);
+        // An element with references (EntityMeta's table) comes zeroed by the GC whatever is asked: advised as it is; so
+        // does every array where huge pages are off.
+        bool zeroed = !Enabled || RuntimeHelpers.IsReferenceOrContainsReferences<T>();
         var array = zeroed ? GC.AllocateArray<T>(length, pinned: true) : GC.AllocateUninitializedArray<T>(length, pinned: true);
         byte* start = (byte*)Unsafe.AsPointer(ref MemoryMarshal.GetArrayDataReference(array));
         byte* first = (byte*)(((nuint)start + (nuint)Page - 1) & ~((nuint)Page - 1));
         byte* end = (byte*)(((nuint)start + (nuint)bytes) & ~((nuint)Page - 1));
-        if (!Advise(first, (nuint)(end - first)) || zeroed)
+        if (Enabled && !Advise(first, (nuint)(end - first)) && !zeroed)
         {
-            if (!zeroed) new Span<T>(array).Clear();
-            return array;
+            new Span<T>(array).Clear();
+            zeroed = true;
         }
 
-        new Span<byte>(start, (int)(first - start)).Clear();
-        new Span<byte>(end, (int)(start + bytes - end)).Clear();
-        byte* residency = stackalloc byte[(int)(Page / BasePage)];
-        for (byte* chunk = first; chunk < end; chunk += Page)
+        if (!zeroed)
         {
-            // Untouched: dropped (it may hold swapped-out data, so nothing is assumed zero); resident: zeroed in place.
-            if (Untouched(chunk, residency)) madvise(chunk, (nuint)Page, MadvDontNeed);
-            else new Span<byte>(chunk, (int)Page).Clear();
+            new Span<byte>(start, (int)(first - start)).Clear();
+            new Span<byte>(end, (int)(start + bytes - end)).Clear();
+            byte* residency = stackalloc byte[(int)(Page / BasePage)];
+            for (byte* chunk = first; chunk < end; chunk += Page)
+            {
+                // Untouched: dropped (it may hold swapped-out data, so nothing is assumed zero); resident: zeroed in place.
+                if (Untouched(chunk, residency)) madvise(chunk, (nuint)Page, MadvDontNeed);
+                else new Span<byte>(chunk, (int)Page).Clear();
+            }
         }
 
         return array;
     }
 
-    /// <summary>Whether no 4 KiB page of the 2 MiB at <paramref name="chunk"/> is resident (false when unknown).</summary>
-    private static bool Untouched(byte* chunk, byte* residency)
+    /// <summary>
+    /// Fault in the pages of <paramref name="array"/> (a large array a user's reservation sized: a table's columns and
+    /// entity rows, the entity records, the free-id list) now, keeping its values: see <see cref="Populate(byte*, nint)"/>.
+    /// The array need not be pinned: the call is over before the GC could move it.
+    /// </summary>
+    internal static void Populate<T>(T[] array) where T : struct
     {
-        if (mincore(chunk, (nuint)Page, residency) != 0) return false;
-        for (int i = 0; i < (int)(Page / BasePage); i++)
-            if ((residency[i] & 1) != 0) return false;
+        nint bytes = (nint)array.Length * Unsafe.SizeOf<T>();
+        if (bytes < 2 * Page || !Prefault) return;
+        fixed (byte* start = &Unsafe.As<T, byte>(ref MemoryMarshal.GetArrayDataReference(array))) Populate(start, bytes);
+    }
+
+    /// <summary>
+    /// Fault in every page of <paramref name="bytes"/> at <paramref name="start"/> in one call (<c>MADV_POPULATE_WRITE</c>,
+    /// Linux 5.14+: the page tables filled as a write would, the contents kept), so the rows a reservation made room for
+    /// are written later without a fault per page: on 4 KiB pages one call costs less than the faults of a first touch
+    /// (PrefaultTouchBenchmark), and the faults leave the tick that fills the rows for the reservation, which is there
+    /// to pay before it (PageFaultBenchmark.Wave). Huge pages advised before fault as huge pages. Only the 2 MiB windows
+    /// with a page not resident are populated, a call per run of them: memory the GC hands out again (or zeroed itself)
+    /// is resident already, and walking its pages again made creating a reserved 1M-entity world 1.05x slower.
+    /// Nothing elsewhere: other systems, an older kernel (the first failure turns it off).
+    /// </summary>
+    private static void Populate(byte* start, nint bytes)
+    {
+        if (!Prefault) return;
+        byte* from = (byte*)((nuint)start & ~(nuint)(BasePage - 1)); // pages holding the array are committed whole
+        byte* to = (byte*)(((nuint)start + (nuint)bytes + BasePage - 1) & ~(nuint)(BasePage - 1));
+        byte* residency = stackalloc byte[(int)(Page / BasePage)];
+        byte* run = null; // the start of the current run of windows to populate
+        try
+        {
+            for (byte* window = from; window < to;)
+            {
+                byte* next = (byte*)Math.Min(((nuint)window + (nuint)Page) & ~((nuint)Page - 1), (nuint)to);
+                bool resident = Every(window, (nuint)(next - window), residency, 1);
+                if (!resident && run == null) run = window;
+                else if (resident && run != null)
+                {
+                    if (!PopulateRun(run, window)) return;
+                    run = null;
+                }
+
+                window = next;
+            }
+
+            if (run != null) PopulateRun(run, to);
+        }
+        catch (Exception) // no libc.so.6 (musl), or no madvise / mincore in it
+        {
+            Prefault = false;
+        }
+    }
+
+    /// <summary>One <c>MADV_POPULATE_WRITE</c> call over [<paramref name="from"/>, <paramref name="to"/>); a failure turns prefault off.</summary>
+    private static bool PopulateRun(byte* from, byte* to)
+    {
+        if (madvise(from, (nuint)(to - from), MadvPopulateWrite) == 0) return true;
+        Prefault = false; // EINVAL before 5.14
+        return false;
+    }
+
+    /// <summary>Whether no 4 KiB page of the 2 MiB at <paramref name="chunk"/> is resident (false when unknown).</summary>
+    private static bool Untouched(byte* chunk, byte* residency) => Every(chunk, (nuint)Page, residency, 0);
+
+    /// <summary>
+    /// Whether every 4 KiB page of the <paramref name="length"/> bytes (at most 2 MiB) at <paramref name="chunk"/> has
+    /// residency <paramref name="state"/> (1 resident, 0 not); false when <c>mincore</c> fails.
+    /// </summary>
+    private static bool Every(byte* chunk, nuint length, byte* residency, int state)
+    {
+        if (mincore(chunk, length, residency) != 0) return false;
+        int pages = (int)((length + BasePage - 1) / BasePage);
+        for (int i = 0; i < pages; i++)
+            if ((residency[i] & 1) != state) return false;
         return true;
     }
 

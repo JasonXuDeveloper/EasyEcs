@@ -224,6 +224,23 @@ its own worktree.
      reporting, `/sys/module/page_reporting/parameters/page_reporting_order` = 9), which discards them, so a huge
      page faulted from a block freed seconds earlier touches at 0.3 GiB/s against 6.6 GiB/s for one reused at once
      and 2 GiB/s for 4 KiB pages (feat-later-memory). Numbers of first touch with huge pages there are a lower bound;
+   - page faults are counted, not guessed: `[PageFaultDiagnoser]` on a class adds minflt, majflt, stime and the THP
+     counters per op (read by the host around an extra launch; the vmstat ones are machine-wide, so under the lock).
+     PageFaultBenchmark counts the ops that allocate a large world's arrays at 1M and 16M (feat-page-faults). What it
+     found: a back-to-back op faults about a sixth of what it allocates (the GC hands most freed large memory back
+     resident; the rest is commits while the previous world is not yet collected), so `GCRetainVM` and a pool of
+     disposed worlds' columns changed no count; on the reference VM an op whose sized arrays fault fresh huge pages
+     (Create, Load at 16M) is bimodal, 0.5-1.4 s between iterations (host refaults of reported blocks): compare such
+     cases over two rounds of the default job and read the faults columns, not one mean. `MADV_POPULATE_WRITE` costs
+     what the first touch costs with 2 MiB pages and 1.27x less with 4 KiB pages (one call for the trap of every page,
+     PrefaultTouchBenchmark); what it buys is where the faults land: a reservation that populates leaves the tick that
+     fills it free of them (PageFaultBenchmark.Wave, a reservation made on memory freed 4 s before, IterationSetup
+     with the pause). Populate only memory that is not resident and that is written later: walking resident pages
+     again (the GC hands most freed memory back resident) made a reserved 1M-entity world 1.05x slower until
+     `mincore` skipped resident 2 MiB windows, and populating an array the same call copies into whole (a load)
+     zeroes it all ahead of the copy, where the first touch zeroes each page right before the copy writes it, still
+     in the cache (Load 1M 1.04-1.06x slower, gone once loads stopped populating). A count inside a case with `[IterationSetup]` includes the setup (the extra launch reads around
+     the whole actual stage): read the setup's share apart before crediting the measured method;
    - a vector loop over a table that fills most of a core's L2 (100k entities of KernelBenchmark: 1.2-1.6 MB against
      2 MiB) varies 20-30 % between processes and between worlds made again in one process with the same compiled
      code (the physical pages the columns land on: L2 sets are physically indexed): before calling such a case slower,

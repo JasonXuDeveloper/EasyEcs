@@ -119,6 +119,24 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   buffers, 1 and 4 threads, 0 B; and the generated text of existing code unchanged but for the loop lines (dump both
   trees with EmitCompilerGeneratedFiles: file names of lambda and tile-load files hash the source path, compare those by
   content).
+  What an element loop takes beyond writing its elements: a variable of the method written only as a sum, Min or Max
+  (`t += e`, `t = Math.Min(t, e)`, a masked `n++`: `SumOf` → `Lane.Sums` → `Kernel.Summed`, a `Reduction` with no T
+  whose lanes start at the identity, -0 for a float sum, and fold into the variable when the vectors stop, also at a
+  bail after the vector's lanes are set back; a float sum only under FloatMode.Fast, two chains as a row loop's);
+  the index read as a value (`_index`: lanes `Row + Indices` of int; widened to an 8-byte integer through
+  `WideIndex`, which keeps the int's low 32 bits and sign-extends as the conversion does); a batch method's loops over
+  its rows; neighbors at constant offsets (`s[i ± k]`, |k| <= 64: a stream per (span, offset), passed from its
+  element at index + k so no ref points before a span's start, outside its object; a guard per offset; a span
+  written and read at another offset stays scalar, since a vector loads before it stores while the loop as written
+  reads what it just wrote; aliasing between different spans is `__Apart` at run time, not a proof from roots); a
+  lambda pass's body (`WithElementLoops`); calls inlined as a method's; a method's private static helpers
+  and fields through accessors of the copy (`BodyCopy.Accessors`). Not reported by EECS055 (`WalksElements`): a loop
+  computing with vector types (written by hand: EECS103's in a batch method), a method whose body names one (its loops
+  are the hand-written loop's tail), a loop holding another (each inner loop is its own), elements that are not plain
+  values. Read the schedule's loop line for a cold branch (`; the elements of a vector with a lane that takes a cold
+  branch run as written: ...`): an element loop whose common case is the cold branch bails on almost every vector, so
+  a vector form with a cold line is checked like a scalar one (the height map's `(byte)y` was one: `Scalar` dropped
+  numeric conversions, a C# `case A or B when c` guarding both patterns).
 - **Cells of a tile** (the shader form, built on the inner loop): a method that computes one cell from its neighbors
   by offset; the generator writes the pad, the row walk and the element loop, the neighbor reads unaligned loads at
   offsets in the padded texture, so users write no `Load128`.
@@ -204,7 +222,7 @@ is classified once, in Kernel, as:
   branches for one loop (split by tag or by group), a per-row lookup (`Lookup<T>` hoisted or a component copied in), a
   component of too many fields (split the component), a mixed type the loop cannot widen;
 - **inherent** (not reported, or Info): the algorithm needs scalar work (a call into user code whose result decides
-  the row; a loop over a buffer per row until element loops land, `docs/plans/inner-loops.md`).
+  the row; an element loop leaving early, or writing the method's variables other than as sums, Mins or Maxes).
 
 The owner's rule: plain code that a small rewrite would turn into a vector loop must warn. When in doubt, a reason
 is fixable; a reason stays inherent only when no rewrite of the method keeps its meaning and vectorizes. A fixable

@@ -52,7 +52,7 @@ public sealed partial class SystemGenerator
                 method.Parameters.Any(p => Symbols.Classify(p, outside) == Symbols.ParamKind.Scratch) && ForEachModel.LoopsOrCalls(syntax),
                 outside || pair || record ? null : FusionSide.Of(method, stable, identifies, parallel), // a pair pass walks windows
                 // Loops over spans inside a method that runs row by row (Kernel.Loops.cs): the method copied with their vector forms.
-                simd == null && !pair && !record && !Symbols.IsBatch(method) ? ElementsOf(method, syntax, model, ct) : null); // a batch method's loops: EECS103, or the method for one row
+                simd == null && !pair && !record ? ElementsOf(method, syntax, model, ct) : null);
         }
     }
 

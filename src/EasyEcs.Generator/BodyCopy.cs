@@ -12,7 +12,8 @@ namespace EasyEcs.Generator;
 /// body whose element loops the generator rewrites (Kernel.Loops.cs). The copy binds in another type and file, so every
 /// name of a type, a namespace or a static member is qualified, constants are written as their values (a private one
 /// too) and the rest is left as written; the file gets the using directives the body's extension calls need. A body
-/// that names what code outside its type cannot reach is not copied (<see cref="Unreachable"/>).
+/// that names what code outside its type cannot reach is not copied (<see cref="Unreachable"/>), except a method's
+/// private static helpers and fields, reached through accessors (<see cref="Accessors"/>).
 /// </summary>
 internal static class BodyCopy
 {
@@ -22,8 +23,73 @@ internal static class BodyCopy
     /// (called with the statement as written and as qualified; null keeps the qualified one).
     /// </summary>
     public static string Copy(SyntaxNode body, IMethodSymbol scope, SemanticModel model,
-        System.Func<SyntaxNode, SyntaxNode, string?>? replace, System.Threading.CancellationToken ct) =>
-        new Qualifier(model, scope, replace, ct).Visit(body)!.ToFullString();
+        System.Func<SyntaxNode, SyntaxNode, string?>? replace, System.Threading.CancellationToken ct, Accessors? accessors = null) =>
+        new Qualifier(model, scope, replace, ct, accessors).Visit(body)!.ToFullString();
+
+    /// <summary>
+    /// The UnsafeAccessor externs through which a [ForEach] method's copy reaches its type's private static helpers
+    /// (methods called by their simple name) and fields: a call <c>Helper(a, b)</c> becomes <c>{Prefix}__Helper(self, a,
+    /// b)</c>, a field <c>F</c> the ref <c>{Prefix}__F(self)</c>, where self is the copy's parameter for the type (the
+    /// accessor's own owner parameter, <paramref name="ownerParameter"/>).
+    /// </summary>
+    internal sealed class Accessors(string self, string ownerParameter, string prefix)
+    {
+        private readonly Dictionary<ISymbol, string> _names = new(SymbolEqualityComparer.Default);
+        private readonly System.Text.StringBuilder _declarations = new();
+
+        /// <summary>The externs, one per member reached.</summary>
+        public string Declarations => _declarations.ToString();
+
+        public string Self => self;
+
+        /// <summary>
+        /// Whether <paramref name="name"/>, naming <paramref name="symbol"/>, is reached through an accessor: a private static
+        /// method of the scope's own type called by its simple name with plain arguments (no params, optional or named
+        /// arguments, a value or void returned), or a private static field of it; types it names reachable; not inside a
+        /// lambda or a local function of the body (they do not see the copy's owner parameter).
+        /// </summary>
+        public static bool Fits(SimpleNameSyntax name, ISymbol symbol, IMethodSymbol scope)
+        {
+            if (name is not IdentifierNameSyntax || !symbol.IsStatic || scope.MethodKind != MethodKind.Ordinary
+                || !SymbolEqualityComparer.Default.Equals(symbol.ContainingType, scope.ContainingType) || scope.ContainingType.IsGenericType
+                || name.Ancestors().TakeWhile(n => n is not MemberDeclarationSyntax).Any(n => n is AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax)
+                || name.Parent is MemberAccessExpressionSyntax { Name: var right } && right == name || name.Parent is MemberBindingExpressionSyntax)
+                return false;
+            return symbol switch
+            {
+                IMethodSymbol { MethodKind: MethodKind.Ordinary, IsGenericMethod: false, RefKind: RefKind.None } m =>
+                    name.Parent is InvocationExpressionSyntax call && call.Expression == name && call.ArgumentList.Arguments.All(a => a.NameColon == null)
+                    && (m.ReturnsVoid || Blocking(m.ReturnType) == null)
+                    && m.Parameters.All(q => !q.IsParams && !q.HasExplicitDefaultValue && !q.IsOptional && Blocking(q.Type) == null && q.Type is not IPointerTypeSymbol and not IFunctionPointerTypeSymbol),
+                IFieldSymbol { HasConstantValue: false, IsFixedSizeBuffer: false } f =>
+                    name.Parent is not InvocationExpressionSyntax && Blocking(f.Type) == null && f.Type is not IPointerTypeSymbol and not IFunctionPointerTypeSymbol,
+                _ => false,
+            };
+        }
+
+        /// <summary>The extern reaching <paramref name="symbol"/>, declared the first time.</summary>
+        public string Name(ISymbol symbol)
+        {
+            if (_names.TryGetValue(symbol, out var name)) return name;
+            name = $"{prefix}__{symbol.Name}";
+            _names[symbol] = name;
+            const string attribute = "global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind";
+            if (symbol is IMethodSymbol m)
+            {
+                string parameters = string.Concat(m.Parameters.Select(q => ", " + (q.RefKind switch { RefKind.Ref => "ref ", RefKind.Out => "out ", RefKind.In => "in ", RefKind.RefReadOnlyParameter => "ref readonly ", _ => "" })
+                    + q.Type.ToDisplayString(Symbols.Fqn) + " " + Code.Escape(q.Name)));
+                _declarations.Append($"    [{attribute}.StaticMethod, Name = \"{m.Name}\")]\n");
+                _declarations.Append($"    internal static extern {(m.ReturnsVoid ? "void" : m.ReturnType.ToDisplayString(Symbols.Fqn))} {name}({ownerParameter} __owner{parameters});\n\n");
+            }
+            else
+            {
+                var f = (IFieldSymbol)symbol;
+                _declarations.Append($"    [{attribute}.StaticField, Name = \"{f.Name}\")]\n");
+                _declarations.Append($"    internal static extern ref {f.Type.ToDisplayString(Symbols.Fqn)} {name}({ownerParameter} __owner);\n\n");
+            }
+            return name;
+        }
+    }
 
     /// <summary>The using directives of the file of <paramref name="node"/> that bring extension members into scope (aliases are qualified away).</summary>
     public static IEnumerable<string> Usings(SyntaxNode node)
@@ -56,7 +122,9 @@ internal static class BodyCopy
     /// resolve (another generator's members, while the generator runs) are left alone.
     /// </summary>
     /// <param name="blocking">The symbol code outside its type cannot reach (EECS096's fix makes a private member internal).</param>
-    public static string? Unreachable(SyntaxNode body, IMethodSymbol scope, SemanticModel model, System.Threading.CancellationToken ct, out ISymbol? blocking)
+    /// <param name="accessors">Private static members of the scope's type are reached through accessors (<see cref="Accessors.Fits"/>).</param>
+    public static string? Unreachable(SyntaxNode body, IMethodSymbol scope, SemanticModel model, System.Threading.CancellationToken ct, out ISymbol? blocking,
+        bool accessors = false)
     {
         blocking = null;
         foreach (var name in body.DescendantNodesAndSelf().OfType<SimpleNameSyntax>())
@@ -64,7 +132,7 @@ internal static class BodyCopy
             var symbol = model.GetSymbolInfo(name, ct).Symbol;
             if (symbol is null or ILocalSymbol or IParameterSymbol or ILabelSymbol or IRangeVariableSymbol or IDiscardSymbol or INamespaceSymbol
                 || symbol is IFieldSymbol { HasConstantValue: true } || symbol is IMethodSymbol { MethodKind: MethodKind.LocalFunction or MethodKind.AnonymousFunction }
-                || Inside(symbol.ContainingSymbol, scope))
+                || Inside(symbol.ContainingSymbol, scope) || accessors && Accessors.Fits(name, symbol, scope))
                 continue;
             if (symbol is ITypeParameterSymbol) return $"it names type parameter {symbol.Name}";
             if ((blocking = Blocking(symbol)) != null) return $"it names {Describe(blocking)}";
@@ -128,8 +196,18 @@ internal static class BodyCopy
 
     /// <summary>Rewrites the names <see cref="Copy"/> qualifies, and the statements it replaces.</summary>
     private sealed class Qualifier(SemanticModel model, IMethodSymbol scope, System.Func<SyntaxNode, SyntaxNode, string?>? replace,
-        System.Threading.CancellationToken ct) : CSharpSyntaxRewriter
+        System.Threading.CancellationToken ct, Accessors? accessors) : CSharpSyntaxRewriter
     {
+        public override SyntaxNode? VisitInvocationExpression(InvocationExpressionSyntax node)
+        {
+            if (accessors == null || node.Expression is not IdentifierNameSyntax name || model.GetSymbolInfo(name, ct).Symbol is not IMethodSymbol method
+                || !Accessors.Fits(name, method, scope))
+                return base.VisitInvocationExpression(node);
+            var arguments = (ArgumentListSyntax)Visit(node.ArgumentList)!;
+            string rest = arguments.Arguments.Count > 0 ? ", " + arguments.Arguments.ToFullString() : "";
+            return SyntaxFactory.ParseExpression($"{accessors.Name(method)}({accessors.Self}{rest})").WithTriviaFrom(node);
+        }
+
         public override SyntaxNode? Visit(SyntaxNode? node)
         {
             var rewritten = base.Visit(node);
@@ -137,8 +215,12 @@ internal static class BodyCopy
             return SyntaxFactory.ParseStatement(text).WithLeadingTrivia(rewritten.GetLeadingTrivia()).WithTrailingTrivia(rewritten.GetTrailingTrivia());
         }
 
-        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node) =>
-            Qualified(node, null) is { } qualified ? qualified.WithTriviaFrom(node) : base.VisitIdentifierName(node);
+        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node)
+        {
+            if (accessors != null && model.GetSymbolInfo(node, ct).Symbol is IFieldSymbol field && Accessors.Fits(node, field, scope))
+                return SyntaxFactory.ParseExpression($"{accessors.Name(field)}({accessors.Self})").WithTriviaFrom(node);
+            return Qualified(node, null) is { } qualified ? qualified.WithTriviaFrom(node) : base.VisitIdentifierName(node);
+        }
 
         public override SyntaxNode? VisitGenericName(GenericNameSyntax node)
         {

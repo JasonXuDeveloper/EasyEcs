@@ -99,6 +99,9 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
   (the reason and its fixable / inherent class come from `Kernel`, `audit-vector-loops`). A method that would vectorize
   but reads a `Lookup<T>` in `SimdMode.Auto` gets Info, never a Warning: its gathers are the method's to ask for with
   `SimdMode.Require` (D131), so no fix applies.
+  EECS055 at a loop (element loops) reports exactly the loops the generator lists as scalar in the schedule
+  (`Kernel.WalksElements`, one predicate for both): not a vector loop written by hand, nor the tail of one, nor a loop
+  holding another, nor elements that are not plain values (`audit-vector-loops`).
 - New features without their rules: each attribute, parameter or API the changelog adds, checked for the misuse it
   invites and the hand-written pattern it replaces.
 - Patterns in `samples/`, `BattleServer.cs`, `WorldSimulation.cs`, templates and docs examples that a rule should flag

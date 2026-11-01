@@ -10,17 +10,19 @@ namespace EasyEcs.Generator;
 
 /// <summary>
 /// Element loops (Burst's loop vectorizer): a <c>for</c> or <c>foreach</c> over the elements of spans inside a [ForEach]
-/// method, translated by the same core as the per-row loop. Each element is a lane: a span's element type is read as a
-/// component's (its lane fields, or the number itself), and the variables of the method the loop reads and does not
-/// write are the loop's values, the same for every element. The loop's body is desugared into a static local function
-/// (the elements and values as its parameters), bound in a speculative model of the method's body like a view's
-/// desugared form (Kernel.Views.cs), and translated as a lambda pass's body is. The generator then copies the method
-/// (BodyCopy) with the loop's vector form before the loop, which runs the elements left as written.
+/// method or a lambda pass, translated by the same core as the per-row loop. Each element is a lane: a span's element
+/// type is read as a component's (its lane fields, or the number itself), and the variables of the method the loop
+/// reads and does not write are the loop's values, the same for every element. The loop's body is desugared into a
+/// static local function (the elements and values as its parameters), bound in the loop's place in a speculative model,
+/// its calls inlined as a [ForEach] method's (Kernel.Inlining.cs), and translated as a lambda pass's body is. The
+/// generator then copies the method (BodyCopy) with the loop's vector form before the loop, which runs the elements
+/// left as written.
 /// <para>
 /// Recognized: <c>foreach (ref var x in s)</c> (also <c>ref readonly</c>, by value, explicit types) over a Span, a
 /// ReadOnlySpan or a DynamicBuffer, and <c>for (int i = a; i &lt; n; i++)</c> whose body reads its spans only at
-/// <c>s[i]</c> and <c>i</c> nowhere else. The body leaves the loop nowhere early (break, continue, return, goto),
-/// writes none of the method's variables, and the bound <c>n</c> reads only what the loop does not write.
+/// <c>s[i]</c> (and <c>i</c> as a value, outside another index: <c>_index</c>). The body leaves the loop nowhere early
+/// (break, continue, return, goto), writes the method's variables only as sums, Mins or Maxes (<see cref="SumOf"/>),
+/// and the bound <c>n</c> reads only what the loop does not write.
 /// </para>
 /// </summary>
 internal sealed partial class Kernel
@@ -30,32 +32,35 @@ internal sealed partial class Kernel
     /// stream's element type and how the call site reaches its first element, the values' declarations and arguments.
     /// </summary>
     /// <param name="Streams">Per stream: the C# naming the span at the call site (a local, a parameter, or the foreach's
-    /// span), its element type (fully qualified), and whether the loop writes it.</param>
-    /// <param name="Values">Per value: its type (fully qualified) and its name at the call site.</param>
+    /// span), its element type (fully qualified), whether the loop writes it, and the constant the loop adds to its
+    /// index to read it (<c>s[i - 1]</c>: -1; a span read at several offsets is a stream per offset).</param>
+    /// <param name="Values">Per value: its type (fully qualified), its name at the call site, and whether the loop sums
+    /// into it (passed by ref; its lanes fold into it).</param>
     /// <param name="ForEach">The loop is a foreach (else a for over an index).</param>
-    internal sealed record ElementLoop(Code Code, (string Span, string Element, bool Written)[] Streams, (string Type, string Name)[] Values, bool ForEach)
+    internal sealed record ElementLoop(Code Code, (string Span, string Element, bool Written, int Offset)[] Streams, (string Type, string Name, bool Sum)[] Values, bool ForEach)
     {
         /// <summary>A for loop's end as written (it is read again at the call site), else null.</summary>
         public string? Bound { get; init; }
     }
 
     /// <summary>
-    /// The element loops of a method body: each loop statement (outside lambdas and local functions) with its vector form
-    /// or the reason it runs element by element. Nested loops are each their own; a loop holding another stays scalar.
+    /// The element loops of the body of a method or a lambda pass's lambda: each loop statement (outside lambdas and local
+    /// functions) with its vector form or the reason it runs element by element. Nested loops are each their own; a loop
+    /// holding another stays scalar.
     /// </summary>
-    public static List<(StatementSyntax Loop, ElementLoop? Vector, ScalarReason? Reason)> ElementLoops(IMethodSymbol method, MethodDeclarationSyntax syntax,
+    public static List<(StatementSyntax Loop, ElementLoop? Vector, ScalarReason? Reason)> ElementLoops(IMethodSymbol method, BlockSyntax? body,
         SemanticModel model, System.Threading.CancellationToken ct)
     {
         var loops = new List<(StatementSyntax, ElementLoop?, ScalarReason?)>();
-        if (syntax.Body == null) return loops;
-        foreach (var node in syntax.Body.DescendantNodes(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax)))
+        if (body == null) return loops;
+        foreach (var node in body.DescendantNodes(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax)))
         {
             if (node is not (ForStatementSyntax or ForEachStatementSyntax)) continue;
             ct.ThrowIfCancellationRequested();
             var loop = (StatementSyntax)node;
             try
             {
-                var vector = ElementLoopOf(method, syntax, model, loop, ct, out var reason);
+                var vector = ElementLoopOf(method, model, loop, ct, out var reason);
                 loops.Add((loop, vector, reason));
             }
             catch (System.Exception e) when (e is not System.OperationCanceledException)
@@ -69,19 +74,35 @@ internal sealed partial class Kernel
 
     /// <summary>
     /// Whether a loop walks elements of spans (a foreach over a Span, a ReadOnlySpan or a DynamicBuffer, or a body
-    /// indexing one): a loop meant for an element loop, which EECS055 reports when it stays scalar.
+    /// indexing one): a loop meant for an element loop, which EECS055 reports when it stays scalar. A loop over vectors,
+    /// or one computing with them, is a vector loop written by hand (EECS103's in a batch method): not meant for one.
     /// </summary>
     public static bool WalksElements(StatementSyntax loop, SemanticModel model, System.Threading.CancellationToken ct)
     {
+        var nodes = loop.DescendantNodesAndSelf(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax));
+        foreach (var node in nodes)
+            if (node is ExpressionSyntax expression && IsVectorType(model.GetTypeInfo(expression, ct).Type)
+                || node != loop && node is ForStatementSyntax or ForEachStatementSyntax) // the loops it holds are each their own
+                return false;
         if (loop is ForEachStatementSyntax each)
-            return model.GetTypeInfo(each.Expression, ct).Type is { } type && (Symbols.SpanElement(type) ?? BufferElement(type)) != null;
-        foreach (var access in loop.DescendantNodes(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax)).OfType<ElementAccessExpressionSyntax>())
-            if (model.GetTypeInfo(access.Expression, ct).Type is { } type && Symbols.SpanElement(type) != null) return true;
+            return model.GetTypeInfo(each.Expression, ct).Type is { } type && (Symbols.SpanElement(type) ?? BufferElement(type)) is { } element && Plain(element);
+        foreach (var access in nodes.OfType<ElementAccessExpressionSyntax>())
+            if (model.GetTypeInfo(access.Expression, ct).Type is { } type && Symbols.SpanElement(type) is { } element && Plain(element)) return true;
         return false;
+
+        // a number or a struct of plain values (LaneFields): elements a vector loop could take, so its reason is worth a message
+        static bool Plain(ITypeSymbol element) => IsLaneType(element) || LaneFields(element);
     }
 
+    /// <summary>Vector&lt;T&gt;, Vector64..512&lt;T&gt;, or a span of them.</summary>
+    private static bool IsVectorType(ITypeSymbol? type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named
+        && (named.Name is "Vector" or "Vector64" or "Vector128" or "Vector256" or "Vector512"
+            && named.ContainingNamespace?.ToDisplayString() is "System.Numerics" or "System.Runtime.Intrinsics"
+            || Symbols.SpanElement(named) is { } element && IsVectorType(element));
+
     /// <summary>One loop's vector form, or null with the reason.</summary>
-    private static ElementLoop? ElementLoopOf(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, StatementSyntax loop,
+    private static ElementLoop? ElementLoopOf(IMethodSymbol method, SemanticModel model, StatementSyntax loop,
         System.Threading.CancellationToken ct, out ScalarReason? reason)
     {
         reason = null;
@@ -107,8 +128,9 @@ internal sealed partial class Kernel
         }
 
         // The elements: what each stream symbol stands for in the body, and the names they take as parameters.
-        var streams = new List<(ISymbol Symbol, ITypeSymbol Element, bool Writable, string Span)>();
+        var streams = new List<(ISymbol Symbol, ITypeSymbol Element, bool Writable, string Span, int Offset)>();
         ILocalSymbol? index = null;
+        bool indexValue = false; // the index read as a value (s[i] = i): a parameter of the body whose lanes are the indexes
         SyntaxNode desugared;
         string? boundText = null;
         if (loop is ForEachStatementSyntax each)
@@ -125,7 +147,7 @@ internal sealed partial class Kernel
                 return null;
             }
             bool writable = variable.RefKind == RefKind.Ref && Symbols.Named(((INamedTypeSymbol)spanType).ConstructedFrom, "System.Span<T>");
-            streams.Add((variable, element, writable, BufferElement(spanType) != null ? ".AsReadOnlySpan()" : "")); // the call site's span
+            streams.Add((variable, element, writable, BufferElement(spanType) != null ? ".AsReadOnlySpan()" : "", 0)); // the call site's span
             desugared = body;
         }
         else
@@ -142,24 +164,31 @@ internal sealed partial class Kernel
                 reason = Why($"it writes its index '{variable.Name}'");
                 return null;
             }
-            // Every use of the index is the index of a span: s[i].
+            // Every use of the index is the index of a span (s[i], s[i + 1], s[i - 2]: a constant apart) or a value
+            // (i * 2), not inside another index.
             var replace = new Dictionary<SyntaxNode, SyntaxNode>();
             foreach (var name in body.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
             {
                 if (!SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(name, ct).Symbol, variable)) continue;
-                if (name.Parent is not ArgumentSyntax { Parent: BracketedArgumentListSyntax { Arguments.Count: 1, Parent: ElementAccessExpressionSyntax access } }
+                var (argument, offset) = OffsetOf(name, model, ct);
+                if (argument.Parent is not ArgumentSyntax { Parent: BracketedArgumentListSyntax { Arguments.Count: 1, Parent: ElementAccessExpressionSyntax access } }
                     || access.Expression is not IdentifierNameSyntax spanName
                     || model.GetSymbolInfo(spanName, ct).Symbol is not { } span || span is not (ILocalSymbol or IParameterSymbol)
                     || Symbols.SpanElement(TypeOf(span)) is not { } element)
                 {
-                    // The expression using it (an indexer of something else, a call, arithmetic), not the bare argument list.
+                    if (!name.Ancestors().TakeWhile(a => a != body).Any(a => a is BracketedArgumentListSyntax))
+                    {
+                        indexValue = true;
+                        continue;
+                    }
+                    // An index of its own (s[i - 1], a[i] of an array): the expression using it, not the bare argument list.
                     var use = name.Ancestors().OfType<ExpressionSyntax>().FirstOrDefault() ?? name;
                     reason = Why($"it reads its index '{variable.Name}' as a value ('{use}'), not only as the index of a span (s[{variable.Name}])");
                     return null;
                 }
-                if (!streams.Any(s => SymbolEqualityComparer.Default.Equals(s.Symbol, span)))
-                    streams.Add((span, element, Symbols.Named(((INamedTypeSymbol)TypeOf(span)).ConstructedFrom, "System.Span<T>"), span.Name));
-                replace[access] = IdentifierName(StreamName(span)).WithTriviaFrom(access);
+                if (!streams.Any(s => SymbolEqualityComparer.Default.Equals(s.Symbol, span) && s.Offset == offset))
+                    streams.Add((span, element, Symbols.Named(((INamedTypeSymbol)TypeOf(span)).ConstructedFrom, "System.Span<T>"), span.Name, offset));
+                replace[access] = IdentifierName(StreamName(span, offset: offset)).WithTriviaFrom(access);
             }
             if (streams.Count == 0)
             {
@@ -190,8 +219,10 @@ internal sealed partial class Kernel
             desugared = new Replacer(replace).Visit(body)!;
         }
 
-        // The values: variables of the method the body reads, declared outside the loop.
+        // The values: variables of the method the body reads, declared outside the loop; and those it sums into.
         var values = new List<ISymbol>();
+        var sums = new Dictionary<ISymbol, string>(SymbolEqualityComparer.Default);
+        var loopOperation = model.GetOperation(loop, ct);
         foreach (var read in flow.ReadInside.Concat(flow.WrittenInside))
         {
             if (read is not (ILocalSymbol or IParameterSymbol) || SymbolEqualityComparer.Default.Equals(read, index)
@@ -200,8 +231,12 @@ internal sealed partial class Kernel
             if (read is ILocalSymbol { IsConst: true }) continue;
             if (flow.WrittenInside.Contains(read, SymbolEqualityComparer.Default))
             {
-                reason = Why($"it writes '{read.Name}', a variable of the method: a vector loop writes only the elements");
-                return null;
+                if (loopOperation == null || read is IParameterSymbol { RefKind: RefKind.In or RefKind.RefReadOnlyParameter } || SumOf(read, loopOperation) is not { } op)
+                {
+                    reason = Why($"it writes '{read.Name}', a variable of the method, other than as a sum, a Min or a Max ('{read.Name} += e', '{read.Name} = Math.Min({read.Name}, e)'): a vector loop writes the elements and such variables only");
+                    return null;
+                }
+                sums[read] = op;
             }
             if (TypeOf(read).IsRefLikeType)
             {
@@ -214,20 +249,22 @@ internal sealed partial class Kernel
         // The body as a static local function of the elements and the values, bound where the method's body is.
         var parameters = new List<ParameterSyntax>();
         foreach (var s in streams)
-            parameters.Add(Parameter(Identifier(StreamName(s.Symbol, loop is ForEachStatementSyntax)))
+            parameters.Add(Parameter(Identifier(StreamName(s.Symbol, loop is ForEachStatementSyntax, s.Offset)))
                 .WithType(ParseTypeName(s.Element.ToDisplayString(Symbols.Fqn)))
                 .WithModifiers(TokenList(Token(s.Writable ? SyntaxKind.RefKeyword : SyntaxKind.InKeyword))));
         foreach (var v in values)
-            parameters.Add(Parameter(Identifier(global::EasyEcs.Generator.Code.Escape(v.Name))).WithType(ParseTypeName(TypeOf(v).ToDisplayString(Symbols.Fqn))));
+            parameters.Add(Parameter(Identifier(global::EasyEcs.Generator.Code.Escape(v.Name))).WithType(ParseTypeName(TypeOf(v).ToDisplayString(Symbols.Fqn)))
+                .WithModifiers(sums.ContainsKey(v) ? TokenList(Token(SyntaxKind.RefKeyword)) : default));
+        if (indexValue) parameters.Add(Parameter(Identifier(global::EasyEcs.Generator.Code.Escape(index!.Name))).WithType(PredefinedType(Token(SyntaxKind.IntKeyword))));
         var function = LocalFunctionStatement(PredefinedType(Token(SyntaxKind.VoidKeyword)), Identifier("__Elements"))
             .WithModifiers(TokenList(Token(SyntaxKind.StaticKeyword)))
             .WithParameterList(ParameterList(SeparatedList(parameters)))
             .WithBody(desugared as BlockSyntax ?? Block((StatementSyntax)desugared));
-        var replaced = syntax.WithExpressionBody(null).WithSemicolonToken(default).WithBody(Block(function));
-        if (!model.TryGetSpeculativeSemanticModelForMethodBody(syntax.Body!.SpanStart, replaced, out var speculative) || speculative == null
-            || replaced.Body!.Statements[0] is not LocalFunctionStatementSyntax declared
-            || speculative.GetDeclaredSymbol(declared, ct) is not IMethodSymbol elements
-            || speculative.GetOperation(declared, ct) is not ILocalFunctionOperation { Body: { } operation })
+        // Bound as a statement in the loop's place: the method's names are in scope, and each variable the body reads is
+        // a parameter of the static function, which hides the method's.
+        if (!model.TryGetSpeculativeSemanticModel(loop.SpanStart, function, out var speculative) || speculative == null
+            || speculative.GetDeclaredSymbol(function, ct) is not IMethodSymbol elements
+            || speculative.GetOperation(function, ct) is not ILocalFunctionOperation { Body: { } operation })
         {
             reason = Why("its body could not be bound as a loop over its elements");
             return null;
@@ -237,27 +274,147 @@ internal sealed partial class Kernel
             reason = Why("its body could not be bound as a loop over its elements");
             return null;
         }
+        // The user's own calls inlined (Kernel.Inlining.cs), as in a [ForEach] method's body, bound again in the loop's place.
+        var callees = Callees.Of(model.Compilation);
+        if (method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(ct) is MethodDeclarationSyntax host) callees.Offer(model, host);
+        if (operation.DescendantsAndSelf().Any(o => callees.Candidate(o) != null))
+        {
+            var inliner = new Inliner(new HashSet<string>(function.DescendantTokens().Where(t => t.IsKind(SyntaxKind.IdentifierToken)).Select(t => t.ValueText)),
+                elements, model.Compilation, ct);
+            var block = inliner.Method(speculative).Body(function.Body!);
+            if (block != null && inliner.Count + inliner.Left > 0)
+            {
+                var inlined = function.WithBody(inliner.WithAccessors(Inliner.WithoutInlinedLocalFunctions(block)));
+                if (model.TryGetSpeculativeSemanticModel(loop.SpanStart, inlined, out var rebound) && rebound != null
+                    && rebound.GetDeclaredSymbol(inlined, ct) is IMethodSymbol inlinedElements
+                    && rebound.GetOperation(inlined, ct) is ILocalFunctionOperation { Body: { } inlinedBody }
+                    && !inlinedBody.Descendants().Any(o => o.Kind == OperationKind.Invalid))
+                    (speculative, elements, operation) = (rebound, inlinedElements, inlinedBody);
+            }
+        }
 
         var lane = new Lane(elements, true, false, Symbols.FastFloats(method), speculative, true, method)
         {
             Streams = new HashSet<IParameterSymbol>(elements.Parameters.Take(streams.Count), SymbolEqualityComparer.Default),
+            Sums = values.Select((v, i) => (v, i)).Where(x => sums.ContainsKey(x.v))
+                .ToDictionary(x => elements.Parameters[streams.Count + x.i], x => sums[x.v], (IEqualityComparer<IParameterSymbol>)SymbolEqualityComparer.Default),
+            Index = indexValue ? elements.Parameters[streams.Count + values.Count] : null,
         };
         var code = Vectorize(lane, operation, static (i, _) => $"x{i}", ct, out reason);
         if (code == null) return null;
-        if (code.Wide != null || code.Statics.Length > 0 || code.Gathers || code.VectorTail || code.StructuralChanges.Length > 0 || code.Fold.Length > 0)
+        if (code.Wide != null || code.Statics.Length > 0 || code.Gathers || code.VectorTail || code.StructuralChanges.Length > 0)
         {
             reason = Why("it needs a form of the vector loop element loops do not take yet (a wide element, gathers, records)");
             return null;
         }
 
+        // A span written and read at another offset: the loop as written reads elements it wrote (s[i] = s[i - 1]), or
+        // reads ahead what a vector's stores would have changed first; the vector form loads a whole vector before it
+        // stores one, so it stays scalar.
+        for (int s = 0; s < streams.Count; s++)
+            if (code.Written.Contains(s + 1) && streams.FirstOrDefault(o => SymbolEqualityComparer.Default.Equals(o.Symbol, streams[s].Symbol) && o.Offset != streams[s].Offset) is { Symbol: not null } other)
+            {
+                reason = Why($"it writes span '{streams[s].Symbol.Name}' and reads it at another index ('{streams[s].Symbol.Name}[{index!.Name}{Shift(other.Offset)}]'): each element would read what the loop wrote, or is about to write, one element before; write into another span");
+                return null;
+            }
+
         return new ElementLoop(code,
-            streams.Select(s => (s.Span, s.Element.ToDisplayString(Symbols.Fqn), code.Written.Contains(streams.IndexOf(s) + 1))).ToArray(),
-            values.Select(v => (TypeOf(v).ToDisplayString(Symbols.Fqn), global::EasyEcs.Generator.Code.Escape(v.Name))).ToArray(),
+            streams.Select(s => (s.Span, s.Element.ToDisplayString(Symbols.Fqn), code.Written.Contains(streams.IndexOf(s) + 1), s.Offset)).ToArray(),
+            values.Select(v => (TypeOf(v).ToDisplayString(Symbols.Fqn), global::EasyEcs.Generator.Code.Escape(v.Name), sums.ContainsKey(v))).ToArray(),
             loop is ForEachStatementSyntax) { Bound = boundText };
     }
 
+    /// <summary>
+    /// How <paramref name="loop"/> writes <paramref name="variable"/>, a variable of the method, when every use of it is a
+    /// statement that sums into it (<c>t += e</c>, <c>t -= e</c>, <c>t++</c>, <c>t--</c>: "+") or takes its Min or Max
+    /// with a value (<c>t = Math.Min(t, e)</c>, either side: "Min" / "Max"), all the same operation, the value not
+    /// reading it: the loop's result then does not depend on the order of its elements (the sum of integers wraps;
+    /// Kernel.Summed has the floats). Else null: the variable is read, or written otherwise.
+    /// </summary>
+    private static string? SumOf(ISymbol variable, IOperation loop)
+    {
+        string? op = null;
+        foreach (var use in loop.Descendants())
+        {
+            if (!IsVariable(use, variable)) continue;
+            string? found = use.Parent switch
+            {
+                ICompoundAssignmentOperation { OperatorKind: BinaryOperatorKind.Add or BinaryOperatorKind.Subtract, OperatorMethod: null } a
+                    when a.Target == use && a.Parent is IExpressionStatementOperation => "+",
+                IIncrementOrDecrementOperation { OperatorMethod: null } a when a.Parent is IExpressionStatementOperation => "+",
+                ISimpleAssignmentOperation { Parent: IExpressionStatementOperation } a when a.Target == use => MinMax(a.Value, variable),
+                IArgumentOperation { Parent: IInvocationOperation { Parent: ISimpleAssignmentOperation { Parent: IExpressionStatementOperation } a } call }
+                    when a.Value == call && IsVariable(a.Target, variable) => MinMax(call, variable),
+                _ => null,
+            };
+            if (found == null || op != null && op != found) return null;
+            op = found;
+        }
+        return op;
+
+        // Math.Min(t, e) / Math.Max(e, t) (MathF, or the number type's own): exactly one argument is the variable.
+        static string? MinMax(IOperation value, ISymbol variable) =>
+            value is IInvocationOperation { Instance: null, Arguments.Length: 2, TargetMethod: { Name: "Min" or "Max" } m } call && IsMath(m)
+            && IsVariable(call.Arguments[0].Value, variable) != IsVariable(call.Arguments[1].Value, variable) ? m.Name : null;
+
+        static bool IsVariable(IOperation op, ISymbol variable) => op switch
+        {
+            ILocalReferenceOperation l => SymbolEqualityComparer.Default.Equals(l.Local, variable),
+            IParameterReferenceOperation p => SymbolEqualityComparer.Default.Equals(p.Parameter, variable),
+            _ => false,
+        };
+    }
+
+    /// <summary>
+    /// An int expression of an element loop's index and uniform ints (<c>i * 5 + k</c>) in lanes of the 8-byte integer
+    /// <paramref name="t"/>: +, -, *, &amp;, |, ^, ~ and negation, whose low 32 bits are the int's whatever the high ones;
+    /// <c>Exact</c> when it is the index alone (no int wraps). Null for anything else.
+    /// </summary>
+    private (string Text, bool Exact)? WideIndex(IOperation op, string t)
+    {
+        while (op is IParenthesizedOperation p) op = p.Operand;
+        if (op is IParameterReferenceOperation { Parameter: var index } && SymbolEqualityComparer.Default.Equals(index, _index))
+            return ($"({V}.Create<{t}>(({t}){Row}) + {Vec(t)}.Indices)", true);
+        if (!IsInt(op.Type)) return null;
+        if (IsUniform(op)) return ($"{V}.Create<{t}>(({t}){Scalar(op)})", false);
+        switch (op)
+        {
+            case IBinaryOperation { OperatorMethod: null, IsChecked: false, OperatorKind: var kind } b
+                when kind is BinaryOperatorKind.Add or BinaryOperatorKind.Subtract or BinaryOperatorKind.Multiply or BinaryOperatorKind.And or BinaryOperatorKind.Or or BinaryOperatorKind.ExclusiveOr:
+                if (WideIndex(b.LeftOperand, t) is not { } l || WideIndex(b.RightOperand, t) is not { } r) return null;
+                string sign = kind switch
+                {
+                    BinaryOperatorKind.Add => "+", BinaryOperatorKind.Subtract => "-", BinaryOperatorKind.Multiply => "*",
+                    BinaryOperatorKind.And => "&", BinaryOperatorKind.Or => "|", _ => "^",
+                };
+                return ($"({l.Text} {sign} {r.Text})", false);
+            case IUnaryOperation { OperatorMethod: null, IsChecked: false, OperatorKind: UnaryOperatorKind.Minus or UnaryOperatorKind.BitwiseNegation } u
+                when WideIndex(u.Operand, t) is { } operand:
+                return ($"({(u.OperatorKind == UnaryOperatorKind.Minus ? "-" : "~")}{operand.Text})", false);
+            default:
+                return null;
+        }
+    }
+
     /// <summary>The name a stream takes as a parameter: a foreach's variable keeps its own; a span read at the index is <c>__e_s</c>.</summary>
-    private static string StreamName(ISymbol span, bool forEach = false) => forEach ? global::EasyEcs.Generator.Code.Escape(span.Name) : "__e_" + span.Name;
+    private static string StreamName(ISymbol span, bool forEach = false, int offset = 0) =>
+        forEach ? global::EasyEcs.Generator.Code.Escape(span.Name) : "__e_" + span.Name + (offset == 0 ? "" : offset < 0 ? $"_m{-offset}" : $"_p{offset}");
+
+    /// <summary><c> + k</c> / <c> - k</c> as C# writes an offset after the index, "" for 0.</summary>
+    internal static string Shift(int offset) => offset == 0 ? "" : offset < 0 ? $" - {-offset}" : $" + {offset}";
+
+    /// <summary>
+    /// The expression an index use <paramref name="name"/> is the whole of (<c>i</c>, <c>i + k</c>, <c>k + i</c>, <c>i - k</c>
+    /// for an int constant k up to 64), with k; else the name itself and 0.
+    /// </summary>
+    private static (ExpressionSyntax Expression, int Offset) OffsetOf(IdentifierNameSyntax name, SemanticModel model, System.Threading.CancellationToken ct)
+    {
+        if (name.Parent is BinaryExpressionSyntax { RawKind: (int)SyntaxKind.AddExpression or (int)SyntaxKind.SubtractExpression } b
+            && (b.Left == name || b.IsKind(SyntaxKind.AddExpression))
+            && model.GetConstantValue(b.Left == name ? b.Right : b.Left, ct) is { HasValue: true, Value: int k } && k is >= -64 and <= 64)
+            return (b, b.IsKind(SyntaxKind.SubtractExpression) ? -k : k);
+        return (name, 0);
+    }
 
     private static ITypeSymbol TypeOf(ISymbol variable) => variable switch
     {

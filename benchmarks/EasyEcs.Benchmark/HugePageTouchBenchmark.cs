@@ -113,7 +113,7 @@ public unsafe partial class HugePageTouchBenchmark
         return array;
     }
 
-    private static (nint First, nuint Length) Interior(byte[] array)
+    internal static (nint First, nuint Length) Interior(byte[] array)
     {
         const nuint page = 2 << 20;
         nuint start = (nuint)Unsafe.AsPointer(ref MemoryMarshal.GetArrayDataReference(array));
@@ -122,7 +122,7 @@ public unsafe partial class HugePageTouchBenchmark
         return end > first ? ((nint)first, end - first) : (0, 0);
     }
 
-    private static int Touch(byte[] array)
+    internal static int Touch(byte[] array)
     {
         for (int i = 0; i < array.Length; i += 4096) array[i] = 1;
         return array[^1];
@@ -146,8 +146,8 @@ public unsafe partial class HugePageTouchBenchmark
     }
 
     [LibraryImport("libc.so.6", EntryPoint = "madvise")]
-    private static partial int madvise(nint address, nuint length, int advice);
+    internal static partial int madvise(nint address, nuint length, int advice);
 
     [LibraryImport("libc.so.6", EntryPoint = "mincore")]
-    private static partial int mincore(nint address, nuint length, byte* residency);
+    internal static partial int mincore(nint address, nuint length, byte* residency);
 }

@@ -184,7 +184,8 @@ public static partial class EasyEcsAnalyzer
     private static void ReportElementLoops(SyntaxNodeAnalysisContext context, IMethodSymbol method, MethodDeclarationSyntax syntax)
     {
         if (syntax.Body == null || !syntax.Body.DescendantNodes().Any(static n => n is ForStatementSyntax or ForEachStatementSyntax)) return;
-        foreach (var (loop, vector, reason) in Kernel.ElementLoops(method, syntax, context.SemanticModel, context.CancellationToken))
+        if (HandSimd.MayBe(syntax)) return; // a vector loop written by hand (EECS103's in a batch method): its loops left are its scalar tail
+        foreach (var (loop, vector, reason) in Kernel.ElementLoops(method, syntax.Body, context.SemanticModel, context.CancellationToken))
             if (vector == null && reason != null && Kernel.WalksElements(loop, context.SemanticModel, context.CancellationToken))
                 context.ReportDiagnostic(Diagnostic.Create(ScalarElementLoop, SystemGenerator.LoopKeyword(loop),
                     reason.IsFixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info, null, null, method.Name, reason.Text));
@@ -208,11 +209,11 @@ public static partial class EasyEcsAnalyzer
         if (mode == Symbols.SimdOff || mode == Symbols.SimdAuto && !Kernel.LooksEligible(method))
         {
             ReportChases(context, method, syntax);
-            if (mode != Symbols.SimdOff && !(PairForm.IsPairMethod(method) || Symbols.IsDrain(method) || Symbols.IsBatch(method))) ReportElementLoops(context, method, syntax);
+            if (mode != Symbols.SimdOff && !(PairForm.IsPairMethod(method) || Symbols.IsDrain(method))) ReportElementLoops(context, method, syntax);
             return;
         }
         if (Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out Kernel.ScalarReason? reason) != null) return;
-        if (!(PairForm.IsPairMethod(method) || Symbols.IsDrain(method) || Symbols.IsBatch(method))) ReportElementLoops(context, method, syntax);
+        if (!(PairForm.IsPairMethod(method) || Symbols.IsDrain(method))) ReportElementLoops(context, method, syntax);
         if (ReportChases(context, method, syntax)
             || mode == Symbols.SimdAuto && AccumulatesByHand(method, syntax, context.SemanticModel, context.CancellationToken)) return; // EECS086's
 

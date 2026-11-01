@@ -50,7 +50,13 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
   (`HugePages`: Linux only, off after a failed call), never from native blocks: the GC frees the arrays, so a `ref`
   kept across a resize never reads freed memory; a new large unmanaged array of a table goes through
   `ComponentInfo.Create` (or calls `HugePages.AllocatePinned`), with `sized` false for a doubling step or a trim
-  (only arrays a reservation or a copy sized take huge pages, as `World.AllocateMeta` does for the records).
+  (only arrays a reservation or a copy sized take huge pages, as `World.AllocateMeta` does for the records); the
+  arrays of a user's reservation, whose rows are written later (`Reserve<T..>`, `Reserve(prefab, n)`,
+  `EnsureEntityCapacity`, the initial capacity: columns, entity rows, records, free-id list), are faulted in through
+  `prefault` (`Archetype.Reserve`, `World.Grow` / `ReserveIds` calling `HugePages.Populate`), so the tick that fills
+  them pays no fault; a call that writes every row it allocates (a load, a restore, a snapshot, `CreateEntities`, a
+  move) passes `prefault: false` and leaves them to the first touch (feat-page-faults). Count a memory change's
+  faults before and after (`audit-perf`, page faults), never only its time.
 - **`ArrayPool<T>.Shared` in steady state**: never on a path that runs after warm-up (a sort, a search, a pass). Under
   high memory load (90 % of the GC's threshold, another process's benchmark holding gigabytes) the pool drops its
   arrays at every gen2 collection, so each rent after one allocates (8 KB to 590 KB in 0 B tests of loaded suite runs,

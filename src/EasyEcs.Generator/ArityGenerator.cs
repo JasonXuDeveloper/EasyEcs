@@ -305,8 +305,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             var target = ({{(n == 1 ? "_emptyArchetype.GetAddEdge(b1) ?? CreateEdge(_emptyArchetype, b1)"
                                 : $"_emptyArchetype.GetAddSetEdge({signature}) ?? CreateSetEdge(_emptyArchetype, [{List(n, i => $"b{i}")}], {signature})")}}).Target;
                             if (count <= 0) return;
-                            ReserveIds(count);
-                            target.Reserve(target.Count + count);
+                            ReserveIds(count, true);
+                            target.Reserve(target.Count + count, true); // filled later: its pages faulted in now
                             ReserveBeside(target, count);
                             StorageVersion++; // its columns may have moved: a pass in progress refreshes its refs
                         }

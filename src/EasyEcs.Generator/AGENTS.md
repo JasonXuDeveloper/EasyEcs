@@ -49,12 +49,16 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              locals (Locals counts them), else each in an AggressiveInlining method of the job (D135);
                              StreamLoop: a NoInlining method of the job (__Stream) streaming the write-only columns,
                              called once per run past the last-level cache (StreamingStores.Pays);
-                             SystemGenerator.Elements.cs: a method left scalar whose loops over spans have vector forms
-                             (Kernel.Loops.cs) copied into the generated file (BodyCopy, #line to the user's file) in
-                             place of its UnsafeAccessor, each such loop preceded by a call of its NoInlining
-                             local function (__Elements{k}: whole vectors from the index given, the index it stopped at
-                             returned to the loop as written), a for-loop's under its bounds and alias guard (__Apart);
-                             a line per loop in the schedule
+                             SystemGenerator.Elements.cs: a method left scalar (a batch method's loops over its rows
+                             too) whose loops over spans have vector forms (Kernel.Loops.cs) copied into the generated
+                             file (BodyCopy, #line to the user's file) in place of its UnsafeAccessor, its type's
+                             private static helpers and fields reached through UnsafeAccessor externs of its own
+                             (BodyCopy.Accessors), each such loop preceded by a call of its NoInlining local function
+                             (__Elements{k}: whole vectors from the index given, a sum's lanes folded into its
+                             variable, the index it stopped at returned to the loop as written), a for-loop's under its
+                             bounds and alias guard (__Apart), each stream from its element at the index plus its
+                             offset; a lambda pass's body the same way (WithElementLoops); a line per loop in the
+                             schedule
 SystemGenerator.Pairs.cs     a pair method ([Neighbor] parameters, PairModel): the pass (world.ForPairs), the order
                              struct (Morton key of the compared component over the axes the test names), the job
                              (the cutoff from the test, per row or one; Width; Rows: the method per pair, over the row's
@@ -107,7 +111,8 @@ LambdaPass.cs                what a lambda pass call is, read once for the gener
 BodyCopy.cs                  user code copied into a generated file (a lambda pass's body, a method with element loops):
                              Copy (names of types, namespaces and static members qualified, constants as their values,
                              statements a caller replaces), Usings (the directives extension calls need), Unreachable /
-                             Blocking (a name another file cannot reach), Constant
+                             Blocking (a name another file cannot reach), Accessors (a method's private static helpers
+                             and fields of its own type through UnsafeAccessor externs), Constant
 ComponentGenerator.cs        C# 14 extension members per component / singleton: entity.X (ref T; ref readonly for
                              tracked or indexed), HasX, TryGetX, GetOrAddX, SetX(ctor args), SetXIfChanged, RemoveX,
                              tags IsX,
@@ -186,10 +191,17 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              loop's text: Code.Streamed, FlatCode.Streamed) and the streaming loop's text (Streaming:
                              their loads dropped, their stores StreamingStores.Store);
                              Kernel.Loops.cs: element loops, the for / foreach loops over spans and buffers inside a
-                             method (ElementLoops: each loop's vector code or its ScalarReason; a for-loop indexing its
-                             spans at its counter only, a bound the loop does not write; the body desugared into a
-                             static local function whose ref parameters are the elements (Lane.Streams) and translated
-                             by Kernel; break, return, nested loops and values the loop writes stay scalar);
+                             method or a lambda pass (ElementLoops: each loop's vector code or its ScalarReason; a
+                             for-loop indexing its spans at its counter or a constant from it (s[i - 1]: a stream
+                             per offset; a span written and read at another offset stays scalar), the counter also
+                             read as a value (lanes of
+                             the indexes, WideIndex for 8-byte integers), a bound the loop does not write; variables of
+                             the method written only as sums, Mins or Maxes (SumOf: Lane.Sums, Kernel.Summed's
+                             reductions folded into the variable); the body desugared into a static local function
+                             whose ref parameters are the elements (Lane.Streams), bound in the loop's place, its
+                             calls inlined, and translated by Kernel; break, return, nested loops and other writes of
+                             the method's variables stay scalar; WalksElements: the loops EECS055 reports, not a vector
+                             loop written by hand, not one holding another loop);
                              Kernel.Switches.cs: patterns and switches as lane masks (relational, constant, and / or /
                              not, property, positional, tuple, type and var patterns; a switch expression first match
                              wins from its arms' masks, the lanes no arm matches sent to the method; a switch statement's
