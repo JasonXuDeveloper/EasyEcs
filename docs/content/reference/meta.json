@@ -111,6 +111,8 @@
     "targetpolicyextensions",
     "tile",
     "tileboundary",
+    "tilecolumnwalk",
+    "tilecolumnwalk-cursor",
     "tilecursor",
     "tilefaces",
     "tileids",

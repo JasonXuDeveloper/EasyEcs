@@ -59,6 +59,19 @@ public FusionMode FusionMode { get; init; }
 
 方法是否和系统里与它相邻声明的 [ForEach] 方法共用一次遍历（遍历融合：每行只载入缓存一次，几个方法按声明顺序在这一行上运行）。[`FusionMode.Auto`](/zh/docs/reference/fusionmode#auto)：一次遍历和分开遍历结果相同时（过滤条件和设置相同、没有结构变更、不读别的实体，也不读另一个方法写的单例），融合相邻的方法，差一点就能融合时报告原因（EECS093，一条消息）；[`FusionMode.Require`](/zh/docs/reference/fusionmode#require)：方法没有和前一个方法共用遍历就报错（EECS094）；[`FusionMode.Off`](/zh/docs/reference/fusionmode#off)：方法单独遍历。默认 [`FusionMode.Auto`](/zh/docs/reference/fusionmode#auto)。
 
+### `MaxRows` [#maxrows]
+
+```csharp
+public int MaxRows { get; init; }
+```
+
+方法每次运行最多处理的行数：给一次处理所有行代价太高的工作一个预算（这个 tick 要加载或保存的区块、服务器每个 tick 处理的请求）。遍历开始时按 `Query` 访问的顺序收集前 N 个匹配的行，然后在遍历之外对每一行运行方法（[`World.ForEachCollected`](/zh/docs/reference/world#foreachcollected)），所以方法可以做任何变更：可以调用 `LoadEntities`、`SaveEntities` 和遍历中不允许的其他调用。超出预算的行等下一次运行；配合 [[Consume]](/zh/docs/reference/consumeattribute)，每一行在方法运行之后销毁，下一次运行取后面的行。前面某一行的方法销毁了的行，或者改得不再匹配的行，会跳过。方法拿到的组件是行里组件的副本，`ref` 的组件在方法运行之后写回（写到实体移到的行，除非实体失去了这些组件）。逐个实体、在一个线程上运行：不能和 [`ForEachAttribute.Parallel`](/zh/docs/reference/foreachattribute#parallel)、[`ForEachAttribute.Slices`](/zh/docs/reference/foreachattribute#slices)、组件 span、`[Changed<T>]` / `[Removed<T>]`（超出预算的行会丢掉它们的变化）、[`Mut`](/zh/docs/reference/mut)、[`Maybe`](/zh/docs/reference/maybe)、视图、瓦片、[`Scratch`](/zh/docs/reference/scratch) 或 `[Neighbor]` 一起用（EECS118）。默认 0：所有行，一次遍历。
+
+```csharp
+[ForEach(MaxRows = 8), Consume]
+static void Load(in LoadRequest request, World world) => world.LoadEntities(Files.Read(request.Pos));   // 8 a tick
+```
+
 ### `Parallel` [#parallel]
 
 ```csharp

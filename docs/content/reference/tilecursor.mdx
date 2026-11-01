@@ -29,6 +29,14 @@ The cell at (dx, dy, dz) from the row's first cell. O(1).
 
 ## Methods
 
+### `Columns` [#columns]
+
+```csharp
+public TileColumnWalk<TCell, TTile> Columns(int step);
+```
+
+The columns of the row from 0, every `step` cells while under Width, walked with `foreach` (`foreach (var col in c.Columns(4))`, a vector of four floats per column): each a cursor at its column, whose loads take offsets from that column and whose `col.Store(vector, into)` writes the row the step writes at the column. The walk knows its first and last column, so a load at constant offsets is checked by the JIT alone, a store by one compare of the row's length, and the loads of one column share one address with each offset folded into the instruction: the loop a stencil would write by hand over its own texture. O(1) per column; throws when `step` is not 1 to Width.
+
 ### `Load128` [#load128]
 
 ```csharp
