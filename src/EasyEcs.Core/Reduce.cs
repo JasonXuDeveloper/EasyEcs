@@ -40,11 +40,17 @@ public interface IReduction<T> where T : struct
 /// address a ref field holds stays in memory, a load and a store per row (a float sum then runs several times
 /// slower).
 /// </para>
+/// <para>
+/// In a cell method (a <c>[ForEach]</c> method taking <see cref="Cell{TCell, TTile}"/>), <typeparamref name="T"/> may be a
+/// component of the tile's entity instead: a result per tile. Each tile starts at <see cref="IReduction{T}.Identity"/>,
+/// its cells combine into it, and the pass writes it into the entity's <typeparamref name="T"/> (a write of that
+/// component, stamped once per tile).
+/// </para>
 /// The system writes <typeparamref name="T"/> (once per pass); <see cref="Value"/> holds this chunk's partial result,
 /// not the total.
 /// </summary>
-/// <typeparam name="T">The singleton holding the result, which combines with itself.</typeparam>
-public struct Reduce<T> where T : struct, ISingletonComponent, IReduction<T>
+/// <typeparam name="T">The singleton holding the result (a cell method's: the tile entity's component), which combines with itself.</typeparam>
+public struct Reduce<T> where T : struct, IReduction<T>
 {
     /// <summary>The partial result of this chunk of rows (of the pass, on one thread): write its fields.</summary>
     public T Value;

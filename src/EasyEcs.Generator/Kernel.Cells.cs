@@ -37,6 +37,7 @@ internal sealed partial class Kernel
     {
         var cells = Symbols.Cells(method);
         var outputs = method.Parameters.Where(p => Symbols.CellOut(p) != null).ToList();
+        var results = method.Parameters.Where(p => Symbols.TileResult(p) != null).ToList();
         SyntaxNode? body = (SyntaxNode?)syntax.Body ?? syntax.ExpressionBody?.Expression;
         var offsets = new List<(int, int, int, int)>();
         bool x = false, y = false, z = false;
@@ -83,6 +84,7 @@ internal sealed partial class Kernel
 
         // The values: the method's other parameters the body names, then the row's Y and Z where it reads them.
         var others = method.Parameters.Where(p => !cells.Contains(p, SymbolEqualityComparer.Default) && !outputs.Contains(p, SymbolEqualityComparer.Default)
+            && !results.Contains(p, SymbolEqualityComparer.Default)
             && body.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>().Any(n => SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(n, ct).Symbol, p))).ToList();
         if (others.FirstOrDefault(p => p.RefKind is RefKind.Ref or RefKind.Out || p.Type.IsRefLikeType) is { } written)
             return new CellForm(new(offsets.ToArray()), place, null, new([]), $"it takes '{written.Name}' {(written.Type.IsRefLikeType ? $"(a {written.Type.Name})" : "by ref")}: a cell's vector form reads values the same for the row and writes only its out cells", true);
@@ -93,7 +95,7 @@ internal sealed partial class Kernel
         var parameters = new List<ParameterSyntax>();
         for (int s = 0; s < offsets.Count; s++)
             parameters.Add(Parameter(Identifier(Stream(s))).WithType(ParseTypeName(CellName(offsets[s].Item1))).WithModifiers(TokenList(Token(SyntaxKind.InKeyword))));
-        foreach (var output in outputs)
+        foreach (var output in outputs.Concat(results))
             parameters.Add(Parameter(Identifier(global::EasyEcs.Generator.Code.Escape(output.Name))).WithType(ParseTypeName(output.Type.ToDisplayString(Symbols.Fqn)))
                 .WithModifiers(TokenList(Token(SyntaxKind.RefKeyword))));
         var values = new List<string>();
@@ -112,7 +114,7 @@ internal sealed partial class Kernel
         int position = syntax.Body?.SpanStart ?? syntax.ExpressionBody!.Expression.SpanStart;
         var driver = Enumerable.Range(0, offsets.Count).Where(s => offsets[s].Item1 == 0).ToArray();
         var loop = Translated(method, syntax, model, function, position, offsets.Count + outputs.Count, values.Count, x, ct, out reason, out bool fixable,
-            driver, outputs.Count, out bool constant);
+            driver, outputs.Count, results.Count, out bool constant);
         if (loop == null) return new CellForm(new(offsets.ToArray()), place, null, new([]), reason, fixable, constant);
         var streams = offsets.Select(o => ($"{o}", CellName(o.Item1), false, 0))
             .Concat(outputs.Select(o => ($"{o.Name}", o.Type.ToDisplayString(Symbols.Fqn), true, 0))).ToArray();
@@ -133,7 +135,7 @@ internal sealed partial class Kernel
     /// </summary>
     private static Code? Translated(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, LocalFunctionStatementSyntax function,
         int position, int streams, int values, bool index, System.Threading.CancellationToken ct, out string? reason, out bool fixable,
-        int[] blank, int outputs, out bool constant)
+        int[] blank, int outputs, int results, out bool constant)
     {
         reason = null;
         fixable = false;
@@ -166,12 +168,14 @@ internal sealed partial class Kernel
         var read = streams - outputs;
         constant = ConstantOnBlank(operation,
             new HashSet<IParameterSymbol>(blank.Select(b => elements.Parameters[b]), SymbolEqualityComparer.Default),
-            new HashSet<IParameterSymbol>(elements.Parameters.Skip(read).Take(outputs), SymbolEqualityComparer.Default));
+            new HashSet<IParameterSymbol>(elements.Parameters.Skip(read).Take(outputs), SymbolEqualityComparer.Default),
+            new HashSet<IParameterSymbol>(elements.Parameters.Skip(streams).Take(results), SymbolEqualityComparer.Default));
         var lane = new Lane(elements, true, false, Symbols.FastFloats(method), speculative, true, method)
         {
             Streams = new HashSet<IParameterSymbol>(elements.Parameters.Take(streams), SymbolEqualityComparer.Default),
             Sums = new Dictionary<IParameterSymbol, string>(SymbolEqualityComparer.Default),
-            Index = index ? elements.Parameters[streams + values] : null,
+            Results = new HashSet<IParameterSymbol>(elements.Parameters.Skip(streams).Take(results), SymbolEqualityComparer.Default),
+            Index = index ? elements.Parameters[streams + results + values] : null,
         };
         var code = Vectorize(lane, operation, static (i, _) => $"x{i}", ct, out var why);
         if (code == null)

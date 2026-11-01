@@ -482,13 +482,16 @@ internal sealed partial class Kernel
         /// </summary>
         public Dictionary<IParameterSymbol, string>? Sums { get; init; }
 
+        /// <summary>A cell method's body: its <c>ref Reduce&lt;T&gt;</c> results per tile, which the lanes fold into (<see cref="Reduced"/>).</summary>
+        public HashSet<IParameterSymbol>? Results { get; init; }
+
         /// <summary>An element loop's body: its parameter that is the loop's index read as a value (<c>s[i] = i</c>), or null.</summary>
         public IParameterSymbol? Index { get; init; }
 
         /// <summary>What parameter <paramref name="p"/> is to the loop: <see cref="Symbols.Classify(IParameterSymbol, bool)"/>'s kind, or an element loop's.</summary>
         public Symbols.ParamKind Kind(IParameterSymbol p) => Streams == null ? Symbols.Classify(p, Outside)
             : Streams.Contains(p) ? Symbols.ParamKind.Component
-            : Sums != null && Sums.ContainsKey(p) ? Symbols.ParamKind.Reduction
+            : Sums != null && Sums.ContainsKey(p) || Results != null && Results.Contains(p) ? Symbols.ParamKind.Reduction
             : p.Type.IsRefLikeType || p.RefKind != RefKind.None ? Symbols.ParamKind.Invalid
             : Symbols.ParamKind.Context;
     }

@@ -14,7 +14,9 @@ namespace EasyEcs.Generator;
 /// condition both of whose arms agree, false &amp;&amp; x, x * 0 for integers). Anything it does not read (a call left,
 /// a loop, a write of anything but its locals and out cells) fails the proof: the pass then walks every row, as
 /// before. Exact by construction: a skipped row gets what the method computes on blank cells, which the proof shows is
-/// what it computes on that row.
+/// what it computes on that row. A result per tile (<c>ref Reduce&lt;T&gt;</c>) must come out unchanged too: each field
+/// starts at a value of its own (unknown) that only its operation's identity keeps (x + 0, x | 0, x &amp; ~0, Min with
+/// the type's largest value, Max with its smallest), so a skipped row adds nothing to it.
 /// </summary>
 internal sealed partial class Kernel
 {
@@ -24,21 +26,45 @@ internal sealed partial class Kernel
     /// </summary>
     private sealed class OpaqueValue;
 
+    /// <summary>A result field's value before the body ran: kept only by its operation's identity.</summary>
+    private sealed class StartValue(ITypeSymbol type)
+    {
+        public readonly ITypeSymbol Type = type;
+    }
+
     /// <summary>
     /// Whether <paramref name="body"/>, with the parameters of <paramref name="blank"/> 0 and those of
     /// <paramref name="outputs"/> its results, assigns each out cell a value that does not depend on the rest.
     /// </summary>
-    internal static bool ConstantOnBlank(IOperation body, ISet<IParameterSymbol> blank, ISet<IParameterSymbol> outputs)
+    /// <param name="results">The <c>ref Reduce&lt;T&gt;</c> results per tile, whose fields must end where they started.</param>
+    internal static bool ConstantOnBlank(IOperation body, ISet<IParameterSymbol> blank, ISet<IParameterSymbol> outputs, ISet<IParameterSymbol> results)
     {
         var state = new Dictionary<ISymbol, object?>(SymbolEqualityComparer.Default);
         foreach (var o in outputs) state[o] = null; // unassigned: C# requires the body to assign each one
-        var eval = new BlankEval(blank, outputs);
+        var eval = new BlankEval(blank, outputs, results);
         if (!eval.Run(body, state)) return false;
-        return outputs.All(o => state.TryGetValue(o, out var v) && v != null && eval.Assigned.Contains(o));
+        return outputs.All(o => state.TryGetValue(o, out var v) && v != null && eval.Assigned.Contains(o))
+            && eval.Fields.All(f => f.Value is StartValue start && ReferenceEquals(eval.Starts[f.Key], start));
     }
 
-    private sealed class BlankEval(ISet<IParameterSymbol> blank, ISet<IParameterSymbol> outputs)
+    private sealed class BlankEval(ISet<IParameterSymbol> blank, ISet<IParameterSymbol> outputs, ISet<IParameterSymbol> results)
     {
+        /// <summary>Each result field the body reads or writes ("r.F"): its value now, and the one it started at.</summary>
+        public readonly Dictionary<string, object?> Fields = new();
+        public readonly Dictionary<string, StartValue> Starts = new();
+
+        /// <summary>The key of <paramref name="op"/> when it is a field of a result (<c>r.Value.F</c>), with the field's type; else null.</summary>
+        private string? ResultField(IOperation op, out ITypeSymbol? type)
+        {
+            type = null;
+            if (op is not IFieldReferenceOperation { Field: var field, Instance: IFieldReferenceOperation { Field.Name: "Value", Instance: IParameterReferenceOperation { Parameter: var r } } }
+                || !results.Contains(r)) return null;
+            string key = r.Name + "." + field.Name;
+            type = field.Type;
+            if (!Starts.ContainsKey(key)) Fields[key] = Starts[key] = new StartValue(field.Type);
+            return key;
+        }
+
         /// <summary>The out cells the body assigns (on every path that reaches the end).</summary>
         public readonly HashSet<IParameterSymbol> Assigned = new(SymbolEqualityComparer.Default);
 
@@ -72,7 +98,11 @@ internal sealed partial class Kernel
                     // Unknown: both arms from the same state, then each symbol keeps a value only where they agree.
                     var other = new Dictionary<ISymbol, object?>(state, SymbolEqualityComparer.Default);
                     var assigned = new HashSet<IParameterSymbol>(Assigned, SymbolEqualityComparer.Default);
+                    var fields = new Dictionary<string, object?>(Fields);
                     if (!Run(branch.WhenTrue, state)) return false;
+                    var fieldsTrue = new Dictionary<string, object?>(Fields);
+                    Fields.Clear();
+                    foreach (var f in fields) Fields[f.Key] = f.Value;
                     var afterTrue = new HashSet<IParameterSymbol>(Assigned, SymbolEqualityComparer.Default);
                     Assigned.Clear();
                     Assigned.UnionWith(assigned);
@@ -82,6 +112,10 @@ internal sealed partial class Kernel
                         if (!other.TryGetValue(key, out var v) || !Same(state[key], v)) state[key] = null;
                     foreach (var key in other.Keys)
                         if (!state.ContainsKey(key)) state[key] = null;
+                    foreach (var f in fieldsTrue) // a field read first in one arm started there: its start is the same object
+                        Fields[f.Key] = Fields.TryGetValue(f.Key, out var v) && Same(v, f.Value) ? v : null;
+                    foreach (var key in Fields.Keys.ToList())
+                        if (!fieldsTrue.ContainsKey(key)) Fields[key] = null;
                     return true;
                 }
                 case IEmptyOperation:
@@ -111,6 +145,11 @@ internal sealed partial class Kernel
 
         private bool Assign(IOperation target, object? value, Dictionary<ISymbol, object?> state)
         {
+            if (ResultField(target, out _) is { } key)
+            {
+                Fields[key] = value;
+                return true;
+            }
             switch (target)
             {
                 case ILocalReferenceOperation local:
@@ -145,6 +184,8 @@ internal sealed partial class Kernel
                 case IParameterReferenceOperation { Parameter: var p }:
                     if (blank.Contains(p)) return Default(p.Type);
                     return outputs.Contains(p) && state.TryGetValue(p, out var o) ? o : null;
+                case IFieldReferenceOperation when ResultField(op, out _) is { } key:
+                    return Fields[key];
                 case IFieldReferenceOperation { Instance: { } instance } field:
                     if (instance is IParameterReferenceOperation { Parameter: var cell } && blank.Contains(cell)) return Default(field.Type!);
                     return null; // a field of anything else: not followed
@@ -183,6 +224,9 @@ internal sealed partial class Kernel
                     {
                         "Min" or "Max" when args.Length == 2 && Number(args[0]) && Number(args[1])
                             => Arith(call.TargetMethod.Name, args[0]!, args[1]!, call.Type),
+                        "Min" or "Max" when args.Length == 2 && (args[0] as StartValue ?? args[1] as StartValue) is { } start
+                            && (args[0] is StartValue ? args[1] : args[0]) is var bound && Number(bound) && Keeps(call.TargetMethod.Name, start.Type, bound!)
+                            => start,
                         _ => args.All(a => a != null) ? new OpaqueValue() : null, // a pure function of known values
                     };
                 }
@@ -206,6 +250,10 @@ internal sealed partial class Kernel
 
         private static object? Binary(BinaryOperatorKind kind, object? x, object? y, ITypeSymbol? type)
         {
+            // A result's start combined with its operation's identity is still the start.
+            if (x is StartValue start && Number(y) && Keeps(kind.ToString(), start.Type, y!)) return start;
+            if (y is StartValue other && Number(x) && kind is BinaryOperatorKind.Add or BinaryOperatorKind.Or or BinaryOperatorKind.And
+                && Keeps(kind.ToString(), other.Type, x!)) return other;
             // What one known side decides whatever the other holds (integers and bools only: 0 * NaN is NaN).
             if (!(Number(x) || x is bool) || !(Number(y) || y is bool))
             {
@@ -273,7 +321,40 @@ internal sealed partial class Kernel
         private static long Width(ITypeSymbol? type) => type?.SpecialType is SpecialType.System_Int64 or SpecialType.System_UInt64 ? 63 : 31;
 
         /// <summary>Whether <paramref name="x"/> is a known number (not a bool, not an untracked constant).</summary>
-        private static bool Number(object? x) => x is not null and not bool and not OpaqueValue;
+        private static bool Number(object? x) => x is not null and not bool and not OpaqueValue and not StartValue;
+
+        /// <summary>
+        /// Whether <paramref name="op"/> with <paramref name="value"/> keeps a <paramref name="type"/> result as it was: its
+        /// identity (0 for + and |, all ones for &amp;, the type's largest value for Min and smallest for Max; a float sum
+        /// is not kept, -0 + 0 being +0).
+        /// </summary>
+        private static bool Keeps(string op, ITypeSymbol type, object value)
+        {
+            if (IsFloat(value))
+            {
+                double d = ToDouble(value);
+                return op == "Min" && double.IsPositiveInfinity(d) || op == "Max" && double.IsNegativeInfinity(d);
+            }
+            if (Convert(value, type) is not { } t || t is bool) return false;
+            return op switch
+            {
+                "Add" or "Subtract" or "Or" => ToLong(t) == 0,
+                "And" => Equals(t, Convert(-1L, type)),
+                "Min" => Equals(t, Bound(type, true)),
+                "Max" => Equals(t, Bound(type, false)),
+                _ => false,
+            };
+        }
+
+        /// <summary>The largest (or smallest) value of integer type <paramref name="type"/>, boxed as that type; else null.</summary>
+        private static object? Bound(ITypeSymbol type, bool max) => type.SpecialType switch
+        {
+            SpecialType.System_Byte => max ? byte.MaxValue : byte.MinValue, SpecialType.System_SByte => max ? sbyte.MaxValue : sbyte.MinValue,
+            SpecialType.System_Int16 => max ? short.MaxValue : short.MinValue, SpecialType.System_UInt16 => max ? ushort.MaxValue : ushort.MinValue,
+            SpecialType.System_Int32 => max ? int.MaxValue : int.MinValue, SpecialType.System_UInt32 => max ? uint.MaxValue : uint.MinValue,
+            SpecialType.System_Int64 => max ? long.MaxValue : long.MinValue, SpecialType.System_UInt64 => max ? ulong.MaxValue : ulong.MinValue,
+            _ => null,
+        };
 
         private static bool IsFloat(object x) => x is float or double or decimal;
         private static double ToDouble(object x) => x is float f ? f : System.Convert.ToDouble(x, System.Globalization.CultureInfo.InvariantCulture);
@@ -282,6 +363,7 @@ internal sealed partial class Kernel
         /// <summary><paramref name="x"/> as a value of <paramref name="type"/>, unchecked; null for a type it does not follow.</summary>
         private static object? Convert(object? x, ITypeSymbol? type)
         {
+            if (x is StartValue) return null; // a result converted: not followed
             if (x is null or OpaqueValue || type == null) return x;
             if (type.TypeKind == TypeKind.Enum) type = ((INamedTypeSymbol)type).EnumUnderlyingType;
             if (x is bool) return type?.SpecialType == SpecialType.System_Boolean ? x : null;

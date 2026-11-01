@@ -1318,6 +1318,7 @@ internal static class Symbols
         if (IsNeighbor(p)) // the other entity of a pair: its components read ('in') or written ('ref'), its Entity
             return p.RefKind is RefKind.In or RefKind.Ref && p.Type.IsValueType && IsA(p.Type, Component) || p.RefKind == RefKind.None && Named(p.Type, Entity)
                 ? ParamKind.Neighbor : ParamKind.Invalid;
+        if (TileResult(p) != null) return ParamKind.Mutable; // a cell method's result per tile: a write of the entity's T
         if (ReduceElement(p.Type) is { } reduced) // by ref only: the pass's partial result, which the method writes
             return p.RefKind == RefKind.Ref && reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;
         if (p.RefKind == RefKind.Ref && TileElements(p.Type) is { } stepped) // the method steps the tile
@@ -1378,9 +1379,18 @@ internal static class Symbols
 
     /// <summary>
     /// The component a <c>Mut&lt;T&gt;</c> parameter writes, or the <c>DynamicBuffer&lt;TOut&gt;</c> an <c>out TOut</c>
-    /// parameter of a cell method writes (<see cref="CellOut"/>), else null.
+    /// parameter of a cell method writes (<see cref="CellOut"/>), or the component its <c>ref Reduce&lt;T&gt;</c> of a tile
+    /// writes (<see cref="TileResult"/>), else null.
     /// </summary>
-    public static ITypeSymbol? MutOf(IParameterSymbol p) => MutElement(p.Type) ?? CellOut(p);
+    public static ITypeSymbol? MutOf(IParameterSymbol p) => MutElement(p.Type) ?? CellOut(p) ?? TileResult(p);
+
+    /// <summary>
+    /// The component a cell method's <c>ref Reduce&lt;T&gt;</c> writes, a result per tile (T a component of the tile's
+    /// entity, not a singleton), else null.
+    /// </summary>
+    public static ITypeSymbol? TileResult(IParameterSymbol p) =>
+        p.RefKind == RefKind.Ref && ReduceElement(p.Type) is { IsValueType: true } t && IsA(t, Component) && !IsA(t, Singleton)
+        && p.ContainingSymbol is IMethodSymbol method && IsCellMethod(method) ? t : null;
 
     /// <summary>A <c>Cell&lt;TCell, TTile&gt;</c>: a cell of a tile with its neighbors (the shader form).</summary>
     public static bool IsCell(ITypeSymbol type) =>

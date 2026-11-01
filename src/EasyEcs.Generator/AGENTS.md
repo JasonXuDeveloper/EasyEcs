@@ -50,8 +50,8 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              StreamLoop: a NoInlining method of the job (__Stream) streaming the write-only columns,
                              called once per run past the last-level cache (StreamingStores.Pays);
                              SystemGenerator.Cells.cs: a cell method's pass (Cell<TCell, TTile> inputs of one tile, the
-                             first driving the walk, the others sampled, and out cells; the job handing it a Tile per
-                             input and a Mut per out buffer) in place of its accessor: the halo,
+                             first driving the walk, the others sampled, out cells and ref Reduce<T> results per tile;
+                             the job handing it a Tile per input and a Mut per out buffer and result) in place of its accessor: the halo,
                              the out buffer sized and filled with what the method computes on Cell.Blank (the rows the
                              walk skips), the rows its offsets read (every row when it reads X, Y or Z, or takes
                              several cells), each row's vector loop inline (ElementLoops at 512 / Vector<T> / 128
@@ -204,7 +204,8 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              lanes, Y / Z and the other parameters values; or the reason EECS055 / EECS056 report);
                              Kernel.Blank.cs: the proof that lets a cell pass skip a row (ConstantOnBlank: a constant
                              evaluator over the bound, inlined body, the driving cells 0 and the rest unknown; the out
-                             cells the same whatever the rest holds, or the proof fails and every row runs);
+                             cells the same whatever the rest holds and each result field kept by its operation's
+                             identity, or the proof fails and every row runs);
                              Kernel.Loops.cs: element loops, the for / foreach loops over spans and buffers inside a
                              method or a lambda pass (ElementLoops: each loop's vector code or its ScalarReason; a
                              for-loop indexing its spans at its counter or a constant from it (s[i - 1]: a stream

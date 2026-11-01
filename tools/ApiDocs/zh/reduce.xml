@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.Reduce`1" source="24d49f3e4b1f">
+  <member name="T:EasyEcs.Reduce`1" source="5400e47436a2">
     <summary>
       把一次 <c>[ForEach]</c> 遍历归约到单例 <typeparamref name="T" />（OpenMP 的 <c>reduction</c>，MPI 的 <c>Allreduce</c>），按 <c>ref</c> 传入：
       <c>static void Count(in Health h, ref Reduce&lt;Census&gt; census) =&gt; census.Value.Alive++;</c>。并行遍历的每个块（单线程时是整次遍历）
@@ -15,9 +15,13 @@
       它是按 <c>ref</c> 传入的普通结构体，而不是持有引用的包装：遍历把每段连续行的部分结果放在局部变量里，JIT 会把按 <c>ref</c>
       传给内联方法的局部变量留在寄存器里，而地址被 ref 字段持有的局部变量只能留在内存里，每行一次读一次写（浮点求和因此慢好几倍）。
       </para>
+      <para>
+      在计算一个格子的方法（带 <see cref="T:EasyEcs.Cell`2" /> 参数的 <c>[ForEach]</c> 方法）里，<typeparamref name="T" /> 也可以是瓦片实体的组件：每个瓦片一个结果。
+      每个瓦片从 <see cref="P:EasyEcs.IReduction`1.Identity" /> 开始，它的格子合并进去，遍历把它写进实体的 <typeparamref name="T" />（对这个组件的一次写入，每个瓦片标记一次）。
+      </para>
       系统写 <typeparamref name="T" />（每次遍历一次）；<see cref="F:EasyEcs.Reduce`1.Value" /> 是这个块的部分结果，不是总数。
     </summary>
-    <typeparam name="T">存放结果的单例，它和自身合并。</typeparam>
+    <typeparam name="T">存放结果的单例（计算格子的方法的：瓦片实体的组件），它和自身合并。</typeparam>
   </member>
   <member name="F:EasyEcs.Reduce`1.Value" source="8ec3f39ac7a9">
     <summary>这一块行（单线程时是整次遍历）的部分结果：直接写它的字段。</summary>
