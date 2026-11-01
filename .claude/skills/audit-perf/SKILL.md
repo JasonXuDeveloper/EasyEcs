@@ -228,7 +228,11 @@ its own worktree.
      what the first touch costs with 2 MiB pages and 1.27x less with 4 KiB pages (one call for the trap of every page,
      PrefaultTouchBenchmark); what it buys is where the faults land: a reservation that populates leaves the tick that
      fills it free of them (PageFaultBenchmark.Wave, a reservation made on memory freed 4 s before, IterationSetup
-     with the pause). A count inside a case with `[IterationSetup]` includes the setup (the extra launch reads around
+     with the pause). Populate only memory that is not resident and that is written later: walking resident pages
+     again (the GC hands most freed memory back resident) made a reserved 1M-entity world 1.05x slower until
+     `mincore` skipped resident 2 MiB windows, and populating an array the same call copies into whole (a load)
+     zeroes it all ahead of the copy, where the first touch zeroes each page right before the copy writes it, still
+     in the cache (Load 1M 1.04-1.06x slower, gone once loads stopped populating). A count inside a case with `[IterationSetup]` includes the setup (the extra launch reads around
      the whole actual stage): read the setup's share apart before crediting the measured method;
    - a vector loop over a table that fills most of a core's L2 (100k entities of KernelBenchmark: 1.2-1.6 MB against
      2 MiB) varies 20-30 % between processes and between worlds made again in one process with the same compiled

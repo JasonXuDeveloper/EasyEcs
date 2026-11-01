@@ -50,10 +50,13 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
   (`HugePages`: Linux only, off after a failed call), never from native blocks: the GC frees the arrays, so a `ref`
   kept across a resize never reads freed memory; a new large unmanaged array of a table goes through
   `ComponentInfo.Create` (or calls `HugePages.AllocatePinned`), with `sized` false for a doubling step or a trim
-  (only arrays a reservation or a copy sized take huge pages, as `World.AllocateMeta` does for the records); a large
-  array a reservation sizes outside `AllocatePinned` (a table's entity rows, the free-id list) calls
-  `HugePages.Populate`, so a reservation leaves no fault to the tick that fills it (feat-page-faults). Count a memory
-  change's faults before and after (`audit-perf`, page faults), never only its time.
+  (only arrays a reservation or a copy sized take huge pages, as `World.AllocateMeta` does for the records); the
+  arrays of a user's reservation, whose rows are written later (`Reserve<T..>`, `Reserve(prefab, n)`,
+  `EnsureEntityCapacity`, the initial capacity: columns, entity rows, records, free-id list), are faulted in through
+  `prefault` (`Archetype.Reserve`, `World.Grow` / `ReserveIds` calling `HugePages.Populate`), so the tick that fills
+  them pays no fault; a call that writes every row it allocates (a load, a restore, a snapshot, `CreateEntities`, a
+  move) passes `prefault: false` and leaves them to the first touch (feat-page-faults). Count a memory change's
+  faults before and after (`audit-perf`, page faults), never only its time.
 - **Unbounded memory**: a list, pool or log that grows without a cap or a release (`TrimExcess`, pool limits, the
   destroy log's capacity); per-entity state outside `EntityMeta`.
 - **Per-thread pools and copy-on-write**: whichever thread makes the first write to a shared list pays the copy from
