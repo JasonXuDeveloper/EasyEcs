@@ -176,6 +176,7 @@ internal sealed partial class Kernel
             Sums = new Dictionary<IParameterSymbol, string>(SymbolEqualityComparer.Default),
             Results = new HashSet<IParameterSymbol>(elements.Parameters.Skip(streams).Take(results), SymbolEqualityComparer.Default),
             Index = index ? elements.Parameters[streams + results + values] : null,
+            IndexFits = true, // the pass enters the vector form only while X fits (Code.IndexTop)
         };
         var code = Vectorize(lane, operation, static (i, _) => $"x{i}", ct, out var why);
         if (code == null)

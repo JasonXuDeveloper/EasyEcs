@@ -163,7 +163,7 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              component of one field as 1-byte lanes read as a mask; Kernel.Vectorize: the loop, or the
                              reason EECS055 / EECS056 report, as a ScalarReason: fixable or inherent; a lambda pass's
                              body through the same Translate, with its Lane);
-                             Kernel.Narrow.cs: byte / sbyte / short / ushort lanes (int values followed as low bits and an interval, saturating idioms); Kernel.Struct.cs:
+                             Kernel.Narrow.cs: byte / sbyte / short / ushort lanes (int values followed as low bits and an interval, saturating idioms; a cell's X exact while the row fits the lanes: Code.IndexTop, which the pass checks); Kernel.Struct.cs:
                              struct values (Vector2/3/4 fields, new T(...), with) as one vector per lane;
                              Kernel.Wide.cs: components of up to 16 words, two forms each emitted where it pays (its
                              own gate): AVX-512 (fields gathered by a pruned permute tree) and ARM64's 128 bits (4 rows

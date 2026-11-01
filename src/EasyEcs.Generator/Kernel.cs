@@ -126,6 +126,12 @@ internal sealed partial class Kernel
         public bool Wide128 { get; init; }
 
         /// <summary>
+        /// The largest index the vector form holds exactly in its narrow lanes (<see cref="Lane.IndexFits"/>), which the
+        /// caller checks before entering it; 0 when it assumes none.
+        /// </summary>
+        public long IndexTop { get; init; }
+
+        /// <summary>
         /// The loop of a pair method (Kernel.Neighbors.cs): <see cref="Setup"/> before the clusters, <see cref="Body"/>
         /// the loads of a cluster's rows, <see cref="MaskedBody"/> one neighbor against them (its values broadcast
         /// first), <see cref="MaskedStores"/> the cluster's stores; the lanes are a cluster's (<c>__pass</c>).
@@ -488,6 +494,13 @@ internal sealed partial class Kernel
         /// <summary>An element loop's body: its parameter that is the loop's index read as a value (<c>s[i] = i</c>), or null.</summary>
         public IParameterSymbol? Index { get; init; }
 
+        /// <summary>
+        /// The caller runs the vector form only while every index fits the unsigned lanes of a narrow loop (a cell's X
+        /// under its tile's Width, checked where the JIT folds it): the index is then an exact value there, which
+        /// comparisons read (<see cref="Code.IndexTop"/>).
+        /// </summary>
+        public bool IndexFits { get; init; }
+
         /// <summary>What parameter <paramref name="p"/> is to the loop: <see cref="Symbols.Classify(IParameterSymbol, bool)"/>'s kind, or an element loop's.</summary>
         public Symbols.ParamKind Kind(IParameterSymbol p) => Streams == null ? Symbols.Classify(p, Outside)
             : Streams.Contains(p) ? Symbols.ParamKind.Component
@@ -711,6 +724,7 @@ internal sealed partial class Kernel
                 if (SymbolEqualityComparer.Default.Equals(p, lane.Index))
                 {
                     made._index = p; // an element loop's index read as a value: its lanes are the elements' indexes
+                    made._indexFits = lane.IndexFits;
                     continue;
                 }
                 var kind = lane.Kind(p);
@@ -948,6 +962,7 @@ internal sealed partial class Kernel
         {
             Wide512 = kernel._wide512,
             Wide128 = kernel._wide128,
+            IndexTop = kernel._indexTop,
             StructuralChanges = kernel.StructuralChanges(),
             VectorTail = kernel._change != null || kernel._emits.Values.Any(e => e.Added),
             Written = new EquatableArray<int>(kernel._written.OrderBy(k => k).ToArray()),

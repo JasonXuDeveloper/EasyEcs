@@ -140,6 +140,20 @@ internal sealed partial class Kernel
             }
             case ISwitchExpressionOperation select when IsInt(select.Type): // Kernel.Switches.cs
                 return Switch(select, WideOf, Select);
+            case IParameterReferenceOperation { Parameter: var index } when SymbolEqualityComparer.Default.Equals(index, _index) && _indexFits:
+            {
+                // lane j holds Row + j, exact in the loop's unsigned lanes while the caller keeps every index under their
+                // top; inside a half (lanes of twice the size), those lanes widened, as a local's value is
+                if (_half < 0) return Index();
+                var whole = InBase(Index);
+                return new Wide(As(MaskOf(_size), Unsigned, HalfOf(whole, op)), whole.Lo, whole.Hi, null);
+
+                Wide Index()
+                {
+                    _indexTop = Top(false);
+                    return new Wide(Held($"({V}.Create<{Unsigned}>(unchecked(({Unsigned})({Row}))) + {Vec(Unsigned)}.Indices)"), 0, Top(false), null);
+                }
+            }
             case IInvocationOperation { Instance: null } call when IsMath(call.TargetMethod) && IsInt(call.TargetMethod.ReturnType)
                 && call.TargetMethod.Parameters.All(p => IsInt(p.Type)):
                 return WideCall(call);

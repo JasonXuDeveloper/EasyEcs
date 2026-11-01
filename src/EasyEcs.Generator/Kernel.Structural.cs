@@ -34,6 +34,13 @@ internal sealed partial class Kernel
     /// <summary>An element loop's index read as a value (Kernel.Loops.cs): lane j is <c>Row + j</c>.</summary>
     private IParameterSymbol? _index;
 
+    /// <summary>
+    /// The index of a narrow loop is known to fit its unsigned lanes (<see cref="Lane.IndexFits"/>), and the largest
+    /// index the code then assumes, which <see cref="Code.IndexTop"/> hands to the caller to guard: 0 while unused.
+    /// </summary>
+    private bool _indexFits;
+    private long _indexTop;
+
     /// <summary>The Emit&lt;T&gt; parameters: the job field holding each one's list (<c>e{i}</c>), and whether its one Add was translated.</summary>
     private readonly Dictionary<IParameterSymbol, (int Index, bool Added)> _emits = new(SymbolEqualityComparer.Default);
 

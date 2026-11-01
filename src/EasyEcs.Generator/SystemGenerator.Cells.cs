@@ -137,6 +137,8 @@ public sealed partial class SystemGenerator
             string loops = ElementLoops(loop, true, "goto __rest;");
             with128 = loops.Contains(Vector128 + ".");
             vector.Append(loops);
+            // X in narrow lanes is exact only while the row's cells number no more than they count (a JIT constant).
+            if (loop.Code.IndexTop > 0) row.Append($"if ({at}.Width - 1 <= {loop.Code.IndexTop})\n");
             row.Append("{\n").Append(Indent(vector.ToString())).Append("__rest:\n    __x = (int)i;\n}\n");
         }
         row.Append($"for (; __x < {at}.Width; __x++)\n    {Call(k => $"new {At(k)}(in {Unsafe}.Add(ref __c{k}, __x), __x, __row.Y, __row.Z)", j => $"{Unsafe}.Add(ref __o{j}, __x)")};\n");
