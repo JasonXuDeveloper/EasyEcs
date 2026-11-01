@@ -1854,13 +1854,16 @@ EECS122's id is provisional (EECS120 and EECS121 went to feat-owner-calls): renu
   (the world's, by role) and `RowClusters.Find`'s per-thread arrays instead of `ArrayPool<T>.Shared`, which under high
   memory load drops its arrays at every gen2 collection (8 KB to 590 KB in 0 B tests of loaded runs); considered:
   a private `ArrayPool.Create()` per world (it does not trim, but it takes a lock per rent and return, where the owner
-  thread needs only a field read). Numbers: RowOrderBenchmark A/B.
+  thread needs only a field read). Numbers: RowOrderBenchmark, base and fix in two interleaved rounds at a load
+  below 2, 24 cases: fix / base 0.89-1.08 on the means, 6 cases slower in both rounds (1-8 %: Churn1 1,000 Narrow,
+  100,000 Narrow, 1,000,000 Wide; Reverse 1,000 Wide, 1,000,000 Wide; Sorted 100,000 Narrow), 2 faster in both
+  (Reverse 10,000 Narrow, Sorted 1,000,000 Narrow), within one build's own spread between rounds (Reverse 1,000,000
+  Narrow, base: 48.2 and 57.5 ms); 0 B both (on a quiet machine the pool reused its arrays, so the cost the change
+  removes shows only under memory load, in the tests' pool rents). A third round on a machine no other agent uses
+  would settle the six.
 - changelog (Fixes): "Re-sorts of ordered tables and `RowClusters.Pairs` no longer allocate after a garbage collection
   under high memory load".
 - performance page: nothing (TileRestartBenchmark's numbers come with the bench sync of feat-field-gaps).
-- The committed API reference lags the merged features (seen in feat-later-small's gate, ApiDocs 0 problems): a
-  regeneration adds `ForEachAttribute.MaxRows`, `World.ForEachCollected` and `Tile.Restart` / `Tile.Sweep` (6 files,
-  en + zh). Regenerate it in the docs pass (`dotnet run --project tools/ApiDocs`).
 
 ## feat-roslyn-guidance (backlog Later item: analyzer and incremental generators by the official .NET guidance)
 
