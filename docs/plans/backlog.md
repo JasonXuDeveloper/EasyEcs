@@ -463,7 +463,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
   namespace, so `Alias.Hunt(world)` binds wherever that namespace is imported, alias or not (GeneratorTests
   `UsingAliasesBindEntryPoints`, 7 cases: alias to a system, a nested type, a generic owner, `[Drain]`,
   `[EntityMethod]`, global alias, file-scoped namespace). feat-locality-core's CS7036 came from a file that aliased
-  the owner without importing its namespace: then the call binds to the method itself. EECS120 (provisional id,
+  the owner without importing its namespace: then the call binds to the method itself. EECS122 (provisional id,
   Warning) reports exactly that call (failed binding, the owner has such a method, the entry points' class not in
   scope) and its code fix adds `using {namespace};`. LookupOrderBenchmark now calls `Hunters.Hunt(_hunters)`.
 - [x] **Flaky: `ParallelReductionsScratchAndLookupsDoNotAllocate`** (fix-flaky-alloc): the same path as the
@@ -518,22 +518,29 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 2 MiB columns done on `feat-later-memory` (pinned arrays
       advised before first touch, reserved and copied ones only; 16M chases 1.28-1.67x, Create / Grow equal; docs-todos
       "feat-later-memory"); #157 the #138 recommendations; #159 remaining research.
-- [ ] **Linger at Hop 8 after d666b0d** (feat-later-small): TileRestartBenchmark's Linger 4 threads / 256 springs /
-      Hop 8 read 6-14 % slower than tip in four rounds (865 / 906 / 1013 / 919 us against 989 / 969 / 1071 / 989,
-      sd 8-12 %), 1 / 4 / 8 likewise; the other cases mixed. Cause found in the Tier1 code (DOTNET_JitDisasm, both
-      builds): `Leave` lost its allocation path and became small enough for the JIT to inline it into the job's
-      `Execute` (849 -> 1219 B; only `LeaveInPlace` stays a call); nothing else on the path changed (Settle, Wake,
-      WakeAround, Next within a few bytes). Candidate: `[MethodImpl(NoInlining)]` on `Leave`, tip's code without the
-      allocation; one round: 1 / 4 / 8 back to tip (1115 vs 1123 us, fix 1245), 4 / 256 / 8 not (1029, fix 1033, tip
-      971); its second round ran at load 5 and read 4 / 4 / 8 at 807 us against ~470 in every other run, so the
-      verdict needs the A/B (tip, fix, fix + NoInlining, `--filter '*TileRestartBenchmark.Linger*'`, two rounds) on
-      a machine no other agent is benchmarking.
-- [ ] **Flaky: `NeighborTests.PassesWithResultsAndMutsAllocateNothingOnceWarm`** (seen in feat-later-small's gate,
-      normal mode, 8216 B; passed with AVX off): 8216 B is an `int[2048]`, the size `Pairs.cs` grows a pair list's
-      `Near` to from 1024 (`Array.Resize(ref near, Math.Max(64, found * 2))`, "grows to the densest list"): a moving
-      crowd reaching a denser list than in its 200 fixed warm-up passes, the class of TileSteps' late tiles
-      (d666b0d). Not reproduced or fixed here (outside this branch's code); also the fixed warm-up tests/AGENTS.md
-      names.
+- [x] **Linger at Hop 8 after d666b0d** (feat-later-small): no regression; `[MethodImpl(NoInlining)]` on `Leave` not
+      adopted. Four earlier rounds (2 processes each) read 4 / 256 / 8 6-14 % slower than tip, and the Tier1 code showed
+      `Leave` inlined into the job's `Execute` once its allocation path left (849 -> 1219 B). The A/B on the merged tip
+      (d5991db): base (d666b0d's change reverted), fix and fix + NoInlining, `--launchCount 6`, three interleaved
+      rounds under one hold of the lock, each run started at a load below 2. Fix / base at Hop 8: 0.987 (1 / 4),
+      1.011 (1 / 256), 0.977 (4 / 4), 1.002 (4 / 256); at Hop 1 0.976-1.008, within the rounds' own spread (base
+      4 / 256 / 8: 982 / 946 / 879 us). NoInlining / base: 1.001-1.020 at Hop 8 and up to 1.061 at Hop 1 (4 / 4 / 1),
+      never below fix. So the earlier gap was the spread of 2-process runs on a loaded machine, not the inlining;
+      fix 0 B in every case, base 1 B in one.
+- [x] **Flaky: `NeighborTests.PassesWithResultsAndMutsAllocateNothingOnceWarm`** (feat-later-small's gate on 78fc3ee,
+      8216 B; feat-inner-loops saw 73,824 and 589,920 B, also on c1cad9c, with 11,078 of 12,309 MB in use while a
+      benchmark held 7 GB). Cause (feat-inner-loops' trace, confirmed here): the re-sorts' scratch came from
+      `ArrayPool.Shared` (`RowOrder.Order`'s keys and rows, `Archetype.PermuteBits` and `RebuildTicks`' words), as did
+      `RowClusters.Find`'s; at 90 % of the GC's high-load threshold the pool drops its arrays at every gen2, and
+      `Allocations.Of` starts with one, so each rent allocated (8216 B is the `ulong[1024]` of 1,000 8-byte keys).
+      Fixed: the sort's scratch is the world's (`ColumnSpares.Scratch`, by role, grown to a power of two, cleared by
+      `TrimExcess`), the search's per thread. Tests: `Allocations.PoolRents` counts this thread's rents
+      (ArrayPoolEventSource); before the fix SortingUpdatesAllocateNothing rented 8 times, the Neighbor test 20 and
+      ClusterSearchesRentNothingOnceWarm 3, all 0 after. Not `Near`: a trace at every growth site of the pair passes
+      shows every buffer reaching its size in the worlds' first pass, the same in every run, none in the window (52
+      runs, loaded and with tier-up delayed, never reproduced the 8216 B on a machine with free memory). Both warm-ups
+      of the file's 0 B tests now run through `Allocations.WarmUp`. Left: the generated `ForEachCollected` rents
+      past 64 ids from the pool, around user code (reentrant), so it needs a stack of scratch of its own.
 - [x] #153 (feat-later-small): the `--dev` job is in (screening). The default job stays (Warmup 6, 8 x 250 ms, 2
       processes): Warmup 3 / 150 ms took 244 / 238 s against 375 / 371 s for a fast, a parallel and a memory-bound
       class, but ParallelPassBenchmark's Tick moved +9-10 % (Parallel=False) in both rounds and +19 % (Parallel=True),

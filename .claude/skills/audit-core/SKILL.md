@@ -51,6 +51,13 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
   kept across a resize never reads freed memory; a new large unmanaged array of a table goes through
   `ComponentInfo.Create` (or calls `HugePages.AllocatePinned`), with `sized` false for a doubling step or a trim
   (only arrays a reservation or a copy sized take huge pages, as `World.AllocateMeta` does for the records).
+- **`ArrayPool<T>.Shared` in steady state**: never on a path that runs after warm-up (a sort, a search, a pass). Under
+  high memory load (90 % of the GC's threshold, another process's benchmark holding gigabytes) the pool drops its
+  arrays at every gen2 collection, so each rent after one allocates (8 KB to 590 KB in 0 B tests of loaded suite runs,
+  feat-later-small). Owner-thread scratch is the world's (`ColumnSpares.Scratch`: the sort's keys, rows and words),
+  scratch any thread may need is `[ThreadStatic]` and grown (`RowClusters.Find`); a 0 B test of such a path also
+  asserts `Allocations.PoolRents(...)` is 0. A reentrant path (user code between the rent and the return, the
+  generated `ForEachCollected` past 64 ids) keeps the pool until it has a stack of its own.
 - **Unbounded memory**: a list, pool or log that grows without a cap or a release (`TrimExcess`, pool limits, the
   destroy log's capacity); per-entity state outside `EntityMeta`.
 - **Per-thread pools and copy-on-write**: whichever thread makes the first write to a shared list pays the copy from
