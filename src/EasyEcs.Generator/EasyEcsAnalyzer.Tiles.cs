@@ -29,14 +29,15 @@ public static partial class EasyEcsAnalyzer
         helpLinkUri: Help("EECS115"));
 
     public static readonly DiagnosticDescriptor HandCommit = new("EECS116", "A tile's step and its commit written by hand",
-        "{0} copies {1} into {2}, which {3} steps into {1}: take the tile by ref (ref Tile<{2}, ...>) and write its rows with Write(row); the pass swaps the two buffers, O(1) per tile, without {1} or this copy",
+        "{0} copies {1} into {2}, which {3} steps into {1}: {4}; the pass swaps the two buffers, O(1) per tile, without {1} or this copy",
         Category, DiagnosticSeverity.Warning, true,
         "A stencil over tiles reads the cells as they were before the pass, so it writes its result into a second buffer " +
         "(NextHeat beside Heat), and a commit copies it back once every tile stepped: two buffer types, a pass that " +
         "copies every cell, and a stamp of every tile. Taken by ref, the tile steps itself: Write(row) hands out the row " +
         "of a second buffer the pass keeps per tile, the pass swaps it with the cells (O(1) per tile), zeroes the rows " +
         "the step skipped, and stamps only the tiles that changed, which also lets the tiles that cannot change sleep. " +
-        "Reported for a [ForEach] method whose body is only the copy, at the end of the compilation.",
+        "A cell method steps its tile the same way when its out cell is of the cell's own type (out Heat beside " +
+        "Cell<Heat, ...>). Reported for a [ForEach] method whose body is only the copy, at the end of the compilation.",
         helpLinkUri: Help("EECS116"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     public static readonly DiagnosticDescriptor SuggestGaussSeidel = new("EECS117", "A relaxation stepped one cell per pass",
@@ -185,9 +186,14 @@ public static partial class EasyEcsAnalyzer
                 if (step.Method == null) continue;
                 // The fix rewrites the step, so its location goes along; the commit and the buffer are the user's to delete.
                 bool fix = rewrites.TryGetValue((step.Method, next), out var rewrite);
+                // A cell method steps its tile through an out cell of the cell's own type; another step takes the tile by ref.
+                string advice = step.Method.Parameters.FirstOrDefault(p => Symbols.CellOut(p) is { } buffer
+                        && SymbolEqualityComparer.Default.Equals(Symbols.BufferElement(buffer), next)) is { } output
+                    ? $"write the cell's next value as 'out {cells.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} {output.Name}', the cell's own type"
+                    : $"take the tile by ref (ref Tile<{cells.Name}, ...>) and write its rows with Write(row)";
                 context.ReportDiagnostic(Diagnostic.Create(HandCommit, method.Locations.FirstOrDefault(),
                     fix ? step.Method.Locations.Take(1) : null, fix ? rewrite : null, Symbols.Describe(method),
-                    next.Name, cells.Name, Symbols.Describe(step.Method)));
+                    next.Name, cells.Name, Symbols.Describe(step.Method), advice));
             }
         });
     }
@@ -279,6 +285,7 @@ public static partial class EasyEcsAnalyzer
     private static ImmutableDictionary<string, string?>? StepRewrite(IMethodSymbol method, IParameterSymbol tile, IParameterSymbol next,
         ITypeSymbol cell, ITypeSymbol nextCell, SemanticModel model, System.Threading.CancellationToken ct)
     {
+        if (Symbols.IsCell(tile.Type)) return CellStepRewrite(method, tile, next, cell, nextCell, model, ct);
         if (method.Parameters.Any(Symbols.IsSteppingTile) || Symbols.IsEntityMethod(method) || Symbols.Slices(method) > 1 || Symbols.IsConsume(method)
             || method.DeclaringSyntaxReferences.Length != 1
             || method.DeclaringSyntaxReferences[0].GetSyntax(ct) is not MethodDeclarationSyntax { Body: { } body } declaration
@@ -346,6 +353,47 @@ public static partial class EasyEcsAnalyzer
         static bool AtRow(ExpressionSyntax at, string row) =>
             at is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Index", Expression: IdentifierNameSyntax r } && r.Identifier.ValueText == row
             || at is BinaryExpressionSyntax { RawKind: (int)SyntaxKind.AddExpression } sum && AtRow(sum.Left, row) && sum.Left is MemberAccessExpressionSyntax;
+    }
+
+    /// <summary>
+    /// EECS116's fix of a cell method's step (EasyEcs.CodeFixes), as properties, or null when it is not mechanical: the
+    /// out cell <paramref name="next"/> of <paramref name="nextCell"/> becomes one of the driving cell's own type
+    /// <paramref name="cellType"/>, each <c>new TNext(...)</c> assigned to it <c>new TCell(...)</c> (a target-typed
+    /// <c>new(...)</c> and <c>default</c> stay). Only when <paramref name="cell"/> drives the method, the method would be
+    /// a step the generator can write (EECS115), and every use of <paramref name="next"/> assigns it a new value or
+    /// <c>default</c> whose constructor's parameter types a public constructor of TCell takes too.
+    /// </summary>
+    private static ImmutableDictionary<string, string?>? CellStepRewrite(IMethodSymbol method, IParameterSymbol cell, IParameterSymbol next,
+        ITypeSymbol cellType, ITypeSymbol nextCell, SemanticModel model, System.Threading.CancellationToken ct)
+    {
+        if (!SymbolEqualityComparer.Default.Equals(Symbols.Cells(method)[0], cell) || method.Parameters.Any(Symbols.IsSteppingTile)
+            || Symbols.IsGaussSeidel(method) || Symbols.IsEntityMethod(method) || Symbols.Slices(method) > 1 || Symbols.IsConsume(method)
+            || method.DeclaringSyntaxReferences.Length != 1
+            || method.DeclaringSyntaxReferences[0].GetSyntax(ct) is not MethodDeclarationSyntax declaration
+            || declaration.SyntaxTree != model.SyntaxTree || ((SyntaxNode?)declaration.Body ?? declaration.ExpressionBody) is not { } body)
+            return null;
+        foreach (var name in body.DescendantNodes().OfType<IdentifierNameSyntax>())
+        {
+            if (name.Identifier.ValueText != next.Name || !SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(name, ct).Symbol, next)) continue;
+            if (name.Parent is not AssignmentExpressionSyntax { RawKind: (int)SyntaxKind.SimpleAssignmentExpression } assignment || assignment.Left != name)
+                return null;
+            switch (model.GetOperation(assignment.Right, ct))
+            {
+                case IDefaultValueOperation:
+                    continue;
+                case IObjectCreationOperation { Constructor: { } made }
+                    when cellType.GetMembers(".ctor").OfType<IMethodSymbol>().Any(c => c.DeclaredAccessibility == Accessibility.Public
+                        && c.Parameters.Length == made.Parameters.Length
+                        && c.Parameters.Zip(made.Parameters, (a, b) => SymbolEqualityComparer.Default.Equals(a.Type, b.Type)).All(same => same)):
+                    continue;
+                default:
+                    return null;
+            }
+        }
+        // Lane = the cell and Into = none: the commit's TNext goes when nothing but the step and the commit names it.
+        string cellName = cellType.ToMinimalDisplayString(model, declaration.SpanStart);
+        return ImmutableDictionary<string, string?>.Empty.Add("Fix", "CellStep").Add("Tile", cell.Name).Add("Next", next.Name).Add("Into", "")
+            .Add("Cell", cellName).Add("Lane", cellName).Add("NextCell", nextCell.ToMinimalDisplayString(model, declaration.SpanStart));
     }
 
     /// <summary>EECS117's fix: [GaussSeidel] after [ForEach] (EasyEcs.CodeFixes).</summary>

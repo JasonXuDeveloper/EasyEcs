@@ -783,7 +783,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         foreach (var field in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind == Symbols.ParamKind.View).SelectMany(p => p.Fields))
             Declare($"{(field.Access == "in" ? "Read" : "Write")}<{field.Type}>()");
 
-        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch or Symbols.ParamKind.View))
+        // A cell step's out declares nothing: the driving cell's tile, taken by ref, writes those cells.
+        foreach (var p in model.Methods.SelectMany(m => m.Parameters).Where(p => p.Kind is not (Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch or Symbols.ParamKind.View or Symbols.ParamKind.CellStep))
                      .Select(p => (p.Kind, p.Type, p.RefKind, p.Key, p.Grid)).Distinct())
         {
             if (p is { Kind: Symbols.ParamKind.Lookup, Key.Length: > 0 }) // a read, and its index built before a parallel stage
@@ -926,8 +927,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.View => View(p, i),
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
+            Symbols.ParamKind.CellStep => null, // written through the stepped tile, which the pass takes
             _ => "World",
-        }).Prepend(owner.AccessorArgument));
+        }).OfType<string>().Prepend(owner.AccessorArgument));
 
         // The JIT specializes World.ForEach on this struct and inlines Execute and the user's method into the loop (only
         // Execute for a method that runs out of line: ForEachModel.OutOfLine).
@@ -1673,7 +1675,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             var p = parameters[i];
             switch (p.Kind)
             {
-                case Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch:
+                case Symbols.ParamKind.Entity or Symbols.ParamKind.Scratch or Symbols.ParamKind.CellStep:
                     break;
                 case Symbols.ParamKind.Tile when p.Grid == tile.Grid && p.RefKind == "in":
                     if (!wakes.Contains("cells:" + p.Cell)) wakes.Add("cells:" + p.Cell);

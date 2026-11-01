@@ -35,6 +35,10 @@ public sealed partial class SystemGenerator
         string At(int k) => $"global::EasyEcs.Cell<{CellName(k)}, {shape}>";
         string OutName(int j) => outputs[j].Type.ToDisplayString(Symbols.Fqn);
         string at = At(0); // the shape's constants (every input has the driver's tile)
+        // An out cell of the driver's own type is its next value: the pass steps the driver's tile (the job hands it by
+        // ref, a Jacobi step), its rows written into the tile's second buffer (Write(row)), which TileSteps swaps in
+        // once every tile stepped and whose rows the step skips are zero; no buffer of its own, no commit.
+        int step = outputs.FindIndex(Symbols.IsCellStep);
         // The pass names its parameters __arg{n} and its locals with two underscores: the vector loop's text (e1.., i, rows,
         // at, x{n}) runs inline in it, and no name of the method's can meet them.
         const string self = "__owner";
@@ -47,12 +51,12 @@ public sealed partial class SystemGenerator
                 n = results.FindIndex(r => SymbolEqualityComparer.Default.Equals(r, p));
             if (k >= 0)
             {
-                parameters.Add($"global::EasyEcs.Tile<{CellName(k)}, {shape}> __tile{k}");
+                parameters.Add($"{(k == 0 && step >= 0 ? "ref " : "")}global::EasyEcs.Tile<{CellName(k)}, {shape}> __tile{k}");
                 call.Append($", \u0001c{k}\u0002");
             }
             else if (j >= 0)
             {
-                parameters.Add($"global::EasyEcs.Mut<global::EasyEcs.DynamicBuffer<{OutName(j)}>> __next{j}");
+                if (j != step) parameters.Add($"global::EasyEcs.Mut<global::EasyEcs.DynamicBuffer<{OutName(j)}>> __next{j}");
                 call.Append($", out \u0001o{j}\u0002");
             }
             else if (n >= 0)
@@ -102,6 +106,7 @@ public sealed partial class SystemGenerator
             body.Append(k == 0 && skips ? "__tile0.ExchangeHalo();\n" : $"__tile{k}.ExchangeHalo(0, {at}.Height - 1, mask: false);\n");
         for (int j = 0; j < outputs.Count; j++)
         {
+            if (j == step) continue; // its rows are the stepped tile's (Write(row), per row)
             body.Append($"var __into{j} = global::EasyEcs.DynamicBufferExtensions.SetCount(ref __next{j}.Write(), {at}.Count);\n");
             body.Append($"ref {OutName(j)} __out{j} = ref {Marshal}.GetReference(__into{j});\n");
         }
@@ -112,7 +117,9 @@ public sealed partial class SystemGenerator
         for (int k = 0; k < cells.Count; k++)
             row.Append($"ref {CellName(k)} __c{k} = ref {Unsafe}.AsRef(in __tile{k}.At(__row)[0, 0, 0]);\n");
         for (int j = 0; j < outputs.Count; j++)
-            row.Append($"ref {OutName(j)} __o{j} = ref {Unsafe}.Add(ref __out{j}, __row.Index);\n");
+            row.Append(j == step
+                ? $"ref {OutName(j)} __o{j} = ref {Marshal}.GetReference(__tile0.Write(__row));\n"
+                : $"ref {OutName(j)} __o{j} = ref {Unsafe}.Add(ref __out{j}, __row.Index);\n");
         row.Append("int __x = 0;\n");
         bool with128 = false;
         if (form.Loop is { } loop)
@@ -146,15 +153,22 @@ public sealed partial class SystemGenerator
         {
             // A row the walk skips reads only zeros: it gets what the method computes there, exactly (with this entity's
             // values), computed at the first such row (a tile without one never runs the method on zeros) and written
-            // into the gaps between the rows walked (in order of Index), so every cell is written once.
-            string blank = $"if (!__blank)\n{{\n    {Call(k => $"{At(k)}.Blank", j => $"__f{j}", "__spare")};\n    __blank = true;\n}}\n";
-            string Fill(string slice) => string.Concat(outputs.Select((_, j) => $"    __into{j}.{slice}.Fill(__f{j});\n"));
+            // into the gaps between the rows walked (in order of Index), so every cell is written once. A stepped tile's
+            // rows the step does not write are zero once swapped in: they are written only when that value is not zero.
+            string zero = step >= 0
+                ? $"    __nonzero = global::System.MemoryExtensions.IndexOfAnyExcept({Marshal}.AsBytes(new global::System.ReadOnlySpan<{OutName(step)}>(in __f{step})), (byte)0) >= 0;\n" : "";
+            string blank = $"if (!__blank)\n{{\n    {Call(k => $"{At(k)}.Blank", j => $"__f{j}", "__spare")};\n{zero}    __blank = true;\n}}\n";
+            string Fill(string from, string to) => string.Concat(outputs.Select((_, j) => j == step
+                ? $"    if (__nonzero)\n        for (int __r = {from} / {at}.Width; __r < {to} / {at}.Width; __r++)\n"
+                  + $"            __tile0.Write(new global::EasyEcs.TileRow<{shape}>(__r / {at}.Depth, __r % {at}.Depth)).Fill(__f{j});\n"
+                : $"    __into{j}.Slice({from}, {to} - {from}).Fill(__f{j});\n"));
             body.Append("int __done = 0;\nbool __blank = false;\n");
+            if (step >= 0) body.Append("bool __nonzero = false;\n");
             for (int j = 0; j < outputs.Count; j++) body.Append($"{OutName(j)} __f{j} = default;\n");
             body.Append($"foreach (var __row in __tile0.Rows((global::EasyEcs.TileStencil){stencil}))\n{{\n");
-            body.Append(Indent($"if (__row.Index > __done)\n{{\n{Indent(blank)}{Fill("Slice(__done, __row.Index - __done)")}}}\n"));
+            body.Append(Indent($"if (__row.Index > __done)\n{{\n{Indent(blank)}{Fill("__done", "__row.Index")}}}\n"));
             body.Append(Indent(row.ToString())).Append($"    __done = __row.Index + {at}.Width;\n}}\n");
-            body.Append($"if (__done < {at}.Count)\n{{\n{Indent(blank)}{Fill("Slice(__done)")}}}\n");
+            body.Append($"if (__done < {at}.Count)\n{{\n{Indent(blank)}{Fill("__done", $"{at}.Count")}}}\n");
         }
         else
         {
@@ -167,6 +181,7 @@ public sealed partial class SystemGenerator
         string names = string.Join("', '", cells.Select(c => c.Name));
         string walk = skips ? (form.ConstantOnBlank && (form.ReadsPlace || cells.Count > 1 || results.Count > 0) ? $"; rows of '{cells[0].Name}': blank rows proved constant" : "")
             : form.ReadsPlace ? "; every row: it reads its place" : cells.Count > 1 ? "; every row: several cells" : "; every row: a result per tile";
+        if (step >= 0) walk += $"; steps the tile of '{cells[0].Name}' (its second buffer swapped in)";
         string line = form.Loop is { } l
             ? $"cells of '{names}': vector (Vector512{(with128 ? $", Vector<{l.Code.Lane}> or Vector128" : $" or Vector<{l.Code.Lane}>")} per row; offsets {string.Join(" ", form.Offsets.Select(o => cells.Count > 1 ? $"{cells[o.Cell].Name}({o.Dx},{o.Dy},{o.Dz})" : $"({o.Dx},{o.Dy},{o.Dz})"))}{walk})"
             : $"cells of '{names}': scalar ({form.Reason}{walk})";

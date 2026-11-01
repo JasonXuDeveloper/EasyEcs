@@ -235,7 +235,10 @@ public sealed partial class EasyEcsCodeFixes
                 bool inGone = gone.Any(g => g.SyntaxTree == at.SourceTree && g.Span.Contains(at.SourceSpan));
                 bool inStep = step != null && step.SyntaxTree == at.SourceTree && step.Span.Contains(at.SourceSpan)
                     && (name.FirstAncestorOrSelf<ParameterSyntax>()?.Identifier.ValueText == nextName
-                        || name.FirstAncestorOrSelf<LocalDeclarationStatementSyntax>() is { Declaration.Variables: { Count: 1 } v } && v[0].Identifier.ValueText == intoName);
+                        || name.FirstAncestorOrSelf<LocalDeclarationStatementSyntax>() is { Declaration.Variables: { Count: 1 } v } && v[0].Identifier.ValueText == intoName
+                        // a cell method's new TNext(...) assigned to its out cell, which becomes a new TCell(...)
+                        || name.Parent is ObjectCreationExpressionSyntax { Parent: AssignmentExpressionSyntax { Left: IdentifierNameSyntax assigned } } created
+                           && created.Type == name && assigned.Identifier.ValueText == nextName);
                 if (!inGone && !inStep && !nextDeclaration.Span.Contains(at.SourceSpan)) rewrittenAway = false;
             }
             if (rewrittenAway) nextSyntax = nextDeclaration.GetReference();
@@ -283,8 +286,8 @@ public sealed partial class EasyEcsCodeFixes
         var where = diagnostic.AdditionalLocations[0];
         var target = solution.GetDocument(where.SourceTree) ?? document;
         var root = await target.GetSyntaxRootAsync(token).ConfigureAwait(false);
-        if (root?.FindNode(where.SourceSpan).FirstAncestorOrSelf<MethodDeclarationSyntax>() is not { Body: not null } method
-            || SteppedMethod(root, method, diagnostic.Properties) is not { } rewritten)
+        if (root?.FindNode(where.SourceSpan).FirstAncestorOrSelf<MethodDeclarationSyntax>() is not { } method
+            || (diagnostic.Properties["Fix"] == "CellStep" ? CellStepped(method, diagnostic.Properties) : method.Body == null ? null : SteppedMethod(root, method, diagnostic.Properties)) is not { } rewritten)
             return solution;
         var editor = new SolutionEditor(solution);
         (await editor.GetDocumentEditorAsync(target.Id, token).ConfigureAwait(false)).ReplaceNode(method, rewritten);
@@ -293,6 +296,24 @@ public sealed partial class EasyEcsCodeFixes
                 if (solution.GetDocument(gone.SyntaxTree) is { } at)
                     (await editor.GetDocumentEditorAsync(at.Id, token).ConfigureAwait(false)).RemoveNode(await gone.GetSyntaxAsync(token).ConfigureAwait(false), SyntaxRemoveOptions.KeepNoTrivia);
         return editor.GetChangedSolution();
+    }
+
+    /// <summary>
+    /// The cell method of <see cref="SteppedByRef"/> stepping its tile: its out cell of TNext becomes one of the cell's own
+    /// type, each <c>new TNext(...)</c> assigned to it a <c>new TCell(...)</c> (the analyzer checked TCell's constructor);
+    /// null when the properties no longer match it.
+    /// </summary>
+    private static MethodDeclarationSyntax? CellStepped(MethodDeclarationSyntax method, System.Collections.Immutable.ImmutableDictionary<string, string?> props)
+    {
+        if (props["Next"] is not { } nextName || props["Cell"] is not { } cell || props["NextCell"] is not { } nextCell
+            || method.ParameterList.Parameters.FirstOrDefault(p => p.Identifier.ValueText == nextName) is not { Type: { } declared }
+            || declared.ToString() != nextCell)
+            return null;
+        var cellType = SyntaxFactory.ParseTypeName(cell);
+        var created = method.DescendantNodes().OfType<ObjectCreationExpressionSyntax>()
+            .Where(c => c.Parent is AssignmentExpressionSyntax { Left: IdentifierNameSyntax assigned } && assigned.Identifier.ValueText == nextName).ToArray();
+        var rewritten = method.ReplaceNodes(created.Select(c => c.Type).Append(declared), (old, _) => cellType.WithTriviaFrom(old));
+        return rewritten;
     }
 
     /// <summary>The step of <see cref="SteppedByRef"/> rewritten by ref, or null when the analyzer's properties no longer match it.</summary>

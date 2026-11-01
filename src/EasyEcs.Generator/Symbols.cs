@@ -842,6 +842,13 @@ internal static class Symbols
         /// writes) or <c>[Neighbor] Entity</c> (the other entity): the method runs per pair (PairForm).
         /// </summary>
         Neighbor,
+        /// <summary>
+        /// <c>out TCell</c> of a cell method, TCell the driving cell's own type: the cell's next value, which the method
+        /// writes through its tile, stepped as a <c>ref Tile</c> is (Jacobi: the pass swaps the tile's second buffer
+        /// in). No argument of its own: the job hands the pass the stepped tile (<see cref="IsCellStep"/>).
+        /// </summary>
+        CellStep,
+        /// <summary>
         /// The first parameter of a [Drain] method, <c>in T</c>: the record of <c>Emitted&lt;T&gt;</c> it handles
         /// (<see cref="RecordType"/>). Never returned by <see cref="Classify(IParameterSymbol)"/>: its place makes it one.
         /// </summary>
@@ -1328,6 +1335,7 @@ internal static class Symbols
                 : IsA(p.Type, Component) ? ParamKind.Component
                 : IsA(p.Type, Singleton) ? ParamKind.Singleton
                 : ParamKind.Invalid;
+        if (IsCellStep(p)) return ParamKind.CellStep; // the driving cell's next value: the method steps its tile
         if (p.RefKind == RefKind.Out && CellOut(p) != null) return ParamKind.Mutable; // a cell method's result: its cell of DynamicBuffer<TOut>
         if (p.RefKind != RefKind.None) return ParamKind.Invalid;
         if (SpanElement(p.Type) is { } element)
@@ -1415,6 +1423,16 @@ internal static class Symbols
         return host?.Type.ContainingNamespace.GetTypeMembers("DynamicBuffer", 1).FirstOrDefault()?.Construct(cell);
     }
 
+    /// <summary>
+    /// An <c>out TCell</c> parameter of a cell method whose TCell is the driving cell's own type: the method computes the
+    /// cell's next value, so the pass steps the driver's tile (Jacobi) and writes the row of its second buffer, which
+    /// it swaps in once every tile stepped, instead of a buffer of its own and a commit copying it back.
+    /// </summary>
+    public static bool IsCellStep(IParameterSymbol p) =>
+        p.RefKind == RefKind.Out && p.ContainingSymbol is IMethodSymbol method
+        && method.Parameters.FirstOrDefault(c => c.RefKind == RefKind.None && IsCell(c.Type)) is { Type: INamedTypeSymbol driver }
+        && SymbolEqualityComparer.Default.Equals(p.Type, driver.TypeArguments[0]);
+
     /// <summary>Singleton type of a <c>Reduce&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? ReduceElement(ITypeSymbol type) =>
         type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Reduce<T>")
@@ -1501,8 +1519,14 @@ internal static class Symbols
         return (named.TypeArguments[0], shape, grid);
     }
 
-    /// <summary>A <c>ref Tile&lt;TCell, TTile&gt;</c> parameter: the method steps the tile (a write of its cells).</summary>
-    public static bool IsSteppingTile(IParameterSymbol p) => p.RefKind == RefKind.Ref && TileElements(p.Type) != null;
+    /// <summary>
+    /// A <c>ref Tile&lt;TCell, TTile&gt;</c> parameter, or the driving cell of a cell method with an <c>out TCell</c> of its
+    /// own type (<see cref="IsCellStep"/>): the method steps the tile (a write of its cells).
+    /// </summary>
+    public static bool IsSteppingTile(IParameterSymbol p) =>
+        p.RefKind == RefKind.Ref && TileElements(p.Type) != null
+        || p.RefKind == RefKind.None && IsCell(p.Type) && p.ContainingSymbol is IMethodSymbol method
+           && SymbolEqualityComparer.Default.Equals(Cells(method)[0], p) && method.Parameters.Any(IsCellStep);
 
     /// <summary>The method has [GaussSeidel].</summary>
     public static bool IsGaussSeidel(IMethodSymbol method) => method.GetAttributes().Any(a => Named(a.AttributeClass, GaussSeidelAttribute));
@@ -1526,14 +1550,23 @@ internal static class Symbols
             return $"takes cells '{cells[0].Name}' and '{other.Name}' of different tiles: a cell method's inputs line up row by row, take cells of one TTile";
         if (stepped.Length == 0)
             return gaussSeidel ? "has [GaussSeidel] but takes no tile by ref: the attribute steps the tile the method takes as 'ref Tile<TCell, TTile>'" : null;
+        var steps = method.Parameters.Where(IsCellStep).ToArray();
+        if (steps.Length > 1)
+            return $"writes cell '{cells[0].Name}' through '{steps[0].Name}' and '{steps[1].Name}': a cell's next value is one out parameter of its own type";
+        if (steps.Length > 0 && stepped.Length > 1)
+            return $"steps the tile of cell '{cells[0].Name}' (through '{steps[0].Name}') and takes '{stepped.First(t => !SymbolEqualityComparer.Default.Equals(t, cells[0])).Name}' by ref: a pass steps one tile of each entity, take the others by value";
+        if (steps.Length > 0 && gaussSeidel)
+            return $"has [GaussSeidel], but writes cell '{cells[0].Name}' through '{steps[0].Name}': a cell method's rows read the cells as the pass before left them (Jacobi); write the step as 'ref Tile<TCell, TTile>' to sweep in place";
         if (stepped.Length > 1)
             return $"takes '{stepped[0].Name}' and '{stepped[1].Name}' by ref: a pass steps one tile of each entity, take the others by value";
+        // How the method steps its tile: by ref, or through a cell's next value.
+        string how = steps.Length > 0 ? $"steps the tile of cell '{cells[0].Name}' (through '{steps[0].Name}')" : $"takes '{stepped[0].Name}' by ref";
         if (IsEntityMethod(method))
-            return $"takes '{stepped[0].Name}' by ref, but runs on one entity: a step swaps or sweeps the whole grid after its tiles stepped (make it a [ForEach] method)";
+            return $"{how}, but runs on one entity: a step swaps or sweeps the whole grid after its tiles stepped (make it a [ForEach] method)";
         if (Slices(method) > 1)
-            return $"takes '{stepped[0].Name}' by ref, but runs on a slice of the grid: a step reads every neighbor's cells as the pass before left them (drop Slices)";
+            return $"{how}, but runs on a slice of the grid: a step reads every neighbor's cells as the pass before left them (drop Slices)";
         if (IsConsume(method))
-            return $"takes '{stepped[0].Name}' by ref, but destroys the tiles it visits ([Consume])";
+            return $"{how}, but destroys the tiles it visits ([Consume])";
         if (gaussSeidel && MaxSweeps(method) < 0)
             return "has [GaussSeidel(MaxSweeps)] below 0 (0 is the tile's cell count)";
         if (gaussSeidel && TileElements(stepped[0].Type) is { } tile && TileKey(tile.Grid) is { } key && KeyParities(key, "key") == null)
