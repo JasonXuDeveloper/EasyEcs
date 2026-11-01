@@ -99,9 +99,25 @@ public partial class TileTests
         }
     }
 
-    [TestCase(1)]
-    [TestCase(4)]
-    public void AHaloOfTwoIsTheWholeTorus(int threads)
+    /// <summary>The same step with its out cell a Heat, the cell's next value: the pass steps the tile (no NextHeat, no commit).</summary>
+    [EcsSystem]
+    public ref struct CellWaveStepSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(Cell<Heat, WaveTorus> w, out Heat next)
+        {
+            float here = w.Value.T;
+            float near = w[-1, 0, 0].T + w[1, 0, 0].T + w[0, 0, -1].T + w[0, 0, 1].T;
+            float far = w[-2, 0, 0].T + w[2, 0, 0].T + w[0, 0, -2].T + w[0, 0, 2].T;
+            next = new(here + (16f * near - far - 60f * here) * (CellWaveSystem.Rate / 12f));
+        }
+    }
+
+    [TestCase(1, false)]
+    [TestCase(4, false)]
+    [TestCase(1, true)]
+    [TestCase(4, true)]
+    public void AHaloOfTwoIsTheWholeTorus(int threads, bool stepped)
     {
         const int cells = Torus * 16;
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
@@ -111,13 +127,17 @@ public partial class TileTests
         {
             var plate = world.CreateEntity(new WaveTorus(place));
             var heat = plate.GetOrAdd<DynamicBuffer<Heat>>().SetCount(256);
-            plate.GetOrAdd<DynamicBuffer<NextHeat>>().SetCount(256);
+            if (!stepped) plate.GetOrAdd<DynamicBuffer<NextHeat>>().SetCount(256);
             if (place.X != 1) // a quiet column of plates, for the walk to skip
                 for (int i = 0; i < 8; i++) heat[random.Next(256)] = new Heat(random.Next(1, 1000));
             plates.Add(place, plate);
         }
-        world.AddSystem<CellWaveSystem>();
-        world.AddSystem<CommitHeatSystem>();
+        if (stepped) world.AddSystem<CellWaveStepSystem>();
+        else
+        {
+            world.AddSystem<CellWaveSystem>();
+            world.AddSystem<CommitHeatSystem>();
+        }
 
         var grid = Whole(plates, 16, 16, (Entity e, int i) => e.Read<DynamicBuffer<Heat>>()[i].T, Torus);
         for (int step = 0; step < 20; step++)
@@ -367,6 +387,58 @@ public partial class TileTests
             float expected = i == 5 * 16 + 3 ? 5f : i == 4 * 16 + 3 ? 3f : 1f;
             Assert.That(next[i].T, Is.EqualTo(expected), $"cell {i}");
         }
+    }
+
+    /// <summary>The glow stepping the tile: its blank value is not zero, so the rows the walk skips are written too.</summary>
+    [EcsSystem]
+    public ref struct CellGlowStepSystem
+    {
+        [ForEach]
+        static void Step(Cell<Heat, HeatPlate> w, out Heat next) => next = new(w.Value.T * 0.5f + w[0, 0, 1].T * 0.25f + 1f);
+    }
+
+    /// <summary>A cooling stepping the tile: its blank value is zero, which the rows the step does not write get.</summary>
+    [EcsSystem]
+    public ref struct CellCoolStepSystem
+    {
+        [ForEach]
+        static void Step(Cell<Heat, HeatPlate> w, out Heat next) => next = new(w.Value.T * 0.5f + w[0, 0, 1].T * 0.25f);
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void AStepOfCellsWritesTheTileAndItsSkippedRows(bool glow)
+    {
+        using var world = new World();
+        var plate = world.CreateEntity(new HeatPlate(new TilePos(0, 0, 0)));
+        var heat = plate.GetOrAdd<DynamicBuffer<Heat>>().SetCount(256);
+        heat[5 * 16 + 3] = new Heat(8); // row 5 is warm, row 4 reads it
+        heat[9 * 16 + 7] = new Heat(4);
+        if (glow) world.AddSystem<CellGlowStepSystem>();
+        else world.AddSystem<CellCoolStepSystem>();
+        float add = glow ? 1f : 0f;
+        var expected = new float[256];
+        for (int i = 0; i < 256; i++) expected[i] = add;
+        expected[5 * 16 + 3] = 4f + add;
+        expected[4 * 16 + 3] = 2f + add;
+        expected[9 * 16 + 7] = 2f + add;
+        expected[8 * 16 + 7] = 1f + add;
+        world.Update();
+        for (int i = 0; i < 256; i++)
+            Assert.That(plate.Read<DynamicBuffer<Heat>>()[i].T, Is.EqualTo(expected[i]), $"cell {i}");
+
+        // A second step from the first's cells: the buffers swapped back hold what the first step left in them.
+        world.Update();
+        for (int i = 0; i < 256; i++)
+        {
+            float below = i / 16 < 15 ? expected[i + 16] : 0f;
+            Assert.That(plate.Read<DynamicBuffer<Heat>>()[i].T, Is.EqualTo(expected[i] * 0.5f + below * 0.25f + add), $"cell {i}, step 2");
+        }
+
+        var schedule = world.DescribeSchedule().ToString();
+        Assert.That(schedule, Does.Contain("steps the tile of 'w'"));
+        long bytes = Allocations.Of(() => world.Update());
+        Assert.That(bytes, Is.Zero);
     }
 
     public record struct Count(int N);

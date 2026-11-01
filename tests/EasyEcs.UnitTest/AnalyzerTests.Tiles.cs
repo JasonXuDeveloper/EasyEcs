@@ -56,12 +56,49 @@ public partial class AnalyzerTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Tile<byte, G> t, Tile<byte, Columns<G>> u, Mut<DynamicBuffer<int>> b) => b.Write(); }")] // one buffer, two shapes
     public Task TwoTilesOfOneBufferReport(string source) => ReportsOnTiles("EECS073", source);
 
-    // Cell methods: a cell read and written in one pass (EECS059), a cell beside a tile of its buffer (EECS073), the
-    // reason a cell's rows run cell by cell (EECS055 / EECS056), and the shapes that are clean.
+    // Cell methods: an out cell of the cell's own type stepping the tile (clean; EECS115 for a [GaussSeidel] one, for
+    // two such out cells, and beside a tile by ref), a cell beside a tile of its buffer (EECS073), a cell method's
+    // commit by hand (EECS116), the reason a cell's rows run cell by cell (EECS055 / EECS056), and the shapes that are clean.
+
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<NB, G> c, out NB next) => next = c[1, 0, 0]; }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(Cell<int, G> c, Cell<float, G> d, out int next, out NF sum) { next = c.Value + 1; sum = new NF(d.Value); } }")]
+    public async Task ACellSteppingItsTileIsClean(string source)
+    {
+        await AssertClean(GeneratorTests.Components, TileParts, source);
+        Assert.That(await Count("EECS055", GeneratorTests.Components, TileParts, source), Is.Zero);
+    }
+
+    // Byte cells beside float cells: lanes four times as wide stay scalar (a vector loop pairs lanes of twice the size,
+    // Kernel.Pairs), and the reason says what to change. The step itself is not the reason: no EECS115.
+    [Test]
+    public async Task ACellStepOfMixedLanesSaysWhatToChange()
+    {
+        const string source = "[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(Cell<byte, G> c, Cell<int, G> d, out byte next, out NF sum) { next = (byte)(c.Value + 1); sum = new NF(d.Value); } }";
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, source])).Where(d => d.Id is "EECS055" or "EECS115").ToArray();
+        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS055" }), string.Join(", ", found.Select(d => d.GetMessage())));
+        Assert.That(found[0].GetMessage(), Does.Contain("lane types byte and").And.Contain("not 4 times; widen the byte to 2-byte lanes, or split the method so each takes lanes of one size"));
+    }
+
+    [TestCase("[EcsSystem] public ref struct S { [ForEach, GaussSeidel] static void A(Cell<byte, G> c, out byte next) => next = c[1, 0, 0]; }", "has [GaussSeidel], but writes cell 'c'")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, out byte next, out byte again) { next = c.Value; again = c.Value; } }", "through 'next' and 'again'")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, ref Tile<int, G> t, out byte next) => next = c.Value; }", "and takes 't' by ref")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(Slices = 2)] static void A(Cell<byte, G> c, out byte next) => next = c.Value; }", "steps the tile of cell 'c' (through 'next'), but runs on a slice")]
+    public async Task ACellStepTheGeneratorCannotWriteReports(string source, string reason)
+    {
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, source])).Where(d => d.Id == "EECS115").ToArray();
+        Assert.That(found, Has.Length.EqualTo(1), string.Join(", ", found.Select(d => d.GetMessage())));
+        Assert.That(found[0].GetMessage(), Does.Contain(reason));
+    }
 
     [Test]
-    public Task ACellWritingItsOwnBufferReports() => ReportsOnTiles("EECS059",
-        "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<NB, G> c, out NB next) => next = c[1, 0, 0]; }");
+    public async Task ACommitOfACellMethodSaysItsOutCell()
+    {
+        string source = "[EcsSystem] public ref struct Step { [ForEach] static void A(Cell<byte, G> c, out NB next) => next = new NB(c[1, 0, 0]); }"
+            + " [EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); }";
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, source])).Where(d => d.Id == "EECS116").ToArray();
+        Assert.That(found, Has.Length.EqualTo(1));
+        Assert.That(found[0].GetMessage(), Does.Contain("write the cell's next value as 'out byte next'"));
+    }
 
     [Test]
     public Task ACellBesideATileOfItsBufferReports() => ReportsOnTiles("EECS073",
