@@ -103,6 +103,11 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   `SystemGenerator.Constant` removes left out), not by a cost model: past 32 the AVX-512 form is dropped, the 128-bit
   form stays, and with neither the method is scalar with the reason (fixable when a split helps). Fewer locals come
   from extracting a field into its own name, reusing a merge's first input and one temporary for the packed stores.
+- **Lanes of two sizes** (`Kernel.Pairs`): columns twice as wide as the narrowest are a pair of vectors per vector of
+  the narrow lanes (WidenLower / WidenUpper). Four times as wide (byte cells beside float cells, a byte beside an int)
+  stays scalar: Kernel.Pairs follows a wide value as two halves (`_half` 0 and 1), and a form of four quarters (two
+  widening steps, four copies of every wide operation) is not built or measured. EECS055 says so and what to change (widen the narrow type to half
+  the wide one, or split the method by lane size); a test keeps that reason (`ACellStepOfMixedLanesSaysWhatToChange`).
 - **Inner loops** (Burst's loop vectorizer): a scalar `for` / `foreach` over a span inside a method the generator
   already compiles (a `[ForEach]` method, a `ParallelFor` job's `Execute`) is a vector loop over its elements: a
   `DynamicBuffer<T>`'s elements, an `[InlineArray]` or fixed buffer field, an `IForSpan<T>` / `IForRange` body, a
