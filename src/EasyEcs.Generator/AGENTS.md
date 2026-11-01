@@ -196,12 +196,12 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              sections under the lanes their first matching label takes, the default section's wherever
                              it stands), their reasons (a subject no lane holds, a list pattern, a switch over a call on
                              a struct: the split), and the inliner's lowering of a switch statement that returns
-EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045, EECS047-051 and EECS120: calls and declarations that compile but do not
+EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045, EECS047-051 and EECS122: calls and declarations that compile but do not
                              do what they say (a job's WriteMask, a dropped copy, SetIfChanged that cannot compare, calls
                              a pass refuses, an index added to while walked, a record key that prints itself, a sliced
                              filter where every row is needed, the world's own tags written by hand, a ref used after
                              a structural change, Disable of a component that cannot be disabled, filters no entity
-                             passes, a second group in one filter, an update during a pass; EECS120: a call of a generated entry
+                             passes, a second group in one filter, an update during a pass; EECS122: a call of a generated entry
                              point that binds to the method itself because the entry point's namespace is not in scope)
 EasyEcsAnalyzer.Parallel.cs  EECS060-061: code on several threads (a parallel [ForEach] method, the Execute of a job
                              run by ForEachParallel or ParallelFor) that writes memory every thread shares, a parallel
