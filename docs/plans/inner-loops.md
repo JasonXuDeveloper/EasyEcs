@@ -400,11 +400,13 @@ through `EmitLoops`, which splits them into methods when the count says so.
 - Risk: **inlining budget** (D135): an unrolled body ×8 declares locals per element; past 32 IL locals `EmitLoops` moves each width's loop into a method, and a single loop past 32 is not split further, so `World.Masked` would call it per run or per 64-row word. Count the translated body's locals (`SystemGenerator.Locals`), cap N and fall back with a reason rather than lose; `tools/inlining.sh` checks the runners.
 
 **WP2: element loops in `[ForEach]` methods (per-row with buffers, batch-method loops, lambda passes), through the body copy.**
-Shipped in part (feat-inner-loops): per-row methods, `for` and `foreach` over Span / ReadOnlySpan / DynamicBuffer
+Shipped (feat-inner-loops): per-row methods, `for` and `foreach` over Span / ReadOnlySpan / DynamicBuffer
 (Kernel.Loops.cs, SystemGenerator.Elements.cs), bounds and alias guards, `#line`, the schedule's loop lines, EECS055
-at loops left scalar (a second descriptor of the id), ElementLoopTests, ElementLoopBenchmark. Open: reductions into
-outer locals (SumInts / SumFloatsFast), the index as a value, batch methods, lambda passes, private helpers through
-accessors, HeightMap's port.
+at loops left scalar (a second descriptor of the id); sums, Mins and Maxes into variables of the method (SumOf,
+Kernel.Summed), the index as a value (WideIndex), batch methods' loops over their rows, lambda passes
+(WithElementLoops), calls inlined in a loop, private static helpers and fields through accessors of the copy
+(BodyCopy.Accessors), VoxelServer's height map as a plain loop; ElementLoopTests, ElementLoopBenchmark (+ SumInts,
+SumFloats), HeightMapLoopBenchmark, BatchLoopBenchmark. The rest of this entry is the plan as written.
 - Tests:
   - new `tests/EasyEcs.UnitTest/ElementLoopTests.cs`: equivalence (Lengths, edges, empty buffer, a buffer shared copy-on-write written in the loop, `Mut.Write` stamps once); integer, Min/Max and float-Fast reductions; bounds failure throws at the same element; private helper reached through a generated accessor; 0 B; 1 vs 4 threads.
   - `GeneratorTests`: the copy, `#line`, caching.
@@ -423,6 +425,12 @@ accessors, HeightMap's port.
   - debugging (`#line`).
 
 **WP3: offset reads (1D neighbors) and the alias/bounds proofs.**
+Shipped (feat-inner-loops): `s[i + k]`, `s[k + i]`, `s[i - k]` for an int constant |k| <= 64, a stream per (span,
+offset) passed from its element at the index plus k, a guard per offset (`index >= -k`, `end + k <= s.Length`), the
+alias guard `__Apart` at run time between written spans and the others (not static roots: Slice / Cast of one buffer
+fails the guard and runs the loop as written); a span written and read at another offset stays scalar with its
+reason. ElementLoopTests (Smooth at -2..+2, the steps sum, a neighbor past the end), ElementLoopBenchmark.Smooth. The
+rest of this entry is the plan as written.
 - Tests: `ElementLoopTests` for offsets −2..+2; written-and-read-at-offset stays scalar with the reason; aliasing through `Slice`/`Cast` of one buffer stays scalar; distinct buffers vectorize; bound proofs at start 0 and 1 and at the end.
 - Benchmark: `ElementLoopBenchmark.Smooth3Scalar/Generated/HandWritten`.
 - Risk: proof gaps. Prefer scalar with a reason over a guess.
