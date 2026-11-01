@@ -120,7 +120,8 @@ Interleaved.cs               the deinterleaving loads / interleaving stores of g
                              lookups (TBL / TBX over 1 to 4 registers) of a wide component's 128-bit form, and
                              IsWideAccelerated (ARM64 with 128-bit Vector<T>)
 LaneMath.cs                  lane functions of generated vector loops .NET has no vector form of: the quotient of
-                             int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh of floats
+                             int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh of floats;
+                             each at Vector<T>, Vector512 and Vector128 (with AVX: 4 lanes as one Vector256 of doubles)
 Lanes.cs                     Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress,
                              AVX2 permutation table, 128-bit byte shuffle: NEON TBL / PSHUFB, picked at run time), for
                              batch methods, Emit and CollectIds; Lanes.Selection: a mask to row numbers over it (the one

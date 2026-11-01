@@ -250,11 +250,11 @@ public sealed partial class SystemGenerator
     private const string Vector128 = "global::System.Runtime.Intrinsics.Vector128";
 
     /// <summary>
-    /// What a vector loop's text calls with Vector&lt;T&gt; and Vector512 forms only (LaneMath's quotients, Interleaved,
+    /// What a vector loop's text calls with Vector&lt;T&gt; and Vector512 forms only (Interleaved,
     /// Lanes, the lookups' gathers, the marked helpers): such a loop gets no Vector128 copy.
     /// </summary>
     private static readonly string[] OfOneWidth =
-        [Accelerated, Kernel.LanesForm, "global::EasyEcs.LaneMath.", "global::EasyEcs.Interleaved.", "global::EasyEcs.Lanes.", "global::EasyEcs.LookupLanes."];
+        [Accelerated, Kernel.LanesForm, "global::EasyEcs.Interleaved.", "global::EasyEcs.Lanes.", "global::EasyEcs.LookupLanes."];
 
     /// <summary>
     /// Whether <paramref name="count"/> elements hold one whole vector of the narrowest width the loop runs: shorter

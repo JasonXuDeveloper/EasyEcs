@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.X86;
 
 namespace EasyEcs;
 
@@ -60,6 +61,47 @@ public static class LaneMath
         return Vector512.Narrow(Vector512.ConvertToUInt64(lower), Vector512.ConvertToUInt64(upper));
     }
 
+    // Vector128 (the rows of a cell method narrower than Vector<T>): with AVX, 4 int lanes widen into one Vector256 of
+    // doubles (vcvtdq2pd), one division, and vcvttpd2dq truncates back; long-to-double conversions, which AVX2 lacks
+    // (AVX-512 DQ has them), never run. Without AVX (Arm64 converts longs natively) the lanes go through longs. The
+    // float functions widen the same way: 4 lanes are one Vector256 of doubles, one Exp or Log instead of two of 2.
+
+    /// <inheritdoc cref="Quotient(Vector{int}, Vector{int})"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector128<int> Quotient(Vector128<int> x, Vector128<int> y)
+    {
+        if (Avx.IsSupported)
+            return Avx.ConvertToVector128Int32WithTruncation(Avx.ConvertToVector256Double(x) / Avx.ConvertToVector256Double(y));
+        var (xl, xu) = Vector128.Widen(x);
+        var (yl, yu) = Vector128.Widen(y);
+        var lower = Vector128.ConvertToDouble(xl) / Vector128.ConvertToDouble(yl);
+        var upper = Vector128.ConvertToDouble(xu) / Vector128.ConvertToDouble(yu);
+        return Vector128.Narrow(Vector128.ConvertToInt64(lower), Vector128.ConvertToInt64(upper));
+    }
+
+    /// <inheritdoc cref="Quotient(Vector{uint}, Vector{uint})"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector128<uint> Quotient(Vector128<uint> x, Vector128<uint> y)
+    {
+        if (Avx.IsSupported)
+        {
+            // AVX converts signed lanes only: x - 2^31 as an int, converted, plus 2^31 is x exactly. The quotient
+            // (non-negative) is truncated first, then shifted back down by 2^31 into the signed range to convert.
+            var half = Vector256.Create(2147483648.0);
+            var q = Avx.RoundToZero(Unsigned(x, half) / Unsigned(y, half)) - half;
+            return Avx.ConvertToVector128Int32WithTruncation(q).AsUInt32() ^ Vector128.Create(0x80000000u);
+        }
+        var (xl, xu) = Vector128.Widen(x);
+        var (yl, yu) = Vector128.Widen(y);
+        var lower = Vector128.ConvertToDouble(xl) / Vector128.ConvertToDouble(yl);
+        var upper = Vector128.ConvertToDouble(xu) / Vector128.ConvertToDouble(yu);
+        return Vector128.Narrow(Vector128.ConvertToUInt64(lower), Vector128.ConvertToUInt64(upper));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<double> Unsigned(Vector128<uint> x, Vector256<double> half) =>
+        Avx.ConvertToVector256Double((x ^ Vector128.Create(0x80000000u)).AsInt32()) + half;
+
     // ---------------- FloatMode.Fast: Log10 and the hyperbolic functions of float lanes ----------------
     // Each computes in doubles through .NET's vector Exp (within a few double ulps), so e^x - e^-x near 0 loses about
     // ten of 53 bits, far below a float's 24; below 2^-12 the float result is x itself (sinh, tanh: x^3 / 6 is under
@@ -83,6 +125,21 @@ public static class LaneMath
         return Vector512.ConditionalSelect(Vector512.LessThan(Vector512.Abs(x), Vector512.Create(Tiny)), x, value);
     }
 
+    /// <inheritdoc cref="Sinh(Vector{float})"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector128<float> Sinh(Vector128<float> x)
+    {
+        Vector128<float> value;
+        if (Avx.IsSupported)
+            value = Avx.ConvertToVector128Single(SinhOf(Avx.ConvertToVector256Double(x)));
+        else
+        {
+            var (lower, upper) = Vector128.Widen(x);
+            value = Vector128.Narrow(SinhOf(lower), SinhOf(upper));
+        }
+        return Vector128.ConditionalSelect(Vector128.LessThan(Vector128.Abs(x), Vector128.Create(Tiny)), x, value);
+    }
+
     /// <summary>MathF.Cosh per lane, within an ulp or two (FloatMode.Fast).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector<float> Cosh(Vector<float> x)
@@ -97,6 +154,15 @@ public static class LaneMath
     {
         var (lower, upper) = Vector512.Widen(x);
         return Vector512.Narrow(CoshOf(lower), CoshOf(upper));
+    }
+
+    /// <inheritdoc cref="Cosh(Vector{float})"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector128<float> Cosh(Vector128<float> x)
+    {
+        if (Avx.IsSupported) return Avx.ConvertToVector128Single(CoshOf(Avx.ConvertToVector256Double(x)));
+        var (lower, upper) = Vector128.Widen(x);
+        return Vector128.Narrow(CoshOf(lower), CoshOf(upper));
     }
 
     /// <summary>MathF.Tanh per lane, within an ulp or two (FloatMode.Fast).</summary>
@@ -121,6 +187,23 @@ public static class LaneMath
         return Vector512.ConditionalSelect(Vector512.LessThan(abs, Vector512.Create(Tiny)), x, value);
     }
 
+    /// <inheritdoc cref="Tanh(Vector{float})"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector128<float> Tanh(Vector128<float> x)
+    {
+        Vector128<float> value;
+        if (Avx.IsSupported)
+            value = Avx.ConvertToVector128Single(TanhOf(Avx.ConvertToVector256Double(x)));
+        else
+        {
+            var (lower, upper) = Vector128.Widen(x);
+            value = Vector128.Narrow(TanhOf(lower), TanhOf(upper));
+        }
+        var abs = Vector128.Abs(x);
+        value = Vector128.ConditionalSelect(Vector128.GreaterThan(abs, Vector128.Create(10f)), Vector128.CopySign(Vector128<float>.One, x), value);
+        return Vector128.ConditionalSelect(Vector128.LessThan(abs, Vector128.Create(Tiny)), x, value);
+    }
+
     /// <summary>MathF.Log10 per lane, within an ulp (FloatMode.Fast): ln x in doubles times log10(e).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector<float> Log10(Vector<float> x)
@@ -137,6 +220,17 @@ public static class LaneMath
         var (lower, upper) = Vector512.Widen(x);
         var scale = Vector512.Create(0.43429448190325182765);
         return Vector512.Narrow(Vector512.Log(lower) * scale, Vector512.Log(upper) * scale);
+    }
+
+    /// <inheritdoc cref="Log10(Vector{float})"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector128<float> Log10(Vector128<float> x)
+    {
+        if (Avx.IsSupported)
+            return Avx.ConvertToVector128Single(Vector256.Log(Avx.ConvertToVector256Double(x)) * Vector256.Create(0.43429448190325182765));
+        var (lower, upper) = Vector128.Widen(x);
+        var scale = Vector128.Create(0.43429448190325182765);
+        return Vector128.Narrow(Vector128.Log(lower) * scale, Vector128.Log(upper) * scale);
     }
 
     private const float Tiny = 1f / 4096;
@@ -181,5 +275,47 @@ public static class LaneMath
     {
         var e = Vector512.Exp(x + x);
         return (e - Vector512<double>.One) / (e + Vector512<double>.One);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<double> SinhOf(Vector128<double> x)
+    {
+        var e = Vector128.Exp(x);
+        return (e - Vector128<double>.One / e) * Vector128.Create(0.5);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<double> CoshOf(Vector128<double> x)
+    {
+        var e = Vector128.Exp(x);
+        return (e + Vector128<double>.One / e) * Vector128.Create(0.5);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector128<double> TanhOf(Vector128<double> x)
+    {
+        var e = Vector128.Exp(x + x);
+        return (e - Vector128<double>.One) / (e + Vector128<double>.One);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<double> SinhOf(Vector256<double> x)
+    {
+        var e = Vector256.Exp(x);
+        return (e - Vector256<double>.One / e) * Vector256.Create(0.5);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<double> CoshOf(Vector256<double> x)
+    {
+        var e = Vector256.Exp(x);
+        return (e + Vector256<double>.One / e) * Vector256.Create(0.5);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector256<double> TanhOf(Vector256<double> x)
+    {
+        var e = Vector256.Exp(x + x);
+        return (e - Vector256<double>.One) / (e + Vector256<double>.One);
     }
 }
