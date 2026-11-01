@@ -2288,3 +2288,33 @@ helpers).
   内联它们的 Exp：方法的内联预算被第三份 Exp 用完，这是 JIT 的限制），逐格则是四次 MathF 调用。
 - **Found, not done here:** a Vector128 form of Interleaved (the stores of an out struct of several fields) would give
   narrow rows writing such structs their 128-bit loop; Interleaved has 87 helpers, a package of its own.
+
+### WP5b (cell methods: several cells, results per tile, X in narrow lanes, the voxel water) — docs to-dos
+
+- **tiles.mdx + zh ("One cell at a time"):** a cell method takes several `Cell<,>` inputs of one tile type (the
+  first drives the walk, the others are sampled: `ExchangeHalo(mask: false)`) and several out cells; cells of two tile
+  types report EECS115. A row the walk skips is proved: the generator evaluates the method with the driving cells at
+  0 and everything else unknown, and skips the row (filling what the method gives there) only when every out cell
+  comes out a constant and every result field keeps its start; the schedule line says "rows of 'w': blank rows proved
+  constant" or "every row: <reason>". What is not proved: a float multiplied by a sampled or unknown value (NaN times
+  0), a choice that depends on a sampled cell with different arms.
+- **tiles.mdx + zh, results per tile:** `ref Reduce<T>` with `T` a component of the tile's entity (`[Sum]` / `[Min]` /
+  `[Max]` fields): it starts at `T.Identity` per tile, the rows' lanes fold into it, the pass writes it once through
+  `Mut<T>` (stamped). Outside a cell method a `Reduce<T>` of a component reports EECS002. Fields of a narrow row are 1
+  or 2 bytes (a byte row sums into `ushort` fields: the voxel water's `FlowTally`); a Max kept by the proof needs the
+  type's smallest value as its "nothing" (`short.MinValue`), not 0.
+- **tiles.mdx + zh, X in narrow lanes:** a byte or two-byte row reads `c.X` in its lanes (compared, added, cast to
+  short) while the row's cells fit the lanes (Width up to 256 for bytes); a wider row runs cell by cell, checked by a
+  constant the JIT folds.
+- **api.mdx + zh:** `Reduce<T>`'s constraint is `IReduction<T>` (was the singleton marker too): the complexity row is
+  unchanged; the reference page regenerates from the XML doc (zh/reduce.xml updated).
+- **guide/analyzers (EECS002):** a `ref Reduce<T>` of a component outside a cell method.
+- **samples/voxel-server.mdx + zh, README of the sample:** (only if the port lands, see Numbers) Flow.cs is a cell
+  method now: the walkthrough of the hand-written shader (FluidCount ranges, Load128 offsets, the edges from lane masks)
+  becomes the cell body, FlowTally and Step.cs (WaterStepSystem: the tally made the chunk's FluidStep); the file table
+  gains Step.cs.
+- **Changelog (New):** "Cell methods take several cells and out cells, a result per tile (`ref Reduce<T>` of the
+  tile's component), and skip rows proved blank; X vectorizes in byte rows."
+- **Numbers (pending):** TickBenchmark (samples/VoxelServer) of Flow as written (A), with every layer of every chunk
+  exchanged (B: what a pass without a layer range costs), and as cells (C), two rounds; the port ships only at or below
+  A at 0 B.
