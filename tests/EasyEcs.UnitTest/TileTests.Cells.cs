@@ -672,6 +672,73 @@ public partial class TileTests
         Assert.That(float.IsNaN(plate.Read<DynamicBuffer<NextHeat>>()[100].T));
     }
 
+    /// <summary>A result per tile: the cells that hold something, and the first and last row that does.</summary>
+    [EcsSystem]
+    public ref struct CellTallySystem
+    {
+        [ForEach]
+        static void Step(Cell<Count, HeatPlate> c, out Share next, ref Reduce<CountTally> tally)
+        {
+            int n = c.Value.N;
+            next = new(n * 2);
+            tally.Value.Held += n != 0 ? 1 : 0;
+            tally.Value.First = Math.Min(tally.Value.First, n != 0 ? c.Z : int.MaxValue);
+            tally.Value.Last = Math.Max(tally.Value.Last, n != 0 ? c.Z : int.MinValue);
+        }
+    }
+
+    [EcsSystem]
+    public ref struct CellTallyByCellSystem
+    {
+        [ForEach(SimdMode = SimdMode.Off)]
+        static void Step(Cell<Count, HeatPlate> c, out Share next, ref Reduce<CountTally> tally)
+        {
+            int n = c.Value.N;
+            next = new(n * 2);
+            tally.Value.Held += n != 0 ? 1 : 0;
+            tally.Value.First = Math.Min(tally.Value.First, n != 0 ? c.Z : int.MaxValue);
+            tally.Value.Last = Math.Max(tally.Value.Last, n != 0 ? c.Z : int.MinValue);
+        }
+    }
+
+    [TestCase(false, 1)]
+    [TestCase(true, 1)]
+    [TestCase(false, 4)]
+    public void AResultPerTileIsTheTallyOfItsCells(bool byCell, int threads)
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var random = new Random(11);
+        var plates = new List<(Entity Plate, int[] Counts)>();
+        for (int p = 0; p < 6; p++)
+        {
+            var plate = world.CreateEntity(new HeatPlate(new TilePos(p * 3, 0, 0)), new CountTally { Held = 77, First = -5, Last = 99 });
+            var counts = new int[256];
+            if (p > 0) // plate 0 holds nothing: its result is the identity
+                for (int k = 0; k < 6 * p; k++) counts[random.Next(256)] = random.Next(1, 9);
+            var buffer = plate.GetOrAdd<DynamicBuffer<Count>>().SetCount(256);
+            for (int i = 0; i < 256; i++) buffer[i] = new Count(counts[i]);
+            plate.GetOrAdd<DynamicBuffer<Share>>();
+            plates.Add((plate, counts));
+        }
+        if (byCell) world.AddSystem<CellTallyByCellSystem>();
+        else world.AddSystem<CellTallySystem>();
+        world.Update();
+
+        foreach (var (plate, counts) in plates)
+        {
+            int held = 0, first = int.MaxValue, last = int.MinValue;
+            for (int i = 0; i < 256; i++)
+                if (counts[i] != 0) (held, first, last) = (held + 1, Math.Min(first, i / 16), Math.Max(last, i / 16));
+            var tally = plate.Read<CountTally>();
+            Assert.That((tally.Held, tally.First, tally.Last), Is.EqualTo((held, first, last)));
+            var share = plate.Read<DynamicBuffer<Share>>().AsReadOnlySpan();
+            for (int i = 0; i < 256; i++) Assert.That(share[i].N, Is.EqualTo(counts[i] * 2), $"cell {i}");
+        }
+        if (!byCell)
+            Assert.That(world.DescribeSchedule().ToString(), Does.Contain("cells of 'c': vector (").And.Contain("rows of 'c': blank rows proved constant"),
+                world.DescribeSchedule().ToString());
+    }
+
     /// <summary>Reads two cells away with a halo of one.</summary>
     [EcsSystem]
     public ref struct CellPastTheHaloSystem
@@ -719,4 +786,12 @@ public partial class TileTests
         Allocations.WarmUp(world.Update, 50);
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) world.Update(); }), Is.Zero);
     }
+}
+
+/// <summary>A cell method's result per tile: what its cells hold, and the first and last row that holds something.</summary>
+public partial struct CountTally : IComponent
+{
+    [Sum] public int Held;
+    [Min] public int First;
+    [Max] public int Last;
 }
