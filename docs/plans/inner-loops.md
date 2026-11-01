@@ -441,6 +441,16 @@ rest of this entry is the plan as written.
 - Risk: low; the lambda infrastructure and the IForSpan runner exist.
 
 **WP5: `Cell<TCell,TTile>` (built on WP2/WP3): the headline package.**
+Shipped (feat-inner-loops): `Cell<TCell, TTile>` (Cell.cs: Value, the indexer within the halo, X / Y / Z; Offset,
+Check, Width / Depth / Height / Count and Blank for generated code), a cell parameter classified as a tile parameter
+(filters, neighbors, EECS059, EECS073 unchanged) and `out TOut` as a write of `DynamicBuffer<TOut>`; Kernel.Cells.cs
+reads the body as an element loop over a row, SystemGenerator.Cells.cs writes the pass (halo, rows from the offsets or
+every row when X / Y / Z are read, each row's loop inline at 512 / Vector<T> / 128 bits, the method on the cells left,
+the skipped rows' cells from the method on Cell.Blank computed at the first gap); EECS055 / EECS056 on a cell method
+with the reason. On the way: target-typed `new(...)` (Keeps), byte sums compared saturated (Wide.Saturated), loads of
+write-only streams dropped in every element loop (Kernel.Unloaded). TileTests.Cells.cs, AnalyzerTests.Tiles.cs,
+TileBenchmark (Blur9_Cell, Laplacian_Cell, TileActive's Cell). Not in WP5: a Columns<TTile> cell, several cell inputs
+or out cells, per-tile results (WP5b). The rest of this entry is the plan as written.
 - Bar: every Cell case at or below its hand-written `Load128`/`Load256` twin, at 0 B; a case above it is a finding
   for the generator, fixed before the package merges.
 - Core: `Cell<,>`, `PaddedTile` row access for generated code, the 128/256 width tokens.

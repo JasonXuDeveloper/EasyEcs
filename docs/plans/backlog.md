@@ -433,7 +433,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       (narrow, a string compare), compilation-end rules (each needs every use), `EnableConcurrentExecution` and
       `ConfigureGeneratedCodeAnalysis(None)` in `Area`, the shared caches (ConditionalWeakTable, thread-safe).
       Docs to-dos and the decision draft: `docs-todos.md` "feat-roslyn-guidance".
-- [ ] **Inner loops** (`inner-loops.md`), in this order (WP0b, WP0, WP2, WP3 done on feat-inner-loops): WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
+- [ ] **Inner loops** (`inner-loops.md`), in this order (WP0b, WP0, WP2, WP3, WP5 done on feat-inner-loops): WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
       WP5 `Cell<TCell,TTile>` (bar: hand-written speed), WP5b (per-tile results, several inputs/outputs, VoxelServer
       `Flow.cs`), WP1 InlineArray, WP4 ParallelFor lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
       a small rewrite would vectorize warns).

@@ -2203,3 +2203,57 @@ helpers).
 - **Generator cost after WP2 rest + WP3 (GeneratorBenchmark, base bad2017 two rounds, head one round):** level.
   Cold 913 / 876 -> 872 ms, CompileAndAnalyze 7,463 / 7,038 -> 6,958 ms, EditMethodBody 510 / 491 -> 519 ms,
   EditMethodBodyIde 91 / 70 -> 70 ms, EditUnrelatedFile 556 / 523 -> 473 ms; allocations within 0.4 %.
+
+### WP5: cell methods (`Cell<TCell, TTile>`, the shader form) — docs to-dos
+
+- **tiles.mdx + zh, new section "One cell at a time" (before the hand-written `Load128` loops, which become the
+  fallback for what a cell cannot say):** a `[ForEach]` method taking `Cell<TCell, TTile> w` and `out TOut next`
+  computes one cell: `w.Value`, `w[dx, dy, dz]` with constant offsets within the shape's halo, `w.X` / `w.Y` / `w.Z`,
+  other parameters (components of the tile's entity, singletons, values). The out cell is the entity's
+  `DynamicBuffer<TOut>` at the same place (sized by the pass). The generator writes the pass: the halo exchanged, the
+  rows the offsets read walked (the quiet rows get what the method computes from zeros, exact for any body; reading
+  X, Y or Z walks every row), each row a vector loop (Vector512, Vector<T>, Vector128: a byte row of 16 is one
+  Vector128), the method itself on cells the vector loop cannot take. Results bit for bit those of the method cell by
+  cell. "You write / The generator writes" with the 9-point blur (TileBenchmark's CellBlurSystem) and Life in bytes;
+  the schedule line (`loop Step: a tile per entity; cells of 'w': vector (...; offsets (-1,0,-1) ...)`). Pitfalls: an
+  offset past the halo throws when the pass starts; `out` of the cell type the method reads is EECS059 (write a second
+  buffer and commit, as the tile steps do, or step the tile by ref); a cell handed to a helper or read at a variable
+  offset runs cell by cell (EECS055 says why).
+- **analyzer.mdx + zh:** EECS055 / EECS056 on a cell method (the reasons: the cell used other than at constant offsets,
+  a parameter by ref, what the body computes); EECS059 and EECS073 cover a cell parameter as a tile parameter.
+- **api.mdx + zh, complexity rows:** `Cell<TCell, TTile>`: `Value`, the indexer, `X` / `Y` / `Z` O(1) (the pass: O(rows
+  read x Width / lanes) per tile). The EditorBrowsable(Never) members (`Offset`, `Check`, `Width`, `Depth`, `Height`,
+  `Count`, `Blank`, the constructor) are generated code's.
+- **performance.mdx + zh:** TileStencilBenchmark's Blur9_Cell / Laplacian_Cell against _Tile / _Hand / _Columns, and
+  TileActiveBenchmark's Cell against AlwaysOn, once synced.
+- **Changelog (New):** "A [ForEach] method can compute one cell of a tile (Cell<TCell, TTile>); the generator writes the
+  stencil's vector loop"; link tiles.mdx. **(Performance):** element loops no longer load what they only write; byte
+  lanes compare saturated sums (Life's neighbor count) in byte lanes.
+- **Roadmap:** the Cell form (inner-loops.md WP5) shipped; WP5b (per-tile results, several inputs and outputs, the
+  voxel water as cells) next.
+- **README "What's new":** cell methods, one line with the blur.
+- **Decision D77 rewritten (draft, en):** *Stencils are written one cell at a time; the generator writes the loop.* A
+  `[ForEach]` method taking `Cell<TCell, TTile>` and an out cell is read as an element loop over a tile's row (each
+  constant offset a stream from the padded row, the out cell a written stream, X the index's lanes) and translated by
+  the vector-loop core, so the hand-written `Load128` stencil is no longer the fast form. D77's three objections are
+  answered: byte promotion by Kernel.Narrow's intervals (a count of eight byte neighbors is followed as its saturated
+  lanes, exact against constants below 255); the row's width by emitting every width with constant guards (a byte row
+  of 16 runs one Vector128 iteration); per-row summaries are WP5b's per-tile results. The quiet rows get what the
+  method computes on a texture of zeros (`Cell.Blank`), exact for any body. The row's loop is inline in a NoInlining
+  pass per method: as a local function it was not inlined (more than the 32 locals the JIT inlines) and cost a call
+  per row. Considered: a `Cell` parameter per row (no gain over the element loop), an f(0) = 0 assumption for the
+  skipped rows (wrong for a body with a constant term), a routine per width (still over 32 locals for Life). Numbers:
+  TileStencilBenchmark, TileActiveBenchmark.
+- **Decision D77 rewritten (draft, zh):** *模板按一个格子写，循环由生成器写。* 带 `Cell<TCell, TTile>` 和 out 格子参数的
+  `[ForEach]` 方法被读作瓦片一行上的元素循环（每个常量偏移是从带光环的行开始的一条流，out 格子是一条写入的流，X 是下标的通道），
+  由向量循环核心翻译，所以手写的 `Load128` 模板不再是快的写法。D77 的三条异议都有了答案：byte 提升由 Kernel.Narrow 的区间处理
+  （八个 byte 邻居的计数按饱和通道跟踪，和 255 以下的常量比较时结果精确）；行宽由按常量条件生成每种宽度解决（16 个 byte 的一行
+  只跑一次 Vector128）；每行汇总是 WP5b 的每瓦片结果。跳过的安静行得到方法在全零纹理（`Cell.Blank`）上算出的值，对任何方法体都精确。
+  行的循环内联在每个方法一个的 NoInlining 遍历里：写成局部函数时 JIT 不内联它（局部变量超过 JIT 内联的上限 32 个），每行多一次调用。
+  考虑过：每行一个 `Cell` 参数（比元素循环没有收益）、假设 f(0) = 0 跳过安静行（方法体有常数项时出错）、每种宽度一个函数（Life 仍超过
+  32 个局部变量）。数字：TileStencilBenchmark、TileActiveBenchmark。
+- **Numbers for WP5 (pending):** the run of TileStencilBenchmark (Blur9 / Laplacian: _Cell against _Tile, _Hand,
+  _Columns), TileActiveBenchmark (Cell against AlwaysOn), ElementLoopBenchmark's second round and GeneratorBenchmark's
+  head round waited 1 h 40 min on the bench lock (other agents' rounds) and was stopped at the 2 h limit before it
+  started. Tier1 of the blur's pass (checked with DOTNET_JitDisasm): per row one zmm load and eight vaddps from memory,
+  a vmulps and a store, no call; Life's row one Vector128 iteration, a vpaddusb chain and three vpcmpeqb.
