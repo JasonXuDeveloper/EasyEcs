@@ -155,6 +155,12 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
     share the pass's scope, so the pass names its parameters `__arg{n}` and its locals with two underscores.
   - Each width (Vector512, Vector<T>, Vector128) is emitted; the constants fold the ones a row of 16 bytes cannot take,
     so a byte row runs one Vector128 iteration on AVX2 and AVX-512 alike.
+  - The Vector128 copy is the Vector512 text with the type replaced, so a helper the text calls needs a Vector128
+    overload, or the copy is dropped (`OfOneWidth`: Interleaved, Lanes, LookupLanes have none; the schedule line then
+    omits "Vector128" and a narrow row runs cell by cell). LaneMath has them: with AVX, 4 lanes widen into one
+    Vector256 of doubles (vcvtdq2pd / vcvttpd2dq for the quotient; AVX2 has no long-to-double conversion, so the
+    path through longs would be emulated). A new helper Kernel emits gets its Vector128 form with it, checked in Tier1
+    under `DOTNET_EnableAVX512=0` (`DOTNET_JitStdOutFile` appends: delete the file between runs).
   - A column the loop only writes is not loaded (`Kernel.Unloaded`: the JIT keeps a dead load, which may fault); every
     element loop does the same.
   - A target-typed `new(...)` is a conversion to its own type around the creation (`Keeps`), as a switch expression is.
