@@ -177,7 +177,7 @@ RowOrder.cs                  ordered tables: IRowOrder<T> (a key and a box point
                              per cluster (8 rows with 256-bit vectors, 4 on ARM64, or the size a request asks), widened
                              where a row moves in, reset by a restore)
 RowClusters.cs               RowClusters: the read path of one ordered table (clusters, boxes per axis, columns, ids,
-                             Pairs: the cluster pairs within a cutoff, a sweep) and ClusterPair
+                             Pairs: the cluster pairs within a cutoff, a sweep over scratch kept per thread) and ClusterPair
 Pairs.cs                     [Neighbor] (a pair method's other entity) and the pass of a pair method: IPairJob (the
                              generated job: the cutoff, per row or one, and its run over a table against another),
                              PairRun (one table against one: clusters of Vector<float>.Count rows, their lane masks,
@@ -237,7 +237,8 @@ Archetype.cs                 a table: mask, EntitySlot rows (version + id), one 
                              columns pinned and 64-byte aligned), presence bits + absent counts per column,
                              per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
                              FillHoles, Permute (a re-sort: every column, presence bit, change tick and slot,
-                             gathered into a spare and swapped in: ColumnSpares, one per array type and length);
+                             gathered into a spare and swapped in: ColumnSpares, one per array type and length, which also
+                             holds the sort's scratch: keys, rows, words, never ArrayPool.Shared);
                              change-tick summaries (LastWrite per column, WordTicks per 64 rows, BlockTicks
                              per 4,096 rows for writes and for removals), Stamp/StampRows/StampWord/SetTick,
                              MarkPresent/MarkAbsent, CloneRow; Resize (growth and Trim, which shrinks a table to a
