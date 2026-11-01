@@ -202,54 +202,15 @@ internal static class LambdaPass
     // ---------------- the body as generated code ----------------
 
     /// <summary>
-    /// The first name in the lambda's body that code in another file cannot reach (a private member of the type around
-    /// the call, a file-local type), or null: the generator then runs the lambda through its delegate (EECS096).
-    /// Names the compilation cannot resolve (another generator's members, while the generator runs) are left alone.
+    /// The first name in the lambda's body that code in another file cannot reach (<see cref="BodyCopy.Unreachable"/>), or
+    /// null: the generator then runs the lambda through its delegate (EECS096).
     /// </summary>
     public static string? Unreachable(Call call, SemanticModel model, System.Threading.CancellationToken ct) => Unreachable(call, model, ct, out _);
 
     /// <inheritdoc cref="Unreachable(Call, SemanticModel, System.Threading.CancellationToken)"/>
     /// <param name="blocking">The symbol code outside its type cannot reach (EECS096's fix makes a private member internal).</param>
-    public static string? Unreachable(Call call, SemanticModel model, System.Threading.CancellationToken ct, out ISymbol? blocking)
-    {
-        blocking = null;
-        var lambda = call.Lambda!;
-        foreach (var name in call.Syntax!.Body.DescendantNodesAndSelf().OfType<SimpleNameSyntax>())
-        {
-            var symbol = model.GetSymbolInfo(name, ct).Symbol;
-            if (symbol is null or ILocalSymbol or IParameterSymbol or ILabelSymbol or IRangeVariableSymbol or IDiscardSymbol or INamespaceSymbol
-                || symbol is IFieldSymbol { HasConstantValue: true } || symbol is IMethodSymbol { MethodKind: MethodKind.LocalFunction or MethodKind.AnonymousFunction }
-                || Inside(symbol.ContainingSymbol, lambda))
-                continue;
-            if (symbol is ITypeParameterSymbol) return $"it names type parameter {symbol.Name}";
-            if ((blocking = Blocking(symbol)) != null) return $"it names {Describe(blocking)}";
-        }
-
-        return null;
-    }
-
-    /// <summary>The symbol of <paramref name="symbol"/>'s chain (itself or a containing type) that another file cannot reach, or null.</summary>
-    internal static ISymbol? Blocking(ISymbol symbol)
-    {
-        if (symbol is IMethodSymbol { ReducedFrom: { } extension }) symbol = extension;
-        if (symbol is IMethodSymbol { IsGenericMethod: true } generic) symbol = generic.ConstructedFrom;
-        for (var s = symbol; s != null && s is not INamespaceSymbol; s = s.ContainingSymbol)
-        {
-            if (s is INamedTypeSymbol { IsFileLocal: true }) return s;
-            if (s.DeclaredAccessibility is Accessibility.Private or Accessibility.Protected or Accessibility.ProtectedAndInternal) return s;
-            if (s is INamedTypeSymbol { IsGenericType: true } named)
-                foreach (var argument in named.TypeArguments)
-                    if (argument is INamedTypeSymbol && Blocking(argument) is { } inner) return inner;
-        }
-
-        return null;
-    }
-
-    internal static string Describe(ISymbol symbol) =>
-        $"{(symbol.DeclaredAccessibility == Accessibility.Private ? "private " : symbol is INamedTypeSymbol { IsFileLocal: true } ? "file-local " : "protected ")}"
-        + $"{symbol.Kind.ToString().ToLowerInvariant().Replace("namedtype", "type")} '{symbol.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}'"
-        + (symbol.ContainingType is { } type ? $" of {type.Name}" : "")
-        + ", which code outside its type (or file) cannot reach";
+    public static string? Unreachable(Call call, SemanticModel model, System.Threading.CancellationToken ct, out ISymbol? blocking) =>
+        BodyCopy.Unreachable(call.Syntax!.Body, call.Lambda!, model, ct, out blocking);
 
     /// <summary>
     /// Whether the lambda's body is an expression that may stand as a statement (an assignment, an increment, a call),
@@ -260,115 +221,14 @@ internal static class LambdaPass
         or PostfixUnaryExpressionSyntax { RawKind: (int)SyntaxKind.PostIncrementExpression or (int)SyntaxKind.PostDecrementExpression };
 
     /// <summary>
-    /// The lambda's body as the body of a static method in a generated file: every name of a type, a namespace or a static
-    /// member qualified (<c>global::Game.Rules.Limit</c>), constants written as their values (a private one too), the
-    /// rest as written. Call only when <see cref="Unreachable"/> found nothing. A block keeps its braces; an expression
-    /// becomes <c>=&gt; expression;</c>.
+    /// The lambda's body as the body of a static method in a generated file (<see cref="BodyCopy.Copy"/>). Call only when
+    /// <see cref="Unreachable(Call, SemanticModel, System.Threading.CancellationToken)"/> found nothing. A block keeps its
+    /// braces; an expression becomes <c>=&gt; expression;</c>.
     /// </summary>
     public static string Copy(Call call, SemanticModel model, System.Threading.CancellationToken ct)
     {
-        var body = (CSharpSyntaxNode)new Qualifier(model, call.Lambda!, ct).Visit(call.Syntax!.Body)!;
-        return body is BlockSyntax block ? block.ToFullString().Trim() : $"=> {body.ToFullString().Trim()};";
-    }
-
-    /// <summary>The using directives of the file of the call that bring extension members into scope (aliases are qualified away).</summary>
-    public static IEnumerable<string> Usings(SyntaxNode node)
-    {
-        var usings = new List<string>();
-        foreach (var unit in node.Ancestors())
-        {
-            var directives = unit switch
-            {
-                CompilationUnitSyntax compilation => compilation.Usings,
-                BaseNamespaceDeclarationSyntax ns => ns.Usings,
-                _ => default,
-            };
-            foreach (var u in directives)
-                if (u.Alias == null && u.GlobalKeyword.IsKind(SyntaxKind.None) && u.NamespaceOrType is { } name)
-                    usings.Add($"using {(u.StaticKeyword.IsKind(SyntaxKind.None) ? "" : "static ")}{name.ToString()};");
-            if (unit is BaseNamespaceDeclarationSyntax enclosing) // the namespace and those around it, in scope at the call
-            {
-                var parts = enclosing.Name.ToString().Split('.');
-                for (int i = 1; i <= parts.Length; i++) usings.Add($"using {string.Join(".", parts.Take(i))};");
-            }
-        }
-
-        return usings;
-    }
-
-    /// <summary>Rewrites the names <see cref="Copy"/> qualifies.</summary>
-    private sealed class Qualifier(SemanticModel model, IMethodSymbol lambda, System.Threading.CancellationToken ct) : CSharpSyntaxRewriter
-    {
-        public override SyntaxNode? VisitIdentifierName(IdentifierNameSyntax node) =>
-            Qualified(node, null) is { } qualified ? qualified.WithTriviaFrom(node) : base.VisitIdentifierName(node);
-
-        public override SyntaxNode? VisitGenericName(GenericNameSyntax node)
-        {
-            var rewritten = (GenericNameSyntax)base.VisitGenericName(node)!;
-            return Qualified(node, rewritten.TypeArgumentList.ToString()) is { } qualified ? qualified.WithTriviaFrom(node) : rewritten;
-        }
-
-        public override SyntaxNode? VisitAliasQualifiedName(AliasQualifiedNameSyntax node) => node; // global::… as written
-
-        /// <summary>The qualified form of a leftmost name, or null to keep it.</summary>
-        private ExpressionSyntax? Qualified(SimpleNameSyntax node, string? typeArguments)
-        {
-            if (!Leftmost(node) || node is IdentifierNameSyntax { IsVar: true } && model.GetSymbolInfo(node, ct).Symbol is ITypeSymbol) return null;
-            var symbol = model.GetSymbolInfo(node, ct).Symbol;
-            switch (symbol)
-            {
-                case INamespaceSymbol ns when !ns.IsGlobalNamespace:
-                    return SyntaxFactory.ParseName(ns.ToDisplayString(Symbols.Fqn));
-                case INamedTypeSymbol type when typeArguments == null:
-                    return SyntaxFactory.ParseName(type.ToDisplayString(Symbols.Fqn));
-                case INamedTypeSymbol type:
-                    return SyntaxFactory.ParseName(Outer(type.OriginalDefinition) + type.Name + typeArguments);
-                case IFieldSymbol { HasConstantValue: true } constant when constant.Type is { } t && Constant(constant.ConstantValue, t) is { } value:
-                    return SyntaxFactory.ParseExpression(value);
-                case IFieldSymbol or IPropertySymbol or IEventSymbol or IMethodSymbol { MethodKind: MethodKind.Ordinary }
-                    when symbol.IsStatic && !Inside(symbol.ContainingSymbol, lambda) && symbol.ContainingType is { } owner:
-                    return SyntaxFactory.ParseExpression($"{owner.ToDisplayString(Symbols.Fqn)}.{Code.Escape(symbol.Name)}{typeArguments}");
-                default:
-                    return null;
-            }
-        }
-
-        /// <summary>The containing types and namespace of a type as a prefix (<c>global::Ns.Outer.</c>).</summary>
-        private static string Outer(INamedTypeSymbol type) => type.ContainingType is { } outer
-            ? outer.ToDisplayString(Symbols.Fqn) + "."
-            : type.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString(Symbols.Fqn) + "." : "global::";
-
-        /// <summary>A name that starts an expression or a type: not a member after a dot, a named argument or an initialized member.</summary>
-        private static bool Leftmost(SimpleNameSyntax node) => node.Parent switch
-        {
-            MemberAccessExpressionSyntax access => access.Expression == node,
-            QualifiedNameSyntax qualified => qualified.Left == node,
-            MemberBindingExpressionSyntax or NameColonSyntax or NameEqualsSyntax or AliasQualifiedNameSyntax or ExplicitInterfaceSpecifierSyntax => false,
-            AssignmentExpressionSyntax { Parent: InitializerExpressionSyntax } assignment => assignment.Left != node,
-            _ => true,
-        };
-    }
-
-    /// <summary>A constant as C# writes it, or null when it has no literal form here.</summary>
-    internal static string? Constant(object? value, ITypeSymbol type)
-    {
-        string? text = value switch
-        {
-            null => type.IsReferenceType ? $"default({type.ToDisplayString(Symbols.Fqn)})" : null,
-            string s => SymbolDisplay.FormatLiteral(s, true),
-            char c => SymbolDisplay.FormatLiteral(c, true),
-            bool b => b ? "true" : "false",
-            float f when float.IsNaN(f) => "float.NaN",
-            float f when float.IsInfinity(f) => f > 0 ? "float.PositiveInfinity" : "float.NegativeInfinity",
-            float f => f.ToString("R", CultureInfo.InvariantCulture) + "f",
-            double d when double.IsNaN(d) => "double.NaN",
-            double d when double.IsInfinity(d) => d > 0 ? "double.PositiveInfinity" : "double.NegativeInfinity",
-            double d => d.ToString("R", CultureInfo.InvariantCulture) + "d",
-            decimal m => m.ToString(CultureInfo.InvariantCulture) + "m",
-            System.IFormattable number => number.ToString(null, CultureInfo.InvariantCulture),
-            _ => null,
-        };
-        return text == null ? null : $"(({type.ToDisplayString(Symbols.Fqn)})({text}))";
+        var body = BodyCopy.Copy(call.Syntax!.Body, call.Lambda!, model, null, ct);
+        return call.Syntax.Body is BlockSyntax ? body.Trim() : $"=> {body.Trim()};";
     }
 
     /// <summary>

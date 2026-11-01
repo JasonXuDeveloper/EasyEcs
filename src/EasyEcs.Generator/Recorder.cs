@@ -512,7 +512,7 @@ internal static class Recorder
         private bool Writes(SyntaxNode node) => model.GetOperation(node, Ct) is not { } op || Uses.MayWrite(op);
 
         private static ExpressionSyntax Constant(IFieldSymbol constant) =>
-            LambdaPass.Constant(constant.ConstantValue, constant.Type) is { } value ? ParseExpression(value)
+            BodyCopy.Constant(constant.ConstantValue, constant.Type) is { } value ? ParseExpression(value)
                 : throw new NotRecorded($"it names constant {constant.Name}, whose value the generator cannot write");
 
         private static ExpressionSyntax Qualified(IMethodSymbol method)

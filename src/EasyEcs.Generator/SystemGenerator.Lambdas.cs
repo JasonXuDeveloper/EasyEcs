@@ -112,6 +112,11 @@ public sealed partial class SystemGenerator
                     ? static (i, kind) => kind switch { Symbols.ParamKind.Singleton => $"s{i}.Value", Symbols.ParamKind.Reduction => $"l{i}", _ => $"x{i}" }
                     : static (i, kind) => kind switch { Symbols.ParamKind.Singleton => $"s{i}", Symbols.ParamKind.Reduction => $"l{i}", _ => $"x{i}" }, ct, out scalar)
                 : null;
+            // A body left row by row whose loops over spans have vector forms: copied with them (Kernel.Loops.cs).
+            if (simd == null && body != null && call.Syntax!.Body is BlockSyntax block && Symbols.Simd(lambda) != Symbols.SimdOff
+                && block.DescendantNodes().Any(static n => n is ForStatementSyntax or ForEachStatementSyntax)
+                && Kernel.ElementLoops(lambda, block, model, ct) is var found && found.Any(f => f.Vector != null))
+                body = WithElementLoops(lambda, block, model, found, "", ct).Trim();
             var owner = new OwnerModel("", "", "", "Lambda", "", true, false, false, "", "", "", "", 0);
             var method = new ForEachModel(owner, "Lambda", true, stable, call.Parallel, 0,
                 new EquatableArray<string>(query.ToArray()), new EquatableArray<ParamModel>(parameters),
@@ -128,7 +133,7 @@ public sealed partial class SystemGenerator
             };
             return new LambdaModel(invocation.SyntaxTree.FilePath, invocation.SpanStart, location.Version, location.Data,
                 LambdaPass.Where(invocation.GetLocation()), method, body,
-                new EquatableArray<string>(body == null ? [] : LambdaPass.Usings(invocation).Distinct().OrderBy(u => u, System.StringComparer.Ordinal).ToArray()),
+                new EquatableArray<string>(body == null ? [] : BodyCopy.Usings(invocation).Distinct().OrderBy(u => u, System.StringComparer.Ordinal).ToArray()),
                 lambda.ReturnsVoid ? "void" : lambda.ReturnType.ToDisplayString(Symbols.Fqn));
         }
     }

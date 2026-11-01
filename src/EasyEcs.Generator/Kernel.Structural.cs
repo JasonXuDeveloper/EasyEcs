@@ -31,6 +31,9 @@ internal sealed partial class Kernel
     /// <summary>The Entity parameter: its uses are its id (in a record) and the changes it makes.</summary>
     private IParameterSymbol? _entity;
 
+    /// <summary>An element loop's index read as a value (Kernel.Loops.cs): lane j is <c>Row + j</c>.</summary>
+    private IParameterSymbol? _index;
+
     /// <summary>The Emit&lt;T&gt; parameters: the job field holding each one's list (<c>e{i}</c>), and whether its one Add was translated.</summary>
     private readonly Dictionary<IParameterSymbol, (int Index, bool Added)> _emits = new(SymbolEqualityComparer.Default);
 

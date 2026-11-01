@@ -2228,3 +2228,80 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   bullet above). Changelog (Performance): "a reservation faults its pages in on Linux: spawning into it pays no page
   fault" (link the decision). api.mdx: `Reserve` / `EnsureEntityCapacity` complexity unchanged (O(capacity) for the
   faults, as the first touch was). Roadmap: the backlog item done.
+
+## feat-inner-loops (element loops, WP0 + WP2 + WP3) — docs to-dos
+
+- **systems.mdx + zh, vector loops section ("Loops inside a method"):** a [ForEach] method that runs row by row and
+  loops over a span or a buffer gets the loop's vector form. What qualifies: `foreach (ref var x in span)` over a
+  Span, ReadOnlySpan or DynamicBuffer, `for (int i = start; i < end; i++)` reading its spans only at `[i]`; a body
+  that does not leave early, holds no loop and writes the method's variables only as sums, Mins or Maxes
+  (`t += x`, `lo = Math.Min(lo, x)`; a float sum needs FloatMode.Fast); the index also read as a value
+  (`s[i] = i * 0.5f`); neighbors at constant offsets (`s[i - 1] + s[i + 1]`, |k| <= 64, a span written must not be
+  read at another offset); elements of plain values. Also: a batch method's loops over its rows, the body of a lambda
+  pass, calls of the type's private static helpers (inlined into the loop, reached from the copy through accessors). Results bit for bit; the loop as written runs the elements left (tail, a vector a lane of which
+  would throw). Show "You write / The generator writes" with the Decay method and the generated `__Elements0` call.
+  The schedule's loop lines (`DescribeSchedule`: `loop File.cs(L,C): vector (...)` / `scalar (reason)`).
+- **dynamic-buffers.mdx + zh:** one paragraph and a link to the section above: a loop over a buffer's span inside a
+  [ForEach] method is vectorized; a `for` over two buffers needs the target at least as long as the bound, and a
+  neighbor read at i + k needs the span to reach end + k (else the loop as written runs and throws where it would).
+  A stencil over one buffer writes into a second one (Smooth: `dst[i] = src[i - 1] + 2 * src[i] + src[i + 1]`).
+- **analyzer.mdx + zh, EECS055:** the second message, at the loop's keyword: "This loop of [ForEach] method 'A' runs
+  one element at a time, without a vector loop: {reason}" (Info; SimdMode.Off silences it). Examples: a `break`, a
+  float sum without FloatMode.Fast, a variable written other than as a sum, a span written and read at another
+  offset ("it writes span 's' and reads it at another index ('s[i - 1]'): ... write into another span"), the index
+  inside another expression of an index (`s[i * 2]`).
+- **api.mdx + zh:** no public API change (no complexity row).
+- **performance.mdx + zh:** ElementLoopBenchmark (Decay / Widen, 4 / 64 / 1,024 elements) once synced; add the class to
+  `tools/bench.sh --site`.
+- **Changelog (New):** "Loops over spans and buffers inside [ForEach] methods run as vector loops"; link systems.mdx.
+- **Roadmap:** element loops (inner-loops.md WP2, WP3) shipped: sums, the index, offsets, batch methods, lambda
+  passes, private helpers; the Cell form (WP5) next.
+- **VoxelServer page (samples/voxel-server.mdx + zh):** the height map is now a plain loop the generator vectorizes
+  (HeightMap.cs); its walkthrough names the form instead of the Vector128 code.
+- **Decision D132 (draft, en):** *Element loops share the vector-loop core; the method is copied.* A loop over a
+  span inside a method that runs row by row is desugared into a static local function whose ref parameters are the
+  elements and translated by the same Kernel as a row loop (each element a lane). The generator copies the method
+  into its generated file in place of the UnsafeAccessor (BodyCopy: names qualified, constants inlined, `#line` to the
+  user's file so breakpoints and errors land there), with each loop preceded by a NoInlining local function (called when the span holds a whole vector)
+  that runs whole vectors and returns the index it stopped at; the loop as written runs the rest. Considered: a copy
+  of the compilation with the loop rewritten (costly per keystroke), intercepting the method (interceptors are only for
+  lambda passes, D63), an `Element<T>` parameter (declined by the owner). A variable of the method summed in the loop
+  is a reduction of the same core folded into the variable when the vectors stop (at a bail, after the vector's own
+  lanes are set back); the index read as a value is a lane of indexes; a span read at i + k is a stream of its own
+  from its element at index + k (no ref before a span's start, which would point outside its object), guarded per
+  offset at run time; aliasing is checked at run time (`__Apart`) rather than proven from roots, so a Slice of one
+  buffer written into another Slice of it runs as written. Private static helpers and fields of the method's type are
+  reached from the copy through UnsafeAccessor externs. Numbers: ElementLoopBenchmark, HeightMapLoopBenchmark,
+  BatchLoopBenchmark.
+- **Decision D132 (draft, zh):** *元素循环共用向量循环核心；方法体被复制。* 按行运行的方法中遍历 span 的循环，被改写为静态局部函数
+  （元素作为 ref 参数），由与行循环相同的 Kernel 翻译（每个元素一条 lane）。生成器把方法复制进生成文件，替代
+  UnsafeAccessor（BodyCopy：名称全限定、常量内联、`#line` 指回用户文件，断点和错误落在用户代码上）；每个循环之前调用一个
+  NoInlining 局部函数（span 至少容纳一个完整向量时才调用），按整向量运行并返回停下的位置，剩余元素由原循环处理。考虑过：改写循环后的编译副本（每次按键代价高）、
+  拦截方法（拦截器只用于 lambda pass，D63）、`Element<T>` 参数（所有者已否决）。循环中累加的方法变量是同一核心的归约，向量结束时
+  （在退出点先还原该向量自身的 lane）折叠进变量；作为值读取的下标是一条下标 lane；在 i + k 读取的 span 是一条独立的流，从
+  index + k 处的元素传入（不在 span 起点之前取 ref，那会指向对象之外），每个偏移在运行时检查边界；别名在运行时检查（`__Apart`），
+  不从根推导，所以同一 buffer 的一个 Slice 写入它的另一个 Slice 时按原循环运行。方法所在类型的私有静态辅助方法和字段通过
+  UnsafeAccessor extern 从副本访问。数字：ElementLoopBenchmark、HeightMapLoopBenchmark、BatchLoopBenchmark。
+- **Numbers for D132 (ElementLoopBenchmark, 10k entities, this machine, round 1 after the inlining fix, round 2 within 0.05; ratio to
+  Scalar):** Decay 4 / 64 / 1,024 elements: Generated 1.07 / 0.42 / 0.27, HandWritten 1.05 / 0.37 / 0.29. Widen
+  (int to long across two buffers): Generated 1.00 / 0.69 / 0.62 of WidenScalar, HandWritten 1.41 / 0.75 / 0.67.
+  Before the fix the 4-element cases cost 1.19-1.23x: the copy was NoInlining while the method's small body inlines
+  into its job through the accessor. The copy now takes the accessor's inlining, the vector form is a NoInlining root
+  called only for a span of a whole vector. D132 says so (the rule: a copy of user code inlines as the code would).
+- **Generator cost (GeneratorBenchmark, base c2beddf against this branch, two interleaved rounds):** level. Cold
+  906 / 961 -> 913 / 971 ms (one namespace: 938 / 922 -> 938 / 938), EditMethodBody 574 / 555 -> 555 / 513 ms
+  (516 / 561 -> 541 / 531), CompileAndAnalyze 5,738 / 5,562 -> 5,678 / 5,725 ms (7,607 / 7,326 -> 7,508 / 7,182);
+  allocations within 0.4 %. Methods without loops pay one syntax walk for a loop keyword.
+- **Numbers for D132, WP2 rest + WP3 (this branch at 9f89ff8, one round; ratio to the loop as written, SimdMode.Off):**
+  10k entities, 4 / 64 / 1,024 elements: SumInts Generated 1.08 / 0.46 / 0.33 (HandWritten 1.22 / 0.55 / 0.43);
+  SumFloats (FloatMode.Fast) 1.03 / 0.34 / 0.09 (HandWritten 0.91 / 0.33 / 0.11); Smooth (three neighbors, int to
+  long) 1.05 / 0.64 / 0.74 (HandWritten 1.03 / 0.71 / 0.70; 1,024 is memory-bound: 120 MB per pass); Decay
+  1.02 / 0.41 / 0.36; Widen 0.92 / 0.76 / 0.62. HeightMapLoopBenchmark (1,000 chunks): Generated 0.020 of the plain loop,
+  HandWritten (the sample's old Vector128 loop) 0.029. BatchLoopBenchmark (100k rows): a batch method's loop
+  Generated 0.21, the method for one row 0.21. 0 B everywhere. A first round before 9f89ff8 had SumInts at 64
+  elements at 1.25x of the loop as written: the sum's lanes were folded lane by lane through the variable's ref
+  (a variable-index extract of a Vector512 per lane); one horizontal Sum fixed it (0.46). The second round of the
+  loop classes did not run: the bench lock was held by other agents' runs past the 2 h limit twice.
+- **Generator cost after WP2 rest + WP3 (GeneratorBenchmark, base bad2017 two rounds, head one round):** level.
+  Cold 913 / 876 -> 872 ms, CompileAndAnalyze 7,463 / 7,038 -> 6,958 ms, EditMethodBody 510 / 491 -> 519 ms,
+  EditMethodBodyIde 91 / 70 -> 70 ms, EditUnrelatedFile 556 / 523 -> 473 ms; allocations within 0.4 %.
