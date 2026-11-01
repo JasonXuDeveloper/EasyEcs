@@ -18,38 +18,40 @@ namespace EasyEcs.Generator;
 internal sealed partial class Kernel
 {
     /// <summary>
-    /// What a cell method reads and how its rows run: the offsets its body reads (in the order of the streams), whether
-    /// it reads its place (X, Y or Z: no row may be skipped), the other parameters it reads, and the row's vector form
-    /// (null with <paramref name="Reason"/>: every cell runs the method as written).
+    /// What a cell method reads and how its rows run: the offsets its body reads (in the order of the streams; Cell, the
+    /// ordinal among its cell parameters, 0 the one that drives the walk), whether it reads its place (X, Y or Z: no row
+    /// may be skipped), the other parameters it reads, and the row's vector form (null with <paramref name="Reason"/>:
+    /// every cell runs the method as written). The streams are the offsets', then the out cells' in parameter order.
     /// </summary>
     /// <param name="Values">Per value of the vector form, after the streams: "Y", "Z" (the row's) or a parameter's name.</param>
     /// <param name="Fixable">Whether the method can be rewritten for the vector form (EECS055 then warns).</param>
-    internal sealed record CellForm(EquatableArray<(int Dx, int Dy, int Dz)> Offsets, bool ReadsPlace, ElementLoop? Loop, EquatableArray<string> Values, string? Reason,
+    internal sealed record CellForm(EquatableArray<(int Cell, int Dx, int Dy, int Dz)> Offsets, bool ReadsPlace, ElementLoop? Loop, EquatableArray<string> Values, string? Reason,
         bool Fixable = false);
 
     /// <summary>The shape of cell method <paramref name="method"/>'s body, and its row's vector form when Kernel takes it.</summary>
     public static CellForm CellFormOf(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
     {
-        var cell = method.Parameters.First(p => p.RefKind == RefKind.None && Symbols.IsCell(p.Type));
-        var output = method.Parameters.First(p => Symbols.CellOut(p) != null);
-        var cellType = (INamedTypeSymbol)cell.Type;
+        var cells = Symbols.Cells(method);
+        var outputs = method.Parameters.Where(p => Symbols.CellOut(p) != null).ToList();
         SyntaxNode? body = (SyntaxNode?)syntax.Body ?? syntax.ExpressionBody?.Expression;
-        var offsets = new List<(int, int, int)>();
+        var offsets = new List<(int, int, int, int)>();
         bool x = false, y = false, z = false;
         string? reason = null;
         var replace = new Dictionary<SyntaxNode, SyntaxNode>();
         if (body == null) return new CellForm(new([]), true, null, new([]), "it has no body");
         foreach (var name in body.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>())
         {
-            if (!SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(name, ct).Symbol, cell)) continue;
-            (int, int, int)? at = null;
+            if (model.GetSymbolInfo(name, ct).Symbol is not IParameterSymbol cell) continue;
+            int input = cells.FindIndex(c => SymbolEqualityComparer.Default.Equals(c, cell));
+            if (input < 0) continue;
+            (int, int, int, int)? at = null;
             SyntaxNode? use = null;
             if (name.Parent is ElementAccessExpressionSyntax { ArgumentList.Arguments: { Count: 3 } args } access && access.Expression == name)
             {
                 var d = args.Select(a => model.GetConstantValue(a.Expression, ct)).ToArray();
                 if (d.All(c => c is { HasValue: true, Value: int }))
                 {
-                    at = ((int)d[0].Value!, (int)d[1].Value!, (int)d[2].Value!);
+                    at = (input, (int)d[0].Value!, (int)d[1].Value!, (int)d[2].Value!);
                     use = access;
                 }
             }
@@ -57,7 +59,7 @@ internal sealed partial class Kernel
             {
                 switch (member.Name.Identifier.ValueText)
                 {
-                    case "Value": at = (0, 0, 0); use = member; break;
+                    case "Value": at = (input, 0, 0, 0); use = member; break;
                     case "X": x = true; replace[member] = IdentifierName("__X").WithTriviaFrom(member); continue;
                     case "Y": y = true; replace[member] = IdentifierName("__Y").WithTriviaFrom(member); continue;
                     case "Z": z = true; replace[member] = IdentifierName("__Z").WithTriviaFrom(member); continue;
@@ -76,19 +78,20 @@ internal sealed partial class Kernel
         if (Symbols.Simd(method) == Symbols.SimdOff) return new CellForm(new(offsets.ToArray()), place, null, new([]), "SimdMode.Off");
 
         // The values: the method's other parameters the body names, then the row's Y and Z where it reads them.
-        var others = method.Parameters.Where(p => !SymbolEqualityComparer.Default.Equals(p, cell) && !SymbolEqualityComparer.Default.Equals(p, output)
+        var others = method.Parameters.Where(p => !cells.Contains(p, SymbolEqualityComparer.Default) && !outputs.Contains(p, SymbolEqualityComparer.Default)
             && body.DescendantNodesAndSelf().OfType<IdentifierNameSyntax>().Any(n => SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(n, ct).Symbol, p))).ToList();
         if (others.FirstOrDefault(p => p.RefKind is RefKind.Ref or RefKind.Out || p.Type.IsRefLikeType) is { } written)
-            return new CellForm(new(offsets.ToArray()), place, null, new([]), $"it takes '{written.Name}' {(written.Type.IsRefLikeType ? $"(a {written.Type.Name})" : "by ref")}: a cell's vector form reads values the same for the row and writes only its out cell", true);
+            return new CellForm(new(offsets.ToArray()), place, null, new([]), $"it takes '{written.Name}' {(written.Type.IsRefLikeType ? $"(a {written.Type.Name})" : "by ref")}: a cell's vector form reads values the same for the row and writes only its out cells", true);
 
         var rewritten = body.ReplaceNodes(replace.Keys, (original, _) => replace[original]);
         var statements = rewritten is BlockSyntax block ? block : Block(ExpressionStatement((ExpressionSyntax)rewritten));
-        string cellName = cellType.TypeArguments[0].ToDisplayString(Symbols.Fqn);
+        string CellName(int input) => ((INamedTypeSymbol)cells[input].Type).TypeArguments[0].ToDisplayString(Symbols.Fqn);
         var parameters = new List<ParameterSyntax>();
         for (int s = 0; s < offsets.Count; s++)
-            parameters.Add(Parameter(Identifier(Stream(s))).WithType(ParseTypeName(cellName)).WithModifiers(TokenList(Token(SyntaxKind.InKeyword))));
-        parameters.Add(Parameter(Identifier(global::EasyEcs.Generator.Code.Escape(output.Name))).WithType(ParseTypeName(output.Type.ToDisplayString(Symbols.Fqn)))
-            .WithModifiers(TokenList(Token(SyntaxKind.RefKeyword))));
+            parameters.Add(Parameter(Identifier(Stream(s))).WithType(ParseTypeName(CellName(offsets[s].Item1))).WithModifiers(TokenList(Token(SyntaxKind.InKeyword))));
+        foreach (var output in outputs)
+            parameters.Add(Parameter(Identifier(global::EasyEcs.Generator.Code.Escape(output.Name))).WithType(ParseTypeName(output.Type.ToDisplayString(Symbols.Fqn)))
+                .WithModifiers(TokenList(Token(SyntaxKind.RefKeyword))));
         var values = new List<string>();
         foreach (var p in others)
         {
@@ -103,9 +106,10 @@ internal sealed partial class Kernel
             .WithParameterList(ParameterList(SeparatedList(parameters)))
             .WithBody(statements);
         int position = syntax.Body?.SpanStart ?? syntax.ExpressionBody!.Expression.SpanStart;
-        var loop = Translated(method, syntax, model, function, position, offsets.Count + 1, values.Count, x, ct, out reason, out bool fixable);
+        var loop = Translated(method, syntax, model, function, position, offsets.Count + outputs.Count, values.Count, x, ct, out reason, out bool fixable);
         if (loop == null) return new CellForm(new(offsets.ToArray()), place, null, new([]), reason, fixable);
-        var streams = offsets.Select((o, s) => ($"{o}", cellName, false, 0)).Append(($"{output.Name}", output.Type.ToDisplayString(Symbols.Fqn), true, 0)).ToArray();
+        var streams = offsets.Select(o => ($"{o}", CellName(o.Item1), false, 0))
+            .Concat(outputs.Select(o => ($"{o.Name}", o.Type.ToDisplayString(Symbols.Fqn), true, 0))).ToArray();
         var valueTypes = others.Select(p => (p.Type.ToDisplayString(Symbols.Fqn), global::EasyEcs.Generator.Code.Escape(p.Name), false)).ToList();
         if (y) valueTypes.Add(("int", "__Y", false));
         if (z) valueTypes.Add(("int", "__Z", false));

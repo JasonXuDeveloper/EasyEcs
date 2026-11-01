@@ -1386,6 +1386,10 @@ internal static class Symbols
     public static bool IsCell(ITypeSymbol type) =>
         type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Cell<TCell, TTile>");
 
+    /// <summary>A cell method's cell parameters in order: the first drives the walk, the others are sampled.</summary>
+    public static List<IParameterSymbol> Cells(IMethodSymbol method) =>
+        method.Parameters.Where(p => p.RefKind == RefKind.None && IsCell(p.Type)).ToList();
+
     /// <summary>A method taking a <c>Cell&lt;TCell, TTile&gt;</c>: it computes one cell (the generator writes its pass).</summary>
     public static bool IsCellMethod(IMethodSymbol method) => method.Parameters.Any(p => p.RefKind == RefKind.None && IsCell(p.Type));
 
@@ -1507,6 +1511,9 @@ internal static class Symbols
     {
         var stepped = method.Parameters.Where(IsSteppingTile).ToArray();
         bool gaussSeidel = IsGaussSeidel(method);
+        var cells = Cells(method);
+        if (cells.FirstOrDefault(c => !SymbolEqualityComparer.Default.Equals(((INamedTypeSymbol)c.Type).TypeArguments[1], ((INamedTypeSymbol)cells[0].Type).TypeArguments[1])) is { } other)
+            return $"takes cells '{cells[0].Name}' and '{other.Name}' of different tiles: a cell method's inputs line up row by row, take cells of one TTile";
         if (stepped.Length == 0)
             return gaussSeidel ? "has [GaussSeidel] but takes no tile by ref: the attribute steps the tile the method takes as 'ref Tile<TCell, TTile>'" : null;
         if (stepped.Length > 1)

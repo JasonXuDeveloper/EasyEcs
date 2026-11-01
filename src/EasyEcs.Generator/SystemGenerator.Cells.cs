@@ -26,29 +26,31 @@ public sealed partial class SystemGenerator
             form = new Kernel.CellForm(new([]), true, null, new([]), $"the generator failed to translate the cell ({e.GetType().Name}: {e.Message})");
         }
 
-        var cell = method.Parameters.First(p => p.RefKind == RefKind.None && Symbols.IsCell(p.Type));
-        var output = method.Parameters.First(p => Symbols.CellOut(p) != null);
-        var cellType = (INamedTypeSymbol)cell.Type;
-        string cellName = cellType.TypeArguments[0].ToDisplayString(Symbols.Fqn), shape = cellType.TypeArguments[1].ToDisplayString(Symbols.Fqn);
-        string outName = output.Type.ToDisplayString(Symbols.Fqn);
-        string at = $"global::EasyEcs.Cell<{cellName}, {shape}>";
+        var cells = Symbols.Cells(method);
+        var outputs = method.Parameters.Where(p => Symbols.CellOut(p) != null).ToList();
+        string shape = ((INamedTypeSymbol)cells[0].Type).TypeArguments[1].ToDisplayString(Symbols.Fqn);
+        string CellName(int k) => ((INamedTypeSymbol)cells[k].Type).TypeArguments[0].ToDisplayString(Symbols.Fqn);
+        string At(int k) => $"global::EasyEcs.Cell<{CellName(k)}, {shape}>";
+        string OutName(int j) => outputs[j].Type.ToDisplayString(Symbols.Fqn);
+        string at = At(0); // the shape's constants (every input has the driver's tile)
         // The pass names its parameters __arg{n} and its locals with two underscores: the vector loop's text (e1.., i, rows,
         // at, x{n}) runs inline in it, and no name of the method's can meet them.
-        const string self = "__owner", w = "__tile", next = "__next";
+        const string self = "__owner";
         var parameters = new List<string>();
         var passed = new Dictionary<string, string>(); // a parameter's name in the method -> in the pass
-        var call = new StringBuilder(); // the method's own call at one cell: {0} the cell, {1} its out cell
+        var call = new StringBuilder(); // the method's own call at one cell, each cell and out cell a placeholder Call replaces
         foreach (var p in method.Parameters)
         {
-            if (SymbolEqualityComparer.Default.Equals(p, cell))
+            int k = cells.FindIndex(c => SymbolEqualityComparer.Default.Equals(c, p)), j = outputs.FindIndex(o => SymbolEqualityComparer.Default.Equals(o, p));
+            if (k >= 0)
             {
-                parameters.Add($"global::EasyEcs.Tile<{cellName}, {shape}> {w}");
-                call.Append(", {0}");
+                parameters.Add($"global::EasyEcs.Tile<{CellName(k)}, {shape}> __tile{k}");
+                call.Append($", \u0001c{k}\u0002");
             }
-            else if (SymbolEqualityComparer.Default.Equals(p, output))
+            else if (j >= 0)
             {
-                parameters.Add($"global::EasyEcs.Mut<global::EasyEcs.DynamicBuffer<{outName}>> {next}");
-                call.Append(", out {1}");
+                parameters.Add($"global::EasyEcs.Mut<global::EasyEcs.DynamicBuffer<{OutName(j)}>> __next{j}");
+                call.Append($", out \u0001o{j}\u0002");
             }
             else
             {
@@ -58,11 +60,19 @@ public sealed partial class SystemGenerator
                 passed[Code.Escape(p.Name)] = name;
             }
         }
-        string Call(string cellArg, string outArg) => $"{AccessorPrefix}__Cell({self}" + call.ToString().Replace("{0}", cellArg).Replace("{1}", outArg) + ")";
+        string Call(System.Func<int, string> cell, System.Func<int, string> output)
+        {
+            var text = new StringBuilder($"{AccessorPrefix}__Cell({self}").Append(call).Append(')');
+            for (int k = 0; k < cells.Count; k++) text.Replace($"\u0001c{k}\u0002", cell(k));
+            for (int j = 0; j < outputs.Count; j++) text.Replace($"\u0001o{j}\u0002", output(j));
+            return text.ToString();
+        }
 
-        // The rows the offsets read: the row itself, its neighbors north and south, the layers above and below.
+        // The rows the driver's offsets read: the row itself, its neighbors north and south, the layers above and below.
+        // A row the walk skips is blank in the driver only, so it may be skipped only when the driver is the one input.
+        bool skips = !form.ReadsPlace && cells.Count == 1;
         int stencil = 1;
-        foreach (var (dx, dy, dz) in form.Offsets)
+        foreach (var (_, dx, dy, dz) in form.Offsets)
         {
             if (dz != 0) stencil |= 2;
             if (dy > 0) stencil |= 4;
@@ -75,13 +85,19 @@ public sealed partial class SystemGenerator
         sb.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]\n");
         sb.Append($"    internal static void {AccessorPrefix}({OwnerModel.From(method.ContainingType).AccessorParameter} {self}, {string.Join(", ", parameters)})\n    {{\n");
         var body = new StringBuilder();
-        foreach (var (dx, dy, dz) in form.Offsets) body.Append($"{at}.Check({dx}, {dy}, {dz});\n"); // constants: the JIT drops them
-        body.Append($"{w}.ExchangeHalo();\n");
-        body.Append($"var __into = global::EasyEcs.DynamicBufferExtensions.SetCount(ref {next}.Write(), {at}.Count);\n");
-        body.Append($"ref {outName} __out = ref {Marshal}.GetReference(__into);\n");
+        foreach (var (k, dx, dy, dz) in form.Offsets) body.Append($"{At(k)}.Check({dx}, {dy}, {dz});\n"); // constants: the JIT drops them
+        for (int k = 0; k < cells.Count; k++)
+            body.Append(k == 0 && skips ? "__tile0.ExchangeHalo();\n" : $"__tile{k}.ExchangeHalo(0, {at}.Height - 1, mask: false);\n");
+        for (int j = 0; j < outputs.Count; j++)
+        {
+            body.Append($"var __into{j} = global::EasyEcs.DynamicBufferExtensions.SetCount(ref __next{j}.Write(), {at}.Count);\n");
+            body.Append($"ref {OutName(j)} __out{j} = ref {Marshal}.GetReference(__into{j});\n");
+        }
         var row = new StringBuilder();
-        row.Append($"ref {cellName} __c = ref {Unsafe}.AsRef(in {w}.At(__row)[0, 0, 0]);\n");
-        row.Append($"ref {outName} __o = ref {Unsafe}.Add(ref __out, __row.Index);\n");
+        for (int k = 0; k < cells.Count; k++)
+            row.Append($"ref {CellName(k)} __c{k} = ref {Unsafe}.AsRef(in __tile{k}.At(__row)[0, 0, 0]);\n");
+        for (int j = 0; j < outputs.Count; j++)
+            row.Append($"ref {OutName(j)} __o{j} = ref {Unsafe}.Add(ref __out{j}, __row.Index);\n");
         row.Append("int __x = 0;\n");
         bool with128 = false;
         if (form.Loop is { } loop)
@@ -93,7 +109,9 @@ public sealed partial class SystemGenerator
             var columns = loop.Code.Columns;
             for (int k = 0; k < loop.Streams.Length; k++)
             {
-                string start = k < form.Offsets.Length ? $"{Unsafe}.Add(ref __c, {at}.Offset({form.Offsets[k].Dx}, {form.Offsets[k].Dy}, {form.Offsets[k].Dz}))" : "__o";
+                string start = k < form.Offsets.Length
+                    ? $"{Unsafe}.Add(ref __c{form.Offsets[k].Cell}, {at}.Offset({form.Offsets[k].Dx}, {form.Offsets[k].Dy}, {form.Offsets[k].Dz}))"
+                    : $"__o{k - form.Offsets.Length}";
                 vector.Append($"ref {columns[k]} e{k + 1} = ref {Unsafe}.As<{loop.Streams[k].Element}, {columns[k]}>(ref {start});\n");
             }
             vector.Append($"nint i = 0, rows = {at}.Width;\nint at = 0;\n");
@@ -104,18 +122,20 @@ public sealed partial class SystemGenerator
             vector.Append(loops);
             row.Append("{\n").Append(Indent(vector.ToString())).Append("__rest:\n    __x = (int)i;\n}\n");
         }
-        row.Append($"for (; __x < {at}.Width; __x++)\n    {Call($"new {at}(in {Unsafe}.Add(ref __c, __x), __x, __row.Y, __row.Z)", $"{Unsafe}.Add(ref __o, __x)")};\n");
-        if (!form.ReadsPlace)
+        row.Append($"for (; __x < {at}.Width; __x++)\n    {Call(k => $"new {At(k)}(in {Unsafe}.Add(ref __c{k}, __x), __x, __row.Y, __row.Z)", j => $"{Unsafe}.Add(ref __o{j}, __x)")};\n");
+        if (skips)
         {
             // A row the walk skips reads only zeros: it gets what the method computes there, exactly (with this entity's
             // values), computed at the first such row (a tile without one never runs the method on zeros) and written
             // into the gaps between the rows walked (in order of Index), so every cell is written once.
-            string blank = $"if (!__blank)\n{{\n    {Call($"{at}.Blank", "__f0")};\n    __blank = true;\n}}\n";
-            body.Append($"int __done = 0;\nbool __blank = false;\n{outName} __f0 = default;\n");
-            body.Append($"foreach (var __row in {w}.Rows((global::EasyEcs.TileStencil){stencil}))\n{{\n");
-            body.Append(Indent($"if (__row.Index > __done)\n{{\n{Indent(blank)}    __into.Slice(__done, __row.Index - __done).Fill(__f0);\n}}\n"));
+            string blank = $"if (!__blank)\n{{\n    {Call(k => $"{At(k)}.Blank", j => $"__f{j}")};\n    __blank = true;\n}}\n";
+            string Fill(string slice) => string.Concat(outputs.Select((_, j) => $"    __into{j}.{slice}.Fill(__f{j});\n"));
+            body.Append("int __done = 0;\nbool __blank = false;\n");
+            for (int j = 0; j < outputs.Count; j++) body.Append($"{OutName(j)} __f{j} = default;\n");
+            body.Append($"foreach (var __row in __tile0.Rows((global::EasyEcs.TileStencil){stencil}))\n{{\n");
+            body.Append(Indent($"if (__row.Index > __done)\n{{\n{Indent(blank)}{Fill("Slice(__done, __row.Index - __done)")}}}\n"));
             body.Append(Indent(row.ToString())).Append($"    __done = __row.Index + {at}.Width;\n}}\n");
-            body.Append($"if (__done < __into.Length)\n{{\n{Indent(blank)}    __into.Slice(__done).Fill(__f0);\n}}\n");
+            body.Append($"if (__done < {at}.Count)\n{{\n{Indent(blank)}{Fill("Slice(__done)")}}}\n");
         }
         else
         {
@@ -124,9 +144,11 @@ public sealed partial class SystemGenerator
         }
         sb.Append(Indent(Indent(body.ToString()))).Append("    }\n#pragma warning restore\n\n");
 
+        string names = string.Join("', '", cells.Select(c => c.Name));
+        string walk = form.ReadsPlace ? "; every row: it reads its place" : cells.Count > 1 ? "; every row: several cells" : "";
         string line = form.Loop is { } l
-            ? $"cells of '{cell.Name}': vector (Vector512{(with128 ? $", Vector<{l.Code.Lane}> or Vector128" : $" or Vector<{l.Code.Lane}>")} per row; offsets {string.Join(" ", form.Offsets.Select(o => $"({o.Dx},{o.Dy},{o.Dz})"))}{(form.ReadsPlace ? "; every row: it reads its place" : "")})"
-            : $"cells of '{cell.Name}': scalar ({form.Reason})";
+            ? $"cells of '{names}': vector (Vector512{(with128 ? $", Vector<{l.Code.Lane}> or Vector128" : $" or Vector<{l.Code.Lane}>")} per row; offsets {string.Join(" ", form.Offsets.Select(o => cells.Count > 1 ? $"{cells[o.Cell].Name}({o.Dx},{o.Dy},{o.Dz})" : $"({o.Dx},{o.Dy},{o.Dz})"))}{walk})"
+            : $"cells of '{names}': scalar ({form.Reason}{walk})";
         return new ElementCode(sb.ToString(), new([]), new(new[] { line }), "", Cells: true);
     }
 }
