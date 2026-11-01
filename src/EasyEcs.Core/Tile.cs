@@ -1688,6 +1688,28 @@ internal static class TileLayout
         nuint bytes = (nuint)(count * Unsafe.SizeOf<TCell>());
         // A row's size is a constant of the shape, so one of these is the whole copy, unrolled: one or two vectors
         // (the second overlapping the first when the row is not a whole number of them), or a loop for long rows.
+        // Under 16 bytes (the sides of a halo of 2 to 3 cells: 8 bytes of two floats), one or two overlapping words.
+        if (bytes is 4 or 8)
+        {
+            ulong word = bytes == 8 ? Unsafe.ReadUnaligned<ulong>(ref from) : Unsafe.ReadUnaligned<uint>(ref from);
+            if (bytes == 8) Unsafe.WriteUnaligned(ref to, word);
+            else Unsafe.WriteUnaligned(ref to, (uint)word);
+            return word != 0;
+        }
+        if (bytes is > 8 and < 16)
+        {
+            ulong a = Unsafe.ReadUnaligned<ulong>(ref from), b = Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref from, bytes - 8));
+            Unsafe.WriteUnaligned(ref to, a);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, bytes - 8), b);
+            return (a | b) != 0;
+        }
+        if (bytes is > 4 and < 8)
+        {
+            uint a = Unsafe.ReadUnaligned<uint>(ref from), b = Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref from, bytes - 4));
+            Unsafe.WriteUnaligned(ref to, a);
+            Unsafe.WriteUnaligned(ref Unsafe.Add(ref to, bytes - 4), b);
+            return (a | b) != 0;
+        }
         if (Vector128.IsHardwareAccelerated && bytes == 16)
         {
             var v = Vector128.LoadUnsafe(ref from);
