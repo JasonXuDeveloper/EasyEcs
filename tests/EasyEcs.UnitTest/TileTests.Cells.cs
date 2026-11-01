@@ -524,6 +524,154 @@ public partial class TileTests
         Assert.That(schedule, Does.Contain(byCell ? "cells of 'w', 'n': scalar (SimdMode.Off; every row: several cells)" : "cells of 'w', 'n': vector ("), schedule);
     }
 
+    public record struct Wet(byte L);
+    public record struct Stone(byte R);
+    public record struct NextWet(byte L);
+
+    /// <summary>Water spreading over sampled rock: on a dry stencil it is 0 whatever the rock (proved), so dry rows are skipped.</summary>
+    [EcsSystem]
+    public ref struct CellSpreadSystem
+    {
+        [ForEach]
+        static void Step(Cell<Wet, HeatPlate> w, Cell<Stone, HeatPlate> g, out NextWet next)
+        {
+            int side = Math.Max(Math.Max(w[-1, 0, 0].L, w[1, 0, 0].L), Math.Max(w[0, 0, -1].L, w[0, 0, 1].L));
+            next = new((byte)(g.Value.R != 0 ? 0 : Math.Max(side - 1, (int)w.Value.L)));
+        }
+    }
+
+    /// <summary>A constant term: a dry stencil gives 7 (proved), and reads its place.</summary>
+    [EcsSystem]
+    public ref struct CellSevenSystem
+    {
+        [ForEach]
+        static void Step(Cell<Wet, HeatPlate> w, Cell<Stone, HeatPlate> g, out NextWet next) =>
+            next = new((byte)(w.Value.L != 0 ? w.X + g.Value.R : 7));
+    }
+
+    /// <summary>What the rock adds on a dry stencil too: not proved, every row runs.</summary>
+    [EcsSystem]
+    public ref struct CellSumSystem
+    {
+        [ForEach]
+        static void Step(Cell<Wet, HeatPlate> w, Cell<Stone, HeatPlate> g, out NextWet next) => next = new((byte)(w.Value.L + g.Value.R));
+    }
+
+    [EcsSystem]
+    public ref struct CellSpreadByCellSystem
+    {
+        [ForEach(SimdMode = SimdMode.Off)]
+        static void Step(Cell<Wet, HeatPlate> w, Cell<Stone, HeatPlate> g, out NextWet next)
+        {
+            int side = Math.Max(Math.Max(w[-1, 0, 0].L, w[1, 0, 0].L), Math.Max(w[0, 0, -1].L, w[0, 0, 1].L));
+            next = new((byte)(g.Value.R != 0 ? 0 : Math.Max(side - 1, (int)w.Value.L)));
+        }
+    }
+
+    private static Func<int, int, byte> Spread(byte[] wet, byte[] rock)
+    {
+        int W(int x, int z) => x is >= 0 and < 16 && z is >= 0 and < 16 ? wet[z * 16 + x] : 0;
+        return (x, z) =>
+        {
+            int side = Math.Max(Math.Max(W(x - 1, z), W(x + 1, z)), Math.Max(W(x, z - 1), W(x, z + 1)));
+            return (byte)(rock[z * 16 + x] != 0 ? 0 : Math.Max(side - 1, W(x, z)));
+        };
+    }
+
+    [TestCase(0)]
+    [TestCase(1)]
+    [TestCase(2)]
+    [TestCase(3)]
+    public void BlankRowsOfTheDriverAreProvedAndSkipped(int form)
+    {
+        using var world = new World();
+        var plate = world.CreateEntity(new HeatPlate(new TilePos(0, 0, 0)));
+        var wet = new byte[256];
+        var rock = new byte[256];
+        var random = new Random(9);
+        for (int i = 0; i < 256; i++)
+        {
+            rock[i] = (byte)(random.Next(3) == 0 ? 1 : 0);  // rock everywhere: no row of it is blank
+            if (i / 16 is 7 or 8) wet[i] = (byte)random.Next(0, 8); // water on rows 7 and 8 only
+        }
+        var w = plate.GetOrAdd<DynamicBuffer<Wet>>().SetCount(256);
+        var g = plate.GetOrAdd<DynamicBuffer<Stone>>().SetCount(256);
+        for (int i = 0; i < 256; i++) (w[i], g[i]) = (new Wet(wet[i]), new Stone(rock[i]));
+        plate.GetOrAdd<DynamicBuffer<NextWet>>().SetCount(256).Fill(new NextWet(99)); // what the last step left: every cell is written
+        switch (form)
+        {
+            case 0: world.AddSystem<CellSpreadSystem>(); break;
+            case 1: world.AddSystem<CellSpreadByCellSystem>(); break;
+            case 2: world.AddSystem<CellSevenSystem>(); break;
+            default: world.AddSystem<CellSumSystem>(); break;
+        }
+        world.Update();
+
+        var next = plate.Read<DynamicBuffer<NextWet>>().AsReadOnlySpan();
+        var spread = Spread(wet, rock);
+        for (int z = 0; z < 16; z++)
+        for (int x = 0; x < 16; x++)
+        {
+            int i = z * 16 + x;
+            int expected = form switch { 2 => wet[i] != 0 ? (byte)(x + rock[i]) : 7, 3 => (byte)(wet[i] + rock[i]), _ => spread(x, z) };
+            Assert.That(next[i].L, Is.EqualTo(expected), $"cell ({x}, {z})");
+        }
+        string schedule = world.DescribeSchedule().ToString();
+        string walk = form switch { 1 => "every row: several cells", 3 => "every row: several cells", _ => "rows of 'w': blank rows proved constant" };
+        Assert.That(schedule, Does.Contain(walk), schedule);
+    }
+
+    public record struct Warm(float T);
+
+    /// <summary>0 times a sampled float is NaN where the sample is: not proved.</summary>
+    [EcsSystem]
+    public ref struct CellNaNSystem
+    {
+        [ForEach]
+        static void Step(Cell<Heat, HeatPlate> w, Cell<Warm, HeatPlate> g, out NextHeat next) => next = new(w.Value.T * g.Value.T);
+    }
+
+    /// <summary>A sampled choice between two constants: not proved.</summary>
+    [EcsSystem]
+    public ref struct CellChoiceSystem
+    {
+        [ForEach]
+        static void Step(Cell<Wet, HeatPlate> w, Cell<Stone, HeatPlate> g, out NextWet next) => next = new((byte)(g.Value.R != 0 ? 1 : 2 + w.Value.L));
+    }
+
+    /// <summary>A sampled choice whose arms are both 0 on a dry cell: proved.</summary>
+    [EcsSystem]
+    public ref struct CellAgreeSystem
+    {
+        [ForEach]
+        static void Step(Cell<Wet, HeatPlate> w, Cell<Stone, HeatPlate> g, out NextWet next) => next = new((byte)(g.Value.R != 0 ? w.Value.L : w.Value.L * g.Value.R));
+    }
+
+    [Test]
+    public void OnlyWhatTheDriverDecidesIsProved()
+    {
+        using var world = new World();
+        world.AddSystem<CellNaNSystem>();
+        world.AddSystem<CellChoiceSystem>();
+        world.AddSystem<CellAgreeSystem>();
+        var plate = world.CreateEntity(new HeatPlate(new TilePos(0, 0, 0)));
+        plate.GetOrAdd<DynamicBuffer<Heat>>().SetCount(256);
+        plate.GetOrAdd<DynamicBuffer<Warm>>().SetCount(256).Fill(new Warm(float.NaN));
+        plate.GetOrAdd<DynamicBuffer<Wet>>().SetCount(256);
+        plate.GetOrAdd<DynamicBuffer<Stone>>().SetCount(256)[3] = new Stone(1);
+        plate.GetOrAdd<DynamicBuffer<NextHeat>>();
+        plate.GetOrAdd<DynamicBuffer<NextWet>>();
+        world.Update();
+        string schedule = world.DescribeSchedule().ToString();
+        string[] lines = schedule.Split('\n');
+        string Line(string system) => lines[Array.FindIndex(lines, l => l.Contains(system + ",")) + 1];
+        Assert.That(Line("CellNaNSystem"), Does.Contain("every row: several cells"), schedule);
+        Assert.That(Line("CellChoiceSystem"), Does.Contain("every row: several cells"), schedule);
+        Assert.That(Line("CellAgreeSystem"), Does.Contain("blank rows proved constant"), schedule);
+        // Every row ran where nothing was proved: a skipped row would hold 0 * 0 from the blank cells, not NaN.
+        Assert.That(float.IsNaN(plate.Read<DynamicBuffer<NextHeat>>()[100].T));
+    }
+
     /// <summary>Reads two cells away with a halo of one.</summary>
     [EcsSystem]
     public ref struct CellPastTheHaloSystem
