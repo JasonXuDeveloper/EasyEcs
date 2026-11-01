@@ -11,7 +11,7 @@ using static EasyEcs.UnitTest.GeneratorTests;
 namespace EasyEcs.UnitTest;
 
 // EasyEcsAnalyzer.Usage.cs: calls and declarations that compile but do not do what they say (EECS037-038, EECS040-045,
-// EECS047-051) and an entry point called out of its namespace's scope (EECS120), in lambdas, local functions, generated members and [EntityMethod] methods.
+// EECS047-051) and an entry point called out of its namespace's scope (EECS122), in lambdas, local functions, generated members and [EntityMethod] methods.
 public partial class AnalyzerTests
 {
     [TestCase("public struct Named : IComponent, ITracked { public string Name; } public static class R { [EntityMethod] static void A(Mut<Named> n, in P p) { if (p.V > 0) n.SetIfChanged(default); } }", "EECS040")]
@@ -70,7 +70,7 @@ public partial class AnalyzerTests
     [TestCase(Pq + "[EcsSystem] public ref struct S { [ForEach, Without<Settings>] static void A(Entity e, ref T t) => t.V = e.AsPQ().P.V; }")]   // nothing of PQ excluded
     public Task FiltersSomeEntityPassesAreLeftAlone(string source) => AssertClean(GeneratorTests.Components, source);
 
-    // EECS120: a generated entry point called where its namespace is not in scope: through a using alias or the full
+    // EECS122: a generated entry point called where its namespace is not in scope: through a using alias or the full
     // name alone the call binds to the method itself and does not compile. GeneratorTests.Runners declares the owners.
     [TestCase("using Alias = Game.R; namespace Other { public static class Use { public static void Run(World w) => Alias.A(w); } }", "Alias.A", "ForEach")]
     [TestCase("namespace Other { public static class Use { public static void Run(World w) => Game.R.A(w); } }", "Game.R.A", "ForEach")]
@@ -83,9 +83,9 @@ public partial class AnalyzerTests
     {
         var found = (await GeneratorTests.Analyze([GeneratorTests.Components, GeneratorTests.Runners, use]))
             .Where(d => d.Location.SourceTree?.ToString().Contains("class Use") == true).ToArray(); // the case's own
-        Assert.That(found.Where(d => d.Id.StartsWith("EECS")).Select(d => d.Id), Is.EqualTo(new[] { "EECS120" }), string.Join("\n", found));
+        Assert.That(found.Where(d => d.Id.StartsWith("EECS")).Select(d => d.Id), Is.EqualTo(new[] { "EECS122" }), string.Join("\n", found));
         Assert.That(found.Where(d => d.Id.StartsWith("CS") && d.Severity == DiagnosticSeverity.Error), Is.Not.Empty, "the call does not compile");
-        var message = found.Single(d => d.Id == "EECS120").GetMessage();
+        var message = found.Single(d => d.Id == "EECS122").GetMessage();
         Assert.That(message, Does.Contain($"'{call}'").And.Contain($"[{kind}]").And.Contain("add 'using Game;'").And.Not.Match(@"\{\d+\}"));
     }
 
@@ -96,7 +96,7 @@ public partial class AnalyzerTests
     [TestCase("namespace Game { [EcsSystem] public ref struct S { [ForEach] public static void M(ref P p) { } } } public static class Use { public static void Run(World w) => Game.S.M(w); }")] // a system's: no entry point
     [TestCase("public static class Use { public static bool Run(World w) => Game.R.D(w, 2); }")]                                                  // an entity method given the world
     public async Task EntryPointsInScopeOrOtherMistakesAreLeftAlone(string use) =>
-        Assert.That((await GeneratorTests.Analyze([GeneratorTests.Components, GeneratorTests.Runners, use])).Where(d => d.Id == "EECS120"), Is.Empty);
+        Assert.That((await GeneratorTests.Analyze([GeneratorTests.Components, GeneratorTests.Runners, use])).Where(d => d.Id == "EECS122"), Is.Empty);
 
     // The rules of calls and declarations that compile but do not do what they say (EECS036 for plain components,
     // EECS037, EECS038, EECS040-EECS045), and the false negatives of EECS014 and EECS017: each case reports exactly one.

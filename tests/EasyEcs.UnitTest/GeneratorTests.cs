@@ -999,7 +999,7 @@ public class GeneratorTests
     }
 
     // A using alias names the type, so the entry point (an extension member of the type) binds through it wherever the
-    // type's namespace is in scope, as through the type's name; an alias alone does not bring the namespace (EECS120).
+    // type's namespace is in scope, as through the type's name; an alias alone does not bring the namespace (EECS122).
     internal const string Runners = """
         namespace Game
         {
