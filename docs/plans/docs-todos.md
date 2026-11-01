@@ -2131,9 +2131,73 @@ helpers).
 
 Nothing user-visible in the API: `HugePages.Prefault` / `HugePages.Populate` are internal. What a user sees: a
 reservation (`Reserve<T..>`, `Reserve(prefab, n)`, `EnsureEntityCapacity`, a large `InitialEntityCapacity`) now commits
-its memory at once on Linux (RSS grows at the reservation, not as rows are written).
+its memory at once on Linux (RSS grows at the reservation, not as rows are written); loads, restores, snapshots and
+`CreateEntities` are as before.
 
-- **Decision draft: a reservation faults its pages in (Linux)**: DECISION-DRAFT-PREFAULT
+- **Decision draft: a reservation faults its pages in (Linux)** (en):
+
+  > **Decision.** On Linux 5.14 and later, the arrays a user's reservation sizes (`Reserve<T..>`, `Reserve(prefab, n)`,
+  > `EnsureEntityCapacity`, `InitialEntityCapacity`: the tables' columns and entity rows, the entity records, the free-id
+  > list) are faulted in at the reservation, one `MADV_POPULATE_WRITE` call per run of 2 MiB windows not yet resident
+  > (`mincore`), with 4 KiB and with 2 MiB pages. Arrays a call writes whole as it allocates them (a load, a restore, a
+  > snapshot, `CreateEntities`, a move between worlds) are left to the first touch. Elsewhere (other systems, an older
+  > kernel, a libc without `madvise`) nothing changes; the first failed call turns it off.
+  >
+  > **Why.** A reservation is there to pay before the tick that fills it, and with first-touch faults that tick paid
+  > them: one trap per 4 KiB page, or one huge page zeroed per 2 MiB, in the middle of a wave of spawns. Faulted in at
+  > the reservation, the tick only writes. One call also costs less than a trap per page with 4 KiB pages (128 MiB of
+  > memory freed 4 s earlier: 67-68 ms touched, 53 ms populated, PrefaultTouchBenchmark).
+  >
+  > **Numbers** (PageFaultBenchmark, default job, two rounds, prefault off / on in one binary, 0 B; 4 KiB pages /
+  > 2 MiB pages): the tick filling a reservation (Wave: 1M or 16M spawns into a world reserved on memory freed 4 s
+  > earlier) at 1M 38.0 → 17.0 and 36.0 → 16.5 ms (2.2x) / 85.7 → 15.9 and 67.0 → 15.8 ms (4.2-5.4x); at 16M 857 → 219
+  > and 965 → 218 ms (3.9-4.4x) / 2.52 s → 224 and 221 ms (11.3-11.4x). The reservation itself at 16M 269 → 209 and 275
+  > → 209 ms (1.29-1.32x, the populate call against the traps) / 140 → 146 and 286 → 153 ms; at 1M 1.24-1.36x / equal.
+  > A reserve-and-fill create at 16M 502 → 452 and 514 → 447 ms (1.11-1.15x) / 876 → 734 and 885 → 731 ms (spread
+  > 0.4-0.6 s: the host refaults free blocks, below); at 1M within 5 % either way. Load, Capture and Restore, which do
+  > not prefault, equal within their spread. Page faults per op at 16M with 4 KiB pages: Reserve 41.7-44.9k → 31.3k,
+  > Wave (its reservation included) 87-91k → 65-68k.
+  >
+  > **Considered.** Prefaulting every sized array, copies included: a load at 1M with 2 MiB pages 1.04-1.06x slower
+  > in two rounds (populating zeroes the whole array before the copy writes it, out of the cache by then; a first-touch
+  > fault zeroes each page right before the copy writes it) and nothing to gain, since the same call writes every row.
+  > Populating resident memory too: the GC hands most freed large memory back resident, and walking its pages again
+  > made creating a reserved 1M-entity world 1.05x slower until resident 2 MiB windows were skipped. Prefault to make
+  > huge-page faults cheaper: one call costs what the first touch costs with 2 MiB pages (536-592 ms touched against
+  > 572-592 ms populated, 128 MiB freed 4 s earlier); on the reference VM the time is the host's (free page reporting
+  > hands free 2 MiB blocks back, the host faults them back), which no guest call avoids. Keeping a disposed world's
+  > columns for the next world: allocations halved, page faults unchanged (the GC already reuses that memory resident),
+  > creating 1.06x and instantiating 1.08x slower. The GC's settings: the host's choice (`GCRetainVM`, `GCgen0size`
+  > change nothing; `GCConserveMemory` and the segments GC fault more and are slower), written up for users.
+
+  zh:
+
+  > **决定。** 在 Linux 5.14 及以上，用户预留所确定大小的数组（`Reserve<T..>`、`Reserve(prefab, n)`、`EnsureEntityCapacity`、
+  > `InitialEntityCapacity`：表的列和实体行、实体记录、空闲 id 列表）在预留时预先缺页：对尚未驻留（`mincore`）的连续 2 MiB
+  > 窗口各调用一次 `MADV_POPULATE_WRITE`，4 KiB 页和 2 MiB 页都如此。分配后立即被整体写满的数组（加载、恢复、快照、
+  > `CreateEntities`、在世界间移动）留给首次访问。其他环境（其他系统、更旧的内核、没有 `madvise` 的 libc）不变；第一次调用
+  > 失败即关闭。
+  >
+  > **原因。** 预留就是为了在填充它的那一帧之前付出代价，而首次访问缺页时这笔代价落在了那一帧：每个 4 KiB 页一次陷入，或每
+  > 2 MiB 清零一张大页，发生在一波生成的中途。在预留时预先缺页后，那一帧只剩写入。对 4 KiB 页，一次调用也比每页一次陷入更
+  > 便宜（4 秒前释放的 128 MiB 内存：首次访问 67-68 ms，预先缺页 53 ms，PrefaultTouchBenchmark）。
+  >
+  > **数字**（PageFaultBenchmark，默认作业，两轮，同一程序内关闭 / 开启预先缺页，0 B；4 KiB 页 / 2 MiB 页）：填充预留的那一帧
+  > （Wave：向一个在 4 秒前释放的内存上预留的世界生成 1M 或 16M 个实体）1M 时 38.0 → 17.0 和 36.0 → 16.5 ms（2.2x）/
+  > 85.7 → 15.9 和 67.0 → 15.8 ms（4.2-5.4x）；16M 时 857 → 219 和 965 → 218 ms（3.9-4.4x）/ 2.52 s → 224 和 221 ms
+  > （11.3-11.4x）。预留本身 16M 时 269 → 209 和 275 → 209 ms（1.29-1.32x，一次调用对比逐页陷入）/ 140 → 146 和 286 → 153 ms；
+  > 1M 时 1.24-1.36x / 持平。先预留再填充的创建 16M 时 502 → 452 和 514 → 447 ms（1.11-1.15x）/ 876 → 734 和 885 → 731 ms
+  > （波动 0.4-0.6 s：宿主重新缺页空闲块，见下）；1M 时上下 5 % 以内。不预先缺页的加载、快照和恢复在波动范围内持平。16M、
+  > 4 KiB 页时每次操作的缺页数：Reserve 41.7-44.9k → 31.3k，Wave（含其预留）87-91k → 65-68k。
+  >
+  > **考虑过的方案。** 所有确定大小的数组都预先缺页，包括复制：2 MiB 页下 1M 的加载两轮都慢 1.04-1.06x（预先缺页在复制写入
+  > 之前把整个数组清零，写入时已不在缓存中；首次访问缺页则在复制写入每一页之前才清零它），而且没有收益，因为同一个调用会
+  > 写满每一行。连已驻留的内存也预先缺页：GC 交回的大块已释放内存大多仍驻留，再走一遍它的页让创建一个预留的 1M 实体世界慢
+  > 1.05x，直到跳过已驻留的 2 MiB 窗口。用预先缺页降低大页缺页的代价：2 MiB 页下一次调用的代价与首次访问相同（4 秒前释放的
+  > 128 MiB：首次访问 536-592 ms，预先缺页 572-592 ms）；在参考虚拟机上这段时间属于宿主（空闲页上报把空闲的 2 MiB 块交还宿主，
+  > 宿主再把它们缺页回来），客户机的任何调用都无法避免。把已销毁世界的列留给下一个世界：分配减半，缺页不变（GC 已经以驻留
+  > 状态复用这些内存），创建慢 1.06x，实例化慢 1.08x。GC 设置：由宿主决定（`GCRetainVM`、`GCgen0size` 没有影响；
+  > `GCConserveMemory` 和 segments GC 缺页更多、更慢），写给用户的说明见下。
 
 - **GC settings for large worlds (a users' to-do, performance page "What it costs" or the FAQ; en + zh).** The library
   sets none of them: they are the host's (`runtimeconfig.json` / `DOTNET_*` variables). Measured at 16M entities
@@ -2155,8 +2219,10 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   costs; the gain is that the tick filling a reservation pays no fault, and with 4 KiB pages one call is cheaper than a
   fault per page. On the reference VM a huge page faulted from memory freed seconds earlier costs about 8x a 4 KiB
   one (the host's free page reporting, `feat-later-memory`): numbers of 16M creates and loads there are bimodal.
-- **Pages.** architecture.mdx + zh, the memory section (with feat-later-memory's huge pages): reserved arrays are
-  advised and faulted in when allocated; the steps of a doubling are not. Guide page on reservations (`Reserve` /
+- **Pages.** architecture.mdx + zh, the memory section (with feat-later-memory's huge pages): sized arrays are
+  advised (the steps of a doubling are not); a user's reservation's arrays are also faulted in at the reservation,
+  skipping resident memory; arrays a load, restore, snapshot or `CreateEntities` writes at once are left to the first
+  touch. Guide page on reservations (`Reserve` /
   `InitialEntityCapacity`) + zh: one sentence that a reservation commits its memory at once on Linux, so the tick that
   fills it pays no page fault (link the decision). faq.mdx + zh: "Which GC settings for large worlds?" (the
   bullet above). Changelog (Performance): "a reservation faults its pages in on Linux: spawning into it pays no page

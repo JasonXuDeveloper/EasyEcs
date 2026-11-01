@@ -513,7 +513,12 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
       the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
 - [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
-- [ ] **Fewer page faults on top of huge pages** (owner, 2026-10-31: "大页内存然后减少缺页呢，你要不研究一下改一下"; next
+- [x] **Fewer page faults on top of huge pages** (done on `feat-page-faults`: counted with `[PageFaultDiagnoser]`
+      (PageFaultBenchmark, PrefaultTouchBenchmark); kept: a user's reservation faulted in (`MADV_POPULATE_WRITE`, resident
+      2 MiB windows skipped, copies left to the first touch): the tick filling it 2.2x faster at 1M and 3.9-4.4x at 16M
+      with 4 KiB pages, 4.2-5.4x and 11.3x with 2 MiB pages, Reserve 16M 1.3x; not kept, causes in owner-review: prefault
+      against the host's huge-page refaults, a pool of disposed worlds' columns, prefaulting copies; GC settings are a
+      docs to-do; docs-todos "feat-page-faults") (owner, 2026-10-31: "大页内存然后减少缺页呢，你要不研究一下改一下"; next
       free agent slot, before the other Later items): count first (`minflt` / `majflt` from `/proc/self/stat`, `thp_fault_alloc`,
       `thp_fault_fallback`, `compact_stall` around each op, in a BenchmarkDotNet column) on Create / Grow / Reserve / Load /
       Capture-Restore / InstantiateEach at 1M and 16M, then try each and keep what pays: prefault a sized array in one call
