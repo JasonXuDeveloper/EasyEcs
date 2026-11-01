@@ -462,6 +462,68 @@ public partial class TileTests
             Assert.That(schedule.Split("Vector<int> or Vector128 per row").Length - 1, Is.EqualTo(3), schedule); // all three: LaneMath has Vector128 forms
     }
 
+    /// <summary>Two inputs of one plate (the second only sampled) and two out cells.</summary>
+    [EcsSystem]
+    public ref struct CellPairSystem
+    {
+        [ForEach]
+        static void Step(Cell<Heat, HeatPlate> w, Cell<Count, HeatPlate> n, out NextHeat next, out Share share)
+        {
+            next = new(w.Value.T + w[1, 0, 0].T * n[0, 0, 1].N);
+            share = new(n.Value.N * 2 + n[-1, 0, 0].N - (int)w[0, 0, -1].T);
+        }
+    }
+
+    /// <summary>The same method cell by cell.</summary>
+    [EcsSystem]
+    public ref struct CellPairByCellSystem
+    {
+        [ForEach(SimdMode = SimdMode.Off)]
+        static void Step(Cell<Heat, HeatPlate> w, Cell<Count, HeatPlate> n, out NextHeat next, out Share share)
+        {
+            next = new(w.Value.T + w[1, 0, 0].T * n[0, 0, 1].N);
+            share = new(n.Value.N * 2 + n[-1, 0, 0].N - (int)w[0, 0, -1].T);
+        }
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void TwoCellsAndTwoOutCellsAreTheArithmeticOfTheWholePlate(bool byCell)
+    {
+        using var world = new World();
+        var plate = world.CreateEntity(new HeatPlate(new TilePos(0, 0, 0)));
+        var heat = plate.GetOrAdd<DynamicBuffer<Heat>>().SetCount(256);
+        var counts = plate.GetOrAdd<DynamicBuffer<Count>>().SetCount(256);
+        var random = new Random(5);
+        for (int i = 0; i < 256; i++)
+        {
+            // Rows 6 to 9 cold and empty in both: no row may be skipped by the heat alone, the counts are sampled.
+            int row = i / 16;
+            heat[i] = new Heat(row is >= 6 and <= 9 ? 0 : random.Next(-50, 50));
+            counts[i] = new Count(row is >= 6 and <= 8 ? 0 : random.Next(-9, 9));
+        }
+        plate.GetOrAdd<DynamicBuffer<NextHeat>>();
+        plate.GetOrAdd<DynamicBuffer<Share>>();
+        if (byCell) world.AddSystem<CellPairByCellSystem>();
+        else world.AddSystem<CellPairSystem>();
+        world.Update();
+        var heats = heat.ToArray();
+        var ns = counts.ToArray();
+
+        float H(int x, int z) => x is >= 0 and < 16 && z is >= 0 and < 16 ? heats[z * 16 + x].T : 0;
+        int N(int x, int z) => x is >= 0 and < 16 && z is >= 0 and < 16 ? ns[z * 16 + x].N : 0;
+        var next = plate.Read<DynamicBuffer<NextHeat>>().AsReadOnlySpan();
+        var share = plate.Read<DynamicBuffer<Share>>().AsReadOnlySpan();
+        for (int z = 0; z < 16; z++)
+        for (int x = 0; x < 16; x++)
+        {
+            Assert.That(next[z * 16 + x].T, Is.EqualTo(H(x, z) + H(x + 1, z) * N(x, z + 1)), $"next ({x}, {z})");
+            Assert.That(share[z * 16 + x].N, Is.EqualTo(N(x, z) * 2 + N(x - 1, z) - (int)H(x, z - 1)), $"share ({x}, {z})");
+        }
+        string schedule = world.DescribeSchedule().ToString();
+        Assert.That(schedule, Does.Contain(byCell ? "cells of 'w', 'n': scalar (SimdMode.Off; every row: several cells)" : "cells of 'w', 'n': vector ("), schedule);
+    }
+
     /// <summary>Reads two cells away with a halo of one.</summary>
     [EcsSystem]
     public ref struct CellPastTheHaloSystem
@@ -491,7 +553,7 @@ public partial class TileTests
         world.AddSystem<CellPlaceByCellSystem>();
         string schedule = world.DescribeSchedule().ToString();
         Assert.That(schedule, Does.Contain("cells of 'w': vector (").And.Contain("cells of 'c': vector (")
-            .And.Contain("every row: it reads its place").And.Contain("cells of 'w': scalar (SimdMode.Off)"), schedule);
+            .And.Contain("every row: it reads its place").And.Contain("cells of 'w': scalar (SimdMode.Off; every row: it reads its place)"), schedule);
     }
 
     [Test]

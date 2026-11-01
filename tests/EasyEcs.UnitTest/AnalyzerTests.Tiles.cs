@@ -15,6 +15,7 @@ public partial class AnalyzerTests
         public record struct Spot(int X, string Name);
         public record struct N(Spot Pos) : IComponent, ITile<Spot> { Spot IIndexed<Spot>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static Spot ITile<Spot>.Beside(Spot k, TileFaces f) => k; }
         public record struct NB(byte V);
+        public record struct NF(float V);
         """;
 
     private static Task ReportsOnTiles(string id, string source) => AssertReports(id, GeneratorTests.Components, TileParts, source);
@@ -66,7 +67,12 @@ public partial class AnalyzerTests
     public Task ACellBesideATileOfItsBufferReports() => ReportsOnTiles("EECS073",
         "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, Tile<byte, G> t, out NB next) => next = new NB(c.Value); }");
 
+    [Test]
+    public Task CellsOfTwoTilesReport() => ReportsOnTiles("EECS115",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, Cell<byte, N> d, out NB next) => next = new NB((byte)(c.Value + d.Value)); }");
+
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, out NB next) => next = new NB((byte)(c[-1, 0, 0] + c[1, 0, 0])); }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<int, G> c, Cell<float, G> d, out uint next, out NF sum) { next = (uint)(c.Value * 2 + c[1, 0, 0]); sum = new NF(d.Value * c[0, 0, 1] + d[-1, 0, 0]); } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(Cell<float, G> c, out double next, in G g) => next = c.Value * g.Pos + c.X + c.Z; }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Off)] static void A(Cell<byte, G> c, out NB next) { int k = c.X % 2; next = new NB(c[k, 0, 0]); } }")]
     public async Task CellMethodsAreClean(string source)
