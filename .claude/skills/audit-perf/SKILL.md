@@ -127,7 +127,11 @@ its own worktree.
      running to load the machine; `dotnet build-server shutdown` stops one);
    - a flock queue is not fair: an A/B script chaining benchmark steps back to back holds the gate and starves the
      builds and tests waiting behind it; sleep about 20 s between steps, or run the tests before queuing the A/B
-     (feat-emit-segments);
+     (feat-emit-segments). The same holds for a detached script (`setsid nohup`) of several locked runs: a pause of at
+     least 5 s before each one, written in before it starts. A script already running cannot be fixed by editing it
+     (bash has parsed its loop): give each run a skip check (its log holding "Global total time"), write that marker
+     into the logs of the runs not started, and queue them again from a script with the pause (feat-inner-loops: two
+     agents' gate tests waited over an hour behind back-to-back runs);
    - rows that moved on code the change does not run (contended hand-written baselines such as InterlockedCursor,
      ConcurrentQueue; BattleServer swings about 10% between rounds) are re-run in extra interleaved rounds before they
      count as a regression or a win;
