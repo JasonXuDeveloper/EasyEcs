@@ -2257,3 +2257,34 @@ helpers).
   head round waited 1 h 40 min on the bench lock (other agents' rounds) and was stopped at the 2 h limit before it
   started. Tier1 of the blur's pass (checked with DOTNET_JitDisasm): per row one zmm load and eight vaddps from memory,
   a vmulps and a store, no call; Life's row one Vector128 iteration, a vpaddusb chain and three vpcmpeqb.
+
+### LaneMath at 128 bits (Vector128 forms of the generated loops' math) — docs to-dos
+
+- **api.mdx + zh:** no rows. LaneMath is `[EditorBrowsable(Never)]` (generated code calls it, a method never does), so
+  ApiDocs leaves it out of the reference and api.mdx lists none of its members; the new `Vector128` overloads follow
+  the same rule. Nothing to add unless the class becomes public API.
+- **tiles.mdx + zh ("One cell at a time"):** a cell row of 16 bytes (4 ints or floats, 16 bytes) now runs its Vector128
+  loop also when the method divides integers (the quotient through doubles: AVX widens 4 lanes into one Vector256 of
+  doubles, one vdivpd, vcvttpd2dq back) or, under FloatMode.Fast, calls Sinh / Cosh / Tanh / Log10 (4 lanes as one
+  Vector256 of doubles, one Exp or Log). An out cell of a struct of several fields still has no Vector128 loop (its
+  store goes through Interleaved, which has Vector<T> and Vector512 forms only): such a narrow row runs at Vector<T>
+  width or cell by cell, which the schedule line says ("Vector512 or Vector<T> per row", no "Vector128").
+- **Changelog (Performance):** "Cell rows of 16 bytes vectorize integer division and FloatMode.Fast's hyperbolic
+  functions and Log10 at 128 bits."
+- **Decision (draft, en), under D77 or the vector-loop math decision:** *LaneMath has Vector128 forms; with AVX they
+  widen into one Vector256 of doubles.* The Vector128 copy of a cell row was dropped whenever the text called LaneMath,
+  so a row of 4 ints that divides ran cell by cell on AVX2. The forms convert int lanes with vcvtdq2pd ymm and
+  truncate with vcvttpd2dq (AVX2 has no long-to-double conversion: the path through longs, which the Vector<T> and
+  Vector512 forms take, would be emulated there); unsigned lanes are biased by 2^31 into the signed range, and their
+  quotient truncated (vroundpd) before the bias comes off. Without AVX (Arm64) they go through longs, which Arm64
+  converts natively. Tier1 under DOTNET_EnableAVX512=0: the signed row is vcvtdq2pd, vdivpd, vcvttpd2dq, no call; the
+  float functions call .NET's ExpDouble once per 4 lanes (the wider loops of the same pass inline theirs: the method's
+  inline budget is spent by its third copy of Exp, a JIT limit), against four MathF calls cell by cell.
+- **Decision (draft, zh):** *LaneMath 有 Vector128 形式；有 AVX 时扩成一个 Vector256 的 double。* 以前 cell 行的文本一调用
+  LaneMath 就不生成 Vector128 副本，所以 AVX2 上 4 个 int 一行的除法逐格计算。新形式用 vcvtdq2pd ymm 转换 int 通道、vcvttpd2dq
+  截断回去（AVX2 没有 long 到 double 的转换，Vector<T> 和 Vector512 形式走的 long 路径在那里是模拟的）；无符号通道先偏移 2^31
+  进有符号范围，商先截断（vroundpd）再去掉偏移。没有 AVX 时（Arm64）走 long，Arm64 原生转换。DOTNET_EnableAVX512=0 下的 Tier1：
+  有符号的一行是 vcvtdq2pd、vdivpd、vcvttpd2dq，没有调用；浮点函数每 4 个通道调用一次 .NET 的 ExpDouble（同一遍历里更宽的循环会
+  内联它们的 Exp：方法的内联预算被第三份 Exp 用完，这是 JIT 的限制），逐格则是四次 MathF 调用。
+- **Found, not done here:** a Vector128 form of Interleaved (the stores of an out struct of several fields) would give
+  narrow rows writing such structs their 128-bit loop; Interleaved has 87 helpers, a package of its own.
