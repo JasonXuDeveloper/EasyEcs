@@ -206,6 +206,11 @@ public static partial class EasyEcsAnalyzer
             || !Symbols.IsForEach(method) || !Symbols.IsValidForEach(method) || method.PartialDefinitionPart != null // a partial method: once, on its definition
             || Symbols.IsEntityMethod(method) || Symbols.MaxRows(method) > 0) return; // one entity per call (an [EntityMethod], a collected row): no loop to vectorize
         int mode = Symbols.Simd(method);
+        if (Symbols.IsCellMethod(method))
+        {
+            ReportCells(context, method, syntax, mode);
+            return;
+        }
         if (mode == Symbols.SimdOff || mode == Symbols.SimdAuto && !Kernel.LooksEligible(method))
         {
             ReportChases(context, method, syntax);
@@ -225,6 +230,22 @@ public static partial class EasyEcsAnalyzer
                 reason.IsFixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info, null,
                 reason.SplitComponent is { } split ? SplitFix(method, syntax, context.SemanticModel, split, context.CancellationToken) : null,
                 method.Name, reason.Text));
+    }
+
+    /// <summary>
+    /// EECS055 and EECS056 for a cell method whose rows run cell by cell, with the reason <see cref="Kernel.CellFormOf"/>
+    /// gives (the call the generator makes, SystemGenerator.Cells.cs): a warning when the method can be rewritten for the
+    /// vector form, a suggestion when what it computes stops it.
+    /// </summary>
+    private static void ReportCells(SyntaxNodeAnalysisContext context, IMethodSymbol method, MethodDeclarationSyntax syntax, int mode)
+    {
+        if (mode == Symbols.SimdOff) return;
+        var form = Kernel.CellFormOf(method, syntax, context.SemanticModel, context.CancellationToken);
+        if (form.Loop != null || form.Reason == null) return;
+        context.ReportDiagnostic(mode == Symbols.SimdRequire
+            ? Diagnostic.Create(NoVectorLoop, method.Locations.FirstOrDefault(), method.Name, form.Reason)
+            : Diagnostic.Create(ScalarLoop, method.Locations.FirstOrDefault(), form.Fixable ? DiagnosticSeverity.Warning : DiagnosticSeverity.Info, null, null,
+                method.Name, form.Reason));
     }
 
     /// <summary>
@@ -257,7 +278,7 @@ public static partial class EasyEcsAnalyzer
             {
                 Symbols.ParamKind.Component => p.Type,
                 Symbols.ParamKind.ComponentSpan => Symbols.SpanElement(p.Type),
-                Symbols.ParamKind.Mutable => Symbols.MutElement(p.Type),
+                Symbols.ParamKind.Mutable => Symbols.MutOf(p),
                 Symbols.ParamKind.Optional => Symbols.MaybeElement(p.Type),
                 _ => null,
             };

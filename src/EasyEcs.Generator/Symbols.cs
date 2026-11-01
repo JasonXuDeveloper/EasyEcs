@@ -856,7 +856,7 @@ internal static class Symbols
     {
         var kind = Classify(p);
         if (kind != ParamKind.Invalid || !outside || IsNeighbor(p) ||p.RefKind is not (RefKind.None or RefKind.Ref or RefKind.In)) return kind;
-        var element = SpanElement(p.Type) ?? MaybeElement(p.Type) ?? MutElement(p.Type) ?? p.Type;
+        var element = SpanElement(p.Type) ?? MaybeElement(p.Type) ?? MutOf(p) ?? p.Type;
         if (IsA(element, Component) || IsA(element, Singleton) || ReduceElement(p.Type) != null) return ParamKind.Invalid; // a component by value
         // A span or other ref struct goes into the job by value: a job holds no ref field to a ref struct.
         if (p.Type.IsRefLikeType && p.RefKind != RefKind.None) return ParamKind.Invalid;
@@ -1327,6 +1327,7 @@ internal static class Symbols
                 : IsA(p.Type, Component) ? ParamKind.Component
                 : IsA(p.Type, Singleton) ? ParamKind.Singleton
                 : ParamKind.Invalid;
+        if (p.RefKind == RefKind.Out && CellOut(p) != null) return ParamKind.Mutable; // a cell method's result: its cell of DynamicBuffer<TOut>
         if (p.RefKind != RefKind.None) return ParamKind.Invalid;
         if (SpanElement(p.Type) is { } element)
             return element.IsValueType && IsA(element, Component) ? ParamKind.ComponentSpan : ParamKind.Invalid;
@@ -1374,6 +1375,31 @@ internal static class Symbols
         type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Mut<T>")
             ? named.TypeArguments[0]
             : null;
+
+    /// <summary>
+    /// The component a <c>Mut&lt;T&gt;</c> parameter writes, or the <c>DynamicBuffer&lt;TOut&gt;</c> an <c>out TOut</c>
+    /// parameter of a cell method writes (<see cref="CellOut"/>), else null.
+    /// </summary>
+    public static ITypeSymbol? MutOf(IParameterSymbol p) => MutElement(p.Type) ?? CellOut(p);
+
+    /// <summary>A <c>Cell&lt;TCell, TTile&gt;</c>: a cell of a tile with its neighbors (the shader form).</summary>
+    public static bool IsCell(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Cell<TCell, TTile>");
+
+    /// <summary>A method taking a <c>Cell&lt;TCell, TTile&gt;</c>: it computes one cell (the generator writes its pass).</summary>
+    public static bool IsCellMethod(IMethodSymbol method) => method.Parameters.Any(p => p.RefKind == RefKind.None && IsCell(p.Type));
+
+    /// <summary>
+    /// The buffer an <c>out TOut</c> parameter of a cell method writes, <c>DynamicBuffer&lt;TOut&gt;</c> of the entity (its
+    /// cell at the cell's place), else null: TOut an unmanaged struct.
+    /// </summary>
+    public static ITypeSymbol? CellOut(IParameterSymbol p)
+    {
+        if (p.RefKind != RefKind.Out || p.Type is not INamedTypeSymbol { IsValueType: true, IsUnmanagedType: true } cell
+            || p.ContainingSymbol is not IMethodSymbol method) return null;
+        var host = method.Parameters.FirstOrDefault(c => c.RefKind == RefKind.None && IsCell(c.Type));
+        return host?.Type.ContainingNamespace.GetTypeMembers("DynamicBuffer", 1).FirstOrDefault()?.Construct(cell);
+    }
 
     /// <summary>Singleton type of a <c>Reduce&lt;T&gt;</c>, else null.</summary>
     public static ITypeSymbol? ReduceElement(ITypeSymbol type) =>
@@ -1453,7 +1479,8 @@ internal static class Symbols
     /// </summary>
     public static (ITypeSymbol Cell, ITypeSymbol Shape, ITypeSymbol Grid)? TileElements(ITypeSymbol type)
     {
-        if (type is not INamedTypeSymbol { IsGenericType: true } named || !Named(named.ConstructedFrom, "EasyEcs.Tile<TCell, TTile>")) return null;
+        if (type is not INamedTypeSymbol { IsGenericType: true } named
+            || !Named(named.ConstructedFrom, "EasyEcs.Tile<TCell, TTile>") && !Named(named.ConstructedFrom, "EasyEcs.Cell<TCell, TTile>")) return null;
         var shape = named.TypeArguments[1];
         var grid = shape is INamedTypeSymbol { IsGenericType: true } columns && Named(columns.ConstructedFrom, "EasyEcs.Columns<TTile>")
             ? columns.TypeArguments[0] : shape;
@@ -1566,7 +1593,7 @@ internal static class Symbols
     {
         ParamKind.Component => p.Type,
         ParamKind.ComponentSpan => SpanElement(p.Type),
-        ParamKind.Mutable => MutElement(p.Type),
+        ParamKind.Mutable => MutOf(p),
         _ => null,
     };
 

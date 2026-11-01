@@ -59,8 +59,8 @@ public sealed partial class SystemGenerator
                 string declared = LambdaPass.Declared(p);
                 return Symbols.Classify(p, true) switch
                 {
-                    Symbols.ParamKind.Mutable => new ParamModel(Symbols.ParamKind.Mutable, Symbols.MutElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,
-                        Symbols.Implements(Symbols.MutElement(p.Type)!, Symbols.TrackChanges)),
+                    Symbols.ParamKind.Mutable => new ParamModel(Symbols.ParamKind.Mutable, Symbols.MutOf(p)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,
+                        Symbols.Implements(Symbols.MutOf(p)!, Symbols.TrackChanges)),
                     Symbols.ParamKind.Reduction => new ParamModel(Symbols.ParamKind.Reduction, Symbols.ReduceElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,
                         Accumulates: Symbols.Accumulates(Symbols.ReduceElement(p.Type)!)),
                     Symbols.ParamKind.Scratch => new ParamModel(Symbols.ParamKind.Scratch, Symbols.ScratchElement(p.Type)!.ToDisplayString(Symbols.Fqn), "", p.Name, declared),

@@ -41,8 +41,10 @@ internal sealed partial class Kernel
         return op;
     }
 
+    // A conversion that leaves the value as it is: an identity, a switch expression or a target-typed 'new(...)' (both
+    // bound as a conversion to their own type).
     private static bool Keeps(IConversionOperation c) => c.Conversion.IsIdentity
-        || c is { OperatorMethod: null, Operand: ISwitchExpressionOperation } && SymbolEqualityComparer.Default.Equals(c.Type, c.Operand.Type);
+        || c is { OperatorMethod: null, Operand: ISwitchExpressionOperation or IObjectCreationOperation } && SymbolEqualityComparer.Default.Equals(c.Type, c.Operand.Type);
 
     /// <summary>
     /// <paramref name="value"/> as the subject of a pattern of <paramref name="user"/> (an <c>is</c>, a switch); a switch's

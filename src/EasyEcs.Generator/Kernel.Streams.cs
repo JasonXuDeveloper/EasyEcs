@@ -64,12 +64,21 @@ internal sealed partial class Kernel
     internal static (string Body, string Stores) Streaming(string body, string stores, EquatableArray<string> columns, EquatableArray<int> streamed)
     {
         foreach (int k in streamed)
-        {
-            body = Regex.Replace(body, $@"(?m)^var (__c{k}_0(?:_[01])?) = {Regex.Escape(V)}\.LoadUnsafe\(ref e{k}, [^\n]*\);$",
-                $"var $1 = default({V.Replace("$", "$$")}<{columns[k - 1]}>);");
             stores = Regex.Replace(stores, $@"(?m)^{Regex.Escape(V)}\.StoreUnsafe\((.*), ref e{k}, ([^\n]*)\);$",
                 $"global::EasyEcs.StreamingStores.Store($1, ref e{k}, $2);");
-        }
-        return (body, stores);
+        return (Unloaded(body, columns, streamed), stores);
+    }
+
+    /// <summary>
+    /// <paramref name="body"/> with each column of <paramref name="streamed"/> declared without its load
+    /// (<c>default(V&lt;T&gt;)</c>, lane type <paramref name="columns"/>[k - 1]): the JIT keeps a dead load, since it may
+    /// fault. An element loop's written span and a cell method's out cell drop theirs in the cache too.
+    /// </summary>
+    internal static string Unloaded(string body, EquatableArray<string> columns, EquatableArray<int> streamed)
+    {
+        foreach (int k in streamed)
+            body = Regex.Replace(body, $@"(?m)^var (__c{k}_0(?:_[01])?) = {Regex.Escape(V)}\.LoadUnsafe\(ref e{k}, [^\n]*\);$",
+                $"var $1 = default({V.Replace("$", "$$")}<{columns[k - 1]}>);");
+        return body;
     }
 }

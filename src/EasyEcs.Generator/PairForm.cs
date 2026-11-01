@@ -95,8 +95,8 @@ internal static class PairForm
                     break;
                 case Symbols.ParamKind.Mutable: // a component of the row written where the method writes it
                     row = true;
-                    rows.Add(Symbols.MutElement(p.Type)!);
-                    written.Add(Symbols.MutElement(p.Type)!);
+                    rows.Add(Symbols.MutOf(p)!);
+                    written.Add(Symbols.MutOf(p)!);
                     break;
                 case Symbols.ParamKind.Reduction: // a partial result of the pass (of each chunk in parallel), combined when it ends
                     break;

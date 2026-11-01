@@ -61,7 +61,7 @@ public static partial class EasyEcsAnalyzer
                 {
                     Symbols.ParamKind.Component => p.Type,
                     Symbols.ParamKind.ComponentSpan => Symbols.SpanElement(p.Type),
-                    Symbols.ParamKind.Mutable => Symbols.MutElement(p.Type),
+                    Symbols.ParamKind.Mutable => Symbols.MutOf(p),
                     Symbols.ParamKind.Optional => Symbols.MaybeElement(p.Type),
                     _ => null,
                 };

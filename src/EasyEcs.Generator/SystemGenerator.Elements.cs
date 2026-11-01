@@ -15,9 +15,10 @@ public sealed partial class SystemGenerator
     /// A method's element loops: <paramref name="Body"/>, the method's body as C# with the loops' vector forms (its
     /// helpers at the end), or "" when it is not copied; the using directives its extension calls need; one line per
     /// loop (for the schedule); the UnsafeAccessor externs through which the copy reaches the type's private static
-    /// helpers and fields (BodyCopy.Accessors), named after <see cref="AccessorPrefix"/>.
+    /// helpers and fields (BodyCopy.Accessors), named after <see cref="AccessorPrefix"/>. <paramref name="Cells"/>: the
+    /// pass of a cell method (SystemGenerator.Cells.cs), <paramref name="Body"/> the whole method with its header.
     /// </summary>
-    private sealed record ElementCode(string Body, EquatableArray<string> Usings, EquatableArray<string> Loops, string Accessors = "");
+    private sealed record ElementCode(string Body, EquatableArray<string> Usings, EquatableArray<string> Loops, string Accessors = "", bool Cells = false);
 
     /// <summary>The token EmitAccessor replaces with the accessor's name (<c>Cool_3</c>): the prefix of the copy's own accessors.</summary>
     internal const string AccessorPrefix = "__EasyEcsAccessorOf"; // an identifier: the copy is parsed with it
@@ -40,6 +41,7 @@ public sealed partial class SystemGenerator
     /// </summary>
     private static ElementCode? ElementsOf(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
     {
+        if (Symbols.IsCellMethod(method)) return CellsOf(method, syntax, model, ct);
         var loops = new List<string>();
         var code = Copied(method, syntax, model, ct, loops);
         return loops.Count == 0 ? null : new ElementCode(code?.Body ?? "", code?.Usings ?? new([]), new(loops.ToArray()), code?.Accessors ?? "");
@@ -191,6 +193,22 @@ public sealed partial class SystemGenerator
         var text = new StringBuilder();
         for (int s = 1; s <= loop.Streams.Length; s++)
             text.Append($"ref {simd.Columns[s - 1]} e{s} = ref {Unsafe}.As<{loop.Streams[s - 1].Element}, {simd.Columns[s - 1]}>(ref r{s});\n");
+        text.Append(ElementLoops(loop, false, "return i;"));
+        text.Append("return i;\n");
+        sb.Append(Indent(text.ToString())).Append("}\n");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The loops of an element loop's vector form over streams <c>e1</c>.. from index <c>i</c> to <c>rows</c> (<c>at</c>
+    /// the index of element 0, its values <c>x{n}</c>), leaving in <c>i</c> the first element they did not run;
+    /// <paramref name="bail"/> leaves at a vector the loop as written must run. <paramref name="with128"/> adds a
+    /// Vector128 loop after Vector&lt;T&gt;'s.
+    /// </summary>
+    private static string ElementLoops(Kernel.ElementLoop loop, bool with128, string bail)
+    {
+        var simd = loop.Code;
+        var text = new StringBuilder();
         if (simd.Flat is { } flat)
         {
             text.Append($"nint lanes = rows * {flat.Fields};\ni *= {flat.Fields};\n");
@@ -204,12 +222,12 @@ public sealed partial class SystemGenerator
             foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) loopText.Append(line).Append('\n');
             Paired(loopText, simd, vector, loop.Streams.Length); // a float sum, Min or Max: two chains
             loopText.Append($"for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{{\n");
-            loopText.Append(Indent(simd.Body));
+            loopText.Append(Indent(Kernel.Unloaded(simd.Body, simd.Columns, simd.Streamed))); // what it only writes: not loaded
             // A sum's lanes fold into its variable when the vectors stop: after the loop, or at a bail with the vector's
             // own lanes set back (the loop as written then adds that vector's elements).
             if (simd.Bails)
                 loopText.Append("    if (__bail)\n    {\n").Append(Indent(Indent(simd.Restore + simd.Fold)))
-                    .Append("        return i; // the loop as written runs this vector's elements and the rest\n    }\n");
+                    .Append($"        {bail} // the loop as written runs this vector's elements and the rest\n    }}\n");
             loopText.Append(Indent(simd.Stores)).Append("}\n");
             loopText.Append(simd.Fold);
             Constants(loopText);
@@ -217,11 +235,26 @@ public sealed partial class SystemGenerator
             string guard = $"{Hardware(simd)} && rows - i >= {vector}.Count";
             text.Append($"if ({Wide(guard, null)})\n{{\n").Append(Indent(Wide(body, null))).Append("}\n");
             text.Append($"if ({Narrow(guard, null)})\n{{\n").Append(Indent(Narrow(body, null))).Append("}\n");
+            // Vector128 after Vector<T>: a row of a cell method narrower than Vector<T> (16 bytes of a tile's row on AVX2);
+            // only for text that calls no helper of one width (LaneMath, Interleaved: their Vector<T> and 512 forms).
+            if (with128 && !OfOneWidth.Any(h => body.IndexOf(h, System.StringComparison.Ordinal) >= 0))
+                text.Append($"if ({Width128(guard)})\n{{\n").Append(Indent(Width128(body))).Append("}\n");
         }
-        text.Append("return i;\n");
-        sb.Append(Indent(text.ToString())).Append("}\n");
-        return sb.ToString();
+        return text.ToString();
     }
+
+    /// <summary>The Vector128 loop's text: <see cref="Narrow"/>'s, the vector type Vector128.</summary>
+    private static string Width128(string s) => Lines(s, Kernel.Mark128, Kernel.Mark512).Replace(WideGuard, "")
+        .Replace(Kernel.SquareRoot, Vector128 + ".Sqrt(").Replace(Kernel.V, Vector128).Replace(Kernel.LanesForm, "");
+
+    private const string Vector128 = "global::System.Runtime.Intrinsics.Vector128";
+
+    /// <summary>
+    /// What a vector loop's text calls with Vector&lt;T&gt; and Vector512 forms only (LaneMath's quotients, Interleaved,
+    /// Lanes, the lookups' gathers, the marked helpers): such a loop gets no Vector128 copy.
+    /// </summary>
+    private static readonly string[] OfOneWidth =
+        [Accelerated, Kernel.LanesForm, "global::EasyEcs.LaneMath.", "global::EasyEcs.Interleaved.", "global::EasyEcs.Lanes.", "global::EasyEcs.LookupLanes."];
 
     /// <summary>
     /// Whether <paramref name="count"/> elements hold one whole vector of the narrowest width the loop runs: shorter

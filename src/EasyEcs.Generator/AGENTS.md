@@ -49,6 +49,13 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              locals (Locals counts them), else each in an AggressiveInlining method of the job (D135);
                              StreamLoop: a NoInlining method of the job (__Stream) streaming the write-only columns,
                              called once per run past the last-level cache (StreamingStores.Pays);
+                             SystemGenerator.Cells.cs: a cell method's pass (Cell<TCell, TTile> and an out cell, the
+                             job handing it the Tile and a Mut of the out buffer) in place of its accessor: the halo,
+                             the out buffer sized and filled with what the method computes on Cell.Blank (the rows the
+                             walk skips), the rows its offsets read (every row when it reads X, Y or Z), each row's
+                             vector loop inline (ElementLoops at 512 / Vector<T> / 128 bits, parameters __arg{n} so no
+                             name of the method's meets the loop's), then the method itself (an UnsafeAccessor,
+                             {Name}_{index}__Cell) on the cells left; the schedule line;
                              SystemGenerator.Elements.cs: a method left scalar (a batch method's loops over its rows
                              too) whose loops over spans have vector forms (Kernel.Loops.cs) copied into the generated
                              file (BodyCopy, #line to the user's file) in place of its UnsafeAccessor, its type's
@@ -189,7 +196,11 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              lane or the entity's id (Code.VectorTail: every row takes the vector form);
                              Kernel.Streams.cs: the columns a loop writes without reading (WriteOnly, read off the
                              loop's text: Code.Streamed, FlatCode.Streamed) and the streaming loop's text (Streaming:
-                             their loads dropped, their stores StreamingStores.Store);
+                             their loads dropped (Unloaded, which element loops and cells use in the cache too), their
+                             stores StreamingStores.Store);
+                             Kernel.Cells.cs: a cell method's body as an element loop over a row (CellFormOf: each
+                             constant offset a stream, the out parameter a written stream, X the index's lanes, Y / Z
+                             and the other parameters values; or the reason EECS055 / EECS056 report);
                              Kernel.Loops.cs: element loops, the for / foreach loops over spans and buffers inside a
                              method or a lambda pass (ElementLoops: each loop's vector code or its ScalarReason; a
                              for-loop indexing its spans at its counter or a constant from it (s[i - 1]: a stream

@@ -29,9 +29,13 @@ internal sealed partial class Kernel
     /// <summary>
     /// An int value of a narrow kernel. <paramref name="Low"/>: its low bits in lanes of the unsigned type of the
     /// kernel's size (null when they are not known); [<paramref name="Lo"/>, <paramref name="Hi"/>]: the values it can
-    /// take; <paramref name="Pending"/>: the sum it is, when its operands are exact, for a saturating form.
+    /// take; <paramref name="Pending"/>: the sum it is, when its operands are exact, for a saturating form;
+    /// <paramref name="Saturated"/>: for a sum of non-negative values that may pass the unsigned top, the lanes of
+    /// Min(value, top) (a chain of saturating adds: each partial sum is non-negative, so saturating at every step is
+    /// saturating the total), which compare with a constant below the top as the value does (the Game of Life's count
+    /// of eight neighbors against 2 and 3).
     /// </summary>
-    private sealed record Wide(string? Low, long Lo, long Hi, Sum? Pending);
+    private sealed record Wide(string? Low, long Lo, long Hi, Sum? Pending, string? Saturated = null);
 
     /// <summary>
     /// <paramref name="X"/> + <paramref name="Y"/> (or -), exact operands, then Min / Max with each bound of
@@ -71,6 +75,9 @@ internal sealed partial class Kernel
         foreach (bool signed in new[] { false, true })
             if (values.All(v => Fits(v, signed))) yield return signed;
     }
+
+    /// <summary>The lanes of Min(<paramref name="w"/>, the unsigned top) for a non-negative value, when known.</summary>
+    private string? Capped(Wide w) => w.Saturated ?? (Fits(w, false) ? In(w, false) : null);
 
     /// <summary>The low bits of <paramref name="w"/> as lanes of the signed (unsigned) type.</summary>
     private string In(Wide w, bool signed) => As(Unsigned, Kind(signed), w.Low!);
@@ -165,7 +172,10 @@ internal sealed partial class Kernel
                 long lo = add ? l.Lo + r.Lo : l.Lo - r.Hi, hi = add ? l.Hi + r.Hi : l.Hi - r.Lo;
                 // the operands, when exact, for Math.Min / Max to make it a saturating sum
                 Sum? sum = Kinds(l, r).Any() ? new Sum(add, l, r, []) : null;
-                return Of(Both(add ? "+" : "-"), lo, hi, sum);
+                var result = Of(Both(add ? "+" : "-"), lo, hi, sum);
+                if (add && l.Lo >= 0 && r.Lo >= 0 && hi > Top(false) && hi <= int.MaxValue && Capped(l) is { } a && Capped(r) is { } b)
+                    result = result with { Saturated = Held($"{V}.AddSaturate({a}, {b})") };
+                return result;
             }
             case BinaryOperatorKind.Multiply:
             {
@@ -348,6 +358,10 @@ internal sealed partial class Kernel
                     ? $"{V}.{(s.Add ? "AddSaturate" : "SubtractSaturate")}({In(s.X, k)}, {In(s.Y, k)})"
                     : In(w, k));
         }
+        // A non-negative sum against a constant below the unsigned top: its saturated lanes compare alike.
+        bool Below(Wide w) => Fits(w, false) && w.Hi < Top(false);
+        if (l.Saturated != null && Below(r) || r.Saturated != null && Below(l))
+            return Lanes(l, r, false, (w, k) => w.Saturated ?? In(w, k));
         throw new Unsupported($"'{Text(op)}' compares ints that {Bits}-bit lanes do not hold");
     }
 
@@ -382,7 +396,7 @@ internal sealed partial class Kernel
             return name;
         }
         var pending = w.Pending is { } s ? new Sum(s.Add, Snapshot(s.X), Snapshot(s.Y), s.Chain.Select(c => (c.Min, Snapshot(c.Bound))).ToArray()) : null;
-        return new Wide(Copy(w.Low), w.Lo, w.Hi, pending);
+        return new Wide(Copy(w.Low), w.Lo, w.Hi, pending, Copy(w.Saturated));
     }
 
     private void DeclareWide(ILocalSymbol local, Wide value) => _wides[local] = Snapshot(value); // other lanes: never read

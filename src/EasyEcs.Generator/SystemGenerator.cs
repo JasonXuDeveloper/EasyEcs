@@ -269,6 +269,16 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         string parameters = string.Concat(method.Parameters.Select(p => $", {p.Declared} {Escape(p.Name)}"));
         // The instance parameter must not take the name of one of the method's own parameters (CS0100).
         string self = SelfName(method.Parameters.Select(p => p.Name));
+        if (method.Elements is { Cells: true } cells)
+        {
+            // A cell method: the pass over its tile's rows under the accessor's name (SystemGenerator.Cells.cs), and the
+            // method itself under its own, which runs the cells the vector form leaves.
+            string name = $"{method.Name}_{index}";
+            sb.Append(cells.Body.Replace(AccessorPrefix, name));
+            sb.Append($"    [global::System.Runtime.CompilerServices.UnsafeAccessor(global::System.Runtime.CompilerServices.UnsafeAccessorKind.StaticMethod, Name = \"{method.Name}\")]\n");
+            sb.Append($"    internal static extern {method.Returns} {name}__Cell({owner.AccessorParameter} {self}{parameters});\n\n");
+            return;
+        }
         if (method.Elements is { Body.Length: > 0 } elements)
         {
             // The method copied with its element loops' vector forms (Kernel.Loops.cs), under the accessor's name, so
@@ -1418,6 +1428,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             if (Pair != null) return Pair.Describe(Name);
             if (Record.Length > 0) return $"{Name}: the records of Emitted<{Record.Replace("global::", "")}>, in order, then cleared";
             if (MaxRows > 0) return $"{Name}: at most {MaxRows} rows per run, collected first, then run one by one outside the walk";
+            if (Elements is { Cells: true } cells) return $"{Name}: a tile per entity; {cells.Loops[0]}";
             if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(HasChaseTwin ? ", lookups prefetched past the cache" : "")}"
                 + (Elements is { } elements ? string.Concat(elements.Loops.Select(l => "; " + l)) : "");
             var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Lane}>)" };
@@ -1478,7 +1489,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             string record = Symbols.IsDrain(method) ? Symbols.RecordType(method)!.ToDisplayString(Symbols.Fqn) : "";
             var parameters = method.Parameters.Select((p, at) =>
             {
-                string declared = (p.RefKind switch { RefKind.Ref => "ref ", RefKind.In => "in ", RefKind.RefReadOnlyParameter => "ref readonly ", _ => "" })
+                string declared = (p.RefKind switch { RefKind.Ref => "ref ", RefKind.In => "in ", RefKind.RefReadOnlyParameter => "ref readonly ", RefKind.Out => "out ", _ => "" })
                     + p.Type.ToDisplayString(Symbols.Fqn);
                 if (at == 0 && record.Length > 0) return new ParamModel(Symbols.ParamKind.Record, record, "in", p.Name, declared);
                 return Symbols.Classify(p, outside) switch
@@ -1490,8 +1501,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                         Symbols.MaybeElement(p.Type)!.ToDisplayString(Symbols.Fqn), Symbols.IsReadOnlyMaybe(p.Type) ? "in" : "ref", p.Name, declared,
                         Symbols.Implements(Symbols.MaybeElement(p.Type)!, Symbols.TrackChanges)),
                     Symbols.ParamKind.Mutable => new ParamModel(Symbols.ParamKind.Mutable, // a write: the scheduler sees its writer
-                        Symbols.MutElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,
-                        Symbols.Implements(Symbols.MutElement(p.Type)!, Symbols.TrackChanges)),
+                        Symbols.MutOf(p)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared,
+                        Symbols.Implements(Symbols.MutOf(p)!, Symbols.TrackChanges)),
                     Symbols.ParamKind.Reduction => new ParamModel(Symbols.ParamKind.Reduction, // a write of the singleton, once per pass
                         Symbols.ReduceElement(p.Type)!.ToDisplayString(Symbols.Fqn), "ref", p.Name, declared, Accumulates: Symbols.Accumulates(Symbols.ReduceElement(p.Type)!)),
                     Symbols.ParamKind.Scratch => new ParamModel(Symbols.ParamKind.Scratch, Symbols.ScratchElement(p.Type)!.ToDisplayString(Symbols.Fqn), "", p.Name, declared),

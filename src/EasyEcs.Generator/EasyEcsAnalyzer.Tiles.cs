@@ -195,7 +195,7 @@ public static partial class EasyEcsAnalyzer
     /// <summary>The element of the buffer a [ForEach] parameter writes (<c>Mut&lt;DynamicBuffer&lt;T&gt;&gt;</c>, <c>ref DynamicBuffer&lt;T&gt;</c>), else null.</summary>
     private static ITypeSymbol? WrittenBuffer(IParameterSymbol p) => Symbols.Classify(p) switch
     {
-        Symbols.ParamKind.Mutable => Symbols.BufferElement(Symbols.MutElement(p.Type)!),
+        Symbols.ParamKind.Mutable => Symbols.BufferElement(Symbols.MutOf(p)!),
         Symbols.ParamKind.Component when p.RefKind == RefKind.Ref => Symbols.BufferElement(p.Type),
         _ => null,
     };

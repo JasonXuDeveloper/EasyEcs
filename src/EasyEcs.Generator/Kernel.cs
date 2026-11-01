@@ -610,7 +610,7 @@ internal sealed partial class Kernel
         Symbols.ParamKind.Entities => "it takes the EntitySpan",
         Symbols.ParamKind.World => "it takes the World",
         Symbols.ParamKind.ComponentSpan => "it takes spans: a batch method writes its own loop",
-        Symbols.ParamKind.Mutable => $"it takes a Mut<{Symbols.MutElement(p.Type)?.Name}>",
+        Symbols.ParamKind.Mutable => $"it takes a Mut<{Symbols.MutOf(p)?.Name}>",
         Symbols.ParamKind.Scratch => $"it takes a Scratch<{Element(p.Type)}>: working memory a row at a time, not one per lane",
         Symbols.ParamKind.Lookup => null, // its reads decide (Kernel.Lookups.cs)
         Symbols.ParamKind.Neighbor => NeighborRefused(p), // Kernel.Neighbors.cs
