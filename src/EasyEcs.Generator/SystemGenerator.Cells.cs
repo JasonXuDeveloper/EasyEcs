@@ -69,8 +69,10 @@ public sealed partial class SystemGenerator
         }
 
         // The rows the driver's offsets read: the row itself, its neighbors north and south, the layers above and below.
-        // A row the walk skips is blank in the driver only, so it may be skipped only when the driver is the one input.
-        bool skips = !form.ReadsPlace && cells.Count == 1;
+        // A row the walk skips is blank in the driver only: it may be skipped when the driver is the one input and the
+        // method does not read its place (what it computes there is what it computes on Cell.Blank), or when the
+        // generator proved the out cells the same on every blank row of the driver, whatever else the method reads.
+        bool skips = form.ConstantOnBlank || !form.ReadsPlace && cells.Count == 1;
         int stencil = 1;
         foreach (var (_, dx, dy, dz) in form.Offsets)
         {
@@ -145,7 +147,8 @@ public sealed partial class SystemGenerator
         sb.Append(Indent(Indent(body.ToString()))).Append("    }\n#pragma warning restore\n\n");
 
         string names = string.Join("', '", cells.Select(c => c.Name));
-        string walk = form.ReadsPlace ? "; every row: it reads its place" : cells.Count > 1 ? "; every row: several cells" : "";
+        string walk = skips ? (form.ConstantOnBlank && (form.ReadsPlace || cells.Count > 1) ? $"; rows of '{cells[0].Name}': blank rows proved constant" : "")
+            : form.ReadsPlace ? "; every row: it reads its place" : "; every row: several cells";
         string line = form.Loop is { } l
             ? $"cells of '{names}': vector (Vector512{(with128 ? $", Vector<{l.Code.Lane}> or Vector128" : $" or Vector<{l.Code.Lane}>")} per row; offsets {string.Join(" ", form.Offsets.Select(o => cells.Count > 1 ? $"{cells[o.Cell].Name}({o.Dx},{o.Dy},{o.Dz})" : $"({o.Dx},{o.Dy},{o.Dz})"))}{walk})"
             : $"cells of '{names}': scalar ({form.Reason}{walk})";

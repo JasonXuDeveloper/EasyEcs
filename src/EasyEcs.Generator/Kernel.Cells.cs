@@ -25,8 +25,12 @@ internal sealed partial class Kernel
     /// </summary>
     /// <param name="Values">Per value of the vector form, after the streams: "Y", "Z" (the row's) or a parameter's name.</param>
     /// <param name="Fixable">Whether the method can be rewritten for the vector form (EECS055 then warns).</param>
+    /// <param name="ConstantOnBlank">
+    /// Whether the out cells are proved the same on every row whose driving cells are blank, whatever the rest holds
+    /// (<see cref="ConstantOnBlank"/>): the pass then skips those rows even when the method reads its place or other cells.
+    /// </param>
     internal sealed record CellForm(EquatableArray<(int Cell, int Dx, int Dy, int Dz)> Offsets, bool ReadsPlace, ElementLoop? Loop, EquatableArray<string> Values, string? Reason,
-        bool Fixable = false);
+        bool Fixable = false, bool ConstantOnBlank = false);
 
     /// <summary>The shape of cell method <paramref name="method"/>'s body, and its row's vector form when Kernel takes it.</summary>
     public static CellForm CellFormOf(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
@@ -106,14 +110,16 @@ internal sealed partial class Kernel
             .WithParameterList(ParameterList(SeparatedList(parameters)))
             .WithBody(statements);
         int position = syntax.Body?.SpanStart ?? syntax.ExpressionBody!.Expression.SpanStart;
-        var loop = Translated(method, syntax, model, function, position, offsets.Count + outputs.Count, values.Count, x, ct, out reason, out bool fixable);
-        if (loop == null) return new CellForm(new(offsets.ToArray()), place, null, new([]), reason, fixable);
+        var driver = Enumerable.Range(0, offsets.Count).Where(s => offsets[s].Item1 == 0).ToArray();
+        var loop = Translated(method, syntax, model, function, position, offsets.Count + outputs.Count, values.Count, x, ct, out reason, out bool fixable,
+            driver, outputs.Count, out bool constant);
+        if (loop == null) return new CellForm(new(offsets.ToArray()), place, null, new([]), reason, fixable, constant);
         var streams = offsets.Select(o => ($"{o}", CellName(o.Item1), false, 0))
             .Concat(outputs.Select(o => ($"{o.Name}", o.Type.ToDisplayString(Symbols.Fqn), true, 0))).ToArray();
         var valueTypes = others.Select(p => (p.Type.ToDisplayString(Symbols.Fqn), global::EasyEcs.Generator.Code.Escape(p.Name), false)).ToList();
         if (y) valueTypes.Add(("int", "__Y", false));
         if (z) valueTypes.Add(("int", "__Z", false));
-        return new CellForm(new(offsets.ToArray()), place, new ElementLoop(loop, streams, valueTypes.ToArray(), false), new(values.ToArray()), null);
+        return new CellForm(new(offsets.ToArray()), place, new ElementLoop(loop, streams, valueTypes.ToArray(), false), new(values.ToArray()), null, false, constant);
 
         static string Stream(int s) => "__s" + s;
     }
@@ -121,13 +127,17 @@ internal sealed partial class Kernel
     /// <summary>
     /// <paramref name="function"/>, a body desugared into a static local function (its streams first, then its values, then
     /// the index when it reads it), bound at <paramref name="position"/>, its calls inlined, translated as an element
-    /// loop's; null with the reason.
+    /// loop's; null with the reason. For a cell method (<paramref name="blank"/>: the streams of its driving input,
+    /// then <paramref name="outputs"/> out cells after the streams read), <paramref name="constant"/> says whether the
+    /// bound body proves its out cells constant on blank driving cells (<see cref="ConstantOnBlank"/>).
     /// </summary>
     private static Code? Translated(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, LocalFunctionStatementSyntax function,
-        int position, int streams, int values, bool index, System.Threading.CancellationToken ct, out string? reason, out bool fixable)
+        int position, int streams, int values, bool index, System.Threading.CancellationToken ct, out string? reason, out bool fixable,
+        int[] blank, int outputs, out bool constant)
     {
         reason = null;
         fixable = false;
+        constant = false;
         if (!model.TryGetSpeculativeSemanticModel(position, function, out var speculative) || speculative == null
             || speculative.GetDeclaredSymbol(function, ct) is not IMethodSymbol elements
             || speculative.GetOperation(function, ct) is not ILocalFunctionOperation { Body: { } operation }
@@ -153,6 +163,10 @@ internal sealed partial class Kernel
                     (speculative, elements, operation) = (rebound, inlinedElements, inlinedBody);
             }
         }
+        var read = streams - outputs;
+        constant = ConstantOnBlank(operation,
+            new HashSet<IParameterSymbol>(blank.Select(b => elements.Parameters[b]), SymbolEqualityComparer.Default),
+            new HashSet<IParameterSymbol>(elements.Parameters.Skip(read).Take(outputs), SymbolEqualityComparer.Default));
         var lane = new Lane(elements, true, false, Symbols.FastFloats(method), speculative, true, method)
         {
             Streams = new HashSet<IParameterSymbol>(elements.Parameters.Take(streams), SymbolEqualityComparer.Default),

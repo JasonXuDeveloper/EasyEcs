@@ -202,6 +202,9 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              Kernel.Cells.cs: a cell method's body as an element loop over a row (CellFormOf: each
                              constant offset of each input a stream, each out cell a written stream, X the index's
                              lanes, Y / Z and the other parameters values; or the reason EECS055 / EECS056 report);
+                             Kernel.Blank.cs: the proof that lets a cell pass skip a row (ConstantOnBlank: a constant
+                             evaluator over the bound, inlined body, the driving cells 0 and the rest unknown; the out
+                             cells the same whatever the rest holds, or the proof fails and every row runs);
                              Kernel.Loops.cs: element loops, the for / foreach loops over spans and buffers inside a
                              method or a lambda pass (ElementLoops: each loop's vector code or its ScalarReason; a
                              for-loop indexing its spans at its counter or a constant from it (s[i - 1]: a stream
