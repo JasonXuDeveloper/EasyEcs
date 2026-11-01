@@ -477,6 +477,34 @@ or out cells, per-tile results (WP5b). The rest of this entry is the plan as wri
   the hand-written version.
 - Tests: summaries against the scalar method per tile, 1 vs 4 threads, 0 B; the water's output unchanged.
 
+WP5b design (decided 2026-11-01, from what Flow.cs needs):
+- **What Flow needs.** Two inputs of one grid (`Fluid` drives, `Block` is only sampled: solid almost everywhere,
+  so a walk that skips a row only when every input is blank walks nearly every row). The layers from a count of the
+  tile and its neighbors (`FluidCount`), not all 32. Per-tile results: wet / filled counts (sums), the first and last
+  wet layer (Min / Max of Y), whether anything moved and on which faces (an OR of flags read at X / Z).
+- **Inputs.** Cell parameters of one `TTile` (rows line up); the first drives the walk (exchanged with its row
+  masks), the others are sampled (`ExchangeHalo(mask: false)`), each offset of each input a stream. Several `out`
+  cells, each a written stream into its own `DynamicBuffer<TOut>`.
+- **Exact skipping, proved.** A row the walk skips holds a blank stencil of the driver only. The generator evaluates
+  the bound, inlined body with the driver's streams at their blank value (a small constant evaluator over the
+  operations: arithmetic, comparisons, conditionals, Min / Max, casts, `new T(...)`, the patterns Kernel.Switches
+  reads) and the sampled inputs, X, Y, Z and values unknown. When every out cell comes out a constant and every
+  per-tile result its identity, a skipped row is exactly that constant, whatever the rest holds: the pass skips it
+  (and its result contribution) even when the method reads its place. When the proof fails: one input keeps WP5's
+  rule (f0 from `Cell.Blank`, every row when X / Y / Z is read); several inputs walk every row. The schedule line
+  says which.
+- **Per-tile results.** `ref Reduce<T>` with `T` a component of the tile's entity (`IReduction<T>`; Reduce<T>'s
+  constraint relaxed from ISingletonComponent to IComponent, a singleton's form unchanged): each tile starts at
+  Identity, the body writes its fields (sums, Min / Max, |, & as in element loops' reductions into variables, which
+  the vector loop folds per row), the pass writes the result into the entity's `T` once. EECS for `Reduce<T>` of a
+  component outside a cell method.
+- **Row ranges.** With the proof, the layers to exchange and walk are those within reach (the stencil's dy) of a
+  driver layer that is not blank; the tile's own blank layers are found while padding. A range from the user's own
+  summary (FluidCount) stays possible through a value parameter only if the measured exchange cost demands it
+  (TickBenchmark decides).
+- Order: (1) several inputs and outs; (2) the blank-driver proof; (3) per-tile results; (4) ranges; (5) Flow.cs as
+  cells, TickBenchmark against the hand-written step.
+
 **WP6: EECS103 and its code fix.**
 - WP6a (v1, batch casts): shipped (D134).
 - WP6b (Tile → Cell) after WP5; WP6c (element loops → plain) after WP2.
