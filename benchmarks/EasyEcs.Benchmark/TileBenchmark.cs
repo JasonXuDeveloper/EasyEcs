@@ -8,7 +8,8 @@ namespace EasyEcs.Benchmark;
 
 // Stencils over a torus of 32 x 32 plates of 16 x 16 cells (262,144 cells, 1 MiB a buffer: in cache), or of 512 x 512
 // (67 million cells, 256 MiB a buffer: past the last-level cache): what Tile<TCell, TTile> costs against the same
-// stencil written by hand (a Lookup per neighbor, a padded texture on the stack), what sleeping tiles save, and what
+// stencil written by hand (a Lookup per neighbor, a padded texture on the stack), what the cell methods the generator
+// turns into those loops cost (_Cell: one cell's arithmetic, Cell<TCell, TTile>), what sleeping tiles save, and what
 // finding the neighbors costs in a pass.
 
 public record struct Plot(int X, int Z)
@@ -107,7 +108,7 @@ public class TileStencilBenchmark
 
     [Params(Plot.Default, 512)] public int Side;
 
-    private World _blurTile, _blurDirect, _blurHand, _blurPingPong, _waveTile, _waveHand, _wavePingPong, _blurColumns, _waveColumns;
+    private World _blurTile, _blurDirect, _blurHand, _blurPingPong, _waveTile, _waveHand, _wavePingPong, _blurColumns, _waveColumns, _blurCell, _waveCell;
 
     [GlobalSetup]
     public void Setup()
@@ -136,6 +137,12 @@ public class TileStencilBenchmark
         _blurColumns.AddSystem<TileSystems.ColumnBlurSystem>();
         _waveColumns = TileWorlds.Warm<WavePlot>(Threads, p => new WavePlot(p), next: false);
         _waveColumns.AddSystem<TileSystems.ColumnWaveSystem>();
+        _blurCell = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p));
+        _blurCell.AddSystem<TileSystems.CellBlurSystem>();
+        _blurCell.AddSystem<TileSystems.CommitWarmthSystem>();
+        _waveCell = TileWorlds.Warm<WavePlot>(Threads, p => new WavePlot(p));
+        _waveCell.AddSystem<TileSystems.CellWaveSystem>();
+        _waveCell.AddSystem<TileSystems.CommitWarmthSystem>();
         for (int i = 0; i < 3; i++)
         {
             Blur9_Tile();
@@ -147,6 +154,8 @@ public class TileStencilBenchmark
             Laplacian_PingPong();
             Blur9_Columns();
             Laplacian_Columns();
+            Blur9_Cell();
+            Laplacian_Cell();
         }
         TileWorlds.Same(_blurTile, _blurHand);
         TileWorlds.Same(_blurPingPong, _blurHand);
@@ -155,6 +164,8 @@ public class TileStencilBenchmark
         TileWorlds.Same(_waveTile, _waveHand);
         TileWorlds.Same(_blurColumns, _blurHand);
         TileWorlds.Same(_waveColumns, _waveHand);
+        TileWorlds.Same(_blurCell, _blurHand);
+        TileWorlds.Same(_waveCell, _waveHand);
     }
 
     [GlobalCleanup]
@@ -169,6 +180,8 @@ public class TileStencilBenchmark
         _wavePingPong.Dispose();
         _blurColumns.Dispose();
         _waveColumns.Dispose();
+        _blurCell.Dispose();
+        _waveCell.Dispose();
     }
 
     [Benchmark] public void Blur9_Tile() => _blurTile.Update();
@@ -180,6 +193,8 @@ public class TileStencilBenchmark
     [Benchmark] public void Laplacian_PingPong() => _wavePingPong.Update();
     [Benchmark] public void Blur9_Columns() => _blurColumns.Update();
     [Benchmark] public void Laplacian_Columns() => _waveColumns.Update();
+    [Benchmark] public void Blur9_Cell() => _blurCell.Update();
+    [Benchmark] public void Laplacian_Cell() => _waveCell.Update();
 }
 
 /// <summary>
@@ -195,7 +210,7 @@ public class TileActiveBenchmark
 
     [Params(Plot.Default, 512)] public int Side;
 
-    private World _always, _sparse, _pingPong;
+    private World _always, _sparse, _pingPong, _cell;
 
     [GlobalSetup]
     public void Setup()
@@ -211,15 +226,20 @@ public class TileActiveBenchmark
         _sparse.AddSystem<TileSystems.WakeSystem>();
         _pingPong = TileWorlds.Blinkers(Threads, awake: false, next: false);
         _pingPong.AddSystem<TileSystems.PingLifeSystem>();
+        _cell = TileWorlds.Blinkers(Threads, awake: false);
+        _cell.AddSystem<TileSystems.CellLifeSystem>();
+        _cell.AddSystem<TileSystems.CommitSeedSystem>();
         for (int i = 0; i < 4; i++)
         {
             AlwaysOn();
             Sparse();
             PingPong();
+            Cell();
         }
         if (_sparse.Count<Awake>(QueryFilter.Create()) != Side / 8 * (Side / 8)) throw new InvalidOperationException("the plates with a blinker stay awake");
         TileWorlds.SameSeeds(_always, _sparse);
         TileWorlds.SameSeeds(_always, _pingPong);
+        TileWorlds.SameSeeds(_always, _cell);
     }
 
     [GlobalCleanup]
@@ -228,11 +248,13 @@ public class TileActiveBenchmark
         _always.Dispose();
         _sparse.Dispose();
         _pingPong.Dispose();
+        _cell.Dispose();
     }
 
     [Benchmark(Baseline = true)] public void AlwaysOn() => _always.Update();
     [Benchmark] public void Sparse() => _sparse.Update();
     [Benchmark] public void PingPong() => _pingPong.Update();
+    [Benchmark] public void Cell() => _cell.Update();
 }
 
 /// <summary>
@@ -662,6 +684,45 @@ internal static class TileSystems
                 var stays = Vector128.Equals(count, Vector128.Create((byte)2)) & c.Load128<byte>();
                 ((born | stays) & Vector128<byte>.One).CopyTo(MemoryMarshal.Cast<Seed, byte>(life.Write(row)));
             }
+        }
+    }
+
+    /// <summary>The 9-point blur as one cell: the generator writes AlwaysOn's loop around it (the halo, the rows, a vector per row).</summary>
+    [EcsSystem]
+    public ref struct CellBlurSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(Cell<Warmth, BlurPlot> w, out NextWarmth next) =>
+            next = new((w[-1, 0, -1].T + w[0, 0, -1].T + w[1, 0, -1].T
+                + w[-1, 0, 0].T + w.Value.T + w[1, 0, 0].T
+                + w[-1, 0, 1].T + w[0, 0, 1].T + w[1, 0, 1].T) * (1f / 9));
+    }
+
+    /// <summary>The fourth-order Laplacian as one cell.</summary>
+    [EcsSystem]
+    public ref struct CellWaveSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(Cell<Warmth, WavePlot> w, out NextWarmth next)
+        {
+            float here = w.Value.T;
+            float alongX = -w[-2, 0, 0].T + 16f * w[-1, 0, 0].T - 30f * here + 16f * w[1, 0, 0].T - w[2, 0, 0].T;
+            float alongZ = -w[0, 0, -2].T + 16f * w[0, 0, -1].T - 30f * here + 16f * w[0, 0, 1].T - w[0, 0, 2].T;
+            next = new(here + (alongX + alongZ) * (1f / 12) * Rate);
+        }
+    }
+
+    /// <summary>Life as one cell: bytes, the count of eight neighbors compared saturated.</summary>
+    [EcsSystem]
+    public ref struct CellLifeSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(Cell<Seed, LifePlot> c, out NextSeed next)
+        {
+            int count = c[-1, 0, -1].Alive + c[0, 0, -1].Alive + c[1, 0, -1].Alive
+                + c[-1, 0, 0].Alive + c[1, 0, 0].Alive
+                + c[-1, 0, 1].Alive + c[0, 0, 1].Alive + c[1, 0, 1].Alive;
+            next = new((byte)(count == 3 || count == 2 && c.Value.Alive == 1 ? 1 : 0));
         }
     }
 
