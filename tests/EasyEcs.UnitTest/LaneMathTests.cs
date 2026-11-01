@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using System.Runtime.Intrinsics;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -521,5 +522,48 @@ public class LaneMathTests
         Sweep<Real, Real4>(Samples(stride), stride, real, LoweredKernels.Powers, Powers, Near, show);
         Sweep<Real, Real4>(Samples(stride), stride, real, LoweredKernels.Curves, Curves, Tan, show);
         Sweep<Real, Real4>(Samples(stride), stride, real, LoweredKernels.Hyperbolic, Hyperbolic, Near, show);
+    }
+
+    /// <summary>
+    /// The Vector128 forms (the rows of a cell method narrower than Vector&lt;T&gt;): the quotients exact against the
+    /// scalar division over the edges and random operands of both signs (AVX's path, and the path through longs under
+    /// DOTNET_EnableAVX=0), the float functions within 2 ulps of the scalar ones.
+    /// </summary>
+    [Test]
+    public void TheVector128FormsAreTheScalarOperations()
+    {
+        var random = new Random(128);
+        uint[] edges = [1, 2, 3, 7, 0x7FFFFFFF, 0x80000000, 0x80000001, 0xFFFFFFFF, 0xFFFFFFFE, 0xFFFFFFF9, 65536, 1000003];
+        Span<uint> x = stackalloc uint[4], y = stackalloc uint[4];
+        for (int round = 0; round < 200000; round++)
+        {
+            for (int k = 0; k < 4; k++)
+            {
+                x[k] = round < edges.Length * edges.Length / 4 * 4 ? edges[(round * 4 + k) / edges.Length % edges.Length] : (uint)random.NextInt64();
+                y[k] = round < edges.Length * edges.Length / 4 * 4 ? edges[(round * 4 + k) % edges.Length] : (uint)random.Next(1, 1 << random.Next(1, 31)) * (random.Next(2) == 0 ? 1u : uint.MaxValue);
+                if (y[k] == 0) y[k] = 1;
+            }
+            var xv = Vector128.Create<uint>(x);
+            var yv = Vector128.Create<uint>(y);
+            var unsigned = LaneMath.Quotient(xv, yv);
+            var signed = LaneMath.Quotient(xv.AsInt32(), yv.AsInt32());
+            for (int k = 0; k < 4; k++)
+            {
+                Assert.That(unsigned[k], Is.EqualTo(x[k] / y[k]), $"{x[k]} / {y[k]}");
+                int a = (int)x[k], b = (int)y[k];
+                if (a == int.MinValue && b == -1) continue; // the caller replaces this divisor
+                Assert.That(signed[k], Is.EqualTo(a / b), $"{a} / {b}");
+            }
+        }
+        for (int i = 0; i < 100000; i++)
+        {
+            uint bits = i < Edges.Length ? Edges[i] : (uint)random.NextInt64();
+            float f = BitConverter.UInt32BitsToSingle(bits), small = f % 80f;
+            var v = Vector128.Create(small);
+            Assert.That(Ulps(LaneMath.Sinh(v)[0], MathF.Sinh(small)), Is.LessThanOrEqualTo(2), $"Sinh {small}");
+            Assert.That(Ulps(LaneMath.Cosh(v)[0], MathF.Cosh(small)), Is.LessThanOrEqualTo(2), $"Cosh {small}");
+            Assert.That(Ulps(LaneMath.Tanh(v)[0], MathF.Tanh(small)), Is.LessThanOrEqualTo(2), $"Tanh {small}");
+            Assert.That(Ulps(LaneMath.Log10(Vector128.Create(f))[0], MathF.Log10(f)), Is.LessThanOrEqualTo(2), $"Log10 {f}");
+        }
     }
 }

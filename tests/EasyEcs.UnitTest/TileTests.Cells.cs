@@ -394,6 +394,74 @@ public partial class TileTests
         for (int i = 0; i < 256; i++) Assert.That(shares[i].N, Is.EqualTo(1000 / (i + 1)));
     }
 
+    /// <summary>A plate of 4 x 4: its rows of ints are 16 bytes, narrower than Vector&lt;T&gt; on AVX2, so they run Vector128.</summary>
+    public record struct NarrowPlate(TilePos Pos) : IComponent, ITile<TilePos>
+    {
+        readonly TilePos IIndexed<TilePos>.Key => Pos;
+        static int ITileShape.Width => 4;
+        static int ITileShape.Depth => 4;
+        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Wrap(p, face);
+    }
+
+    public record struct Unsigned(uint N);
+    public record struct Curve(float F);
+
+    // One field each: a struct of several fields stores through Interleaved, which has no Vector128 form.
+
+    /// <summary>Signed integer division in rows of 16 bytes.</summary>
+    [EcsSystem]
+    public ref struct CellNarrowSignedSystem
+    {
+        [ForEach]
+        static void Step(Cell<Count, NarrowPlate> c, out Share q) => q = new(1000003 / c.Value.N);
+    }
+
+    /// <summary>Unsigned integer division in rows of 16 bytes.</summary>
+    [EcsSystem]
+    public ref struct CellNarrowUnsignedSystem
+    {
+        [ForEach]
+        static void Step(Cell<Count, NarrowPlate> c, out Unsigned q) => q = new(4000000000u / (uint)c.Value.N);
+    }
+
+    /// <summary>LaneMath's Sinh (FloatMode.Fast) in rows of 16 bytes.</summary>
+    [EcsSystem]
+    public ref struct CellNarrowCurveSystem
+    {
+        [ForEach(FloatMode = FloatMode.Fast)]
+        static void Step(Cell<Count, NarrowPlate> c, out Curve q) => q = new(MathF.Sinh(c.Value.N * 0.01f));
+    }
+
+    [Test]
+    public void RowsOf16BytesDivideInVector128()
+    {
+        using var world = new World();
+        var plate = world.CreateEntity(new NarrowPlate(new TilePos(0, 0, 0)));
+        var counts = plate.GetOrAdd<DynamicBuffer<Count>>().SetCount(16);
+        int[] ns = [1, 2, 3, 7, -1, -7, 1000003, -1000003, int.MaxValue, 13, 100, -100, 65536, 99991, -5, 1 << 20];
+        for (int i = 0; i < 16; i++) counts[i] = new Count(ns[i]);
+        plate.GetOrAdd<DynamicBuffer<Share>>();
+        plate.GetOrAdd<DynamicBuffer<Unsigned>>();
+        plate.GetOrAdd<DynamicBuffer<Curve>>();
+        world.AddSystem<CellNarrowSignedSystem>();
+        world.AddSystem<CellNarrowUnsignedSystem>();
+        world.AddSystem<CellNarrowCurveSystem>();
+        world.Update();
+        var signed = plate.Read<DynamicBuffer<Share>>().AsReadOnlySpan();
+        var unsigned = plate.Read<DynamicBuffer<Unsigned>>().AsReadOnlySpan();
+        var curve = plate.Read<DynamicBuffer<Curve>>().AsReadOnlySpan();
+        for (int i = 0; i < 16; i++)
+        {
+            int n = ns[i];
+            Assert.That(signed[i].N, Is.EqualTo(1000003 / n), $"cell {i}");
+            Assert.That(unsigned[i].N, Is.EqualTo(4000000000u / (uint)n), $"cell {i}");
+            Assert.That(curve[i].F, Is.EqualTo(MathF.Sinh(n * 0.01f)).Within(2).Ulps, $"cell {i}");
+        }
+        string schedule = world.DescribeSchedule().ToString();
+        if (System.Numerics.Vector.IsHardwareAccelerated && System.Numerics.Vector<int>.Count > 4)
+            Assert.That(schedule.Split("Vector<int> or Vector128 per row").Length - 1, Is.EqualTo(3), schedule); // all three: LaneMath has Vector128 forms
+    }
+
     /// <summary>Reads two cells away with a halo of one.</summary>
     [EcsSystem]
     public ref struct CellPastTheHaloSystem
