@@ -672,6 +672,103 @@ public partial class TileTests
         Assert.That(float.IsNaN(plate.Read<DynamicBuffer<NextHeat>>()[100].T));
     }
 
+    /// <summary>X in byte lanes: compared and added to, and a result per tile of two-byte fields summed from it.</summary>
+    [EcsSystem]
+    public ref struct CellEdgeSystem
+    {
+        [ForEach]
+        static void Step(Cell<Life, LifePlate> c, out NextLife next, ref Reduce<EdgeTally> tally)
+        {
+            int edge = c.X == 0 || c.X == 15 ? 1 : 0;
+            next = new((byte)(c.Value.Alive + edge * 10 + (c.X > 7 ? c.X : 0)));
+            tally.Value.Edges += c.Value.Alive != 0 && edge != 0 ? (ushort)1 : (ushort)0;
+            tally.Value.Right = Math.Max(tally.Value.Right, c.Value.Alive != 0 ? (short)c.X : short.MinValue);
+        }
+    }
+
+    [EcsSystem]
+    public ref struct CellEdgeByCellSystem
+    {
+        [ForEach(SimdMode = SimdMode.Off)]
+        static void Step(Cell<Life, LifePlate> c, out NextLife next, ref Reduce<EdgeTally> tally)
+        {
+            int edge = c.X == 0 || c.X == 15 ? 1 : 0;
+            next = new((byte)(c.Value.Alive + edge * 10 + (c.X > 7 ? c.X : 0)));
+            tally.Value.Edges += c.Value.Alive != 0 && edge != 0 ? (ushort)1 : (ushort)0;
+            tally.Value.Right = Math.Max(tally.Value.Right, c.Value.Alive != 0 ? (short)c.X : short.MinValue);
+        }
+    }
+
+    /// <summary>A plate of 300 x 2: its X passes a byte, so the row runs cell by cell (the vector form holds X up to 255).</summary>
+    public record struct BytePastPlate(TilePos Pos) : IComponent, ITile<TilePos>
+    {
+        readonly TilePos IIndexed<TilePos>.Key => Pos;
+        static int ITileShape.Width => 300;
+        static int ITileShape.Depth => 2;
+        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Wrap(p, face);
+    }
+
+    [EcsSystem]
+    public ref struct CellWideEdgeSystem
+    {
+        [ForEach]
+        static void Step(Cell<Life, BytePastPlate> c, out NextLife next) => next = new((byte)(c.Value.Alive + (c.X > 250 ? 1 : 0)));
+    }
+
+    [EcsSystem]
+    public ref struct CellWideEdgeByCellSystem
+    {
+        [ForEach(SimdMode = SimdMode.Off)]
+        static void Step(Cell<Life, BytePastPlate> c, out NextLife next) => next = new((byte)(c.Value.Alive + (c.X > 250 ? 1 : 0)));
+    }
+
+    [TestCase(1)]
+    [TestCase(4)]
+    public void XInByteLanesIsXCellByCell(int threads)
+    {
+        using var vector = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        using var scalar = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var random = new Random(23);
+        var plates = new List<(Entity Vector, Entity Scalar)>();
+        foreach (var place in Box(Torus, 1, Torus))
+        {
+            var a = vector.CreateEntity(new LifePlate(place), EdgeTally.Identity);
+            var b = scalar.CreateEntity(new LifePlate(place), EdgeTally.Identity);
+            var cells = a.GetOrAdd<DynamicBuffer<Life>>().SetCount(256);
+            if (place.X != 0) // the plates of column 0 are blank: their result is the identity (each row runs: the method reads X)
+                for (int i = 0; i < 256; i++) cells[i] = new Life((byte)(random.Next(4) == 0 ? random.Next(1, 3) : 0));
+            cells.CopyTo(b.GetOrAdd<DynamicBuffer<Life>>().SetCount(256));
+            a.GetOrAdd<DynamicBuffer<NextLife>>();
+            b.GetOrAdd<DynamicBuffer<NextLife>>();
+            plates.Add((a, b));
+        }
+        foreach (var place in Box(2, 1, 1))
+        {
+            var a = vector.CreateEntity(new BytePastPlate(place));
+            var b = scalar.CreateEntity(new BytePastPlate(place));
+            var cells = a.GetOrAdd<DynamicBuffer<Life>>().SetCount(600);
+            for (int i = 0; i < 600; i++) cells[i] = new Life((byte)random.Next(3));
+            cells.CopyTo(b.GetOrAdd<DynamicBuffer<Life>>().SetCount(600));
+            a.GetOrAdd<DynamicBuffer<NextLife>>();
+            b.GetOrAdd<DynamicBuffer<NextLife>>();
+            plates.Add((a, b));
+        }
+        vector.AddSystem<CellEdgeSystem>();
+        vector.AddSystem<CellWideEdgeSystem>();
+        scalar.AddSystem<CellEdgeByCellSystem>();
+        scalar.AddSystem<CellWideEdgeByCellSystem>();
+        vector.Update();
+        scalar.Update();
+        foreach (var (a, b) in plates)
+        {
+            Assert.That(a.Read<DynamicBuffer<NextLife>>().AsReadOnlySpan().SequenceEqual(b.Read<DynamicBuffer<NextLife>>().AsReadOnlySpan()), Is.True);
+            if (a.Has<EdgeTally>()) Assert.That(a.Read<EdgeTally>(), Is.EqualTo(b.Read<EdgeTally>()));
+        }
+        var schedule = vector.DescribeSchedule().ToString();
+        Assert.That(schedule, Does.Contain("cells of 'c': vector ("));
+        Assert.That(schedule, Does.Not.Contain("cells of 'c': scalar"));
+    }
+
     /// <summary>A result per tile: the cells that hold something, and the first and last row that does.</summary>
     [EcsSystem]
     public ref struct CellTallySystem
@@ -794,4 +891,11 @@ public partial struct CountTally : IComponent
     [Sum] public int Held;
     [Min] public int First;
     [Max] public int Last;
+}
+
+/// <summary>A cell method's result per tile of two-byte fields, summed in byte lanes: the live cells on an edge, the rightmost one.</summary>
+public partial struct EdgeTally : IComponent
+{
+    [Sum] public ushort Edges;
+    [Max] public short Right;
 }
