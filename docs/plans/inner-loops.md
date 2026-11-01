@@ -503,7 +503,14 @@ WP5b design (decided 2026-11-01, from what Flow.cs needs):
   summary (FluidCount) stays possible through a value parameter only if the measured exchange cost demands it
   (TickBenchmark decides).
 - Order: (1) several inputs and outs; (2) the blank-driver proof; (3) per-tile results; (4) ranges; (5) Flow.cs as
-  cells, TickBenchmark against the hand-written step.
+  cells, TickBenchmark against the hand-written step. (1) and (2) shipped on feat-inner-loops (Kernel.Blank.cs:
+  record structs' positional members are auto-properties, read as their backing field's 0; a void body ends in an
+  implicit return).
+- (3) in detail: a field of the result is a variable of the row's element loop (SumOf: `+`, Min, Max; `|` and `&`
+  added, exact for integers), loaded from the tile's partial result before each row's vector loop and stored back
+  after it, so the scalar cells left and the next row continue it. The proof follows each field from a start value
+  of its own (unknown) that `x + 0`, `x | 0`, `x & ~0`, Min with the type's MaxValue and Max with its MinValue keep:
+  a row is skipped only when every field ends at its start too.
 
 **WP6: EECS103 and its code fix.**
 - WP6a (v1, batch casts): shipped (D134).
