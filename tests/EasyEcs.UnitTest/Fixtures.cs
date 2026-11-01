@@ -121,4 +121,47 @@ public static class Allocations
         System.GC.Collect(2, System.GCCollectionMode.Forced, blocking: true);
         System.GC.WaitForPendingFinalizers();
     }
+
+    /// <summary>
+    /// The arrays one run of <paramref name="run"/> rented from any <c>ArrayPool</c> on this thread
+    /// (System.Buffers.ArrayPoolEventSource's BufferRented, raised on the renting thread). A 0 B check alone misses a
+    /// rent in steady state: on a quiet machine the pool hands the same array back, but under high memory load
+    /// (90 % of the GC's threshold) <c>ArrayPool.Shared</c> drops its arrays at every gen2 collection, so the rent
+    /// allocates after each one, and <see cref="Of"/> starts with one (73,824 to 589,920 B in loaded runs).
+    /// </summary>
+    public static int PoolRents(System.Action run)
+    {
+        using var listener = new PoolRentListener();
+        PoolRentListener.Count = 0;
+        PoolRentListener.Counting = true;
+        try
+        {
+            run();
+        }
+        finally
+        {
+            PoolRentListener.Counting = false;
+        }
+
+        return PoolRentListener.Count;
+    }
+
+    private sealed class PoolRentListener : System.Diagnostics.Tracing.EventListener
+    {
+        [System.ThreadStatic] public static int Count;
+        [System.ThreadStatic] public static bool Counting;
+
+        // Called by the base constructor for the sources that exist already (before this class's fields are set).
+        protected override void OnEventSourceCreated(System.Diagnostics.Tracing.EventSource source)
+        {
+            if (source.Name == "System.Buffers.ArrayPoolEventSource")
+                EnableEvents(source, System.Diagnostics.Tracing.EventLevel.Verbose);
+        }
+
+        // Raised synchronously on the thread that rents.
+        protected override void OnEventWritten(System.Diagnostics.Tracing.EventWrittenEventArgs e)
+        {
+            if (Counting && e.EventName == "BufferRented") Count++;
+        }
+    }
 }

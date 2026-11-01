@@ -757,6 +757,30 @@ public class OrderTests
 
         for (int i = 0; i < 5; i++) Tick();
         Assert.That(Allocations.Of(Tick), Is.Zero);
+        // The sort's keys, rows and words are the world's: a rent from ArrayPool.Shared allocated after every gen2
+        // collection of a loaded machine (the pool drops its arrays then), 8 KB to 590 KB in loaded suite runs.
+        Assert.That(Allocations.PoolRents(Tick), Is.Zero, "rents of the sort");
+    }
+
+    [Test]
+    public void ClusterSearchesRentNothingOnceWarm()
+    {
+        using var world = new World();
+        Populate(world, 3000, new Random(16));
+        world.SortRows<Walker>();
+        var pairs = new ClusterPair[1 << 16];
+        int Search()
+        {
+            int found = 0;
+            foreach (var clusters in world.Clusters<Walker>())
+                if (clusters.RowCount > 0) found += clusters.Pairs(4f, pairs);
+            return found;
+        }
+
+        Assert.That(Search(), Is.Positive);
+        // The search's keys, ids and sides are this thread's (RowClusters.Find), not ArrayPool.Shared's.
+        Assert.That(Allocations.PoolRents(() => Search()), Is.Zero, "rents of the search");
+        Assert.That(Allocations.Of(() => Search()), Is.Zero);
     }
 
     // In a method of its own: a reference it reads dies with its frame (the JIT may keep one in a slot of the caller's).

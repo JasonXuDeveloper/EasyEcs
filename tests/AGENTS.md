@@ -16,7 +16,10 @@ before its fix). A warm-up before a 0 B
 check runs through `Allocations.WarmUp(step, least)`, which goes on until the JIT has settled: in the full suite a loop
 can still run Tier0 code after a fixed warm-up, and its on-stack replacement compiles (and allocates) on the measuring
 thread (fix-flaky-alloc). The fixed warm-ups left in KernelTests, KernelLookupTests, HelperLoopTests and
-AllocationTests race the same way.
+AllocationTests race the same way. A 0 B check of a path that could rent from `ArrayPool` also asserts
+`Allocations.PoolRents(run)` is 0: on a quiet machine a rent reuses the pool's array, but under high memory load the
+pool empties at every gen2 collection (which `Allocations.Of` starts with), so the rent allocates (OrderTests,
+NeighborTests; audit-core).
 
 ```
 tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System (and stats),
