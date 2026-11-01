@@ -702,7 +702,8 @@ internal sealed partial class Kernel
             if (size == SizeOf(first)) continue;
             if (size != 2 * SizeOf(first) || wides.Any(w => w != null))
                 throw new Unsupported($"lane types {first.ToDisplayString()} and {field.Type.ToDisplayString()} differ in size"
-                    + (size == 2 * SizeOf(first) ? "" : $": a vector loop takes lanes of one size and of twice that size, not {size / SizeOf(first)} times"));
+                    + (size == 2 * SizeOf(first) ? "" : $": a vector loop takes lanes of one size and of twice that size, not {size / SizeOf(first)} times;"
+                        + $" widen the {first.ToDisplayString()} to {size / 2}-byte lanes, or split the method so each takes lanes of one size"));
             if (components[k].Length > 1 && size < 4)
                 throw new Unsupported($"component {componentTypes[k].Name} has {components[k].Length} fields of {field.Type.ToDisplayString()}, twice as wide as the {first.ToDisplayString()} lanes: a vector loop splits fields of 4 or 8 bytes");
         }
