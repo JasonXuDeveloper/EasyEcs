@@ -626,4 +626,37 @@ public partial class ReduceTests
         for (int i = 0; i < 10; i++) world.Update();
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 300; i++) world.Update(); }), Is.Zero);
     }
+
+    /// <summary>
+    /// A parallel pass over one table of at most 64 rows is one chunk whatever its rows cost: it runs on the calling
+    /// thread without being cut, and its result is still the serial one (the partial result combined into the identity,
+    /// in row order) on any thread count, with nothing allocated.
+    /// </summary>
+    [Test]
+    public void AParallelReductionOverOneSmallTableIsTheSerialOne()
+    {
+        foreach (int threads in new[] { 1, 4 })
+        foreach (int rows in new[] { 1, 37, 64, 65, 200 })
+        {
+            using var world = Pointed(rows, threads);
+            world.AddSystem<SerialEnds>();
+            world.Update();
+            var serial = world.Ends2;
+            world.RemoveSystem<SerialEnds>();
+            world.AddSystem<ParallelEnds>();
+            for (int run = 0; run < 3; run++)
+            {
+                world.Update();
+                Assert.That(world.Ends2, Is.EqualTo(serial), $"{rows} rows on {threads} threads, run {run}");
+            }
+
+            Runners.Score(world);
+            Assert.That((world.Scores.Count, world.Scores.Sum), Is.EqualTo((rows, (long)(rows - 1) * rows / 2)), $"{rows} rows, an entry point");
+        }
+
+        using var small = Pointed(40);
+        small.AddSystem<ParallelEnds>();
+        Allocations.WarmUp(() => small.Update(), 50);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) small.Update(); }), Is.Zero);
+    }
 }
