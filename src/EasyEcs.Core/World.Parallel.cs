@@ -121,53 +121,11 @@ public sealed partial class World
         // stage's threads may only read it. Gathered once per schedule: the stage's systems are known when it is cut.
         var prepares = stage.Prepares;
         for (int i = 0; i < prepares.Length; i++) prepares[i](this);
-        if (runner.TryTake())
-        {
-            try
-            {
-                // The stage's systems never change structure (they do not run alone): a change throws in either region.
-                // A stage that settled on running alone runs on this thread, still a parallel region for its systems
-                // (InParallel: what they see does not depend on the runner's choice), entered with plain stores (four
-                // locked instructions otherwise).
-                if (!stage.Wide(out bool sample))
-                {
-                    bool plain = Gate.FreezeParallelAlone();
-                    if (!plain) Gate.FreezeParallel();
-                    try
-                    {
-                        Runner.RunAlone(stage, systems.Length);
-                    }
-                    finally
-                    {
-                        if (plain) Gate.ThawParallelAlone();
-                        else Gate.ThawParallel();
-                    }
-
-                    return;
-                }
-
-                Gate.FreezeParallel();
-                try
-                {
-                    runner.RunWide(stage, systems.Length, sample);
-                }
-                finally
-                {
-                    Gate.ThawParallel();
-                }
-            }
-            finally
-            {
-                runner.Release();
-            }
-
-            return;
-        }
-
-        Gate.FreezeParallel(); // an update from inside a running stage: one system after the other, still frozen
+        Gate.FreezeParallel(); // the stage's systems never change structure (they do not run alone): a change throws
         try
         {
-            foreach (var segment in stage.Segments)
+            if (runner.TryRun(stage, systems.Length, out _)) return;
+            foreach (var segment in stage.Segments) // an update from inside a running stage: one system after the other
                 segment.Set.Run(this, systems.AsSpan(segment.Start, segment.Count), update, default, default);
         }
         finally
@@ -533,44 +491,27 @@ public sealed partial class World
         public bool TryRun(ParallelWork work, int count, out long allocated)
         {
             allocated = 0;
-            if (!TryTake()) return false;
+            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return false;
+            ThreadSetup.CatchUp(); // the caller's per-thread state too, before it runs an item
             try
             {
-                allocated = work.Wide(out bool sample) ? RunWide(work, count, sample) : RunAlone(work, count);
+                allocated = Run(work, count);
             }
             finally
             {
-                Release();
+                _work = null;
+                Volatile.Write(ref _busy, 0);
             }
 
             return true;
         }
 
-        /// <summary>
-        /// Take the runner for one run (false when it is busy: a parallel pass inside another one's item, or two systems
-        /// of a stage at once); <see cref="Release"/> gives it back. The caller's per-thread state is caught up, before it
-        /// runs an item.
-        /// </summary>
-        public bool TryTake()
+        /// <summary>Run the items; returns the bytes helpers allocated (read while the runner is still this run's).</summary>
+        private long Run(ParallelWork work, int count)
         {
-            if (Interlocked.CompareExchange(ref _busy, 1, 0) != 0) return false;
-            ThreadSetup.CatchUp();
-            return true;
-        }
+            bool wide = work.Wide(out bool sample);
+            if (!wide) return RunAlone(work, count);
 
-        /// <summary>Give back the runner <see cref="TryTake"/> took.</summary>
-        public void Release()
-        {
-            _work = null;
-            Volatile.Write(ref _busy, 0);
-        }
-
-        /// <summary>
-        /// Run the items with helpers (<see cref="ParallelWork.Wide"/> said so; <paramref name="sample"/>: its time
-        /// counts); returns the bytes helpers allocated (read while the runner is still this run's).
-        /// </summary>
-        public long RunWide(ParallelWork work, int count, bool sample)
-        {
             // Close the last run's claims first: a late participant of it that read its cursor before this can no longer
             // claim (its compare-exchange fails), and one reading after it finds no item. Without this, one that read
             // the cursor at its end and then the larger _count of this run would claim an item of this run under the
@@ -621,7 +562,7 @@ public sealed partial class World
         /// item; the next run with helpers closes them again before it publishes anything. An item that throws does
         /// not stop the others; the first exception is rethrown once all have run, as with helpers.
         /// </summary>
-        public static long RunAlone(ParallelWork work, int count)
+        private static long RunAlone(ParallelWork work, int count)
         {
             Exception error = null;
             long start = Stopwatch.GetTimestamp();
