@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
@@ -262,6 +263,40 @@ internal sealed partial class Kernel
         {
             get => (_all.Length, _masked.Length);
             set => (_all.Length, _masked.Length) = value;
+        }
+
+        /// <summary>
+        /// Drops the narrow values (<c>var __wN = ...;</c>, pure vector arithmetic) that nothing reads: a sum is followed
+        /// both wrapping and saturated (<see cref="Wide"/>), and only one of them may reach a comparison or a store. The
+        /// JIT does not always drop an unused vector chain, and every value left counts toward its local budget.
+        /// <paramref name="elsewhere"/> is the rest of the loop's text (setup, stores, masked stores), which may read one.
+        /// </summary>
+        public void Prune(string elsewhere)
+        {
+            for (bool dropped = true; dropped;)
+            {
+                dropped = false;
+                string all = _all.ToString(), masked = _masked.ToString();
+                foreach (Match m in Declared.Matches(all))
+                {
+                    string id = m.Groups[1].Value;
+                    var name = new Regex($@"\b{id}\b");
+                    int declarations = Count(all, m.Value) + Count(masked, m.Value);
+                    if (name.Matches(all).Count + name.Matches(masked).Count + name.Matches(elsewhere).Count > declarations) continue;
+                    _all.Replace(m.Value, "");
+                    _masked.Replace(m.Value, "");
+                    dropped = true;
+                }
+            }
+        }
+
+        private static readonly Regex Declared = new(@"(?m)^var (__w\d+) = [^\n]*;\n");
+
+        private static int Count(string text, string part)
+        {
+            int n = 0;
+            for (int at = text.IndexOf(part, System.StringComparison.Ordinal); at >= 0; at = text.IndexOf(part, at + part.Length, System.StringComparison.Ordinal)) n++;
+            return n;
         }
 
         /// <summary>The text for masked words.</summary>
@@ -935,6 +970,7 @@ internal sealed partial class Kernel
         string hold = kernel._bails || kernel._lookups.Count > 0 ? held.ToString() : ""; // a lookup sends unresolved vectors to the method too (Kernel.RunRows)
         // A masked word holds the accumulators for a bail and for a pair's fold.
         string maskedHold = kernel._bails || kernel._lookups.Count > 0 || kernel._reductions.Values.Any(r => r.Fields.Any(f => kernel.IsDoubled(f.Type))) ? held.ToString() : "";
+        if (kernel._narrow) kernel._body.Prune(stores.ToString() + masked + kernel._setup);
         if (kernel._wideOf.Count > 0) kernel.Gate();
         string uses = kernel._body.ToString() + stores + masked + kernel._setup;
         var read = new StringBuilder();

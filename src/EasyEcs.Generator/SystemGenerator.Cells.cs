@@ -149,22 +149,44 @@ public sealed partial class SystemGenerator
             row.Append("{\n").Append(Indent(vector.ToString())).Append("__rest:\n    __x = (int)i;\n}\n");
         }
         row.Append($"for (; __x < {at}.Width; __x++)\n    {Call(k => $"new {At(k)}(in {Unsafe}.Add(ref __c{k}, __x), __x, __row.Y, __row.Z)", j => $"{Unsafe}.Add(ref __o{j}, __x)")};\n");
+        string? constants = null;
         if (skips)
         {
             // A row the walk skips reads only zeros: it gets what the method computes there, exactly (with this entity's
-            // values), computed at the first such row (a tile without one never runs the method on zeros) and written
-            // into the gaps between the rows walked (in order of Index), so every cell is written once. A stepped tile's
-            // rows the step does not write are zero once swapped in: they are written only when that value is not zero.
+            // values), written into the gaps between the rows walked (in order of Index), so every cell is written once.
+            // A stepped tile's rows the step does not write are zero once swapped in: they are written only when that
+            // value is not zero. A method that takes nothing besides its cells and out cells computes the same there
+            // for every tile: once per system, in static readonly fields (constants once the type is initialized, so
+            // Tier1 drops the fill of a zero step); else at the first such row of each tile (a tile without one never
+            // runs the method on zeros).
+            bool once = passed.Count == 0 && results.Count == 0;
+            string F(int j) => once ? $"{AccessorPrefix}__Blank.F{j}" : $"__f{j}";
+            string nonzero = once ? $"{AccessorPrefix}__Blank.Nonzero" : "__nonzero";
             string zero = step >= 0
-                ? $"    __nonzero = global::System.MemoryExtensions.IndexOfAnyExcept({Marshal}.AsBytes(new global::System.ReadOnlySpan<{OutName(step)}>(in __f{step})), (byte)0) >= 0;\n" : "";
-            string blank = $"if (!__blank)\n{{\n    {Call(k => $"{At(k)}.Blank", j => $"__f{j}", "__spare")};\n{zero}    __blank = true;\n}}\n";
+                ? $"    {nonzero} = global::System.MemoryExtensions.IndexOfAnyExcept({Marshal}.AsBytes(new global::System.ReadOnlySpan<{OutName(step)}>(in {F(step)})), (byte)0) >= 0;\n" : "";
+            string blank = once ? "" : $"if (!__blank)\n{{\n    {Call(k => $"{At(k)}.Blank", j => $"__f{j}", "__spare")};\n{zero}    __blank = true;\n}}\n";
+            if (once)
+            {
+                var fields = new StringBuilder();
+                for (int j = 0; j < outputs.Count; j++) fields.Append($"        internal static readonly {OutName(j)} F{j};\n");
+                if (step >= 0) fields.Append("        internal static readonly bool Nonzero;\n");
+                constants = $"    /// <summary>What the method computes on Cell.Blank: the cells of the rows the walk skips.</summary>\n"
+                    + $"    private static class {AccessorPrefix}__Blank\n    {{\n{fields}\n        static {AccessorPrefix}__Blank()\n        {{\n"
+                    + $"            {Call(k => $"{At(k)}.Blank", j => $"F{j}").Replace(self, "default")};\n"
+                    + (step >= 0 ? $"            Nonzero = global::System.MemoryExtensions.IndexOfAnyExcept({Marshal}.AsBytes(new global::System.ReadOnlySpan<{OutName(step)}>(in F{step})), (byte)0) >= 0;\n" : "")
+                    + "        }\n    }\n\n";
+            }
             string Fill(string from, string to) => string.Concat(outputs.Select((_, j) => j == step
-                ? $"    if (__nonzero)\n        for (int __r = {from} / {at}.Width; __r < {to} / {at}.Width; __r++)\n"
-                  + $"            __tile0.Write(new global::EasyEcs.TileRow<{shape}>(__r / {at}.Depth, __r % {at}.Depth)).Fill(__f{j});\n"
-                : $"    __into{j}.Slice({from}, {to} - {from}).Fill(__f{j});\n"));
-            body.Append("int __done = 0;\nbool __blank = false;\n");
-            if (step >= 0) body.Append("bool __nonzero = false;\n");
-            for (int j = 0; j < outputs.Count; j++) body.Append($"{OutName(j)} __f{j} = default;\n");
+                ? $"    if ({nonzero})\n        for (int __r = {from} / {at}.Width; __r < {to} / {at}.Width; __r++)\n"
+                  + $"            __tile0.Write(new global::EasyEcs.TileRow<{shape}>(__r / {at}.Depth, __r % {at}.Depth)).Fill({F(j)});\n"
+                : $"    __into{j}.Slice({from}, {to} - {from}).Fill({F(j)});\n"));
+            body.Append("int __done = 0;\n");
+            if (!once)
+            {
+                body.Append("bool __blank = false;\n");
+                if (step >= 0) body.Append("bool __nonzero = false;\n");
+                for (int j = 0; j < outputs.Count; j++) body.Append($"{OutName(j)} __f{j} = default;\n");
+            }
             body.Append($"foreach (var __row in __tile0.Rows((global::EasyEcs.TileStencil){stencil}))\n{{\n");
             body.Append(Indent($"if (__row.Index > __done)\n{{\n{Indent(blank)}{Fill("__done", "__row.Index")}}}\n"));
             body.Append(Indent(row.ToString())).Append($"    __done = __row.Index + {at}.Width;\n}}\n");
@@ -177,6 +199,7 @@ public sealed partial class SystemGenerator
         }
         for (int n = 0; n < results.Count; n++) body.Append($"__res{n}.Write() = __red{n}.Value;\n");
         sb.Append(Indent(Indent(body.ToString()))).Append("    }\n#pragma warning restore\n\n");
+        if (constants != null) sb.Append("#pragma warning disable\n").Append(constants).Append("#pragma warning restore\n\n");
 
         string names = string.Join("', '", cells.Select(c => c.Name));
         string walk = skips ? (form.ConstantOnBlank && (form.ReadsPlace || cells.Count > 1 || results.Count > 0) ? $"; rows of '{cells[0].Name}': blank rows proved constant" : "")
