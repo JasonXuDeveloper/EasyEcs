@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.Intrinsics;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -938,6 +939,200 @@ public partial class TileTests
         string schedule = world.DescribeSchedule().ToString();
         Assert.That(schedule, Does.Contain("cells of 'w': vector (").And.Contain("cells of 'c': vector (")
             .And.Contain("every row: it reads its place").And.Contain("cells of 'w': scalar (SimdMode.Off; every row: it reads its place)"), schedule);
+    }
+
+    /// <summary>Plates of 32 floats a row, a halo of 2: four vectors of 128 bits, two of 256, one of 512 per row... and a second.</summary>
+    public record struct PlaneWide(TilePos Pos) : IComponent, ITile<TilePos>
+    {
+        readonly TilePos IIndexed<TilePos>.Key => Pos;
+        static int ITileShape.Width => 32;
+        static int ITileShape.Depth => 8;
+        static int ITileShape.Halo => 2;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
+        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
+    }
+
+    /// <summary>Plates of 64 bytes a row, a halo of 2: shifts by one and two bytes at every width.</summary>
+    public record struct PlaneBytes(TilePos Pos) : IComponent, ITile<TilePos>
+    {
+        readonly TilePos IIndexed<TilePos>.Key => Pos;
+        static int ITileShape.Width => 64;
+        static int ITileShape.Depth => 4;
+        static int ITileShape.Halo => 2;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
+        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
+    }
+
+    /// <summary>Plates of 12 floats a row (48 bytes, not a whole number of 256-bit vectors): the halo copied, as before.</summary>
+    public record struct PlaneOdd(TilePos Pos) : IComponent, ITile<TilePos>
+    {
+        readonly TilePos IIndexed<TilePos>.Key => Pos;
+        static int ITileShape.Width => 12;
+        static int ITileShape.Depth => 4;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
+        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
+    }
+
+    [EcsSystem]
+    public ref struct CellWideSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(Cell<Heat, PlaneWide> w, out Heat next) =>
+            next = new(w.Value.T * 0.5f + (w[-2, 0, 0].T + w[2, 0, 0].T) * 0.1f + (w[-1, 0, -1].T + w[1, 0, 1].T) * 0.05f
+                + w[0, 0, -2].T * 0.01f + w[1, 0, 2].T * 0.02f + w[-2, 0, 1].T * 0.03f);
+    }
+
+    [EcsSystem]
+    public ref struct CellWideByCellSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2, SimdMode = SimdMode.Off)]
+        static void Step(Cell<Heat, PlaneWide> w, out Heat next) =>
+            next = new(w.Value.T * 0.5f + (w[-2, 0, 0].T + w[2, 0, 0].T) * 0.1f + (w[-1, 0, -1].T + w[1, 0, 1].T) * 0.05f
+                + w[0, 0, -2].T * 0.01f + w[1, 0, 2].T * 0.02f + w[-2, 0, 1].T * 0.03f);
+    }
+
+    [EcsSystem]
+    public ref struct CellByteSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(Cell<Life, PlaneBytes> c, out NextLife next) =>
+            next = new((byte)(c[-2, 0, 0].Alive + c[1, 0, -1].Alive + c[2, 0, 1].Alive + c[-1, 0, 2].Alive + c.Value.Alive));
+    }
+
+    [EcsSystem]
+    public ref struct CellByteByCellSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2, SimdMode = SimdMode.Off)]
+        static void Step(Cell<Life, PlaneBytes> c, out NextLife next) =>
+            next = new((byte)(c[-2, 0, 0].Alive + c[1, 0, -1].Alive + c[2, 0, 1].Alive + c[-1, 0, 2].Alive + c.Value.Alive));
+    }
+
+    [EcsSystem]
+    public ref struct CellOddSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(Cell<Heat, PlaneOdd> w, out NextHeat next) =>
+            next = new((w[-1, 0, -1].T + w[1, 0, 1].T + w[-1, 0, 0].T + w.Value.T + w[1, 0, -1].T) * 0.2f);
+    }
+
+    [EcsSystem]
+    public ref struct CellOddByCellSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2, SimdMode = SimdMode.Off)]
+        static void Step(Cell<Heat, PlaneOdd> w, out NextHeat next) =>
+            next = new((w[-1, 0, -1].T + w[1, 0, 1].T + w[-1, 0, 0].T + w.Value.T + w[1, 0, -1].T) * 0.2f);
+    }
+
+    /// <summary>
+    /// The halo read in place (TilePlane, CellRow's shifts) against the method as written over the copied halo, bit for
+    /// bit: rows of several vectors at every width (32 floats stepping their tile), shifts by one and two bytes (64
+    /// bytes), a row the shape does not let it read in place (12 floats), on a grid with holes and quiet rows, 1 and 4
+    /// threads.
+    /// </summary>
+    [TestCase(1)]
+    [TestCase(4)]
+    public void TheHaloReadInPlaceIsTheHaloCopied(int threads)
+    {
+        var holes = new[] { new TilePos(1, 0, 1), new TilePos(2, 0, 0) };
+        Twins<PlaneWide, Heat, CellWideSystem, CellWideByCellSystem>(threads, p => new PlaneWide(p), 32 * 8, holes, 6,
+            static (r, i) => i % 3 == 0 ? new Heat(r.Next(1, 1000)) : default, null);
+        Twins<PlaneBytes, Life, CellByteSystem, CellByteByCellSystem>(threads, p => new PlaneBytes(p), 64 * 4, holes, 1,
+            static (r, i) => new Life((byte)r.Next(4)), static e => e.GetOrAdd<DynamicBuffer<NextLife>>().SetCount(64 * 4));
+        Twins<PlaneOdd, Heat, CellOddSystem, CellOddByCellSystem>(threads, p => new PlaneOdd(p), 12 * 4, holes, 1,
+            static (r, i) => new Heat(r.Next(-1000, 1000) * 0.5f), static e => e.GetOrAdd<DynamicBuffer<NextHeat>>().SetCount(12 * 4));
+
+        static void Twins<TTile, TCell, TVector, TScalar>(int threads, Func<TilePos, TTile> place, int cells, TilePos[] holes, int steps,
+            Func<Random, int, TCell> fill, Action<Entity> outBuffer)
+            where TTile : struct, IComponent where TCell : unmanaged where TVector : struct, allows ref struct where TScalar : struct, allows ref struct
+        {
+            using var vector = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+            using var scalar = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+            var random = new Random(17);
+            var plates = new List<(Entity Vector, Entity Scalar)>();
+            foreach (var p in Box(3, 1, 3, holes))
+            {
+                var a = vector.CreateEntity(place(p));
+                var b = scalar.CreateEntity(place(p));
+                var c = a.GetOrAdd<DynamicBuffer<TCell>>().SetCount(cells);
+                if (p.X != 0) // a quiet column of plates
+                    for (int i = 0; i < cells; i++)
+                        if (i / 8 % 2 == 0) c[i] = fill(random, i); // quiet rows too
+                c.CopyTo(b.GetOrAdd<DynamicBuffer<TCell>>().SetCount(cells));
+                outBuffer?.Invoke(a);
+                outBuffer?.Invoke(b);
+                plates.Add((a, b));
+            }
+            vector.AddSystem<TVector>();
+            scalar.AddSystem<TScalar>();
+            for (int step = 0; step < steps; step++)
+            {
+                vector.Update();
+                scalar.Update();
+                foreach (var (a, b) in plates)
+                {
+                    Assert.That(System.Runtime.InteropServices.MemoryMarshal.AsBytes(a.Read<DynamicBuffer<TCell>>().AsReadOnlySpan())
+                        .SequenceEqual(System.Runtime.InteropServices.MemoryMarshal.AsBytes(b.Read<DynamicBuffer<TCell>>().AsReadOnlySpan())), $"{typeof(TTile).Name} cells, step {step}");
+                    if (outBuffer == null) continue;
+                    Assert.That(SameOut(a, b), $"{typeof(TTile).Name} out cells, step {step}");
+                }
+            }
+        }
+
+        static bool SameOut(Entity a, Entity b) => a.Has<DynamicBuffer<NextLife>>()
+            ? a.Read<DynamicBuffer<NextLife>>().AsReadOnlySpan().SequenceEqual(b.Read<DynamicBuffer<NextLife>>().AsReadOnlySpan())
+            : a.Read<DynamicBuffer<NextHeat>>().AsReadOnlySpan().SequenceEqual(b.Read<DynamicBuffer<NextHeat>>().AsReadOnlySpan());
+    }
+
+    /// <summary>
+    /// CellRow's loads of a row's lanes from i + dx against the lanes read one at a time from the row and the rows beside
+    /// it: bytes, shorts, floats and doubles, every dx a vector reaches, every vector of a row of three, each width
+    /// (where a width is not accelerated, or its shift instruction is missing, the shift through memory).
+    /// </summary>
+    [Test]
+    public void CellRowLoadsAreTheLanesAcrossTheRowsEnds()
+    {
+        Check<byte>();
+        Check<ushort>();
+        Check<float>();
+        Check<double>();
+
+        static void Check<T>() where T : unmanaged, System.Numerics.INumber<T>
+        {
+            foreach (int form in new[] { 16, 32, 64, 0 }) // 0: Vector<T>
+            {
+                int bytes = form == 0 ? System.Numerics.Vector<byte>.Count : form;
+                int lanes = bytes / System.Runtime.CompilerServices.Unsafe.SizeOf<T>(), width = 3 * lanes;
+                var row = new T[width];
+                var west = new T[width];
+                var east = new T[width];
+                for (int j = 0; j < width; j++)
+                {
+                    row[j] = T.CreateTruncating(1 + j);
+                    west[j] = T.CreateTruncating(101 + j);
+                    east[j] = T.CreateTruncating(201 - j);
+                }
+                for (int i = 0; i < width; i += lanes)
+                for (int dx = -lanes; dx <= lanes; dx++)
+                {
+                    var got = new T[lanes];
+#pragma warning disable CA1857 // every dx through one loop: the shift's immediate is then not a constant, which the JIT handles with a slower form
+                    switch (form)
+                    {
+                        case 16: CellRow.Load128(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
+                        case 32: CellRow.Load256(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
+                        case 64: CellRow.Load512(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
+                        default: CellRow.LoadVector(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
+                    }
+#pragma warning restore CA1857
+                    for (int j = 0; j < lanes; j++)
+                    {
+                        int x = i + dx + j;
+                        T want = x < 0 ? west[width + x] : x >= width ? east[x - width] : row[x];
+                        Assert.That(got[j], Is.EqualTo(want), $"{typeof(T).Name}, {bytes} bytes, i {i}, dx {dx}, lane {j}");
+                    }
+                }
+            }
+        }
     }
 
     [Test]
