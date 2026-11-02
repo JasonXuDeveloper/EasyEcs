@@ -687,6 +687,13 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("AddSaturate(__c1_0, __c2_0)").And.Not.Contain("(__c1_0 + __c2_0)")
             .And.Contain("__Blank.Nonzero").And.Contain("internal static readonly byte F0;")
             .And.Not.Contain("bool __blank").And.Not.Contain("bool __nonzero"), generated);
+        // What keeps the pass within the inliner's budget: the exchange out of line, the walk as plain loops over the
+        // words of rows, the stepped buffer checked once per tile, the shape's constants and offsets read once.
+        Assert.That(generated, Does.Contain("A_0__Exchange0(ref __tile0);").And.Contain("MethodImplOptions.NoInlining)]\n    private static void A_0__Exchange0(")
+            .And.Contain("__walk.RowsOf(__l)").And.Not.Contain("foreach (var __row")
+            .And.Contain("__tile0.JacobiNext(out ulong[] __written)").And.Not.Contain("Write(__row)")
+            .And.Contain("int __width = global::EasyEcs.Cell<byte, ").And.Contain("nint __d0 = global::EasyEcs.Cell<byte, ").And.Contain(">.Offset(-1, 0, 0);")
+            .And.Contain("rows = __width"), generated);
     }
 
     // FloatMode.Fast: the vector approximations of .NET (Vector.Sin, Vector512.Sin) in both loops; degrees to radians as
