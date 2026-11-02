@@ -106,6 +106,31 @@ internal struct StructuralGate
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void ThawAlone() => _held = 0;
 
+    /// <summary>
+    /// A parallel region that runs on the owner thread alone while nothing holds the gate (a stage of systems that
+    /// settled on running without helpers): <see cref="InParallel"/> holds as in <see cref="FreezeParallel"/>, so its
+    /// systems see what they would see with helpers (an index is not built lazily, a tile step leaves the stage's tick
+    /// alone), with plain stores: no other thread touches either flag before this thread starts one (posting work to
+    /// helpers publishes them), and nested regions on this thread add to them in order. Returns false, freezing nothing,
+    /// when the gate is held or frozen already: the caller then takes <see cref="FreezeParallel"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool FreezeParallelAlone()
+    {
+        if (!Free) return false;
+        _held = FrozenRegion;
+        _parallel++;
+        return true;
+    }
+
+    /// <summary>Ends the region of <see cref="FreezeParallelAlone"/> (when it froze).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void ThawParallelAlone()
+    {
+        _parallel--;
+        _held = 0;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void EnterShared() => _shared.Enter();
 
