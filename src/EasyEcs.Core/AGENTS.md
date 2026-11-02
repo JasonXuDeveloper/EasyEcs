@@ -138,7 +138,8 @@ ScheduleInfo.cs              what World.DescribeSchedule returns (groups, stages
                              pairs) and its ToString / ToMermaid
 World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration, Instantiate of a
                              Prefab, with given components too, and Entity.Clone: one row copy, CloneRow; Reserve and
-                             ReserveBuffers of a prefab: its tables, and the pools of the buffer lists its instances take)
+                             ReserveBuffers of a prefab: its tables, and the pools of the buffer lists its instances take);
+                             TakeCollected / ReturnCollected: ForEachCollected's id arrays past 64, one per nesting level
 World.Defaults.cs            TypeDefaults: the setup a type declares ([GroupBy], [WhenTargetDestroyed]), applied by
                              every world from its first table holding the type (rules pending until a destroy or
                              the index needs them); what a world set up itself is never overridden

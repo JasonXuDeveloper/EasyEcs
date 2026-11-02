@@ -589,10 +589,31 @@ public sealed partial class World : IDisposable
     public bool IsAlive(EntityId id) => TryGetEntity(id, out _);
 
     /// <summary>
-    /// The ids <c>ForEachCollected</c> keeps on the stack (512 bytes); a larger budget rents an array of the matching
-    /// rows' size from <c>ArrayPool</c>, only when more rows than this match.
+    /// The ids <c>ForEachCollected</c> keeps on the stack (512 bytes); a larger budget takes an array of at least the
+    /// matching rows' size from the world (<see cref="TakeCollected"/>), only when more rows than this match.
     /// </summary>
     internal const int CollectedOnStack = 64;
+
+    // The id arrays of ForEachCollected past CollectedOnStack, one per nesting level (a job it runs may call it again),
+    // kept for the next run at that level. Not ArrayPool.Shared: under high memory load the pool drops its arrays at
+    // every gen2 collection, so a rent after one allocated in steady state. Owner thread only.
+    private EntityId[][] _collected = new EntityId[2][];
+    private int _collectedDepth;
+
+    /// <summary>
+    /// The id array of the next nesting level of <c>ForEachCollected</c>, at least <paramref name="length"/> long
+    /// (grown to a power of two, kept for the next run at that level); given back by <see cref="ReturnCollected"/>.
+    /// </summary>
+    internal EntityId[] TakeCollected(int length)
+    {
+        if (_collectedDepth == _collected.Length) Array.Resize(ref _collected, _collectedDepth * 2);
+        ref var kept = ref _collected[_collectedDepth++];
+        if (kept == null || kept.Length < length) kept = new EntityId[(int)BitOperations.RoundUpToPowerOf2((uint)length)];
+        return kept;
+    }
+
+    /// <summary>Give back the array of the innermost <c>ForEachCollected</c> (<see cref="TakeCollected"/>).</summary>
+    internal void ReturnCollected() => _collectedDepth--;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal ref EntityMeta MetaRef(int id) => ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Meta), id);
