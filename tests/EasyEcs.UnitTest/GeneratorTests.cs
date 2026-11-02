@@ -673,6 +673,22 @@ public class GeneratorTests
         Assert.That(masked.Substring(0, masked.IndexOf("WriteMask", System.StringComparison.Ordinal)), Does.Not.Contain("Vector"), generated);
     }
 
+    // A count of byte neighbors compared with constants (the Game of Life) is a chain of saturating adds: the wrapping
+    // sum beside it is read by nothing and is not written (Body.Prune). A cell step that takes nothing besides its cell
+    // computes the cells of its blank rows once per system, in static readonly fields Tier1 folds, not once per tile.
+    [Test]
+    public void ACellStepKeepsOnlyWhatItReadsAndItsBlankRowsOncePerSystem()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, AnalyzerTests.TileParts,
+            "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, out byte next) { int n = c[-1, 0, 0] + c[1, 0, 0] + c[0, 0, -1] + c[0, 0, 1]; next = (byte)(n == 3 || n == 2 && c.Value == 1 ? 1 : 0); } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("AddSaturate(__c1_0, __c2_0)").And.Not.Contain("(__c1_0 + __c2_0)")
+            .And.Contain("__Blank.Nonzero").And.Contain("internal static readonly byte F0;")
+            .And.Not.Contain("bool __blank").And.Not.Contain("bool __nonzero"), generated);
+    }
+
     // FloatMode.Fast: the vector approximations of .NET (Vector.Sin, Vector512.Sin) in both loops; degrees to radians as
     // the scalar's two operations; a uniform call computed once by the scalar function.
     [Test]
