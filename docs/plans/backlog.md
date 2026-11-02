@@ -539,8 +539,16 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       ClusterSearchesRentNothingOnceWarm 3, all 0 after. Not `Near`: a trace at every growth site of the pair passes
       shows every buffer reaching its size in the worlds' first pass, the same in every run, none in the window (52
       runs, loaded and with tier-up delayed, never reproduced the 8216 B on a machine with free memory). Both warm-ups
-      of the file's 0 B tests now run through `Allocations.WarmUp`. Left: the generated `ForEachCollected` rents
-      past 64 ids from the pool, around user code (reentrant), so it needs a stack of scratch of its own.
+      of the file's 0 B tests now run through `Allocations.WarmUp`. The generated `ForEachCollected` past 64 ids
+      takes the world's array of its nesting level (`World.TakeCollected` / `ReturnCollected`: a job it runs may call
+      it again), no longer the pool: on 857202b the MaxRows steady-state test rented once per step and a run inside
+      a run 101 times, 0 after; MaxRowsBenchmark level (Generated, budget 256: 1.020 and 0.952, the unchanged
+      HandWritten form 0.980-1.056 in the same rounds). RowOrderBenchmark: four rounds of the class, then Churn1,
+      Reverse and Sorted with `--launchCount 6` in two more rounds each (fix / base 0.908-1.059); the two slower in
+      both of those (Reverse 1M Wide 1.059, Sorted 1k Wide 1.046) in three more rotating rounds of 6 processes against
+      a third build with the words back on the pool: Sorted 1k Wide 0.992; Reverse 1M Wide 1.017 (t 0.89 over 18
+      processes a side), the third build 0.984, and one process of one build ranges 68-88 ms, so the gap is where a
+      process's pages land, not the scratch (the two builds differ only in a 128 KB array). Nothing slower.
 - [x] #153 (feat-later-small): the `--dev` job is in (screening). The default job stays (Warmup 6, 8 x 250 ms, 2
       processes): Warmup 3 / 150 ms took 244 / 238 s against 375 / 371 s for a fast, a parallel and a memory-bound
       class, but ParallelPassBenchmark's Tick moved +9-10 % (Parallel=False) in both rounds and +19 % (Parallel=True),

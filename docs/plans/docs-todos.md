@@ -1859,10 +1859,17 @@ EECS122's id is provisional (EECS120 and EECS121 went to feat-owner-calls): renu
   100,000 Narrow, 1,000,000 Wide; Reverse 1,000 Wide, 1,000,000 Wide; Sorted 100,000 Narrow), 2 faster in both
   (Reverse 10,000 Narrow, Sorted 1,000,000 Narrow), within one build's own spread between rounds (Reverse 1,000,000
   Narrow, base: 48.2 and 57.5 ms); 0 B both (on a quiet machine the pool reused its arrays, so the cost the change
-  removes shows only under memory load, in the tests' pool rents). A third round on a machine no other agent uses
-  would settle the six.
+  removes shows only under memory load, in the tests' pool rents). Rechecked with 6 processes per run: Churn1, Reverse
+  and Sorted in two rounds each (0.908-1.059), then the two slower in both (Reverse 1,000,000 Wide, Sorted 1,000 Wide)
+  in three rotating rounds against a build with the words back on the pool: 1.017 (t 0.89, 18 processes a side; the
+  pool build 0.984, one build's processes 68-88 ms) and 0.992. Nothing slower.
+- decisions.mdx + zh (same record or next to it): the generated `ForEachCollected` past 64 ids takes the world's
+  array of its nesting level (`World.TakeCollected` / `ReturnCollected`, a job it runs may run another), not
+  `ArrayPool.Shared`: the steady-state test rented once per step and a run inside a run 101 times, 0 after;
+  MaxRowsBenchmark Generated budget 256: 1.020 / 0.952, budget 64: 1.009 / 0.978, 0 B.
 - changelog (Fixes): "Re-sorts of ordered tables and `RowClusters.Pairs` no longer allocate after a garbage collection
-  under high memory load".
+  under high memory load"; "`[ForEach(MaxRows = N)]` past 64 rows no longer rents from the shared array pool each
+  tick".
 - performance page: nothing (TileRestartBenchmark's numbers come with the bench sync of feat-field-gaps).
 
 ## feat-roslyn-guidance (backlog Later item: analyzer and incremental generators by the official .NET guidance)
