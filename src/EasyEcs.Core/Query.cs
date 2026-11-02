@@ -605,6 +605,12 @@ internal sealed class RowPlan(short[] require, short[] exclude, short[] anyOf, s
     public readonly bool HasAnySets = anyChanged.Length + anyRemoved.Length != 0;
 
     /// <summary>
+    /// The plan only requires components (no Without, WithAny, Changed, Removed or any-set): the common pass, whose
+    /// table check reads the required columns' counts alone (<see cref="RowFilter.Mode"/>'s short path).
+    /// </summary>
+    public readonly bool RequiresOnly = exclude.Length + anyOf.Length + changed.Length + anyChanged.Length + anyRemoved.Length == 0;
+
+    /// <summary>
     /// The tick column whose summaries skip words (-1 without Changed columns): a removed component's when there is one
     /// (removals are sparser than writes, and its summaries leave writes out), else the first changed one.
     /// </summary>
@@ -654,6 +660,15 @@ internal readonly struct RowFilter(RowPlan plan, ulong since)
     {
         var absent = archetype.Absent;
         var plan = _plan;
+        if (plan.RequiresOnly)
+        {
+            // The common plan: every row passes unless one lacks a required component (presence bits).
+            var required = plan.Require;
+            for (int i = 0; i < required.Length; i++)
+                if (absent[required[i]] != 0) return Test;
+            return All;
+        }
+
         var changed = plan.Changed;
         // A table not written since the pass's tick has no changed row.
         for (int i = 0; i < changed.Length; i++)
