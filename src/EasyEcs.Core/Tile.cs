@@ -770,6 +770,21 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
     }
 
     /// <summary>
+    /// What <see cref="Write"/> checks per row, checked once per tile: the first cell of the second buffer of a Jacobi step
+    /// of this tile (a row's cells start at its <see cref="TileRow{TTile}.Index"/>) and the words of the rows written
+    /// (layer y's bit z set for each row written, as Write does). Generated code calls this; throws for a tile the method
+    /// does not step, or steps in place. O(1).
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public readonly ref TCell JacobiNext(out ulong[] written)
+    {
+        var frame = _frame;
+        if (frame.Stepping != _entity.Id || frame.Next == null) TileFrame<TCell, TTile>.ThrowNotStepping();
+        written = frame.Written;
+        return ref MemoryMarshal.GetArrayDataReference(frame.Next);
+    }
+
+    /// <summary>
     /// The sweep a <see cref="GaussSeidelAttribute">[GaussSeidel]</see> step of the tile is in: 0 in its first, one more
     /// in each sweep after it (0 in a Jacobi step, which is one sweep). For what a step does once (a mask of the ground
     /// read in its first sweep into a <see cref="Scratch{T}"/>, the cells it starts from: <see cref="Restart"/>) and for
@@ -1148,7 +1163,24 @@ public ref struct TileRows<TTile> where TTile : struct, ITileShape
         return true;
     }
 
+    /// <summary>The first texture layer of the walk. Generated code walks layers First..Last and the bits of <see cref="RowsOf"/> in place of <c>foreach</c>.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public readonly int First => _layer + 1;
+
+    /// <summary>The last texture layer of the walk. Generated code calls this.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public readonly int Last => _last;
+
+    /// <summary>The tile layer (<see cref="TileRow{TTile}.Y"/>) of texture layer <paramref name="layer"/>. Generated code calls this.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public readonly int LayerOf(int layer) => _base + layer;
+
+    /// <summary>The rows of texture layer <paramref name="layer"/> the walk visits, bit z for row z: what <see cref="MoveNext"/> walks. Generated code calls this.</summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public readonly ulong RowsOf(int layer) => Visit(layer);
+
     /// <summary>The rows of texture layer <paramref name="layer"/> the stencil reads something in (its neighbors are in the texture: halo layers).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private readonly ulong Visit(int layer)
     {
         int depth = TTile.Depth, hy = TTile.Height > 1 ? TTile.Halo : 0;

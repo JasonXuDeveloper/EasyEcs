@@ -102,8 +102,18 @@ public sealed partial class SystemGenerator
         sb.Append($"    internal static void {AccessorPrefix}({OwnerModel.From(method.ContainingType).AccessorParameter} {self}, {string.Join(", ", parameters)})\n    {{\n");
         var body = new StringBuilder();
         foreach (var (k, dx, dy, dz) in form.Offsets) body.Append($"{At(k)}.Check({dx}, {dy}, {dz});\n"); // constants: the JIT drops them
+        // The exchange is a call of its own (NoInlining): inlined, its faces take the inliner's budget for the pass, and
+        // the row walk's helpers (the masks, Index, Width, Write's checks) are then left as calls in every row.
+        var exchanges = new StringBuilder();
         for (int k = 0; k < cells.Count; k++)
-            body.Append(k == 0 && skips ? "__tile0.ExchangeHalo();\n" : $"__tile{k}.ExchangeHalo(0, {at}.Height - 1, mask: false);\n");
+        {
+            body.Append($"{AccessorPrefix}__Exchange{k}(ref __tile{k});\n");
+            exchanges.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]\n")
+                .Append($"    private static void {AccessorPrefix}__Exchange{k}(ref global::EasyEcs.Tile<{CellName(k)}, {shape}> tile) => ")
+                .Append(k == 0 && skips ? "tile.ExchangeHalo();\n\n" : $"tile.ExchangeHalo(0, {at}.Height - 1, mask: false);\n\n");
+        }
+        // A stepped tile's next buffer and its words of rows written, checked once per tile (Write checks each row).
+        if (step >= 0) body.Append($"ref {OutName(step)} __stepped = ref __tile0.JacobiNext(out ulong[] __written);\n");
         for (int j = 0; j < outputs.Count; j++)
         {
             if (j == step) continue; // its rows are the stepped tile's (Write(row), per row)
@@ -118,8 +128,8 @@ public sealed partial class SystemGenerator
             row.Append($"ref {CellName(k)} __c{k} = ref {Unsafe}.AsRef(in __tile{k}.At(__row)[0, 0, 0]);\n");
         for (int j = 0; j < outputs.Count; j++)
             row.Append(j == step
-                ? $"ref {OutName(j)} __o{j} = ref {Marshal}.GetReference(__tile0.Write(__row));\n"
-                : $"ref {OutName(j)} __o{j} = ref {Unsafe}.Add(ref __out{j}, __row.Index);\n");
+                ? $"__written[__y] |= 1UL << __z;\nref {OutName(j)} __o{j} = ref {Unsafe}.Add(ref __stepped, __index);\n"
+                : $"ref {OutName(j)} __o{j} = ref {Unsafe}.Add(ref __out{j}, __index);\n");
         row.Append("int __x = 0;\n");
         bool with128 = false;
         if (form.Loop is { } loop)
@@ -187,18 +197,39 @@ public sealed partial class SystemGenerator
                 if (step >= 0) body.Append("bool __nonzero = false;\n");
                 for (int j = 0; j < outputs.Count; j++) body.Append($"{OutName(j)} __f{j} = default;\n");
             }
-            body.Append($"foreach (var __row in __tile0.Rows((global::EasyEcs.TileStencil){stencil}))\n{{\n");
-            body.Append(Indent($"if (__row.Index > __done)\n{{\n{Indent(blank)}{Fill("__done", "__row.Index")}}}\n"));
-            body.Append(Indent(row.ToString())).Append($"    __done = __row.Index + {at}.Width;\n}}\n");
+            // The walk of Rows as plain loops, in its order: a word of rows per layer, a trailing-zero count per row.
+            body.Append($"var __walk = __tile0.Rows((global::EasyEcs.TileStencil){stencil});\n");
+            body.Append("for (int __l = __walk.First, __last = __walk.Last; __l <= __last; __l++)\n{\n    int __y = __walk.LayerOf(__l);\n");
+            body.Append("    for (ulong __m = __walk.RowsOf(__l); __m != 0; __m &= __m - 1)\n    {\n");
+            var inner = new StringBuilder();
+            inner.Append($"int __z = global::System.Numerics.BitOperations.TrailingZeroCount(__m);\nvar __row = new global::EasyEcs.TileRow<{shape}>(__y, __z);\n");
+            inner.Append("int __index = (__y * __depth + __z) * __width;\n");
+            inner.Append($"if (__index > __done)\n{{\n{Indent(blank)}{Fill("__done", "__index")}}}\n");
+            inner.Append(row).Append("__done = __index + __width;\n");
+            body.Append(Indent(Indent(inner.ToString()))).Append("    }\n}\n");
             body.Append($"if (__done < {at}.Count)\n{{\n{Indent(blank)}{Fill("__done", $"{at}.Count")}}}\n");
         }
         else
         {
             body.Append($"for (int __y = 0; __y < {at}.Height; __y++)\nfor (int __z = 0; __z < {at}.Depth; __z++)\n{{\n");
-            body.Append(Indent($"var __row = new global::EasyEcs.TileRow<{shape}>(__y, __z);\n" + row)).Append("}\n");
+            body.Append(Indent($"var __row = new global::EasyEcs.TileRow<{shape}>(__y, __z);\nint __index = (__y * __depth + __z) * __width;\n" + row)).Append("}\n");
         }
         for (int n = 0; n < results.Count; n++) body.Append($"__res{n}.Write() = __red{n}.Value;\n");
-        sb.Append(Indent(Indent(body.ToString()))).Append("    }\n#pragma warning restore\n\n");
+        // The shape's constants and the offsets read once, before the walk (each read is an inline, and the pass is large
+        // enough for the inliner's budget to run out): the JIT folds them, and with the width the vector loops a row of
+        // that many bytes never enters, so only the width that runs is compiled.
+        string text = body.ToString().Replace($"{at}.Width", "__width").Replace($"{at}.Depth", "__depth").Replace($"{at}.Height", "__height").Replace($"{at}.Count", "__count");
+        var head = new StringBuilder($"int __width = {at}.Width, __depth = {at}.Depth, __height = {at}.Height, __count = {at}.Count;\n");
+        for (int k = 0; k < form.Offsets.Length; k++)
+        {
+            var o = form.Offsets[k];
+            string offset = $"{at}.Offset({o.Dx}, {o.Dy}, {o.Dz})";
+            if (!text.Contains(offset)) continue;
+            head.Append($"nint __d{k} = {offset};\n");
+            text = text.Replace(offset, $"__d{k}");
+        }
+        sb.Append(Indent(Indent(head + text))).Append("    }\n#pragma warning restore\n\n");
+        sb.Append("#pragma warning disable\n").Append(exchanges).Append("#pragma warning restore\n\n");
         if (constants != null) sb.Append("#pragma warning disable\n").Append(constants).Append("#pragma warning restore\n\n");
 
         string names = string.Join("', '", cells.Select(c => c.Name));
