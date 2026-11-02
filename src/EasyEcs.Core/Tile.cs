@@ -785,6 +785,30 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
     }
 
     /// <summary>
+    /// The halo of a 2D tile with a border of zeros read in place (<see cref="TilePlane{TCell, TTile}"/>): the tile's
+    /// buffer and its eight neighbors' (the blank where there is none, or the shape's neighborhood leaves it out), no copy
+    /// into the texture. With <paramref name="mask"/>, the row masks <see cref="ExchangeHalo(int, int, TCell, bool)"/>
+    /// records, from the same cells, for <see cref="TilePlane{TCell, TTile}.Rows"/>. The texture is left without this
+    /// tile (<see cref="At"/> throws until an exchange). Generated code calls this when the shape allows it
+    /// (<see cref="TilePlane{TCell, TTile}.Fits{TLane}"/>); throws for another shape. O(Depth) with the mask, else O(1).
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public readonly TilePlane<TCell, TTile> Plane(bool mask)
+    {
+        TileShapeCheck<TTile>.Check();
+        if (TTile.Height != 1 || TTile.Boundary != TileBoundary.Border || TTile.Halo > TTile.Width || TTile.Halo > TTile.Depth) TileLayout.ThrowOffset();
+        var frame = _frame;
+        frame.Loaded = default; // the texture does not hold this tile
+        int cells = TTile.Width * TTile.Depth;
+        TCell[] blank = TileMemory<TCell, TTile>.Blank(default, true);
+        var plane = new TilePlane<TCell, TTile>(Own(cells), Beside(10, cells, blank), Beside(16, cells, blank), Beside(12, cells, blank),
+            Beside(14, cells, blank), Beside(9, cells, blank), Beside(11, cells, blank), Beside(15, cells, blank), Beside(17, cells, blank),
+            ref MemoryMarshal.GetArrayDataReference(frame.Masks));
+        if (mask) plane.Mask();
+        return plane;
+    }
+
+    /// <summary>
     /// The sweep a <see cref="GaussSeidelAttribute">[GaussSeidel]</see> step of the tile is in: 0 in its first, one more
     /// in each sweep after it (0 in a Jacobi step, which is one sweep). For what a step does once (a mask of the ground
     /// read in its first sweep into a <see cref="Scratch{T}"/>, the cells it starts from: <see cref="Restart"/>) and for
@@ -1700,6 +1724,37 @@ internal static class TileLayout
             any |= !IsZero(cell);
         }
         return any;
+    }
+
+    /// <summary>
+    /// Whether one of <paramref name="count"/> cells from <paramref name="source"/> is not zero: <see cref="Copy"/>'s
+    /// test without the copy (<see cref="TilePlane{TCell, TTile}"/>'s masks). Unchecked: the caller holds the range in bounds.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool Any<TCell>(ref TCell source, int count) where TCell : unmanaged
+    {
+        if (count == 1) return !IsZero(source);
+        ref byte from = ref Unsafe.As<TCell, byte>(ref source);
+        nuint bytes = (nuint)(count * Unsafe.SizeOf<TCell>());
+        // A constant of the shape: one or two vectors (overlapping), or a loop for long rows.
+        if (Vector128.IsHardwareAccelerated && bytes == 16) return Vector128.LoadUnsafe(ref from) != Vector128<byte>.Zero;
+        if (Vector256.IsHardwareAccelerated && bytes == 32) return Vector256.LoadUnsafe(ref from) != Vector256<byte>.Zero;
+        if (Vector512.IsHardwareAccelerated && bytes == 64) return Vector512.LoadUnsafe(ref from) != Vector512<byte>.Zero;
+        if (Vector128.IsHardwareAccelerated && bytes is > 16 and <= 32)
+            return (Vector128.LoadUnsafe(ref from) | Vector128.LoadUnsafe(ref from, bytes - 16)) != Vector128<byte>.Zero;
+        if (Vector256.IsHardwareAccelerated && bytes > 32)
+        {
+            var any = Vector256.LoadUnsafe(ref from, bytes - 32);
+            for (nuint i = 0; i + 32 <= bytes; i += 32) any |= Vector256.LoadUnsafe(ref from, i);
+            return any != Vector256<byte>.Zero;
+        }
+        if (Vector128.IsHardwareAccelerated && bytes > 32)
+        {
+            var any = Vector128.LoadUnsafe(ref from, bytes - 16);
+            for (nuint i = 0; i + 16 <= bytes; i += 16) any |= Vector128.LoadUnsafe(ref from, i);
+            return any != Vector128<byte>.Zero;
+        }
+        return MemoryMarshal.CreateReadOnlySpan(ref from, (int)bytes).IndexOfAnyExcept((byte)0) >= 0;
     }
 
     /// <summary>
