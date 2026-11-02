@@ -26,7 +26,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS055", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS119", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "CS0234", "CS0246", "CS0305", "CS0592",
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS119", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "EECS122", "CS0234", "CS0246", "CS0305", "CS0592",
             "CS0200", "CS0272", "CS1501", "CS1729", "CS1739");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -191,6 +191,11 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                 case "EECS080" when kind == "EntityMethod":
                     context.RegisterCodeFix(CodeAction.Create("Write it as an [EntityMethod] method",
                         token => ToEntityMethod(context.Document, diagnostic, token), diagnostic.Id), diagnostic);
+                    break;
+                case "EECS122" when diagnostic.Properties.TryGetValue("Namespace", out var imported) && imported != null && root is CompilationUnitSyntax unit:
+                    context.RegisterCodeFix(CodeAction.Create($"Add 'using {imported};'", _ => Task.FromResult(context.Document.WithSyntaxRoot(unit.AddUsings(
+                            SyntaxFactory.UsingDirective(SyntaxFactory.ParseName(imported)).NormalizeWhitespace().WithTrailingTrivia(SyntaxFactory.LineFeed)))),
+                        diagnostic.Id), diagnostic);
                     break;
                 case "EECS037" when kind == "WriteMask" && diagnostic.Properties.TryGetValue("WriteMask", out var writes) && writes != null:
                     if (DeclareWriteMask(root, node, writes) is { } withWrites)

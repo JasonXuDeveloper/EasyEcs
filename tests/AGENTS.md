@@ -8,11 +8,18 @@ When you add, rename or delete a file here, update its line (`verify` checks eve
 
 An allocation check measures through `Allocations.Of(...)` or starts from `Allocations.Baseline()` (Fixtures.cs), never
 from a raw `GC.GetAllocatedBytesForCurrentThread()`: a background collection ending in the window adds the unused
-rest of the thread's allocation context to the count although nothing was allocated (D128). A warm-up before a 0 B
+rest of the thread's allocation context to the count although nothing was allocated (D128). It counts this thread,
+never the process (`GC.GetTotalAllocatedBytes`): the test host's own threads allocate now and then (168 B at 1
+thread with every method of the walk compiled, ATileThatChangesLateDoesNotAllocate); a parallel pass's helpers are
+covered because the calling thread steps chunks too (that test failed on this thread's bytes alone, 696-1016 B,
+before its fix). A warm-up before a 0 B
 check runs through `Allocations.WarmUp(step, least)`, which goes on until the JIT has settled: in the full suite a loop
 can still run Tier0 code after a fixed warm-up, and its on-stack replacement compiles (and allocates) on the measuring
 thread (fix-flaky-alloc). The fixed warm-ups left in KernelTests, KernelLookupTests, HelperLoopTests and
-AllocationTests race the same way.
+AllocationTests race the same way. A 0 B check of a path that could rent from `ArrayPool` also asserts
+`Allocations.PoolRents(run)` is 0: on a quiet machine a rent reuses the pool's array, but under high memory load the
+pool empties at every gen2 collection (which `Allocations.Of` starts with), so the rent allocates (OrderTests,
+NeighborTests; audit-core).
 
 ```
 tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, Presence, Query, System (and stats),
@@ -26,7 +33,7 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                Lanes (Lanes.Compact and Lanes.Selection against a plain walk, every mask shape and length),
                                LaneMath (the math a vector loop lowers: integer division, a float divided by a power of two, Pow, the throwing
                                Abs / CopySign / Sign, FloatMode.Fast's forms; every 32-bit input under the explicit category Exhaustive),
-                               Generator (generated code, the vector loops and EECS055 / EECS056's reasons, caching; the
+                               Generator (generated code, the vector loops and EECS055 / EECS056's reasons, caching; GeneratorBenchmark's corpus clean, linked: GeneratorCorpus.cs; the
                                harness: Compile, Driver, Analyze, Components), Analyzer (the rules, one file per analyzer
                                file: .Declarations, .Systems, .Usage, .Parallel, .Parts, .Forms (and EECS103's idioms and guards), .Pairs (EECS105-107), .Tiles (EECS115-117, EECS120's reasons), .Performance (costs,
                                lambda passes, view fields); what each rule reports, the edges it branches on and the code

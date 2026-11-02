@@ -171,5 +171,6 @@ public sealed partial class World
         _roots.TrimExcess();
         _prefabTables = null; // prefab table -> table of this world: found again by the next instance
         _columnSpares.Clear(); // the next sort of each shape makes its spare again
+        if (_collectedDepth == 0) Array.Clear(_collected); // ForEachCollected's id arrays: the next run past 64 ids takes one again
     }
 }

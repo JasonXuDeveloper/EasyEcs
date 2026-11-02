@@ -221,6 +221,19 @@ public int CollectIds<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Span<EntityId> into, i
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M)，再加 `into` 写满前读过的行
 
+### `CopyEntities` [#copyentities]
+
+```csharp
+public int CopyEntities<TTag>(World target, ReadOnlySpan<EntityId> entities, in ComponentSet components, Span<Entity> copied = default) where TTag : struct, IComponent;
+```
+
+把 `entities`（失效的 id、重复的 id 和退休实体都跳过）复制到 `target`，即同一线程上的另一个 World：新实体只带 `components` 里它们有的组件（[`Disabled`](/zh/docs/reference/disabled) 标签跟着它的组件走），再加上默认值的 `TTag`：邻居边界的幽灵行、只读副本、复制到客户端 World 的兴趣区域。原实体保持不变。表里前后相连的行作为一段一起复制，每列一次块复制。副本里（组件和缓冲元素中）指向被复制实体的 [`EntityId`](/zh/docs/reference/entityid) 字段改为指向它的副本，其余的都成为 [`EntityId.Null`](/zh/docs/reference/entityid#null)；父实体没被复制的 [`ChildOf`](/zh/docs/reference/childof) 会被移除，和 [`World.LoadEntities`](/zh/docs/reference/world#loadentities) 及 [`World.MoveEntities`](/zh/docs/reference/world#moveentities) 一样。清理组件（[`ICleanupComponent`](/zh/docs/reference/icleanupcomponent)）从不复制：它们持有的资源由原实体释放。索引和分组会认识这些副本，副本的组件算一次写入，和 `CreateEntity` 一样。新句柄按顺序写进 `copied`（放得下多少写多少，跳过的 id 对应 [`Entity`](/zh/docs/reference/entity) 的 default）；返回复制的数量。id 列表写成 `CollectionsMarshal.AsSpan(list)`，不复制；组件集合放在 `static readonly` 字段里。目标 World 的表已存在、缓冲足够大之后不分配内存。O(实体数 × 集合中的组件数)。调用线程必须同时是两个 World 的所有者线程；任何一个 World 正在遍历时都可以调用（副本是新行，之前开始的遍历不会访问它们）。
+
+**异常**
+
+- `ArgumentException`：`target` 就是本 World，`components` 含有单例类型，或 `TTag` 是唯一组件。
+- `InvalidOperationException`：被复制的实体有一个唯一键（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)），而 `target` 里已有实体持有它：什么都不复制。
+
 ### `Count` [#count]
 
 ```csharp
@@ -531,6 +544,24 @@ public void ForEachBatchParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref T
 多线程版的 [`World.ForEachBatch`](/zh/docs/reference/world#foreachbatch)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.MaxChunkRows`](/zh/docs/reference/world#maxchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkSize` 向上取整到 64：`[ForEach(Parallel = true, ChunkSize = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+
+### `ForEachCollected` [#foreachcollected]
+
+```csharp
+public int ForEachCollected<T1, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default) where T1 : struct, IComponent where TJob : struct, IForEachEntity<T1>, allows ref struct;
+public int ForEachCollected<T1, T2, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2>, allows ref struct;
+public int ForEachCollected<T1, T2, T3, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3>, allows ref struct;
+public int ForEachCollected<T1, T2, T3, T4, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4>, allows ref struct;
+public int ForEachCollected<T1, T2, T3, T4, T5, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5>, allows ref struct;
+public int ForEachCollected<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6>, allows ref struct;
+public int ForEachCollected<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7>, allows ref struct;
+public int ForEachCollected<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8>, allows ref struct;
+public int ForEachCollected<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9>, allows ref struct;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+对最多 `maxRows` 个拥有 `T1, T2` 全部组件（并且满足 `filter`）的实体运行 `job`，按 `Query` 访问的顺序取前面的实体，在任何遍历之外运行：先收集它们的 id（`CollectIds`），再依次对每个实体运行 job，传入组件的副本，所以 job 可以做任何变更，包括遍历中不允许的调用（`LoadEntities`、`SaveEntities`）。前面的运行销毁了的实体，或者改得不再匹配的实体，会跳过；job 写的组件（`IForEachEntity.WriteMask`）在它运行之后写回，写到实体移到的行，除非实体失去了这些组件。`[ForEach(MaxRows = N)]` 方法就是这样运行的。返回 job 运行了几个实体。O(匹配的原型数 + 收集满 `maxRows` 个之前读过的行)；预热后零分配（最多 64 个 id 放在栈上，更多的放在世界按嵌套层保留的数组里）。只能在所有者线程调用。
 
 ### `ForEachEntity` [#foreachentity]
 

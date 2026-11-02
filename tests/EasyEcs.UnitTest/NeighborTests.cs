@@ -1094,11 +1094,19 @@ public class NeighborTests
         using var world = Crowd(30000, 60f, 6, tables: true, threads: 4);
         using var pickup = Pickup(1000, 3000, 40f, 6, true);
         WithItems(pickup);
-        for (int i = 0; i < 200; i++) Passes(world, pickup); // re-sorts, past tiering and OSR
+        // Until the JIT settles, not a fixed count (tests/AGENTS.md); every buffer of both worlds' pair passes reaches its
+        // size in their first pass, the same in every run (traced at each growth site), so nothing of theirs grows here.
+        Allocations.WarmUp(() => Passes(world, pickup), 200);
         Assert.That(Allocations.Of(() =>
         {
             for (int i = 0; i < 20; i++) Passes(world, pickup);
         }), Is.EqualTo(0));
+        // Nothing rented from ArrayPool.Shared either (the re-sorts' scratch is the world's): on a loaded machine the pool
+        // drops its arrays at every gen2 collection, and a rent then allocates (8216 B in a loaded suite run).
+        Assert.That(Allocations.PoolRents(() =>
+        {
+            for (int i = 0; i < 20; i++) Passes(world, pickup);
+        }), Is.Zero);
 
         static void Passes(World world, World pickup)
         {
@@ -1117,12 +1125,12 @@ public class NeighborTests
     public void AWritingPassAllocatesNothingOnceWarm()
     {
         using var world = Pickup(1000, 3000, 40f, 6, true);
-        for (int i = 0; i < 200; i++) // re-sorts, past tiering and OSR
+        Allocations.WarmUp(() =>
         {
             ResetPickup(world);
             Neighbors.Pick(world);
             world.Update();
-        }
+        }, 200); // re-sorts, until the JIT settles
 
         Assert.That(Allocations.Of(() =>
         {

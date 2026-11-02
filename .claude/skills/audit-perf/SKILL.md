@@ -79,6 +79,13 @@ its own worktree.
      dynamic PGO on and start call counting at once, so the warmups reach Tier1 code; never shorten past that with
      `ShortRun`, `--runOncePerIteration`, `InProcess` toolchains or `TieredCompilation=0`, which measure other code.
      Filter to the cases a change touches; a full class is for the decision run;
+   - the default job's warm-up is not slack: the parallel classes keep speeding up for 2-4 s of each process
+     (ParallelPassBenchmark's Tick: warmups 1.62-1.70 ms, measured iterations falling to 1.23 ms), so Warmup 3 /
+     150 ms read them 9-28 % slower (#153, feat-later-small); and its two processes are not slack either: a class's
+     processes can differ more than the noise within one (GeneratorBenchmark's Compile, 9 %). A class `[Config]` job
+     does not replace the default one: BenchmarkDotNet applies the `AsDefault` job over it (its LaunchCount and
+     WarmupCount win); change a class's job with a mutator (`Job.Default.WithLaunchCount(1).AsMutator()`) and check
+     the job line of the log;
    - `--dev` screens of parallel benchmarks on this VM put cases 1.1-1.5x apart in both rounds on byte-identical code:
      before calling a parallel regression, read the screen against a class whose code did not change;
    - check `df` before a long run: a full disk crashes a publish or a round with IOException (exit 134);

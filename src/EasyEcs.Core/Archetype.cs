@@ -1643,10 +1643,10 @@ internal sealed class Archetype
             spares.Give(old);
         }
 
-        foreach (short c in _bitColumns) PermuteBits(Present[c], order);
+        foreach (short c in _bitColumns) PermuteBits(Present[c], order, spares);
         if (_tracked)
             for (int c = 0; c < Words.Length; c++)
-                if (Words[c] != null) RebuildTicks(c, order);
+                if (Words[c] != null) RebuildTicks(c, order, spares);
 
         // The slots too, the versions of the rows past Count with them (a tombstone keeps its version).
         var slots = spares.Take(Slots) as EntityId[] ?? new EntityId[Slots.Length];
@@ -1689,10 +1689,10 @@ internal sealed class Archetype
     }
 
     /// <summary>The presence bits of rows [0, order.Length) in the new order; the bits past them stay.</summary>
-    private static void PermuteBits(ulong[] bits, ReadOnlySpan<int> order)
+    private static void PermuteBits(ulong[] bits, ReadOnlySpan<int> order, ColumnSpares spares)
     {
         int words = (order.Length + 63) >> 6;
-        var scratch = System.Buffers.ArrayPool<ulong>.Shared.Rent(words);
+        var scratch = spares.Scratch<ulong>(ColumnSpares.Words, words);
         for (int w = 0; w < words; w++)
         {
             int first = w << 6, end = Math.Min(first + 64, order.Length);
@@ -1707,7 +1707,6 @@ internal sealed class Archetype
         }
 
         scratch.AsSpan(0, words).CopyTo(bits);
-        System.Buffers.ArrayPool<ulong>.Shared.Return(scratch);
     }
 
     /// <summary>
@@ -1718,11 +1717,11 @@ internal sealed class Archetype
     /// the blocks (writes and removals) from the words. A pass after the sort finds every row written or removed since
     /// its tick, in its new place.
     /// </summary>
-    private void RebuildTicks(int column, ReadOnlySpan<int> order)
+    private void RebuildTicks(int column, ReadOnlySpan<int> order, ColumnSpares spares)
     {
         var words = Words[column];
         int count = (order.Length + 63) >> 6;
-        var removed = System.Buffers.ArrayPool<ulong>.Shared.Rent(count);
+        var removed = spares.Scratch<ulong>(ColumnSpares.Words, count);
         for (int w = 0; w < count; w++)
         {
             ulong bound = 0;
@@ -1752,7 +1751,6 @@ internal sealed class Archetype
             words[w] = new WordTicks { Write = write, Rest = rest, Rows = rows, Removed = removed[w] };
         }
 
-        System.Buffers.ArrayPool<ulong>.Shared.Return(removed);
         RebuildBlocks(Blocks[column], words, count, static (in WordTicks word) => word.Write);
         RebuildBlocks(Removals[column], words, count, static (in WordTicks word) => word.Removed);
     }
@@ -2070,12 +2068,36 @@ internal sealed class Transition
 /// its shape (array type and length) and swaps it in, and the old column becomes the spare, so the rows move once and
 /// nothing is copied back. One spare per shape (unmanaged columns are pinned byte arrays, so tables of one capacity and
 /// row size share one), managed ones cleared (they keep nothing alive): the memory of one column per shape of the
-/// ordered tables, given back by <see cref="World.TrimExcess"/>. Owner thread, inside the structural gate.
+/// ordered tables, given back by <see cref="World.TrimExcess"/>. Also the sort's scratch (<see cref="Scratch{T}"/>): its
+/// keys and rows, the words of a column's presence bits and tick bounds. Owner thread, inside the structural gate.
 /// </summary>
 internal sealed class ColumnSpares
 {
     private Array[] _spares = [];
     private int _count;
+
+    /// <summary>The roles of <see cref="Scratch{T}"/>: the radix sort's two buffers of keys of each width and of rows, and one of words.</summary>
+    public const int Keys32 = 0, OtherKeys32 = 1, Keys64 = 2, OtherKeys64 = 3, Rows = 4, OtherRows = 5, Words = 6;
+
+    private Array[] _scratch = new Array[Words + 1];
+
+    /// <summary>
+    /// The world's scratch for <paramref name="role"/>, at least <paramref name="length"/> long (contents meaningless),
+    /// kept from one sort to the next. Not <c>ArrayPool.Shared</c>: under high memory load the pool drops its arrays at
+    /// every gen2 collection, and each sort after one rented them anew (0 B tests measured 8 KB to 590 KB in loaded runs).
+    /// Grown to a power of two, the table's rows rounded up, by the first sort of the largest table.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public T[] Scratch<T>(int role, int length) where T : unmanaged =>
+        _scratch[role] is T[] kept && kept.Length >= length ? kept : Grow<T>(role, length);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private T[] Grow<T>(int role, int length) where T : unmanaged
+    {
+        var grown = new T[(int)BitOperations.RoundUpToPowerOf2((uint)Math.Max(length, 64))];
+        _scratch[role] = grown;
+        return grown;
+    }
 
     /// <summary>
     /// The spare of <paramref name="like"/>'s type and length, taken out (its contents meaningless, null references for a
@@ -2107,10 +2129,11 @@ internal sealed class ColumnSpares
         _spares[_count++] = column;
     }
 
-    /// <summary>Let every spare go (<see cref="World.TrimExcess"/>).</summary>
+    /// <summary>Let every spare and scratch go (<see cref="World.TrimExcess"/>).</summary>
     public void Clear()
     {
         _spares = [];
         _count = 0;
+        Array.Clear(_scratch);
     }
 }

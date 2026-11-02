@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -161,8 +160,8 @@ public readonly ref struct RowClusters
         int na = a.Count, nb = self ? 0 : b.Count;
         if (na + nb == 0) return 0;
         int n = na + nb;
-        var keys = ArrayPool<float>.Shared.Rent(n);
-        var ids = ArrayPool<int>.Shared.Rent(n);
+        var keys = Scratch(ref t_keys, n);
+        var ids = Scratch(ref t_ids, n);
         int m = 0;
         for (int i = 0; i < na; i++)
             if (sa.Min0[i] <= sa.Max0[i]) // an inverted box holds no row
@@ -184,7 +183,7 @@ public readonly ref struct RowClusters
 
         Array.Sort(keys, ids, 0, m);
         // The sides in the sorted order: high0 + cutoff, then low and high + cutoff of axes 1 and 2 (0 where unused).
-        var sides = ArrayPool<float>.Shared.Rent(5 * m);
+        var sides = Scratch(ref t_sides, 5 * m);
         Span<float> high0 = sides.AsSpan(0, m), low1 = sides.AsSpan(m, m), high1 = sides.AsSpan(2 * m, m),
             low2 = sides.AsSpan(3 * m, m), high2 = sides.AsSpan(4 * m, m);
         Gather(new Sides(a), self ? new Sides(a) : new Sides(b), ids.AsSpan(0, m), axes, cutoff, high0, low1, high1, low2, high2);
@@ -205,11 +204,20 @@ public readonly ref struct RowClusters
             }
         }
 
-        ArrayPool<float>.Shared.Return(sides);
-        ArrayPool<float>.Shared.Return(keys);
-        ArrayPool<int>.Shared.Return(ids);
         return found;
     }
+
+    // The search's scratch, per thread (a batch method's run searches on its pass's threads), kept from one search to
+    // the next: not ArrayPool.Shared, which under high memory load drops its arrays at every gen2 collection, so a
+    // search after one rented them anew in steady state. Find calls no user code, so one search per thread at a time.
+    [ThreadStatic] private static float[] t_keys, t_sides;
+    [ThreadStatic] private static int[] t_ids;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static T[] Scratch<T>(ref T[] kept, int length) => kept != null && kept.Length >= length ? kept : Grow(ref kept, length);
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static T[] Grow<T>(ref T[] kept, int length) => kept = new T[(int)System.Numerics.BitOperations.RoundUpToPowerOf2((uint)Math.Max(length, 64))];
 
     // The sides of the clusters ids name (a's as their index, b's as its complement) in that order; the high sides plus
     // cutoff. Axes a table's boxes do not cover are 0 on both sides, so their test always passes.

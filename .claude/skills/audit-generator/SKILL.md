@@ -209,8 +209,14 @@ Reading the output: build with `-p:EmitCompilerGeneratedFiles=true`, and read on
 
 ## Speed: measure first
 
-`GeneratorBenchmark`: the four generators over the battle server plus 40 generated modules (components of every
-kind, buffers, systems, query loops); each case with `OneNamespace` false and true (10 cases, about 90 s each).
+`GeneratorBenchmark`: the generators over `GeneratorCorpus` (the battle server plus 40 generated modules: components
+of every kind, buffers, systems, query loops, views); each case with `OneNamespace` false and true, on the default
+job. Its setup builds only what the cases measure: that the corpus compiles and the analyzer reports nothing is
+`GeneratorTests.TheBenchmarkCorpusIsClean`, not a check in each of its 24 processes. Keep the default job: its
+generator cases settle only in their fifth warmup (Cold 1.3 s -> 0.83 s), and its two processes differ up to 9 % on
+`Compile` (more than the noise within one), which one process would hide. For a generator change, run the cases it
+touches (`--filter '*GeneratorBenchmark.Edit*'`); `Compile` and `CompileAndAnalyze` (2.6-7 s an operation) are most
+of a full run.
 
 ```bash
 tools/bench.sh GeneratorBenchmark

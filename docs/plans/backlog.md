@@ -458,10 +458,14 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
   not built (owner-review.md). Names approved by the owner (2026-10-27): `[Accumulate]`, `[Drain]` +
   `IDrain<T>`, `World.ReserveBuffers`. Docs pass: docs-todos.md "feat-generator-gaps". G1 / G2 come with inner-loops WP5 /
   WP2; G8 / G9 with L2.
-- [ ] **A `using` alias to a system does not bind its generated entry point**: `using Alias = Hunters;` then
-  `Alias.Hunt(world)` fails with CS7036 (found by feat-locality-core). Find whether the generator or the interceptor
-  matches the call by the written name; fix it (an alias is ordinary C#), with a generator test, or have the
-  analyzer say so if it cannot be fixed.
+- [x] **A `using` alias to a system does not bind its generated entry point** (feat-later-small): the cause is not the
+  alias. The entry point is a C# 14 extension member of `{FlatName}ForEach` / `{FlatName}EntityMethods` in the owner's
+  namespace, so `Alias.Hunt(world)` binds wherever that namespace is imported, alias or not (GeneratorTests
+  `UsingAliasesBindEntryPoints`, 7 cases: alias to a system, a nested type, a generic owner, `[Drain]`,
+  `[EntityMethod]`, global alias, file-scoped namespace). feat-locality-core's CS7036 came from a file that aliased
+  the owner without importing its namespace: then the call binds to the method itself. EECS122 (provisional id,
+  Warning) reports exactly that call (failed binding, the owner has such a method, the entry points' class not in
+  scope) and its code fix adds `using {namespace};`. LookupOrderBenchmark now calls `Hunters.Hunt(_hunters)`.
 - [x] **Flaky: `ParallelReductionsScratchAndLookupsDoNotAllocate`** (fix-flaky-alloc): the same path as the
   prefetching test. Its window saw OSR compiles on the measuring thread (updates 53, 62 and 81, in 2 of 4 instrumented
   full runs; none with OSR off); the other paths were ruled out (the measuring thread made its `Scratch` list during
@@ -525,9 +529,10 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] **The inliner's limit, checked instead of assumed** (owner, 2026-10-26: "is a fixed JIT budget right when SIMD
       width differs?"). Answer: `MAX_INL_LCLS = 32` is RyuJIT's implementation constant with no target condition
       (`inline.h`, release/10.0 and main), the same for x64, ARM64, ReadyToRun and Native AOT, and it counts IL
-      locals, which no vector width changes; per-width register pressure is M1's (`microarch.md`). Left to do:
-      `tools/inlining.sh` in CI on the x64 and arm64 jobs (fails when a runner stops inlining a job, so a runtime
-      that changes the limit is seen at once). Mono (the WebAssembly demo; `mini/method-to-ir.c`,
+      locals, which no vector width changes; per-width register pressure is M1's (`microarch.md`). CI runs
+      `tools/inlining.sh` on the x64 and arm64 jobs (ci.yml; checked in feat-later-small: exit 0 as committed, 89
+      benchmark methods, 87 s with its build; the generator's split turned off, `InlinedLocals = 1000`: 22 failed
+      inlines, "too many locals", exit 1; a failed build now prints its errors and exits 2 instead of a silent 1). Mono (the WebAssembly demo; `mini/method-to-ir.c`,
       `mono_method_check_inlining`, release/10.0) read: no limit on locals at all ("also consider num_locals?"), an IL
       size limit of 20 bytes (30 LLVM AOT, 100 LLVM JIT) that `AggressiveInlining` lifts, an inline depth of 10, no
       inlining in gsharedvt code or of methods with exception clauses: the 32-locals split costs Mono nothing, and
@@ -536,8 +541,11 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] **`[Accumulate]` users that do not conflict** (`voxel-rewrite.md` GA2): systems that only add into one
       `[Accumulate]` singleton share a stage, combined in registration order at the stage end. Built only if the
       VoxelServer rewrite's `--schedule` shows stages lost to its `Stats` (step 2 of that plan); otherwise a record.
-- [ ] **EECS031 on nested creation loops** (feat-tiles-pingpong): suggests `Reserve(inner bound)` where
-      `outer × inner` rows are created, and only once the bound is not a constant (`audit-analyzer`, "Open findings").
+- [x] **EECS031 on nested creation loops** (feat-tiles-pingpong; done in feat-later-small): EECS031 climbs the counted
+      loops enclosing a creation loop while they always run it, keep its bounds invariant and destroy nothing, and
+      reports at the outermost with `Reserve(outer * inner)` (three levels and more); a constant product below the
+      small count is not reported, a loop that destroys the rows of its body stops the climb. Tests: nested positive,
+      three levels, constant product, churn negative, code fix.
 - [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
 - [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
       push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with
@@ -548,9 +556,58 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 2 MiB columns done on `feat-later-memory` (pinned arrays
       advised before first touch, reserved and copied ones only; 16M chases 1.28-1.67x, Create / Grow equal; docs-todos
       "feat-later-memory"); #157 the #138 recommendations; #159 remaining research.
-- [ ] #153: the `--dev` job is in (screening); still open: check the default job could drop to Warmup 3 / 150 ms with
-      the same results (two rounds of a few classes at both settings), and a lighter job for GeneratorBenchmark.
-- [ ] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle.
+- [x] **Linger at Hop 8 after d666b0d** (feat-later-small): no regression; `[MethodImpl(NoInlining)]` on `Leave` not
+      adopted. Four earlier rounds (2 processes each) read 4 / 256 / 8 6-14 % slower than tip, and the Tier1 code showed
+      `Leave` inlined into the job's `Execute` once its allocation path left (849 -> 1219 B). The A/B on the merged tip
+      (d5991db): base (d666b0d's change reverted), fix and fix + NoInlining, `--launchCount 6`, three interleaved
+      rounds under one hold of the lock, each run started at a load below 2. Fix / base at Hop 8: 0.987 (1 / 4),
+      1.011 (1 / 256), 0.977 (4 / 4), 1.002 (4 / 256); at Hop 1 0.976-1.008, within the rounds' own spread (base
+      4 / 256 / 8: 982 / 946 / 879 us). NoInlining / base: 1.001-1.020 at Hop 8 and up to 1.061 at Hop 1 (4 / 4 / 1),
+      never below fix. So the earlier gap was the spread of 2-process runs on a loaded machine, not the inlining;
+      fix 0 B in every case, base 1 B in one.
+- [x] **Flaky: `NeighborTests.PassesWithResultsAndMutsAllocateNothingOnceWarm`** (feat-later-small's gate on 78fc3ee,
+      8216 B; feat-inner-loops saw 73,824 and 589,920 B, also on c1cad9c, with 11,078 of 12,309 MB in use while a
+      benchmark held 7 GB). Cause (feat-inner-loops' trace, confirmed here): the re-sorts' scratch came from
+      `ArrayPool.Shared` (`RowOrder.Order`'s keys and rows, `Archetype.PermuteBits` and `RebuildTicks`' words), as did
+      `RowClusters.Find`'s; at 90 % of the GC's high-load threshold the pool drops its arrays at every gen2, and
+      `Allocations.Of` starts with one, so each rent allocated (8216 B is the `ulong[1024]` of 1,000 8-byte keys).
+      Fixed: the sort's scratch is the world's (`ColumnSpares.Scratch`, by role, grown to a power of two, cleared by
+      `TrimExcess`), the search's per thread. Tests: `Allocations.PoolRents` counts this thread's rents
+      (ArrayPoolEventSource); before the fix SortingUpdatesAllocateNothing rented 8 times, the Neighbor test 20 and
+      ClusterSearchesRentNothingOnceWarm 3, all 0 after. Not `Near`: a trace at every growth site of the pair passes
+      shows every buffer reaching its size in the worlds' first pass, the same in every run, none in the window (52
+      runs, loaded and with tier-up delayed, never reproduced the 8216 B on a machine with free memory). Both warm-ups
+      of the file's 0 B tests now run through `Allocations.WarmUp`. The generated `ForEachCollected` past 64 ids
+      takes the world's array of its nesting level (`World.TakeCollected` / `ReturnCollected`: a job it runs may call
+      it again), no longer the pool: on 857202b the MaxRows steady-state test rented once per step and a run inside
+      a run 101 times, 0 after; MaxRowsBenchmark level (Generated, budget 256: 1.020 and 0.952, the unchanged
+      HandWritten form 0.980-1.056 in the same rounds). RowOrderBenchmark: four rounds of the class, then Churn1,
+      Reverse and Sorted with `--launchCount 6` in two more rounds each (fix / base 0.908-1.059); the two slower in
+      both of those (Reverse 1M Wide 1.059, Sorted 1k Wide 1.046) in three more rotating rounds of 6 processes against
+      a third build with the words back on the pool: Sorted 1k Wide 0.992; Reverse 1M Wide 1.017 (t 0.89 over 18
+      processes a side), the third build 0.984, and one process of one build ranges 68-88 ms, so the gap is where a
+      process's pages land, not the scratch (the two builds differ only in a 128 KB array). Nothing slower.
+- [x] #153 (feat-later-small): the `--dev` job is in (screening). The default job stays (Warmup 6, 8 x 250 ms, 2
+      processes): Warmup 3 / 150 ms took 244 / 238 s against 375 / 371 s for a fast, a parallel and a memory-bound
+      class, but ParallelPassBenchmark's Tick moved +9-10 % (Parallel=False) in both rounds and +19 % (Parallel=True),
+      EntityJob +28 % in one: the parallel classes keep speeding up for 2-4 s of each process (warmups 1.62-1.70 ms,
+      measured iterations falling to 1.23 ms), which 0.45 s of warm-up cuts off. GeneratorBenchmark: 1188 / 1206 s a
+      run on the default job, of which 801 s operations (Compile and CompileAndAnalyze, 2.6-7 s each, most of it) and
+      16 s per process outside them (24 processes): the corpus checks (compile errors, the analyzer over everything) left
+      the setup for `GeneratorTests.TheBenchmarkCorpusIsClean` (HEAD on the default job: 1960 s, means within the runs' spread). One process
+      (a mutator: BenchmarkDotNet applies an `AsDefault` job over a class's own job) took 642 / 674 s but was not
+      adopted: the default job's two processes differed up to 9 % on Compile (OneNamespace, 3809 vs 4155 ms, sd ~3 %
+      within each), which one process hides, and both one-process rounds read it higher (4262 / 4501 ms against
+      3834 / 3979). Warmups stay too: the generator cases settle in their fifth (Cold 1.3 s -> 0.83 s). For a
+      generator change, run the cases it touches (`audit-generator`).
+- [x] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle (feat-later-small, base 2db351d vs
+      tip 99e7a2c, default job, two rounds). Scan: 797 ± 123 vs 814 ± 111 us, then 745 ± 64 vs 712 ± 64: the sign
+      flips, no regression. Toggle: 427 ± 33 vs 449 ± 35, then 458 ± 36 vs 469 ± 27, so the Tier1 code was diffed:
+      the per-row path is the same code (AddBit 279 / 281 B, SetRow, MoveTo's IL identical, World.Components.cs
+      unchanged); tip adds RowOrder.Shrink calls in RemoveRow / Archetype.Remove and a larger World.Run (394 -> 953 B:
+      ThreadSetup.Run, SortDue per update), neither on Toggle's path. Tip leaves MoveTo, CopyRow and GetAddEdge at
+      instrumented Tier0 longer, but 2000 Toggles timed directly are equal tiered (485.8 vs 483.8 us, 460.7 vs 460.7)
+      and fully optimized (509.9 vs 504.0, 522.1 vs 463.6 with base the slower): the BenchmarkDotNet gap is noise.
 - [x] **Fewer page faults on top of huge pages** (done on `feat-page-faults`: counted with `[PageFaultDiagnoser]`
       (PageFaultBenchmark, PrefaultTouchBenchmark); kept: a user's reservation faulted in (`MADV_POPULATE_WRITE`, resident
       2 MiB windows skipped, copies left to the first touch): the tick filling it 2.2x faster at 1M and 3.9-4.4x at 16M

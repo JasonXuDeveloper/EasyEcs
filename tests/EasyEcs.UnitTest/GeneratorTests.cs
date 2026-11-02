@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Linq;
 using System.Threading.Tasks;
+using EasyEcs.Benchmark;
 using EasyEcs.Generator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -995,6 +996,53 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsEntryPoints(t)) + "\n" + output.SyntaxTrees.Single(t => IsCode(t));
         foreach (var line in expected) Assert.That(generated, Does.Contain(line), generated);
         Assert.That(generated, Does.Not.Contain("GeneratedUpdate").And.Not.Contain("GeneratedAccess"));
+    }
+
+    // A using alias names the type, so the entry point (an extension member of the type) binds through it wherever the
+    // type's namespace is in scope, as through the type's name; an alias alone does not bring the namespace (EECS122).
+    internal const string Runners = """
+        namespace Game
+        {
+            public static partial class R
+            {
+                [ForEach] public static void A(ref P p) { }
+                [ForEach] static void B(ref P p) { }
+                [ForEach] public static void C(in P p, ref Q q, Lookup<P> ps) { }
+                [EntityMethod] public static void D(ref P p, int by) => p.V += by;
+                public static class Inner { [ForEach] public static void E(ref Q q) { } }
+            }
+            public static class G<X> { [ForEach] public static void F(ref P p) { } }
+        }
+        """;
+
+    [TestCase("using Game; using Alias = Game.R; namespace Other; public static class Use { public static void Run(World w) => Alias.A(w); }")]
+    [TestCase("using Game; namespace Other { using Alias = Game.R; public static class Use { public static void Run(World w) => Alias.C(w); } }")]
+    [TestCase("using Game; using Alias = Game.R; namespace Other; public static class Use { public static bool Run(Entity e) => Alias.D(e, 2); }")]
+    [TestCase("using Game; using Alias = Game.R.Inner; namespace Other; public static class Use { public static void Run(World w) => Alias.E(w); }")]
+    [TestCase("using Game; using Alias = Game.G<int>; namespace Other; public static class Use { public static void Run(World w) => Alias.F(w); }")]
+    [TestCase("using Alias = Game.R; namespace Game.Sub { public static class Use { public static void Run(World w) => Alias.A(w); } }")] // the namespace encloses the call
+    [TestCase("using Game; using Alias = Game.R; namespace Other; public static class Use { public static void Run(World w) => Alias.A(w); } public static class Near { [ForEach] public static void A(ref Q q) { } }")] // a namesake's entry point nearer
+    public void UsingAliasesBindEntryPoints(string use)
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Runners, use), out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+    }
+
+    /// <summary>
+    /// GeneratorBenchmark's corpus (the battle server and 40 modules) compiles with the generators' output, every module
+    /// gets its generated files, and the analyzer has nothing to say about it: its code is written as users should, so a
+    /// rule that starts reporting it is a false positive or the corpus needs fixing (never a filter). Checked here once
+    /// instead of in each of the benchmark's processes.
+    /// </summary>
+    [TestCase(false), TestCase(true)]
+    public void TheBenchmarkCorpusIsClean(bool oneNamespace)
+    {
+        var trees = GeneratorCorpus.Sources(oneNamespace).Select((s, i) => CSharpSyntaxTree.ParseText(s, GeneratorCorpus.Parse, path: $"File{i}.cs"));
+        var compilation = GeneratorCorpus.Compilation([.. trees], GeneratorCorpus.References());
+        var driver = GeneratorCorpus.Driver().RunGeneratorsAndUpdateCompilation(compilation, out var generated, out _);
+        Assert.That(driver.GetRunResult().GeneratedTrees.Length, Is.GreaterThanOrEqualTo(GeneratorCorpus.Modules * 15), "every module generated");
+        Assert.That(generated.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
+        Assert.That(GeneratorCorpus.Findings(generated).Select(d => d.ToString()), Is.Empty);
     }
 
     // Skipped by the generator == reported: a method the analyzer rejects gets no job.

@@ -848,8 +848,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// longer matches, is skipped; the components the job writes (<c>IForEachEntity.WriteMask</c>) are
                     /// written back after it ran, to the row the entity moved to, unless it lost them. What
                     /// <c>[ForEach(MaxRows = N)]</c> methods run as. Returns how many entities the job ran on. O(matching
-                    /// archetypes + the rows read until <paramref name="maxRows"/> are collected); allocation-free (up to 64
-                    /// ids on the stack, more in an array of <c>ArrayPool</c>). Owner thread only.
+                    /// archetypes + the rows read until <paramref name="maxRows"/> are collected); allocation-free once warm
+                    /// (up to 64 ids on the stack, more in an array the world keeps per nesting level). Owner thread only.
                     /// </summary>
                     public int ForEachCollected<{{tps}}, TJob>(ref TJob job, int maxRows, in QueryFilter filter = default)
                 {{cons}}
@@ -859,23 +859,28 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         if (maxRows <= 0) return 0;
                         var match = Match<{{tps}}>(in filter, {{List(n, i => "out _")}});
                         Span<EntityId> ids = stackalloc EntityId[CollectedOnStack];
-                        EntityId[] rented = null;
-                        if (maxRows > CollectedOnStack)
-                        {
-                            int matching = match.CountAlive(filter.Tick); // the array's size: the rows there are, not the budget
-                            if (matching > CollectedOnStack) ids = rented = ArrayPool<EntityId>.Shared.Rent(Math.Min(maxRows, matching));
-                        }
-
-                        int taken = match.CollectAlive(filter.Tick, ids.Slice(0, Math.Min(maxRows, ids.Length))), ran = 0;
+                        bool taken = false;
+                        int ran = 0;
                         try
                         {
-                            for (int i = 0; i < taken; i++)
+                            if (maxRows > CollectedOnStack)
+                            {
+                                int matching = match.CountAlive(filter.Tick); // the array's size: the rows there are, not the budget
+                                if (matching > CollectedOnStack)
+                                {
+                                    ids = TakeCollected(Math.Min(maxRows, matching)); // the world's, per nesting level
+                                    taken = true;
+                                }
+                            }
+
+                            int collected = match.CollectAlive(filter.Tick, ids.Slice(0, Math.Min(maxRows, ids.Length)));
+                            for (int i = 0; i < collected; i++)
                                 if (TryGetEntity(ids[i], out var entity) && entity.RunCollected<{{tps}}, TJob>(ref job, in filter, match))
                                     ran++;
                         }
                         finally
                         {
-                            if (rented != null) ArrayPool<EntityId>.Shared.Return(rented);
+                            if (taken) ReturnCollected();
                         }
 
                         return ran;
