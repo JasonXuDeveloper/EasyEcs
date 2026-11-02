@@ -2305,3 +2305,70 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
 - **Generator cost after WP2 rest + WP3 (GeneratorBenchmark, base bad2017 two rounds, head one round):** level.
   Cold 913 / 876 -> 872 ms, CompileAndAnalyze 7,463 / 7,038 -> 6,958 ms, EditMethodBody 510 / 491 -> 519 ms,
   EditMethodBodyIde 91 / 70 -> 70 ms, EditUnrelatedFile 556 / 523 -> 473 ms; allocations within 0.4 %.
+
+## feat-aot-tables (backlog Later: Native AOT, no class-initialization check per iteration for a loop's tables)
+
+Nothing in the API changes. What a user sees: a Native AOT program published without `IlcInstructionSet` (ILC's
+default x64 baseline, no AVX) runs masked vector loops and `Maybe<T>` loops faster; `native` / `x86-64-v3`
+programs and the JIT are unchanged (their loops were already free of the check since feat-later-memory).
+
+- **Decision draft: the x64 128-bit lane masks as vectors of literals; the masks stay literals in place, not a local
+  before the loop** (en; extends the feat-later-memory draft "x64 permute tables and lane masks as vectors of
+  literals", merge the two into one record):
+
+  > **Decision.** On x64 every lane mask of the vector loops is a vector of literals, the 128-bit one included
+  > (`Vector<T>` of 16 bytes: x64 without AVX, which is Native AOT's default x64 baseline). ARM64 keeps its static
+  > readonly masks, TBL tables and `fixed` NEON loads and stores, so its loops are unchanged. The literal stays in
+  > place: reading the mask into a local before the loop was measured and was not faster.
+  >
+  > **Why.** ILC compiles every loop before any class is initialized and cannot preinitialize a static readonly
+  > vector built by code, so a loop reading one checks the class on every iteration and spills its vectors around
+  > the helper call. Without `IlcInstructionSet`, ILC targets x64 without AVX: `Vector<T>` is 16 bytes there and the
+  > generated loops run their 128-bit form, whose lane masks were still such a static. Step's masked loop was 85
+  > instructions with 9 stack accesses per vector, 74 and 1 with the literal; Optional reads presence masks on every
+  > vector, 75-77 instructions and 14-18 stack accesses before, 63-64 and 3 after. Under the JIT nothing changes:
+  > Tier1 folds an initialized static readonly vector into a constant, and its listings are identical.
+  >
+  > **Numbers** (KernelBenchmark Generated, default job, two rounds, head / base, 0 B): Native AOT without AVX
+  > (`x86-64-v2`) Optional 0.70 / 0.70 at 1,000 entities and 0.72 / 0.68 at 100,000, Holes 1.01 / 0.94 and
+  > 0.97 / 0.88; the other cases within the runs' spread (a six-launch rerun of Share and Move2 at 100,000,
+  > the two that read above 1.05 in one round: 1.00 and 0.98). Native AOT `native` and the JIT (AVX-512): identical loops,
+  > within the spread.
+  >
+  > **Considered.** The mask read once into a local before the masked loop (the other fix for the check): one
+  > constant load less per vector, but a register held for the loop, which at 128 bits (16 xmm registers) adds spills;
+  > not faster than the literal over the two rounds (Holes 0.97 / 0.88 and 0.99 / 0.93 at 1,000 / 100,000 against the
+  > literal's 1.01 / 0.97 and 0.94 / 0.88; Step 100,000 1.04 / 0.95 against 0.97 / 0.89). Tables passed in before the loop for the permutes: no change per
+  > vector (D126, each two-source permute overwrites an operand). The NEON tables as literals: left until the owner's
+  > M4 measures them (the M4 bisect of 2026-10-29).
+
+  zh:
+
+  > **决定。** x64 上向量循环的通道掩码全部是字面量向量，128 位的也一样（`Vector<T>` 为 16 字节：没有 AVX 的 x64，
+  > 也就是 Native AOT 默认的 x64 基线）。ARM64 仍用静态只读掩码、TBL 表和带 `fixed` 的 NEON 加载与存储，它的循环不变。
+  > 字面量就地使用：在循环前把掩码读进局部变量的写法测过，并不更快。
+  >
+  > **原因。** ILC 在任何类初始化之前编译所有循环，并且无法预初始化由代码构造的静态只读向量，所以读取这种向量的循环
+  > 每次迭代都检查类是否已初始化，并在辅助函数调用前后溢出向量寄存器。不设 `IlcInstructionSet` 时，ILC 的目标是没有
+  > AVX 的 x64：这时 `Vector<T>` 为 16 字节，生成的循环走 128 位形式，而它的通道掩码当时还是这种静态字段。Step 的掩码
+  > 循环每个向量 85 条指令、9 次栈访问，改成字面量后是 74 条和 1 次；Optional 每个向量都读存在掩码，之前 75-77 条指令、
+  > 14-18 次栈访问，之后 63-64 条和 3 次。JIT 下没有变化：Tier1 会把已初始化的静态只读向量折叠成常量，前后的反汇编相同。
+  >
+  > **数字**（KernelBenchmark 的 Generated 用例，默认作业，两轮，新版 / 基线，0 B）：没有 AVX 的 Native AOT
+  > （`x86-64-v2`）下 Optional 在 1,000 实体时 0.70 / 0.70，100,000 时 0.72 / 0.68；Holes 1.01 / 0.94 和 0.97 / 0.88；
+  > 其他用例在波动范围内（Share 和 Move2 在 100,000 时有一轮高于 1.05，各跑六次复测为 1.00 和 0.98）。Native AOT `native` 和 JIT（AVX-512）：循环相同，在波动范围内。
+  >
+  > **考虑过的方案。** 在掩码循环前把掩码读进局部变量一次（消除检查的另一种办法）：每个向量少一次常量加载，但整个
+  > 循环要占一个寄存器，在 128 位（16 个 xmm 寄存器）下会增加溢出；两轮合起来没有比字面量快（Holes 在 1,000 / 100,000 时
+  > 0.97 / 0.88 和 0.99 / 0.93，字面量是 1.01 / 0.97 和 0.94 / 0.88；Step 100,000 时 1.04 / 0.95，字面量是 0.97 / 0.89）。为置换在循环前传入表：每个向量没有变化
+  > （D126，双源置换会覆盖一个操作数）。NEON 的表也改成字面量：等所有者的 M4 测过再定（2026-10-29 的 M4 二分）。
+
+- **Pages.** faq.mdx + zh, "Native AOT" answer: publishing without `IlcInstructionSet` runs the 128-bit loops (no
+  AVX); still recommend `native` or a level (`x86-64-v3`, `x86-64-v4`), and say the default baseline no longer pays a
+  per-vector check. guide/hosting.mdx + zh, the Native AOT paragraph: the same sentence. Changelog (Performance):
+  "Native AOT without AVX (the default x64 baseline): loops over optional components and masked rows up to 1.4x
+  faster" (link the decision). Roadmap: the backlog item's x64 half done, ARM64 waits for the M4 run.
+  architecture.mdx + zh (vector loops section, if it names the tables): x64 constants are literals, ARM64's are
+  statics initialized at module load. api.mdx: nothing (internal; complexities unchanged).
+- **M4 run (owner): no change expected on ARM64.** The command is under the backlog item; the NEON loops are the same
+  code before and after.
