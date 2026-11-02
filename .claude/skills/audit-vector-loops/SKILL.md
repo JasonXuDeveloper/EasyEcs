@@ -277,12 +277,19 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   static readonly vector of literals (the generated `__x` permutes were read through a held static base, no check) but
   not one built by code (`Tables32` / `Tables64` from `Tables.LoadN`, `Masks` from a loop): those cost two helper
   checks and a dozen zmm spills per vector of Move2's masked loop. The x64 forms (AVX2 `Permute3*`, the 512-bit
-  tables, the 256/512-bit lane masks, the generated `__x`) are vectors of literals in place (feat-later-memory); the
-  NEON forms (`Masks.Narrow`, the `__y` TBL tables) keep their statics until the owner's M4 measures a change. Read
-  an AOT loop with `<IlcArg Include="--codegenopt:JitDisasm=*Masked*" />` in a scratch harness project and
-  `dotnet publish -v:n` (the listing lands in the build log; `JitStdOutFile` keeps only the last method ILC
-  compiled): `CORINFO_HELP_READYTORUN_NONGCSTATIC_BASE` inside a loop's blocks is the check. A static the loop reads
-  once per run (`__layoutN`) is fine.
+  tables, the 128/256/512-bit lane masks, the generated `__x`) are vectors of literals in place (feat-later-memory,
+  feat-aot-tables); ARM64's forms (`Masks.Narrow`, the `__y` TBL tables, NEON LD/ST under `fixed`) keep their
+  statics until the owner's M4 measures a change. Read an AOT loop with
+  `<IlcArg Include="--codegenopt:JitDisasm=*Masked*" />` in a scratch harness project and `dotnet publish -v:n` (the
+  listing lands in the build log; `JitStdOutFile` keeps only the last method ILC compiled):
+  `CORINFO_HELP_READYTORUN_NONGCSTATIC_BASE` in a block a back edge returns to is the check (the helper itself sits
+  in a cold block at the method's end; follow the jump into it). Read it at three instruction sets: `native`
+  (AVX-512 here), `x86-64-v3`, and no `IlcInstructionSet` at all: ILC's default x64 baseline has no AVX, so
+  `Vector<T>` is 16 bytes there and the loops run their 128-bit form, which is where `Masks.Narrow` still cost a
+  check per vector after the 256/512-bit forms were literals (Step's masked loop 85 instructions and 9 stack
+  accesses with it, 74 and 1 without). Under the JIT the same static costs nothing: Tier1 folds an initialized
+  static readonly vector into a constant, so JIT listings of both forms are identical. A static the loop reads
+  once per run (`__layoutN`, `Maybe<T>`'s zero rows) is fine.
 
 - **Copies in the text are free, shuffles are not**: `var __c = __s;` and `__t` temporaries for a whole-value
   assignment vanish (the JIT copy-propagates them) once the method is compiled, but each one is an IL local, and

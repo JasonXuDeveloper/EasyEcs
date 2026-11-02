@@ -244,7 +244,10 @@ its own worktree.
      filter to the methods the change touches); the JIT and AOT runs of one A/B go in one round, interleaved.
      BenchmarkDotNet 0.15 passes ILC 10 an instruction set it refuses ("Unrecognized instruction set sse") and its
      generated project ignores `Directory.Build.targets`: export `CustomAfterMicrosoftCommonTargets` naming a scratch
-     targets file that sets `<IlcInstructionSet>native</IlcInstructionSet>` for the AOT runs;
+     targets file that sets `<IlcInstructionSet>native</IlcInstructionSet>` for the AOT runs. A change to the 128-bit
+     form is measured under AOT with `x86-64-v2` in that file (ILC's default x64 baseline: `Vector<T>` of 16 bytes);
+     the ISA column then still names the host's ISA (AVX-512), not ILC's target, so check the target from the
+     numbers' scale or a listing (feat-aot-tables);
    - before choosing what to change in a pass, place it on the roofline (below, "Roofline"): a memory-bound pass gains
      from fewer bytes only, a compute-bound one from the loop and the math;
 4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss, a wash or an allocation is first
