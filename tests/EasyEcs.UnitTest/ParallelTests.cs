@@ -703,7 +703,7 @@ public class ParallelTests
     public void AStageThatSettlesOnRunningAloneRunsEverySystemOnEachUpdate()
     {
         // Two light systems of disjoint data share a stage too small for helpers: after its first runs the runner runs it
-        // alone (a plain freeze, still a parallel region for its systems), probing helpers now and then.
+        // alone, probing helpers now and then.
         using var world = new World(new WorldOptions { ParallelSystems = true, MaxDegreeOfParallelism = 4 });
         var counter = world.CreateEntity(new Counter(0));
         var armor = world.CreateEntity(new Armor(0));
@@ -716,30 +716,5 @@ public class ParallelTests
         Assert.That(bumpsCounter.LastRunTick, Is.EqualTo(bumpsArmor.LastRunTick), "a stage's systems share its tick");
         Assert.That(world.CreateEntity(new Counter(0)).IsAlive, Is.True, "the gate is open after the stage");
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
-    }
-
-    [Test]
-    public void AParallelRegionAloneOnTheOwnerThreadRefusesChangesAndNests()
-    {
-        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
-        Assert.That(world.Gate.FreezeParallelAlone(), Is.True, "nothing holds the gate");
-        try
-        {
-            Assert.That(world.Gate.InParallel, Is.True, "its systems see a parallel region, as with helpers");
-            Assert.Throws<InvalidOperationException>(() => world.CreateEntity(new Counter()));
-            var work = new StructuralWork(world);
-            world.RunChunks(work, 1); // a pass of one chunk inside it: the region's freeze holds
-            Assert.That((work.Refused, work.InParallel), Is.EqualTo((true, true)));
-            world.RunChunks(new CountingWork(8), 8); // a parallel pass inside it: atomic adds over the plain stores
-            Assert.That(world.Gate.InParallel, Is.True, "the nested region left the outer one as it was");
-            Assert.That(world.Gate.FreezeParallelAlone(), Is.False, "a region already holds the gate");
-        }
-        finally
-        {
-            world.Gate.ThawParallelAlone();
-        }
-
-        Assert.That(world.Gate.InParallel, Is.False);
-        Assert.That(world.CreateEntity(new Counter()).IsAlive, Is.True, "the gate is open again");
     }
 }
