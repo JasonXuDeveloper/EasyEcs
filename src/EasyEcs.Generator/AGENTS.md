@@ -53,7 +53,7 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              first driving the walk, the others sampled, out cells and ref Reduce<T> results per tile;
                              an out of the driving cell's own type steps its tile: ref Tile, each row written through
                              Write(row), the second buffer swapped in, no Mut and no commit: Symbols.IsCellStep);
-                             the job handing it a Tile per input and a Mut per out buffer and result) in place of its accessor: the halo,
+                             the job handing it a Tile per input and a Mut per out buffer and result) in place of its accessor: the halo (a NoInlining {Name}_{index}__Exchange{k} per input, so the inliner's budget is left for the rows), the shape's constants and offsets read once, the walk as plain loops over the words of rows (TileRows.RowsOf), a stepped tile's buffer checked once (JacobiNext),
                              the out buffer sized and filled with what the method computes on Cell.Blank (the rows the
                              walk skips; once per system, in the static readonly fields of {Name}_{index}__Blank, when
                              the method takes nothing besides its cells and out cells), the rows its offsets read (every row when it reads X, Y or Z, or takes
