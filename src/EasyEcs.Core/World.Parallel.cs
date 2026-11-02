@@ -513,7 +513,7 @@ public sealed partial class World
         {
             [FieldOffset(Archetype.CacheLine)] public long Cursor;
             [FieldOffset(2 * Archetype.CacheLine)] public int Remaining;
-            [FieldOffset(2 * Archetype.CacheLine + 8)] public long Spent; // the participants' summed thread time, first claim to last item
+            [FieldOffset(2 * Archetype.CacheLine + 8)] public long Spent; // the items' summed thread time
             [FieldOffset(2 * Archetype.CacheLine + 16)] public long Allocated; // bytes helpers allocated running items (_measure)
         }
 
@@ -646,12 +646,10 @@ public sealed partial class World
         {
             bool measure = helper && _measure;
             ref var claims = ref _claims;
-            // Added once on leaving, after the participant's last item: the caller sees Remaining at 0 only when every
-            // participant has left, so it reads complete sums. The participant's time is one pair of clock reads, from
-            // its first claim to its last item (the claims between its items included, a few nanoseconds each), not a
-            // pair per item: a clock read costs 20-25 ns on a VM.
+            // Summed here and added once on leaving, after the participant's last item: the caller sees Remaining at 0
+            // only when every participant has left, so it reads complete sums.
             int done = 0;
-            long start = 0, allocated = measure ? GC.GetAllocatedBytesForCurrentThread() : 0;
+            long spent = 0, allocated = measure ? GC.GetAllocatedBytesForCurrentThread() : 0;
             while (true)
             {
                 long cursor = Volatile.Read(ref claims.Cursor);
@@ -659,7 +657,7 @@ public sealed partial class World
                 if ((int)(cursor >> 32) != epoch || index >= _count) break;
                 if (Interlocked.CompareExchange(ref claims.Cursor, cursor + 1, cursor) != cursor) continue;
 
-                if (done == 0) start = Stopwatch.GetTimestamp();
+                long start = Stopwatch.GetTimestamp();
                 try
                 {
                     _work.Run(index);
@@ -669,11 +667,12 @@ public sealed partial class World
                     Interlocked.CompareExchange(ref _error, e, null);
                 }
 
+                spent += Stopwatch.GetTimestamp() - start;
                 done++;
             }
 
             if (done == 0) return; // a late helper: it touches nothing of the run
-            Interlocked.Add(ref claims.Spent, Stopwatch.GetTimestamp() - start);
+            Interlocked.Add(ref claims.Spent, spent);
             if (measure) Interlocked.Add(ref claims.Allocated, GC.GetAllocatedBytesForCurrentThread() - allocated);
             Interlocked.Add(ref claims.Remaining, -done);
         }
