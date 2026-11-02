@@ -129,3 +129,31 @@ decision draft in `docs/plans/docs-todos.md`, "feat-page-faults"). Not kept, eac
   and InstantiateEach 1.2-1.6x slower, the segments GC (`GCName=libclrgc.so`) tripled the faults of a load and an
   InstantiateEach (it releases large segments at once) and made Capture 1.5x and InstantiateEach 1.2x slower
   (`--dev`, one launch each).
+
+## `[Accumulate]` users sharing a stage (backlog Later, voxel-rewrite.md GA2; feat-later-accumulate, 2026-11-02)
+
+**Not built: no stage is lost to an `[Accumulate]` singleton.** The proposal: systems that only add into one
+`[Accumulate]` singleton do not conflict, share a stage, and their pass results are combined into the singleton in
+registration order when the stage ends. The backlog's condition was the VoxelServer's `--schedule` showing stages lost
+to its `Stats`. It shows none (784260d, `dotnet run -c Release --project samples/VoxelServer -- --schedule`):
+
+- 45 systems in 42 stages; 29 systems run alone (an `Entity` or `World` parameter, an `OnUpdate`, a `[Consume]` or
+  `MaxRows` method, no `[ForEach]`), and every one of them that writes `Stats` runs alone for those reasons, not
+  for `Stats` (AoiView, AoiChunk, AoiSpawn, AoiDespawn, ChunkRead, ChunkGenerate, ChunkSave, ZombieDeath, PlayerRespawn,
+  Dig, Pickup, ItemExpiry, NightSpawn, ZombieAttack, SendPackets, Tally).
+- The three systems that add to a total without running alone are WaterCommit (`Filled`), Float (`Carried`) and
+  SendChunks (`Stats`). Their neighbours in registration order run alone (WaterSleep, ZombieAttack, PlayerRespawn,
+  AoiDespawn, ChunkSent) or conflict on components (Float before Physics: `Position`, `Velocity`). Among the
+  "registration order only" pairs, none names `Stats`, `Filled` or `Carried`.
+- After the rewrite (step 2 of voxel-rewrite.md: `Filled` and `Carried` folded into `[Accumulate] Stats`), the same
+  holds: WaterCommit is deleted by the ping-pong step, Float still sits between a system that runs alone and one it
+  conflicts with on components, and ZombieDeath, which the rewrite turns into a vector loop with marked rows, runs alone
+  as such a loop does. BattleServer's `Battle` is written by one non-alone system
+  (Replication) and by `OnUpdate` / `Entity` methods.
+
+So the cause of the VoxelServer's serial stages is systems that run alone, not totals; a shared-total rule would merge
+no stage there. What would change the verdict: a world where two consecutive systems that do not run alone conflict
+only on one `[Accumulate]` singleton (the schedule's "Registration order only" line names just that singleton), for
+example a sample whose per-kind counters move from separate singletons into one total. The design stays as GA2 states
+it (each pass's result kept per system, combined in registration order at the stage end, so the total is the bits of
+the serial run).

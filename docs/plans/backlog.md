@@ -500,9 +500,12 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       inlining in gsharedvt code or of methods with exception clauses: the 32-locals split costs Mono nothing, and
       every helper a loop inlines must keep `AggressiveInlining` (the demo's runners inline only through it).
       Decision record with D135 in the docs pass.
-- [ ] **`[Accumulate]` users that do not conflict** (`voxel-rewrite.md` GA2): systems that only add into one
-      `[Accumulate]` singleton share a stage, combined in registration order at the stage end. Built only if the
-      VoxelServer rewrite's `--schedule` shows stages lost to its `Stats` (step 2 of that plan); otherwise a record.
+- [x] **`[Accumulate]` users that do not conflict** (`voxel-rewrite.md` GA2; feat-later-accumulate): not built, a
+      record in owner-review.md. VoxelServer `--schedule` at 784260d: 45 systems in 42 stages, no stage lost to `Stats`
+      (or `Filled` / `Carried`): every `Stats` writer but SendChunks runs alone for its own reasons (`World` / `Entity`
+      parameters, `OnUpdate`, `[Consume]` / `MaxRows`), and the three totals' writers that do not (WaterCommit, Float,
+      SendChunks) sit between systems that run alone or conflict on components; still true after the rewrite's step 2.
+      The serial stages come from systems that run alone, not from totals.
 - [x] **EECS031 on nested creation loops** (feat-tiles-pingpong; done in feat-later-small): EECS031 climbs the counted
       loops enclosing a creation loop while they always run it, keep its bounds invariant and destroy nothing, and
       reports at the outermost with `Reserve(outer * inner)` (three levels and more); a constant product below the
