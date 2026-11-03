@@ -684,4 +684,37 @@ public class ParallelTests
         Assert.That(work.Refused, Is.True, "the batch job's freeze holds inside the chunk");
         Assert.That(world.CreateEntity(new Counter()).IsAlive, Is.True, "and ends with the batch job");
     }
+
+    [EcsSystem]
+    public ref struct BumpsCounter
+    {
+        [ForEach]
+        static void Bump(ref Counter counter) => counter.N++;
+    }
+
+    [EcsSystem]
+    public ref struct BumpsArmor
+    {
+        [ForEach]
+        static void Bump(ref Armor armor) => armor.Value++;
+    }
+
+    [Test]
+    public void AStageThatSettlesOnRunningAloneRunsEverySystemOnEachUpdate()
+    {
+        // Two light systems of disjoint data share a stage too small for helpers: after its first runs the runner runs it
+        // alone, probing helpers now and then.
+        using var world = new World(new WorldOptions { ParallelSystems = true, MaxDegreeOfParallelism = 4 });
+        var counter = world.CreateEntity(new Counter(0));
+        var armor = world.CreateEntity(new Armor(0));
+        var bumpsCounter = world.AddSystem<BumpsCounter>();
+        var bumpsArmor = world.AddSystem<BumpsArmor>();
+        Assert.That(world.DescribeSchedule().Groups[0].Stages, Has.Length.EqualTo(1), "one stage: no conflict");
+        const int updates = 3_000;
+        for (int i = 0; i < updates; i++) world.Update();
+        Assert.That((counter.Get<Counter>().N, armor.Armor.Value), Is.EqualTo((updates, updates)));
+        Assert.That(bumpsCounter.LastRunTick, Is.EqualTo(bumpsArmor.LastRunTick), "a stage's systems share its tick");
+        Assert.That(world.CreateEntity(new Counter(0)).IsAlive, Is.True, "the gate is open after the stage");
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
+    }
 }

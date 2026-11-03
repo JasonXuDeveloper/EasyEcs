@@ -1498,6 +1498,26 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, {{job}}<{{tps}}>, INoStructuralChanges
                 {
                     var match = Match<{{tps}}, TJob>(TJob.OneQuery, in filter, {{List(n, i => $"out var b{i}")}});
+                    if (SmallPass(match, in filter, out var table, out var rows, out int first, out int end) is var small and >= 0)
+                    {
+                        if (small == 0) return;
+                        // One chunk whatever the rows cost: run it here as the chunk would run, on a copy of the job, merged
+                        // after (the result a cut into one chunk gives), frozen as a serial pass is (RunChunks).
+                        var part = job;
+                        bool froze = Gate.FreezeAlone();
+                        try
+                        {
+                            {{name}}Chunk<{{tps}}, TJob>(ref part, table, rows, first, end, {{bits}});
+                        }
+                        finally
+                        {
+                            if (froze) Gate.ThawAlone();
+                        }
+
+                        if (TJob.Merges) TJob.Merge(ref job, in part);
+                        return;
+                    }
+
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
                     int chunks = work.Cut(this, match, in filter, chunkSize, ref job, {{bits}});
                     try

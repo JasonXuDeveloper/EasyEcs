@@ -135,6 +135,36 @@ public sealed partial class World
     }
 
     /// <summary>
+    /// Whether a parallel pass over <paramref name="match"/> is one chunk whatever its rows cost: 1 when the rows it
+    /// visits lie in one table and number at most 64 (chunks are whole multiples of 64 rows from a word's first row, and
+    /// each table starts its own), with that table and its rows; 0 when it visits no row; -1 otherwise (the pass is cut).
+    /// The pass then runs that chunk on the calling thread without cutting (<c>ChunkRows</c>, the work's chunk arrays,
+    /// their release), as one chunk would run. Its rows are too few for their cost to say anything a cut would use.
+    /// </summary>
+    internal static int SmallPass(QueryMatch match, in QueryFilter filter, out Archetype table, out RowFilter rows, out int first, out int end)
+    {
+        table = null;
+        rows = default;
+        first = end = 0;
+        var archetypes = match.Archetypes;
+        for (int a = 0; a < archetypes.Length; a++)
+        {
+            var archetype = archetypes[a];
+            var filtered = new RowFilter(match.Filters[a], filter.Tick);
+            if (archetype.AliveCount == 0 || filtered.Mode(archetype) == RowFilter.None) continue;
+            var (start, stop) = filter.Rows(a, archetype.Count);
+            if (start >= stop) continue;
+            if (table != null || stop - start > 64) return -1;
+            table = archetype;
+            rows = filtered;
+            first = start;
+            end = stop;
+        }
+
+        return table == null ? 0 : 1;
+    }
+
+    /// <summary>
     /// Run the chunks 0 .. <paramref name="chunks"/> - 1 of <paramref name="work"/> (a parallel pass, a
     /// <see cref="ParallelFor{TJob}"/>), structural changes refused meanwhile: on the chunk runner, or on this thread
     /// when there are fewer than two or the runner cannot take them (<see cref="TryRunChunks"/>).

@@ -2417,3 +2417,25 @@ programs and the JIT are unchanged (their loops were already free of the check s
   statics initialized at module load. api.mdx: nothing (internal; complexities unchanged).
 - **M4 run (owner): no change expected on ARM64.** The command is under the backlog item; the NEON loops are the same
   code before and after.
+
+## feat-later-accumulate (backlog Later: `[Accumulate]` users that do not conflict; #157 the #138 recommendations)
+
+- decisions.mdx + .zh: a record "A parallel pass over at most 64 rows of one table runs uncut" (527d840): one chunk
+  whatever the rows cost (chunks are multiples of 64 rows from a word's first row, each table its own), run on a copy
+  of the job and merged as the cut pass merges it, so results and bits are unchanged; SystemDispatchBenchmark
+  ParallelPasses 0.40x, 0 B. Considered: a fallback below one chunk of the default size (1,024 rows) — refused,
+  heavy rows would never be timed and never split (the cost is learned on one chunk).
+- decisions.mdx + .zh: `RowFilter.Mode`'s short path for plans that only require components (7955c6a): Plain and
+  WithOnUpdate about 5 % faster, ParallelPasses a further 11 %.
+- decisions.mdx + .zh (dropped, with numbers): a stage run alone entered with plain stores (a wash: four uncontended
+  locked adds against 650-850 ns a stage); per-participant timestamps in wide runs (slower: the claims' contention
+  counted as work keeps the runner waking helpers for light stages, ParallelStage 0.72 -> 1.33-1.39 us). Roadmap
+  "Dropped" names both.
+- decisions.mdx + .zh: `[Accumulate]` users sharing a stage not built (owner-review.md entry): no stage of the
+  VoxelServer or the battle server is lost to a total; the serial stages are systems that run alone.
+- decisions.mdx + .zh (dropped, owner 2026-11-03): no row-mask parameter for a batch `[ForEach]` method (`ulong rows`
+  or a `RowMask` struct). The method for one row is the form that gets masks (`IForEachMasked` in the generated vector
+  loop) and EECS103 rewrites a hand-written vector loop into it. What would reopen it: a batch method whose hand loop
+  the generator cannot vectorize, measured against its per-row twin under a sparse filter. Roadmap "Dropped" names it.
+- guide/parallel (or wherever a parallel pass's cost is described) + zh: a parallel `[ForEach]` over a small table
+  costs about a serial pass (no chunking below 64 rows in one table).
