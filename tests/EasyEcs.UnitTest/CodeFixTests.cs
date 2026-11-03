@@ -151,6 +151,18 @@ public class CodeFixTests
     [TestCase("EECS031", "Reserve room first",
         "public static class U { public static void F(World w, int n)\n    {\n        for (int i = 0; i < n; i++) w.CreateEntity(new P { V = i });\n    }\n}",
         "    {\n        w.Reserve<P>(n);\n        for (int i = 0; i < n; i++)")]
+    [TestCase("EECS031", "Reserve room first",
+        "public static class U { public static void F(World w, int side)\n    {\n        for (int x = 0; x < side; x++)\n            for (int y = 0; y < side; y++) w.CreateEntity(new P { V = x + y });\n    }\n}",
+        "    {\n        w.Reserve<P>(side * side);\n        for (int x = 0; x < side; x++)")]                  // nested: the product, before the outer loop
+    [TestCase("EECS031", "Reserve room first",
+        "public static class U { const int Side = 100; public static void F(World w)\n    {\n        for (int x = 0; x < Side; x++) { for (int y = 0; y < Side; y++) w.CreateEntity(new P()); }\n    }\n}",
+        "    {\n        w.Reserve<P>(Side * Side);\n        for (int x = 0;")]                                     // constant bounds whose product is large
+    [TestCase("EECS031", "Reserve room first",
+        "public static class U { public static void F(World w, Prefab p, int d, int h, int n)\n    {\n        for (int z = 1; z < d; z++)\n            for (int y = 0; y < h; y++)\n                for (int x = 0; x < n + 1; x++) w.Instantiate(p);\n    }\n}",
+        "    {\n        w.Reserve(p, (d - 1) * h * (n + 1));\n        for (int z = 1;")]                              // three levels, a start and a sum as factors
+    [TestCase("EECS122", "Add 'using Game;'",
+        "namespace Game { public static class R { [ForEach] public static void A(ref P p) => p.V++; } }\nnamespace Other { using Alias = Game.R; public static class Use { public static void Run(World w) => Alias.A(w); } }",
+        "using RO = System.ReadOnlySpan<Holder>;\nusing Game;\n")]                                                   // the entry point binds through the alias
     [TestCase("EECS032", "Use Any",
         "public static class U { public static bool F(World w) => w.Count<P>() > 0; }",
         "=> w.Any<P>();")]

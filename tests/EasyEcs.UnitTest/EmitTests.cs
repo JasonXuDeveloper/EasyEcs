@@ -619,4 +619,31 @@ public class EmitTests
         var found = GeneratorTests.Analyze([Strikes.Replace("internal record struct Shot", "public record struct Shot")]).Result.Where(d => d.Id == "EECS092");
         Assert.That(found, Is.Empty);
     }
+
+    /// <summary>
+    /// A parallel pass over one table of at most 64 rows runs as its one chunk on the calling thread, uncut: its records
+    /// still reach Emitted&lt;T&gt; in row order, appended after the earlier passes' (and a table of 65 rows is cut).
+    /// </summary>
+    [Test]
+    public void AParallelPassOverOneSmallTableEmitsInRowOrder()
+    {
+        foreach (int threads in new[] { 1, 4 })
+        foreach (int attackers in new[] { 1, 40, 64, 65 })
+        {
+            using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+            var aimed = new Entity[7];
+            world.CreateEntities(aimed, new Hp(1_000_000));
+            var rows = new Entity[attackers];
+            world.CreateEntities(rows, new Attack(0), new Aim(default));
+            for (int n = 0; n < attackers; n++) rows[n].Set(new Attack(n), new Aim(aimed[n % aimed.Length].Id));
+            world.AddSystem<ParallelStrikes>();
+            var once = Expected(attackers, aimed);
+            world.Update();
+            world.Update(); // the second pass appends to the first one's records
+            var hits = world.GetSingleton<Emitted<Hit>>().Items.AsReadOnlySpan();
+            Assert.That(hits.Length, Is.EqualTo(once.Length * 2), $"{attackers} attackers on {threads} threads");
+            Assert.That(hits[..once.Length].SequenceEqual(once) && hits[once.Length..].SequenceEqual(once), Is.True,
+                $"{attackers} attackers on {threads} threads");
+        }
+    }
 }

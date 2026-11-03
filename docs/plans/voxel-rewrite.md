@@ -248,7 +248,7 @@ changes, so the output changes deterministically; the j-cluster prefetch never f
 | # | Gap | Saves / unlocks | Recommendation |
 |---|---|---|---|
 | GA1 | `Reduce<T>` / `[Accumulate]` in pair methods (PairForm refuses `ref` context parameters) | Pickup and Attack count into Stats without a second pass or EECS086 | build (small, after feat-pairs-2) |
-| GA2 | Systems that only accumulate into one `[Accumulate]` singleton do not conflict (combined in registration order at the stage end) | Stats users share stages | build if `--schedule` shows a stage lost after step 2; else record |
+| GA2 | Systems that only accumulate into one `[Accumulate]` singleton do not conflict (combined in registration order at the stage end) | Stats users share stages | not built: `--schedule` shows no stage lost, before or after step 2 (owner-review.md, feat-later-accumulate) |
 | GA3 | `MaxPooledLength` inferred for a tile's cell buffers from `ITileShape` (or `ReserveBuffers(prefab, count, length)`) | Program.cs:65-69 | build with item 11 / 12a |
 | GA4 | A symmetric pair (each unordered pair once, both sides written) | item merging, collisions | **build** (owner, Q3) |
 | GA5 | A bundle of `Lookup<T>` as one parameter | `Nearby` built 5 times (-5) | declined (owner, Q8) |

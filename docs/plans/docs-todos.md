@@ -1827,6 +1827,51 @@ Decision records for the docs pass (en + zh). Number them at the docs pass (D-id
 - architecture.mdx + zh, the paragraph on cache gates (CacheSizes): the large copies of snapshots read the
   last-level gate too.
 
+## feat-later-small (backlog: alias entry points, EECS031 nested, inlining.sh, #153, quiet rechecks, Linger's allocation)
+
+EECS122's id is provisional (EECS120 and EECS121 went to feat-owner-calls): renumber everywhere below if a merge takes it.
+
+- guide/analyzer.mdx + zh:
+  - EECS031's section: nested counted loops are reported at the outermost loop that always runs the inner one with
+    invariant bounds and destroys nothing, with `Reserve(outer * inner)` (three levels and more multiply); a constant
+    product below the small count is not reported; a loop that destroys the rows its body made stops the climb. Its
+    example gains the nested form (doccheck=expect-EECS031) and the code fix's result.
+  - New section and table row EECS122 (Warning, "A generated entry point outside the namespaces in scope"): `Owner.Method(world, ...)`
+    of a [ForEach], [Drain] or [EntityMethod] method binds to the method itself (CS7036 or a wrong overload) when the
+    generated entry point's namespace (the owner's) is not imported, for example in a file that only aliases the owner
+    (`using Alias = Game.Hunters;`). Fix: `using Game;` (the code fix adds it). A `using` alias binds like the name
+    itself once the namespace is in scope.
+- The page on generated entry points (guide/systems.mdx or wherever `Owner.Method(world)` is introduced) + zh: one
+  line: the entry points are C# 14 extension members in the owner's namespace; import it where you call them.
+- skills/easyecs/SKILL.md: "call a [ForEach] method's entry point where the owner's namespace is imported (EECS122)".
+- changelog (Analyzer): "EECS031 reports nested creation loops with the product to reserve"; "EECS122: a generated
+  entry point called where its namespace is not in scope". (Fixed): "A [GaussSeidel] tile that changes for the first
+  time long after it joined no longer allocates in the pass".
+- decisions.mdx + zh: the three drafts of the feat-later-small report ("Generated entry points are found through the
+  owner's namespace", "The default benchmark job keeps its warm-up", "GeneratorBenchmark runs one process"), after
+  D141.
+- decisions.mdx + zh: "Sorts and cluster searches keep their scratch" (after the drafts above): `ColumnSpares.Scratch`
+  (the world's, by role) and `RowClusters.Find`'s per-thread arrays instead of `ArrayPool<T>.Shared`, which under high
+  memory load drops its arrays at every gen2 collection (8 KB to 590 KB in 0 B tests of loaded runs); considered:
+  a private `ArrayPool.Create()` per world (it does not trim, but it takes a lock per rent and return, where the owner
+  thread needs only a field read). Numbers: RowOrderBenchmark, base and fix in two interleaved rounds at a load
+  below 2, 24 cases: fix / base 0.89-1.08 on the means, 6 cases slower in both rounds (1-8 %: Churn1 1,000 Narrow,
+  100,000 Narrow, 1,000,000 Wide; Reverse 1,000 Wide, 1,000,000 Wide; Sorted 100,000 Narrow), 2 faster in both
+  (Reverse 10,000 Narrow, Sorted 1,000,000 Narrow), within one build's own spread between rounds (Reverse 1,000,000
+  Narrow, base: 48.2 and 57.5 ms); 0 B both (on a quiet machine the pool reused its arrays, so the cost the change
+  removes shows only under memory load, in the tests' pool rents). Rechecked with 6 processes per run: Churn1, Reverse
+  and Sorted in two rounds each (0.908-1.059), then the two slower in both (Reverse 1,000,000 Wide, Sorted 1,000 Wide)
+  in three rotating rounds against a build with the words back on the pool: 1.017 (t 0.89, 18 processes a side; the
+  pool build 0.984, one build's processes 68-88 ms) and 0.992. Nothing slower.
+- decisions.mdx + zh (same record or next to it): the generated `ForEachCollected` past 64 ids takes the world's
+  array of its nesting level (`World.TakeCollected` / `ReturnCollected`, a job it runs may run another), not
+  `ArrayPool.Shared`: the steady-state test rented once per step and a run inside a run 101 times, 0 after;
+  MaxRowsBenchmark Generated budget 256: 1.020 / 0.952, budget 64: 1.009 / 0.978, 0 B.
+- changelog (Fixes): "Re-sorts of ordered tables and `RowClusters.Pairs` no longer allocate after a garbage collection
+  under high memory load"; "`[ForEach(MaxRows = N)]` past 64 rows no longer rents from the shared array pool each
+  tick".
+- performance page: nothing (TileRestartBenchmark's numbers come with the bench sync of feat-field-gaps).
+
 ## feat-roslyn-guidance (backlog Later item: analyzer and incremental generators by the official .NET guidance)
 
 Nothing user-visible in the API; no diagnostic changed (the unit tests' 109 diagnostics compared line by line before
@@ -2127,6 +2172,108 @@ helpers).
   forms did not change on this branch: the run checks nothing regressed and gives the baseline for moving
   `Masks.Narrow` and the `__y` TBL tables to literals too.
 
+## feat-page-faults (backlog Later: fewer page faults on top of huge pages)
+
+Nothing user-visible in the API: `HugePages.Prefault` / `HugePages.Populate` are internal. What a user sees: a
+reservation (`Reserve<T..>`, `Reserve(prefab, n)`, `EnsureEntityCapacity`, a large `InitialEntityCapacity`) now commits
+its memory at once on Linux (RSS grows at the reservation, not as rows are written); loads, restores, snapshots and
+`CreateEntities` are as before.
+
+- **Decision draft: a reservation faults its pages in (Linux)** (en):
+
+  > **Decision.** On Linux 5.14 and later, the arrays a user's reservation sizes (`Reserve<T..>`, `Reserve(prefab, n)`,
+  > `EnsureEntityCapacity`, `InitialEntityCapacity`: the tables' columns and entity rows, the entity records, the free-id
+  > list) are faulted in at the reservation, one `MADV_POPULATE_WRITE` call per run of 2 MiB windows not yet resident
+  > (`mincore`), with 4 KiB and with 2 MiB pages. Arrays a call writes whole as it allocates them (a load, a restore, a
+  > snapshot, `CreateEntities`, a move between worlds) are left to the first touch. Elsewhere (other systems, an older
+  > kernel, a libc without `madvise`) nothing changes; the first failed call turns it off.
+  >
+  > **Why.** A reservation is there to pay before the tick that fills it, and with first-touch faults that tick paid
+  > them: one trap per 4 KiB page, or one huge page zeroed per 2 MiB, in the middle of a wave of spawns. Faulted in at
+  > the reservation, the tick only writes. One call also costs less than a trap per page with 4 KiB pages (128 MiB of
+  > memory freed 4 s earlier: 67-68 ms touched, 53 ms populated, PrefaultTouchBenchmark).
+  >
+  > **Numbers** (PageFaultBenchmark, default job, two rounds, prefault off / on in one binary, 0 B; 4 KiB pages /
+  > 2 MiB pages): the tick filling a reservation (Wave: 1M or 16M spawns into a world reserved on memory freed 4 s
+  > earlier) at 1M 38.0 → 17.0 and 36.0 → 16.5 ms (2.2x) / 85.7 → 15.9 and 67.0 → 15.8 ms (4.2-5.4x); at 16M 857 → 219
+  > and 965 → 218 ms (3.9-4.4x) / 2.52 s → 224 and 221 ms (11.3-11.4x). The reservation itself at 16M 269 → 209 and 275
+  > → 209 ms (1.29-1.32x, the populate call against the traps) / 140 → 146 and 286 → 153 ms; at 1M 1.24-1.36x / equal.
+  > A reserve-and-fill create at 16M 502 → 452 and 514 → 447 ms (1.11-1.15x) / 876 → 734 and 885 → 731 ms (spread
+  > 0.4-0.6 s: the host refaults free blocks, below); at 1M within 5 % either way. Load, Capture and Restore, which do
+  > not prefault, equal within their spread. Page faults per op at 16M with 4 KiB pages: Reserve 41.7-44.9k → 31.3k,
+  > Wave (its reservation included) 87-91k → 65-68k.
+  >
+  > **Considered.** Prefaulting every sized array, copies included: a load at 1M with 2 MiB pages 1.04-1.06x slower
+  > in two rounds (populating zeroes the whole array before the copy writes it, out of the cache by then; a first-touch
+  > fault zeroes each page right before the copy writes it) and nothing to gain, since the same call writes every row.
+  > Populating resident memory too: the GC hands most freed large memory back resident, and walking its pages again
+  > made creating a reserved 1M-entity world 1.05x slower until resident 2 MiB windows were skipped. Prefault to make
+  > huge-page faults cheaper: one call costs what the first touch costs with 2 MiB pages (536-592 ms touched against
+  > 572-592 ms populated, 128 MiB freed 4 s earlier); on the reference VM the time is the host's (free page reporting
+  > hands free 2 MiB blocks back, the host faults them back), which no guest call avoids. Keeping a disposed world's
+  > columns for the next world: allocations halved, page faults unchanged (the GC already reuses that memory resident),
+  > creating 1.06x and instantiating 1.08x slower. The GC's settings: the host's choice (`GCRetainVM`, `GCgen0size`
+  > change nothing; `GCConserveMemory` and the segments GC fault more and are slower), written up for users.
+
+  zh:
+
+  > **决定。** 在 Linux 5.14 及以上，用户预留所确定大小的数组（`Reserve<T..>`、`Reserve(prefab, n)`、`EnsureEntityCapacity`、
+  > `InitialEntityCapacity`：表的列和实体行、实体记录、空闲 id 列表）在预留时预先缺页：对尚未驻留（`mincore`）的连续 2 MiB
+  > 窗口各调用一次 `MADV_POPULATE_WRITE`，4 KiB 页和 2 MiB 页都如此。分配后立即被整体写满的数组（加载、恢复、快照、
+  > `CreateEntities`、在世界间移动）留给首次访问。其他环境（其他系统、更旧的内核、没有 `madvise` 的 libc）不变；第一次调用
+  > 失败即关闭。
+  >
+  > **原因。** 预留就是为了在填充它的那一帧之前付出代价，而首次访问缺页时这笔代价落在了那一帧：每个 4 KiB 页一次陷入，或每
+  > 2 MiB 清零一张大页，发生在一波生成的中途。在预留时预先缺页后，那一帧只剩写入。对 4 KiB 页，一次调用也比每页一次陷入更
+  > 便宜（4 秒前释放的 128 MiB 内存：首次访问 67-68 ms，预先缺页 53 ms，PrefaultTouchBenchmark）。
+  >
+  > **数字**（PageFaultBenchmark，默认作业，两轮，同一程序内关闭 / 开启预先缺页，0 B；4 KiB 页 / 2 MiB 页）：填充预留的那一帧
+  > （Wave：向一个在 4 秒前释放的内存上预留的世界生成 1M 或 16M 个实体）1M 时 38.0 → 17.0 和 36.0 → 16.5 ms（2.2x）/
+  > 85.7 → 15.9 和 67.0 → 15.8 ms（4.2-5.4x）；16M 时 857 → 219 和 965 → 218 ms（3.9-4.4x）/ 2.52 s → 224 和 221 ms
+  > （11.3-11.4x）。预留本身 16M 时 269 → 209 和 275 → 209 ms（1.29-1.32x，一次调用对比逐页陷入）/ 140 → 146 和 286 → 153 ms；
+  > 1M 时 1.24-1.36x / 持平。先预留再填充的创建 16M 时 502 → 452 和 514 → 447 ms（1.11-1.15x）/ 876 → 734 和 885 → 731 ms
+  > （波动 0.4-0.6 s：宿主重新缺页空闲块，见下）；1M 时上下 5 % 以内。不预先缺页的加载、快照和恢复在波动范围内持平。16M、
+  > 4 KiB 页时每次操作的缺页数：Reserve 41.7-44.9k → 31.3k，Wave（含其预留）87-91k → 65-68k。
+  >
+  > **考虑过的方案。** 所有确定大小的数组都预先缺页，包括复制：2 MiB 页下 1M 的加载两轮都慢 1.04-1.06x（预先缺页在复制写入
+  > 之前把整个数组清零，写入时已不在缓存中；首次访问缺页则在复制写入每一页之前才清零它），而且没有收益，因为同一个调用会
+  > 写满每一行。连已驻留的内存也预先缺页：GC 交回的大块已释放内存大多仍驻留，再走一遍它的页让创建一个预留的 1M 实体世界慢
+  > 1.05x，直到跳过已驻留的 2 MiB 窗口。用预先缺页降低大页缺页的代价：2 MiB 页下一次调用的代价与首次访问相同（4 秒前释放的
+  > 128 MiB：首次访问 536-592 ms，预先缺页 572-592 ms）；在参考虚拟机上这段时间属于宿主（空闲页上报把空闲的 2 MiB 块交还宿主，
+  > 宿主再把它们缺页回来），客户机的任何调用都无法避免。把已销毁世界的列留给下一个世界：分配减半，缺页不变（GC 已经以驻留
+  > 状态复用这些内存），创建慢 1.06x，实例化慢 1.08x。GC 设置：由宿主决定（`GCRetainVM`、`GCgen0size` 没有影响；
+  > `GCConserveMemory` 和 segments GC 缺页更多、更慢），写给用户的说明见下。
+
+- **GC settings for large worlds (a users' to-do, performance page "What it costs" or the FAQ; en + zh).** The library
+  sets none of them: they are the host's (`runtimeconfig.json` / `DOTNET_*` variables). Measured at 16M entities
+  (PageFaultBenchmark, `--dev`, one launch each, the reference VM): the defaults (regions, workstation or server GC)
+  are the right choice; `GCRetainVM` changes nothing for a world's arrays (the faults left are not memory the GC
+  decommitted); `GCgen0size` nothing (the arrays live on the large and pinned heaps); `GCConserveMemory` (5) makes
+  creating, growing, loading and snapshotting a large world 1.2-1.6x slower with 20-65 % more page faults (it compacts
+  the large object heap); the segments GC (`GCName=libclrgc.so`) faults three times as much on a load and makes a
+  capture 1.5x slower (it releases large segments at once). Say: keep the defaults; a server that creates and drops
+  large worlds over and over gets no faults back from GC settings, and `Reserve` is where to pay them up front.
+  zh：大型世界的 GC 设置（给用户的说明，性能页"开销"一节或 FAQ）。库不设置其中任何一项：它们由宿主决定
+  （`runtimeconfig.json` / `DOTNET_*` 环境变量）。16M 实体实测（PageFaultBenchmark，`--dev`，各一次启动，参考虚拟机）：默认值
+  （regions，工作站或服务器 GC）就是最好的选择；`GCRetainVM` 对世界的数组没有影响（剩下的缺页不是 GC 归还的内存）；
+  `GCgen0size` 没有影响（数组在大对象堆和固定对象堆上）；`GCConserveMemory`（5）让创建、扩容、加载和快照大型世界慢 1.2-1.6x，
+  缺页多 20-65 %（它压缩大对象堆）；segments GC（`GCName=libclrgc.so`）加载时缺页是三倍，快照慢 1.5x（它立即释放大段）。
+  结论：保持默认；反复创建和丢弃大型世界的服务器无法靠 GC 设置减少缺页，要提前付出就用 `Reserve`。
+- **Wording notes.** Say "faulted in" / "committed at once" (zh：预先缺页 / 立即提交), not "pre-allocated" (the arrays
+  were allocated before too). Do not promise faster creation: with 2 MiB pages populating costs what the first touch
+  costs; the gain is that the tick filling a reservation pays no fault, and with 4 KiB pages one call is cheaper than a
+  fault per page. On the reference VM a huge page faulted from memory freed seconds earlier costs about 8x a 4 KiB
+  one (the host's free page reporting, `feat-later-memory`): numbers of 16M creates and loads there are bimodal.
+- **Pages.** architecture.mdx + zh, the memory section (with feat-later-memory's huge pages): sized arrays are
+  advised (the steps of a doubling are not); a user's reservation's arrays are also faulted in at the reservation,
+  skipping resident memory; arrays a load, restore, snapshot or `CreateEntities` writes at once are left to the first
+  touch. Guide page on reservations (`Reserve` /
+  `InitialEntityCapacity`) + zh: one sentence that a reservation commits its memory at once on Linux, so the tick that
+  fills it pays no page fault (link the decision). faq.mdx + zh: "Which GC settings for large worlds?" (the
+  bullet above). Changelog (Performance): "a reservation faults its pages in on Linux: spawning into it pays no page
+  fault" (link the decision). api.mdx: `Reserve` / `EnsureEntityCapacity` complexity unchanged (O(capacity) for the
+  faults, as the first touch was). Roadmap: the backlog item done.
+
 ## feat-inner-loops (element loops, WP0 + WP2 + WP3) — docs to-dos
 
 - **systems.mdx + zh, vector loops section ("Loops inside a method"):** a [ForEach] method that runs row by row and
@@ -2359,3 +2506,25 @@ helpers).
   read in place where the shape allows".
 - **performance page:** TileStencil's Laplacian_Cell moves with it (bench sync); Blur9_Columns512 joins the stencil
   table where the page lists the Columns forms.
+
+## feat-later-accumulate (backlog Later: `[Accumulate]` users that do not conflict; #157 the #138 recommendations)
+
+- decisions.mdx + .zh: a record "A parallel pass over at most 64 rows of one table runs uncut" (527d840): one chunk
+  whatever the rows cost (chunks are multiples of 64 rows from a word's first row, each table its own), run on a copy
+  of the job and merged as the cut pass merges it, so results and bits are unchanged; SystemDispatchBenchmark
+  ParallelPasses 0.40x, 0 B. Considered: a fallback below one chunk of the default size (1,024 rows) — refused,
+  heavy rows would never be timed and never split (the cost is learned on one chunk).
+- decisions.mdx + .zh: `RowFilter.Mode`'s short path for plans that only require components (7955c6a): Plain and
+  WithOnUpdate about 5 % faster, ParallelPasses a further 11 %.
+- decisions.mdx + .zh (dropped, with numbers): a stage run alone entered with plain stores (a wash: four uncontended
+  locked adds against 650-850 ns a stage); per-participant timestamps in wide runs (slower: the claims' contention
+  counted as work keeps the runner waking helpers for light stages, ParallelStage 0.72 -> 1.33-1.39 us). Roadmap
+  "Dropped" names both.
+- decisions.mdx + .zh: `[Accumulate]` users sharing a stage not built (owner-review.md entry): no stage of the
+  VoxelServer or the battle server is lost to a total; the serial stages are systems that run alone.
+- decisions.mdx + .zh (dropped, owner 2026-11-03): no row-mask parameter for a batch `[ForEach]` method (`ulong rows`
+  or a `RowMask` struct). The method for one row is the form that gets masks (`IForEachMasked` in the generated vector
+  loop) and EECS103 rewrites a hand-written vector loop into it. What would reopen it: a batch method whose hand loop
+  the generator cannot vectorize, measured against its per-row twin under a sparse filter. Roadmap "Dropped" names it.
+- guide/parallel (or wherever a parallel pass's cost is described) + zh: a parallel `[ForEach]` over a small table
+  costs about a serial pass (no chunking below 64 rows in one table).

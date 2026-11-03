@@ -10,7 +10,7 @@ namespace EasyEcs.Generator;
 
 /// <summary>
 /// The rules for calls and declarations that compile but do not do what they say (EECS037, EECS038, EECS040-EECS045,
-/// EECS047-EECS051):
+/// EECS047-EECS051), and a call of a generated entry point that does not compile for want of its namespace (EECS122):
 /// a job's <c>WriteMask</c> that disagrees with its <c>Execute</c>, a changed copy of a component that is dropped,
 /// <c>SetIfChanged</c> on a type it cannot compare, calls a pass refuses made during one, an indexed component changed
 /// while its index is walked, a record struct key that prints itself, a sliced filter where every row is needed, and
@@ -133,6 +133,19 @@ public static partial class EasyEcsAnalyzer
         "and closes the holes, which moves rows the loop has not reached yet behind it, so the loop misses them (a loop " +
         "that outlives the update ends as no pass). Record what to do, and update after the loop.", helpLinkUri: Help("EECS051"));
 
+    public static readonly DiagnosticDescriptor EntryPointNotImported = new("EECS122", "A generated entry point outside the namespaces in scope",
+        "'{0}' takes {1}: it is the generated entry point of [{2}] method '{3}', an extension member declared in namespace '{4}', which is not in scope here, so the call binds to the method itself; add 'using {4};'",
+        Category, DiagnosticSeverity.Warning, true,
+        "The generator gives each [ForEach], [Drain] and [EntityMethod] method of a type that is not a system (and each " +
+        "[EntityMethod] method of a system) an entry point, Owner.Method(world, ...) or Owner.Method(entity, ...): a C# 14 " +
+        "static extension member of the owner, declared in the owner's namespace. Like every extension member it is found " +
+        "only where that namespace is imported or encloses the call; written through the type's full name or a using " +
+        "alias alone, the call binds to the method itself and fails (CS7036, CS1620, CS0122). Import the namespace.",
+        helpLinkUri: Help("EECS122"));
+
+    /// <summary>EECS122's property for its code fix: the namespace the file imports.</summary>
+    public const string ImportNamespace = "Namespace";
+
     /// <summary>EECS037's property for its code fix: the WriteMask value Execute needs (<c>0b101</c>).</summary>
     public const string WriteMaskValue = "WriteMask";
 
@@ -174,7 +187,43 @@ public static partial class EasyEcsAnalyzer
             start.RegisterOperationAction(AnalyzeViewOfVisited, OperationKind.Invocation);
             start.RegisterOperationAction(c => AnalyzeRefAcrossChange(c, core), OperationKind.VariableDeclarator);
             start.RegisterOperationAction(c => AnalyzeItemAcrossChange(c, core), OperationKind.Loop);
+            start.RegisterOperationAction(c => AnalyzeEntryPointScope(c, core), OperationKind.Invalid);
         });
+
+    // ---------------- EECS122: a generated entry point whose namespace is not in scope ----------------
+
+    /// <summary>
+    /// EECS122: <c>Owner.Method(world, ...)</c> (or <c>(entity, ...)</c>) that failed to bind, where <c>Owner</c> (a full
+    /// name or an alias) has a [ForEach], [Drain] or [EntityMethod] method of that name with a generated entry point, and
+    /// the entry points' class (<c>{FlatName}ForEach</c> / <c>{FlatName}EntityMethods</c>, in the owner's namespace) is
+    /// not in scope at the call. Runs on invalid operations only, which a compiling project has none of.
+    /// </summary>
+    private static void AnalyzeEntryPointScope(OperationAnalysisContext context, Core core)
+    {
+        if (context.Operation.Syntax is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access, ArgumentList.Arguments: { Count: > 0 } arguments } invocation)
+            return;
+        var model = context.Operation.SemanticModel!;
+        if (model.GetSymbolInfo(access.Expression, context.CancellationToken).Symbol is not INamedTypeSymbol owner
+            || owner.ContainingNamespace is not { IsGlobalNamespace: false } ns) return;
+        string? kind = null;
+        foreach (var member in owner.GetMembers(access.Name.Identifier.ValueText))
+            if (member is IMethodSymbol method)
+            {
+                if (Symbols.IsEntityMethod(method)) kind = "EntityMethod";
+                else if (!Symbols.IsSystem(owner) && (Symbols.IsForEach(method) || Symbols.IsDrain(method))) kind = Symbols.IsDrain(method) ? "Drain" : "ForEach";
+                if (kind != null) break;
+            }
+
+        // The entry point takes the entity or the world first: a call with other arguments is some other mistake.
+        bool perEntity = kind == "EntityMethod";
+        if (kind == null || !core.Is(model.GetTypeInfo(arguments[0].Expression, context.CancellationToken).Type, perEntity ? core.Entity : core.World)) return;
+        string entryClass = Symbols.FlatName(owner.OriginalDefinition) + (perEntity ? "EntityMethods" : "ForEach");
+        if (!model.LookupNamespacesAndTypes(invocation.SpanStart, name: entryClass).IsEmpty) return;
+        string imported = ns.ToDisplayString();
+        context.ReportDiagnostic(Diagnostic.Create(EntryPointNotImported, invocation.GetLocation(),
+            ImmutableDictionary<string, string?>.Empty.Add(ImportNamespace, imported),
+            access.ToString(), perEntity ? "the entity" : "the world", kind, access.Name.Identifier.ValueText, imported));
+    }
 
     // ---------------- EECS037: a hand-written job's WriteMask ----------------
 
@@ -986,7 +1035,7 @@ public sealed class UsageAnalyzer : EasyEcsAnalyzer.Area
         EasyEcsAnalyzer.JobWrites, EasyEcsAnalyzer.KeyPrintsItself, EasyEcsAnalyzer.NeverMatches,
         EasyEcsAnalyzer.NotComparable, EasyEcsAnalyzer.NotDisableable, EasyEcsAnalyzer.RefAcrossChange,
         EasyEcsAnalyzer.RefusedInPass, EasyEcsAnalyzer.RemovedRequired, EasyEcsAnalyzer.SecondGroup,
-        EasyEcsAnalyzer.SlicedFilter, EasyEcsAnalyzer.UpdateInPass);
+        EasyEcsAnalyzer.SlicedFilter, EasyEcsAnalyzer.UpdateInPass, EasyEcsAnalyzer.EntryPointNotImported);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeUsage(context);
 }

@@ -76,7 +76,12 @@ HugePages.cs                 the large pinned arrays of the tables on 2 MiB page
                              capacity or a copy sized (not doubling steps): allocated uninitialized, the 2 MiB-aligned
                              interior advised MADV_HUGEPAGE, each untouched 2 MiB dropped (MADV_DONTNEED), each resident
                              one (mincore) zeroed in place; not collapsed (MADV_COLLAPSE costs kernel time); Enabled
-                             where THP is not "never", off after a failed call
+                             where THP is not "never", off after a failed call; Populate: the arrays of a user's
+                             reservation (Reserve, EnsureEntityCapacity, the initial capacity: columns, entity rows,
+                             records, free-id list) faulted in (MADV_POPULATE_WRITE, Linux 5.14+, on 4 KiB pages too,
+                             the 2 MiB windows mincore shows resident skipped), so the rows it made room for are
+                             written without a fault; arrays a call writes whole at once (load, restore, snapshot,
+                             CreateEntities) are left to the first touch; Prefault off after a failed call
 StreamingStores.cs           the non-temporal stores of generated vector loops (a column the method writes without
                              reading, past the last-level cache): Pays (the gate, once per run: MinRows, the table's rows
                              of the method's columns past CacheSizes.LastLevel), Head (the rows to the first aligned
@@ -144,7 +149,8 @@ ScheduleInfo.cs              what World.DescribeSchedule returns (groups, stages
                              pairs) and its ToString / ToMermaid
 World.cs                     entity lifecycle (create/destroy, id recycling, lookup, enumeration, Instantiate of a
                              Prefab, with given components too, and Entity.Clone: one row copy, CloneRow; Reserve and
-                             ReserveBuffers of a prefab: its tables, and the pools of the buffer lists its instances take)
+                             ReserveBuffers of a prefab: its tables, and the pools of the buffer lists its instances take);
+                             TakeCollected / ReturnCollected: ForEachCollected's id arrays past 64, one per nesting level
 World.Defaults.cs            TypeDefaults: the setup a type declares ([GroupBy], [WhenTargetDestroyed]), applied by
                              every world from its first table holding the type (rules pending until a destroy or
                              the index needs them); what a world set up itself is never overridden
@@ -188,7 +194,7 @@ RowOrder.cs                  ordered tables: IRowOrder<T> (a key and a box point
                              per cluster (8 rows with 256-bit vectors, 4 on ARM64, or the size a request asks), widened
                              where a row moves in, reset by a restore)
 RowClusters.cs               RowClusters: the read path of one ordered table (clusters, boxes per axis, columns, ids,
-                             Pairs: the cluster pairs within a cutoff, a sweep) and ClusterPair
+                             Pairs: the cluster pairs within a cutoff, a sweep over scratch kept per thread) and ClusterPair
 Pairs.cs                     [Neighbor] (a pair method's other entity) and the pass of a pair method: IPairJob (the
                              generated job: the cutoff, per row or one, and its run over a table against another),
                              PairRun (one table against one: clusters of Vector<float>.Count rows, their lane masks,
@@ -248,7 +254,8 @@ Archetype.cs                 a table: mask, EntitySlot rows (version + id), one 
                              columns pinned and 64-byte aligned), presence bits + absent counts per column,
                              per-bit and per-signature add transitions (copy plans); swap-remove / tombstones,
                              FillHoles, Permute (a re-sort: every column, presence bit, change tick and slot,
-                             gathered into a spare and swapped in: ColumnSpares, one per array type and length);
+                             gathered into a spare and swapped in: ColumnSpares, one per array type and length, which also
+                             holds the sort's scratch: keys, rows, words, never ArrayPool.Shared);
                              change-tick summaries (LastWrite per column, WordTicks per 64 rows, BlockTicks
                              per 4,096 rows for writes and for removals), Stamp/StampRows/StampWord/SetTick,
                              MarkPresent/MarkAbsent, CloneRow; Resize (growth and Trim, which shrinks a table to a

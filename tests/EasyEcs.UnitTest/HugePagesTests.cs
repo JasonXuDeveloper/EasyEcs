@@ -14,20 +14,23 @@ public record struct PageLink(EntityId Target) : IComponent;
 /// Large pinned arrays on 2 MiB pages (HugePages): zeroed whatever the memory held before, backed by huge pages where
 /// transparent huge pages are on, and worlds, lookups and snapshots reading the same values either way.
 /// </summary>
-public class HugePagesTests
+public partial class HugePagesTests
 {
     private const int Many = 600_000; // 9.6 MB of entity records, 2.4 MB per int column: past one huge page each
 
     [Test]
-    public void ArraysAreZeroedOverMemoryUsedBefore([Values(false, true)] bool huge, [Values(64 << 10, (6 << 20) + 4093)] int length)
+    public void ArraysAreZeroedOverMemoryUsedBefore([Values(false, true)] bool huge, [Values(false, true)] bool prefault,
+        [Values(64 << 10, (6 << 20) + 4093)] int length)
     {
-        bool was = HugePages.Enabled;
+        bool was = HugePages.Enabled, populated = HugePages.Prefault;
         HugePages.Enabled = huge && was;
+        HugePages.Prefault = prefault && populated;
         try
         {
             for (int round = 0; round < 4; round++)
             {
                 var array = HugePages.AllocatePinned<byte>(length);
+                HugePages.Populate(array); // a no-op when prefault is off
                 Assert.That(array.Length, Is.EqualTo(length));
                 Assert.That(array.AsSpan().IndexOfAnyExcept((byte)0), Is.EqualTo(-1), $"round {round}");
                 array.AsSpan().Fill(0xA5); // dirty the memory the next round may be handed
@@ -35,14 +38,100 @@ public class HugePagesTests
             }
 
             var records = HugePages.AllocatePinned<EntityMeta>((5 << 20) / 16 + 3);
+            HugePages.Populate(records);
             for (int i = 0; i < records.Length; i++)
                 Assert.That(records[i].Archetype == null && records[i].Version == 0 && records[i].Slot == 0, Is.True, $"record {i}");
         }
         finally
         {
             HugePages.Enabled = was;
+            HugePages.Prefault = populated;
         }
     }
+
+    [Test]
+    public unsafe void PopulatedArraysAreResident([Values(false, true)] bool huge)
+    {
+        if (!HugePages.Prefault) Assert.Ignore("MADV_POPULATE_WRITE is not available here (not Linux, or a kernel before 5.14)");
+        bool was = HugePages.Enabled;
+        HugePages.Enabled = huge && was;
+        try
+        {
+            var array = HugePages.AllocatePinned<byte>(16 << 20);
+            HugePages.Populate(array);
+            Assert.That(ResidentPages(array), Is.EqualTo(array.Length / 4096).Within(2), "every page faulted in before the first touch");
+            Assert.That(array.AsSpan().IndexOfAnyExcept((byte)0), Is.EqualTo(-1));
+
+            // Populating an array the process wrote keeps its values.
+            var rows = new long[1 << 20];
+            for (int i = 0; i < rows.Length; i++) rows[i] = i * 3L;
+            HugePages.Populate(rows);
+            for (int i = 0; i < rows.Length; i++) Assert.That(rows[i], Is.EqualTo(i * 3L));
+        }
+        finally
+        {
+            HugePages.Enabled = was;
+        }
+    }
+
+    [Test]
+    public void AReservationFaultsInItsColumnsAndRecords()
+    {
+        if (!HugePages.Prefault) Assert.Ignore("MADV_POPULATE_WRITE is not available here (not Linux, or a kernel before 5.14)");
+        using var world = new World();
+        world.Reserve<PageMark, PageLink>(2 * Many); // 4.8 MB per int column: past the two huge pages Populate starts at
+        var table = world.CreateEntity(new PageMark(1), new PageLink()).LocateArchetype(out _, true);
+        for (int c = 0; c < table.Columns.Length; c++)
+        {
+            var column = (byte[])table.Columns[c];
+            Assert.That(ResidentPages(column), Is.EqualTo(column.Length / 4096).Within(2), $"column {c}");
+        }
+
+        Assert.That(ResidentPages(table.Slots), Is.EqualTo(table.Slots.Length * 8 / 4096).Within(2), "entity rows");
+        Assert.That(ResidentPages(world.Meta), Is.EqualTo(world.Meta.Length * 16 / 4096).Within(2), "entity records");
+    }
+
+    [Test]
+    public void ReservedWorldsReadTheSameWithAndWithoutPrefault([Values(false, true)] bool prefault)
+    {
+        bool populated = HugePages.Prefault;
+        HugePages.Prefault = prefault && populated;
+        try
+        {
+            using var world = new World();
+            world.Reserve<PageMark, PageLink>(Many);
+            world.EnsureEntityCapacity(Many);
+            var entities = new Entity[Many];
+            world.CreateEntities(entities, new PageMark(0), new PageLink());
+            for (int i = 0; i < entities.Length; i++) entities[i].Get<PageMark>() = new PageMark(i);
+            for (int i = 0; i < entities.Length; i += 2) entities[i].Destroy();
+            long sum = 0;
+            foreach (var entity in world.Entities) sum += entity.Get<PageMark>().Value;
+            Assert.That(world.EntityCount, Is.EqualTo(Many / 2));
+            Assert.That(sum, Is.EqualTo((long)Many * Many / 4)); // the odd rows: 1 + 3 + ... + (Many - 1)
+        }
+        finally
+        {
+            HugePages.Prefault = populated;
+        }
+    }
+
+    /// <summary>The resident 4 KiB pages of the whole pages inside <paramref name="array"/> (mincore).</summary>
+    private static unsafe int ResidentPages<T>(T[] array) where T : struct
+    {
+        nuint data = (nuint)Unsafe.AsPointer(ref Unsafe.As<T, byte>(ref MemoryMarshal.GetArrayDataReference(array)));
+        nuint start = (data + 4095) & ~(nuint)4095;
+        nuint end = (data + (nuint)((long)array.Length * Unsafe.SizeOf<T>())) & ~(nuint)4095;
+        var residency = new byte[(int)((end - start) / 4096)];
+        fixed (byte* r = residency)
+            if (mincore((void*)start, end - start, r) != 0) return -1;
+        int resident = 0;
+        foreach (byte b in residency) resident += b & 1;
+        return resident + 1; // the partial pages at either end, counted as one
+    }
+
+    [LibraryImport("libc.so.6", EntryPoint = "mincore")]
+    private static unsafe partial int mincore(void* address, nuint length, byte* residency);
 
     [Test]
     public void OnLinuxTheKernelBacksALargeArrayWithHugePages()

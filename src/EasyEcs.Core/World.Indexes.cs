@@ -113,7 +113,7 @@ public sealed partial class World
         if (table.HasCleanup && table.ColumnIndex(RetiredBit) < 0)
         {
             var retired = (table.GetAddEdge(RetiredBit) ?? CreateEdge(table, RetiredBit)).Target;
-            retired.Reserve(retired.Count + count);
+            retired.Reserve(retired.Count + count, false); // filled only by destroys, perhaps never: not faulted in
         }
 
         var components = table.Components;

@@ -99,7 +99,7 @@ public partial class LookupOrderBenchmark
     }
 
     [Benchmark]
-    public void Chase() => EasyEcs.Benchmark.Locality.Chase.Hunt(_hunters); // the generated entry point binds through the type name, not an alias
+    public void Chase() => Hunters.Hunt(_hunters);
 
     [Benchmark]
     public void Gather() => Seeking.Bearing(_seekers);

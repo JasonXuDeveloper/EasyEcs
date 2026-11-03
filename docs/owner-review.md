@@ -90,3 +90,70 @@ What would change the verdict: the owner prefers other names (rename before the 
   pays for turning already turns with `tile.Sweep` (the scent). What would change the verdict: a field written with
   `Rows()` whose sweeps fall by far more than the 18 % here when turned, or a machine with counters showing the loss
   is not the access order.
+
+## Page faults: what was tried and not kept (feat-page-faults, 2026-10-31)
+
+The owner asked for fewer page faults on top of huge pages. Counted first (PageFaultBenchmark with the
+`PageFaultDiagnoser` columns: `minflt` / `stime` of the process, `thp_fault_alloc` and the other THP counters of the
+machine, per op). Kept: the arrays of a user's reservation are faulted in at the reservation (`MADV_POPULATE_WRITE`, see the
+decision draft in `docs/plans/docs-todos.md`, "feat-page-faults"). Not kept, each with the cause found:
+
+- **Prefault to cut the cost of huge-page faults.** One `MADV_POPULATE_WRITE` call costs what the first touch costs
+  with 2 MiB pages: 128 MiB of memory freed 4 s earlier, 536 ms touched against 572 ms populated (PrefaultTouchBenchmark,
+  the spread 41-50 ms). The time is the host's, not the guest's: the reference VM (Firecracker, virtio-balloon free
+  page reporting at order 9) hands free 2 MiB blocks back to its host, a huge page needs exactly such a block, and the
+  host faults it back 4 KiB at a time (stime 187 ms of the 536). With 4 KiB pages the same touch takes 67 ms (most
+  4 KiB allocations come from blocks never reported), and populating them saves the trap per page (53 ms, 1.27x). So
+  prefault moves the faults (what is kept: out of the tick that fills a reservation) but cannot make a huge page
+  cheaper on such a VM. What would change the verdict: a host that does not report free pages (bare metal, most
+  cloud VMs), where a huge page faults at memory speed and nothing is left to cut.
+- **Prefaulting every sized array** (copies included: a load's, a restore's and a snapshot's tables, the rows of
+  `CreateEntities`). A load at 1M entities with huge pages was 1.04-1.06x slower in two rounds: populating zeroes the
+  whole array before the copy writes it, out of the cache by then, where a first-touch fault zeroes each page right
+  before the copy writes it. Nothing is gained either, since the same call writes every row: the faults stay in
+  the call. Kept instead: only a user's reservation (rows written later) is faulted in. The resident-window walk
+  (populating memory the GC handed back resident) was the other cost found: skipped through `mincore`.
+- **Keeping a disposed world's columns for the next world** (a process-wide spare list of exact lengths, 1 GiB at most,
+  given at `Dispose`, taken by `ComponentInfo.Create`). The allocations halved (Create 16M 732 → 366 MB) but the faults
+  did not move (31,252 against 31,257 per op) and the ops were no faster (Create 16M 1.06x slower, InstantiateEach 16M
+  1.08x slower, `--dev`): the GC already hands a freed large array's memory back resident (a 128 MiB pinned array
+  allocated again after a collection faults 0 pages), so the spares only replaced the GC's own reuse and added a
+  clear. The faults left come from the other arrays (entity records, a table's entity rows, the free-id list: other
+  types, which a typed spare cannot serve) and from the GC committing a new region while the previous world is not yet
+  collected. Reusing a column inside one world (its next resize) never meets a spare of the size: doubling only grows.
+  What would change the verdict: a workload that disposes and recreates worlds of one shape faster than the GC
+  collects (a match server whose matches are past the large object heap's budget), measured.
+- **The GC's settings** (host choices, never set by the library; written up for users in the docs to-dos): at 16M
+  entities `GCRetainVM` changed no count (the faults are not memory the GC decommitted), `GCgen0size` none (the
+  arrays are on the large and pinned heaps), `GCConserveMemory=5` added 20-65 % faults and made Grow, Load, Capture
+  and InstantiateEach 1.2-1.6x slower, the segments GC (`GCName=libclrgc.so`) tripled the faults of a load and an
+  InstantiateEach (it releases large segments at once) and made Capture 1.5x and InstantiateEach 1.2x slower
+  (`--dev`, one launch each).
+
+## `[Accumulate]` users sharing a stage (backlog Later, voxel-rewrite.md GA2; feat-later-accumulate, 2026-11-02)
+
+**Not built: no stage is lost to an `[Accumulate]` singleton.** The proposal: systems that only add into one
+`[Accumulate]` singleton do not conflict, share a stage, and their pass results are combined into the singleton in
+registration order when the stage ends. The backlog's condition was the VoxelServer's `--schedule` showing stages lost
+to its `Stats`. It shows none (784260d, `dotnet run -c Release --project samples/VoxelServer -- --schedule`):
+
+- 45 systems in 42 stages; 29 systems run alone (an `Entity` or `World` parameter, an `OnUpdate`, a `[Consume]` or
+  `MaxRows` method, no `[ForEach]`), and every one of them that writes `Stats` runs alone for those reasons, not
+  for `Stats` (AoiView, AoiChunk, AoiSpawn, AoiDespawn, ChunkRead, ChunkGenerate, ChunkSave, ZombieDeath, PlayerRespawn,
+  Dig, Pickup, ItemExpiry, NightSpawn, ZombieAttack, SendPackets, Tally).
+- The three systems that add to a total without running alone are WaterCommit (`Filled`), Float (`Carried`) and
+  SendChunks (`Stats`). Their neighbours in registration order run alone (WaterSleep, ZombieAttack, PlayerRespawn,
+  AoiDespawn, ChunkSent) or conflict on components (Float before Physics: `Position`, `Velocity`). Among the
+  "registration order only" pairs, none names `Stats`, `Filled` or `Carried`.
+- After the rewrite (step 2 of voxel-rewrite.md: `Filled` and `Carried` folded into `[Accumulate] Stats`), the same
+  holds: WaterCommit is deleted by the ping-pong step, Float still sits between a system that runs alone and one it
+  conflicts with on components, and ZombieDeath, which the rewrite turns into a vector loop with marked rows, runs alone
+  as such a loop does. BattleServer's `Battle` is written by one non-alone system
+  (Replication) and by `OnUpdate` / `Entity` methods.
+
+So the cause of the VoxelServer's serial stages is systems that run alone, not totals; a shared-total rule would merge
+no stage there. What would change the verdict: a world where two consecutive systems that do not run alone conflict
+only on one `[Accumulate]` singleton (the schedule's "Registration order only" line names just that singleton), for
+example a sample whose per-kind counters move from separate singletons into one total. The design stays as GA2 states
+it (each pass's result kept per system, combined in registration order at the stage end, so the total is the bits of
+the serial run).

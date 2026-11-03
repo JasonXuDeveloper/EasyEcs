@@ -343,11 +343,52 @@ public class MaxRowsTests
         {
             world.Update();
             world.RemoveAll<Parked>();                                       // the next run raises the first three again
-            world.ForEachCollected<Level, ForEachCollectedJob>(ref job, 100);  // past the stack: an array of the pool
+            world.ForEachCollected<Level, ForEachCollectedJob>(ref job, 100);  // past the stack: the world's array
         }
 
         Allocations.WarmUp(Step, 50);
         Assert.That(Allocations.Of(Step), Is.Zero);
+        // Past 64 ids the array is the world's: a rent from ArrayPool.Shared allocated after every gen2 collection of a
+        // loaded machine (the pool drops its arrays then).
+        Assert.That(Allocations.PoolRents(Step), Is.Zero, "rents of the collected ids");
+    }
+
+    [Test]
+    public void ARunInsideARunKeepsItsOwnIds()
+    {
+        using var world = new World();
+        for (int i = 0; i < 150; i++) world.CreateEntity(new Level(i));
+        var outer = new OuterCollectedJob { World = world };
+        void Step()
+        {
+            outer.Rows = outer.Inner = 0;
+            world.ForEachCollected<Level, OuterCollectedJob>(ref outer, 100);
+        }
+
+        Step();
+        // Each of the outer run's 100 rows ran the inner run over 120 rows: the inner ids never overwrote the outer ones.
+        Assert.That((outer.Rows, outer.Inner), Is.EqualTo((100, 100 * 120)));
+        Allocations.WarmUp(Step, 5);
+        Assert.That(Allocations.Of(Step), Is.Zero);
+        Assert.That(Allocations.PoolRents(Step), Is.Zero, "rents of the collected ids");
+        Assert.That((outer.Rows, outer.Inner), Is.EqualTo((100, 100 * 120)));
+    }
+
+    /// <summary>A job run on collected rows that runs another collected run from each row (nesting level 2).</summary>
+    private struct OuterCollectedJob : IForEachEntity<Level>
+    {
+        public World World;
+        public int Rows, Inner;
+
+        public static int WriteMask => 0;
+
+        public void Execute(Entity entity, ref Level level)
+        {
+            Rows++;
+            var inner = new ForEachCollectedJob();
+            World.ForEachCollected<Level, ForEachCollectedJob>(ref inner, 120);
+            Inner += inner.Rows;
+        }
     }
 
     /// <summary>A hand-written job run on collected rows: counts them.</summary>

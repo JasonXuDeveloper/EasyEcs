@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -287,7 +286,8 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
     /// <summary>
     /// The keys as <typeparamref name="TBits"/> (an unsigned integer as wide as the key or wider), their byte histograms
     /// in the same pass, then one stable scatter per key byte whose values differ (a byte every row shares is skipped:
-    /// a Morton key of a small map sorts in its low bytes only), ping-ponging between two buffers of the array pool.
+    /// a Morton key of a small map sorts in its low bytes only), ping-ponging between two buffers of the world's scratch
+    /// (<see cref="ColumnSpares.Scratch{T}"/>).
     /// </summary>
     private bool Order<TBits>(Archetype table, int column, EntityMeta[] meta, ColumnSpares spares)
         where TBits : unmanaged, IBinaryInteger<TBits>, IUnsignedNumber<TBits>
@@ -295,8 +295,9 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
         int n = table.Count, bytes = Math.Clamp(TOrder.KeyBytes, 1, Unsafe.SizeOf<TBits>());
         float cell = Cell;
         if (n < 2) return false;
-        var keys = ArrayPool<TBits>.Shared.Rent(n);
-        var rows = ArrayPool<int>.Shared.Rent(n);
+        int role = Unsafe.SizeOf<TBits>() == 4 ? ColumnSpares.Keys32 : ColumnSpares.Keys64; // then its other buffer
+        var keys = spares.Scratch<TBits>(role, n);
+        var rows = spares.Scratch<int>(ColumnSpares.Rows, n);
         Span<int> counts = stackalloc int[bytes * 256];
         counts.Clear();
         ref T row0 = ref table.Data<T>(column);
@@ -316,15 +317,9 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
             for (int b = 0; b < bytes; b++) counts[(b << 8) + (int.CreateTruncating(key >> (b << 3)) & 0xFF)]++;
         }
 
-        if (sorted)
-        {
-            ArrayPool<TBits>.Shared.Return(keys);
-            ArrayPool<int>.Shared.Return(rows);
-            return false;
-        }
-
-        var keys2 = ArrayPool<TBits>.Shared.Rent(n);
-        var rows2 = ArrayPool<int>.Shared.Rent(n);
+        if (sorted) return false;
+        var keys2 = spares.Scratch<TBits>(role + 1, n);
+        var rows2 = spares.Scratch<int>(ColumnSpares.OtherRows, n);
         TBits[] fromKeys = keys, toKeys = keys2;
         int[] fromRows = rows, toRows = rows2;
         for (int b = 0; b < bytes; b++)
@@ -352,10 +347,6 @@ internal sealed class RowOrder<T, TOrder>(int axes, float cell, int interval, fl
         }
 
         table.Permute(fromRows.AsSpan(0, n), meta, spares);
-        ArrayPool<TBits>.Shared.Return(keys);
-        ArrayPool<TBits>.Shared.Return(keys2);
-        ArrayPool<int>.Shared.Return(rows);
-        ArrayPool<int>.Shared.Return(rows2);
         return true;
     }
 

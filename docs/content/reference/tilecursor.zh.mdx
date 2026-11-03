@@ -29,6 +29,14 @@ public ref readonly TCell this[int dx, int dy, int dz] { get; }
 
 ## 方法 [#methods]
 
+### `Columns` [#columns]
+
+```csharp
+public TileColumnWalk<TCell, TTile> Columns(int step);
+```
+
+这一行从 0 起、每 `step` 个格子一列、直到 Width 为止的各列，用 `foreach` 遍历（`foreach (var col in c.Columns(4))`，每列一个 4 个 float 的向量）：每一列是停在该列的游标，加载的偏移从这一列算起，`col.Store(vector, into)` 把结果写进步进写的那一行的这一列。遍历知道自己的第一列和最后一列，所以常量偏移的加载只由 JIT 检查，存储只比较一次行的长度；同一列的加载共用一个地址，每个偏移折进指令里：正是模板手写在自己纹理上的那种循环。每列 O(1)；`step` 不在 1 到 Width 之间时抛出异常。
+
 ### `Load128` [#load128]
 
 ```csharp

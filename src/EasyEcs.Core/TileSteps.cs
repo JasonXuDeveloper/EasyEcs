@@ -209,6 +209,14 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     {
         _membership = _index.Membership;
         _wokenOnly = false; // a tile that joined steps first in a walk of every tile
+        // The queues and the walk sized for every tile of the grid: a tile is queued once per color until walked, so
+        // however many tiles of a color wake at once (a source reaching a part of the grid it never reached), a pass
+        // never grows them. 8 bytes per tile for the walk and 4 per tile and color, next to a tile's cells; Wake's
+        // growth stays for the indexes of tiles that left, which may sit in a queue until it is walked.
+        int tiles = _world.Count<DynamicBuffer<TCell>, TGrid>();
+        if (_walk.Length < tiles) _walk = new EntityId[tiles];
+        for (int c = 0; c < _queues.Length; c++)
+            if (_queues[c].Length < tiles) Array.Resize(ref _queues[c], tiles);
         var entries = _entries;
         for (int i = 0; i < entries.Length; i++)
         {
@@ -456,6 +464,9 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         return true;
     }
 
+    /// <summary>The slots of the tiles around one (<see cref="Entry.Around"/>): up to the highest of the neighborhood's slot mask.</summary>
+    private static int AroundSlots => 32 - BitOperations.LeadingZeroCount(TileOffsets<TTile>.SlotMask);
+
     /// <summary>A tile steps for the first time at its index: its state, awake, any row of its cells possibly set.</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Join(ref Entry entry, Entity tile)
@@ -474,6 +485,9 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         entry.Dirty = true;
         entry.FrontRows ??= new ulong[TTile.Height];
         entry.NextRows ??= new ulong[TTile.Height];
+        // The ids across its edges a step keeps for Next, set up here with the rest: a tile may change for the first
+        // time long after it joined (a source wandering into it), which must not allocate in the pass.
+        entry.Around ??= new EntityId[AroundSlots];
         entry.FrontRows.AsSpan().Fill(AllRows);
         entry.NextRows.AsSpan().Fill(AllRows);
     }
@@ -553,7 +567,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         if (!_sleeps) return;
         // The tiles across the edges that changed wake after this color (Next): the ids the step's exchange found, kept
         // in the tile's own state (no lookup in Next, and no memory another thread writes).
-        var ids = entry.Around ??= new EntityId[32 - BitOperations.LeadingZeroCount(TileOffsets<TTile>.SlotMask)];
+        var ids = entry.Around; // set up when the tile joined
         for (uint slots = TileOffsets<TTile>.Facing(entry.Edges) & TileOffsets<TTile>.SlotMask; slots != 0; slots &= slots - 1)
         {
             int slot = BitOperations.TrailingZeroCount(slots);
