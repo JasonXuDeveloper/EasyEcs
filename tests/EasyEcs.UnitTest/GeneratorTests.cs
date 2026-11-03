@@ -528,7 +528,7 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("internal struct AJob0 : global::EasyEcs.IForEachBatch<global::F>, global::EasyEcs.INoStructuralChanges")
             .And.Contain("ref readonly global::G __p1 = ref s1.Value;")
             .And.Contain("var l2 = a2;")
-            .And.Contain("l2.Combine(__v);")
+            .And.Contain("l2.Value.N = unchecked((int)(l2.Value.N + global::System.Numerics.Vector.Sum(__a2_0)));")
             .And.Contain("static bool global::EasyEcs.IForEachBatch<global::F>.Merges => true;")
             .And.Contain("world.ForEachBatchParallel<global::F, __ForEach.AJob0>(ref job0, in __ForEach.AFilter0);")
             .And.Not.Contain("ulong pass"), generated);
@@ -749,9 +749,11 @@ public class GeneratorTests
         foreach (var line in lines) Assert.That(generated, Does.Contain(line), generated);
     }
 
-    // A reduction: one accumulator per lane and field from T.Identity, folded into the run's partial result in lane order.
+    // A reduction: one accumulator per lane and field from T.Identity, each field folded on its own into the run's
+    // partial result (T.Combine combines field by field): a sum as the lanes' horizontal sum, a Min / Max in lane order,
+    // with no call of Combine per lane.
     [Test]
-    public void AReductionFoldsItsLanesInLaneOrder()
+    public void AReductionFoldsEachFieldOnItsOwn()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
             "[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Count> c) { if (p.V > 0) c.Value.N += p.V; c.Value.Low = System.Math.Min(c.Value.Low, p.V); } }"),
@@ -763,9 +765,9 @@ public class GeneratorTests
             .And.Contain("var __a1_1 = global::System.Numerics.Vector.Create<int>(__id1.Low);")
             .And.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect(__m0, (__a1_0 + __c1_0), __a1_0);")
             .And.Contain("__a1_1 = global::System.Numerics.Vector.Min(__a1_1, __c1_0);")
-            .And.Contain("for (int __j = 0; __j < global::System.Numerics.Vector<int>.Count; __j++)")
-            .And.Contain("__v.N = __a1_0[__j];")
-            .And.Contain("l1.Combine(__v);"), generated);
+            .And.Contain("l1.Value.N = unchecked((int)(l1.Value.N + global::System.Numerics.Vector.Sum(__a1_0)));")
+            .And.Contain("for (int __j = 0; __j < global::System.Numerics.Vector<int>.Count; __j++) l1.Value.Low = global::System.Math.Min(l1.Value.Low, __a1_1[__j]);")
+            .And.Not.Contain("Combine(__v)"), generated);
         // In a masked word each write of an accumulator leaves the lanes that do not pass as they were: no select after.
         Assert.That(generated, Does.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect((__m0 & __pass), (__a1_0 + __c1_0), __a1_0);")
             .And.Contain("__a1_1 = global::System.Numerics.Vector.ConditionalSelect(__pass, global::System.Numerics.Vector.Min(__a1_1, __c1_0), __a1_1);")
@@ -808,11 +810,11 @@ public class GeneratorTests
         var compilation = Compile().AddSyntaxTrees(reduction, systems);
         var driver = Driver().RunGenerators(compilation);
         string Generated() => driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
-        Assert.That(Generated(), Does.Contain("l1.Combine(__v);"));
+        Assert.That(Generated(), Does.Contain("l1.Value.N = unchecked((int)(l1.Value.N + global::System.Numerics.Vector.Sum(__a1_0)));"));
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(reduction, CSharpSyntaxTree.ParseText(
             reduction.ToString().Replace("N = a.N + b.N", "N = a.N"), Parse)));
         Assert.That(Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason), Has.Some.EqualTo(IncrementalStepRunReason.Modified));
-        Assert.That(Generated(), Does.Not.Contain("l1.Combine(__v);").And.Not.Contain("Vector.IsHardwareAccelerated"));
+        Assert.That(Generated(), Does.Not.Contain("Vector.Sum(__a1_0)").And.Not.Contain("Vector.IsHardwareAccelerated"));
     }
 
     [Test]
