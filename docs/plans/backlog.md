@@ -520,7 +520,12 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       actionable here: Unity support waits for a Unity release on .NET 10; the toolchain item is a standing rule.
 - [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 2 MiB columns done on `feat-later-memory` (pinned arrays
       advised before first touch, reserved and copied ones only; 16M chases 1.28-1.67x, Create / Grow equal; docs-todos
-      "feat-later-memory"); #157 the #138 recommendations: done on feat-later-accumulate (table below); #159 remaining research.
+      "feat-later-memory"); #157 the #138 recommendations: done on feat-later-accumulate (table below); #159 remaining research: done on
+      feat-later-research (borrowed-ideas.md "#159 remainder": the ideas already in EasyEcs listed with their records;
+      `Emit<T>` lists padded apart built and reverted, a wash (1 of 16 pooled lists shared a line); native memory for
+      columns measured by `NativeColumnsBenchmark`, glibc 1.4-2.4x slower past 1M rows, not built, owner-review.md;
+      the helpers' queue line and thread pinning need a quieter or larger machine, owner-review.md; nothing for
+      feat-inner-loops).
 - [x] **#157, the #138 recommendations** (feat-later-accumulate; the #138 report's "Recommended, not built" list, and its
       stencil items). Numbers: BenchmarkDotNet, six processes per case for the small ones, sides forward then backward.
 

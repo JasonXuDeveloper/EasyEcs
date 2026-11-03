@@ -2372,3 +2372,21 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   the generator cannot vectorize, measured against its per-row twin under a sparse filter. Roadmap "Dropped" names it.
 - guide/parallel (or wherever a parallel pass's cost is described) + zh: a parallel `[ForEach]` over a small table
   costs about a serial pass (no chunking below 64 rows in one table).
+
+## feat-later-research (#159 remainder: HPC, vLLM, database, low-latency and allocator ideas)
+
+No user-visible change (the one core change was reverted), so no changelog, migration or guide entry. Records:
+
+- decisions.mdx + .zh (dropped, with numbers; text in borrowed-ideas.md "#159 remainder"): padding the chunks'
+  `Emit<T>` lists apart (false sharing): a wash, EmitParallel 100,000 0.96x / 1.11x across two rounds with the
+  controls moving as much; the cause measured: the pooled lists are 56 bytes, so one pair in 16 shared a line.
+- decisions.mdx + .zh (dropped): the core's unmanaged columns on native memory (`NativeMemory`, mimalloc): glibc's
+  malloc 1.4x slower at 1M rows and 2.4x at 4M (3-6x the page faults; the GC keeps freed memory resident), faster
+  only when the C runtime happens to keep it resident; the upside is world creation only (owner-review.md).
+- D22 / D125 (or the record that describes the runner): name the ideas the runner already holds under their field
+  names for readers who search them (busy-poll with a spin budget, padded claim cursor, morsels), and say that the
+  helpers' queue counter sharing a line with its gate is under 1 % (owner-review.md).
+- roadmap.mdx + .zh "Dropped": the two records above; value zone maps (no write hook: a `ref` write leaves a block's
+  bounds stale) and dictionary encoding of keys (`IDirectMapped<TKey>` is the dense key) with their reasons.
+- benchmarks page or performance page (if it lists prototypes): `NativeColumnsBenchmark` is an A/B-only class, not for
+  the site.

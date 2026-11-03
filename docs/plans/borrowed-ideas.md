@@ -383,3 +383,116 @@ measured. A world whose tables are each under the cache never streams (the gate 
 its peak of fused multiply-adds on the widest vector and on `Vector<float>`); `audit-perf`, "Roofline", has the
 method, this VM's roofs and KernelBenchmark's Integrate, Count, Step and Wave placed on it (Integrate and Count at the
 L2's bandwidth, Step near the ridge, Wave compute-bound).
+
+## #159 remainder (feat-later-research, 2026-11-03)
+
+Backlog #159 asked for the ideas of HPC, vLLM, databases, low-latency systems and allocators (NativeMemory, mimalloc)
+that sections 1 and 5 do not hold, each built where it has a hot path and a plausible win. This is what was left,
+checked against the code (at 49c8d6f), `decisions.mdx`, the roadmap's "Dropped" list and `owner-review.md`.
+
+### Already in EasyEcs or measured before (not redone)
+
+| Field | Idea | Where it is | Record |
+|---|---|---|---|
+| vLLM | paged blocks (PagedAttention's block table) for columns | columns are contiguous arrays: pages add an indirection to every handle access and save only the copy on growth, which `Reserve` removes | D7, D28 |
+| vLLM | paged blocks for `DynamicBuffer<T>` | `BufferStore<T>` holds one `T[]` per list; paged blocks were weighed in D124 and rejected: `AsSpan` / `AsReadOnlySpan` hand out one contiguous span (public API), which a list spread over blocks cannot | D124 (docs-todos "feat-cow-buffers") |
+| vLLM | prefix sharing / copy-on-write blocks | prefab instances, clones and snapshots share a buffer's list until written (`BufferStore.Shares`); shared component values were dropped (a write through a shared value is invisible to change tracking) | D124, D14 |
+| Databases | zone maps | per-column change-tick summaries: `WordTicks` per 64 rows, `BlockTicks` per 4,096 (Archetype.cs), skipped by `RowFilter`; cluster boxes of ordered tables (`RowClusters`, the spatial zone map of a pair pass) | D23, locality.md |
+| Databases | zone maps on values (min / max of a column per block, to skip blocks a condition rejects) | not built: a `[ForEach]` method writes by `ref`, with no hook between the write and the column, so a block's bounds would be stale after any pass; keeping them means a store per write (what `Mut<T>` pays for ticks) for a skip only conditions on that field can use. The vector loop reads 8 rows per instruction; a skipped block saves bandwidth only on columns past the L2 (roofline) | - |
+| Databases | morsel-driven parallelism | chunks of 64-row multiples claimed from one cursor, sized by the rows' measured cost (5-25 µs, at most 64 per thread); the NUMA half is in section 3 | D125, D130 |
+| Databases | late materialization | the row form hands the method refs (a column is read only where the method reads it); the vector loop's masked form starts from the rows that pass (D126); skipping a vector whose mask is empty before loading the other columns was measured and dropped (feat-microarch M2 candidate 5: BattleServer 1.09-1.10x slower) | D126, microarch.md |
+| Databases | dictionary encoding of keys | `IDirectMapped<TKey>`: a dense key is its own slot (no hash); a hashed key (`ValueIndex._heads`, a `Dictionary<TKey, IndexHead>`) is probed once per lookup, and encoding it to an int would be a second probe at write time for the same result. A user with string keys interns them to ints in a component, which is the dense key | D71, D24 |
+| Databases | radix-partitioned chases | ordered rows by target (locality.md L1, LookupOrderBenchmark) | locality.md |
+| Low latency | busy-poll with a spin budget before parking | `Workers.Spin`: 100 µs of `SpinWait` (yielding), then a park on the thread's own event; 35, 50 and 200 µs and one spinning helper at a time measured and dropped | D22, D125 |
+| Low latency | cache-line-padded counters | `Runner.Claims`: the claim cursor alone on its line, the sums on the next; `Reduce<T>` partials are locals of each chunk's job, never shared | D125, Reduce.cs |
+| TBB | work stealing, affinity partitioner | one shared cursor, one compare-and-swap per chunk of 5-25 µs; the affinity partitioner measured and dropped | D125 |
+| Kokkos | layout as a parameter (LayoutLeft / Right, AoSoA) | struct-of-arrays columns, interleaved loads of 2-4 field components (`Interleaved.cs`); `[Layout(Soa)]` storage measured and dropped | D90 |
+| Legion | privileges on regions | `SystemAccess` read / write sets cut the stages | D76 |
+| Allocators | size classes, per-thread pools | `BufferStore<T>` per-thread free lists in batches of 32 (D32) with a pool limit per element type (D65); `ValueIndex` spares by log2 length; `ColumnSpares` per array type and length | D32, D65 |
+| Allocators | huge pages, prefaulting | #164 (`HugePages.AllocatePinned`), feat-page-faults (`MADV_POPULATE_WRITE`) | sections 1 and 5 |
+
+### New here, each with where it applies and its proof
+
+1. **False sharing between the chunks' `Emit<T>` lists** (low latency, LMAX "mechanical sympathy"). `Emit<T>.Add`
+   (src/EasyEcs.Core/Emit.cs) writes `store.Count` of its chunk's `EmitStore<T>` on every record. The pool
+   (`EmitPool<T>`) allocates its lists one after another, each followed by its first 16-element array; once a
+   collection compacts away those arrays, lists can sit side by side and two chunks' counts share a cache line.
+   Built: a cache line of padding after `EmitStore<T>`'s fields (a 64-byte `CacheLinePad` struct). **Reverted: a
+   wash.** `EmitBenchmark`, default job, two rounds with the sides swapped (base = 49c8d6f), means in µs, base /
+   head:
+
+   | Case | r1 (base first) | r2 (head first) |
+   |---|---|---|
+   | EmitParallel 10,000 | 11.24 / 10.47 | 11.14 / 11.15 |
+   | EmitParallel 100,000 | 42.85 / 44.65 | 51.10 / 46.22 |
+   | EmitParallelThenRead 100,000 | 95.00 / 96.96 | 111.48 / 103.38 |
+   | EmitParallelThenDrain 100,000 | 188.3 / 187.2 | 203.1 / 186.2 |
+   | ComponentThenScan 100,000 (control: same code) | 180.7 / 181.3 | 196.6 / 176.2 |
+   | EmitSerial 100,000 (control) | 105.8 / 112.9 | 111.9 / 116.6 |
+
+   r1 puts head 0.96-1.07x of base, r2 1.00-1.11x faster, and r2's control moved as much (base's run started at a
+   load of 5.5); errors are 5-10 % of the means. All 0 B. The cause, measured (a probe that ran the parallel emitting
+   pass 200 times, collected twice, and read the address of each pooled list's `Count`, four rounds, on base and
+   head): the 16 pooled lists are promoted to gen2, four pairs of them sit 56 bytes apart (the list objects
+   back to back), but two counts 56 bytes apart share a line only when the first lies in the line's first 8 bytes,
+   so 1 pair of 16 shared a line, and it contends only while its two chunks run at the same time on two threads. With
+   the padding the closest lists sit 120 bytes apart and none share a line, which takes away an event too rare to
+   show in a pass. What would change the verdict: a record type and pool whose lists pack closer than a line (the
+   object grows only with `EmitStore<T>`'s fields, so not today), or a machine where cross-core transfers cost far
+   more (two sockets): rerun EmitBenchmark there.
+2. **Native memory for the core's unmanaged arrays** (allocators: NativeMemory, mimalloc). Columns of unmanaged
+   components and the entity records are pinned arrays on the pinned object heap (`ComponentInfo.Create`,
+   `HugePages.AllocatePinned`, D28), counted against the GC's pinned-heap budget (a full background collection past
+   it, D28). Native memory (`NativeMemory.AlignedAlloc`, glibc's malloc here, which mimalloc would replace) is outside
+   the GC's budgets. Every column is an `Array` today (snapshots, saves, `Archetype.Row0`, the generated jobs' spans),
+   so the move is a large refactor; the prototype measured its ceiling first: `NativeColumnsBenchmark` (a world's five
+   arrays at 100,000, 1M and 4M rows, 48 bytes a row, allocated, written once and released: pinned arrays against
+   `AlignedAlloc` + `AlignedFree`, with and without `GC.AddMemoryPressure`; and `WorldCreate`, the whole operation).
+   **Not built.** Default job, three runs of the same binary (r1, r2; r3 with `[PageFaultDiagnoser]`), means in ms:
+
+   | Rows | Pinned r1 / r2 / r3 | Native r1 / r2 / r3 | NativeWithPressure r1 / r2 / r3 | WorldCreate r1 / r2 / r3 |
+   |---|---|---|---|---|
+   | 100,000 | 1.37 / 1.38 / 1.51 | 1.26 / 1.30 / 1.30 | 0.28 / 0.87 (+-0.65) / 0.28 | 4.30 / 3.91 / 4.44 |
+   | 1M | 12.4 / 11.4 / 12.7 | 17.9 / 18.6 / 17.3 | 4.8 (+-4.2) / 2.8 / 9.3 (+-7.1) | 31.9 / 32.5 / 36.5 |
+   | 4M | 34.4 / 36.0 / 35.1 | 82.6 / 86.7 / 84.8 | 86.2 / 86.3 / 86.7 | 109.4 / 114.7 / 115.8 |
+
+   Minor faults per op (r3): Pinned 142 / 1,204 / 2,720, Native 347 / 3,771 / 16,123, NativeWithPressure 0 / 1 /
+   16,123; kernel time Native 0.3 / 4.9 / 25.1 ms per op against Pinned's 0.5 / 2.4 / 4.5. Pinned pays 0.5-1 gen2
+   collections per op (the pinned-heap budget), the native forms none without pressure and 2.6-4 per op with it. The
+   cause: glibc hands large freed blocks back to the kernel (an `mmap` per block past its threshold, which grows to
+   32 MiB at most, and a trimmed heap top below it) and faults them in again on the next allocation, 3-6x the faults
+   of the GC, which keeps freed memory resident and reuses it; past 32 MiB a column (4M rows of 16-byte records) is
+   always a fresh mapping, 2.4x slower. With memory pressure the 100,000 and 1M cases sometimes reuse resident memory
+   (0 faults: 4x faster than Pinned at 1M) and sometimes not (r3's 9.3 +- 7.1 ms): the C runtime's heuristics decide,
+   not EasyEcs. So the C runtime's allocator is slower where the arrays are large, and an allocator that keeps memory
+   resident (mimalloc, or an arena of our own) would at best save the gen2 collections and zeroing of a fresh world's
+   creation, a share of `WorldCreate` that only matters to a process that creates and disposes large worlds often;
+   steady ticks allocate nothing either way. Recorded in owner-review.md with what would change the verdict.
+3. **The helpers' queue counter apart from its gate** (low latency, padded counters). `Workers` keeps its `SpinGate`
+   and `_queued` (the count spinning helpers read in their 100 µs spin) side by side in its statics, so the gate's
+   compare-and-swap at each `Post` and `Take` invalidates the spinners' copy of the line on top of `_queued`'s own write.
+   Bound: one or two cache-line transfers per post and per take (about 0.1-0.3 µs a pass, per thread), against passes
+   of 5 µs and more that wake helpers (D22, D130) and this VM's 10-40 % run-to-run spread on parallel classes
+   (`audit-perf`): a change of under 1 % that no round here can show. Not built; the place to measure it is a quiet
+   many-core machine (`ParallelForBenchmark.LightParallelFor`, `ParallelSystemsBenchmark`), listed in owner-review.md.
+4. **Chunk boundaries sharing a presence or tick line**: chunks are multiples of 64 rows (one presence word), so the
+   last word of one chunk and the first of the next can share a 64-byte line (8 words); each thread writes it once,
+   at a different time of the pass (one at its end, the other at its start). One line per boundary, chunks of 1,024
+   rows and more: nothing to gain. Not built.
+5. **Thread pinning and isolated cores** (low latency: `isolcpus`, `sched_setaffinity`): the helpers are OS threads
+   the scheduler moves; pinning them needs cores no other process uses, which this shared 4-core VM cannot give.
+   owner-review.md, with NUMA and hybrid cores (section 3).
+
+### Verdicts
+
+| Idea | Field | Verdict | Numbers |
+|---|---|---|---|
+| `Emit<T>` lists padded apart | low latency (false sharing) | built, reverted: a wash | EmitParallel 100,000 0.96x (r1) / 1.11x (r2), controls moved as much; 1 of 16 pooled lists shared a line |
+| Native memory for columns (NativeMemory, mimalloc) | allocators | prototype only, refactor not started | native 1.4x slower at 1M, 2.4x at 4M (3-6x the faults); faster only when the C runtime keeps memory resident, bimodal |
+| Helpers' queue counter on its own line | low latency | not built: under 1 %, below this VM's noise | owner-review.md |
+| Thread pinning / isolated cores | low latency | needs dedicated cores | owner-review.md |
+| Chunk boundaries sharing a presence / tick line | low latency | not built: one line per chunk boundary | - |
+| Value zone maps, dictionary encoding, morsels, late materialization, paged buffer blocks, prefix sharing, work stealing, Kokkos layouts, Legion privileges, size classes | databases, vLLM, HPC, allocators | in EasyEcs already, or measured and dropped before | table "Already in EasyEcs" above |
+
+No idea needed a new public API or a file another agent owns (Kernel*.cs, Tile*.cs, CellRows.cs): nothing handed to
+feat-inner-loops.
