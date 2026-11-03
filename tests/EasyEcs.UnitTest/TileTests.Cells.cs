@@ -991,6 +991,41 @@ public partial class TileTests
                 + w[0, 0, -2].T * 0.01f + w[1, 0, 2].T * 0.02f + w[-2, 0, 1].T * 0.03f);
     }
 
+    // Cross stencils (shifts along x on the cell's own row only): the forms that read the halo in place.
+    [EcsSystem]
+    public ref struct CellWideCrossSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(Cell<Heat, PlaneWide> w, out Heat next) =>
+            next = new(w.Value.T * 0.5f + (w[-2, 0, 0].T + w[2, 0, 0].T) * 0.1f + (w[-1, 0, 0].T + w[1, 0, 0].T) * 0.05f
+                + w[0, 0, -2].T * 0.01f + w[0, 0, 2].T * 0.02f + w[0, 0, -1].T * 0.03f);
+    }
+
+    [EcsSystem]
+    public ref struct CellWideCrossByCellSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2, SimdMode = SimdMode.Off)]
+        static void Step(Cell<Heat, PlaneWide> w, out Heat next) =>
+            next = new(w.Value.T * 0.5f + (w[-2, 0, 0].T + w[2, 0, 0].T) * 0.1f + (w[-1, 0, 0].T + w[1, 0, 0].T) * 0.05f
+                + w[0, 0, -2].T * 0.01f + w[0, 0, 2].T * 0.02f + w[0, 0, -1].T * 0.03f);
+    }
+
+    [EcsSystem]
+    public ref struct CellByteCrossSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(Cell<Life, PlaneBytes> c, out NextLife next) =>
+            next = new((byte)(c[-2, 0, 0].Alive + c[1, 0, 0].Alive + c[0, 0, 1].Alive + c[0, 0, -2].Alive + c.Value.Alive));
+    }
+
+    [EcsSystem]
+    public ref struct CellByteCrossByCellSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2, SimdMode = SimdMode.Off)]
+        static void Step(Cell<Life, PlaneBytes> c, out NextLife next) =>
+            next = new((byte)(c[-2, 0, 0].Alive + c[1, 0, 0].Alive + c[0, 0, 1].Alive + c[0, 0, -2].Alive + c.Value.Alive));
+    }
+
     [EcsSystem]
     public ref struct CellByteSystem
     {
@@ -1024,25 +1059,29 @@ public partial class TileTests
     }
 
     /// <summary>
-    /// The halo read in place (TilePlane, CellRow's shifts) against the method as written over the copied halo, bit for
-    /// bit: rows of several vectors at every width (32 floats stepping their tile), shifts by one and two bytes (64
-    /// bytes), a row the shape does not let it read in place (12 floats), on a grid with holes and quiet rows, 1 and 4
-    /// threads.
+    /// The halo read in place (TilePlane, CellRow's shifts: cross stencils) against the method as written over the copied
+    /// halo, bit for bit: rows of several vectors at every width (32 floats stepping their tile), shifts by one and two
+    /// bytes (64 bytes); box stencils of the same shapes and a row the shape does not let it read in place (12 floats),
+    /// which copy the halo; on a grid with holes and quiet rows, 1 and 4 threads. The schedule says which read in place.
     /// </summary>
     [TestCase(1)]
     [TestCase(4)]
     public void TheHaloReadInPlaceIsTheHaloCopied(int threads)
     {
         var holes = new[] { new TilePos(1, 0, 1), new TilePos(2, 0, 0) };
+        Twins<PlaneWide, Heat, CellWideCrossSystem, CellWideCrossByCellSystem>(threads, p => new PlaneWide(p), 32 * 8, holes, 6,
+            static (r, i) => i % 3 == 0 ? new Heat(r.Next(1, 1000)) : default, null, true);
+        Twins<PlaneBytes, Life, CellByteCrossSystem, CellByteCrossByCellSystem>(threads, p => new PlaneBytes(p), 64 * 4, holes, 1,
+            static (r, i) => new Life((byte)r.Next(4)), static e => e.GetOrAdd<DynamicBuffer<NextLife>>().SetCount(64 * 4), true);
         Twins<PlaneWide, Heat, CellWideSystem, CellWideByCellSystem>(threads, p => new PlaneWide(p), 32 * 8, holes, 6,
-            static (r, i) => i % 3 == 0 ? new Heat(r.Next(1, 1000)) : default, null);
+            static (r, i) => i % 3 == 0 ? new Heat(r.Next(1, 1000)) : default, null, false);
         Twins<PlaneBytes, Life, CellByteSystem, CellByteByCellSystem>(threads, p => new PlaneBytes(p), 64 * 4, holes, 1,
-            static (r, i) => new Life((byte)r.Next(4)), static e => e.GetOrAdd<DynamicBuffer<NextLife>>().SetCount(64 * 4));
+            static (r, i) => new Life((byte)r.Next(4)), static e => e.GetOrAdd<DynamicBuffer<NextLife>>().SetCount(64 * 4), false);
         Twins<PlaneOdd, Heat, CellOddSystem, CellOddByCellSystem>(threads, p => new PlaneOdd(p), 12 * 4, holes, 1,
-            static (r, i) => new Heat(r.Next(-1000, 1000) * 0.5f), static e => e.GetOrAdd<DynamicBuffer<NextHeat>>().SetCount(12 * 4));
+            static (r, i) => new Heat(r.Next(-1000, 1000) * 0.5f), static e => e.GetOrAdd<DynamicBuffer<NextHeat>>().SetCount(12 * 4), false);
 
         static void Twins<TTile, TCell, TVector, TScalar>(int threads, Func<TilePos, TTile> place, int cells, TilePos[] holes, int steps,
-            Func<Random, int, TCell> fill, Action<Entity> outBuffer)
+            Func<Random, int, TCell> fill, Action<Entity> outBuffer, bool inPlace)
             where TTile : struct, IComponent where TCell : unmanaged where TVector : struct, allows ref struct where TScalar : struct, allows ref struct
         {
             using var vector = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
@@ -1064,6 +1103,7 @@ public partial class TileTests
             }
             vector.AddSystem<TVector>();
             scalar.AddSystem<TScalar>();
+            Assert.That(vector.DescribeSchedule().ToString().Contains("read in place"), Is.EqualTo(inPlace), typeof(TVector).Name);
             for (int step = 0; step < steps; step++)
             {
                 vector.Update();
