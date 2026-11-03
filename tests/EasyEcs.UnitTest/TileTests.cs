@@ -606,6 +606,8 @@ public partial class TileTests
         Compare<WidePlate>(wide[0], 5, 128);                                            // 5 ints a row: one column
         foreach (int step in new[] { 4, 8 }) Compare<DeepColumn>(deep[0], step, 128);  // 8 ints a row
         Compare<DeepColumn>(deep[0], 8, 256);
+        var column = Grid(world, Box(1, 1, 1), s => new Column(s));
+        Compare<Column>(column[0], 16, 512);                                             // 16 ints a row: one column
         if (Vector<int>.Count <= 8) Compare<DeepColumn>(deep[0], Vector<int>.Count, 0);   // the machine's width
 
         static void Compare<TTile>(Entity e, int step, int bits) where TTile : struct, IComponent, ITile<TilePos>
@@ -632,6 +634,12 @@ public partial class TileTests
                     col.Store(v, into);
                     v.CopyTo(copy);
                 }
+                else if (bits == 512)
+                {
+                    var v = Vector512.Create(col.X * 100) + Vector512<int>.Indices;
+                    col.Store(v, into);
+                    v.CopyTo(copy);
+                }
                 else
                 {
                     var v = new Vector<int>(col.X * 100) + Vector<int>.Indices;
@@ -641,6 +649,41 @@ public partial class TileTests
             }
             Assert.That(stored, Is.EqualTo(copied), $"{typeof(TTile).Name}, step {step}, {bits} bits");
             Assert.That(stored.AsSpan(w).ToArray(), Is.All.EqualTo(default(Cell)), "nothing past the row");
+        }
+    }
+
+    // Load512 reads 16 ints from the cursor and from a column of a walk by 16: the indexer's cells at every offset whose
+    // 64 bytes stay in the padded row (Column: 16 cells and a halo of 1, rows of 18 ints), and throws one cell past it.
+    // Without Vector512 the same values (two halves); the generated pass and the benchmarks pick it only where accelerated.
+
+    [Test]
+    public void Load512ReadsWhatTheIndexerReads()
+    {
+        using var world = new World();
+        var column = Grid(world, Box(2, 2, 2), s => new Column(s));
+        var tile = TileOf<Cell, Column>(column[0], out _);
+        tile.ExchangeHalo();
+        for (int z = 0; z < 16; z++)
+        {
+            var c = tile.At(new TileRow<Column>(1, z));
+            for (int dz = -1; dz <= 1; dz++)
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                var loaded = c.Load512<int>(dx, 0, dz);
+                foreach (var col in c.Columns(16))
+                    Assert.That(col.Load512<int>(dx, 0, dz), Is.EqualTo(loaded), $"z {z}, dx {dx}, dz {dz}");
+                for (int lane = 0; lane < 16; lane++)
+                    Assert.That(loaded.GetElement(lane), Is.EqualTo(c[dx + lane, 0, dz].V), $"z {z}, dx {dx}, dz {dz}, lane {lane}");
+            }
+        }
+        Assert.Throws<ArgumentOutOfRangeException>(() => Past(column[0], 2));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Past(column[0], -2));
+
+        static int Past(Entity e, int dx)
+        {
+            var tile = TileOf<Cell, Column>(e, out _);
+            tile.ExchangeHalo();
+            return tile.At(new TileRow<Column>(1, 0)).Load512<int>(dx).GetElement(0);
         }
     }
 

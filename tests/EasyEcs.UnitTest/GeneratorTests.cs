@@ -2093,6 +2093,8 @@ public class GeneratorTests
         "Covers<TCell, TTile>(0, 16L, 4, -1, 16)")]
     [TestCase("static float F<T>(TileCursor<float, T> c) where T : struct, ITileShape { float s = 0; for (int x = 0; x < T.Width; x++) { s += c.Load256<float>(1 + x).GetElement(0); } return s; }", 1,
         "Covers<TCell, TTile>(0, TTile.Width, 1, 1, 32)")]
+    [TestCase("static float F(TileCursor<float, Sh> c) { float s = 0; for (int x = 0; x < 16; x += 16) s += c.Load512<float>(x).GetElement(0); return s; }", 1,
+        "Covers<TCell, TTile>(0, 16L, 16, 0, 64)")]
     [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = -1; x <= 12; x = x + 4) s += c.LoadVector<int>(x)[0]; return s; }", 1,
         "Covers<TCell, TTile>(-1, 12L + 1L, 4, 0, global::System.Numerics.Vector<byte>.Count)")]
     [TestCase("static int F(TileCursor<int, Sh> c, int dy) { int s = 0; for (int x = 0; x < 16; ++x) s += c.Load128<int>(x, dy, 0).GetElement(0); return s; }", 1,
