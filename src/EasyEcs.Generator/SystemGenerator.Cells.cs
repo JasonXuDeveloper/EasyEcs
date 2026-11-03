@@ -122,8 +122,11 @@ public sealed partial class SystemGenerator
         // The halo read in place (TilePlane, no copy into the texture) where the pass can: one cell of a 2D tile, its
         // rows whole vectors at 128 bits too (no cell is left to the method, which reads the texture), every load of a
         // stream shifted along x a plain one CellRow takes over, and the shape's constants letting it (Fits, a JIT
-        // constant: the other branch is dropped). The texture's form stays the other branch.
-        string? planeLoads = loops != null && cells.Count == 1 && with128 && form.Offsets.All(o => o.Dy == 0)
+        // constant: the other branch is dropped). The texture's form stays the other branch. Only for a cross stencil
+        // (a shift along x on the cell's own row alone): its 2r shifted streams share one pair of edge vectors, while
+        // the copy it saves holds 2r band rows; a box stencil shifts on 2r + 1 rows, each with its own edge loads and
+        // corner rows, which costs more than the copy (Blur9 1.11-1.22x, Life about even; Laplacian 0.82-0.98x).
+        string? planeLoads = loops != null && cells.Count == 1 && with128 && form.Offsets.All(o => o.Dy == 0 && (o.Dx == 0 || o.Dz == 0))
             && !loops.Contains("goto __rest") && !loops.Contains("nint lanes =") ? PlaneLoads(loops, form.Offsets) : null;
         string? planeGuard = planeLoads == null ? null
             : $"global::EasyEcs.TilePlane<{CellName(0)}, {shape}>.Fits<{form.Loop!.Code.Columns[0]}>()"
@@ -151,14 +154,12 @@ public sealed partial class SystemGenerator
             if (plane)
             {
                 // Each row the offsets read along z, where it lives (the tile, or the tile north or south), and the rows
-                // beside it along x when a stream shifts across the row's ends.
+                // beside the walked row along x when a stream shifts across its ends (a cross stencil shifts on it alone).
                 foreach (var dz in form.Offsets.Select(o => o.Dz).Distinct())
-                {
-                    string z = dz == 0 ? "__z" : dz < 0 ? $"__z - {-dz}" : $"__z + {dz}";
-                    row.Append($"ref {CellName(0)} __in{Dz(dz)} = ref __plane.Row({z}, 0);\n");
-                    if (form.Offsets.Any(o => o.Dz == dz && o.Dx != 0))
-                        row.Append($"ref {CellName(0)} __inW{Dz(dz)} = ref __plane.Row({z}, -1);\nref {CellName(0)} __inE{Dz(dz)} = ref __plane.Row({z}, 1);\n");
-                }
+                    row.Append(dz == 0 ? $"ref {CellName(0)} __in0 = ref __plane.Own(__z, 0);\n"
+                        : $"ref {CellName(0)} __in{Dz(dz)} = ref __plane.Row({(dz < 0 ? $"__z - {-dz}" : $"__z + {dz}")});\n");
+                if (form.Offsets.Any(o => o.Dx != 0))
+                    row.Append($"ref {CellName(0)} __inW0 = ref __plane.Own(__z, -1);\nref {CellName(0)} __inE0 = ref __plane.Own(__z, 1);\n");
             }
             else
                 for (int k = 0; k < cells.Count; k++)
@@ -184,7 +185,7 @@ public sealed partial class SystemGenerator
                         var o = form.Offsets[k];
                         vector.Append($"ref {columns[k]} e{k + 1} = ref {Cast($"__in{Dz(o.Dz)}")};\n");
                         if (o.Dx != 0)
-                            vector.Append($"ref {columns[k]} __west{k + 1} = ref {Cast($"__inW{Dz(o.Dz)}")};\nref {columns[k]} __east{k + 1} = ref {Cast($"__inE{Dz(o.Dz)}")};\n");
+                            vector.Append($"ref {columns[k]} __west{k + 1} = ref {Cast("__inW0")};\nref {columns[k]} __east{k + 1} = ref {Cast("__inE0")};\n");
                     }
                     else
                         vector.Append($"ref {columns[k]} e{k + 1} = ref {Cast($"{Unsafe}.Add(ref __c{form.Offsets[k].Cell}, {at}.Offset({form.Offsets[k].Dx}, {form.Offsets[k].Dy}, {form.Offsets[k].Dz}))")};\n");

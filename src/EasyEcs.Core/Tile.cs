@@ -792,7 +792,8 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
     /// tile (<see cref="At"/> throws until an exchange). Generated code calls this when the shape allows it
     /// (<see cref="TilePlane{TCell, TTile}.Fits{TLane}"/>); throws for another shape. O(Depth) with the mask, else O(1).
     /// </summary>
-    [EditorBrowsable(EditorBrowsableState.Never)]
+    // Out of line as the exchange is: its nine lookups would take the inliner's budget and the registers of the rows.
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.NoInlining)]
     public readonly TilePlane<TCell, TTile> Plane(bool mask)
     {
         TileShapeCheck<TTile>.Check();
@@ -1736,7 +1737,13 @@ internal static class TileLayout
         if (count == 1) return !IsZero(source);
         ref byte from = ref Unsafe.As<TCell, byte>(ref source);
         nuint bytes = (nuint)(count * Unsafe.SizeOf<TCell>());
-        // A constant of the shape: one or two vectors (overlapping), or a loop for long rows.
+        // A constant of the shape: one or two words (overlapping) for a halo's cells, one or two vectors for a row, or
+        // a loop for long rows.
+        if (bytes == 2) return Unsafe.ReadUnaligned<ushort>(ref from) != 0;
+        if (bytes == 4) return Unsafe.ReadUnaligned<uint>(ref from) != 0;
+        if (bytes is > 4 and < 8) return (Unsafe.ReadUnaligned<uint>(ref from) | Unsafe.ReadUnaligned<uint>(ref Unsafe.Add(ref from, bytes - 4))) != 0;
+        if (bytes == 8) return Unsafe.ReadUnaligned<ulong>(ref from) != 0;
+        if (bytes is > 8 and < 16) return (Unsafe.ReadUnaligned<ulong>(ref from) | Unsafe.ReadUnaligned<ulong>(ref Unsafe.Add(ref from, bytes - 8))) != 0;
         if (Vector128.IsHardwareAccelerated && bytes == 16) return Vector128.LoadUnsafe(ref from) != Vector128<byte>.Zero;
         if (Vector256.IsHardwareAccelerated && bytes == 32) return Vector256.LoadUnsafe(ref from) != Vector256<byte>.Zero;
         if (Vector512.IsHardwareAccelerated && bytes == 64) return Vector512.LoadUnsafe(ref from) != Vector512<byte>.Zero;

@@ -53,26 +53,27 @@ public readonly ref struct TilePlane<TCell, TTile> where TCell : unmanaged where
     }
 
     /// <summary>
-    /// The first cell of row <paramref name="z"/> (−Halo to Depth + Halo − 1) of the padded plane, in the tile beside
-    /// this one along x by <paramref name="side"/> (−1 west, 0 the tile's column, 1 east): a row of the tile, or of the
-    /// tile north or south of it, or of the one across the corner. O(1); unchecked, the pass reads only its offsets' rows.
+    /// The first cell of row <paramref name="z"/> (−Halo to Depth + Halo − 1) of the padded plane's column: a row of the
+    /// tile, or of the tile north or south of it. O(1); unchecked, the pass reads only its offsets' rows.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ref TCell Row(int z, [ConstantExpected] int side)
+    public ref TCell Row(int z)
     {
         int depth = TTile.Depth, width = TTile.Width;
-        if (z < 0)
-        {
-            int at = (depth + z) * width;
-            if (side < 0) return ref Unsafe.Add(ref _northWest, at);
-            return ref Unsafe.Add(ref side > 0 ? ref _northEast : ref _north, at);
-        }
-        if (z >= depth)
-        {
-            int at = (z - depth) * width;
-            if (side < 0) return ref Unsafe.Add(ref _southWest, at);
-            return ref Unsafe.Add(ref side > 0 ? ref _southEast : ref _south, at);
-        }
+        // A row of the tile first, in one unsigned compare (below 0 wraps above Depth): the rows a stencil reads are
+        // mostly its own, the bands only within the halo of an edge.
+        if ((uint)z < (uint)depth) return ref Unsafe.Add(ref _self, z * width);
+        return ref z < 0 ? ref Unsafe.Add(ref _north, (depth + z) * width) : ref Unsafe.Add(ref _south, (z - depth) * width);
+    }
+
+    /// <summary>
+    /// Row <paramref name="z"/> of the tile (0 to Depth − 1, unchecked: the row a pass walks), or of the west or east
+    /// neighbor beside it (<paramref name="side"/> −1 or 1), whose edge vectors a shift along x reads. O(1).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref TCell Own(int z, [ConstantExpected] int side)
+    {
+        int width = TTile.Width;
         if (side < 0) return ref Unsafe.Add(ref _west, z * width);
         return ref Unsafe.Add(ref side > 0 ? ref _east : ref _self, z * width);
     }
@@ -133,16 +134,16 @@ public static class CellRow
     public static Vector128<T> Load128<T>(ref T row, ref T west, ref T east, nint i, [ConstantExpected] int dx, int width) where T : unmanaged
     {
         int lanes = Vector128<T>.Count;
-        nint at = i + dx;
-        if (at >= 0 && at + lanes <= width) return Vector128.LoadUnsafe(ref row, (nuint)at);
-        var here = Vector128.LoadUnsafe(ref row, (nuint)i);
+        if (dx == 0) return Vector128.LoadUnsafe(ref row, (nuint)i);
+        // One compare: i is a multiple of the lanes and |dx| at most the lanes, so a load before the row's start is
+        // only the first vector's, one past its end only the last's.
         if (dx < 0)
         {
-            var before = i >= lanes ? Vector128.LoadUnsafe(ref row, (nuint)(i - lanes)) : Vector128.LoadUnsafe(ref west, (nuint)(width - lanes));
-            return Shift128(before, here, (lanes + dx) * Unsafe.SizeOf<T>());
+            if (i > 0) return Vector128.LoadUnsafe(ref row, (nuint)(i + dx));
+            return Shift128(Vector128.LoadUnsafe(ref west, (nuint)(width - lanes)), Vector128.LoadUnsafe(ref row), (lanes + dx) * Unsafe.SizeOf<T>());
         }
-        var after = i + 2 * lanes <= width ? Vector128.LoadUnsafe(ref row, (nuint)(i + lanes)) : Vector128.LoadUnsafe(ref east);
-        return Shift128(here, after, dx * Unsafe.SizeOf<T>());
+        if (i + lanes < width) return Vector128.LoadUnsafe(ref row, (nuint)(i + dx));
+        return Shift128(Vector128.LoadUnsafe(ref row, (nuint)i), Vector128.LoadUnsafe(ref east), dx * Unsafe.SizeOf<T>());
     }
 
     /// <summary>The 256 bits of a row's lanes from <paramref name="i"/> + <paramref name="dx"/>.</summary>
@@ -150,16 +151,16 @@ public static class CellRow
     public static Vector256<T> Load256<T>(ref T row, ref T west, ref T east, nint i, [ConstantExpected] int dx, int width) where T : unmanaged
     {
         int lanes = Vector256<T>.Count;
-        nint at = i + dx;
-        if (at >= 0 && at + lanes <= width) return Vector256.LoadUnsafe(ref row, (nuint)at);
-        var here = Vector256.LoadUnsafe(ref row, (nuint)i);
+        if (dx == 0) return Vector256.LoadUnsafe(ref row, (nuint)i);
+        // One compare: i is a multiple of the lanes and |dx| at most the lanes, so a load before the row's start is
+        // only the first vector's, one past its end only the last's.
         if (dx < 0)
         {
-            var before = i >= lanes ? Vector256.LoadUnsafe(ref row, (nuint)(i - lanes)) : Vector256.LoadUnsafe(ref west, (nuint)(width - lanes));
-            return Shift256(before, here, (lanes + dx) * Unsafe.SizeOf<T>());
+            if (i > 0) return Vector256.LoadUnsafe(ref row, (nuint)(i + dx));
+            return Shift256(Vector256.LoadUnsafe(ref west, (nuint)(width - lanes)), Vector256.LoadUnsafe(ref row), (lanes + dx) * Unsafe.SizeOf<T>());
         }
-        var after = i + 2 * lanes <= width ? Vector256.LoadUnsafe(ref row, (nuint)(i + lanes)) : Vector256.LoadUnsafe(ref east);
-        return Shift256(here, after, dx * Unsafe.SizeOf<T>());
+        if (i + lanes < width) return Vector256.LoadUnsafe(ref row, (nuint)(i + dx));
+        return Shift256(Vector256.LoadUnsafe(ref row, (nuint)i), Vector256.LoadUnsafe(ref east), dx * Unsafe.SizeOf<T>());
     }
 
     /// <summary>The 512 bits of a row's lanes from <paramref name="i"/> + <paramref name="dx"/>.</summary>
@@ -167,16 +168,16 @@ public static class CellRow
     public static Vector512<T> Load512<T>(ref T row, ref T west, ref T east, nint i, [ConstantExpected] int dx, int width) where T : unmanaged
     {
         int lanes = Vector512<T>.Count;
-        nint at = i + dx;
-        if (at >= 0 && at + lanes <= width) return Vector512.LoadUnsafe(ref row, (nuint)at);
-        var here = Vector512.LoadUnsafe(ref row, (nuint)i);
+        if (dx == 0) return Vector512.LoadUnsafe(ref row, (nuint)i);
+        // One compare: i is a multiple of the lanes and |dx| at most the lanes, so a load before the row's start is
+        // only the first vector's, one past its end only the last's.
         if (dx < 0)
         {
-            var before = i >= lanes ? Vector512.LoadUnsafe(ref row, (nuint)(i - lanes)) : Vector512.LoadUnsafe(ref west, (nuint)(width - lanes));
-            return Shift512(before, here, (lanes + dx) * Unsafe.SizeOf<T>());
+            if (i > 0) return Vector512.LoadUnsafe(ref row, (nuint)(i + dx));
+            return Shift512(Vector512.LoadUnsafe(ref west, (nuint)(width - lanes)), Vector512.LoadUnsafe(ref row), (lanes + dx) * Unsafe.SizeOf<T>());
         }
-        var after = i + 2 * lanes <= width ? Vector512.LoadUnsafe(ref row, (nuint)(i + lanes)) : Vector512.LoadUnsafe(ref east);
-        return Shift512(here, after, dx * Unsafe.SizeOf<T>());
+        if (i + lanes < width) return Vector512.LoadUnsafe(ref row, (nuint)(i + dx));
+        return Shift512(Vector512.LoadUnsafe(ref row, (nuint)i), Vector512.LoadUnsafe(ref east), dx * Unsafe.SizeOf<T>());
     }
 
     /// <summary>The <see cref="Vector{T}"/> of a row's lanes from <paramref name="i"/> + <paramref name="dx"/>: one of the three by its size.</summary>
