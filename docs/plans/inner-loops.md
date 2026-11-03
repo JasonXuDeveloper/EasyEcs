@@ -469,6 +469,13 @@ Later on feat-inner-loops (2026-11-02/03, BenchmarkDotNet, the reference machine
 - *The ISA knobs on .NET 10*: DOTNET_EnableAVX512=0 turns AVX-512 off (Vector512 and Avx512F false); the older
   DOTNET_EnableAVX512F=0 and DOTNET_EnableSSSE3=0 change nothing (SSSE3 is in the x64 baseline), so CellRow's shift
   through memory is reached only through Shift256 / Shift512 with AVX off.
+- *Tile Load512* (#157, 0bd1cda): TileCursor's and the column walk's Load512 and the walk's 512-bit Store; Blur9_Columns512
+  0.86-0.97 of Blur9_Columns in the same runs, 0 B; with AVX-512 off the system's IsHardwareAccelerated branch reads as
+  Columns (backlog #157).
+- *Blur9_Cell against PingPong*: below it in every case on this host (the copy form, 417 / 476 us, 199 / 211 ms,
+  225 / 236 us, 68.6 / 70.6 ms), so no listing comparison was needed.
+- *The 24 B once seen on Blur9_Columns*: not reproduced in three default launches and three with gcConcurrent=0, all
+  0 B; a background GC ending voids allocation contexts and can fake bytes (D128).
 - *Inlining the exchange's lookups*: rejected (the neighbors' memory is the cost, not the calls; docs-todos).
 - Bar: every Cell case at or below its hand-written `Load128`/`Load256` twin, at 0 B; a case above it is a finding
   for the generator, fixed before the package merges.
@@ -543,6 +550,32 @@ WP5b design (decided 2026-11-01, from what Flow.cs needs):
   WaterStepSystem making the tally the chunk's FluidStep (Commit, Sleep and Wake unchanged). Vector512 / Vector<byte> /
   Vector128 per row, blank rows proved; the sample's output identical (check-sample). Ships if TickBenchmark (C) is at
   or below A at 0 B; else the range (from the user's summary, a value parameter) is the next step.
+- (5) verdict (2026-11-03): **not shipped**, the sample keeps Flow.cs as written; the port is kept out of the tree.
+  WaterFlowSystem in the 50-player probe (500 ticks; A as written, B = A exchanging every layer of every chunk, C
+  cells):
+
+  | | A | B | C | C, per-field fold |
+  |---|---|---|---|---|
+  | after 900 ticks, TieredCompilation=0 | 3.3 ms | 8.1 | 26.1 | 7.9 |
+  | after 9000 ticks, default | 1.40 | | | 3.61 |
+  | after 9000 ticks, TieredCompilation=0 | 1.27 | | | 4.53 |
+
+  Causes: (a) C's listing folded the FlowTally lanes through Reduce<T>.Combine once per lane, 16 calls per 16-byte
+  row with 14 accumulators spilled around each: fixed in the generator for every vector loop (9feb02e: each field
+  folds on its own, sums by Vector.Sum, Min / Max lane by lane), which brought C to B; (b) the rest is the exchange
+  of every layer (B against A): the sampled Block cells are exchanged over all 32 layers of every chunk where A reads
+  only the layers its own summary ranges. Next step, a public API for the owner: the range from the user's summary
+  (a value parameter giving the layers to exchange and walk).
+- *Tiering* (the lead's question: Flow_0 at Tier0 / OSR through the probe, 46 ms against 3.3 at TieredCompilation=0).
+  Not stuck: the JIT summary over the run shows about 10,000 methods going Tier0 -> Instrumented Tier0 -> Tier1 on
+  the one background compiler, done about 3 s into the process; the probe measured 1.0-1.4 s, mid backlog (953
+  instrumented recompiles and 197 Tier1 compiles in that window, 15 new Tier0 methods). The call-counting delay is
+  not the cause (no stream of new Tier0 methods), OSR is not (two OSR compiles in the whole run), nothing blocks
+  Tier1 (Flow reaches Tier1 with synthesized PGO at compile 9,725 of 10,153). Steady state after 9,000 ticks: default
+  1.40 ms, TieredCompilation=0 1.27, TieredPGO=0 1.32. AggressiveOptimization on the generated cell pass (the fix the
+  lead named) helps the transient only in part (C 98 -> 74 ms after 900 ticks: the core code it calls, the exchange,
+  still tiers) and costs the steady state its PGO (3.61 -> 3.77 ms): not adopted. What a user can set for a warm
+  start is the runtime's (ReadyToRun, TieredPGO, TieredCompilation): a docs-todos item.
 
 **WP6: EECS103 and its code fix.**
 - WP6a (v1, batch casts): shipped (D134).

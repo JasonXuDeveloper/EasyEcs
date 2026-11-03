@@ -2456,15 +2456,24 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
 - **api.mdx + zh:** `Reduce<T>`'s constraint is `IReduction<T>` (was the singleton marker too): the complexity row is
   unchanged; the reference page regenerates from the XML doc (zh/reduce.xml updated).
 - **guide/analyzers (EECS002):** a `ref Reduce<T>` of a component outside a cell method.
-- **samples/voxel-server.mdx + zh, README of the sample:** (only if the port lands, see Numbers) Flow.cs is a cell
-  method now: the walkthrough of the hand-written shader (FluidCount ranges, Load128 offsets, the edges from lane masks)
-  becomes the cell body, FlowTally and Step.cs (WaterStepSystem: the tally made the chunk's FluidStep); the file table
-  gains Step.cs.
+- **samples/voxel-server.mdx + zh, README of the sample:** nothing: the port did not land (Numbers), Flow.cs stays
+  the hand-written shader.
 - **Changelog (New):** "Cell methods take several cells and out cells, a result per tile (`ref Reduce<T>` of the
   tile's component), and skip rows proved blank; X vectorizes in byte rows."
-- **Numbers (pending):** TickBenchmark (samples/VoxelServer) of Flow as written (A), with every layer of every chunk
-  exchanged (B: what a pass without a layer range costs), and as cells (C), two rounds; the port ships only at or below
-  A at 0 B.
+- **Numbers:** the port did not ship (docs/plans/inner-loops.md WP5b (5) verdict): C after the per-field fold equals B
+  (Flow as written exchanging every layer of every chunk), 2.6-3.6x A in the steady state. decisions.mdx + zh: a record
+  "The voxel water stays hand-written" with that table and its cause (the sampled cells exchanged over every layer; the
+  range from the user's summary is the open question for the owner); roadmap: the range under "Planned" if the owner
+  takes it.
+- **decisions.mdx + zh (a Reduce<T>'s fold, 9feb02e):** after a vector loop each field of the result folds on its
+  own (a sum as the lanes' horizontal sum, a Min / Max lane by lane), since T.Combine is proven field by field;
+  Combine per lane cost a call per lane with the accumulators spilled (the cell pass of the voxel water 26.1 -> 7.9 ms
+  at full optimization). guide/reductions (or where Reduce<T>'s vector loop is described) + zh: one sentence.
+- **performance or faq + zh (warm start):** a server's first seconds run code still tiering: the VoxelServer probe's
+  water 46 ms over the 500 ticks after tick 900 (about 1 s in) against 1.4 ms after tick 9,000, about 10,000 methods
+  going Tier0 -> Instrumented Tier0 -> Tier1 on one background compiler; what a user can set (ReadyToRun, TieredPGO,
+  TieredCompilation) and what it costs; AggressiveOptimization on generated passes not adopted (the core code they
+  call still tiers; the steady state loses PGO). Numbers from a BenchmarkDotNet run, not the probe.
 
 ### WP5 (a cell method stepping its tile) — docs to-dos
 
