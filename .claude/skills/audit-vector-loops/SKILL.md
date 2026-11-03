@@ -365,6 +365,15 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   One body for both widths needs a generic vector abstraction: `ISimdVector<TSelf, T>` is internal in .NET 10, so it
   would be our own static-abstract wrapper, adopted only if BenchmarkDotNet and the Tier1 code show no loss.
 
+- **What runs once per vector loop counts on short loops**: a cell pass runs one loop per row (16 bytes of a voxel
+  chunk), so the setup and the fold after it run per row. A Reduce<T> folded through `T.Combine` once per lane was
+  16 calls per row with every accumulator spilled around each (the voxel water's cell pass 3.3x its rows' work); each
+  field folds on its own now (`Kernel` fold: sums by `Vector.Sum`, Min / Max lane by lane, exact since Combine is
+  proven field by field). Read a new form's listing for calls between its loops, not only inside them.
+- **A halo read in place pays for cross stencils, not box ones** (inner-loops.md WP5): a shift in registers per
+  shifted stream (PALIGNR / VPALIGNR / VALIGND, port 5) plus edge loads per row beats copying a cross stencil's band
+  rows, but a box stencil shifts on 2r + 1 rows with corner loads each, and a halo of one copies cheaply (Blur9
+  1.11-1.22x): `SystemGenerator.Cells.cs` reads in place only when every offset has Dx == 0 or Dz == 0.
 - **A written column's load stays in the loop even when its value is dead**: the JIT keeps a byref load that may
   fault, so it still reads the line. A form that must not touch the line (streaming stores) drops the load itself
   (`default(V<T>)` in place of the column's load).

@@ -79,6 +79,15 @@ its own worktree.
      dynamic PGO on and start call counting at once, so the warmups reach Tier1 code; never shorten past that with
      `ShortRun`, `--runOncePerIteration`, `InProcess` toolchains or `TieredCompilation=0`, which measure other code.
      Filter to the cases a change touches; a full class is for the decision run;
+   - a probe outside BenchmarkDotNet (a sample's own loop with stats) measures its first seconds mid tier-up: the
+     VoxelServer probe after 900 ticks (about 1 s in) ran its water at 46 ms against 1.4 ms after 9,000 ticks, while
+     about 10,000 methods went Tier0 -> Instrumented Tier0 -> Tier1 on one background compiler (done at about 3 s;
+     read it with `DOTNET_JitDisasmSummary=1` + `DOTNET_JitStdOutFile` and `JitInfo.GetCompiledMethodCount()` at the
+     window's ends). Not stuck code: warm a probe past it, or compare at `TieredCompilation=0` only to attribute
+     (WP5b); AggressiveOptimization on a generated pass did not fix it (the core it calls still tiers) and cost the
+     steady state its PGO. ISA knobs on .NET 10: `DOTNET_EnableAVX512=0` turns AVX-512 off, `DOTNET_EnableAVX=0`
+     leaves 128-bit vectors; `DOTNET_EnableAVX512F=0` and `DOTNET_EnableSSSE3=0` change nothing (check
+     `Vector512.IsHardwareAccelerated` in the run);
    - the default job's warm-up is not slack: the parallel classes keep speeding up for 2-4 s of each process
      (ParallelPassBenchmark's Tick: warmups 1.62-1.70 ms, measured iterations falling to 1.23 ms), so Warmup 3 /
      150 ms read them 9-28 % slower (#153, feat-later-small); and its two processes are not slack either: a class's
