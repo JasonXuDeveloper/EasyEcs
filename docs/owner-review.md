@@ -157,3 +157,22 @@ only on one `[Accumulate]` singleton (the schedule's "Registration order only" l
 example a sample whose per-kind counters move from separate singletons into one total. The design stays as GA2 states
 it (each pass's result kept per system, combined in registration order at the stage end, so the total is the bits of
 the serial run).
+
+## A batch method's word of passing rows (#157 / #138 "span mask parameter"; feat-later-accumulate, 2026-11-03)
+
+**The owner's call: a new parameter form.** A batch `[ForEach]` method (spans) under `[Changed<T>]`, `Without<T>` on a
+sparse column or a presence test receives each run of passing rows apart, often 1-10 rows, so a hand-written vector
+loop spends its time in scalar tails. The generated vector loops avoid it through `IForEachMasked` (a word and a
+`ulong` of its passing rows); a user's batch method cannot ask for that (EECS009 allows spans, singletons and
+`EntitySpan` only). Options:
+
+1. `ulong rows` as a batch method's parameter: the spans cover the word's first to last passing row, the bits say
+   which pass (whole runs get every bit). The generator writes an `IForEachMasked` job; EECS009 / EECS013 learn the
+   parameter.
+2. A `RowMask` struct parameter (`rows.Bits`, `rows.Has(i)`, `rows.Count`): the same job, a name a reader can look up.
+3. Not built: the method for one row is the form that gets masks (the generator's vector loop), and EECS103 already
+   rewrites a hand-written vector loop into it.
+
+Recommended: 3 unless a user's loop shows a form the generator cannot write; then 2 (a type documents itself, a
+bare `ulong` does not). What would change it: a batch method in a sample or a user report whose hand loop the
+generator cannot vectorize, measured against its per-row twin under a sparse filter.

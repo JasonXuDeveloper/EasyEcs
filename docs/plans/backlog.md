@@ -520,7 +520,23 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       actionable here: Unity support waits for a Unity release on .NET 10; the toolchain item is a standing rule.
 - [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 2 MiB columns done on `feat-later-memory` (pinned arrays
       advised before first touch, reserved and copied ones only; 16M chases 1.28-1.67x, Create / Grow equal; docs-todos
-      "feat-later-memory"); #157 the #138 recommendations; #159 remaining research.
+      "feat-later-memory"); #157 the #138 recommendations: done on feat-later-accumulate (table below); #159 remaining research.
+- [x] **#157, the #138 recommendations** (feat-later-accumulate; the #138 report's "Recommended, not built" list, and its
+      stencil items). Numbers: BenchmarkDotNet, six processes per case for the small ones, sides forward then backward.
+
+      | Recommendation | State | Evidence |
+      |---|---|---|
+      | Span mask parameter (a batch method told which rows of a word pass) | not built: a new parameter form, the owner's call | owner-review.md "A batch method's word of passing rows" |
+      | Ping-pong buffer | done before | `ref Tile` steps, TileSteps.cs (ed9f5e9, feat-tiles-pingpong): the second buffer swapped in, no commit |
+      | Tile store | done before | `tile.Write(row)` (Tile.cs:759), `col.Store` of TileColumnWalk (Tile.cs:1346-1356, 23a85f6) |
+      | Tile `Load512` | not built: Tile.cs belongs to feat-inner-loops in this round | needs `TileCursor.Load512` / the column walk's next to `Load256` (Tile.cs:1209, 1331) and a TileStencil case; handed back |
+      | Small-pass serial fallback | **built** (527d840): a parallel pass over at most 64 rows of one table runs its one chunk uncut | SystemDispatchBenchmark.ParallelPasses 1,003 / 986 -> 408 / 392 ns (0.40x), 0 B; Reduce and Emit results equal |
+      | A stage that runs alone without a region | built and reverted (bbb3391): a wash | ParallelStage 725 / 657 -> 715 / 840 ns: four uncontended locked adds are a few ns against 650-850 ns per stage and its spread |
+      | `Masked` short path | **built** in part (7955c6a): `RowFilter.Mode`'s requires-only plans | Plain 355 / 343 -> 332 / 333 ns, WithOnUpdate 361 / 353 -> 338 / 333, ParallelPasses 408 / 392 -> 349 / 355; the frame split of `Masked` not tried (below) |
+      | Per-participant timestamps | built and reverted (1ffd92d): slower | the span from first claim to last item counts the cursor's contention as work, so a run with helpers "beats" it and the runner stops running light stages alone: ParallelStage 0.72 -> 1.33-1.39 us |
+
+      Left: the frame split of `Masked` / `Batches` (the per-table preamble apart from the loop, a smaller frame): the
+      research's ceiling is about 5 ns of a 20 ns system; next step is `tools/jitdisasm.sh` of `Masked` on Plain.
 - [x] **Linger at Hop 8 after d666b0d** (feat-later-small): no regression; `[MethodImpl(NoInlining)]` on `Leave` not
       adopted. Four earlier rounds (2 processes each) read 4 / 256 / 8 6-14 % slower than tip, and the Tier1 code showed
       `Leave` inlined into the job's `Execute` once its allocation path left (849 -> 1219 B). The A/B on the merged tip

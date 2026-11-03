@@ -2350,3 +2350,21 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
 - **Generator cost after WP2 rest + WP3 (GeneratorBenchmark, base bad2017 two rounds, head one round):** level.
   Cold 913 / 876 -> 872 ms, CompileAndAnalyze 7,463 / 7,038 -> 6,958 ms, EditMethodBody 510 / 491 -> 519 ms,
   EditMethodBodyIde 91 / 70 -> 70 ms, EditUnrelatedFile 556 / 523 -> 473 ms; allocations within 0.4 %.
+
+## feat-later-accumulate (backlog Later: `[Accumulate]` users that do not conflict; #157 the #138 recommendations)
+
+- decisions.mdx + .zh: a record "A parallel pass over at most 64 rows of one table runs uncut" (527d840): one chunk
+  whatever the rows cost (chunks are multiples of 64 rows from a word's first row, each table its own), run on a copy
+  of the job and merged as the cut pass merges it, so results and bits are unchanged; SystemDispatchBenchmark
+  ParallelPasses 0.40x, 0 B. Considered: a fallback below one chunk of the default size (1,024 rows) — refused,
+  heavy rows would never be timed and never split (the cost is learned on one chunk).
+- decisions.mdx + .zh: `RowFilter.Mode`'s short path for plans that only require components (7955c6a): Plain and
+  WithOnUpdate about 5 % faster, ParallelPasses a further 11 %.
+- decisions.mdx + .zh (dropped, with numbers): a stage run alone entered with plain stores (a wash: four uncontended
+  locked adds against 650-850 ns a stage); per-participant timestamps in wide runs (slower: the claims' contention
+  counted as work keeps the runner waking helpers for light stages, ParallelStage 0.72 -> 1.33-1.39 us). Roadmap
+  "Dropped" names both.
+- decisions.mdx + .zh: `[Accumulate]` users sharing a stage not built (owner-review.md entry): no stage of the
+  VoxelServer or the battle server is lost to a total; the serial stages are systems that run alone.
+- guide/parallel (or wherever a parallel pass's cost is described) + zh: a parallel `[ForEach]` over a small table
+  costs about a serial pass (no chunking below 64 rows in one table).
