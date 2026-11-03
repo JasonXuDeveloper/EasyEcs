@@ -945,6 +945,27 @@ internal sealed partial class Kernel
                 }
                 continue;
             }
+            if (r.Type != null)
+            {
+                // a Reduce<T>: T.Combine combines each field on its own (Reduced), so each field folds on its own, into
+                // the partial's field: a sum as the lanes' horizontal sum (an integer wraps either way; a float sum is
+                // FloatMode.Fast's, any order), a Min / Max lane by lane as Combine does. Combine itself per lane cost a
+                // call per lane with every accumulator spilled around it: on a cell pass's short rows (16 bytes of a
+                // voxel chunk) more than the rows' arithmetic.
+                for (int f = 0; f < r.Fields.Length; f++)
+                {
+                    string acc = $"__a{r.Index}_{f}", ft = r.Fields[f].Type.ToDisplayString(Symbols.Fqn), into = $"{r.Partial}.Value.{r.Fields[f].Name}";
+                    foreach (var h in Suffixes(kernel.IsDoubled(r.Fields[f].Type)))
+                    {
+                        held.Append($"var __h{r.Index}_{f}{h} = {acc}{h};\n");
+                        restore.Append($"{acc}{h} = __h{r.Index}_{f}{h};\n");
+                        if (h.Length > 0) masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, Elem(r.Fields[f].Type))}, {acc}{h}, __h{r.Index}_{f}{h});\n");
+                        fold.Append(r.Ops[f] == "+" ? $"{into} = unchecked(({ft})({into} + {V}.Sum({acc}{h})));\n"
+                            : $"for (int __j = 0; __j < {Vec(Elem(r.Fields[f].Type))}.Count; __j++) {into} = global::System.Math.{r.Ops[f]}({into}, {acc}{h}[__j]);\n");
+                    }
+                }
+                continue;
+            }
             fold.Append($"for (int __j = 0; __j < {count}; __j++)\n{{\n    var __v = default({t});\n");
             for (int f = 0; f < r.Fields.Length; f++)
             {
