@@ -18,6 +18,12 @@
   <member name="M:EasyEcs.TileCursor`2.Load256``1(System.Int32,System.Int32,System.Int32)" source="95be5a7cb0e3">
     <summary>从 (dx, dy, dz) 开始的 256 位格子，按 <typeparamref name="TLane" /> 分道。O(1)。</summary>
   </member>
+  <member name="M:EasyEcs.TileCursor`2.Load512``1(System.Int32,System.Int32,System.Int32)" source="25d306e0df0c">
+    <summary>
+      从 (dx, dy, dz) 开始的 512 位格子，按 <typeparamref name="TLane" /> 分道：<c>Vector512.IsHardwareAccelerated</c> 时一次加载一行 16 个 float，
+      其他机器上是两次 256 位加载。O(1)。
+    </summary>
+  </member>
   <member name="M:EasyEcs.TileCursor`2.LoadVector``1(System.Int32,System.Int32,System.Int32)" source="31eeba1903d7">
     <summary>从 (dx, dy, dz) 开始的一个 <c>Vector&lt;TLane&gt;</c> 格子（机器的向量宽度）。O(1)。</summary>
   </member>
