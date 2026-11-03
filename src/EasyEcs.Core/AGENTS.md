@@ -90,10 +90,16 @@ Tile.cs                      grid tiles: ITileShape / ITile<TKey> (a shape, halo
                              tile's cell buffers sized from its shape when the assembly loads), ExchangeHalo into the thread's
                              TileFrame (a texture padded with the halo, a row mask per layer, the state of the tile it
                              steps), Rows (TZCNT walk; First / Last / LayerOf / RowsOf: the same walk as plain loops for generated code), At / the indexer, Write (a stepped tile's row; JacobiNext: its checks once per tile for generated code), Sweep / Restart (a [GaussSeidel]
-                             step's sweep count, its cells started from a value: TileFrame.Restart), TileCursor.Load128,
+                             step's sweep count, its cells started from a value: TileFrame.Restart), TileCursor.Load128 / 256 / 512,
                              TileCursor.Columns (TileColumnWalk and its Cursor: a row's columns, loads at constant
                              offsets of the column and Store into the row the step writes, checked once for the walk),
-                             ChangedEdges / Facing (sleeping tiles written by hand)
+                             ChangedEdges / Facing (sleeping tiles written by hand); Plane (a 2D cell pass's halo read
+                             in place, out of line as the exchange) and TileLayout.Any (its row masks without a copy)
+CellRows.cs                  TilePlane<TCell, TTile> (the tile's buffer and its eight neighbors' for a cell pass reading
+                             its halo in place: Row along z, Own beside along x, Mask; Fits, the shapes it takes) and
+                             CellRow (a row's vector at i + dx: one load inside the row, else a shift in registers
+                             against the neighbor's edge vector: PALIGNR / EXT, VPERM2I128 + VPALIGNR, VALIGND, a pair
+                             through memory elsewhere); generated code only
 Cell.cs                      Cell<TCell, TTile>: one cell of a tile with its neighbors at constant offsets, the
                              parameter of a [ForEach] method computing one cell into its out parameter (the shader
                              form, written by the generator: SystemGenerator.Cells.cs); Offset / Width / Blank (a cell

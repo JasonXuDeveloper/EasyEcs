@@ -53,7 +53,7 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              first driving the walk, the others sampled, out cells and ref Reduce<T> results per tile;
                              an out of the driving cell's own type steps its tile: ref Tile, each row written through
                              Write(row), the second buffer swapped in, no Mut and no commit: Symbols.IsCellStep);
-                             the job handing it a Tile per input and a Mut per out buffer and result) in place of its accessor: the halo (a NoInlining {Name}_{index}__Exchange{k} per input, so the inliner's budget is left for the rows), the shape's constants and offsets read once, the walk as plain loops over the words of rows (TileRows.RowsOf), a stepped tile's buffer checked once (JacobiNext),
+                             the job handing it a Tile per input and a Mut per out buffer and result) in place of its accessor: the halo (a NoInlining {Name}_{index}__Exchange{k} per input, so the inliner's budget is left for the rows; a cross stencil of one 2D cell type whose rows are whole vectors reads it in place instead, behind TilePlane.Fits: Tile.Plane, rows through Row / Own, shifted loads through CellRow), the shape's constants and offsets read once, the walk as plain loops over the words of rows (TileRows.RowsOf), a stepped tile's buffer checked once (JacobiNext),
                              the out buffer sized and filled with what the method computes on Cell.Blank (the rows the
                              walk skips; once per system, in the static readonly fields of {Name}_{index}__Blank, when
                              the method takes nothing besides its cells and out cells), the rows its offsets read (every row when it reads X, Y or Z, or takes
@@ -97,7 +97,7 @@ SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(valu
                              gets (body copied with names qualified and constants inlined; the static delegate per
                              row where it cannot be: EECS096); its calls and the tile loads are bound after their syntax
                              provider (SystemGenerator.BoundLater), so an IDE that skips their output never binds them
-SystemGenerator.TileLoads.cs tile loads checked once per loop: c.Load128 / Load256 / LoadVector(x + k, dy, dz) in a
+SystemGenerator.TileLoads.cs tile loads checked once per loop: c.Load128 / Load256 / Load512 / LoadVector(x + k, dy, dz) in a
                              proven column loop -> an interceptor per loop and offset (one file per source file in
                              EasyEcs.Generated, implementation output): Covers, the loop's first and last column against
                              the padded row in constants the JIT folds, then a load at one zero-extended index off the

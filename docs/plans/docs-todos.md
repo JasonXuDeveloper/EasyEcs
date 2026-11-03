@@ -2318,3 +2318,44 @@ helpers).
 - **Numbers (pending):** TickBenchmark (samples/VoxelServer) of Flow as written (A), with every layer of every chunk
   exchanged (B: what a pass without a layer range costs), and as cells (C), two rounds; the port ships only at or below
   A at 0 B.
+
+### WP5 (a cell method stepping its tile) — docs to-dos
+
+- **tiles.mdx + zh ("One cell at a time"):** an `out` parameter of the driving cell's own type (`Cell<Heat, Plate> c,
+  out Heat next`) steps the tile, Jacobi ping-pong: the pass writes each row into the tile's second buffer and swaps
+  the two after the pass (O(1) per tile), so there is no `NextHeat` buffer and no commit system. Skipped rows come out
+  zero from the swap; a method whose blank value is not zero writes them. "You write / The generator writes" shows
+  the method and the schedule line ("steps the tile of 'c' (its second buffer swapped in)"). Not with [GaussSeidel],
+  a second step out, another ref tile, Slices, [EntityMethod] or [Consume] (EECS115 says which).
+- **guide/analyzers (EECS116) + zh:** EECS116 now also reports a commit after a cell method; its message says "write
+  the cell's next value as 'out {cell} {name}'", and the code fix rewrites the out type and `new TNext(...)` to the
+  cell's type, deleting the commit and TNext (offered when the cell type has a public constructor of the same
+  parameter types, or the value is `default`).
+- **guide/analyzers (EECS059) + zh:** an `out` of the driving cell's own type is the step form, no longer EECS059.
+- **guide/analyzers (EECS055) + zh, guide/vector-loops:** lanes four times as wide (byte cells beside float cells, a
+  byte beside an int) stay scalar; the reason says "widen the byte to 2-byte lanes, or split the method so each takes
+  lanes of one size".
+- **decisions.mdx + zh:** the cell step (why `out TCell` of the driver's type, considered: an attribute, a ref cell);
+  `TileLayout.Copy`'s runs under 16 bytes as one or two words, tried and reverted (no change to the exchange in
+  TileExchangeBenchmark, two rounds, and Laplacian_Tile / Blur9_Cell slower in TileStencilBenchmark; cause in the
+  WP5 hand-back). The exchange's lookups inlined, tried and rejected: `[AggressiveInlining]` on `Tile.Of` (h1), and
+  on `Of` and `LoadPlane` (h2), against two base rounds: Halo2 at side 512 / 1 thread 106 and 104 ms on base, 96 (h1)
+  and 107 ms (h2); Laplacian_Cell 290 and 311 ms on base, 308 and 320 ms; Laplacian_Columns 237 and 243 ms, 255 and
+  254 ms; rows that allocated (1 to 672 B). No win inside base's own spread: the exchange's cost per tile (about
+  185 ns in cache, 362 ns past it) is the neighbors' memory, not the calls. LoadFaces / LoadAny (too many locals) are
+  off the 2D path these rows take, so splitting them to the inliner's budget would change none of them.
+- **samples / benchmarks pages:** TileBenchmark's CellBlur / CellWave / CellLife are the step form (no NextWarmth, no
+  commit); performance page rows for Cell move with them.
+- **#157 Tile Load512 (api.mdx + zh, tiles.mdx + zh, guide/analyzers EECS120 + zh):** `TileCursor.Load512<TLane>`,
+  the column walk's `col.Load512` and `col.Store(Vector512<TLane>, into)` beside Load128 / Load256 / LoadVector (the
+  type row at api.mdx:76 and the complexity row at :266 name them; one unaligned load, two 256-bit halves without
+  Vector512); a column loop of Load512 is checked once like the others (EECS120's description lists it); the tiles
+  page's walk by `Columns(16)` with Load512 for rows of 16 floats, behind `Vector512.IsHardwareAccelerated` with the
+  128-bit walk otherwise (TileStencilBenchmark.Blur9_Columns512). Verdict and numbers: the backlog's #157 row.
+- **decisions.mdx + zh (the halo read in place):** a 2D cell pass of a cross stencil (every shift along x on the cell's
+  own row) reads its halo from the neighbors' buffers, shifting the vectors that cross a row's ends in registers; box
+  stencils copy it into the texture. Why, considered and numbers: docs/plans/inner-loops.md WP5 ("The halo read in
+  place"). why-fast / tiles pages: one sentence where the exchange is described; the schedule line says "its halo
+  read in place where the shape allows".
+- **performance page:** TileStencil's Laplacian_Cell moves with it (bench sync); Blur9_Columns512 joins the stencil
+  table where the page lists the Columns forms.

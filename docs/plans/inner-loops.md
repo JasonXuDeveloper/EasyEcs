@@ -451,6 +451,25 @@ with the reason. On the way: target-typed `new(...)` (Keeps), byte sums compared
 write-only streams dropped in every element loop (Kernel.Unloaded). TileTests.Cells.cs, AnalyzerTests.Tiles.cs,
 TileBenchmark (Blur9_Cell, Laplacian_Cell, TileActive's Cell). Not in WP5: a Columns<TTile> cell, several cell inputs
 or out cells, per-tile results (WP5b). The rest of this entry is the plan as written.
+Later on feat-inner-loops (2026-11-02/03, BenchmarkDotNet, the reference machine's Xeon with AVX-512):
+- *A cell stepping its tile* (`out` of the cell's own type): Jacobi ping-pong, no next buffer, no commit.
+- *Nothing to call in the rows* (a40db04): Step_0 at Tier1 1,195 bytes with no call in the row loop (6,230 before;
+  the calls were Tier1 PGO's inlining choices); TileActive Cell 4.87-4.97 us against 5.27-5.71 at side 32.
+- *The halo read in place for cross stencils* (b7d0c33, a4d9c32): TilePlane (the tile's buffer and its eight
+  neighbors'), CellRow (a vector at i + dx: one load inside the row, else a shift in registers against the neighbor's
+  edge vector: PALIGNR / EXT, VPERM2I128 + VPALIGNR, VALIGND). The prototype (TileInPlace: InPlaceShift 0.85-0.98 of
+  Hand; InPlace, a window through memory, 1.46-1.76: stores forwarded to wider loads stall) won against a copy into a
+  stack texture; the generated exchange already copies vector runs, so the first form lost 1.23-1.34x: two compares
+  per row ref (7 refs, spilled), two per shifted load, a span search per short run of the masks, Plane's lookups in
+  the pass (4.7-6.4 KB). With those cut (one compare per load, Own unchecked, words for short runs, Plane out of line:
+  2.7-3.1 KB) cross stencils win and box stencils still lose: Blur9 1.11-1.22x (six VALIGND on one port and their edge
+  and corner loads against nine plain loads; a halo of one copies cheaply), Laplacian 0.94 / 0.98 / 0.96 / 0.96 of the
+  copy form over four six-launch runs. So only cross stencils read in place; box stencils copy. 0 B; bit for bit in the
+  tests at AVX-512, AVX2 (DOTNET_EnableAVX512=0) and SSE (DOTNET_EnableAVX=0).
+- *The ISA knobs on .NET 10*: DOTNET_EnableAVX512=0 turns AVX-512 off (Vector512 and Avx512F false); the older
+  DOTNET_EnableAVX512F=0 and DOTNET_EnableSSSE3=0 change nothing (SSSE3 is in the x64 baseline), so CellRow's shift
+  through memory is reached only through Shift256 / Shift512 with AVX off.
+- *Inlining the exchange's lookups*: rejected (the neighbors' memory is the cost, not the calls; docs-todos).
 - Bar: every Cell case at or below its hand-written `Load128`/`Load256` twin, at 0 B; a case above it is a finding
   for the generator, fixed before the package merges.
 - Core: `Cell<,>`, `PaddedTile` row access for generated code, the 128/256 width tokens.
@@ -510,7 +529,20 @@ WP5b design (decided 2026-11-01, from what Flow.cs needs):
   added, exact for integers), loaded from the tile's partial result before each row's vector loop and stored back
   after it, so the scalar cells left and the next row continue it. The proof follows each field from a start value
   of its own (unknown) that `x + 0`, `x | 0`, `x & ~0`, Min with the type's MaxValue and Max with its MinValue keep:
-  a row is skipped only when every field ends at its start too.
+  a row is skipped only when every field ends at its start too. Shipped (Reduce<T>'s constraint relaxed, EECS002
+  outside a cell method).
+- (4) what was found: the walk is already ranged (Rows visits only the rows whose driver stencil holds something), so
+  a range only saves exchange. A tile's own blank layers do not bound it: a blank layer must still run when a lateral
+  neighbor's same layer, or the tile above or below at the boundary, holds water, since the stencil reaches it through
+  the halo; a correct range reads the neighbors' layers, most of what the exchange reads anyway. Flow.cs ranges from
+  its own summary (FluidCount of the chunk and its four neighbors). What a pass without a range costs is measured
+  directly: TickBenchmark with Flow.cs exchanging every layer of every chunk (B) against Flow.cs as written (A).
+- (5) Flow.cs as cells: the shader one block at a time (two cells: Fluid drives, Block sampled; out NextFluid;
+  `ref Reduce<FlowTally>` of two-byte fields, the row's bytes summed in ushort lanes; X and Z compared for the edges,
+  which needed X in byte lanes: Kernel.Narrow's index while the row fits the lanes, Code.IndexTop guarded by the pass),
+  WaterStepSystem making the tally the chunk's FluidStep (Commit, Sleep and Wake unchanged). Vector512 / Vector<byte> /
+  Vector128 per row, blank rows proved; the sample's output identical (check-sample). Ships if TickBenchmark (C) is at
+  or below A at 0 B; else the range (from the user's summary, a value parameter) is the next step.
 
 **WP6: EECS103 and its code fix.**
 - WP6a (v1, batch casts): shipped (D134).
