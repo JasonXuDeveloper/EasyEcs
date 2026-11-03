@@ -9,13 +9,13 @@ namespace EasyEcs.Generator;
 
 /// <summary>
 /// A tile load the generator checks once instead of per call: <c>c.Load128&lt;T&gt;(x + k, dy, dz)</c> (or
-/// <c>Load256</c>, <c>LoadVector</c>) of a <c>TileCursor</c>, its column the variable of the loop around it,
+/// <c>Load256</c>, <c>Load512</c>, <c>LoadVector</c>) of a <c>TileCursor</c>, its column the variable of the loop around it,
 /// <c>for (int x = a; x &lt; e; x += s)</c>, plus a constant. The cursor checks each load's column (a compare and a
 /// sign extension per column of the stencil); the loop already says which columns it loads, so the interceptor the
 /// generator writes checks the loop's first and last column once, in constants the JIT folds, and loads each column
 /// at one zero-extended index off the row's first halo cell.
 /// </summary>
-/// <param name="Load">The cursor's method: Load128, Load256 or LoadVector.</param>
+/// <param name="Load">The cursor's method: Load128, Load256, Load512 or LoadVector.</param>
 /// <param name="First">The loop variable's first value (a).</param>
 /// <param name="End">The bound the variable stays under (e), as the interceptor writes it: a number, or
 /// <c>TTile.Width</c> (or Depth, Height, Halo) of the cursor's shape, plus one for <c>&lt;=</c>.</param>
@@ -23,12 +23,12 @@ namespace EasyEcs.Generator;
 /// <param name="Offset">The constant added to the variable (k).</param>
 internal sealed record TileLoad(string Load, int First, string End, int Step, int Offset)
 {
-    private static readonly string[] Loads = ["Load128", "Load256", "LoadVector"];
+    private static readonly string[] Loads = ["Load128", "Load256", "Load512", "LoadVector"];
     private static readonly string[] Extents = ["Width", "Depth", "Height", "Halo"];
 
     /// <summary>A call that may be a cursor's load: decided on syntax alone.</summary>
     public static bool IsCandidate(SyntaxNode node) =>
-        node is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Load128" or "Load256" or "LoadVector" } };
+        node is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Load128" or "Load256" or "Load512" or "LoadVector" } };
 
     /// <summary>
     /// The load's loop, or null when the call is not a cursor's load or its column is not proven to step through the

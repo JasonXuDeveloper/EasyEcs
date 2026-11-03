@@ -70,6 +70,7 @@ public sealed partial class SystemGenerator
             {
                 "Load128" => "using __Vector128 = global::System.Runtime.Intrinsics.Vector128;\n",
                 "Load256" => "using __Vector256 = global::System.Runtime.Intrinsics.Vector256;\n",
+                "Load512" => "using __Vector512 = global::System.Runtime.Intrinsics.Vector512;\n",
                 _ => "using __Vector = global::System.Numerics.Vector;\n",
             });
         sb.Append($"\nnamespace {LambdaPass.Namespace}\n{{\n    file static class __TileLoads\n    {{\n");
@@ -81,6 +82,7 @@ public sealed partial class SystemGenerator
             {
                 "Load128" => ("__Vector128", "16", "global::System.Runtime.Intrinsics.Vector128<TLane>"),
                 "Load256" => ("__Vector256", "32", "global::System.Runtime.Intrinsics.Vector256<TLane>"),
+                "Load512" => ("__Vector512", "64", "global::System.Runtime.Intrinsics.Vector512<TLane>"),
                 _ => ("__Vector", "global::System.Numerics.Vector<byte>.Count", "global::System.Numerics.Vector<TLane>"),
             };
             string column = load.Offset == 0 ? "x" : load.Offset > 0 ? $"x + {load.Offset}" : $"x - {-(long)load.Offset}";

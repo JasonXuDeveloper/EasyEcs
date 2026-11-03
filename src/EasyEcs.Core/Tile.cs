@@ -1266,6 +1266,14 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
     public Vector256<TLane> Load256<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
         Vector256.LoadUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Vector256<byte>.Count))));
 
+    /// <summary>
+    /// The 512 bits of cells from (dx, dy, dz) as lanes of <typeparamref name="TLane"/>: a row of 16 floats in one
+    /// load where <c>Vector512.IsHardwareAccelerated</c>, two 256-bit loads elsewhere. O(1).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public Vector512<TLane> Load512<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
+        Vector512.LoadUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Vector512<byte>.Count))));
+
     /// <summary>A <c>Vector&lt;TLane&gt;</c> of cells from (dx, dy, dz) (the machine's vector width). O(1).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public Vector<TLane> LoadVector<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
@@ -1388,6 +1396,11 @@ public ref struct TileColumnWalk<TCell, TTile> where TCell : unmanaged where TTi
         public Vector256<TLane> Load256<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
             Vector256.LoadUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Vector256<byte>.Count))));
 
+        /// <summary>The 512 bits of cells from (dx, dy, dz) of the column as lanes of <typeparamref name="TLane"/>, as <see cref="TileCursor{TCell, TTile}.Load512{TLane}"/> loads them. O(1).</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Vector512<TLane> Load512<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
+            Vector512.LoadUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref _at, Offset(dx, dy, dz, Vector512<byte>.Count))));
+
         /// <summary>A <c>Vector&lt;TLane&gt;</c> of cells from (dx, dy, dz) of the column (the machine's vector width). O(1).</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public Vector<TLane> LoadVector<TLane>(int dx = 0, int dy = 0, int dz = 0) =>
@@ -1407,6 +1420,11 @@ public ref struct TileColumnWalk<TCell, TTile> where TCell : unmanaged where TTi
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void Store<TLane>(Vector256<TLane> value, Span<TCell> into) =>
             value.StoreUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref MemoryMarshal.GetReference(into), Within(into, Vector256<byte>.Count))));
+
+        /// <summary>Stores 512 bits of <paramref name="value"/> into the row <paramref name="into"/> from the column's cell, as <see cref="Store{TLane}(Vector128{TLane}, Span{TCell})"/> does. O(1).</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void Store<TLane>(Vector512<TLane> value, Span<TCell> into) =>
+            value.StoreUnsafe(ref Unsafe.As<TCell, TLane>(ref Unsafe.Add(ref MemoryMarshal.GetReference(into), Within(into, Vector512<byte>.Count))));
 
         /// <summary>Stores a <c>Vector&lt;TLane&gt;</c> into the row <paramref name="into"/> from the column's cell, as <see cref="Store{TLane}(Vector128{TLane}, Span{TCell})"/> does. O(1).</summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

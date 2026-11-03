@@ -53,7 +53,7 @@ public static partial class EasyEcsAnalyzer
     public static readonly DiagnosticDescriptor CheckedTileLoad = new("EECS120", "A tile load checked on every call",
         "{0} at a column the generator cannot follow is checked on every call: {1}; write the loop as 'for (int x = 0; x < TTile.Width; x += step)' with nothing else writing x, or walk the row's columns with c.Columns(step)",
         Category, DiagnosticSeverity.Info, true,
-        "A TileCursor load (Load128, Load256, LoadVector) checks that its cells lie in the padded row: a compare and a " +
+        "A TileCursor load (Load128, Load256, Load512, LoadVector) checks that its cells lie in the padded row: a compare and a " +
         "sign extension per column. In a column loop the generator can follow (the loop declares an int from a constant, " +
         "tests it against a constant or the shape's Width, Depth, Height or Halo, adds a positive constant, nothing else " +
         "writes it, and the call is in its body, not in a lambda or local function there), the load's column is the " +
