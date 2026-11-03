@@ -526,7 +526,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 
       | Recommendation | State | Evidence |
       |---|---|---|
-      | Span mask parameter (a batch method told which rows of a word pass) | not built: a new parameter form, the owner's call | owner-review.md "A batch method's word of passing rows" |
+      | Span mask parameter (a batch method told which rows of a word pass) | dropped (owner, 2026-11-03): the method for one row gets masks through the generated vector loop, and EECS103 rewrites a hand loop into it | decision record in the docs pass (docs-todos "feat-later-accumulate") |
       | Ping-pong buffer | done before | `ref Tile` steps, TileSteps.cs (ed9f5e9, feat-tiles-pingpong): the second buffer swapped in, no commit |
       | Tile store | done before | `tile.Write(row)` (Tile.cs:759), `col.Store` of TileColumnWalk (Tile.cs:1346-1356, 23a85f6) |
       | Tile `Load512` | not built: Tile.cs belongs to feat-inner-loops in this round | needs `TileCursor.Load512` / the column walk's next to `Load256` (Tile.cs:1209, 1331) and a TileStencil case; handed back |

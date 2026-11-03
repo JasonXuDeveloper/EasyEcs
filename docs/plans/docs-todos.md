@@ -2366,5 +2366,9 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   "Dropped" names both.
 - decisions.mdx + .zh: `[Accumulate]` users sharing a stage not built (owner-review.md entry): no stage of the
   VoxelServer or the battle server is lost to a total; the serial stages are systems that run alone.
+- decisions.mdx + .zh (dropped, owner 2026-11-03): no row-mask parameter for a batch `[ForEach]` method (`ulong rows`
+  or a `RowMask` struct). The method for one row is the form that gets masks (`IForEachMasked` in the generated vector
+  loop) and EECS103 rewrites a hand-written vector loop into it. What would reopen it: a batch method whose hand loop
+  the generator cannot vectorize, measured against its per-row twin under a sparse filter. Roadmap "Dropped" names it.
 - guide/parallel (or wherever a parallel pass's cost is described) + zh: a parallel `[ForEach]` over a small table
   costs about a serial pass (no chunking below 64 rows in one table).
