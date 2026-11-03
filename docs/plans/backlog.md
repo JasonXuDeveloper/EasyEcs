@@ -535,6 +535,13 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       | `Masked` short path | **built** in part (7955c6a): `RowFilter.Mode`'s requires-only plans | Plain 355 / 343 -> 332 / 333 ns, WithOnUpdate 361 / 353 -> 338 / 333, ParallelPasses 408 / 392 -> 349 / 355; the frame split of `Masked` not tried (below) |
       | Per-participant timestamps | built and reverted (1ffd92d): slower | the span from first claim to last item counts the cursor's contention as work, so a run with helpers "beats" it and the runner stops running light stages alone: ParallelStage 0.72 -> 1.33-1.39 us |
 
+      Head (both kept) against base, every other case: the broad set (SystemDispatch, ParallelSystems, ParallelRunner,
+      ParallelPass, WorldSimulation, BattleServer, Reduce, Emit) two rounds, sides swapped in the second, then six
+      processes per case for those one round put above 1.0: none slower beyond its spread, 0 B. ReduceBenchmark's
+      BoundsParallelLock (a lock taken per row by four threads) read 0.81-1.44x across rounds, its standard deviation
+      15-25 % of its mean: contention, not the code (its pass is cut as before; the lock-free twins on the same rows
+      0.97-1.02x). VoxelServer TickBenchmark, four alternating rounds: 50 / 500 / 2,000 players 0.95 / 0.95 / 1.03.
+
       Left: the frame split of `Masked` / `Batches` (the per-table preamble apart from the loop, a smaller frame): the
       research's ceiling is about 5 ns of a 20 ns system; next step is `tools/jitdisasm.sh` of `Masked` on Plain.
 - [x] **Linger at Hop 8 after d666b0d** (feat-later-small): no regression; `[MethodImpl(NoInlining)]` on `Leave` not
