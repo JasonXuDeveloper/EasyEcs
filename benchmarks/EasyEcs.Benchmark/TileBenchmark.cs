@@ -108,7 +108,7 @@ public class TileStencilBenchmark
 
     [Params(Plot.Default, 512)] public int Side;
 
-    private World _blurTile, _blurDirect, _blurHand, _blurPingPong, _waveTile, _waveHand, _wavePingPong, _blurColumns, _waveColumns, _blurCell, _waveCell;
+    private World _blurTile, _blurDirect, _blurHand, _blurPingPong, _waveTile, _waveHand, _wavePingPong, _blurColumns, _blurColumns512, _waveColumns, _blurCell, _waveCell;
 
     [GlobalSetup]
     public void Setup()
@@ -135,14 +135,14 @@ public class TileStencilBenchmark
         _wavePingPong.AddSystem<TileSystems.PingWaveSystem>();
         _blurColumns = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p), next: false);
         _blurColumns.AddSystem<TileSystems.ColumnBlurSystem>();
+        _blurColumns512 = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p), next: false);
+        _blurColumns512.AddSystem<TileSystems.ColumnBlur512System>();
         _waveColumns = TileWorlds.Warm<WavePlot>(Threads, p => new WavePlot(p), next: false);
         _waveColumns.AddSystem<TileSystems.ColumnWaveSystem>();
-        _blurCell = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p));
+        _blurCell = TileWorlds.Warm<BlurPlot>(Threads, p => new BlurPlot(p), next: false);
         _blurCell.AddSystem<TileSystems.CellBlurSystem>();
-        _blurCell.AddSystem<TileSystems.CommitWarmthSystem>();
-        _waveCell = TileWorlds.Warm<WavePlot>(Threads, p => new WavePlot(p));
+        _waveCell = TileWorlds.Warm<WavePlot>(Threads, p => new WavePlot(p), next: false);
         _waveCell.AddSystem<TileSystems.CellWaveSystem>();
-        _waveCell.AddSystem<TileSystems.CommitWarmthSystem>();
         for (int i = 0; i < 3; i++)
         {
             Blur9_Tile();
@@ -153,6 +153,7 @@ public class TileStencilBenchmark
             Blur9_PingPong();
             Laplacian_PingPong();
             Blur9_Columns();
+            Blur9_Columns512();
             Laplacian_Columns();
             Blur9_Cell();
             Laplacian_Cell();
@@ -163,6 +164,7 @@ public class TileStencilBenchmark
         TileWorlds.Same(_blurDirect, _blurHand);
         TileWorlds.Same(_waveTile, _waveHand);
         TileWorlds.Same(_blurColumns, _blurHand);
+        TileWorlds.Same(_blurColumns512, _blurHand);
         TileWorlds.Same(_waveColumns, _waveHand);
         TileWorlds.Same(_blurCell, _blurHand);
         TileWorlds.Same(_waveCell, _waveHand);
@@ -179,6 +181,7 @@ public class TileStencilBenchmark
         _blurPingPong.Dispose();
         _wavePingPong.Dispose();
         _blurColumns.Dispose();
+        _blurColumns512.Dispose();
         _waveColumns.Dispose();
         _blurCell.Dispose();
         _waveCell.Dispose();
@@ -192,6 +195,7 @@ public class TileStencilBenchmark
     [Benchmark] public void Blur9_PingPong() => _blurPingPong.Update();
     [Benchmark] public void Laplacian_PingPong() => _wavePingPong.Update();
     [Benchmark] public void Blur9_Columns() => _blurColumns.Update();
+    [Benchmark] public void Blur9_Columns512() => _blurColumns512.Update();
     [Benchmark] public void Laplacian_Columns() => _waveColumns.Update();
     [Benchmark] public void Blur9_Cell() => _blurCell.Update();
     [Benchmark] public void Laplacian_Cell() => _waveCell.Update();
@@ -226,9 +230,8 @@ public class TileActiveBenchmark
         _sparse.AddSystem<TileSystems.WakeSystem>();
         _pingPong = TileWorlds.Blinkers(Threads, awake: false, next: false);
         _pingPong.AddSystem<TileSystems.PingLifeSystem>();
-        _cell = TileWorlds.Blinkers(Threads, awake: false);
+        _cell = TileWorlds.Blinkers(Threads, awake: false, next: false);
         _cell.AddSystem<TileSystems.CellLifeSystem>();
-        _cell.AddSystem<TileSystems.CommitSeedSystem>();
         for (int i = 0; i < 4; i++)
         {
             AlwaysOn();
@@ -484,17 +487,48 @@ internal static class TileSystems
     public ref struct ColumnBlurSystem
     {
         [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(ref Tile<Warmth, BlurPlot> warmth) => ColumnBlur(ref warmth);
+    }
+
+    /// <summary>
+    /// The blur walked by c.Columns(16) with c.Load512 where Vector512 is accelerated: a row of 16 floats per load, one
+    /// column per row; the 128-bit walk of ColumnBlurSystem elsewhere (the branch a constant of the JIT).
+    /// </summary>
+    [EcsSystem]
+    public ref struct ColumnBlur512System
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
         static void Step(ref Tile<Warmth, BlurPlot> warmth)
         {
+            if (!Vector512.IsHardwareAccelerated)
+            {
+                ColumnBlur(ref warmth);
+                return;
+            }
             warmth.ExchangeHalo();
             foreach (var row in warmth.Rows(TileStencil.Layer))
             {
                 var into = warmth.Write(row);
-                foreach (var col in warmth.At(row).Columns(4))
-                    col.Store((col.Load128<float>(-1, 0, -1) + col.Load128<float>(0, 0, -1) + col.Load128<float>(1, 0, -1)
-                      + col.Load128<float>(-1) + col.Load128<float>() + col.Load128<float>(1)
-                      + col.Load128<float>(-1, 0, 1) + col.Load128<float>(0, 0, 1) + col.Load128<float>(1, 0, 1)) * (1f / 9), into);
+                foreach (var col in warmth.At(row).Columns(16))
+                    col.Store((col.Load512<float>(-1, 0, -1) + col.Load512<float>(0, 0, -1) + col.Load512<float>(1, 0, -1)
+                      + col.Load512<float>(-1) + col.Load512<float>() + col.Load512<float>(1)
+                      + col.Load512<float>(-1, 0, 1) + col.Load512<float>(0, 0, 1) + col.Load512<float>(1, 0, 1)) * (1f / 9), into);
             }
+        }
+    }
+
+    /// <summary>The blur's 128-bit column walk (ColumnBlurSystem, and ColumnBlur512System without Vector512).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void ColumnBlur(ref Tile<Warmth, BlurPlot> warmth)
+    {
+        warmth.ExchangeHalo();
+        foreach (var row in warmth.Rows(TileStencil.Layer))
+        {
+            var into = warmth.Write(row);
+            foreach (var col in warmth.At(row).Columns(4))
+                col.Store((col.Load128<float>(-1, 0, -1) + col.Load128<float>(0, 0, -1) + col.Load128<float>(1, 0, -1)
+                  + col.Load128<float>(-1) + col.Load128<float>() + col.Load128<float>(1)
+                  + col.Load128<float>(-1, 0, 1) + col.Load128<float>(0, 0, 1) + col.Load128<float>(1, 0, 1)) * (1f / 9), into);
         }
     }
 
@@ -628,7 +662,7 @@ internal static class TileSystems
 
     /// <summary>A neighbor's cells, empty when no plate was found (the search stays in the method: a Lookup gets its
     /// index when the method calls TryFind on the parameter itself).</summary>
-    private static ReadOnlySpan<float> Cells(bool found, EntityId id, Lookup<DynamicBuffer<Warmth>> warmths) =>
+    internal static ReadOnlySpan<float> Cells(bool found, EntityId id, Lookup<DynamicBuffer<Warmth>> warmths) =>
         found ? MemoryMarshal.Cast<Warmth, float>(warmths.Read(id).AsReadOnlySpan()) : default;
 
     /// <summary>A neighbor's facing row of 16 into the ring, or zeros.</summary>
@@ -687,12 +721,15 @@ internal static class TileSystems
         }
     }
 
-    /// <summary>The 9-point blur as one cell: the generator writes AlwaysOn's loop around it (the halo, the rows, a vector per row).</summary>
+    /// <summary>
+    /// The 9-point blur as one cell: the generator writes AlwaysOn's loop around it (the halo, the rows, a vector per
+    /// row); its out cell is a Warmth, the cell's next value, so the pass steps the tile as PingPong does (no commit).
+    /// </summary>
     [EcsSystem]
     public ref struct CellBlurSystem
     {
         [ForEach(Parallel = true, ChunkSize = 16)]
-        static void Step(Cell<Warmth, BlurPlot> w, out NextWarmth next) =>
+        static void Step(Cell<Warmth, BlurPlot> w, out Warmth next) =>
             next = new((w[-1, 0, -1].T + w[0, 0, -1].T + w[1, 0, -1].T
                 + w[-1, 0, 0].T + w.Value.T + w[1, 0, 0].T
                 + w[-1, 0, 1].T + w[0, 0, 1].T + w[1, 0, 1].T) * (1f / 9));
@@ -703,7 +740,7 @@ internal static class TileSystems
     public ref struct CellWaveSystem
     {
         [ForEach(Parallel = true, ChunkSize = 16)]
-        static void Step(Cell<Warmth, WavePlot> w, out NextWarmth next)
+        static void Step(Cell<Warmth, WavePlot> w, out Warmth next)
         {
             float here = w.Value.T;
             float alongX = -w[-2, 0, 0].T + 16f * w[-1, 0, 0].T - 30f * here + 16f * w[1, 0, 0].T - w[2, 0, 0].T;
@@ -717,7 +754,7 @@ internal static class TileSystems
     public ref struct CellLifeSystem
     {
         [ForEach(Parallel = true, ChunkSize = 16)]
-        static void Step(Cell<Seed, LifePlot> c, out NextSeed next)
+        static void Step(Cell<Seed, LifePlot> c, out Seed next)
         {
             int count = c[-1, 0, -1].Alive + c[0, 0, -1].Alive + c[1, 0, -1].Alive
                 + c[-1, 0, 0].Alive + c[1, 0, 0].Alive
