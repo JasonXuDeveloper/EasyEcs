@@ -1026,13 +1026,13 @@ public static class NarrowKernels
 public class KernelTests
 {
     /// <summary>The lengths that cut a vector short or leave a tail, at both vector widths, and a long run.</summary>
-    private static readonly int[] Lengths = [0, 1, Vector<float>.Count - 1, Vector<float>.Count, Vector<float>.Count + 1,
+    internal static readonly int[] Lengths = [0, 1, Vector<float>.Count - 1, Vector<float>.Count, Vector<float>.Count + 1,
         Vector512<float>.Count - 1, Vector512<float>.Count + 1, Vector<double>.Count + 1, 2 * Vector<float>.Count, 3 * Vector512<float>.Count + 1, 1000];
 
     private static readonly float[] Special = [float.NaN, -0f, 0f, 1f, -1f, 2f, 3f, 0.5f, 2.5f, -2.5f, float.PositiveInfinity, float.NegativeInfinity, 1e-30f, float.MaxValue,
         2147483648f, -2147483904f, 4294967296f, 3e9f, -3e9f, float.Epsilon];
 
-    private static float NextFloat(Random random, int i) => i % 5 == 0 ? Special[random.Next(Special.Length)] : (float)(random.NextDouble() * 20 - 10);
+    internal static float NextFloat(Random random, int i) => i % 5 == 0 ? Special[random.Next(Special.Length)] : (float)(random.NextDouble() * 20 - 10);
 
     private static double NextDouble(Random random, int i) =>
         i % 7 == 0 ? new[] { double.NaN, -0d, 1e11, -1e11, double.NegativeInfinity, 9.3e18, 1.9e19, -9.3e18, 2.5 }[random.Next(9)] : random.NextDouble() * 200 - 100;
@@ -1051,6 +1051,14 @@ public class KernelTests
     private static bool Same<T>(in T a, in T b) where T : struct
     {
         if (MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in a)).SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in b)))) return true;
+        if (Floats(typeof(T))) // inline arrays of floats (InlineArrayTests): lane by lane, any NaN equal to any NaN
+        {
+            var x = MemoryMarshal.Cast<byte, float>(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in a)));
+            var y = MemoryMarshal.Cast<byte, float>(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in b)));
+            for (int k = 0; k < x.Length; k++)
+                if (float.IsNaN(x[k]) ? !float.IsNaN(y[k]) : BitConverter.SingleToInt32Bits(x[k]) != BitConverter.SingleToInt32Bits(y[k])) return false;
+            return true;
+        }
         foreach (var field in typeof(T).GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic))
         {
             object x = field.GetValue(a)!, y = field.GetValue(b)!;
@@ -1063,6 +1071,16 @@ public class KernelTests
             if (!same) return false;
         }
         return true;
+    }
+
+    /// <summary>A struct holding an inline array whose every value is a float (no padding: its bytes are floats).</summary>
+    private static bool Floats(Type type, bool inline = false)
+    {
+        if (type == typeof(float)) return inline;
+        if (!type.IsValueType || type.IsPrimitive || type.IsEnum) return false;
+        inline |= type.IsDefined(typeof(System.Runtime.CompilerServices.InlineArrayAttribute), false);
+        var fields = type.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+        return fields.Length > 0 && fields.All(f => Floats(f.FieldType, inline)) && (inline || fields.Any(f => f.FieldType != typeof(float)));
     }
 
     /// <summary>Components of <paramref name="count"/> entities in two tables, the generated loop, and the method itself per row.</summary>
@@ -1097,7 +1115,7 @@ public class KernelTests
         }
     }
 
-    private delegate void ScalarRow<T1, T2>(ref T1 a, ref T2 b);
+    internal delegate void ScalarRow<T1, T2>(ref T1 a, ref T2 b);
 
     private static Vector2 NextVector2(Random r, int i) => new(NextFloat(r, i), NextFloat(r, i + 1));
     private static Vector3 NextVector3(Random r, int i) => new(NextFloat(r, i), NextFloat(r, i + 1), NextFloat(r, i + 2));
@@ -1482,7 +1500,7 @@ public class KernelTests
         ("one per 300 rows", i => i % 300 != 7), // words without a passing row between them: skipped
     ];
 
-    private static readonly int[] HoleCounts = [1, 8, 17, 64, 65, 130, 1000];
+    internal static readonly int[] HoleCounts = [1, 8, 17, 64, 65, 130, 1000];
 
     private static System.Collections.Generic.IEnumerable<TestCaseData> HoleCases() =>
         from hole in Holes from count in HoleCounts select new TestCaseData(hole.Name, count);
@@ -1620,7 +1638,7 @@ public class KernelTests
     /// <see cref="Check{T1, T2}"/> over one table whose rows in <paramref name="hole"/> lack one of the two components
     /// (the first for odd rows, the second for even ones): the method runs on the rows that have both.
     /// </summary>
-    private static void CheckHoles<T1, T2>(int count, Func<int, bool> hole, Func<Random, int, T1> make1, Func<Random, int, T2> make2,
+    internal static void CheckHoles<T1, T2>(int count, Func<int, bool> hole, Func<Random, int, T1> make1, Func<Random, int, T2> make2,
         Action<World> generated, ScalarRow<T1, T2> scalar)
         where T1 : struct, IComponent where T2 : struct, IComponent
     {

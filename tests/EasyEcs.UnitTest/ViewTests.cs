@@ -406,6 +406,8 @@ public class ViewRuleTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(PQ v, Maybe<Q> q) => v.Add(); }")]
     [TestCase("[View] public ref struct OnlyQ { public ref readonly Q Q; } [EcsSystem] public ref struct S { [ForEach] static void A(PQ v, OnlyQ w) => v.Add(); }")]
     [TestCase("public static class R { [EntityMethod] static void A(PQ v, in Q q) => v.Add(); }")]                                // [EntityMethod]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P a, in P b) => a.V += b.V; }")]                     // two parameters
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P a, Mut<P> b) => a.V++; }")]                        // a parameter and a Mut
     public async Task AComponentReachedTwiceIsAnError(string source) =>
         Assert.That(await Ids(source), Is.EqualTo(new[] { "EECS099" }));
 
