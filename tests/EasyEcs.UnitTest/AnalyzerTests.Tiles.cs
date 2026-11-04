@@ -112,6 +112,27 @@ public partial class AnalyzerTests
     public Task CellsOfTwoTilesReport() => ReportsOnTiles("EECS115",
         "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, Cell<byte, N> d, out NB next) => next = new NB((byte)(c.Value + d.Value)); }");
 
+    // EECS123: a cell method's layers (ITileLayers) where the pass may not skip rows: the rows outside could not be filled.
+    private const string Layers = "public record struct GL(int From, int To) : IComponent, ITileLayers; ";
+
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<float, G> c, in GL layers, out NF next) => next = new NF(c.Z > 1 ? 1 : c.Value); }", "it reads its place")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<int, G> c, Cell<float, G> d, in GL layers, out NF next) => next = new NF(c.Value * d.Value); }", "it takes several cells")]
+    public async Task LayersThatCannotBoundThePassReport(string source, string reason)
+    {
+        await ReportsOnTiles("EECS123", Layers + source);
+        var found = await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, Layers + source]);
+        Assert.That(found.Single(d => d.Id == "EECS123").GetMessage(), Does.Contain(reason).And.Contain("'layers'"));
+    }
+
+    // Layers that bound the pass: one cell, or a blank row proved; the parameter the body never reads is no EECS026.
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, in GL layers, out NB next) => next = new NB((byte)(c[-1, 0, 0] + c[1, 0, 0])); }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<int, G> c, Cell<float, G> d, in GL layers, out NF next) => next = new NF(c.Value != 0 ? d.Value : 0); }")]
+    public async Task LayersThatBoundThePassAreClean(string source)
+    {
+        await AssertClean(GeneratorTests.Components, TileParts, Layers + source);
+        Assert.That(await Count("EECS026", GeneratorTests.Components, TileParts, Layers + source) + await Count("EECS123", GeneratorTests.Components, TileParts, Layers + source), Is.Zero);
+    }
+
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, out NB next) => next = new NB((byte)(c[-1, 0, 0] + c[1, 0, 0])); }")]
     [TestCase("[Sum] public partial struct CT : IComponent { public int N; } [EcsSystem] public ref struct S { [ForEach] static void A(Cell<int, G> c, out NF next, ref Reduce<CT> r) { next = new NF(c.Value); r.Value.N += c[1, 0, 0]; } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<int, G> c, Cell<float, G> d, out uint next, out NF sum) { next = (uint)(c.Value * 2 + c[1, 0, 0]); sum = new NF(d.Value * c[0, 0, 1] + d[-1, 0, 0]); } }")]

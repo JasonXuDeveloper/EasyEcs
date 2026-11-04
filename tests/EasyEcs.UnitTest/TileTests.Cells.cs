@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using NUnit.Framework;
 
@@ -9,8 +10,9 @@ namespace EasyEcs.UnitTest;
 /// Cell methods (<see cref="Cell{TCell, TTile}"/>, the shader form): a blur per boundary, a halo of 2 on a torus and
 /// the Game of Life in bytes, each against the whole grid computed at once (bit for bit against the tile methods it
 /// replaces), on one thread and on four; the cell's place (X, Y, Z) in a 3D tile; the rows the walk skips filled with
-/// what the method computes from zeros; the method as written (SimdMode.Off) against its vector form; an offset past
-/// the halo throwing; the schedule's lines and 0 B.
+/// what the method computes from zeros; a pass bounded to the layers a component gives (ITileLayers) against the
+/// whole one; the method as written (SimdMode.Off) against its vector form; an offset past the halo throwing; the
+/// schedule's lines and 0 B.
 /// </summary>
 public partial class TileTests
 {
@@ -290,6 +292,80 @@ public partial class TileTests
         {
             if (x < 0 || y < 0 || z < 0 || !columns.TryGetValue(new TilePos(x / w, y / h, z / d), out var column)) return 0;
             return column.Read<DynamicBuffer<Heat>>()[(y % h * d + z % d) * w + x % w].T;
+        }
+    }
+
+    /// <summary>The layers of a column a cell pass covers (ITileLayers): where its heat and its neighbors' reach.</summary>
+    public record struct HeatLayers(int From, int To) : IComponent, ITileLayers;
+
+    /// <summary>The seven-point stencil bounded to each column's layers.</summary>
+    [EcsSystem]
+    public ref struct CellLayersSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(Cell<Heat, PlaceColumn> w, in HeatLayers layers, out NextHeat next) =>
+            next = new(w.Value.T * 0.4f + (w[-1, 0, 0].T + w[1, 0, 0].T + w[0, -1, 0].T + w[0, 1, 0].T + w[0, 0, -1].T + w[0, 0, 1].T) * 0.1f);
+    }
+
+    // Columns of 4 x 2 x 2 tiles, heat in layers 2 and 3 of the columns at x = 0: those and the columns beside them
+    // (x = 1) take layers 1 to 4, a dry column whose neighbors are dry takes none (x = 2: From above To), and x = 3 takes
+    // layers far outside the tile (clamped: every layer). Each step's cells equal the unbounded pass's bit for bit, every
+    // cell written (the buffers start at a value no step gives), on one thread and four, and the pass allocates nothing.
+    private static (World Bounded, World Whole, List<(Entity Bounded, Entity Whole)> Columns) LayeredColumns(int threads)
+    {
+        const int w = 8, d = 8, h = 6;
+        var bounded = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var whole = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var random = new Random(29);
+        var columns = new List<(Entity, Entity)>();
+        foreach (var place in Box(4, 2, 2))
+        {
+            var a = bounded.CreateEntity(new PlaceColumn(place), place.X switch
+            {
+                0 or 1 => new HeatLayers(1, 4),
+                2 => new HeatLayers(3, 2),
+                _ => new HeatLayers(-5, 50),
+            });
+            var b = whole.CreateEntity(new PlaceColumn(place));
+            var heat = a.GetOrAdd<DynamicBuffer<Heat>>().SetCount(w * d * h);
+            if (place.X == 0)
+                for (int i = 0; i < 60; i++) heat[(2 + random.Next(2)) * w * d + random.Next(w * d)] = new Heat(random.Next(1, 1000));
+            heat.CopyTo(b.GetOrAdd<DynamicBuffer<Heat>>().SetCount(w * d * h));
+            a.GetOrAdd<DynamicBuffer<NextHeat>>().SetCount(w * d * h).Fill(new NextHeat(-7));
+            b.GetOrAdd<DynamicBuffer<NextHeat>>().SetCount(w * d * h);
+            columns.Add((a, b));
+        }
+        bounded.AddSystem<CellLayersSystem>();
+        whole.AddSystem<CellSevenPointSystem>();
+        return (bounded, whole, columns);
+    }
+
+    [TestCase(1)]
+    [TestCase(4)]
+    public void LayersBoundThePassToWhereTheCellsAre(int threads)
+    {
+        var (bounded, whole, columns) = LayeredColumns(threads);
+        using (bounded)
+        using (whole)
+        {
+            bounded.Update();
+            whole.Update();
+            foreach (var (a, b) in columns)
+                Assert.That(MemoryMarshal.AsBytes(a.Read<DynamicBuffer<NextHeat>>().AsReadOnlySpan()).SequenceEqual(MemoryMarshal.AsBytes(b.Read<DynamicBuffer<NextHeat>>().AsReadOnlySpan())), Is.True,
+                    $"column {a.Read<PlaceColumn>().Pos}");
+            Assert.That(bounded.DescribeSchedule().ToString(), Does.Contain("layers of 'layers'"));
+        }
+    }
+
+    [Test]
+    public void LayersAllocateNothing()
+    {
+        var (bounded, whole, _) = LayeredColumns(4);
+        using (bounded)
+        using (whole)
+        {
+            Allocations.WarmUp(bounded.Update, 50);
+            Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) bounded.Update(); }), Is.Zero);
         }
     }
 
