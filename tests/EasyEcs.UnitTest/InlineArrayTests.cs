@@ -272,7 +272,8 @@ public class InlineArrayTests
     {
         using var world = new World();
         world.AddSystem<ArrayLoops>();
-        Assert.That(world.DescribeSchedule().Groups[0].Stages[0].Systems[0].Loops, Is.EqualTo(new[]
+        // without NEON, AVX2 or AVX-512 the interleaved loop's line adds "; rows on this hardware"
+        Assert.That(world.DescribeSchedule().Groups[0].Stages[0].Systems[0].Loops.Select(l => l.Split("; rows on this hardware")[0]), Is.EqualTo(new[]
         {
             "Fade4: vector (Vector512 or Vector<float>), flat, masked words vector",
             "Fade8: vector (Vector512 or Vector<float>), flat, masked words scalar",
