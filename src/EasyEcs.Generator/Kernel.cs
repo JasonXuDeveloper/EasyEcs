@@ -488,22 +488,32 @@ internal sealed partial class Kernel
     public static Code? Vectorize(IMethodSymbol lambda, IAnonymousFunctionOperation function, bool parallel, bool stable,
         SemanticModel model, System.Func<int, Symbols.ParamKind, string> fieldOf, System.Threading.CancellationToken ct, out string? reason)
     {
-        // A view's members are inlined from a method's declaration (Kernel.Views.cs), which a lambda has not.
-        if (lambda.Parameters.Any(p => Symbols.Classify(p, true) == Symbols.ParamKind.View))
-        {
-            reason = "it takes a view, whose members only a [ForEach] method inlines into its vector loop: write one";
-            return null;
-        }
-
         try
         {
-            var lane = new Lane(lambda, true, parallel, false, model, stable);
+            IOperation root = function.Body;
+            var declaration = lambda;
+            // Views: the lambda as written without them, as a method's (Kernel.Views.cs), bound in the method the call is in.
+            if (lambda.Parameters.Any(p => Symbols.Classify(p, true) == Symbols.ParamKind.View))
+            {
+                if (function.Syntax is not ParenthesizedLambdaExpressionSyntax syntax)
+                {
+                    reason = "its views could not be desugared";
+                    return null;
+                }
+                if (Desugar(lambda, syntax, model, ct, out var viewReason) is not var (desugared, desugaredBody, desugaredModel))
+                {
+                    reason = viewReason ?? "a view member cannot be inlined";
+                    return null;
+                }
+                (lambda, root, model) = (desugared, desugaredBody, desugaredModel);
+            }
+            var lane = new Lane(lambda, true, parallel, false, model, stable, declaration);
             if (Declined(lane) is { } declined)
             {
                 reason = declined.Reason;
                 return null;
             }
-            var code = Vectorize(lane, function.Body, fieldOf, ct, out ScalarReason? why);
+            var code = Vectorize(lane, root, fieldOf, ct, out ScalarReason? why);
             reason = why?.Text;
             return code;
         }
