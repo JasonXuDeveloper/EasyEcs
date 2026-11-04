@@ -2475,6 +2475,12 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   TieredCompilation) and what it costs; AggressiveOptimization on generated passes not adopted (the core code they
   call still tiers; the steady state loses PGO). Numbers from a BenchmarkDotNet run, not the probe.
 
+### WP1 step 1 (inline arrays not read as one lane) — docs to-dos
+
+- **Changelog (Fixes) + zh:** "A [ForEach] method over a component holding an `[InlineArray]` beside other fields no
+  longer runs a vector loop that read its rows at the wrong size; it runs row by row, and EECS055 (Info) says why."
+  Link guide/systems#vector-loops. analyzer.mdx + zh: the reason in EECS055's list of inherent reasons.
+
 ### WP5b (ITileLayers: a cell pass bounded to the layers a component gives) — docs to-dos
 
 The name was approved by the owner (2026-11-04, through the lead): `ITileLayers` with `From` / `To`, taken by a cell
