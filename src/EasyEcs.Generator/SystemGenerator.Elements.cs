@@ -205,10 +205,11 @@ public sealed partial class SystemGenerator
     /// <paramref name="bail"/> leaves at a vector the loop as written must run. <paramref name="with128"/> adds a
     /// Vector128 loop after Vector&lt;T&gt;'s.
     /// </summary>
-    private static string ElementLoops(Kernel.ElementLoop loop, bool with128, string bail)
+    private static string ElementLoops(Kernel.ElementLoop loop, bool with128, string bail, Hoisted? hoist = null)
     {
         var simd = loop.Code;
         var text = new StringBuilder();
+        if (hoist != null && !Hoists(simd)) hoist = null;
         if (simd.Flat is { } flat)
         {
             text.Append($"nint lanes = rows * {flat.Fields};\ni *= {flat.Fields};\n");
@@ -219,7 +220,9 @@ public sealed partial class SystemGenerator
         {
             string vector = $"{Kernel.V}<{simd.Lane}>";
             var loopText = new StringBuilder();
-            foreach (var line in simd.Setup.Split('\n')) if (line.Length > 0) loopText.Append(line).Append('\n');
+            var accumulators = new StringBuilder();
+            foreach (var line in simd.Setup.Split('\n'))
+                if (line.Length > 0) (hoist != null && Accumulator.IsMatch(line) ? accumulators : loopText).Append(line).Append('\n');
             Paired(loopText, simd, vector, loop.Streams.Length); // a float sum, Min or Max: two chains
             loopText.Append($"for (nint last = rows - {vector}.Count; i <= last; i += {vector}.Count)\n{{\n");
             loopText.Append(Indent(Kernel.Unloaded(simd.Body, simd.Columns, simd.Streamed))); // what it only writes: not loaded
@@ -229,19 +232,57 @@ public sealed partial class SystemGenerator
                 loopText.Append("    if (__bail)\n    {\n").Append(Indent(Indent(simd.Restore + simd.Fold)))
                     .Append($"        {bail} // the loop as written runs this vector's elements and the rest\n    }}\n");
             loopText.Append(Indent(simd.Stores)).Append("}\n");
-            loopText.Append(simd.Fold);
+            if (hoist == null) loopText.Append(simd.Fold);
             Constants(loopText);
             string body = loopText.Replace(Kernel.Row, "(at + (int)i)").Replace(Kernel.Visited, "ulong.MaxValue").ToString();
             string guard = $"{Hardware(simd)} && rows - i >= {vector}.Count";
-            text.Append($"if ({Wide(guard, null)})\n{{\n").Append(Indent(Wide(body, null))).Append("}\n");
-            text.Append($"if ({Narrow(guard, null)})\n{{\n").Append(Indent(Narrow(body, null))).Append("}\n");
+            // Each width's text, and with a hoist its accumulators and fold, named apart per width (they share the pass's scope).
+            void Width(System.Func<string, string> of, string tag)
+            {
+                if (hoist == null)
+                {
+                    text.Append($"if ({of(guard)})\n{{\n").Append(Indent(of(body))).Append("}\n");
+                    return;
+                }
+                text.Append($"if ({of(guard)})\n{{\n").Append(Indent(Tagged(of(body), tag))).Append("}\n");
+                hoist.Setup.Append(Tagged(of(accumulators.ToString()), tag));
+                hoist.Fold.Append($"if ({of(Hardware(simd))} && {hoist.Count} >= {of(vector)}.Count)\n{{\n").Append(Indent(Tagged(of(simd.Fold), tag))).Append("}\n");
+            }
+            Width(s => Wide(s, null), "w");
+            Width(s => Narrow(s, null), "n");
             // Vector128 after Vector<T>: a row of a cell method narrower than Vector<T> (16 bytes of a tile's row on AVX2);
             // only for text that calls no helper of one width (LaneMath, Interleaved: their Vector<T> and 512 forms).
-            if (with128 && !OfOneWidth.Any(h => body.IndexOf(h, System.StringComparison.Ordinal) >= 0))
-                text.Append($"if ({Width128(guard)})\n{{\n").Append(Indent(Width128(body))).Append("}\n");
+            if (with128 && !OfOneWidth.Any(h => body.IndexOf(h, System.StringComparison.Ordinal) >= 0)) Width(Width128, "q");
         }
         return text.ToString();
     }
+
+    /// <summary>
+    /// Where a cell pass puts a reduction's accumulators and fold: once per tile around the walk (<see cref="Setup"/>
+    /// before it, <see cref="Fold"/> after it, each width under its own guard, <see cref="Count"/> the row's cells), not
+    /// once per row. A row of a voxel chunk is one vector of 16 bytes, so the per-row start of nine two-byte fields and
+    /// their fold (14 horizontal sums, four Min / Max lane by lane) cost more than the row's arithmetic.
+    /// </summary>
+    internal sealed class Hoisted(string count)
+    {
+        public readonly StringBuilder Setup = new(), Fold = new();
+        public readonly string Count = count;
+    }
+
+    /// <summary>
+    /// Whether a loop's accumulators may live across its runs: integer sums wrap and Min / Max take any order, so a
+    /// fold per tile equals one per row; a float sum is FloatMode.Fast's (any order). Not with a bail (it folds and
+    /// restores mid-loop) or paired chains (they copy the accumulator per run).
+    /// </summary>
+    private static bool Hoists(Kernel.Code simd) =>
+        simd.Flat == null && !simd.Bails && simd.Chains.Length == 0 && simd.Fold.Length > 0;
+
+    /// <summary>A setup line declaring a reduction's identity or one of its accumulators (Kernel.Reduced / Summed).</summary>
+    private static readonly System.Text.RegularExpressions.Regex Accumulator = new(@"^var __(?:id|a)\d+[_ ]");
+
+    /// <summary>The reduction names of one width's text (<c>__a3_0</c>, <c>__id3</c>) given that width's tag.</summary>
+    private static string Tagged(string text, string tag) =>
+        System.Text.RegularExpressions.Regex.Replace(text, @"\b__(id|a)(\d+)(?!\d)", "__$1$2" + tag);
 
     /// <summary>The Vector128 loop's text: <see cref="Narrow"/>'s, the vector type Vector128.</summary>
     private static string Width128(string s) => Lines(s, Kernel.Mark128, Kernel.Mark512).Replace(WideGuard, "")

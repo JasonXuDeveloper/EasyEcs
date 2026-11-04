@@ -119,9 +119,11 @@ public sealed partial class SystemGenerator
         // The row's vector loop, once: the loops of each width, from the row's streams (each width's text names them).
         string? loops = null;
         bool with128 = false;
+        // A result per tile keeps its lanes across the rows (accumulators started before the walk, folded after it).
+        var hoist = results.Count > 0 ? new Hoisted($"{at}.Width") : null;
         if (form.Loop is { } built)
         {
-            loops = ElementLoops(built, true, "goto __rest;");
+            loops = ElementLoops(built, true, "goto __rest;", hoist);
             with128 = loops.Contains(Vector128 + ".");
         }
         // The halo read in place (TilePlane, no copy into the texture) where the pass can: one cell of a 2D tile, its
@@ -158,6 +160,7 @@ public sealed partial class SystemGenerator
             // Each result starts at its identity for the tile (and a spare for the blank cells, which add nothing to it).
             for (int n = 0; n < results.Count; n++)
                 body.Append($"var __red{n} = new global::EasyEcs.Reduce<{Result(n)}> {{ Value = {Result(n)}.Identity }};\nvar __spare{n} = __red{n};\n");
+            if (hoist != null) body.Append(hoist.Setup);
             var row = new StringBuilder();
             if (plane)
             {
@@ -272,6 +275,13 @@ public sealed partial class SystemGenerator
             {
                 body.Append($"for (int __y = 0; __y < {at}.Height; __y++)\nfor (int __z = 0; __z < {at}.Depth; __z++)\n{{\n");
                 body.Append(Indent($"var __row = new global::EasyEcs.TileRow<{shape}>(__y, __z);\nint __index = (__y * __depth + __z) * __width;\n" + row)).Append("}\n");
+            }
+            if (hoist != null && hoist.Fold.Length > 0 && form.Loop is { } folded)
+            {
+                // The rows' lanes into the tile's result, once (the row's names x{n}, as its loop wrote them).
+                body.Append("{\n");
+                for (int n = 0; n < results.Count; n++) body.Append($"    ref var x{folded.Streams.Length + n} = ref __red{n};\n");
+                body.Append(Indent(hoist.Fold.ToString())).Append("}\n");
             }
             for (int n = 0; n < results.Count; n++) body.Append($"__res{n}.Write() = __red{n}.Value;\n");
             return body.ToString();
