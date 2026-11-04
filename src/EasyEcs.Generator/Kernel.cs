@@ -710,6 +710,24 @@ internal sealed partial class Kernel
         HashSet<IParameterSymbol>? whole = null;
         Dictionary<IParameterSymbol, List<(IFieldSymbol[] Path, ISymbol[] Access)>>? touched = null;
         List<int>? flatOnly = null; // the job columns of components of more lanes than a row loop splits (Lanes)
+        (IParameterSymbol Parameter, int Lanes)? flatOnlyOf = null; // the first of them
+        // A row loop would split more lanes than Interleaved does: the flat loop is the only one, else this reason.
+        Unsupported FlatOnly()
+        {
+            var (p, lanes) = flatOnlyOf!.Value;
+            string reason = $"component {p.Type.Name} holds an inline array and has {lanes} lanes: a vector loop splits up to {MaxFields} fields of a row, and takes more only when the method does the same to each lane (a flat loop)";
+            // A method that reads none of the array: the fields it uses, moved into a component of their own, get a loop.
+            whole ??= new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
+            touched ??= Touched(body, whole);
+            if (!whole.Contains(p) && touched.TryGetValue(p, out var used) && used.Count <= MaxFields
+                && used.All(u => IsLaneType(u.Path[u.Path.Length - 1].Type) && SizeOf(u.Path[u.Path.Length - 1].Type) == SizeOf(used[0].Path[used[0].Path.Length - 1].Type)))
+            {
+                string names = string.Join(", ", used.Select(u => string.Join(".", u.Path.Select(Symbols.MemberName))));
+                return new Unsupported(reason + $"; it uses {used.Count} of {p.Type.Name}'s fields ({names}) and not the array: move {(used.Count == 1 ? "it" : "them")} into a component of {(used.Count == 1 ? "its" : "their")} own (a component of {(used.Count == 1 ? "one field" : $"{used.Count} fields")} gets a vector loop)",
+                    true, p.Type.ToDisplayString());
+            }
+            return new Unsupported(reason);
+        }
         // A component the loop does not split (more than MaxFields lanes, a field that is not a lane, lanes of two sizes)
         // still has a vector loop on AVX-512 when the method uses only 4-byte lanes of it (Kernel.Wide.cs); else the reason,
         // and the advice to split the lanes it uses into a component of their own when they are few.
@@ -731,7 +749,11 @@ internal sealed partial class Kernel
                     try
                     {
                         fields = Lanes(p.Type, out bool many);
-                        if (many) (flatOnly ??= new List<int>()).Add(components.Count + 1);
+                        if (many)
+                        {
+                            (flatOnly ??= new List<int>()).Add(components.Count + 1);
+                            flatOnlyOf ??= (p, fields.Length);
+                        }
                         if (fields.Length > 1 && fields.FirstOrDefault(f => IsBool(f.Type)) is { } flag)
                             throw new Unsupported($"field {p.Type.Name}.{flag.Name} is a bool among {fields.Length} fields: a vector loop takes a bool in a component of its own (one byte per row)"); // inherent until the samples split theirs (owner-review)
                         if (fields.Any(f => SizeOf(f.Type) != SizeOf(fields[0].Type)))
@@ -909,7 +931,12 @@ internal sealed partial class Kernel
             columns.Add(([$"__q{index}_", $"__has{index}"], loads.ToString()));
         }
         var root = body;
-        kernel.Statement(root, null);
+        try { kernel.Statement(root, null); }
+        catch (Unsupported) when (flatOnly != null)
+        {
+            // what the row loop could not translate does not matter: only a flat loop takes such a component
+            throw FlatOnly();
+        }
         kernel.FinishChanges(lane.Declaration ?? method);
         // A masked word keeps the values loaded of what the method writes, and stores them back in the lanes that do not
         // pass: the rows are left as they were (their memory is the table's, whether a component is absent or not).
@@ -1052,26 +1079,7 @@ internal sealed partial class Kernel
             if (names.Any(n => n.Length == 0 || uses.Contains(n))) read.Append(text);
         if (kernel._wideOf.Count > 0) kernel.FitLocals(kernel._setup.ToString() + prologue + read + hold + kernel._body + stores);
         var flat = Flat(kernel, root, () => Make(false));
-        if (flatOnly != null)
-        {
-            // A row loop would split more lanes than Interleaved does: the flat loop is the only one, else the reason.
-            var (p, (_, many, _)) = kernel._components.Select(c => (c.Key, c.Value)).First(c => flatOnly.Contains(c.Value.Index));
-            if (flat == null)
-            {
-                string reason = $"component {p.Type.Name} holds an inline array and has {many.Length} lanes: a vector loop splits up to {MaxFields} fields of a row, and takes more only when the method does the same to each lane (a flat loop)";
-                // A method that reads none of the array: the fields it uses, moved into a component of their own, get a loop.
-                whole ??= new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
-                touched ??= Touched(body, whole);
-                if (!whole.Contains(p) && touched.TryGetValue(p, out var used) && used.Count <= MaxFields
-                    && used.All(u => IsLaneType(u.Path[u.Path.Length - 1].Type) && SizeOf(u.Path[u.Path.Length - 1].Type) == SizeOf(used[0].Path[used[0].Path.Length - 1].Type)))
-                {
-                    string names = string.Join(", ", used.Select(u => string.Join(".", u.Path.Select(Symbols.MemberName))));
-                    throw new Unsupported(reason + $"; it uses {used.Count} of {p.Type.Name}'s fields ({names}) and not the array: move {(used.Count == 1 ? "it" : "them")} into a component of {(used.Count == 1 ? "its" : "their")} own (a component of {(used.Count == 1 ? "one field" : $"{used.Count} fields")} gets a vector loop)",
-                        true, p.Type.ToDisplayString());
-                }
-                throw new Unsupported(reason);
-            }
-        }
+        if (flatOnly != null && flat == null) throw FlatOnly();
         kernel.FitUnrolled(kernel._setup.ToString() + prologue + read + hold + kernel._body + stores, kernel._components.Count);
         // Narrow lanes have no shuffles: a component of several fields takes the flat loop or none.
         if (kernel._narrow && flat == null && kernel._components.FirstOrDefault(c => c.Value.Fields.Length > 1 && !kernel._doubled.Contains(c.Value.Index)) is { Key: { } narrow, Value.Fields: { } several })
