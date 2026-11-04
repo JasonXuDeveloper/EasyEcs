@@ -278,6 +278,15 @@ internal sealed partial class Kernel
     /// the job's own names aside), or the reason; each step's locals are declared again, so a long body times its steps
     /// would push the job out of the runner, a call per run (D135).
     /// </summary>
+    /// <summary>
+    /// Whether the masked words' loop of an unrolled body, <paramref name="text"/>, declares no more locals than the JIT
+    /// inlines: its broadcasts of constants are locals before the loop (unlike the loop over whole vectors, which takes
+    /// them in place) and it holds the word's passing lanes. Past the budget its masked words run the method (the job's
+    /// runner would call the loop per word), while the loop over whole vectors keeps the vectors.
+    /// </summary>
+    private bool MaskedFits(string text, int columns) =>
+        !_unrolled || SystemGenerator.Locals(text) + columns + 2 <= SystemGenerator.InlinedLocals;
+
     private void FitUnrolled(string text, int columns)
     {
         if (!_unrolled) return;

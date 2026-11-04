@@ -132,6 +132,9 @@ internal sealed partial class Kernel
         /// </summary>
         public bool FlatOnly { get; init; }
 
+        /// <summary>The masked words' loop declares more locals than the JIT inlines (Kernel.Unrolled.cs): they run the method.</summary>
+        public bool MaskedScalar { get; init; }
+
         /// <summary>
         /// The largest index the vector form holds exactly in its narrow lanes (<see cref="Lane.IndexFits"/>), which the
         /// caller checks before entering it; 0 when it assumes none.
@@ -1104,6 +1107,7 @@ internal sealed partial class Kernel
             Wide512 = kernel._wide512,
             Wide128 = kernel._wide128,
             FlatOnly = flatOnly != null,
+            MaskedScalar = !kernel.MaskedFits(kernel._setup.ToString() + prologue + read + kept + maskedHold + kernel._body.Masked + masked, kernel._components.Count),
             IndexTop = kernel._indexTop,
             StructuralChanges = kernel.StructuralChanges(),
             VectorTail = kernel._change != null || kernel._emits.Values.Any(e => e.Added),
