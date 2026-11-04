@@ -1596,7 +1596,10 @@ internal sealed partial class Kernel
                 target = a.Target;
                 value = $"({Expr(a.Target)} {(a.Kind == OperationKind.Increment ? "+" : "-")} {VecOf(a.Type)}.One)";
                 break;
-            case IDeconstructionAssignmentOperation { Target: ITupleOperation targets, Value: ITupleOperation values } when !_narrow && targets.Elements.Length == values.Elements.Length
+            // (nearest, next) = (d, i): the value a tuple, or the tuple converted to the target's element names (an implicit
+            // conversion of the same element types, checked below)
+            case IDeconstructionAssignmentOperation { Target: ITupleOperation targets, Value: IConversionOperation { IsImplicit: true, Operand: ITupleOperation } or ITupleOperation } d
+                when !_narrow && (d.Value as ITupleOperation ?? (ITupleOperation)((IConversionOperation)d.Value).Operand) is var values && targets.Elements.Length == values.Elements.Length
                 && targets.Elements.Select((t, k) => (t, k)).All(e => (IsLane(e.t.Type) || IsBool(e.t.Type)) && SymbolEqualityComparer.Default.Equals(e.t.Type, values.Elements[e.k].Type)):
             {
                 // (nearest, next) = (d, i): every value first, each in a local of its own (a swap reads the old ones), then the writes
