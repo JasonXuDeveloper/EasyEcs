@@ -423,6 +423,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, in H h) { float v; v = h.V; f.V = v; }", "local 'v' has no initializer: give it its value where it is declared", true)]
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V = e.Id.Index;", "it uses the Entity in 'e.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)", true)]
     [TestCase("public record struct Wide2(int A, long B); static Wide2 At(float v) => new((int)v, 1); [ForEach] static void A(ref F f) { var c = At(f.V); f.V = c.A; }", "local 'c' is a S.Wide2, not a lane type of 4 or 8 bytes")] // the helper's new(...) keeps its type in 'var c'
+    [TestCase("[System.Runtime.CompilerServices.InlineArray(4)] public struct Quad { private float _q; } public struct Held : IComponent { public float V; public Quad Q; } [ForEach] static void A(ref Held h) => h.V += 1;", "field Held.Q is an inline array (Quad), which a vector loop does not read")] // as many values as its length, never one lane
     public void ScalarLoopsNameTheirReason(string members, string reason, bool fixable = false)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
