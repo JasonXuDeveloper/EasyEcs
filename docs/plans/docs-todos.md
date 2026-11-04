@@ -2481,6 +2481,37 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   longer runs a vector loop that read its rows at the wrong size; it runs row by row, and EECS055 (Info) says why."
   Link guide/systems#vector-loops. analyzer.mdx + zh: the reason in EECS055's list of inherent reasons.
 
+### WP1 lanes, counted sums and the lambda forms (feat-inner-loops, 2026-11-04) — docs to-dos
+
+- **guide/systems.mdx + zh (vector loops: what becomes a vector loop):** a component holding an `[InlineArray]` of
+  4 / 8 / 16 elements (float, int, ...) is read as that many lanes, and a `for` over it with a constant trip count is
+  unrolled into the row loop (lanes = rows, element by element): Spectrum / Mix / Nearest of InlineArrayBenchmark as
+  the "You write / The generator writes" example. What stays scalar, with EECS055's reason: more than 16 elements, a
+  bound that is not a constant, an element index that is not the loop's. A body whose masked loop would pass the
+  JIT's 32 inlined locals runs its masked words through the method (the schedule says "masked words scalar"); the
+  whole words keep the vector loop. Also in the "Costs" table: the unrolled body grows with the elements.
+- **guide/systems.mdx + zh (reductions):** `sum += cond ? 1 : 0`, `if (cond) sum++` / `sum += 1` (and `cond ? 0 : 1`)
+  are counts: the lanes subtract the condition's mask (same width) or count it into an int (a field twice the
+  width: `long` over 4-byte lanes), folded once. Numbers: KernelBenchmark CycleHoles / Cycle, TileTallyBenchmark Cell.
+- **guide/analyzer.mdx + zh (EECS099):** also reported when two parameters of one method (or a view's two fields)
+  take the same component: they would alias one row. The message names both.
+- **guide/analyzer.mdx + zh (EECS055):** a component only the flat loop can take (an inline array read through an
+  index the row loop does not unroll) names itself as the reason, whatever else the row loop tripped on.
+- **guide/lambdas (or the lambda pass section of guide/systems) + zh:** a lambda pass changing structure under a
+  condition (`if (hp.V <= 0) e.Add<Dead>()`), and a lambda pass taking a `[View]`, get the vector loop the method
+  gets (the view's members inlined; EECS097 says why when it stays scalar). Numbers: StructuralLoopBenchmark Lambda,
+  ViewBenchmark Lambda. Remove "lambda + structural change" and "lambda + view" from any list of forms that stay
+  scalar (roadmap "Vector loops: forms left for later", the lambda page's limits).
+- **Changelog (New) + README "What's new":** "Inline array components and constant-trip loops over them run as
+  vector loops"; "Counts (`sum += cond ? 1 : 0`) are mask arithmetic"; "Lambda passes that change structure or
+  take a view get vector loops". Changelog (Analyzer): EECS099's new case.
+- **decisions.mdx + zh:** a record "Inline array elements as lanes, constant loops unrolled" (why lanes = rows and
+  not a wide form per element: Kernel.Wide's layout and LayoutCheck name members, an element would need an index
+  step the wide form does not have; the numbers: InlineArrayBenchmark); a record "A count is the mask, subtracted"
+  (why not CountWhereAllBitsSet / popcount on same-width lanes: Tier1 materializes the all-ones vector and a
+  sign extension each iteration, 15 vs 16 instructions and slower at 1k; doubled fields keep the popcount into an
+  int counter).
+
 ### WP5b (ITileLayers: a cell pass bounded to the layers a component gives) — docs to-dos
 
 The name was approved by the owner (2026-11-04, through the lead): `ITileLayers` with `From` / `To`, taken by a cell
