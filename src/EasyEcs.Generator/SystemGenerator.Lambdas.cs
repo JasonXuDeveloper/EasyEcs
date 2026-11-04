@@ -107,7 +107,7 @@ public sealed partial class SystemGenerator
             string? body = LambdaPass.Unreachable(call, model, ct) == null ? LambdaPass.Copy(call, model, ct) : null;
             string? scalar = null;
             // A body copied into the generated file is the method's; one run through its delegate has no loop to translate.
-            var simd = body != null && stable
+            var simd = body != null
                 ? Kernel.Vectorize(lambda, function, call.Parallel, stable, model, call.Parallel
                     ? static (i, kind) => kind switch { Symbols.ParamKind.Singleton => $"s{i}.Value", Symbols.ParamKind.Reduction => $"l{i}", _ => $"x{i}" }
                     : static (i, kind) => kind switch { Symbols.ParamKind.Singleton => $"s{i}", Symbols.ParamKind.Reduction => $"l{i}", _ => $"x{i}" }, ct, out scalar)
@@ -154,7 +154,6 @@ public sealed partial class SystemGenerator
             var call = file.Calls[k];
             var method = call.Method;
             const string world = "__world", body = "__body";
-            string job = $"{method.Name}Job{k}";
             var values = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Context).Select(p => $"{p.Type} {Escape(p.Name)}");
             string parameters = string.Concat(method.Parameters.Select(p => $", {p.Declared} {Escape(p.Name)}"));
             type.Append($"    /// <summary>The lambda pass at {call.Where.Replace("<", "&lt;")}.</summary>\n");
@@ -165,13 +164,8 @@ public sealed partial class SystemGenerator
             type.Append($"    internal static void {method.Name}{k}(this global::EasyEcs.World {world}{tick}{string.Concat(values.Select(v => ", " + v))}, global::System.Delegate {body})\n    {{\n");
             if (call.Body == null) type.Append($"        {method.Name}{k}Delegate = global::System.Runtime.CompilerServices.Unsafe.As<{method.Name}{k}Body>({body});\n");
             string filter = method.Since ? $"{method.Name}Filter{k}.Since({since})" : $"in {method.Name}Filter{k}";
-            if (method.HasChaseTwin) EmitPass(type, method, "__ForEach", k, world, "job", ", " + filter, "", "        "); // the twin past the cache
-            else
-            {
-                type.Append($"        var job = new {job}{Fields(method, world)};\n");
-                type.Append($"        {world}.{method.ForEach}<{method.ComponentTypes}, {job}>(ref job, {filter}{method.Chunks});\n");
-                EmitReductions(type, method, world, "job", "        ");
-            }
+            // as a [ForEach] method's pass: the twin past the cache, the rows a vector loop marked changed after it
+            EmitPass(type, method, "__ForEach", k, world, "job", ", " + filter, "", "        ");
             type.Append("    }\n\n");
 
             // What the job calls per row: the lambda's body (inlined like a [ForEach] method), or its delegate.
