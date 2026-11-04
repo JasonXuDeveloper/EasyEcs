@@ -576,6 +576,36 @@ WP5b design (decided 2026-11-01, from what Flow.cs needs):
   lead named) helps the transient only in part (C 98 -> 74 ms after 900 ticks: the core code it calls, the exchange,
   still tiers) and costs the steady state its PGO (3.61 -> 3.77 ms): not adopted. What a user can set for a warm
   start is the runtime's (ReadyToRun, TieredPGO, TieredCompilation): a docs-todos item.
+- (5) with the range (2026-11-04): `ITileLayers` (cc1cf2c, the owner's name) bounds a cell pass's exchange and walk
+  to the layers a component of the tile gives. TileLayersBenchmark: Layers 0.51 of Whole at 1 thread, 0.59 at 4, 0 B.
+  Flow.cs as cells on it (WaterReachSystem setting FlowLayers from the counts, WaterFlowSystem the cell method,
+  WaterStepSystem making the FlowTally the FluidStep: one job each) is **still not shipped**; the sample keeps Flow.cs
+  as written (the port: scratchpad afk-flowx, not in the tree). Probe, 50 players, 500 ticks after 9,000, two runs:
+
+  | | as written | cells | cells, fold hoisted |
+  |---|---|---|---|
+  | WaterFlowSystem | 1.41 / 1.46 ms | 2.71 / 3.07 | 1.62 / 1.77 |
+  | WaterReachSystem + WaterStepSystem | (inside Flow) | 0.51 / 0.68 | 0.52 / 0.53 |
+
+  Causes, from the generated text and the Tier1 listing of Flow_0 (5.9 KB, no call in the walk's row loop): (a) a row
+  is one Vector128 of 16 bytes, and the per-tile result's 18 accumulators (nine two-byte fields, each two widened
+  halves) were started and folded per row: 14 `Vector128.Sum` and four 8-lane Min / Max loops around one vector of
+  work. Fixed in the generator for every cell pass with a result (`SystemGenerator.Elements.cs` `Hoisted`: the
+  accumulators start before the walk and fold once after it, per width; exact, since integer sums wrap and Min / Max
+  take any order; not with a bail or paired chains): 2.71-3.07 -> 1.62-1.77 ms. TileTallyBenchmark (byte cells on
+  16 x 16 x 32 towers, a tally of two sums, a Min and a Max; two rounds, base / head interleaved, 0 B): Cell 2,592 /
+  3,008 -> 1,071 / 1,065 us at 1 thread, 1,017 / 1,017 -> 415 / 429 us at 4; Hand (Load128 and popcounts, the same
+  code in both) 693-719 / 266-288 us, so Cell is now 1.5x Hand, from 3.6-4.4x.
+  (b) What the pass still costs over the hand-written row: seven count fields summed in widened two-byte lanes
+  (vpmovm2b, vpmovsxbw, vpternlogd, an add per half; the accumulators live in stack slots across the walk, 18 vectors)
+  where the hand-written row pops a mask's bits (movemask, popcnt); and the blank fill of the gaps between walked rows
+  (a SpanHelpers.Fill per gap; the hand-written step relied on the buffer staying zero there). The next generator form
+  for (b): a sum of a condition's 0 / 1 as the popcount of its mask into a scalar per field. (c) The port's own:
+  WaterReachSystem and WaterStepSystem are a system each (one job per system), about 2-3 us per run of a few chunks
+  each, and Reach repeats the neighbor lookup the hand-written Flow shares with its exchange; together 0.52 ms against
+  the 0.2-0.3 ms (b) leaves, so even (b) fixed the port stays above Flow as written. TickBenchmark could not decide
+  either way: the base alone moved 45.8-58.8 ms at 50 players between rounds (its 1,600 ticks per process end mid
+  tier-up), while the probe's water differs by about 0.15 ms per 100 ticks.
 
 **WP6: EECS103 and its code fix.**
 - WP6a (v1, batch casts): shipped (D134).
