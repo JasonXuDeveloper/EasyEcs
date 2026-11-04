@@ -986,16 +986,17 @@ internal sealed partial class Kernel
         var restore = new StringBuilder();
         var fold = new StringBuilder();
         string count = $"{Vec(Column(first))}.Count";
-        // A sum every write of which counts lanes (Counts) keeps no vector: its accumulators, never written, are not
-        // started or folded.
+        // An integer field of a reduction the body never writes (a field the method leaves alone, a count kept by a
+        // counter: Counts) holds its identity: its accumulators are not started or folded. A fold per run is what a run of
+        // a few rows pays most for: four Min / Max loops lane by lane cost Cycle more than its 1,000 rows' arithmetic.
+        // (A float's stay: its chains are paired by name, SystemGenerator.Paired.)
         string written = kernel._body.ToString() + kernel._body.Masked;
-        bool Unused(string acc) => kernel._counters.Count > 0 && !System.Text.RegularExpressions.Regex.IsMatch(written, $@"\b{acc}\b");
-        foreach (var counted in kernel._counters.Keys)
-        {
-            string vector = counted.Substring(0, counted.Length - 1);
-            foreach (var h in new[] { "", "_0", "_1" })
-                if (Unused(vector + h)) kernel._setup.Replace(SetupLine(kernel._setup.ToString(), vector + h), "");
-        }
+        bool Unused(string acc, ITypeSymbol type) => !IsFloat(type) && !System.Text.RegularExpressions.Regex.IsMatch(written, $@"\b{acc}\b");
+        foreach (var r in kernel._reductions.Values)
+            for (int f = 0; f < r.Fields.Length; f++)
+                foreach (var h in Suffixes(kernel.IsDoubled(r.Fields[f].Type)))
+                    if (Unused($"__a{r.Index}_{f}{h}", r.Fields[f].Type))
+                        kernel._setup.Replace(SetupLine(kernel._setup.ToString(), $"__a{r.Index}_{f}{h}"), "");
         foreach (var entry in kernel._counters.OrderBy(c => c.Key, System.StringComparer.Ordinal))
         {
             var (counter, (r, f)) = (entry.Key, entry.Value);
@@ -1016,7 +1017,7 @@ internal sealed partial class Kernel
                 string acc = $"__a{r.Index}_0";
                 foreach (var h in Suffixes(kernel.IsDoubled(r.Fields[0].Type)))
                 {
-                    if (Unused(acc + h)) continue;
+                    if (Unused(acc + h, r.Fields[0].Type)) continue;
                     held.Append($"var __h{r.Index}_0{h} = {acc}{h};\n");
                     restore.Append($"{acc}{h} = __h{r.Index}_0{h};\n");
                     if (h.Length > 0) masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, Elem(r.Fields[0].Type))}, {acc}{h}, __h{r.Index}_0{h});\n");
@@ -1036,7 +1037,7 @@ internal sealed partial class Kernel
                     string acc = $"__a{r.Index}_{f}", ft = r.Fields[f].Type.ToDisplayString(Symbols.Fqn), into = $"{r.Partial}.Value.{r.Fields[f].Name}";
                     foreach (var h in Suffixes(kernel.IsDoubled(r.Fields[f].Type)))
                     {
-                        if (Unused(acc + h)) continue;
+                        if (Unused(acc + h, r.Fields[f].Type)) continue;
                         held.Append($"var __h{r.Index}_{f}{h} = {acc}{h};\n");
                         restore.Append($"{acc}{h} = __h{r.Index}_{f}{h};\n");
                         if (h.Length > 0) masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, Elem(r.Fields[f].Type))}, {acc}{h}, __h{r.Index}_{f}{h});\n");
@@ -1899,9 +1900,11 @@ internal sealed partial class Kernel
 
     /// <summary>
     /// A sum of a partial result (or of a variable an element loop sums into) that <paramref name="op"/> adds 1 to on the
-    /// lanes of a condition: the popcount of the condition's mask added to a scalar counter, not a vector of 0 / 1 per
-    /// lane (for a field wider than the lanes, widened into two halves first). Exact: an integer sum wraps, so the
-    /// count added once equals its ones added lane by lane. False when <paramref name="op"/> is no such write.
+    /// lanes of a condition. A field of the lanes' width subtracts the condition's mask (-1 on its lanes) from its
+    /// accumulator: one operation, where adding 1 under the mask is two. A field twice as wide as the lanes (a ushort
+    /// count of byte cells) adds the popcount of the mask to a scalar counter, where the sum would widen the mask into two
+    /// halves and add each. Exact: an integer sum wraps, so either equals the ones added lane by lane; the counter, an
+    /// int, holds at most the rows of a run or a tile. False when <paramref name="op"/> is no such write.
     /// </summary>
     private bool Counts(IOperation op, string? mask)
     {
@@ -1911,15 +1914,24 @@ internal sealed partial class Kernel
             IIncrementOrDecrementOperation a => Accumulator(a.Target),
             _ => null,
         };
-        if (target is not var (r, field) || r.Ops[field] != "+" || IsFloat(r.Fields[field].Type) || Counted(op, mask) is not { } counted) return false;
+        if (target is not var (r, field) || r.Ops[field] != "+") return false;
+        var type = r.Fields[field].Type;
+        if (IsFloat(type) || !IsLane(type) && !IsDoubled(type) || Counted(op, mask) is not { } counted) return false;
+        string active = And(counted, _alive)!;
+        if (!IsDoubled(type))
+        {
+            string acc = Acc(r, field);
+            string Less(string lanes) => $"{acc} = ({acc} - {MaskAs(lanes, type)});\n";
+            _body.Append(Less(active), Less(And(active, "__pass")!));
+            return true;
+        }
         string counter = $"__a{r.Index}_{field}c";
         if (!_counters.ContainsKey(counter))
         {
             _counters[counter] = (r, field);
-            _setup.Append($"var {counter} = 0L;\n");
+            _setup.Append($"var {counter} = 0;\n");
         }
-        string active = And(counted, _alive)!;
-        string Add(string lanes) => $"{counter} += (long){V}.CountWhereAllBitsSet({lanes});\n";
+        string Add(string lanes) => $"{counter} += {V}.CountWhereAllBitsSet({lanes});\n";
         _body.Append(Add(active), Add(And(active, "__pass")!));
         return true;
     }
