@@ -1,0 +1,26 @@
+<doc>
+  <member name="T:EasyEcs.ITileLayers" source="330a7123db40">
+    <summary>
+      高瓦片里一个格子方法的遍历覆盖的层，来自方法所取的、瓦片实体上的一个组件（<c>in TLayers</c>）：遍历只交换
+      <see cref="P:EasyEcs.ITileLayers.From" /> 到 <see cref="P:EasyEcs.ITileLayers.To" /> 这些层的光环（连同它们的光环层，和
+      <see cref="M:EasyEcs.Tile`2.ExchangeHalo(System.Int32,System.Int32,`0,System.Boolean)" /> 一样），也只走这些层，
+      适合数据只在少数几层、而用户自己的统计知道是哪几层的模板（一个区块的水能到的层）：
+      <code>
+      public record struct FlowLayers(int From, int To) : IComponent, ITileLayers;
+
+      [ForEach(Parallel = true)]
+      static void Flow(Cell&lt;Fluid, Chunk&gt; w, Cell&lt;Block, Chunk&gt; g, in FlowLayers layers, out NextFluid next) =&gt; ...
+      </code>
+      范围外的行得到方法在空白格子上算出的值，和遍历跳过的行一样：所以这些层必须包含每一个模板读到非零格子的行（瓦片自己的、
+      旁边邻居的，以及模板向上向下够到的层）。层会被夹到瓦片之内（0 到 Height - 1）；<see cref="P:EasyEcs.ITileLayers.From" /> 大于
+      <see cref="P:EasyEcs.ITileLayers.To" /> 时什么都不交换，所有行都填上。生成器只在证明了方法在空白行上算出什么的地方才限定遍历
+      （调度行写 "layers of '...'"）；其他地方每一层都运行（EECS123）。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.ITileLayers.From" source="b7d5e7c8febf">
+    <summary>遍历的第一层（夹到 0）。</summary>
+  </member>
+  <member name="P:EasyEcs.ITileLayers.To" source="5811af4f905b">
+    <summary>遍历的最后一层（夹到 Height - 1）。</summary>
+  </member>
+</doc>

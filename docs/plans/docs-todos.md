@@ -2475,6 +2475,42 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   TieredCompilation) and what it costs; AggressiveOptimization on generated passes not adopted (the core code they
   call still tiers; the steady state loses PGO). Numbers from a BenchmarkDotNet run, not the probe.
 
+### WP5b (ITileLayers: a cell pass bounded to the layers a component gives) — docs to-dos
+
+The name was approved by the owner (2026-11-04, through the lead): `ITileLayers` with `From` / `To`, taken by a cell
+method as `in T` of a component of the tile's entity.
+
+- **guide/grids.mdx + zh ("Tall tiles: layers" and "One cell at a time"):** a cell method takes `in TLayers` of a
+  component implementing `ITileLayers` (From, To): its pass exchanges every cell input over those layers only (with
+  their halo layers) and walks them; the rows outside get what the method computes on blank cells, as skipped rows do,
+  so the layers must hold every row whose stencil reads a cell that is not zero (the tile's own, the neighbors' beside,
+  the layers the stencil reaches up and down). Clamped to the tile; From above To exchanges nothing and fills every row.
+  The example: TileLayersBenchmark's Band (the voxel water stays as written: inner-loops.md WP5b). The "Costs" table
+  row "ExchangeHalo() of every layer" gains the cell form's answer. The schedule line says "layers of 'x'".
+- **glossary.mdx + zh:** "Tile layers (ITileLayers)": the layers a cell pass covers; zh 瓦片的层范围 (`ITileLayers`), the
+  glossary of tools/ApiDocs/zh/README.md gains it too.
+- **decisions.mdx + zh:** a record "A cell pass bounded by a component's layers": why a component and not an attribute
+  or a callback (the range is per tile and comes from the user's summary, often its neighbors' too: a system computes
+  it with the tools it already has, Lookup and Beside; the pass reads two ints), why only where rows may be skipped
+  (the rows outside are filled as skipped rows), the name (extends `ExchangeHalo(from, to)`; MPI's subarray and
+  Halide's bounds name boxes, not layers; ITileRange vaguer, IActiveLayers clashes with the active rows), and the
+  numbers: TileLayersBenchmark (Whole against Layers) and the voxel water (docs/plans/inner-loops.md WP5b).
+- **guide/analyzer.mdx + zh:** EECS123 (Warning): a cell method's ITileLayers that cannot bound its pass (it reads its
+  place, takes several cells or has a result per tile, and what it computes on a blank row is not proved): every layer
+  runs; the reasons as the message gives them. EECS026 does not report the layers' parameter (the pass reads it).
+- **api.mdx + zh:** ITileLayers (From, To: O(1), read once per tile by the pass); the reference page regenerates
+  (tools/ApiDocs/zh/itilelayers.xml).
+- **Changelog (New) + README "What's new":** "A cell method bounds its pass to the layers a component gives
+  (`ITileLayers`): the halo and the walk cover those layers only." Link grids#layers.
+- **performance page:** TileLayersBenchmark and TileTallyBenchmark join the tiles' table once synced.
+- **guide/grids.mdx + zh ("One cell at a time", results per tile):** a result per tile keeps its lanes across the
+  tile's rows and folds once after the walk ("What it costs": a count is summed in lanes of the field's width; the
+  hand-written popcount of a row's mask is still cheaper, TileTallyBenchmark Hand against Cell).
+- **decisions.mdx + zh (with D133's cell record):** the fold per tile, not per row: why (a row of a voxel chunk is one
+  vector; 18 accumulators started and folded per row cost more than the row), why exact (integer sums wrap, Min / Max
+  in any order, float sums only under FloatMode.Fast), what it does not cover (bails, paired chains), the numbers
+  (TileTallyBenchmark base / head, the water probe 2.71-3.07 -> 1.62-1.77 ms).
+
 ### WP5 (a cell method stepping its tile) — docs to-dos
 
 - **tiles.mdx + zh ("One cell at a time"):** an `out` parameter of the driving cell's own type (`Cell<Heat, Plate> c,

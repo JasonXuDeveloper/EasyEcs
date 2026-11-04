@@ -53,12 +53,13 @@ SystemGenerator.cs           [ForEach] -> struct jobs (per entity or per run of 
                              first driving the walk, the others sampled, out cells and ref Reduce<T> results per tile;
                              an out of the driving cell's own type steps its tile: ref Tile, each row written through
                              Write(row), the second buffer swapped in, no Mut and no commit: Symbols.IsCellStep);
-                             the job handing it a Tile per input and a Mut per out buffer and result) in place of its accessor: the halo (a NoInlining {Name}_{index}__Exchange{k} per input, so the inliner's budget is left for the rows; a cross stencil of one 2D cell type whose rows are whole vectors reads it in place instead, behind TilePlane.Fits: Tile.Plane, rows through Row / Own, shifted loads through CellRow), the shape's constants and offsets read once, the walk as plain loops over the words of rows (TileRows.RowsOf), a stepped tile's buffer checked once (JacobiNext),
+                             the job handing it a Tile per input and a Mut per out buffer and result) in place of its accessor: the halo (a NoInlining {Name}_{index}__Exchange{k} per input, so the inliner's budget is left for the rows; a cross stencil of one 2D cell type whose rows are whole vectors reads it in place instead, behind TilePlane.Fits: Tile.Plane, rows through Row / Own, shifted loads through CellRow), the shape's constants and offsets read once, the walk as plain loops over the words of rows (TileRows.RowsOf), bounded with the exchange to the layers of an 'in T' ITileLayers component where the pass may skip rows (Symbols.TileLayers; else EECS123), a stepped tile's buffer checked once (JacobiNext),
                              the out buffer sized and filled with what the method computes on Cell.Blank (the rows the
                              walk skips; once per system, in the static readonly fields of {Name}_{index}__Blank, when
                              the method takes nothing besides its cells and out cells), the rows its offsets read (every row when it reads X, Y or Z, or takes
                              several cells), each row's vector loop inline (ElementLoops at 512 / Vector<T> / 128
-                             bits, parameters __arg{n} so no name of the method's meets the loop's), then the method itself (an UnsafeAccessor,
+                             bits, parameters __arg{n} so no name of the method's meets the loop's; a result per tile's
+                             accumulators started before the walk and folded after it, per width: Hoisted), then the method itself (an UnsafeAccessor,
                              {Name}_{index}__Cell) on the cells left; the schedule line;
                              SystemGenerator.Elements.cs: a method left scalar (a batch method's loops over its rows
                              too) whose loops over spans have vector forms (Kernel.Loops.cs) copied into the generated
@@ -145,8 +146,9 @@ EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as de
                              like a hook)
 UnusedSuppressor.cs          suppresses IDE0051 / IDE0052 on [ForEach], [EntityMethod] and hook methods (called through
                              UnsafeAccessor; Rider reads their [MeansImplicitUse])
-EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-032, EECS034, EECS039, EECS046, EECS052, EECS053 and EECS055 (with the
-                             check of EECS056):
+EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-032, EECS034, EECS039, EECS046, EECS052, EECS053, EECS055 (with the
+                             check of EECS056) and EECS123 (a cell method's ITileLayers that cannot bound its pass: the
+                             rows outside are not proved blank):
                              code that works but costs (write access that
                              only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per
                              update, per-entity structural changes and counting over queries, creation loops,

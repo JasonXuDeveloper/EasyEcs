@@ -108,7 +108,8 @@ CellRows.cs                  TilePlane<TCell, TTile> (the tile's buffer and its 
 Cell.cs                      Cell<TCell, TTile>: one cell of a tile with its neighbors at constant offsets, the
                              parameter of a [ForEach] method computing one cell into its out parameter (the shader
                              form, written by the generator: SystemGenerator.Cells.cs); Offset / Width / Blank (a cell
-                             of a texture of zeros: what a skipped row gets) for generated code
+                             of a texture of zeros: what a skipped row gets) for generated code; ITileLayers (From / To:
+                             a component a cell method takes to bound its pass to those layers)
 TileSteps.cs                 a stepping tile's pass (ref Tile, TileSteps<TCell, TTile, TGrid, TKey, TColors>, one per
                              world and method): the second buffer of a Jacobi step swapped in after the pass, the rows
                              it skipped zeroed; [GaussSeidel]'s sweeps in place, color by color (ITileColors,
