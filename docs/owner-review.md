@@ -157,3 +157,38 @@ only on one `[Accumulate]` singleton (the schedule's "Registration order only" l
 example a sample whose per-kind counters move from separate singletons into one total. The design stays as GA2 states
 it (each pass's result kept per system, combined in registration order at the stage end, so the total is the bits of
 the serial run).
+
+## Machine-bound items of #159: thread pinning, the helpers' queue line (feat-later-research, 2026-11-03)
+
+**Not built: this shared 4-core VM cannot show them.** Two low-latency ideas of `borrowed-ideas.md` "#159 remainder":
+
+- **The helpers' queue counter apart from its gate** (`Workers`: `_queued`, which spinning helpers read, shares a
+  cache line with the `SpinGate` every `Post` and `Take` compare-and-swaps). The bound is one or two cache-line
+  transfers per post and per take, about 0.1-0.3 µs of a pass that wakes helpers (5 µs and more, D22 / D130), under
+  1 %, where parallel classes on this VM move 10-40 % between runs of the same code.
+- **Pinning the helper threads to cores** (`sched_setaffinity`, `isolcpus`): needs cores no other process runs on.
+
+What would change the verdict: a quiet machine with 8 or more cores (no SMT sharing, or with it, to see both). Run
+`ParallelForBenchmark` (LightParallelFor at 10,000 records) and `ParallelSystemsBenchmark` with `--launchCount 6` on
+base and on base plus the queue counter on a line of its own (a padded struct holding `Gate` at one line and `_queued`
+at the next); a gain past the spread of the six launches ships. Pinning needs an option the owner would name
+(`WorldOptions` has no thread settings today), so it is a public API question first.
+
+## The core's columns on native memory (NativeMemory, mimalloc; feat-later-research, 2026-11-03)
+
+**Not built: the C runtime's allocator is slower for large arrays, and an allocator that would be faster only helps
+world creation.** `NativeColumnsBenchmark` (borrowed-ideas.md "#159 remainder", item 2) allocated a world's five
+unmanaged arrays (48 bytes a row), wrote them once and freed them: `NativeMemory.AlignedAlloc` (glibc) took 1.4x the
+pinned arrays' time at 1M rows and 2.4x at 4M (3-6x the minor faults: glibc returns large blocks to the kernel and
+faults them back; the GC keeps freed memory resident), equal at 100,000. With `GC.AddMemoryPressure` (which a library
+holding native memory owes the GC) the 1M case was sometimes 4x faster (memory reused resident, 0 faults) and
+sometimes not (9.3 +- 7.1 ms): glibc's heuristics decide. The prize is the gen2 collections the pinned-heap budget
+starts while a fresh world fills (D28), at most a quarter of `WorldCreate` at 1M; steady ticks allocate nothing
+either way. Moving the columns means every column stops being an `Array` (snapshots, saves, the generated jobs'
+spans, `Archetype.Row0`), freed by `Dispose` and a finalizer.
+
+What would change the verdict: a workload that creates and disposes large worlds often (a zone server spinning up
+instances), measured with `NativeColumnsBenchmark` and `PageFaultBenchmark`; then the options are (a) an arena of
+EasyEcs's own that keeps freed column memory resident across worlds (the measured upside without a native
+dependency), (b) mimalloc as a native dependency (one binary per platform: x64, arm64, WebAssembly, iOS / Android
+through Godot), (c) leave the pinned heap and document `GCSettings` / `GCConserveMemory` for such hosts.

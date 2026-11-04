@@ -264,7 +264,18 @@ its own worktree.
      filter to the methods the change touches); the JIT and AOT runs of one A/B go in one round, interleaved.
      BenchmarkDotNet 0.15 passes ILC 10 an instruction set it refuses ("Unrecognized instruction set sse") and its
      generated project ignores `Directory.Build.targets`: export `CustomAfterMicrosoftCommonTargets` naming a scratch
-     targets file that sets `<IlcInstructionSet>native</IlcInstructionSet>` for the AOT runs;
+     targets file that sets `<IlcInstructionSet>native</IlcInstructionSet>` for the AOT runs. A change to the 128-bit
+     form is measured under AOT with `x86-64-v2` in that file (ILC's default x64 baseline: `Vector<T>` of 16 bytes);
+     the ISA column then still names the host's ISA (AVX-512), not ILC's target, so check the target from the
+     numbers' scale or a listing (feat-aot-tables);
+   - false sharing is measured before it is padded away: read where the objects actually sit (a probe that runs the
+     pass, collects, and prints the addresses of the written fields of the pooled objects) and count the pairs on one
+     line; objects of 56 bytes back to back share a line for one pair in eight, and only while both run at once
+     (`Emit<T>`'s pooled lists: 1 pair of 16, padding them a wash; feat-later-research);
+   - an allocator is compared by its faults, not its name: `[PageFaultDiagnoser]` on the A/B. glibc returns blocks past
+     its `mmap` threshold (32 MiB at most) and a trimmed heap top to the kernel and faults them back (native columns
+     1.4-2.4x slower than pinned arrays at 1M-4M rows, 3-6x the faults), while the GC keeps freed memory resident;
+     with `GC.AddMemoryPressure` the same code turned bimodal (feat-later-research, `NativeColumnsBenchmark`);
    - before choosing what to change in a pass, place it on the roofline (below, "Roofline"): a memory-bound pass gains
      from fewer bytes only, a compute-bound one from the loop and the math;
 4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss, a wash or an allocation is first

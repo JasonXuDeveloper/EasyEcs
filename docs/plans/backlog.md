@@ -488,6 +488,44 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       Decision: NEON LD/ST keep `fixed` (as HEAD has); literals return only where they do not read through a NEON
       TBL table (x64 permutes, lane masks), NEON lookup tables stay hoisted statics. Then try the fix per path (literals only where AOT pays; or the table read into a local before the loop) and land it only
       with JIT x64, JIT ARM64 (M4) and Native AOT numbers.
+      **x64 done (feat-aot-tables).** ILC listings of every KernelBenchmark runner at three instruction sets: at
+      `native` (AVX-512) and `x86-64-v3` no runner checks a class inside a vector loop since 5527701 (the checks left
+      are in the prologue, once per call, or a run's setup, once per run: `Maybe<T>`'s zero rows, Glide's layout,
+      Wave's setup). ILC's default x64 baseline has no AVX, so `Vector<T>` is 16 bytes and the loops run their 128-bit
+      form, which still read `Masks.Narrow` with a check per vector: Step, Grade, Share, Wave, Integrate (masked
+      words) and Optional (presence masks, every vector). The x64 128-bit lane masks are now literals (`Masks.Bits32` /
+      `Bits64` pick `Vector128.Create` when `!AdvSimd.IsSupported`); no check is left in any vector loop at any of the
+      three sets (Step's masked loop 85 -> 74 instructions, 9 -> 1 stack accesses; Grade 96 -> 84, 9 -> 0; Optional
+      75-77 -> 63-64, 14-18 -> 3). Under the JIT the Tier1 listings are identical before and after (AVX-512 and
+      `DOTNET_EnableAVX=0`): Tier1 folds an initialized static readonly vector into a constant. The other fix, the
+      masks read into a local before the masked loop (generator: `var __bits` passed to `Lanes32(pass, i, __bits)`),
+      saved one constant load per vector and cost spills at 128 bits; measured, it was not faster than the literal in
+      either round (below), so it was not kept. For the permutes D126 already showed that tables passed in before the
+      loop change nothing per vector. NEON paths unchanged by construction: ARM64 runs the same `Masks.Narrow`, the
+      same `__y` statics and the same `fixed` LD/ST as before (the new arm is behind `!AdvSimd.IsSupported`, a JIT
+      and ILC constant). Numbers (KernelBenchmark *Generated, default job, two rounds, ratio head / base, 0 B):
+      Native AOT `x86-64-v2` Optional 0.70 / 0.70 at 1,000 and 0.72 / 0.68 at 100,000, Holes 1.01 / 0.94 and
+      0.97 / 0.88, everything else within the run's spread (0.89-1.15; the Move2, Move4, Integrate and Share 100k cases above 1.05 in one round fell back in the other, and a six-launch rerun of Share and Move2 read 1.00 and 0.98 at 100,000; their runners are the same code before and after); Native AOT `native` and the JIT (AVX-512)
+      run identical loops before and after (stripped listings equal), and their ratios are the machine's spread: AOT `native` 0.90-1.07 / 0.90-1.12, JIT 0.91-1.09 / 0.95-1.11 (the second JIT head round started under another process's load). Left: the owner's M4 run below, a no-change check.
+      M4 command (owner; ARM64 should show no change, the loops it runs are unchanged):
+
+      ```bash
+      git worktree add ../ecs-base 85e0394
+      git worktree add ../ecs-head feat-aot-tables
+      # in each worktree, alternately, twice; JIT then Native AOT:
+      dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter \
+        '*KernelBenchmark.Move2Generated' '*KernelBenchmark.Move3Generated' '*KernelBenchmark.Move4Generated' \
+        '*KernelBenchmark.StepGenerated' '*KernelBenchmark.HolesGenerated' '*KernelBenchmark.IntegrateGenerated' \
+        '*KernelBenchmark.WaveGenerated' '*KernelBenchmark.ShareGenerated' '*KernelBenchmark.SeekGenerated' \
+        '*KernelBenchmark.GlideGenerated' '*KernelBenchmark.OptionalGenerated' '*KernelBenchmark.BrightenGenerated' \
+        '*KernelBenchmark.GradeGenerated'
+      CustomAfterMicrosoftCommonTargets=$PWD/../ilc-native.targets \
+        dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --runtimes nativeaot10.0 --filter <same filters>
+      ```
+
+      `../ilc-native.targets` holds `<Project><PropertyGroup><IlcInstructionSet>native</IlcInstructionSet></PropertyGroup></Project>`
+      (BenchmarkDotNet 0.15 passes ILC an instruction set it refuses). Add `--launchCount 6` to a 100k case that
+      differs (page placement, `audit-perf`).
 - [ ] **The inliner's limit, checked instead of assumed** (owner, 2026-10-26: "is a fixed JIT budget right when SIMD
       width differs?"). Answer: `MAX_INL_LCLS = 32` is RyuJIT's implementation constant with no target condition
       (`inline.h`, release/10.0 and main), the same for x64, ARM64, ReadyToRun and Native AOT, and it counts IL
@@ -520,7 +558,12 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       actionable here: Unity support waits for a Unity release on .NET 10; the toolchain item is a standing rule.
 - [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 2 MiB columns done on `feat-later-memory` (pinned arrays
       advised before first touch, reserved and copied ones only; 16M chases 1.28-1.67x, Create / Grow equal; docs-todos
-      "feat-later-memory"); #157 the #138 recommendations: done on feat-later-accumulate (table below); #159 remaining research.
+      "feat-later-memory"); #157 the #138 recommendations: done on feat-later-accumulate (table below); #159 remaining research: done on
+      feat-later-research (borrowed-ideas.md "#159 remainder": the ideas already in EasyEcs listed with their records;
+      `Emit<T>` lists padded apart built and reverted, a wash (1 of 16 pooled lists shared a line); native memory for
+      columns measured by `NativeColumnsBenchmark`, glibc 1.4-2.4x slower past 1M rows, not built, owner-review.md;
+      the helpers' queue line and thread pinning need a quieter or larger machine, owner-review.md; nothing for
+      feat-inner-loops).
 - [x] **#157, the #138 recommendations** (feat-later-accumulate; the #138 report's "Recommended, not built" list, and its
       stencil items). Numbers: BenchmarkDotNet, six processes per case for the small ones, sides forward then backward.
 

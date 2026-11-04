@@ -107,8 +107,8 @@ public static partial class Interleaved
         [ThreadStatic] public static T[] Rows;
     }
 
-    // The tables the 128-bit form's loops read are static readonly vectors (the x64 forms' are vectors of literals:
-    // Masks, Tables32 / Tables64): constants in a loop the JIT compiles once their class is initialized, a call of the
+    // The tables ARM64's loops read are static readonly vectors (the x64 forms' are vectors of literals: Masks,
+    // Tables32 / Tables64): constants in a loop the JIT compiles once their class is initialized, a call of the
     // class-initialization helper per use otherwise. A runner is compiled at Tier1 after its first calls and never
     // again, so if those calls ran only loops that read no table (a table without holes runs the flat loop: no
     // permutes, no lane masks), every masked word after the first hole would pay the helper per vector and spill its
@@ -124,11 +124,12 @@ public static partial class Interleaved
     }
 
     /// <summary>
-    /// Lane j holds bit j: the row of each lane in a word's bits. The 256- and 512-bit forms (x64) are vectors of
-    /// literals, constants of the compiled code: under Native AOT a static readonly vector costs a class-initialization
-    /// check on every iteration of the loop reading it, and the loop's vectors are spilled around the helper. The
-    /// 128-bit form (ARM64's NEON, x64 without AVX) keeps its static readonly vectors (<see cref="Narrow"/>): an ARM64
-    /// change ships only with the owner's M4 numbers (audit-vector-loops, "Read the loop the JIT wrote").
+    /// Lane j holds bit j: the row of each lane in a word's bits. The x64 forms (128-, 256- and 512-bit) are vectors
+    /// of literals, constants of the compiled code: under Native AOT a static readonly vector costs a
+    /// class-initialization check on every iteration of the loop reading it, and the loop's vectors are spilled around
+    /// the helper (Native AOT's default x64 baseline runs the 128-bit form: Step's masked loop 85 instructions with
+    /// the check, 74 without). ARM64 keeps its static readonly vectors (<see cref="Narrow"/>): an ARM64 change ships
+    /// only with the owner's M4 numbers (audit-vector-loops, "Read the loop the JIT wrote").
     /// </summary>
     private static class Masks
     {
@@ -139,6 +140,7 @@ public static partial class Interleaved
             {
                 64 => Bits32x16.AsVector(),
                 32 => Vector256.Create(1, 2, 4, 8, 16, 32, 64, 128).AsVector(),
+                _ when !AdvSimd.IsSupported => Vector128.Create(1, 2, 4, 8).AsVector(),
                 _ => Narrow.Bits32,
             };
         }
@@ -150,6 +152,7 @@ public static partial class Interleaved
             {
                 64 => Bits64x8.AsVector(),
                 32 => Vector256.Create(1L, 2, 4, 8).AsVector(),
+                _ when !AdvSimd.IsSupported => Vector128.Create(1L, 2).AsVector(),
                 _ => Narrow.Bits64,
             };
         }
@@ -166,7 +169,7 @@ public static partial class Interleaved
             get => Vector512.Create(1L, 2, 4, 8, 16, 32, 64, 128);
         }
 
-        /// <summary>The 128-bit form's masks, unchanged (initialized when the module loads: InitializeTables).</summary>
+        /// <summary>ARM64's masks, unchanged (initialized when the module loads: InitializeTables).</summary>
         public static class Narrow
         {
             public static readonly Vector<int> Bits32 = Make32();
