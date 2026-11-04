@@ -168,6 +168,12 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              component of one field as 1-byte lanes read as a mask; Kernel.Vectorize: the loop, or the
                              reason EECS055 / EECS056 report, as a ScalarReason: fixable or inherent; a lambda pass's
                              body through the same Translate, with its Lane);
+                             Kernel.Unrolled.cs: loops of a constant trip count of at most 16 steps (a for from a
+                             constant by 1 to a constant, a foreach over an inline array) translated step after step,
+                             the counter a constant per step, each step's names those of the first; an [InlineArray]
+                             field as one lane per element (Paths), read at a constant or the counter; a component of
+                             more than 4 lanes holding one takes only the flat loop (Code.FlatOnly: its masked words run
+                             the method); the reasons a loop stays scalar and the 32 locals the JIT inlines (FitUnrolled);
                              Kernel.Narrow.cs: byte / sbyte / short / ushort lanes (int values followed as low bits and an interval, saturating idioms, the wrapping or saturated chain nothing reads dropped: Body.Prune; a cell's X exact while the row fits the lanes: Code.IndexTop, which the pass checks); Kernel.Struct.cs:
                              struct values (Vector2/3/4 fields, new T(...), with) as one vector per lane;
                              Kernel.Wide.cs: components of up to 16 words, two forms each emitted where it pays (its

@@ -127,6 +127,12 @@ internal sealed partial class Kernel
         public bool Wide128 { get; init; }
 
         /// <summary>
+        /// A component holds more lanes than a loop over rows splits (an inline array, Kernel.Unrolled.cs): only
+        /// <see cref="Flat"/> runs, masked words run the method; the row loop's texts are not a loop.
+        /// </summary>
+        public bool FlatOnly { get; init; }
+
+        /// <summary>
         /// The largest index the vector form holds exactly in its narrow lanes (<see cref="Lane.IndexFits"/>), which the
         /// caller checks before entering it; 0 when it assumes none.
         /// </summary>
@@ -257,6 +263,22 @@ internal sealed partial class Kernel
             _all.Insert(at, text);
             _masked.Insert(at, text);
         }
+
+        /// <summary>
+        /// The texts from <paramref name="from"/> on (<see cref="Length"/>), each rewritten by <paramref name="rewrite"/>
+        /// (Kernel.Unrolled.cs: a step's locals named as the first step's).
+        /// </summary>
+        public void Rewrite((int All, int Masked) from, System.Func<string, string> rewrite)
+        {
+            string all = rewrite(_all.ToString(from.All, _all.Length - from.All)), masked = rewrite(_masked.ToString(from.Masked, _masked.Length - from.Masked));
+            _all.Length = from.All;
+            _masked.Length = from.Masked;
+            _all.Append(all);
+            _masked.Append(masked);
+        }
+
+        /// <summary>The text for whole vectors from <paramref name="from"/> on.</summary>
+        public string From(int from) => _all.ToString(from, _all.Length - from);
 
         /// <summary>Both texts' lengths, to undo a branch (<see cref="Save"/>).</summary>
         public (int All, int Masked) Length
@@ -680,6 +702,7 @@ internal sealed partial class Kernel
         bool outside = lane.Outside;
         HashSet<IParameterSymbol>? whole = null;
         Dictionary<IParameterSymbol, List<(IFieldSymbol[] Path, ISymbol[] Access)>>? touched = null;
+        List<int>? flatOnly = null; // the job columns of components of more lanes than a row loop splits (Lanes)
         // A component the loop does not split (more than MaxFields lanes, a field that is not a lane, lanes of two sizes)
         // still has a vector loop on AVX-512 when the method uses only 4-byte lanes of it (Kernel.Wide.cs); else the reason,
         // and the advice to split the lanes it uses into a component of their own when they are few.
@@ -700,7 +723,8 @@ internal sealed partial class Kernel
                     WideLayout? wide = null;
                     try
                     {
-                        fields = Lanes(p.Type);
+                        fields = Lanes(p.Type, out bool many);
+                        if (many) (flatOnly ??= new List<int>()).Add(components.Count + 1);
                         if (fields.Length > 1 && fields.FirstOrDefault(f => IsBool(f.Type)) is { } flag)
                             throw new Unsupported($"field {p.Type.Name}.{flag.Name} is a bool among {fields.Length} fields: a vector loop takes a bool in a component of its own (one byte per row)"); // inherent until the samples split theirs (owner-review)
                         if (fields.Any(f => SizeOf(f.Type) != SizeOf(fields[0].Type)))
@@ -842,6 +866,7 @@ internal sealed partial class Kernel
             var loads = new StringBuilder();
             columns.Add(([kernel._wideOf.ContainsKey(p) ? "" : $"__c{index}_"], ""));
             if (kernel._wideOf.TryGetValue(p, out var wide)) kernel.WideLoads(index, wide, column, loads);
+            else if (flatOnly?.Contains(index) == true) { } // only the flat loop reads it
             else
                 foreach (var (h, row) in kernel.Rows(index, column))
                 {
@@ -892,6 +917,7 @@ internal sealed partial class Kernel
                 kernel.WideStores(index, wide, column, stores);
                 continue;
             }
+            if (flatOnly?.Contains(index) == true) continue; // only the flat loop writes it
             foreach (var (h, row) in kernel.Rows(index, column))
             {
                 // A pair's halves are written in every lane: their passing lanes are selected here. The other columns'
@@ -999,6 +1025,27 @@ internal sealed partial class Kernel
             if (names.Any(n => n.Length == 0 || uses.Contains(n))) read.Append(text);
         if (kernel._wideOf.Count > 0) kernel.FitLocals(kernel._setup.ToString() + prologue + read + hold + kernel._body + stores);
         var flat = Flat(kernel, root, () => Make(false));
+        if (flatOnly != null)
+        {
+            // A row loop would split more lanes than Interleaved does: the flat loop is the only one, else the reason.
+            var (p, (_, many, _)) = kernel._components.Select(c => (c.Key, c.Value)).First(c => flatOnly.Contains(c.Value.Index));
+            if (flat == null)
+            {
+                string reason = $"component {p.Type.Name} holds an inline array and has {many.Length} lanes: a vector loop splits up to {MaxFields} fields of a row, and takes more only when the method does the same to each lane (a flat loop)";
+                // A method that reads none of the array: the fields it uses, moved into a component of their own, get a loop.
+                whole ??= new HashSet<IParameterSymbol>(SymbolEqualityComparer.Default);
+                touched ??= Touched(body, whole);
+                if (!whole.Contains(p) && touched.TryGetValue(p, out var used) && used.Count <= MaxFields
+                    && used.All(u => IsLaneType(u.Path[u.Path.Length - 1].Type) && SizeOf(u.Path[u.Path.Length - 1].Type) == SizeOf(used[0].Path[used[0].Path.Length - 1].Type)))
+                {
+                    string names = string.Join(", ", used.Select(u => string.Join(".", u.Path.Select(Symbols.MemberName))));
+                    throw new Unsupported(reason + $"; it uses {used.Count} of {p.Type.Name}'s fields ({names}) and not the array: move {(used.Count == 1 ? "it" : "them")} into a component of {(used.Count == 1 ? "its" : "their")} own (a component of {(used.Count == 1 ? "one field" : $"{used.Count} fields")} gets a vector loop)",
+                        true, p.Type.ToDisplayString());
+                }
+                throw new Unsupported(reason);
+            }
+        }
+        kernel.FitUnrolled(kernel._setup.ToString() + prologue + read + hold + kernel._body + stores, kernel._components.Count);
         // Narrow lanes have no shuffles: a component of several fields takes the flat loop or none.
         if (kernel._narrow && flat == null && kernel._components.FirstOrDefault(c => c.Value.Fields.Length > 1 && !kernel._doubled.Contains(c.Value.Index)) is { Key: { } narrow, Value.Fields: { } several })
         {
@@ -1020,6 +1067,7 @@ internal sealed partial class Kernel
         {
             Wide512 = kernel._wide512,
             Wide128 = kernel._wide128,
+            FlatOnly = flatOnly != null,
             IndexTop = kernel._indexTop,
             StructuralChanges = kernel.StructuralChanges(),
             VectorTail = kernel._change != null || kernel._emits.Values.Any(e => e.Added),
@@ -1052,31 +1100,47 @@ internal sealed partial class Kernel
         if (fields < 2 || components.Any(c => c.Fields.Length != fields || c.Fields.Any(f => !SymbolEqualityComparer.Default.Equals(f.Type, type))))
             return null;
 
-        var statements = new List<IOperation>();
-        void Flatten(IOperation op)
+        // The statements, a loop of a constant trip count as one statement per step with its variable bound (Kernel.Unrolled.cs).
+        var statements = new List<(IOperation Op, (Unrolled Loop, int Step)[] Bound)>();
+        void Flatten(IOperation op, (Unrolled, int)[] bound)
         {
-            if (op is IBlockOperation block) foreach (var inner in block.Operations) Flatten(inner);
+            if (op is IBlockOperation block) foreach (var inner in block.Operations) Flatten(inner, bound);
+            else if (op is ILoopOperation loop)
+            {
+                var unrolled = UnrolledLoop(loop); // main translated it: it unrolls
+                for (int k = 0; k < unrolled.Steps.Length; k++) Flatten(unrolled.Body, [.. bound, (unrolled, k)]);
+            }
             else if (op is not (IEmptyOperation or IReturnOperation { IsImplicit: true, ReturnedValue: null }) // a lambda's own end
-                && !(op is ILocalFunctionOperation f && Recorded.AccessOf(f.Symbol) != null)) statements.Add(op);
+                && !(op is ILocalFunctionOperation f && Recorded.AccessOf(f.Symbol) != null)) statements.Add((op, bound));
         }
-        Flatten(root);
-        var groups = new List<IOperation>[fields];
-        for (int f = 0; f < fields; f++) groups[f] = new List<IOperation>();
+        Flatten(root, []);
+        void Bind(Kernel kernel, (Unrolled Loop, int Step)[] bound) { foreach (var (loop, step) in bound) loop.Bind(kernel, step); }
+        void Unbind(Kernel kernel, (Unrolled Loop, int Step)[] bound) { foreach (var (loop, _) in bound) loop.Unbind(kernel); }
+        var groups = new List<(IOperation, (Unrolled, int)[])>[fields];
+        for (int f = 0; f < fields; f++) groups[f] = new();
         foreach (var statement in statements)
         {
             int field = -1;
             bool every = false, mixed = false; // position = new Position(position.Value + velocity.Value * dt): each lane alike
-            foreach (var op in statement.DescendantsAndSelf())
+            Bind(main, statement.Bound);
+            try
             {
-                if (main.Covers(op) is > 0 and var covered)
+                foreach (var op in statement.Op.DescendantsAndSelf())
                 {
-                    if (covered != fields) return null;
-                    every = true;
-                    continue;
+                    if (main.Covers(op) is > 0 and var covered)
+                    {
+                        if (covered != fields) return null;
+                        every = true;
+                        continue;
+                    }
+                    if (main.LaneOf(op) is not { } lane) continue;
+                    mixed |= field >= 0 && lane.Field != field;
+                    field = lane.Field;
                 }
-                if (main.LaneOf(op) is not { } lane) continue;
-                mixed |= field >= 0 && lane.Field != field;
-                field = lane.Field;
+            }
+            finally
+            {
+                Unbind(main, statement.Bound);
             }
             // A statement of one field goes to its group; one that writes every lane of a struct (position = new
             // Position(position.X + velocity.X, position.Y + velocity.Y)) to every group, where each field's
@@ -1095,7 +1159,18 @@ internal sealed partial class Kernel
             kernel._flat = f;
             try
             {
-                foreach (var statement in groups[f]) kernel.Statement(statement, null);
+                foreach (var (statement, bound) in groups[f])
+                {
+                    Bind(kernel, bound);
+                    try
+                    {
+                        kernel.Statement(statement, null);
+                    }
+                    finally
+                    {
+                        Unbind(kernel, bound);
+                    }
+                }
             }
             catch (Unsupported)
             {
@@ -1138,6 +1213,22 @@ internal sealed partial class Kernel
     }
 
     /// <summary>
+    /// <see cref="Lanes(ITypeSymbol)"/>, or for a component of more than <see cref="MaxFields"/> lanes that holds an
+    /// inline array (or is one) all of its lanes: a loop over its rows cannot split them, but a flat loop takes them when
+    /// the method does the same to each (<see cref="Flat"/>, the only loop such a component gets: <see cref="Code.FlatOnly"/>).
+    /// </summary>
+    private static LaneField[] Lanes(ITypeSymbol type, out bool many)
+    {
+        many = false;
+        if (IsLaneType(type) || type is not INamedTypeSymbol { TypeKind: TypeKind.Struct } named || named.GetAttributes().Any(a => a.AttributeClass?.Name == "StructLayoutAttribute"))
+            return Lanes(type);
+        var paths = Paths(type, $"component {type.Name}");
+        if (paths.Length <= MaxFields || !IsInlineArray(type) && !paths.Any(p => p.Any(f => IsInlineArray(f.Type)))) return Lanes(type);
+        many = true;
+        return paths.Select(p => LaneField.Of(p[p.Length - 1])).ToArray();
+    }
+
+    /// <summary>
     /// A lane of a component or element (<see cref="Lanes"/>): its type, the name of the field that holds it ("" for an
     /// element that is the lane itself, a number of an element loop's span) and the type declaring that field.
     /// </summary>
@@ -1154,6 +1245,9 @@ internal sealed partial class Kernel
     {
         if (type is not INamedTypeSymbol { TypeKind: TypeKind.Struct } named) throw new Unsupported($"{what} is not a struct");
         if (named.IsGenericType) throw new Unsupported($"{what} is generic");
+        // An inline array is as many values as its length, one after another, behind a struct of one field: a lane per
+        // element (Kernel.Unrolled.cs), never the one field, which would take the row for a fraction of its size.
+        if (IsInlineArray(named)) return ElementPaths(named, [], what).ToArray();
         if (Symbols.FieldsInSeveralParts(named))
             throw new Unsupported($"{what} declares fields in several parts, so the order of its fields is not defined: declare them in one part", true);
         var fields = named.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
@@ -1162,12 +1256,8 @@ internal sealed partial class Kernel
         foreach (var field in fields)
         {
             string name = $"{type.Name}.{Symbols.MemberName(field)}";
-            // An inline array is as many values as its length, laid out one after another, behind a struct of one field:
-            // read as that one field, the row would be taken for a fraction of its size. Inherent until a vector loop
-            // reads one (inner-loops.md WP1): splitting it out helps only a method that does not read it.
-            if (IsInlineArray(field.Type))
-                throw new Unsupported($"field {name} is an inline array ({field.Type.Name}), which a vector loop does not read");
-            if (!field.IsFixedSizeBuffer && (IsLaneType(field.Type) || IsBool(field.Type))) paths.Add([field]);
+            if (IsInlineArray(field.Type)) paths.AddRange(ElementPaths(field.Type, [field], $"field {name}"));
+            else if (!field.IsFixedSizeBuffer && (IsLaneType(field.Type) || IsBool(field.Type))) paths.Add([field]);
             else if (!field.IsFixedSizeBuffer && field.Type is INamedTypeSymbol { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None } inner
                      && SequentialLayout(inner) && paths.Count < MaxFields * 4)
                 foreach (var path in Paths(inner, $"field {name}"))
@@ -1176,10 +1266,6 @@ internal sealed partial class Kernel
         }
         return paths.ToArray();
     }
-
-    /// <summary>An [InlineArray(N)] struct: N values one after another behind its one declared field.</summary>
-    private static bool IsInlineArray(ITypeSymbol type) =>
-        type.GetAttributes().Any(a => a.AttributeClass is { Name: "InlineArrayAttribute", ContainingNamespace.Name: "CompilerServices" });
 
     /// <summary>A nested struct's fields lie in declaration order: no [StructLayout], or a sequential one without Pack or Size.</summary>
     private static bool SequentialLayout(INamedTypeSymbol type) =>
@@ -1316,6 +1402,8 @@ internal sealed partial class Kernel
             case ISwitchOperation select:
                 Switch(select, mask); // Kernel.Switches.cs
                 return true;
+            case ILoopOperation loop: // of a constant trip count, its steps one after another (Kernel.Unrolled.cs)
+                return Unroll(loop, mask);
             case IReturnOperation { ReturnedValue: null }:
                 if (mask == null) return false;
                 if (_alive == null)
@@ -1467,6 +1555,19 @@ internal sealed partial class Kernel
                 target = a.Target;
                 value = $"({Expr(a.Target)} {(a.Kind == OperationKind.Increment ? "+" : "-")} {VecOf(a.Type)}.One)";
                 break;
+            case IDeconstructionAssignmentOperation { Target: ITupleOperation targets, Value: ITupleOperation values } when !_narrow && targets.Elements.Length == values.Elements.Length
+                && targets.Elements.Select((t, k) => (t, k)).All(e => (IsLane(e.t.Type) || IsBool(e.t.Type)) && SymbolEqualityComparer.Default.Equals(e.t.Type, values.Elements[e.k].Type)):
+            {
+                // (nearest, next) = (d, i): every value first, each in a local of its own (a swap reads the old ones), then the writes
+                var held = values.Elements.Select(v =>
+                {
+                    string name = Temp("t");
+                    _body.Append($"var {name} = {Expr(v)};\n");
+                    return name;
+                }).ToArray();
+                for (int k = 0; k < held.Length; k++) Write(Target(targets.Elements[k]), held[k], targets.Elements[k].Type!, mask);
+                return;
+            }
             default:
                 throw Not(op);
         }
@@ -1770,10 +1871,10 @@ internal sealed partial class Kernel
     private (int Index, int Field, bool Ref)? LaneOf(IOperation op)
     {
         // members is empty only for an element stream of numbers, whose one path is empty (Kernel.Loops.cs)
-        if (Chain(op) is not ({ } root, var members) || root is not IParameterReferenceOperation { Parameter: var parameter }
+        if (LaneChain(op) is not ({ } root, var members, var element) || root is not IParameterReferenceOperation { Parameter: var parameter }
             || !_components.TryGetValue(parameter, out var c))
             return null;
-        int f = Leaf(_paths[parameter], members);
+        int f = Leaf(_paths[parameter], members, element);
         if (f < 0) return null;
         if (_flat < 0) return (c.Index, f, c.Ref);
         if (f != _flat) throw new Unsupported("a statement mixes fields"); // Flat checked this; never reported
@@ -1810,11 +1911,14 @@ internal sealed partial class Kernel
     private static bool Is(ISymbol member, IFieldSymbol field) =>
         SymbolEqualityComparer.Default.Equals(member, field) || SymbolEqualityComparer.Default.Equals(member, Symbols.Associated(field));
 
-    /// <summary>The lane whose path <paramref name="members"/> is, or -1.</summary>
-    private static int Leaf(IFieldSymbol[][] paths, ISymbol[] members)
+    /// <summary>
+    /// The lane whose path <paramref name="members"/> is, or -1: of an inline array's elements, which share one path per
+    /// element (<see cref="ElementPaths"/>), the <paramref name="element"/>-th (the first when it is -1: element 0).
+    /// </summary>
+    private static int Leaf(IFieldSymbol[][] paths, ISymbol[] members, int element = -1)
     {
-        for (int f = 0; f < paths.Length; f++)
-            if (paths[f].Length == members.Length && Enumerable.Range(0, members.Length).All(k => Is(members[k], paths[f][k]))) return f;
+        for (int f = 0, seen = 0; f < paths.Length; f++)
+            if (paths[f].Length == members.Length && Enumerable.Range(0, members.Length).All(k => Is(members[k], paths[f][k])) && seen++ == System.Math.Max(element, 0)) return f;
         return -1;
     }
 
@@ -1823,10 +1927,10 @@ internal sealed partial class Kernel
     /// <summary>The optional and field whose lane <paramref name="op"/> is: <c>m.Value.X</c> of a Maybe&lt;T&gt; m.</summary>
     private (int Index, int Field)? OptionalLane(IOperation op)
     {
-        if (Chain(op) is not ({ } root, { Length: > 1 } members) || members[0].Name != "Value" || root is not IParameterReferenceOperation { Parameter: var parameter }
+        if (LaneChain(op) is not ({ } root, { Length: > 1 } members, var element) || members[0].Name != "Value" || root is not IParameterReferenceOperation { Parameter: var parameter }
             || !_optionals.TryGetValue(parameter, out var o))
             return null;
-        int f = Leaf(_paths[parameter], members.Skip(1).ToArray());
+        int f = Leaf(_paths[parameter], members.Skip(1).ToArray(), element);
         return f < 0 ? null : (o.Index, f);
     }
 
@@ -1956,6 +2060,8 @@ internal sealed partial class Kernel
                 return Member((IMemberReferenceOperation)op) is { Length: 1 } one && one[0] is { } lane ? lane : throw new Unsupported("a statement mixes fields"); // p.X of a struct value
             case IFieldReferenceOperation when Accumulator(op) != null:
                 throw new Unsupported($"it reads '{Text(op)}', a partial result the lanes of a vector loop hold in parts");
+            case IInlineArrayAccessOperation or ILocalReferenceOperation when LaneOf(op) is { } element: // s.Gain[3], a foreach's element (Kernel.Unrolled.cs)
+                return ComponentLane(element.Index, element.Field, op);
             case ILocalReferenceOperation { Local: var local } when _locals.TryGetValue(local, out var name):
                 return Local(local, name, op);
             case IBinaryOperation { OperatorMethod: null, IsChecked: false } b:
@@ -2427,6 +2533,8 @@ internal sealed partial class Kernel
     /// </summary>
     private bool IsUniform(IOperation op) => op switch
     {
+        ILocalReferenceOperation { Local: var local } when _constants.ContainsKey(local) => true, // an unrolled loop's counter
+        ILocalReferenceOperation { Local: var local } when _elements.TryGetValue(local, out var bound) => IsUniform(bound.Array),
         ILocalReferenceOperation or IInstanceReferenceOperation => false,
         IParameterReferenceOperation { Parameter: var p } => _uniformParams.ContainsKey(p),
         IIsPatternOperation or ISwitchExpressionOperation => false, // tested per lane (Kernel.Switches.cs), its value broadcast
@@ -2444,6 +2552,12 @@ internal sealed partial class Kernel
         {
             case IParameterReferenceOperation { Parameter: var p }:
                 return _uniformParams[p];
+            case ILocalReferenceOperation { Local: var local } when _constants.TryGetValue(local, out int step):
+                return Literal(step, local.Type);
+            case ILocalReferenceOperation { Local: var local } when _elements.TryGetValue(local, out var bound):
+                return ScalarElement(bound.Array, bound.Element);
+            case IInlineArrayAccessOperation { Instance: var array, Argument: var index } access when array.Type != null:
+                return ScalarElement(array, ElementIndex(index, array.Type, access));
             case IFieldReferenceOperation { Field: { IsStatic: true, IsReadOnly: true } f }:
                 return $"{f.ContainingType.ToDisplayString(Symbols.Fqn)}.{f.Name}";
             case IInvocationOperation { TargetMethod: var placeholder } call when Recorded.AccessOf(placeholder) is { } access:
