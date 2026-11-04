@@ -15,6 +15,20 @@ public record struct Remains(int Slot) : ICleanupComponent;
 public record struct Fallen(EntityId Who);
 public record struct Peak(int Value);
 
+/// <summary>The round of <see cref="LambdaStunRows"/>.</summary>
+public record struct StunRound(int Value) : ISingletonComponent;
+
+/// <summary>The lambda pass of StructuralLoopTests one row at a time.</summary>
+[EcsSystem]
+public ref struct LambdaStunRows
+{
+    [ForEach(SimdMode = SimdMode.Off), Without<Daze>]
+    static void Stun(Entity e, in Stamina v, in StunRound round)
+    {
+        if ((v.Value & 7) == 3) e.SetDaze(round.Value);
+    }
+}
+
 /// <summary>
 /// Structural changes under a condition, in vector loops: each method marks the rows its condition passes, and the
 /// system applies the change to them in bulk when the pass ends (Kernel.Structural.cs, MarkedRows). Each method has a twin
@@ -213,6 +227,50 @@ public class StructuralLoopTests
             vector.Update();
             scalar.Update();
             AssertSame(vector, scalar, a, b, round);
+        }
+    }
+
+    /// <summary>
+    /// A lambda pass that changes structure under a condition gets the vector loop a [ForEach] method does (its marked
+    /// rows changed after the pass): it ends where the method row by row does.
+    /// </summary>
+    [TestCase(1000, 1)]
+    [TestCase(77, 2)]
+    [TestCase(3, 3)]
+    public void ALambdaPassChangingStructureEndsWhereTheMethodDoes(int count, int seed)
+    {
+        using var vector = new World();
+        using var scalar = new World();
+        scalar.AddSystem<LambdaStunRows>();
+        var random = new Random(seed);
+        var a = new Entity[count];
+        var b = new Entity[count];
+        for (int i = 0; i < count; i++)
+        {
+            a[i] = vector.CreateEntity(new Stamina(random.Next(-100, 101)));
+            b[i] = scalar.CreateEntity(a[i].Get<Stamina>());
+            if (i % 5 == 0)
+            {
+                a[i].SetDaze(1);
+                b[i].SetDaze(1);
+            }
+        }
+        for (int round = 0; round < 4; round++)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                int value = random.Next(-100, 101);
+                a[i].SetStamina(value);
+                b[i].SetStamina(value);
+            }
+            vector.ForEach(round, [Without<Daze>] static (Entity e, in Stamina v, int round) => { if ((v.Value & 7) == 3) e.SetDaze(round); });
+            scalar.SetStunRound(round);
+            scalar.Update();
+            for (int i = 0; i < count; i++)
+            {
+                Assert.That(a[i].Has<Daze>(), Is.EqualTo(b[i].Has<Daze>()), $"Daze of row {i}, round {round}");
+                if (a[i].Has<Daze>()) Assert.That(a[i].Get<Daze>(), Is.EqualTo(b[i].Get<Daze>()), $"Daze of row {i}, round {round}");
+            }
         }
     }
 
