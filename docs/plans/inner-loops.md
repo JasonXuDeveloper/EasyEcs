@@ -394,6 +394,14 @@ the runner inlines declare at most 32 IL locals (`SystemGenerator.InlinedLocals`
 through `EmitLoops`, which splits them into methods when the count says so.
 
 **WP1: `[InlineArray]` lanes and constant-trip unrolling in the per-row loop.**
+Step 1 shipped (feat-inner-loops, 2026-11-04): the latent bug was real, not only latent. A component holding an inline
+array beside a plain field (`Spectrum { float Level; Bands Gain; }`, Bands `[InlineArray(8)]` of float) was two float
+lanes to `Paths` (8 bytes a row, where it is 36), so a method writing `Level` took its rows from the wrong offsets
+(InlineArrayTests: row 0 read 1.5 where the method gives 1.0). `Paths` refuses an inline array field with an inherent
+reason (splitting it out helps only a method that does not read it, so not a Warning until this package reads them;
+TileBenchmark's `CachedSystem.Find` reads one), and Kernel.Wide's layout refuses it as it refuses a fixed buffer
+(otherwise the wide form took it and its runtime layout check sent every row to the method, with no message). Next:
+the lanes themselves (below).
 - Tests: `KernelTests.InlineArrayElementsMatchTheMethodBitForBit` (Lengths; 4/8/16 elements; flat, interleaved, wide); `UnrolledLoopsKeepLoopCarriedLocals` (argmin, running sum); uniform inline arrays (Waypoints); a regression test for the single-lane `Paths` bug; EECS055 reasons (N > 16, variable bound); 0 B.
 - Benchmarks: `KernelBenchmark` new `SpectrumScalar/Generated/HandWritten` (component of 8 floats, 1k/100k) and `NearestScalar/Generated` (8 waypoints, argmin).
 - Regression: `CycleHolesGenerated`, `WorldSimulationBenchmark`, `BattleServerBenchmark`.
