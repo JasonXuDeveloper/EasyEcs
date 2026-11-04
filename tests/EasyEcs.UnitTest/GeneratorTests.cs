@@ -697,6 +697,28 @@ public class GeneratorTests
             .And.Contain("rows = __width"), generated);
     }
 
+    // A result per tile keeps its lanes across the tile's rows: each width's accumulators start before the walk and fold
+    // once after it (a row of a voxel chunk is one vector, and a fold per row cost more than the row's arithmetic).
+    [Test]
+    public void ACellResultFoldsOncePerTile()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, AnalyzerTests.TileParts,
+            "public partial struct Tally : IComponent { [Sum] public ushort Wet; [Max] public short Top; }",
+            "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, out byte next, ref Reduce<Tally> t) { int v = System.Math.Max(c[-1, 0, 0], c[1, 0, 0]); next = (byte)v; t.Value.Wet += v != 0 ? (ushort)1 : (ushort)0; t.Value.Top = System.Math.Max(t.Value.Top, v != 0 ? (short)c.Y : short.MinValue); } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        int walk = generated.IndexOf("var __walk =", System.StringComparison.Ordinal), result = generated.IndexOf("__res0.Write() =", System.StringComparison.Ordinal);
+        int start = generated.IndexOf("var __a3q_0_0 = global::System.Runtime.Intrinsics.Vector128.Create<ushort>(__id3q.Wet);", System.StringComparison.Ordinal);
+        int fold = generated.IndexOf("Vector128.Sum(__a3q_0_0)", System.StringComparison.Ordinal);
+        Assert.That(walk, Is.GreaterThan(0), generated);
+        Assert.That(start, Is.GreaterThan(0).And.LessThan(walk), generated);  // started once, before the walk
+        Assert.That(fold, Is.GreaterThan(walk).And.LessThan(result), generated); // folded once, after it
+        // one fold per pass (the halo read in place and the texture's: two passes in the text)
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"Vector128\.Sum\(__a3q_0_0\)").Count,
+            Is.EqualTo(System.Text.RegularExpressions.Regex.Matches(generated, @"__res0\.Write\(\) =").Count), generated);
+    }
+
     // FloatMode.Fast: the vector approximations of .NET (Vector.Sin, Vector512.Sin) in both loops; degrees to radians as
     // the scalar's two operations; a uniform call computed once by the scalar function.
     [Test]
