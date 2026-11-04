@@ -475,9 +475,9 @@ public class ViewRuleTests
         Assert.That(generated, Does.Contain("T = new global::EasyEcs.Mut<global::T>(ref global::System.Runtime.CompilerServices.Unsafe.AsRef(in @this.Read<global::T>()), @this)")); // AsVM
     }
 
-    // A lambda pass takes a view as a [ForEach] method does; its loop stays scalar (EECS097 says why), a component
-    // reached twice or an invalid view is EECS095.
-    [TestCase("world.ForEach(static (PQ v) => v.Add())", "EECS097", "takes a view")]
+    // A lambda pass takes a view as a [ForEach] method does (its members inlined into the vector loop; what the loop
+    // cannot follow keeps it scalar, EECS097 says why), a component reached twice or an invalid view is EECS095.
+    [TestCase("world.ForEach(static (PQ v) => System.Console.WriteLine(v.P.V))", "EECS097", "Console.WriteLine")]
     [TestCase("world.ForEach(static (PQ v, ref P p) => v.Add())", "EECS095", "through view 'v'")]
     [TestCase("world.ForEach(static (Bad v) => { })", "EECS095", "a view the generators cannot use")]
     public async Task ALambdaPassTakesAView(string call, string id, string text)
@@ -487,6 +487,18 @@ public class ViewRuleTests
             .Where(d => d.Id is "EECS095" or "EECS096" or "EECS097").ToArray();
         Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { id }), string.Join("\n", found.Select(d => d.ToString())));
         Assert.That(found[0].GetMessage(), Does.Contain(text));
+    }
+
+    // A lambda pass taking a view gets the vector loop the same body written over its fields gets.
+    [Test]
+    public void ALambdaPassTakingAViewGetsAVectorLoop()
+    {
+        GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(GeneratorTests.Components, Views,
+            "public static class Run { public static void F(World world) => world.ForEach(static (PQ v) => v.Add()); }"), out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        string generated = string.Concat(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Lambdas.g.cs")).Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain("internal ref struct LambdaJob0").And.Contain("Vector512.LoadUnsafe(ref e1, (nuint)i)")
+            .And.Contain("(__c1_0 + __c2_0)"), generated);
     }
 
     [Test]
