@@ -1162,6 +1162,11 @@ internal sealed partial class Kernel
         foreach (var field in fields)
         {
             string name = $"{type.Name}.{Symbols.MemberName(field)}";
+            // An inline array is as many values as its length, laid out one after another, behind a struct of one field:
+            // read as that one field, the row would be taken for a fraction of its size. Inherent until a vector loop
+            // reads one (inner-loops.md WP1): splitting it out helps only a method that does not read it.
+            if (IsInlineArray(field.Type))
+                throw new Unsupported($"field {name} is an inline array ({field.Type.Name}), which a vector loop does not read");
             if (!field.IsFixedSizeBuffer && (IsLaneType(field.Type) || IsBool(field.Type))) paths.Add([field]);
             else if (!field.IsFixedSizeBuffer && field.Type is INamedTypeSymbol { TypeKind: TypeKind.Struct, SpecialType: SpecialType.None } inner
                      && SequentialLayout(inner) && paths.Count < MaxFields * 4)
@@ -1171,6 +1176,10 @@ internal sealed partial class Kernel
         }
         return paths.ToArray();
     }
+
+    /// <summary>An [InlineArray(N)] struct: N values one after another behind its one declared field.</summary>
+    private static bool IsInlineArray(ITypeSymbol type) =>
+        type.GetAttributes().Any(a => a.AttributeClass is { Name: "InlineArrayAttribute", ContainingNamespace.Name: "CompilerServices" });
 
     /// <summary>A nested struct's fields lie in declaration order: no [StructLayout], or a sequential one without Pack or Size.</summary>
     private static bool SequentialLayout(INamedTypeSymbol type) =>

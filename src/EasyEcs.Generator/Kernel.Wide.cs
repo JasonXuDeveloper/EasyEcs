@@ -144,7 +144,7 @@ internal sealed partial class Kernel
         var leaves = new Dictionary<string, int>();
         foreach (var field in type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic))
         {
-            if (field.IsFixedSizeBuffer) return null;
+            if (field.IsFixedSizeBuffer || IsInlineArray(field.Type)) return null; // not one value of its declared field
             var t = field.Type is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType: { } underlying } ? underlying : field.Type;
             int s, a;
             Dictionary<string, int>? inner = null;
