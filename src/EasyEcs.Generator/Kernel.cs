@@ -201,6 +201,13 @@ internal sealed partial class Kernel
     private readonly Dictionary<IParameterSymbol, string> _uniformParams = new(SymbolEqualityComparer.Default);
     /// <summary>The Reduce&lt;T&gt; parameters: T's fields, how T.Combine combines each ("+", "Min", "Max"), the run's partial result.</summary>
     private readonly Dictionary<IParameterSymbol, Reduction> _reductions = new(SymbolEqualityComparer.Default);
+
+    /// <summary>
+    /// The scalar counters of sums whose every write adds 1 under a condition (<see cref="Counted"/>): the counter's
+    /// name (<c>__a{index}_{field}c</c>, an accumulator's name so a cell pass hoists it with the others), its reduction
+    /// and field.
+    /// </summary>
+    private readonly Dictionary<string, (Reduction Reduction, int Field)> _counters = new();
     private readonly Dictionary<ILocalSymbol, string> _locals = new(SymbolEqualityComparer.Default);
     private readonly Dictionary<string, string> _broadcasts = new();
     private readonly StringBuilder _setup = new();
@@ -952,6 +959,24 @@ internal sealed partial class Kernel
         var restore = new StringBuilder();
         var fold = new StringBuilder();
         string count = $"{Vec(Column(first))}.Count";
+        // A sum every write of which counts lanes (Counts) keeps no vector: its accumulators, never written, are not
+        // started or folded.
+        string written = kernel._body.ToString() + kernel._body.Masked;
+        bool Unused(string acc) => kernel._counters.Count > 0 && !System.Text.RegularExpressions.Regex.IsMatch(written, $@"\b{acc}\b");
+        foreach (var counted in kernel._counters.Keys)
+        {
+            string vector = counted.Substring(0, counted.Length - 1);
+            foreach (var h in new[] { "", "_0", "_1" })
+                if (Unused(vector + h)) kernel._setup.Replace(SetupLine(kernel._setup.ToString(), vector + h), "");
+        }
+        foreach (var entry in kernel._counters.OrderBy(c => c.Key, System.StringComparer.Ordinal))
+        {
+            var (counter, (r, f)) = (entry.Key, entry.Value);
+            string ft = r.Fields[f].Type.ToDisplayString(Symbols.Fqn), into = r.Type == null ? r.Partial : $"{r.Partial}.Value.{r.Fields[f].Name}";
+            held.Append($"var __h{counter.Substring(3)} = {counter};\n");
+            restore.Append($"{counter} = __h{counter.Substring(3)};\n");
+            fold.Append($"{into} = unchecked(({ft})({into} + {counter}));\n");
+        }
         foreach (var r in kernel._reductions.Values.OrderBy(r => r.Index))
         {
             // a variable: lane by lane into it as the loop writes it (Min / Max as Math does, a sum that wraps)
@@ -964,6 +989,7 @@ internal sealed partial class Kernel
                 string acc = $"__a{r.Index}_0";
                 foreach (var h in Suffixes(kernel.IsDoubled(r.Fields[0].Type)))
                 {
+                    if (Unused(acc + h)) continue;
                     held.Append($"var __h{r.Index}_0{h} = {acc}{h};\n");
                     restore.Append($"{acc}{h} = __h{r.Index}_0{h};\n");
                     if (h.Length > 0) masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, Elem(r.Fields[0].Type))}, {acc}{h}, __h{r.Index}_0{h});\n");
@@ -983,6 +1009,7 @@ internal sealed partial class Kernel
                     string acc = $"__a{r.Index}_{f}", ft = r.Fields[f].Type.ToDisplayString(Symbols.Fqn), into = $"{r.Partial}.Value.{r.Fields[f].Name}";
                     foreach (var h in Suffixes(kernel.IsDoubled(r.Fields[f].Type)))
                     {
+                        if (Unused(acc + h)) continue;
                         held.Append($"var __h{r.Index}_{f}{h} = {acc}{h};\n");
                         restore.Append($"{acc}{h} = __h{r.Index}_{f}{h};\n");
                         if (h.Length > 0) masked.Insert(0, $"{acc}{h} = {V}.ConditionalSelect({kernel.PassAs(h, Elem(r.Fields[f].Type))}, {acc}{h}, __h{r.Index}_{f}{h});\n");
@@ -1082,6 +1109,10 @@ internal sealed partial class Kernel
                 .ToArray()),
         };
     }
+
+    /// <summary>The line of <paramref name="setup"/> declaring <paramref name="name"/>, or an empty string.</summary>
+    private static string SetupLine(string setup, string name) =>
+        System.Text.RegularExpressions.Regex.Match(setup, $@"(?m)^var {name} = [^\n]*\n").Value is { Length: > 0 } line ? line : "\u0000";
 
     /// <summary>
     /// The flat loop of a method that treats each field alike, or null. Every component has the same 2 to
@@ -1498,6 +1529,7 @@ internal sealed partial class Kernel
     {
         // A write of a value twice as wide as the lanes: each half of the pair, the lower lanes first (each reads only
         // its own half of what the other writes, and the values of the lanes' width both read are held before).
+        if (_half < 0 && Counts(op, mask)) return;
         bool pair = PairTarget(op);
         if (pair && _half < 0)
         {
@@ -1854,6 +1886,59 @@ internal sealed partial class Kernel
                 return true;
             default:
                 throw new Unsupported(NotCombined("writes"));
+        }
+    }
+
+    /// <summary>
+    /// A sum of a partial result (or of a variable an element loop sums into) that <paramref name="op"/> adds 1 to on the
+    /// lanes of a condition: the popcount of the condition's mask added to a scalar counter, not a vector of 0 / 1 per
+    /// lane (for a field wider than the lanes, widened into two halves first). Exact: an integer sum wraps, so the
+    /// count added once equals its ones added lane by lane. False when <paramref name="op"/> is no such write.
+    /// </summary>
+    private bool Counts(IOperation op, string? mask)
+    {
+        var target = op switch
+        {
+            ICompoundAssignmentOperation a => Accumulator(a.Target),
+            IIncrementOrDecrementOperation a => Accumulator(a.Target),
+            _ => null,
+        };
+        if (target is not var (r, field) || r.Ops[field] != "+" || IsFloat(r.Fields[field].Type) || Counted(op, mask) is not { } counted) return false;
+        string counter = $"__a{r.Index}_{field}c";
+        if (!_counters.ContainsKey(counter))
+        {
+            _counters[counter] = (r, field);
+            _setup.Append($"var {counter} = 0L;\n");
+        }
+        string active = And(counted, _alive)!;
+        string Add(string lanes) => $"{counter} += (long){V}.CountWhereAllBitsSet({lanes});\n";
+        _body.Append(Add(active), Add(And(active, "__pass")!));
+        return true;
+    }
+
+    /// <summary>
+    /// The lanes on which <paramref name="op"/> adds 1 to a sum, as a mask, or null: <c>s += c ? 1 : 0</c> (<c>c ? 0 : 1</c>
+    /// on the lanes where c fails), or <c>s++</c> / <c>s += 1</c> under a condition (<paramref name="mask"/>, the lanes of
+    /// an if).
+    /// </summary>
+    private string? Counted(IOperation op, string? mask)
+    {
+        static long? Constant(IOperation x) =>
+            x.ConstantValue is { HasValue: true, Value: var v and (sbyte or byte or short or ushort or int or uint or long) } ? System.Convert.ToInt64(v) : null;
+        switch (op)
+        {
+            case IIncrementOrDecrementOperation { Kind: OperationKind.Increment, IsChecked: false, OperatorMethod: null } when mask != null:
+                return mask;
+            case ICompoundAssignmentOperation { OperatorKind: BinaryOperatorKind.Add, IsChecked: false, OperatorMethod: null, Value: var value }:
+                while (!value.ConstantValue.HasValue && value is IConversionOperation { IsImplicit: true } conversion) value = conversion.Operand;
+                if (Constant(value) == 1) return mask;
+                if (value is not IConditionalOperation { IsRef: false, WhenFalse: { } whenFalse } choice || !IsBool(choice.Condition.Type)) return null;
+                var (yes, no) = (Constant(choice.WhenTrue), Constant(whenFalse));
+                if (!(yes == 1 && no == 0 || yes == 0 && no == 1)) return null;
+                string condition = Hold(Expr(choice.Condition), choice.Condition.Type!);
+                return And(mask, yes == 1 ? condition : $"~{condition}");
+            default:
+                return null;
         }
     }
 
