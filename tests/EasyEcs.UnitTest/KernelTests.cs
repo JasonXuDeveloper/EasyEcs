@@ -186,6 +186,15 @@ public partial record struct Tallies : ISingletonComponent
     [Max] public int High;
 }
 
+/// <summary>Counts of rows under conditions (a scalar of popcounts per field), and one field also summed (both kept).</summary>
+public partial record struct Counts : ISingletonComponent
+{
+    [Sum] public int Positive;
+    [Sum] public int NotPositive;
+    [Sum] public long Odd;
+    [Sum] public int Mixed;
+}
+
 /// <summary>Extent declared by attributes.</summary>
 public partial record struct Reach : ISingletonComponent
 {
@@ -211,6 +220,17 @@ public static class ReduceKernels
         if (rank.Value > 0) tallies.Value.Sum += rank.Value;
         tallies.Value.Low = Math.Min(tallies.Value.Low, rank.Value);
         tallies.Value.High = Math.Max(rank.Value, tallies.Value.High);
+    }
+
+    // 1 added on the lanes of a condition, in each form a method writes it: the popcount of the condition's mask.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Counted(in Rank rank, ref Reduce<Counts> counts)
+    {
+        counts.Value.Positive += rank.Value > 0 ? 1 : 0;
+        counts.Value.NotPositive += rank.Value > 0 ? 0 : 1;
+        if ((rank.Value & 1) != 0) counts.Value.Odd++;
+        if (rank.Value > 5) counts.Value.Mixed += 1;
+        counts.Value.Mixed += rank.Value;
     }
 
     [ForEach(SimdMode = SimdMode.Require)]
@@ -1718,6 +1738,11 @@ public class KernelTests
             ReduceKernels.Tallies(world);
             Assert.That(world.GetSingleton<Tallies>(), Is.EqualTo(tallies.Value), "Tallies");
             Assert.That((tallies.Value.Count, tallies.Value.Sum, tallies.Value.Low, tallies.Value.High), Is.EqualTo((headcount.Value.Count, headcount.Value.Sum, headcount.Value.Low, headcount.Value.High)), "Tallies is Count");
+
+            var counts = new Reduce<Counts> { Value = Counts.Identity };
+            foreach (int i in order) if (!hole(i)) ReduceKernels.Counted(in ranks[i], ref counts);
+            ReduceKernels.Counted(world);
+            Assert.That(world.GetSingleton<Counts>(), Is.EqualTo(counts.Value), "Counted");
 
             headcount = new Reduce<Headcount> { Value = Headcount.Identity };
             foreach (int i in order) if (!hole(i)) ReduceKernels.Tally(ref ranks[i], ref headcount);

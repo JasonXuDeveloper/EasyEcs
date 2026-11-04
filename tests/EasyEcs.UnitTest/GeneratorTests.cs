@@ -717,13 +717,15 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         int walk = generated.IndexOf("var __walk =", System.StringComparison.Ordinal), result = generated.IndexOf("__res0.Write() =", System.StringComparison.Ordinal);
-        int start = generated.IndexOf("var __a3q_0_0 = global::System.Runtime.Intrinsics.Vector128.Create<ushort>(__id3q.Wet);", System.StringComparison.Ordinal);
-        int fold = generated.IndexOf("Vector128.Sum(__a3q_0_0)", System.StringComparison.Ordinal);
+        // Wet counts the lanes of a condition: a scalar counter of their popcounts, no vector of 0 / 1 (Kernel.Counts).
+        int start = generated.IndexOf("var __a3q_0c = 0L;", System.StringComparison.Ordinal);
+        int fold = generated.IndexOf("x3.Value.Wet = unchecked((ushort)(x3.Value.Wet + __a3q_0c));", System.StringComparison.Ordinal);
+        Assert.That(generated, Does.Contain("__a3q_0c += (long)global::System.Runtime.Intrinsics.Vector128.CountWhereAllBitsSet(").And.Not.Contain("__a3q_0_0"), generated);
         Assert.That(walk, Is.GreaterThan(0), generated);
         Assert.That(start, Is.GreaterThan(0).And.LessThan(walk), generated);  // started once, before the walk
         Assert.That(fold, Is.GreaterThan(walk).And.LessThan(result), generated); // folded once, after it
         // one fold per pass (the halo read in place and the texture's: two passes in the text)
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"Vector128\.Sum\(__a3q_0_0\)").Count,
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"\+ __a3q_0c\)").Count,
             Is.EqualTo(System.Text.RegularExpressions.Regex.Matches(generated, @"__res0\.Write\(\) =").Count), generated);
     }
 
