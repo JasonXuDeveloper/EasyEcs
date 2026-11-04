@@ -152,6 +152,19 @@ public ref struct ArrayLoops
         for (int k = 0; k < 4; k++) sum = sum * 0.5f + g.G[k];
         g.G[0] = sum;
     }
+
+    // An argmin carried from step to step: the deconstruction under the condition is a write of each lane, not a cold branch.
+    [ForEach] static void Nearest(in Here h, ref Aimed aim)
+    {
+        int next = -1;
+        float nearest = float.MaxValue;
+        for (int i = 0; i < 8; i++)
+        {
+            float dx = i * 3 - h.X, d = dx * dx + h.Y * h.Y;
+            if (d > 4 && d < nearest) (nearest, next) = (d, i);
+        }
+        aim.Index = next;
+    }
 }
 
 /// <summary>The same methods row by row (<see cref="SimdMode.Off"/>), to compare against.</summary>
@@ -279,6 +292,7 @@ public class InlineArrayTests
             "Fade8: vector (Vector512 or Vector<float>), flat, masked words scalar",
             "Fade16: vector (Vector512 or Vector<float>), flat, masked words scalar",
             "Mix: vector (Vector512 or Vector<float>), interleaved fields, masked words vector",
+            "Nearest: vector (Vector512 or Vector<float>), interleaved fields, write-only columns streamed past the last-level cache, masked words vector",
         }));
     }
 
