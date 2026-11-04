@@ -123,6 +123,32 @@ public readonly ref struct Cell<TCell, TTile> where TCell : unmanaged where TTil
     }
 }
 
+/// <summary>
+/// The layers of a tall tile a cell method's pass covers, from a component of the tile's entity that the method takes
+/// (<c>in TLayers</c>): the pass exchanges the halo of layers <see cref="From"/> to <see cref="To"/> only (with their halo
+/// layers, as <see cref="Tile{TCell, TTile}.ExchangeHalo(int, int, TCell, bool)"/> does) and walks only those, for a
+/// stencil whose data sits in a few layers that the user's own summary knows (the layers a chunk's water reaches):
+/// <code>
+/// public record struct FlowLayers(int From, int To) : IComponent, ITileLayers;
+///
+/// [ForEach(Parallel = true)]
+/// static void Flow(Cell&lt;Fluid, Chunk&gt; w, Cell&lt;Block, Chunk&gt; g, in FlowLayers layers, out NextFluid next) =&gt; ...
+/// </code>
+/// The rows outside get what the method computes on blank cells, as the rows the walk skips do: so the layers must hold
+/// every row whose stencil reads a cell that is not zero (the tile's own, the neighbors' beside, and the layers the
+/// stencil reaches up and down). The layers are clamped to the tile (0 to Height - 1); <see cref="From"/> above
+/// <see cref="To"/> exchanges nothing and fills every row. The generator bounds the pass only where it proved what
+/// the method computes on a blank row (the schedule line says "layers of '...'"); elsewhere every layer runs (EECS123).
+/// </summary>
+public interface ITileLayers
+{
+    /// <summary>The first layer of the pass (clamped to 0).</summary>
+    int From { get; }
+
+    /// <summary>The last layer of the pass (clamped to Height - 1).</summary>
+    int To { get; }
+}
+
 /// <summary>A padded texture of zeros per cell and tile type, for <see cref="Cell{TCell, TTile}.Blank"/>.</summary>
 internal static class CellBlank<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
 {

@@ -88,6 +88,10 @@ public sealed partial class SystemGenerator
         // generator proved the out cells the same on every blank row of the driver, whatever else the method reads.
         // A result per tile is skipped only with the proof: the rows' f0 says nothing of what they add to it.
         bool skips = form.ConstantOnBlank || !form.ReadsPlace && cells.Count == 1 && results.Count == 0;
+        // The layers a component of the tile's entity gives (ITileLayers): the pass exchanges and walks only those, and
+        // the rows outside get what a skipped row gets, so it takes them only where it may skip rows (else EECS123).
+        var layers = Symbols.TileLayers(method);
+        bool ranged = layers != null && skips;
         int stencil = 1;
         foreach (var (_, dx, dy, dz) in form.Offsets)
         {
@@ -108,8 +112,9 @@ public sealed partial class SystemGenerator
         var exchanges = new StringBuilder();
         for (int k = 0; k < cells.Count; k++)
             exchanges.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]\n")
-                .Append($"    private static void {AccessorPrefix}__Exchange{k}(ref global::EasyEcs.Tile<{CellName(k)}, {shape}> tile) => ")
-                .Append(k == 0 && skips ? "tile.ExchangeHalo();\n\n" : $"tile.ExchangeHalo(0, {at}.Height - 1, mask: false);\n\n");
+                .Append($"    private static void {AccessorPrefix}__Exchange{k}(ref global::EasyEcs.Tile<{CellName(k)}, {shape}> tile{(ranged ? ", int from, int to" : "")}) => ")
+                .Append(ranged ? (k == 0 ? "tile.ExchangeHalo(from, to);\n\n" : "tile.ExchangeHalo(from, to, mask: false);\n\n")
+                    : k == 0 && skips ? "tile.ExchangeHalo();\n\n" : $"tile.ExchangeHalo(0, {at}.Height - 1, mask: false);\n\n");
 
         // The row's vector loop, once: the loops of each width, from the row's streams (each width's text names them).
         string? loops = null;
@@ -126,7 +131,7 @@ public sealed partial class SystemGenerator
         // (a shift along x on the cell's own row alone): its 2r shifted streams share one pair of edge vectors, while
         // the copy it saves holds 2r band rows; a box stencil shifts on 2r + 1 rows, each with its own edge loads and
         // corner rows, which costs more than the copy (Blur9 1.11-1.22x, Life about even; Laplacian 0.82-0.98x).
-        string? planeLoads = loops != null && cells.Count == 1 && with128 && form.Offsets.All(o => o.Dy == 0 && (o.Dx == 0 || o.Dz == 0))
+        string? planeLoads = loops != null && !ranged && cells.Count == 1 && with128 && form.Offsets.All(o => o.Dy == 0 && (o.Dx == 0 || o.Dz == 0))
             && !loops.Contains("goto __rest") && !loops.Contains("nint lanes =") ? PlaneLoads(loops, form.Offsets) : null;
         string? planeGuard = planeLoads == null ? null
             : $"global::EasyEcs.TilePlane<{CellName(0)}, {shape}>.Fits<{form.Loop!.Code.Columns[0]}>()"
@@ -136,7 +141,10 @@ public sealed partial class SystemGenerator
         string Pass(bool plane)
         {
             var body = new StringBuilder();
+            string range = ranged ? passed[Code.Escape(layers!.Name)] : "";
             if (plane) body.Append($"var __plane = __tile0.Plane({(skips ? "true" : "false")});\n");
+            else if (ranged) // the layers clamped to the tile; the exchange comes with the walk, when there is a layer
+                body.Append($"int __from = global::System.Math.Max({range}.From, 0), __to = global::System.Math.Min({range}.To, {at}.Height - 1);\n");
             else
                 for (int k = 0; k < cells.Count; k++) body.Append($"{AccessorPrefix}__Exchange{k}(ref __tile{k});\n");
             // A stepped tile's next buffer and its words of rows written, checked once per tile (Write checks each row).
@@ -244,15 +252,20 @@ public sealed partial class SystemGenerator
                     for (int j = 0; j < outputs.Count; j++) body.Append($"{OutName(j)} __f{j} = default;\n");
                 }
                 // The walk of Rows as plain loops, in its order: a word of rows per layer, a trailing-zero count per row.
-                body.Append($"var __walk = {(plane ? "__plane" : "__tile0")}.Rows((global::EasyEcs.TileStencil){stencil});\n");
-                body.Append("for (int __l = __walk.First, __last = __walk.Last; __l <= __last; __l++)\n{\n    int __y = __walk.LayerOf(__l);\n");
-                body.Append("    for (ulong __m = __walk.RowsOf(__l); __m != 0; __m &= __m - 1)\n    {\n");
+                // Bounded by the layers: the exchange and the walk of those, none when they are empty.
+                var walking = new StringBuilder();
+                if (ranged)
+                    for (int k = 0; k < cells.Count; k++) walking.Append($"{AccessorPrefix}__Exchange{k}(ref __tile{k}, __from, __to);\n");
+                walking.Append($"var __walk = {(plane ? "__plane" : "__tile0")}.Rows((global::EasyEcs.TileStencil){stencil});\n");
+                walking.Append("for (int __l = __walk.First, __last = __walk.Last; __l <= __last; __l++)\n{\n    int __y = __walk.LayerOf(__l);\n");
+                walking.Append("    for (ulong __m = __walk.RowsOf(__l); __m != 0; __m &= __m - 1)\n    {\n");
                 var inner = new StringBuilder();
                 inner.Append($"int __z = global::System.Numerics.BitOperations.TrailingZeroCount(__m);\nvar __row = new global::EasyEcs.TileRow<{shape}>(__y, __z);\n");
                 inner.Append("int __index = (__y * __depth + __z) * __width;\n");
                 inner.Append($"if (__index > __done)\n{{\n{Indent(blank)}{Fill("__done", "__index")}}}\n");
                 inner.Append(row).Append("__done = __index + __width;\n");
-                body.Append(Indent(Indent(inner.ToString()))).Append("    }\n}\n");
+                walking.Append(Indent(Indent(inner.ToString()))).Append("    }\n}\n");
+                body.Append(ranged ? $"if (__from <= __to)\n{{\n{Indent(walking.ToString())}}}\n" : walking.ToString());
                 body.Append($"if (__done < {at}.Count)\n{{\n{Indent(blank)}{Fill("__done", $"{at}.Count")}}}\n");
             }
             else
@@ -287,6 +300,8 @@ public sealed partial class SystemGenerator
         string names = string.Join("', '", cells.Select(c => c.Name));
         string walk = skips ? (form.ConstantOnBlank && (form.ReadsPlace || cells.Count > 1 || results.Count > 0) ? $"; rows of '{cells[0].Name}': blank rows proved constant" : "")
             : form.ReadsPlace ? "; every row: it reads its place" : cells.Count > 1 ? "; every row: several cells" : "; every row: a result per tile";
+        if (ranged) walk += $"; layers of '{layers!.Name}'";
+        else if (layers != null) walk += $"; every layer: the rows outside '{layers.Name}' are not proved blank";
         if (step >= 0) walk += $"; steps the tile of '{cells[0].Name}' (its second buffer swapped in)";
         if (planeGuard != null) walk += "; its halo read in place where the shape allows";
         string line = form.Loop is { } l

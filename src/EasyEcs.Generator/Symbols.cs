@@ -1408,6 +1408,17 @@ internal static class Symbols
     public static List<IParameterSymbol> Cells(IMethodSymbol method) =>
         method.Parameters.Where(p => p.RefKind == RefKind.None && IsCell(p.Type)).ToList();
 
+    /// <summary>
+    /// A cell method's component that bounds its pass's layers (<c>in T</c>, T an <c>ITileLayers</c> component of the
+    /// tile's entity), the first one; else null.
+    /// </summary>
+    public static IParameterSymbol? TileLayers(IMethodSymbol method) =>
+        IsCellMethod(method) ? method.Parameters.FirstOrDefault(p => p.RefKind is RefKind.In or RefKind.RefReadOnlyParameter && p.Type is INamedTypeSymbol { IsValueType: true } t
+            && IsA(t, Component) && IsA(t, TileLayersInterface)) : null;
+
+    /// <summary>The interface a component implements to bound a cell method's pass to its layers.</summary>
+    public const string TileLayersInterface = "EasyEcs.ITileLayers";
+
     /// <summary>A method taking a <c>Cell&lt;TCell, TTile&gt;</c>: it computes one cell (the generator writes its pass).</summary>
     public static bool IsCellMethod(IMethodSymbol method) => method.Parameters.Any(p => p.RefKind == RefKind.None && IsCell(p.Type));
 

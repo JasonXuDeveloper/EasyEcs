@@ -142,6 +142,18 @@ public static partial class EasyEcsAnalyzer
         "only what it writes.",
         helpLinkUri: Help("EECS053"));
 
+    public static readonly DiagnosticDescriptor UnboundedLayers = new("EECS123", "A cell method's layers that cannot bound its pass",
+        "Cell method '{0}' takes the layers of '{1}' (ITileLayers), but its pass runs every layer: {2}",
+        Category, DiagnosticSeverity.Warning, true,
+        "A cell method that takes a component implementing ITileLayers gets a pass that exchanges and walks only the layers " +
+        "From to To, the rows outside getting what the method computes on blank cells, as the rows the walk skips do. The " +
+        "generator does that only where it may skip rows: the method takes one cell, does not read its place (X, Y, Z) " +
+        "and has no result per tile, or the generator proved what it computes on a blank row (its out cells constant, its " +
+        "results unchanged, whatever else it reads). This method is neither, so the pass runs every layer and the layers " +
+        "change nothing. Make what the method computes on zero cells provable (the message names why it is not), or drop " +
+        "the parameter.",
+        helpLinkUri: Help("EECS123"));
+
     public static readonly DiagnosticDescriptor ScalarLoop = new("EECS055", "A [ForEach] method that runs one row at a time",
         "[ForEach] method '{0}' runs one row at a time, without a vector loop: {1}",
         Category, DiagnosticSeverity.Warning, true,
@@ -239,8 +251,19 @@ public static partial class EasyEcsAnalyzer
     /// </summary>
     private static void ReportCells(SyntaxNodeAnalysisContext context, IMethodSymbol method, MethodDeclarationSyntax syntax, int mode)
     {
-        if (mode == Symbols.SimdOff) return;
+        var layers = Symbols.TileLayers(method);
+        if (mode == Symbols.SimdOff && layers == null) return;
         var form = Kernel.CellFormOf(method, syntax, context.SemanticModel, context.CancellationToken);
+        // EECS123: the rows outside the layers get what a skipped row gets, so the pass is bounded only where it may skip
+        // rows (the generator's test, SystemGenerator.Cells.cs).
+        int cellCount = Symbols.Cells(method).Count;
+        bool results = method.Parameters.Any(p => Symbols.TileResult(p) != null);
+        if (layers != null && !(form.ConstantOnBlank || !form.ReadsPlace && cellCount == 1 && !results))
+            context.ReportDiagnostic(Diagnostic.Create(UnboundedLayers, layers.Locations.FirstOrDefault(), method.Name, layers.Name,
+                form.ReadsPlace ? "it reads its place (X, Y or Z) and what it computes on a blank row is not proved"
+                : cellCount > 1 ? "it takes several cells and what it computes on a blank row is not proved"
+                : "it has a result per tile and what it adds on a blank row is not proved"));
+        if (mode == Symbols.SimdOff) return;
         if (form.Loop != null || form.Reason == null) return;
         context.ReportDiagnostic(mode == Symbols.SimdRequire
             ? Diagnostic.Create(NoVectorLoop, method.Locations.FirstOrDefault(), method.Name, form.Reason)
@@ -437,6 +460,7 @@ public static partial class EasyEcsAnalyzer
             if (used is not { } references)
             {
                 if (empty) continue; // a method being written: nothing to say yet
+                if (SymbolEqualityComparer.Default.Equals(p, Symbols.TileLayers(method))) continue; // the cell pass reads it: its layers (ITileLayers)
                 if (component != null)
                 {
                     string shown = component.ToMinimalDisplayString(body.SemanticModel!, location?.SourceSpan.Start ?? 0);
@@ -2011,7 +2035,7 @@ public sealed class PerformanceAnalyzer : EasyEcsAnalyzer.Area
         EasyEcsAnalyzer.RowLookup, EasyEcsAnalyzer.ScalarLoop, EasyEcsAnalyzer.ScalarElementLoop, EasyEcsAnalyzer.ScratchEscape,
         EasyEcsAnalyzer.SomeRowsWritten, EasyEcsAnalyzer.UntrackedMut, EasyEcsAnalyzer.UnusedParameter,
         EasyEcsAnalyzer.UpdateInSystem, EasyEcsAnalyzer.WriteAccessOnlyReads, EasyEcsAnalyzer.HandWrittenEmit,
-        EasyEcsAnalyzer.HandWrittenLookup, EasyEcsAnalyzer.HandWrittenReduce, EasyEcsAnalyzer.HandWrittenTotal, EasyEcsAnalyzer.ColdFields);
+        EasyEcsAnalyzer.HandWrittenLookup, EasyEcsAnalyzer.HandWrittenReduce, EasyEcsAnalyzer.HandWrittenTotal, EasyEcsAnalyzer.ColdFields, EasyEcsAnalyzer.UnboundedLayers);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializePerformance(context);
 }
