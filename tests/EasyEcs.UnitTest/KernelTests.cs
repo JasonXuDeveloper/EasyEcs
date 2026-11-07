@@ -782,6 +782,18 @@ public record struct Rig8(float X, float A1, float A2, float P, float A4, float 
 /// </summary>
 public record struct Rig16(float X, float A1, float A2, float A3, float A4, float P, float A6, float A7,
     float A8, float A9, float A10, float A11, float A12, float A13, float A14, float Q) : IComponent;
+/// <summary>Eight 8-byte words a row (doubles and longs), a few used: a Vector512 of 8 rows per 8 vectors, AVX2's 4 rows per 8.</summary>
+public record struct Probe8(double X, long Id, double A2, double P, long Tag, double A5, double A6, double Q) : IComponent;
+/// <summary>Doubles beside an int and a short, then a long: 40 bytes a row, the doubles on their 8-byte boundaries.</summary>
+public struct Hull : IComponent
+{
+    public double Speed;
+    public int Crew;
+    public short Deck;
+    public double Mass;
+    public double Drag;
+    public long Id;
+}
 #pragma warning restore EECS091
 
 /// <summary>A system with a wide component's method: its schedule line says whether the vector loop runs on this hardware.</summary>
@@ -840,6 +852,28 @@ public static class WideKernels
     {
         r.X = r.X - r.P * l.Value + MathF.Sqrt(MathF.Abs(r.Q));
         r.Q = MathF.Min(r.Q + r.X * r.P, 10) * 0.5f - MathF.Max(r.P - l.Value, 0) * l.Value + l.Value * l.Value;
+    }
+
+    // 8-byte words: heavy math over doubles (a square root, divisions), light math over longs.
+    [ForEach]
+    internal static void Dive(ref Probe8 p, in Depth d)
+    {
+        p.X = p.X - p.P * d.Value + Math.Sqrt(Math.Abs(p.Q));
+        p.Q = Math.Min(p.Q + p.X * p.P, 10) * 0.5 - p.Q / (d.Value + 3);
+    }
+
+    [ForEach]
+    internal static void Tally(ref Probe8 p, in Stamp s)
+    {
+        p.Id = (p.Id + p.Tag * 3 + s.Value) ^ (p.Tag >> 2);
+        p.Tag = (p.Tag ^ 0x55) + p.Id - 7;
+    }
+
+    [ForEach]
+    internal static void Sail(ref Hull h, in Depth d)
+    {
+        h.Speed = h.Speed * 0.75 - h.Drag / h.Mass + d.Value;
+        h.Mass = Math.Max(h.Mass - Math.Sqrt(Math.Abs(h.Speed)), 1);
     }
 }
 
@@ -1168,6 +1202,24 @@ public class KernelTests
             WideKernels.Haul, (ref Rig16 g, ref Level l) => WideKernels.Haul(ref g, in l));
         CheckHoles(count, i => i % 5 == 3, (r, i) => new Rig16(NextFloat(r, i), 1, 2, 3, 4, NextFloat(r, i + 1), 6, 7, 8, 9, 10, 11, 12, 13, 14, NextFloat(r, i + 2)), NextLevel,
             WideKernels.Haul, (ref Rig16 g, ref Level l) => WideKernels.Haul(ref g, in l));
+    }
+
+    /// <summary>
+    /// Wide components of 8-byte words (doubles and longs, a row of 64 bytes and one of 40 with an int and a short among
+    /// its doubles): heavy math (square roots, divisions, NaN) and light (longs), gathered by AVX-512's 8-lane permutes,
+    /// AVX2's and the 128-bit table lookups where each pays; results the method's bit for bit, holes included.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void WideComponentsOfEightByteWordsMatchTheMethodBitForBit(int count)
+    {
+        Probe8 Probe(Random r, int i) => new(NextDouble(r, i), r.NextInt64(), 2, NextDouble(r, i + 1), r.NextInt64(), 5, 6, NextDouble(r, i + 2));
+        Depth NextDepth(Random r, int i) => new() { Value = i % 7 == 0 ? double.NaN : NextDouble(r, i + 3) };
+        Check(count, Probe, NextDepth, WideKernels.Dive, (ref Probe8 p, ref Depth d) => WideKernels.Dive(ref p, in d));
+        CheckHoles(count, i => i % 3 == 1, Probe, NextDepth, WideKernels.Dive, (ref Probe8 p, ref Depth d) => WideKernels.Dive(ref p, in d));
+        Check(count, Probe, (r, i) => new Stamp { Value = r.NextInt64() }, WideKernels.Tally, (ref Probe8 p, ref Stamp s) => WideKernels.Tally(ref p, in s));
+        Hull NextHull(Random r, int i) => new() { Speed = NextDouble(r, i), Crew = i, Deck = (short)-i, Mass = i % 5 == 0 ? 0 : NextDouble(r, i + 1), Drag = NextDouble(r, i + 2), Id = i };
+        Check(count, NextHull, NextDepth, WideKernels.Sail, (ref Hull h, ref Depth d) => WideKernels.Sail(ref h, in d));
+        CheckHoles(count, i => i % 4 == 2, NextHull, NextDepth, WideKernels.Sail, (ref Hull h, ref Depth d) => WideKernels.Sail(ref h, in d));
     }
 
     /// <summary>

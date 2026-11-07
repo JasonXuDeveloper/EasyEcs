@@ -218,6 +218,7 @@ public class GeneratorTests
         public partial struct Keyed { public override string ToString() => V.ToString(); }
         public struct Unit : IComponent { public float Speed; public bool Alive; public byte Team; public int Hp; }
         public struct Sixteen : IComponent { public float F0, F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11, F12, F13, F14, F15; }
+        public struct Probe : IComponent { public double X; public long Id; public double Y, P; public long Tag; public double Heat, Spin, Q; }
         public record struct G(float Pull) : ISingletonComponent;
         public struct Purse : ISingletonComponent { public long Sum; }
         public struct Count : ISingletonComponent, IReduction<Count> { public int N, Low; public static Count Identity => new() { Low = int.MaxValue }; public static Count Combine(Count a, Count b) => new() { N = a.N + b.N, Low = System.Math.Min(a.Low, b.Low) }; }
@@ -637,7 +638,42 @@ public class GeneratorTests
             .And.Contain("var __c1_0 = global::EasyEcs.Interleaved.Pick(__v1_0, __v1_1, __v1_2, __y0);")
             .And.Contain("__v1_1 = global::EasyEcs.Interleaved.PickInto(__v1_1, __c1_0, __y2);")
             .And.Contain("global::System.Runtime.Intrinsics.Vector128.Create((byte)0, 1, 2, 3, 12, 13, 14, 15, 24, 25, 26, 27, 36, 37, 38, 39);")
-            .And.Contain("A: vector (Vector512 or Vector<float> of 128 bits), wide component (permutes, table lookups), masked words scalar"), generated);
+            .And.Contain("A: vector (Vector512 or Vector<float> of 128 bits), wide component (permutes, table lookups), masked words scalar")
+            .And.Not.Contain("IsWide256").And.Not.Contain("Permute256"), generated); // light math: AVX2's permutes cost more than its lanes gain
+    }
+
+    // Heavy math (a square root) pays for AVX2's permutes too: a Vector<T> loop of its own behind Interleaved.IsWide256,
+    // left to the AVX-512 form where that runs, each two-source permute two VPERMD and a VPBLENDD.
+    [Test]
+    public void AWideComponentsHeavyMathTakesAvx2sPermutes()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Unit u) => u.Speed = System.MathF.Sqrt(System.MathF.Abs(u.Speed * 0.5f - 1)); }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("global::System.Numerics.Vector.IsHardwareAccelerated && global::EasyEcs.Interleaved.IsWide256 && !global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported && __layout1 && rows - i >=")
+            .And.Contain("global::EasyEcs.Interleaved.Permute256(__v1_0, __v1_1, global::System.Runtime.Intrinsics.Vector256.Create(")
+            .And.Contain("global::EasyEcs.Interleaved.Merge256(")
+            .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2(")
+            .And.Contain("A: vector (Vector512 or Vector<float> of 256 or 128 bits), wide component (permutes, table lookups), masked words scalar"), generated);
+    }
+
+    // 8-byte words (doubles beside longs): the layout checked in longs, AVX-512's 8-lane permutes, and AVX2's permutes
+    // of each double as two 32-bit words.
+    [Test]
+    public void AWideComponentOfEightByteWordsIsGatheredByEightLanePermutes()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Probe p) { p.X = p.X - p.P * 0.25 + System.Math.Sqrt(System.Math.Abs(p.Q)); p.Q = System.Math.Min(p.Q + p.X * p.P, 10) * 0.5 - p.Q / 3; } }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(generated, Does.Contain("t = t with { X = global::System.BitConverter.Int64BitsToDouble(1) };")
+            .And.Contain("ref long w = ref global::System.Runtime.CompilerServices.Unsafe.As<global::Probe, long>(ref t);")
+            .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar8x64x2(")
+            .And.Contain("global::EasyEcs.Interleaved.Permute256(")
+            .And.Contain("A: vector (Vector512 or Vector<double> of 256 bits)"), generated);
     }
 
     // A form that does not pay is not written: 16 words a row put each field of a 128-bit vector's 4 rows in 4 vectors,
