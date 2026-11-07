@@ -136,7 +136,8 @@ Interleaved.cs               the deinterleaving loads / interleaving stores of g
                              LoadTail / StoreTail: the last rows of a run copied into a vector's worth (a loop that
                              marks rows runs them masked); Interleaved.Wide.cs: Pick / PickInto, the NEON table
                              lookups (TBL / TBX over 1 to 4 registers) of a wide component's 128-bit form, and
-                             IsWideAccelerated (ARM64 with 128-bit Vector<T>)
+                             IsWideAccelerated (ARM64 with 128-bit Vector<T>); Permute256 / Merge256, its AVX2 form's
+                             permutes (VPERMD, VPBLENDD), and IsWide256 (x64 with 256-bit Vector<T> and AVX2)
 LaneMath.cs                  lane functions of generated vector loops .NET has no vector form of: the quotient of
                              int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh of floats;
                              each at Vector<T>, Vector512 and Vector128 (with AVX: 4 lanes as one Vector256 of doubles)

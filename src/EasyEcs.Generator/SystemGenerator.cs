@@ -1469,8 +1469,14 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             else if (simd.Interleaves) parts.Add("interleaved fields");
             if (simd.Wide != null)
             {
-                parts[0] = simd.Wide512 && simd.Wide128 ? $"vector (Vector512 or Vector<{simd.Lane}> of 128 bits)" : simd.Wide512 ? "vector (Vector512 only)" : $"vector (Vector<{simd.Lane}> of 128 bits only)";
-                parts.Add(simd.Wide512 && simd.Wide128 ? "wide component (permutes, table lookups)" : simd.Wide512 ? "wide component (permutes)" : "wide component (table lookups)");
+                var bits = new List<string>();
+                if (simd.Wide256) bits.Add("256");
+                if (simd.Wide128) bits.Add("128");
+                var widths = new List<string>();
+                if (simd.Wide512) widths.Add("Vector512");
+                if (bits.Count > 0) widths.Add($"Vector<{simd.Lane}> of {string.Join(" or ", bits)} bits");
+                parts[0] = $"vector ({string.Join(" or ", widths)}{(widths.Count == 1 && bits.Count < 2 ? " only" : "")})";
+                parts.Add(simd.Wide512 || simd.Wide256 ? simd.Wide128 ? "wide component (permutes, table lookups)" : "wide component (permutes)" : "wide component (table lookups)");
             }
             if (simd.Gathers) parts.Add("gathers (Lookup<T>)");
             if (simd.Prefetched.Length > 0) parts.Add("lookups prefetched past the last-level cache");

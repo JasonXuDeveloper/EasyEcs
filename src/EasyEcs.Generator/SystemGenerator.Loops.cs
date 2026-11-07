@@ -169,6 +169,7 @@ public sealed partial class SystemGenerator
         var loops = new List<Loop>();
         if (simd.Wide == null || simd.Wide512) loops.Add(new("Loop512", Wide(guard, simd.Wide), Wide(text, simd.Wide)));
         if (simd.Wide == null || simd.Wide128) loops.Add(new("Loop", Narrow(guard, simd.Wide), Narrow(text, simd.Wide)));
+        if (simd.Wide != null && simd.Wide256) loops.Add(new("Loop256", Narrow256(guard, simd.Wide, simd.Wide512), Narrow256(text, simd.Wide, simd.Wide512)));
         if (simd.VectorTail) loops.Add(TailLoop(simd, components, masked, split));
         return loops;
     }
@@ -230,13 +231,22 @@ public sealed partial class SystemGenerator
     /// (<see cref="Kernel.Mark512"/>) and permutes behind <paramref name="layout"/> (null: no wide component; "": the
     /// hardware alone, for the schedule's line).
     /// </summary>
-    private static string Wide(string s, string? layout) => Lines(s, Kernel.Mark512, Kernel.Mark128)
+    private static string Wide(string s, string? layout) => Lines(s, Kernel.Mark512, Kernel.Mark128, Kernel.Mark256)
         .Replace(WideGuard, layout == null ? "" : " && global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported" + (layout.Length > 0 ? " && " + layout : ""))
         .Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512).Replace(Accelerated, "IsAccelerated512").Replace(Kernel.LanesForm, "In512");
 
     /// <summary>The Vector&lt;T&gt; loop's text: <see cref="Wide"/>'s counterpart, a wide component's 128-bit lines and table lookups.</summary>
-    private static string Narrow(string s, string? layout) => Lines(s, Kernel.Mark128, Kernel.Mark512)
+    private static string Narrow(string s, string? layout) => Lines(s, Kernel.Mark128, Kernel.Mark512, Kernel.Mark256)
         .Replace(WideGuard, layout == null ? "" : " && global::EasyEcs.Interleaved.IsWideAccelerated" + (layout.Length > 0 ? " && " + layout : ""))
+        .Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(Kernel.LanesForm, "");
+
+    /// <summary>
+    /// A wide component's Vector&lt;T&gt; loop of 256 bits (AVX2): <see cref="Narrow"/>'s text with the AVX2 lines
+    /// (<see cref="Kernel.Mark256"/>); where the AVX-512 form runs (<paramref name="wide512"/>), it leaves the rows to it.
+    /// </summary>
+    private static string Narrow256(string s, string layout, bool wide512) => Lines(s, Kernel.Mark256, Kernel.Mark512, Kernel.Mark128)
+        .Replace(WideGuard, " && global::EasyEcs.Interleaved.IsWide256" + (wide512 ? " && !global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported" : "")
+            + (layout.Length > 0 ? " && " + layout : ""))
         .Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(Kernel.LanesForm, "");
 
     /// <summary>
@@ -251,13 +261,18 @@ public sealed partial class SystemGenerator
         if (simd.Flat != null) widths.Add($"{Vector}.IsHardwareAccelerated");
         if (simd.Wide == null || simd.Wide512) widths.Add(Wide(Hardware(simd), simd.Wide == null ? null : ""));
         if (simd.Wide == null || simd.Wide128) widths.Add(Narrow(Hardware(simd), simd.Wide == null ? null : ""));
+        if (simd.Wide != null && simd.Wide256) widths.Add(Narrow256(Hardware(simd), "", simd.Wide512));
         return string.Join(" || ", widths.Distinct().Select(w => w.Contains(" && ") && widths.Count > 1 ? $"({w})" : w));
     }
 
-    /// <summary><paramref name="text"/> without the lines marked <paramref name="drop"/>, and without the mark <paramref name="keep"/>.</summary>
-    private static string Lines(string text, string keep, string drop) => (text.IndexOf(drop, System.StringComparison.Ordinal) < 0
-        ? text
-        : Regex.Replace(text, "(?m)^[ \\t]*" + Regex.Escape(drop) + "[^\\n]*\\n", "")).Replace(keep, "");
+    /// <summary><paramref name="text"/> without the lines marked <paramref name="drops"/>, and without the mark <paramref name="keep"/>.</summary>
+    private static string Lines(string text, string keep, params string[] drops)
+    {
+        foreach (var drop in drops)
+            if (text.IndexOf(drop, System.StringComparison.Ordinal) >= 0)
+                text = Regex.Replace(text, "(?m)^[ \\t]*" + Regex.Escape(drop) + "[^\\n]*\\n", "");
+        return text.Replace(keep, "");
+    }
 
     // A token of Hardware's text: what a wide component needs of each width (Wide, Narrow).
     private const string WideGuard = "\u0001WideGuard";
