@@ -18,6 +18,7 @@
     <Project Path="samples/HotReload/HotReload.Host/HotReload.Host.csproj" />
     <Project Path="samples/Actors/Actors.csproj" />
     <Project Path="samples/VoxelServer/VoxelServer.csproj" />
+    <Project Path="samples/VoxelServer/Benchmark/VoxelServer.Benchmark.csproj" />
   </Folder>
   <Folder Name="/demo/">
     <Project Path="demo/EasyEcs.Demo/EasyEcs.Demo.csproj" />

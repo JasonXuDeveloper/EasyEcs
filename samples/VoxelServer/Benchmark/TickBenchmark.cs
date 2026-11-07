@@ -1,10 +1,13 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Running;
 using EasyEcs;
+using EasyEcs.Benchmark;
 using Nino.Core;
 using VoxelServer;
 
-BenchmarkSwitcher.FromAssembly(typeof(TickBenchmark).Assembly).Run(args);
+// The job of the library's benchmarks (BenchmarkConfig.cs, linked; --dev while developing).
+var config = BenchmarkConfig.Create(ref args);
+BenchmarkSwitcher.FromAssembly(typeof(TickBenchmark).Assembly).Run(args, config);
 
 /// <summary>
 /// A hundred ticks of the server (five seconds of game time) from tick 900 of a run, its second night: zombies
@@ -13,9 +16,10 @@ BenchmarkSwitcher.FromAssembly(typeof(TickBenchmark).Assembly).Run(args);
 /// the same ticks; the world is built as Program.cs builds it (Startup), without MeasureSystems. A hundred ticks hold
 /// every cadence of the simulation: twenty water steps, one spawn, the slices of the systems that look at a share of
 /// their rows per tick. Run: <c>dotnet run -c Release --project samples/VoxelServer/Benchmark -- --filter '*'</c>
+/// One call per iteration: each starts from the rewound state.
 /// </summary>
 [MemoryDiagnoser]
-[SimpleJob(launchCount: 2, warmupCount: 4, iterationCount: 12, invocationCount: 1)]
+[InvocationCount(1)]
 public class TickBenchmark
 {
     const int From = 900, Ticks = 100;

@@ -29,7 +29,7 @@ public static class Report
         // and how long its last run took.
         foreach (var system in world.Systems)
         {
-            string name = system.GetType().Name;
+            string name = system.Name;
             double microseconds = system.Stats.LastTime.TotalMicroseconds;
             long runs = system.Stats.Runs;
             Console.WriteLine($"  {name,-20} {runs,5} runs, {microseconds,8:F1} us last run");
