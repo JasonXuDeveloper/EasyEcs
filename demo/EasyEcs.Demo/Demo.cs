@@ -19,7 +19,7 @@ public static partial class Demo
     private static float[] _frame = [];
     private static double _updateMs;
 
-    // The last motion time of each group: [0] per entity, [1] batched.
+    // The last motion time of each group: [0] per entity, [1] vectorized.
     private static readonly double[] _motionMs = new double[2];
 
     // A new world of `count` sparks in an arena of `width` x `height` pixels.
@@ -34,11 +34,11 @@ public static partial class Demo
         _world.SetPopulation(count);
         _world.SetPointer(0, 0, false);
 
-        // Motion, in either group: Update<Batched>() or Update<PerEntity>() runs it
-        _world.AddSystem<DragBatchSystem>();
-        _world.AddSystem<MovementBatchSystem>();
+        // Motion, in either group: Update<Vectorized>() or Update<PerEntity>() runs it
         _world.AddSystem<DragSystem>();
         _world.AddSystem<MovementSystem>();
+        _world.AddSystem<DragPerEntitySystem>();
+        _world.AddSystem<MovementPerEntitySystem>();
 
         // The default group, run by Update() after the motion, in this order
         _world.AddSystem<LifetimeSystem>();
@@ -70,9 +70,9 @@ public static partial class Demo
     [JSExport]
     public static void Point(float x, float y, bool active) => World.SetPointer(x, y, active);
 
-    // Milliseconds the last update of the batch (true) or per-entity (false) motion group took.
+    // Milliseconds the last update of the vectorized (true) or per-entity (false) motion group took.
     [JSExport]
-    public static double MotionMs(bool batched) => _motionMs[batched ? 1 : 0];
+    public static double MotionMs(bool vectorized) => _motionMs[vectorized ? 1 : 0];
 
     // Which vector widths run as hardware SIMD here, as bits: 1 = Vector128, 2 = Vector256,
     // 4 = Vector512, 8 = Vector<T>.
@@ -91,11 +91,11 @@ public static partial class Demo
 
         // The two motion groups take turns, one per step. They do the same work, so the picture
         // does not change, and each is timed on the same sparks
-        bool batched = (world.DefaultUpdateCount & 1) != 0;
+        bool vectorized = (world.DefaultUpdateCount & 1) != 0;
         long start = Stopwatch.GetTimestamp();
-        if (batched)
+        if (vectorized)
         {
-            world.Update<Batched>();
+            world.Update<Vectorized>();
         }
         else
         {
@@ -106,7 +106,7 @@ public static partial class Demo
         world.Update();
         long end = Stopwatch.GetTimestamp();
 
-        _motionMs[batched ? 1 : 0] = Stopwatch.GetElapsedTime(start, moved).TotalMilliseconds;
+        _motionMs[vectorized ? 1 : 0] = Stopwatch.GetElapsedTime(start, moved).TotalMilliseconds;
         _updateMs = Stopwatch.GetElapsedTime(start, end).TotalMilliseconds;
 
         int count = 0;
