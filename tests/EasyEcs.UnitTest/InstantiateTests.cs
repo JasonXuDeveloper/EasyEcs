@@ -112,6 +112,21 @@ public class InstantiateTests
     }
 
     [Test]
+    public void ReservingANegativeOrImpossibleCountThrowsAndChangesNothing()
+    {
+        // As ReserveBuffers: a negative count throws, and a count past what a world holds throws before anything grows
+        // (int products of rows and count wrapped negative before, and the reservation did nothing or tried to).
+        var orc = new Prefab().Set(new Health(30)).Set(new Armor(5));
+        using var world = new World(new WorldOptions { InitialEntityCapacity = 16 });
+        world.Instantiate(orc);
+        Assert.Throws<ArgumentOutOfRangeException>(() => world.Reserve(orc, -1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => world.Reserve(orc, int.MaxValue));
+        Assert.That(world.Meta.Length, Is.EqualTo(16), "nothing grew");
+        world.Reserve(orc, 0);
+        Assert.That(world.Instantiate(orc).Get<Health>().Value, Is.EqualTo(30));
+    }
+
+    [Test]
     public void APassGoesOnInTheGrownColumnsAfterReservingForAPrefab()
     {
         var orc = new Prefab().Set(new Health(30));

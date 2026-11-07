@@ -386,4 +386,25 @@ public class EntityTests
         e.Destroy();
         Assert.That((ComponentValue[])view.GetType().GetProperty("Components")!.GetValue(view)!, Is.Empty);
     }
+
+    [Test]
+    public void EntitiesSkipsTheDestroyedAfterTheRecordsGrewDuringTheWalk()
+    {
+        // The walk reads the current records: an entity destroyed after a growth during the walk is not handed out
+        // (the walk read the records it captured before, where it still looked alive).
+        using var world = new World(new WorldOptions { InitialEntityCapacity = 4 });
+        var first = world.CreateEntity(new Health(0));
+        var ahead = world.CreateEntity(new Health(1));
+        var visited = new List<Entity>();
+        foreach (var entity in world.Entities)
+        {
+            visited.Add(entity);
+            if (entity != first) continue;
+            for (int i = 0; i < 8; i++) world.CreateEntity(new Health(10 + i)); // past the capacity: the records grow
+            ahead.Destroy();
+        }
+
+        Assert.That(visited, Does.Not.Contain(ahead));
+        Assert.That(visited.Count, Is.EqualTo(3), "ids past the capacity captured at the start are not visited");
+    }
 }

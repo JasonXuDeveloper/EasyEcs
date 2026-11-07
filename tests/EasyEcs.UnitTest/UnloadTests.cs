@@ -54,9 +54,53 @@ public class UnloadTests
         }
         """;
 
+    // Pair methods over a host's component (its order type is the plugin's) and over a plugin's, with a managed
+    // component on the sorted tables (the sorts keep spare columns of its type).
+    private const string Crowds = """
+        using EasyEcs;
+        using EasyEcs.UnitTest;
+        namespace Plugin;
+
+        public record struct Near(int Count) : IComponent;
+        public record struct Spot(float X, float Y) : IComponent;
+        public record struct Label(string Name) : IComponent;
+
+        [EcsSystem]
+        public ref struct Crowd
+        {
+            [ForEach]
+            static void ByPosition(in Position p, ref Near near, [Neighbor] in Position q)
+            {
+                float dx = q.X - p.X, dy = q.Y - p.Y;
+                if (dx * dx + dy * dy < 4f) near.Count += VERSION;
+            }
+
+            [ForEach]
+            static void BySpot(in Spot p, ref Near near, [Neighbor] in Spot q)
+            {
+                float dx = q.X - p.X, dy = q.Y - p.Y;
+                if (dx * dx + dy * dy < 4f) near.Count += VERSION;
+            }
+        }
+
+        public static class Entry
+        {
+            public static Entity[] Setup(World world, Entity[] players)
+            {
+                world.AddSystem<Crowd>();
+                foreach (var player in players) player.Set(new Near(0)).Set(new Label("player"));
+                var spots = new Entity[20];
+                for (int i = 0; i < spots.Length; i++) spots[i] = world.CreateEntity(new Spot(i, 0), new Near(0), new Label("spot"));
+                return spots;
+            }
+
+            public static int NearOf(Entity entity) => entity.Get<Near>().Count;
+        }
+        """;
+
     private sealed class PluginContext() : AssemblyLoadContext(isCollectible: true); // the host's assemblies by fallback
 
-    private static byte[] Compile(int version)
+    private static byte[] Compile(int version, string source = Plugin)
     {
         var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
             .Where(p => Path.GetFileName(p).StartsWith("System.") || Path.GetFileName(p) is "netstandard.dll" or "mscorlib.dll")
@@ -64,7 +108,7 @@ public class UnloadTests
             .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p));
         var parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
         var compilation = CSharpCompilation.Create("Plugin",
-            [CSharpSyntaxTree.ParseText(Plugin.Replace("VERSION", version.ToString()), parse)], references,
+            [CSharpSyntaxTree.ParseText(source.Replace("VERSION", version.ToString()), parse)], references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
         CSharpGeneratorDriver.Create([new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()],
             parseOptions: parse).RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
@@ -163,5 +207,54 @@ public class UnloadTests
         world.Restore(snapshot);
         Assert.That((players[0].Get<Health>(), players[0].Has<Velocity>(), players[1].Has<Health>()),
             Is.EqualTo((new Health(10), true, false)));
+    }
+
+    [Test]
+    public void OrdersAndPairStatesOfAPluginLetItUnload()
+    {
+        // The world kept a plugin's order requests (closures over its types), the order of host tables its pair method
+        // over a host component asked for, its pair state's clusters of the dropped tables and the sorts' spare columns
+        // of its managed component: the context never unloaded (fix-core-lane1). A type taking a reclaimed bit gets
+        // its own order, not the request of the type that had the bit.
+        using var world = new World();
+        var players = new Entity[3];
+        for (int i = 0; i < players.Length; i++) players[i] = world.CreateEntity(new Position(i, 0));
+        var host = world.CreateEntity(new Position(5, 5)); // a host table the plugin's order of Position reached
+
+        var unloaded = RunCrowdsAndUnload(world, players);
+        for (int i = 0; i < 20 && unloaded.IsAlive; i++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+        }
+
+        Assert.That(unloaded.IsAlive, Is.False, "nothing of EasyEcs roots the old version");
+        Assert.That(World.Source(host).Table.Order, Is.Null, "the plugin's order of a host table went with it");
+
+        var context = new PluginContext();
+        var plugin = context.LoadFromStream(new MemoryStream(Compile(2, Crowds)));
+        var spots = (Entity[])Entry(plugin, "Setup").Invoke(null, [world, players])!;
+        for (int i = 0; i < 3; i++) world.Update();
+        var order = World.Source(spots[0]).Table.Order;
+        Assert.That(order?.GetType().GetGenericArguments()[0], Is.EqualTo(plugin.GetType("Plugin.Spot")), "its own order");
+        Assert.That(Entry(plugin, "NearOf").Invoke(null, [spots[5]]), Is.EqualTo(3 * 2 * 3), "three neighbors within 2, twice a pass");
+        world.RemoveTypes(context);
+        context.Unload();
+    }
+
+    // Not inlined: no reference to the plugin's types survives on the test's stack.
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference RunCrowdsAndUnload(World world, Entity[] players)
+    {
+        var context = new PluginContext();
+        var plugin = context.LoadFromStream(new MemoryStream(Compile(1, Crowds)));
+        var spots = (Entity[])Entry(plugin, "Setup").Invoke(null, [world, players])!;
+        for (int i = 0; i < 12; i++) world.Update(); // the sorts, pair passes, a re-sort
+        Assert.That(Entry(plugin, "NearOf").Invoke(null, [spots[5]]), Is.EqualTo(12 * 3), "three neighbors within 2 per pass");
+        Assert.That(World.Source(spots[0]).Table.Order, Is.Not.Null);
+
+        world.RemoveTypes(context);
+        context.Unload();
+        return new WeakReference(context);
     }
 }

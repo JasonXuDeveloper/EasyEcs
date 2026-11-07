@@ -154,6 +154,35 @@ public class WorkersTests
         Assert.That(ran, Is.EqualTo(once));
     }
 
+    private sealed class Reloaded; // stands for a plugin's type: its steps go when its context unloads
+
+    [ThreadStatic] private static int t_ran; // the steps of the test below this thread ran
+
+    [Test]
+    public void ForgottenStepsLeaveAndLaterStepsStillRun()
+    {
+        // Each reload of a plugin added its steps for good before (Forget only nulled them): 50 load / unload cycles
+        // leave the steps held where they were, and a step added after a compaction still runs on a thread that ran
+        // more steps than are held now.
+        ThreadSetup.CatchUp();
+        int held = ThreadSetup.Held;
+        for (int cycle = 0; cycle < 50; cycle++)
+        {
+            ThreadSetup.Add(static () => { }, typeof(Reloaded));
+            ThreadSetup.Add(static () => { }, typeof(Reloaded));
+            ThreadSetup.CatchUp();
+            ThreadSetup.Forget(static type => type == typeof(Reloaded));
+        }
+
+        Assert.That(ThreadSetup.Held, Is.EqualTo(held));
+        t_ran = 0;
+        ThreadSetup.Add(static () => t_ran++, typeof(Reloaded));
+        ThreadSetup.CatchUp();
+        Assert.That((t_ran, ThreadSetup.Done), Is.EqualTo((1, ThreadSetup.Count)));
+        AwaitSetup(); // the helper threads catch up too
+        ThreadSetup.Forget(static type => type == typeof(Reloaded));
+    }
+
     [Test]
     public void AHelperRunningAMethodForTheFirstTimeAllocatesNothing()
     {

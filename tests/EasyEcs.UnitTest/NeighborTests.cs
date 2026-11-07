@@ -20,6 +20,7 @@ public partial record struct PairLoot(bool Taken, int By, int Order) : IComponen
 public partial record struct PairBag(int Count) : IComponent;
 public partial record struct PairHeat(int Value) : IComponent, ITracked;
 public partial record struct PairItem(int Loot);
+public partial record struct PairZone(int Id) : IComponent, IGroup { public readonly int Group => Id; }
 
 /// <summary>
 /// The pairs a pass met, in its order: their count, the sum of their keys, the first and the last (associative, not
@@ -401,6 +402,27 @@ public class NeighborTests
             Neighbors.SeparateRows(world);
             Assert.That(Pushes(world), Is.EqualTo(got), "the vector loop equals the pairs one at a time");
         }
+    }
+
+    [Test]
+    public void ThePairStateKeepsOnlyTheTablesTheWorldKeeps()
+    {
+        // Rows regrouped through 100 zones: each zone is a new table, emptied when the rows move on and dropped by
+        // TrimExcess. The pair state dropped its clusters with them (it kept one record per table ever met, and the
+        // dropped tables with their columns, before), and every pass still equals every pair.
+        using var world = Crowd(300, 10f, 3);
+        world.GroupBy<PairZone>();
+        for (int zone = 0; zone < 100; zone++)
+        {
+            world.SetAll(new PairZone(zone));
+            Neighbors.Reset(world);
+            Neighbors.Separate(world);
+            world.TrimExcess();
+            Assert.That(world.PairTableCount(), Is.EqualTo(1), $"zone {zone}");
+        }
+
+        var got = Pushes(world);
+        foreach (var (id, push) in Reference(world)) Assert.That(got[id], Is.EqualTo(push), $"entity {id}");
     }
 
     [Test]

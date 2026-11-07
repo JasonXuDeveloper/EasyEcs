@@ -340,4 +340,35 @@ public class SnapshotTests
         Assert.That(entities[0].Read<DynamicBuffer<int>>()[0], Is.EqualTo(1));
         Assert.That(entities[0].Read<Shield>().Value, Is.EqualTo(1));
     }
+
+    [Test]
+    public void ABulkWriteOfValuesKeepsTheNextCaptureIncremental()
+    {
+        // SetAll over rows that hold the component writes values only: no row moves and no presence bit flips, so the
+        // world stays in sync with its snapshot and the next capture copies only what was written (it copied every
+        // table whole before: the walk bumped StorageVersion unconditionally). Removing and giving back flip bits.
+        using var world = new World();
+        for (int i = 0; i < 200; i++) world.CreateEntity(new Armor(i), new Position(i, 0));
+        var unit = world.CreateEntity(new Armor(-1));
+        var snapshot = world.Capture();
+        int version = world.StorageVersion;
+
+        Assert.That(world.SetAll(new Armor(7)), Is.EqualTo(201));
+        Assert.That(world.SetAll(new Velocity(1, 1), QueryFilter.Create().With<Frozen>()), Is.Zero); // no table matches
+        Assert.That(world.StorageVersion, Is.EqualTo(version), "values written in place move nothing");
+        world.Capture(snapshot);
+        Assert.That(world.StorageVersion, Is.EqualTo(snapshot.StorageVersion));
+
+        world.SetAll(new Armor(9));
+        world.Restore(snapshot);
+        Assert.That(unit.Get<Armor>().Value, Is.EqualTo(7), "the incremental capture took the bulk write");
+
+        Assert.That(world.RemoveAll<Armor>(), Is.EqualTo(201));
+        Assert.That(world.StorageVersion, Is.Not.EqualTo(version), "presence bits flipped");
+        version = world.StorageVersion;
+        world.SetAll(new Armor(3));
+        Assert.That(world.StorageVersion, Is.Not.EqualTo(version), "given back: flipped again");
+        world.Restore(snapshot);
+        Assert.That(unit.Get<Armor>().Value, Is.EqualTo(7));
+    }
 }

@@ -983,4 +983,23 @@ public class IndexTests
         System.BitConverter.GetBytes(with).CopyTo(copy, at);
         return copy;
     }
+
+    [Test]
+    public void ReservationsBeforeTheFirstLookupMakeRoomForOneReservationNotTheirSum()
+    {
+        // A reservation is room for the next n instances: 100 waves of 1,000 reserved before the first lookup made the
+        // index room for 100,000 keys at once (a 100,000-entry dictionary and as many spare id arrays) before.
+        var unit = new Prefab().Set(new Rating(1));
+        using var world = new World();
+        for (int wave = 0; wave < 100; wave++) world.Reserve(unit, 1_000);
+        long once;
+        using (var other = new World())
+        {
+            other.Reserve(unit, 1_000);
+            once = Allocations.Of(() => other.Index<Rating, int>());
+        }
+
+        long all = Allocations.Of(() => world.Index<Rating, int>());
+        Assert.That(all, Is.LessThan(once * 2), $"one reservation: {once} B");
+    }
 }
