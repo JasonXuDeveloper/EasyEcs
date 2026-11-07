@@ -9,14 +9,15 @@ namespace EasyEcs.Benchmark;
 // method taking the band from a component of the column (ITileLayers: layers 13 to 18), so the pass exchanges and walks
 // those alone.
 
-/// <summary>A column of the torus: 16 x 16 cells, 32 layers, the faces beside it (no tile above or below).</summary>
-public partial record struct Tower([LookupKey] Plot Pos) : IComponent, ITile<Plot>
+/// <summary>
+/// A column of the torus: 16 x 16 cells, 32 layers, the faces beside it (no tile above or below). [Tile] declares the
+/// shape; Beside is written here because it wraps (the last column's east is the first).
+/// </summary>
+[Tile(Width = 16, Depth = 16, Height = 32)]
+public partial record struct Tower([LookupKey] Plot Pos) : IComponent
 {
     public const int Side = 16;
 
-    static int ITileShape.Width => 16;
-    static int ITileShape.Depth => 16;
-    static int ITileShape.Height => 32;
     static Plot ITile<Plot>.Beside(Plot p, TileFaces face) => face switch
     {
         TileFaces.North => new Plot(p.X, (p.Z + Side - 1) % Side),

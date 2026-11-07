@@ -39,8 +39,15 @@ public struct Dead : IComponent;
 // #endregion components
 
 // #region singletons
-// The battle's totals so far
-public record struct Battle(long Tick, int Hits, int Deaths, int Shots, int Replicated, int Afflicted) : ISingletonComponent;
+// The battle's totals so far: [Accumulate] makes each pass that counts into it (a ref Reduce<Battle>) add its result to
+// the total, its rows counted per chunk; [Sum] combines every field by addition. Fields, not a record's positional
+// properties: a vector loop folds its lanes into fields
+[Accumulate, Sum]
+public partial record struct Battle : ISingletonComponent
+{
+    public long Tick;
+    public int Hits, Deaths, Shots, Replicated, Afflicted;
+}
 
 // The hits of one CombatSystem pass (a ref Reduce<T> parameter): each run of rows counts in a register, and the
 // combined count replaces the singleton when the pass ends, so TallySystem adds it to the total. [Sum] on a field: the
@@ -276,12 +283,12 @@ public ref struct RespawnSystem                                           // Dea
 public ref struct ProjectileSystem
 {
     [ForEach, With<Player>, Without<Dead>]                                    // a frozen player's Velocity is disabled
-    static void Shoot(Entity player, in Position p, in Velocity v, ref Mana mana, ref Battle battle, in Rules rules,
+    static void Shoot(Entity player, in Position p, in Velocity v, ref Mana mana, ref Reduce<Battle> battle, in Rules rules,
         in EntityRandom random, World world)
     {
         if (rules.Ceasefire || mana.Value < rules.ShotCost || !random.Chance(player.Id, Draws.Shot, 1 / 20f)) return;
         mana.Value -= rules.ShotCost;
-        battle.Shots++;
+        battle.Value.Shots++;
         world.Instantiate(BattleServer.Shot, p, new Velocity(v.X * 4, v.Y * 4), new ChildOf(player));  // one row copy;
     }                                                                         // a child: gone with its player
 
@@ -309,40 +316,39 @@ public ref struct RegenerationSystem
 [EcsSystem, UpdateInGroup<Replication>]
 public ref struct ReplicationSystem                                       // only what changed since the last send
 {
-    // The totals are written row by row here, not reduced: a send visits the rows written since the last one, a few
-    // scattered rows per run, where a Reduce<T>'s partial result per run of rows costs more than the add it saves
+    // Each send counts into the battle's total ([Accumulate]): the pass's count is added to it when the pass ends
     [ForEach, Changed<Health>]
-    static void Send(in Health hp, ref Replica replica, ref Battle battle)
+    static void Send(in Health hp, ref Replica replica, ref Reduce<Battle> battle)
     {
         replica.Health = hp.Value;
-        battle.Replicated++;
+        battle.Value.Replicated++;
     }
 
     [ForEach, Changed<Burning>]                                               // set on fire, or burning on
-    static void SendFire(ref Replica replica, ref Battle battle)
+    static void SendFire(ref Replica replica, ref Reduce<Battle> battle)
     {
         if (replica.Burning) return;
         replica.Burning = true;
-        battle.Replicated++;
+        battle.Value.Replicated++;
     }
 
     [ForEach, Removed<Burning>]                                               // the fire went out: the row lacks it now
-    static void SendFireOut(ref Replica replica, ref Battle battle)
+    static void SendFireOut(ref Replica replica, ref Reduce<Battle> battle)
     {
         if (!replica.Burning) return;                                         // lit and out between two sends
         replica.Burning = false;
-        battle.Replicated++;
+        battle.Value.Replicated++;
     }
 
     [ForEach, Changed<Goal>]                                                  // the goals PlanningSystem changed, not
-    static void SendGoal(in Goal goal, ref Replica replica, ref Battle battle)  // every goal it planned
+    static void SendGoal(in Goal goal, ref Replica replica, ref Reduce<Battle> battle)  // every goal it planned
     {
         replica.Waypoint = goal.Waypoint;
-        battle.Replicated++;
+        battle.Value.Replicated++;
     }
 
     [ForEach, Changed<DynamicBuffer<Loot>>]                                   // bags changed by a ref write
-    static void SendBag(in DynamicBuffer<Loot> bag, ref Battle battle) => battle.Replicated += 1 + bag.Count;
+    static void SendBag(in DynamicBuffer<Loot> bag, ref Reduce<Battle> battle) => battle.Value.Replicated += 1 + bag.Count;
 }
 
 [EcsSystem, UpdateInGroup<Replication>]
@@ -378,14 +384,11 @@ public partial struct Vitality : ISingletonComponent { [Sum] public int Health; 
 public partial struct ManaPool : ISingletonComponent { [Sum] public int Mana; }
 
 /// <summary>
-/// The weakest living player: two fields that combine together (the lower health keeps its id), so the reduction is
-/// written by hand. Combine keeps the left one on a tie: the earlier row, as on one thread.
+/// The weakest living player: the row with the lowest Health, its id with it ([MinBy], MPI's MINLOC). The generator
+/// writes Identity (Health at int.MaxValue) and Combine, which keeps the left one on a tie: the earlier row, so the
+/// result is the same on any number of threads.
 /// </summary>
-public record struct Weakest(EntityId Player, int Health) : ISingletonComponent, IReduction<Weakest>
-{
-    public static Weakest Identity => new(EntityId.Null, int.MaxValue);
-    public static Weakest Combine(Weakest left, Weakest right) => right.Health < left.Health ? right : left;
-}
+public partial record struct Weakest(EntityId Player, [MinBy] int Health) : ISingletonComponent;
 
 /// <summary>
 /// [ForEach] methods outside systems: the generator writes the job and an entry point taking the world and the
@@ -400,7 +403,7 @@ public static class Reports
     [ForEach(Parallel = true)]
     static void SumMana(in Mana mana, ref Reduce<ManaPool> total) => total.Value.Mana += mana.Value;
 
-    [ForEach(Parallel = true, SimdMode = SimdMode.Off), With<Player>, Without<Dead>]
+    [ForEach(Parallel = true, SimdMode = SimdMode.Off), With<Player>, Without<Dead>]   // a row kept by its key: no vector form yet
     static void FindWeakest(Entity player, in Health hp, ref Reduce<Weakest> weakest)
     {
         if (hp.Value < weakest.Value.Health) weakest.Value = new Weakest(player.Id, hp.Value);

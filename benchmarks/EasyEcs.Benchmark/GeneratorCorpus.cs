@@ -59,12 +59,10 @@ public static class GeneratorCorpus
 
     /// <summary>
     /// The analyzer's diagnostics of the generated compilation that the corpus must not have (none: it is written as users
-    /// should), but EECS055: the methods over components of several fields stay scalar, and the message says so; and
-    /// EECS086 until BattleServer.cs takes its Battle totals as an [Accumulate] reduction (docs/plans/docs-todos.md,
-    /// feat-generator-gaps).
+    /// should), but EECS055: the methods over components of several fields stay scalar, and the message says so.
     /// </summary>
     public static Diagnostic[] Findings(Compilation generated) => generated.WithAnalyzers(EasyEcsAnalyzer.All).GetAnalyzerDiagnosticsAsync().Result
-        .Where(d => d.Severity >= DiagnosticSeverity.Info && d.Id is not ("EECS055" or "EECS086")).ToArray();
+        .Where(d => d.Severity >= DiagnosticSeverity.Info && d.Id != "EECS055").ToArray();
 
     /// <summary>One module of a game: components, a buffer element, systems with [ForEach] methods and a query loop.</summary>
     public static string Module(int m, bool oneNamespace)

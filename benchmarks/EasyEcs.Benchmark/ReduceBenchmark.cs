@@ -18,6 +18,8 @@ namespace EasyEcs.Benchmark;
 /// the copy is made once, outside the measurement. Steady state of the world's passes allocates 0 bytes. The
 /// <c>Generated</c> cases reduce into singletons declared with field attributes ([Sum], [Min], [Max]), against the same
 /// reductions written by hand (<c>HandWritten</c>): the generated Identity and Combine cost what hand-written ones do.
+/// <c>LowestGenerated</c> keeps the row with the lowest score ([MinBy], MPI's MINLOC) against the same reduction written
+/// by hand (<c>LowestHandWritten</c>), both row by row: a reduction that keeps a row has no vector form yet.
 /// </summary>
 [MemoryDiagnoser]
 public partial class ReduceBenchmark
@@ -232,6 +234,20 @@ public partial class ReduceBenchmark
         return _box.Value.MaxX;
     }
 
+    [Benchmark]
+    public EntityId LowestGenerated()
+    {
+        Totals.LowestGenerated(_world);
+        return _world.Lowest.Holder;
+    }
+
+    [Benchmark]
+    public EntityId LowestHandWritten()
+    {
+        Totals.LowestHandWritten(_world);
+        return _world.HandLowest.Holder;
+    }
+
     public record struct Score(int Value) : IComponent;
     public record struct Spot(float X, float Y) : IComponent;
 
@@ -305,6 +321,23 @@ public partial class ReduceBenchmark
         };
     }
 
+    /// <summary>The entity with the lowest score, written by hand: Combine keeps the left side on a tie (the earlier rows).</summary>
+    public struct HandLowest : ISingletonComponent, IReduction<HandLowest>
+    {
+        public EntityId Holder;
+        public int Score;
+
+        public static HandLowest Identity => new() { Score = int.MaxValue };
+        public static HandLowest Combine(HandLowest left, HandLowest right) => right.Score < left.Score ? right : left;
+    }
+
+    /// <summary><see cref="HandLowest"/> declared by [MinBy]: the generator writes Identity and Combine.</summary>
+    public partial struct Lowest : ISingletonComponent
+    {
+        public EntityId Holder;
+        [MinBy] public int Score;
+    }
+
     /// <summary><see cref="HandBounds"/> declared by attributes.</summary>
     public partial struct Bounds : ISingletonComponent
     {
@@ -334,6 +367,18 @@ public partial class ReduceBenchmark
 
         [ForEach(Parallel = true)]
         public static void BoundsParallel(in Spot spot, ref Reduce<Extent> extent) => extent.Value.Area.Include(in spot);
+
+        [ForEach(Parallel = true, SimdMode = SimdMode.Off)]
+        public static void LowestGenerated(Entity entity, in Score score, ref Reduce<Lowest> lowest)
+        {
+            if (score.Value < lowest.Value.Score) lowest.Value = new Lowest { Holder = entity.Id, Score = score.Value };
+        }
+
+        [ForEach(Parallel = true, SimdMode = SimdMode.Off)]
+        public static void LowestHandWritten(Entity entity, in Score score, ref Reduce<HandLowest> lowest)
+        {
+            if (score.Value < lowest.Value.Score) lowest.Value = new HandLowest { Holder = entity.Id, Score = score.Value };
+        }
 
         [ForEach(Parallel = true)]
         public static void SumGenerated(in Score score, ref Reduce<ScoreSum> total) => total.Value.Value += score.Value;
