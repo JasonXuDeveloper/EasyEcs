@@ -29,7 +29,7 @@ Finish 2, ...) or a plan file. *Record*, one of:
 | Id | Date | Decision | Lane |
 |---|---|---|---|
 | P10 | 2026-10-27, 2026-10-30 | Talk to the owner in Chinese | Lane 3 (instruction files), backlog T17 |
-| P11 | 2026-10-28 | A choice for the owner goes to him as a popup; an action only he can take, as the exact command | Lane 3 (instruction files), backlog T17 |
+| P11 | 2026-10-28 | A choice for the owner goes to the owner as a popup; an action only the owner can take, as the exact command | Lane 3 (instruction files), backlog T17 |
 | L7 | 2026-11-07 | The Cloudflare build watch excludes `docs/plans/*` and `docs/owner-review.md` (done by the owner) | Lane 3, backlog T18: `docs/AGENTS.md`'s Cloudflare table still says only "include `docs/*`" |
 
 P10 and P11 are kept by the session that heard them, but no instruction file says them, so a new session would not

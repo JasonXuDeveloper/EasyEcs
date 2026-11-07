@@ -147,6 +147,10 @@ owner has asked for once must be written where the next session will find it.
   does, `Use when ...`, and `Triggers: ...`: the paths and file names it owns, the symptoms (an EECS id, "why scalar"),
   and the words the owner uses for that work in English and Chinese (再来一轮, 优化, 合并). A skill that did not run
   when it should have gets the missing trigger added.
+- **Talking to the owner** (owner, 2026-10-27 / 2026-10-30: "用中文对话"; 2026-10-28: "需要我选的给我弹窗，需要我做的给我命令"):
+  reply to the owner in Chinese (code, comments, commits and docs stay English); a choice that is the owner's is asked
+  as a popup (the question tool) with the recommended option first; an action only the owner can take is given as the
+  exact command or dashboard step.
 - **Decide, then record what you did not do.** The owner has delegated judgment: do what clearly fits the
   project's rules and goals without asking (public API changes included, with their migration); ask only for what is
   truly the owner's to decide. A proposal you judge not worth doing goes into `docs/owner-review.md` with the reason
@@ -154,7 +158,7 @@ owner has asked for once must be written where the next session will find it.
   record. "Not worth doing" is a verdict reached after trying or after finding the cause (next rule), never "not yet".
   Every answer the owner gives (a popup, or a message that sets a rule or chooses a design) is appended to
   `docs/plans/owner-decisions.md`, the ledger, in the same session, with where it is applied (a commit, a backlog
-  item, a plan file); read it before asking him again. The docs pass turns its settled entries into decision records
+  item, a plan file); read it before asking the owner again. The docs pass turns its settled entries into decision records
   (`decisions.mdx` + `.zh.mdx`), and the ledger then cites the D number.
 - **Try it now; research a problem, never skip it** (owner, 2026-10-30: "做什么都不要defer，应该立马去尝试，遇到问题不应该
   跳过问题，而是研究为什么会出现这个问题"). An idea within reach is tried in the same session, not parked as "later",

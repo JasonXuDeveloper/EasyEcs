@@ -245,11 +245,11 @@ Starts now. T1 comes before Finish 1b (the move).
       baselines the owner's runs need, or record why each stays.
 - [ ] **T15. Benchmark rows**: the EECS096 delegate fallback in LambdaPassBenchmark (docs-todos "feat-inline").
 - [ ] **T16. The arm64 job's first run** is the owner's dispatch (Finish 4; `owner-m4.md` 6).
-- [ ] **T17. The owner's working rules in `AGENTS.md`** (ledger P10, P11; owner 2026-10-27 / 2026-10-30: "用中文对话";
+- [x] **T17. The owner's working rules in `AGENTS.md`** (ledger P10, P11; owner 2026-10-27 / 2026-10-30: "用中文对话";
       2026-10-28: "需要我选的给我弹窗，需要我做的给我命令"): a bullet in Workflows: talk to the owner in Chinese (code,
-      comments, commits and docs stay English); a choice for the owner is asked as a popup, an action only he can take
+      comments, commits and docs stay English); a choice for the owner is asked as a popup, an action only the owner can take
       is given as the exact command. Proof: `tools/agents.sh --check`.
-- [ ] **T18. `docs/AGENTS.md`'s Cloudflare table** (ledger L7): the build watch paths include `docs/*` and exclude
+- [x] **T18. `docs/AGENTS.md`'s Cloudflare table** (ledger L7): the build watch paths include `docs/*` and exclude
       `docs/plans/*` and `docs/owner-review.md` (set by the owner in the dashboard, 2026-11-07).
 
 ### Lane 4: vector-loop generator (after feat-inner-loops merges; Kernel*.cs, SystemGenerator*.cs, Recorder.cs, LaneMath.cs, ArityGenerator.cs text) — 18 items
