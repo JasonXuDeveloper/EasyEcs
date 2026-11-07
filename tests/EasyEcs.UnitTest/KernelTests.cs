@@ -721,6 +721,9 @@ public static class StructKernels
     }
 
     [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Hold(ref Place2 position, in Pace2 bound) => position = new Place2(Vector2.Clamp(position.Value, -bound.Value, bound.Value));
+
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Swap(ref Plain2 a) => a = new Plain2(a.Y, a.X);
 
     [ForEach(SimdMode = SimdMode.Require)]
@@ -1159,6 +1162,9 @@ public class KernelTests
         }
         Check(count, (r, i) => new Place2(NextVector2(r, i) * 2), (r, i) => new Pace2(NextVector2(r, i + 2)), StructKernels.Bounce,
             (ref Place2 p, ref Pace2 v) => StructKernels.Bounce(ref p, ref v));
+        // Clamp with min above max on the rows of a negative bound, NaN and the zeros among the values.
+        Check(count, (r, i) => new Place2(NextVector2(r, i) * 2), (r, i) => new Pace2(NextVector2(r, i + 2)), StructKernels.Hold,
+            (ref Place2 p, ref Pace2 v) => StructKernels.Hold(ref p, in v));
         Check(count, (r, i) => new Plain2(NextFloat(r, i), NextFloat(r, i + 1)), (r, i) => new Heat(), StructKernels.Swap,
             (ref Plain2 a, ref Heat _) => StructKernels.Swap(ref a));
         Check(count, (r, i) => new Body3 { P = NextVector3(r, i), M = NextFloat(r, i + 3) }, (r, i) => new Pace3(NextVector3(r, i + 4)), StructKernels.Weigh,
