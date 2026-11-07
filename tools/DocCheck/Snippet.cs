@@ -13,8 +13,6 @@ namespace DocCheck;
 /// </summary>
 public sealed partial class Snippet
 {
-    private static readonly CSharpParseOptions Regular = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
-
     private readonly SyntaxTree _parsed;
     private readonly bool _namespaced;                 // a fence with a namespace is a file of its own
     private readonly HashSet<string> _without;         // types another fence replaces here
@@ -27,7 +25,7 @@ public sealed partial class Snippet
         Fence = fence;
         _without = without;
         _namespaced = Namespace().IsMatch(fence.Code);
-        _parsed = CSharpSyntaxTree.ParseText(fence.Code, Regular);
+        _parsed = CSharpSyntaxTree.ParseText(fence.Code, GeneratorHost.Parse);
         var root = (CompilationUnitSyntax)_parsed.GetRoot();
         var declared = _namespaced ? root.Members.OfType<BaseNamespaceDeclarationSyntax>().SelectMany(n => n.Members) : root.Members;
         TypeNames = declared.Where(IsType).Where(t => !IsPartial(t)).Select(NameOf).ToHashSet();
@@ -58,7 +56,7 @@ public sealed partial class Snippet
             var namespaces = root.Members.OfType<BaseNamespaceDeclarationSyntax>()
                 .Select(n => SyntaxFactory.UsingDirective(n.Name).WithGlobalKeyword(global).NormalizeWhitespace().WithTrailingTrivia(SyntaxFactory.LineFeed));
             var file = root.WithUsings(SyntaxFactory.List(usings.Concat(namespaces)));
-            _emitted.Add(CSharpSyntaxTree.ParseText($"#line {Fence.Line} \"{page}\"\n{file.ToFullString()}", Regular, path: $"{page}#{Fence.Line}.cs"));
+            _emitted.Add(CSharpSyntaxTree.ParseText($"#line {Fence.Line} \"{page}\"\n{file.ToFullString()}", GeneratorHost.Parse, path: $"{page}#{Fence.Line}.cs"));
             return _emitted;
         }
 
@@ -78,8 +76,8 @@ public sealed partial class Snippet
                 if (!IsType(member))
                     Mapped(system, member, member is GlobalStatementSyntax global ? global.Statement.ToFullString() : member.ToFullString());
             system.Append("}\n");
-            _emitted.Add(CSharpSyntaxTree.ParseText(types.ToString(), Regular, path: $"{page}#{Fence.Line}.types.cs"));
-            _emitted.Add(CSharpSyntaxTree.ParseText(system.ToString(), Regular, path: $"{page}#{Fence.Line}.system.cs"));
+            _emitted.Add(CSharpSyntaxTree.ParseText(types.ToString(), GeneratorHost.Parse, path: $"{page}#{Fence.Line}.types.cs"));
+            _emitted.Add(CSharpSyntaxTree.ParseText(system.ToString(), GeneratorHost.Parse, path: $"{page}#{Fence.Line}.system.cs"));
             return _emitted;
         }
 
@@ -109,8 +107,8 @@ public sealed partial class Snippet
         }
 
         holder.Append("}\n");
-        _emitted.Add(CSharpSyntaxTree.ParseText(types.ToString(), Regular, path: $"{page}#{Fence.Line}.types.cs"));
-        _emitted.Add(CSharpSyntaxTree.ParseText(holder.ToString(), Regular, path: $"{page}#{Fence.Line}.code.cs"));
+        _emitted.Add(CSharpSyntaxTree.ParseText(types.ToString(), GeneratorHost.Parse, path: $"{page}#{Fence.Line}.types.cs"));
+        _emitted.Add(CSharpSyntaxTree.ParseText(holder.ToString(), GeneratorHost.Parse, path: $"{page}#{Fence.Line}.code.cs"));
         return _emitted;
 
         void Mapped(StringBuilder text, SyntaxNode node, string code)

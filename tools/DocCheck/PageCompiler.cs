@@ -42,15 +42,6 @@ public sealed class PageCompiler
     private static readonly string[] ImplicitUsings =
         ["System", "System.Collections.Generic", "System.IO", "System.Linq", "System.Threading", "System.Threading.Tasks", "EasyEcs"];
 
-    private static readonly CSharpParseOptions Regular = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
-
-    private static readonly ImmutableArray<MetadataReference> References =
-    [
-        .. ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
-            .Where(p => Path.GetFileName(p) is var name && !name.StartsWith("Microsoft.CodeAnalysis", StringComparison.Ordinal)
-                        && name is not ("EasyEcs.Generator.dll" or "DocCheck.dll"))
-            .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p)),
-    ];
 
     // The prelude: declared before every page's fences, so a page's own declaration of a name replaces it.
     private static Snippet Shared => new(new Fence(Prelude.Path, 1, "csharp", "", Prelude.Source));
@@ -115,9 +106,9 @@ public sealed class PageCompiler
         trees.Add(Tree("fields", holder.ToString()));
         foreach (var snippet in snippets) trees.AddRange(snippet.Emit(page, name => last[name] == snippet));
 
-        var compilation = CSharpCompilation.Create("DocCheck." + Path.GetFileNameWithoutExtension(page), trees, References, Options);
-        CSharpGeneratorDriver.Create([new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator()],
-                parseOptions: Regular)
+        // A project referencing the package: its generators, parse options and references (tools/Shared/GeneratorHost.cs).
+        var compilation = CSharpCompilation.Create("DocCheck." + Path.GetFileNameWithoutExtension(page), trees, GeneratorHost.References, Options);
+        CSharpGeneratorDriver.Create(GeneratorHost.Generators(), parseOptions: GeneratorHost.Parse)
             .RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
         var diagnostics = await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync();
         return (output, diagnostics);
@@ -140,7 +131,7 @@ public sealed class PageCompiler
         return string.Join('\n', usings) + "\n";
     }
 
-    private static SyntaxTree Tree(string name, string text) => CSharpSyntaxTree.ParseText(text, Regular, path: name + ".g.cs");
+    private static SyntaxTree Tree(string name, string text) => CSharpSyntaxTree.ParseText(text, GeneratorHost.Parse, path: name + ".g.cs");
 
     /// <summary>
     /// Undeclared names (CS0103) in statements of the focus: a local of an earlier fence, or an ambient variable,

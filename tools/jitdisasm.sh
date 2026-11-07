@@ -19,8 +19,7 @@ fi
 project=$1
 pattern=$2
 shift 2
-dotnet build -c Release "$project" >/dev/null
-target=$(dotnet msbuild "$project" -getProperty:TargetPath -p:Configuration=Release)
+target=$("$(dirname "$0")/build.sh" "$project")
 tiered=$([ "${FULLOPTS:-0}" = 1 ] && echo 0 || echo 1)
 # Only the program gets the settings (not the SDK that builds it).
 DOTNET_JitDisasm="$pattern" DOTNET_TC_CallCountingDelayMs=0 DOTNET_TieredCompilation=$tiered dotnet "$target" "$@"

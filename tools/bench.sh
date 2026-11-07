@@ -6,9 +6,9 @@
 #   tools/bench.sh --all [--sync]           every class of both projects
 #
 # A class that finished is marked in BenchmarkDotNet.Artifacts/done/ and skipped by the next run, so a run cut short
-# (a container restart) goes on where it stopped; --fresh clears the marks. Each project is built once, the classes
-# run with --no-build. One run at a time on a machine: the runs share a lock (BENCH_LOCK, flock -o, so a build server
-# left behind does not keep it). --sync merges the reports into docs/src/data/bench.json (sync-benchmarks --merge):
+# (a container restart) goes on where it stopped; --fresh clears the marks. Each project is built and lists its
+# benchmarks once; a class runs, with --no-build, in the project that declares it. One run at a time on a machine: the
+# runs share a lock (BENCH_LOCK, flock -o, so a build server left behind does not keep it). --sync merges the reports into docs/src/data/bench.json (sync-benchmarks --merge):
 # the classes run replace theirs, the others stay, and the rows that moved (15 %, or their allocation) are listed.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
@@ -41,22 +41,38 @@ done
 [ $fresh = 1 ] && rm -rf "$art/done"
 mkdir -p "$art/done"
 
-project() { case $1 in EcsComparison.*|Features.*|*Comparison*) echo EasyEcs.Comparison ;; *) echo EasyEcs.Benchmark ;; esac; }
+# Each project is built once, and lists its benchmarks (--list flat: Namespace.Class.Method) once.
+declare -A listed=()
+build() {
+  [ -n "${listed[$1]+x}" ] && return
+  dotnet build -c Release "benchmarks/$1" -v q -nologo > "$art/done/build-$1.log" 2>&1 || { cat "$art/done/build-$1.log"; exit 1; }
+  listed[$1]=" $(dotnet run -c Release --no-build --project "benchmarks/$1" -- --list flat 2>/dev/null | tr '\n' ' ')"
+}
+# The project declaring a class (the one whose list has it): a name is never routed by its pattern, so a class of
+# either project runs where it lives, and a name neither declares fails here instead of running nothing.
+# A short name matches after a dot and before the method: BufferChurnBenchmark is not ParallelBufferChurnBenchmark.
+project() {
+  for p in EasyEcs.Benchmark EasyEcs.Comparison; do
+    if [[ ${listed[$p]} == *" $1."* || ${listed[$p]} == *".$1."* ]]; then echo "$p"; return; fi
+  done
+  return 1
+}
 
 cd "$root"
-built=""
 for cls in "${classes[@]}"; do
   [ -f "$art/done/$cls" ] && continue
-  p=$(project "$cls")
-  if [[ " $built " != *" $p "* ]]; then
-    dotnet build -c Release "benchmarks/$p" -v q -nologo > "$art/done/build-$p.log" 2>&1 || { cat "$art/done/build-$p.log"; exit 1; }
-    built="$built $p"
-  fi
+  build EasyEcs.Benchmark; build EasyEcs.Comparison # here, not in project's subshell, so each is built and listed once
+  p=$(project "$cls") || { echo "  failed: no benchmark class $cls in either project"; continue; }
   echo "$(date +%T) $cls"
-  # A short name matches after a dot and before the method: BufferChurnBenchmark is not ParallelBufferChurnBenchmark.
   case $cls in EasyEcs.*|EcsComparison.*) filter="$cls.*" ;; *) filter="*.$cls.*" ;; esac
-  dotnet run -c Release --no-build --project "benchmarks/$p" -- --filter "$filter" --buildTimeout 900 > "$art/done/$cls.log" 2>&1 \
-    && touch "$art/done/$cls" || echo "  failed: $art/done/$cls.log"
+  log=$art/done/$cls.log
+  # BenchmarkDotNet exits with 0 when the filter matches nothing: that run is a failure, not a class done.
+  if dotnet run -c Release --no-build --project "benchmarks/$p" -- --filter "$filter" --buildTimeout 900 > "$log" 2>&1 \
+    && ! grep -q 'No benchmarks to choose from' "$log"; then
+    touch "$art/done/$cls"
+  else
+    echo "  failed: $log"
+  fi
 done
 echo "$(date +%T) done"
 if [ $sync = 1 ]; then
