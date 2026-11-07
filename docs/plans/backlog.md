@@ -228,48 +228,76 @@ Starts now; Forms / Views / Lambdas areas wait for feat-inner-loops, Parts / Til
       suggestion"); an `IForSpan` Execute that is one element loop -> "write it as a lambda pass" (inner-loops.md
       section 6): build after WP4 merges or record.
 
-### Lane 3: tooling and CI (tools/, .github/, docs/scripts, test and benchmark harness, sample hosts) — 18 items
+### Lane 3: tooling and CI (tools/, .github/, docs/scripts, test and benchmark harness, sample hosts) — 19 items
 
 Starts now. T1 comes before Finish 1b (the move).
 
-- [ ] **T1. `tools/agents.sh` recursive, and maps for tests and benchmarks** (`code.md` 2.2, 2.3, 3.8):
+- [x] **T1. `tools/agents.sh` recursive, and maps for tests and benchmarks** (`code.md` 2.2, 2.3, 3.8):
       `glob("**/*.cs", recursive=True)` before the directory move (otherwise it passes vacuously); `tests/` and
       `benchmarks/` in the maps (a file's base name or its stem without Tests / Benchmark); the missing files listed
       (tests: CopyEntitiesTests, KernelTests, ScratchTests, UnusedTests, WorkersTests; benchmarks: ChunkRowsBenchmark,
       KernelBenchmark, ParallelRunnerBenchmark, ScratchBenchmark, Program.cs, the Comparison project's files); the two
       file maps one line per file. Proof: `tools/agents.sh --check` fails on a missing file, passes after.
-- [ ] **T2. GameLoop prints "SystemHandle" for every system** (`code.md` 1.1): `system.Name` in
+      Built (fix-tooling-lane3): the maps of tests/ and benchmarks/ one line per file, every project under them
+      checked by its path (`Locality/Chase.cs`), recursive over git's file list; 190 problems on the old maps, 0
+      after.
+- [x] **T2. GameLoop prints "SystemHandle" for every system** (`code.md` 1.1): `system.Name` in
       `samples/GameLoop/Host/Report.cs:32`; CI checks GameLoop's names and counts (`code.md` 2.5: timing lines
       strippable by `check-sample.sh`). Proof: CI step fails before the fix.
-- [ ] **T3. Raw allocation baselines and fixed warm-ups in tests** (`code.md` 1.2): ConcurrencyTests:178,
+      Built: `system.Name`; CI runs GameLoop through `check-sample.sh` with `SAMPLE_MASK` (numbers masked: names,
+      lines and checks compared, README and pages).
+- [x] **T3. Raw allocation baselines and fixed warm-ups in tests** (`code.md` 1.2): ConcurrencyTests:178,
       LaneMathTests:488 through `Allocations.Baseline` / `Of` / `WarmUp`; the fixed warm-ups of KernelTests,
       KernelLookupTests, HelperLoopTests, AllocationTests to `Allocations.WarmUp` (KernelTests after
       feat-inner-loops), and the sentence in `tests/AGENTS.md` goes.
-- [ ] **T4. One generator list for tests, DocCheck and GeneratorCorpus** (`code.md` 3.1): DocCheck lacks View and
+      Built but KernelTests (feat-inner-loops edits it; tests/AGENTS.md names it): ConcurrencyTests' baseline
+      after the holder waits, LaneMath through WarmUp / Of, AllocationTests' fixed warm-ups through WarmUp;
+      KernelLookupTests and HelperLoopTests already used WarmUp.
+- [x] **T4. One generator list for tests, DocCheck and GeneratorCorpus** (`code.md` 3.1): DocCheck lacks View and
       Prefab generators and the interceptors feature, GeneratorCorpus lacks Prefab; one shared list, parse options and
       references. Before the docs pass (fences with views and lambda passes). Proof: a DocCheck fence with `[View]`
       and a lambda pass compiles.
-- [ ] **T5. CI runs `bun run check`** (`code.md` 2.1): a `docs` job on `docs/**` (setup-bun 1.4.2).
-- [ ] **T6. CI checks the public skills list** (`code.md` 2.4): `npx -y skills add . --list` lists only `easyecs`.
-- [ ] **T7. VoxelServer's TickBenchmark built by CI** (`code.md` 2.6): in the slnx or the build job; its job from
+      Built: tools/Shared/GeneratorHost.cs (the six generators, parse options with the interceptors feature,
+      references) linked into the tests, DocCheck and GeneratorCorpus.
+- [x] **T5. CI runs `bun run check`** (`code.md` 2.1): a `docs` job on `docs/**` (setup-bun 1.4.2).
+      Built: `.github/workflows/docs.yml` (setup-bun, bun 1.4.2, `bun run check` on docs/**).
+- [x] **T6. CI checks the public skills list** (`code.md` 2.4): `npx -y skills add . --list` lists only `easyecs`.
+      Built: a `doc-snippets` step (skills@1.7.6, only `easyecs`).
+- [x] **T7. VoxelServer's TickBenchmark built by CI** (`code.md` 2.6): in the slnx or the build job; its job from
       `BenchmarkConfig`; a README line.
-- [ ] **T8. The committed live demo checked for staleness** (`code.md` 2.7): a source hash beside the bundle.
-- [ ] **T9. Tool scripts: one build helper** (`code.md` 3.4): errors printed, `TargetPath` read, `trap rm` in
+      Built: in the slnx, on BenchmarkConfig's job (linked, `[InvocationCount(1)]`), a README line.
+- [x] **T8. The committed live demo checked for staleness** (`code.md` 2.7): a source hash beside the bundle.
+      Built: `docs/scripts/demo-source.sh` (blob ids of Core, the generator, the demo, Directory.Build.props),
+      `docs/public/demo/source.sha256` written by build-demo.sh (set to 8082b4c's tree, which built the bundle),
+      checked in `doc-snippets`: stale until the next `bun run demo:build`.
+- [x] **T9. Tool scripts: one build helper** (`code.md` 3.4): errors printed, `TargetPath` read, `trap rm` in
       `loopbound.sh`; `inlining.sh --no-build` in CI (`code.md` 2.8).
-- [ ] **T10. One reflective BenchmarkDotNet runner for tools/Inlining and tools/LoopBound** (`code.md` 3.3): short
+      Built: `tools/build.sh` (errors, exit 2, TargetPath, --no-build) for inlining.sh / jitdisasm.sh /
+      loopbound.sh, `trap rm` of the listing, CI `tools/inlining.sh --no-build`.
+- [x] **T10. One reflective BenchmarkDotNet runner for tools/Inlining and tools/LoopBound** (`code.md` 3.3): short
       or full class names, every `[Params]` / `[ParamsSource]` type.
-- [ ] **T11. `tools/bench.sh` resolves a class's project by listing** (`code.md` 3.6), and fails on "No benchmarks
+      Built: tools/Shared/BenchmarkRunner.cs (Find: X, XBenchmark or the full name; [Params] / [ParamsSource] of
+      any type; Create / Cleanup).
+- [x] **T11. `tools/bench.sh` resolves a class's project by listing** (`code.md` 3.6), and fails on "No benchmarks
       to choose from" instead of marking it done.
-- [ ] **T12. `check-sample.sh`'s two copies of the block extraction** (`code.md` 3.7): one function; the README
+      Built: each project lists its benchmarks once; a class runs where it is declared, a name neither declares
+      fails, "No benchmarks to choose from" is a failure.
+- [x] **T12. `check-sample.sh`'s two copies of the block extraction** (`code.md` 3.7): one function; the README
       heading convention unified with the page's in the docs pass.
-- [ ] **T13. Stale comments and maps** (`code.md` 3.5, 5): `tools/inlining.sh:4`'s class names; `docs/AGENTS.md`'s
+      Built: one `block` function (the heading regex through the environment); the heading convention is in docs-todos.
+- [x] **T13. Stale comments and maps** (`code.md` 3.5, 5): `tools/inlining.sh:4`'s class names; `docs/AGENTS.md`'s
       scripts line (`lint-terms.ts`, `chromium.ts`, `after-build.ts`, `first-commit-dates.mjs`,
       `search-expectations.json`); `lint-terms.ts`'s empty `pending` (delete or say why); `benchmarks/AGENTS.md`: a
       benchmark nests its components, only the headline worlds declare at namespace level.
-- [ ] **T14. The `Locality/` prototypes** (docs-todos "Locality phase 0", `locality.md` status; borrowed-ideas keeps
+      Built: inlining.sh's names, docs/AGENTS.md's scripts line, lint-terms' empty `pending` deleted,
+      benchmarks/AGENTS.md's nesting rule.
+- [x] **T14. The `Locality/` prototypes** (docs-todos "Locality phase 0", `locality.md` status; borrowed-ideas keeps
       them for the owner's reruns): delete the shipped prototypes and their link into the unit tests, keep the plain
       baselines the owner's runs need, or record why each stays.
+      Decided: every file stays, with its reason in locality.md's status (worlds of shipped-form tests and
+      benchmarks, baselines, ARM64 evidence); Timers.cs goes with the timer wheel's record (docs-todos).
 - [ ] **T15. Benchmark rows**: the EECS096 delegate fallback in LambdaPassBenchmark (docs-todos "feat-inline").
+      Not in fix-tooling-lane3: lambda passes are being changed on another branch.
 - [ ] **T16. The arm64 job's first run** is the owner's dispatch (Finish 4; `owner-m4.md` 6).
 - [x] **T17. The owner's working rules in `AGENTS.md`** (ledger P10, P11; owner 2026-10-27 / 2026-10-30: "用中文对话";
       2026-10-28: "需要我选的给我弹窗，需要我做的给我命令"): a bullet in Workflows: talk to the owner in Chinese (code,
@@ -277,6 +305,10 @@ Starts now. T1 comes before Finish 1b (the move).
       is given as the exact command. Proof: `tools/agents.sh --check`.
 - [x] **T18. `docs/AGENTS.md`'s Cloudflare table** (ledger L7): the build watch paths include `docs/*` and exclude
       `docs/plans/*` and `docs/owner-review.md` (set by the owner in the dashboard, 2026-11-07).
+- [x] **T19. SDK 10.0.403** (NU1903: GHSA-p3jp-9v83-76w9 in `Microsoft.DotNet.ILCompiler` 10.0.13 of SDK 10.0.402
+      fails `tests/EasyEcs.Aot`'s restore): every workflow's `setup-dotnet` asks `10.0.x`, which installs the
+      channel's latest SDK (10.0.403 since its release); `global.json` now asks for 10.0.403 with `latestFeature`, so an
+      older SDK fails at once instead of at the AOT restore. Proof: the restore fails on 10.0.402, passes on 10.0.403.
 
 ### Lane 4: vector-loop generator (after feat-inner-loops merges; Kernel*.cs, SystemGenerator*.cs, Recorder.cs, LaneMath.cs, ArityGenerator.cs text) — 18 items
 
