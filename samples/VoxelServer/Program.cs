@@ -199,7 +199,7 @@ public static class Startup
             Zombie: new Prefab()
                 .Set(new Zombie()).SetVision(Rules.ZombieVision).SetInChunk(default).SetVisible(default, false).SetTarget(default)
                 .SetPosition(default).SetVelocity(default).SetBody(false, false)
-                .SetHealth(Rules.ZombieHealth).SetCooldown(0).SetExposure(false, false).SetBurning(0).RemoveBurning(),
+                .SetHealth(Rules.ZombieHealth).SetCooldown(0).SetSunlit(false).SetInWater(false).SetBurning(0).RemoveBurning(),
             Item: new Prefab()
                 .SetItem(default, 1).SetInChunk(default).SetVisible(default, false).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
                 .SetBody(false, false).SetDropped(0));
