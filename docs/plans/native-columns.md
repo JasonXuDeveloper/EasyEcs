@@ -41,7 +41,8 @@ ticks allocate nothing either way: this is about creation, growth, copies and di
 - **`GC.AddMemoryPressure(bytes)`** for every block allocated, `RemoveMemoryPressure` when freed, so the GC sees what
   the world holds (the research: without it, the GC never collects the worlds that hold the memory).
 - **No new public API.** An `AppContext` switch for the fallback in tests (`EasyEcs.NativeColumns`, default on) is
-  the one name, hidden; if the owner wants it public, it is a naming question first.
+  the one name, hidden (owner, 2026-11-07: hidden, and the native binary packed per RID with the automatic fallback
+  when it does not load).
 
 ## 3. The binary per platform (NuGet `runtimes/` layout) and the fallback
 

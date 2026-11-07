@@ -94,14 +94,7 @@ Run each once its lane has merged (the backlog marks them "owner, after code"):
   hand: Actions -> CI -> Run workflow on the work branch. Its step "The prefetch this runner issues" passing (and
   every test) -> done; failing -> `Prefetching.IsSupported` keeps x86 only. The job has never run (backlog Finish 4):
   a wrong runner label fails at once and is fixed then.
-- **The prefetch gates on an x86 machine with a 32 MiB last-level cache** (this VM's L3 is 260 MiB, so its sizes past
-  the cache are huge): pick sizes between that machine's L2 and LLC and past the LLC,
-
-  ```bash
-  EASYECS_BENCH_ENTITIES=262144,1048576,4194304,16777216 bench --filter '*LookupChaseGateBenchmark*' \
-    '*ProbePrefetchBenchmark*' '*ChaseFormsPrefetchBenchmark*' '*IdListPrefetchBenchmark*'
-  ```
-
-  What it compares: Auto / Off / On per form. Auto equal to the best of Off and On at every size -> the gates (L2 for
-  the row form's chases and id lists, LLC for probes and vector loops) hold on a common cache size; a size where Auto
-  is slower than Off past the error -> that form's gate moves (the agent reads which cache it should read).
+- **The prefetch gates on an x86 machine with a 32 MiB last-level cache: not run** (owner, 2026-11-07). The docs pass
+  records in the gates' decision record that they were proven only on this VM (260 MiB LLC), and that this run
+  (`EASYECS_BENCH_ENTITIES=262144,1048576,4194304,16777216`, the four `*Prefetch*` / `*ChaseGate*` classes, Auto /
+  Off / On per form) is what would move a gate.

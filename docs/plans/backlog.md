@@ -307,7 +307,10 @@ Starts now. T1 comes before Finish 1b (the move).
       the released `World.ParallelChunkRows` (the first released rename: the renamed-member mechanism stays for it).
 - [ ] **R4. Delete the code fixes for names that never shipped** (`naming.md` B4): `RenamedAttributes`
       (`[IndexKey]` -> `[LookupKey]`) and `RenamedArguments` (`ChunkRows` -> `ChunkSize`) in
-      EasyEcsCodeFixes.Declarations.cs and their CodeFixTests; D129 amended in the docs pass (docs-todos S3).
+      EasyEcsCodeFixes.Declarations.cs and their CodeFixTests; owner (2026-11-07): also the other migrations from
+      forms that never shipped (the hook attributes, `[GroupBy]` on the struct, EntityRandom's tick written by hand),
+      keeping only the fixes from released forms (`WithAny<T>`, the class systems, `ParallelChunkRows`); AGENTS.md's
+      CodeFixes line follows; D129 amended in the docs pass (docs-todos S3).
 - [ ] **R5. Internal and hidden names** (`naming.md` A3-A5, approved as "clearly right"): `BadRecordPass` /
       `HandWrittenRecordPass` / `AnalyzeRecordPass` / `AnalyzeHandWrittenRecordPass` -> `BadDrain` /
       `HandWrittenDrain` / `AnalyzeDrain` / `AnalyzeHandWrittenDrain`; tracking names `RecordMethods` / `RecordBodies` /
@@ -363,7 +366,8 @@ numbers are written once about the final code).
       the page; DocCheck and ApiDocs at 0.
 - [ ] **4.** The `arm64` CI job's first run (owner's dispatch, `owner-m4.md` 6): a wrong runner label fails at once
       and is fixed then.
-- [ ] **5.** "Owner, after code": the runs of `owner-m4.md` (1-5, and the x86 prefetch run of 6), each result
+- [ ] **5.** "Owner, after code": the runs of `owner-m4.md` (1-5; the x86 prefetch run is not made, owner 2026-11-07: the gates' decision
+      record says they were proven on this VM's 260 MiB LLC only and that a 32 MiB-LLC x86 run is what would move them), each result
       recorded where the file says.
 - [ ] **6.** `tools/bench.sh --site --sync` on the final code (perf's stale rows re-read, the classes missing from
       bench.json), README numbers, `verify`, master; then the owner deletes `research-copy-asm` and every finished
