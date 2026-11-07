@@ -361,7 +361,7 @@ public class SnapshotTests
 
         world.SetAll(new Armor(9));
         world.Restore(snapshot);
-        Assert.That(unit.Get<Armor>().Value, Is.EqualTo(7), "the incremental capture took the bulk write");
+        Assert.That(unit.Read<Armor>().Value, Is.EqualTo(7), "the incremental capture took the bulk write");
 
         Assert.That(world.RemoveAll<Armor>(), Is.EqualTo(201));
         Assert.That(world.StorageVersion, Is.Not.EqualTo(version), "presence bits flipped");
@@ -369,6 +369,6 @@ public class SnapshotTests
         world.SetAll(new Armor(3));
         Assert.That(world.StorageVersion, Is.Not.EqualTo(version), "given back: flipped again");
         world.Restore(snapshot);
-        Assert.That(unit.Get<Armor>().Value, Is.EqualTo(7));
+        Assert.That(unit.Read<Armor>().Value, Is.EqualTo(7));
     }
 }

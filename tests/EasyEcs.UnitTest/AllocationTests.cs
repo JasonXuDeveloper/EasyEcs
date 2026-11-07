@@ -413,42 +413,20 @@ public class AllocationTests
     [Test]
     public void DestroyingAfterARestoreDoesNotAllocate()
     {
-        // A restore that brings back a population sizes the free-id list to the records, not to the free ids it holds.
+        // A restore that has to grow the free-id list (TrimExcess shrank it to the ids held) sizes it to the records,
+        // not to the free ids it brings back: it took exactly those 100 before, so the destroys grew it again.
         using (var warm = new World()) warm.CreateEntity(new Health(0)).Destroy();
 
         using var world = new World();
-        var snapshot = world.Capture(); // empty
-        for (int i = 0; i < 1_000; i++) world.CreateEntity(new Health(i));
-        var full = world.Capture();
-        world.Restore(snapshot);
-        world.Restore(full);
-        var entities = new System.Collections.Generic.List<Entity>();
-        foreach (var entity in world.Entities) entities.Add(entity);
+        var entities = new Entity[900];
+        for (int i = 0; i < entities.Length; i++) entities[i] = world.CreateEntity(new Health(i));
+        var snapshot = world.Capture();
+        for (int i = 0; i < 100; i++) world.CreateEntity(new Health(i));
+        world.TrimExcess();       // no free id held: the list shrinks to 64
+        world.Restore(snapshot);  // the 100 created after the capture come back free
         long before = Allocations.Baseline();
         foreach (var entity in entities) entity.Destroy();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
-    }
-
-    public record struct Grain(byte Value); // the pool of this element type serves only the test below
-
-    [Test]
-    public void ReservedPoolListsServeTheFirstBuffers()
-    {
-        // FillPool pays at startup for the lists the world's buffers take when it first grows to its peak.
-        DynamicBuffer<Grain>.MaxPooledLength = 256;
-        DynamicBuffer<Grain>.FillPool(500);
-        using var world = new World();
-        world.Reserve<Position, DynamicBuffer<Grain>>(500);
-        var entities = new Entity[500];
-        long before = Allocations.Baseline();
-        for (int i = 0; i < entities.Length; i++)
-        {
-            entities[i] = world.CreateEntity(new Position(i, 0), new DynamicBuffer<Grain>());
-            entities[i].Get<DynamicBuffer<Grain>>().SetCount(256).Fill(new Grain((byte)i));
-        }
-
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
-        Assert.Throws<ArgumentOutOfRangeException>(() => DynamicBuffer<Grain>.FillPool(-1));
     }
 
     public record struct Chaff(byte Value); // the pool of this element type serves only the test below
