@@ -161,9 +161,17 @@ EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-032, EECS034, EECS039, EECS
 EasyEcsAnalyzer.Members.cs   EECS033 (the generated member a call or a guarded Set says shorter) in an analyzer of its
                              own (MemberAnalyzer): the rule a project most often turns off is the costliest to run, and
                              Roslyn skips an analyzer only when every rule it reports is suppressed
-PartGenerator.cs             [Sum]..[Any], [LookupKey]/[UniqueKey], [Group], [OrderBy] -> a part of the partial struct
-                             (IReduction<T>, IIndexed<K>.Key, IGroup.Group, IOrderKey<K>.OrderKey / BoxPoint); Parts.cs: the models and Problems read once for the
-                             generator and the analyzer (other generators read keys and groups through Symbols)
+PartGenerator.cs             [Sum]..[Any], [MinBy]/[MaxBy], [LookupKey]/[UniqueKey] (SlotsPerAxis: IDirectMapped<K>.Slots /
+                             SlotOf), [Group], [OrderBy], [Tile] -> a part of the partial struct (IReduction<T>, IIndexed<K>.Key,
+                             IGroup.Group, IOrderKey<K>.OrderKey / BoxPoint, ITile<K> with the shape and the inferred Beside); a
+                             struct declaring ITile<K> without those attributes and without Beside gets Beside alone (stage
+                             TileParts); Parts.cs: the models and Problems read once for the generator and the analyzer
+                             (other generators read keys, tiles and groups through Symbols; KeptRowReason: EECS055's reason
+                             for a [MinBy] reduction until the vector form)
+TileParts.cs                 a tile's key and a window's key read once for the generator and the analyzer: BesideAxes /
+                             Beside (an int key, members X / Z / Y; a 2D (X, Y) key refused: EECS124), WindowAxes / SlotOf
+                             (each coordinate masked, row-major; EECS126), and the recognizers of hand-written ones
+                             (ShapeValue, SameBeside, HandWindow: EECS125, EECS127)
 Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (enums as their integer's lanes, a bool
                              component of one field as 1-byte lanes read as a mask; Kernel.Vectorize: the loop, or the
                              reason EECS055 / EECS056 report, as a ScalarReason: fixable or inherent; a lambda pass's
@@ -241,9 +249,11 @@ EasyEcsAnalyzer.Parallel.cs  EECS060-061: code on several threads (a parallel [F
                              job's field read after the call; EECS071: System.Random in a [ForEach] method (fix:
                              EntityRandom); EECS088: two EntityRandom draws of one stream for one entity in pass code
                              (fix: the next free stream), or a draw in a loop that does not vary its stream
-EasyEcsAnalyzer.Parts.cs     EECS062-069, EECS102 (a [Prefab] the generator cannot write) and EECS104 (an [OrderBy] it
-                             cannot keep: a key no radix sort orders, box members, interval, margin): generated parts (not partial, hand-written members, fields no attribute
-                             combines), hand-written reductions, keys and groups the attributes could declare, a wrong
+EasyEcsAnalyzer.Parts.cs     EECS062-069, EECS102 (a [Prefab] the generator cannot write), EECS104 (an [OrderBy] it
+                             cannot keep: a key no radix sort orders, box members, interval, margin) and EECS124-127 (a tile
+                             the generator cannot complete, a tile's shape or Beside written by hand, a window it cannot
+                             write, a window written by hand): generated parts (not partial, hand-written members, fields no attribute
+                             combines), hand-written reductions (a kept row: [MinBy] / [MaxBy]), keys and groups the attributes could declare, a wrong
                              Identity, a setup attribute on a type it does not fit, a managed type without a Nino
                              formatter (Warning when the code saves what holds it: entity saves write no singletons)
 EasyEcsAnalyzer.Forms.cs     EECS080-085, EECS103, EECS108-109 and EECS119 (rows collected and looped over by hand in an OnUpdate:

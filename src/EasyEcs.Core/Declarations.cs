@@ -60,6 +60,29 @@ public sealed class AllAttribute : Attribute;
 public sealed class AnyAttribute : Attribute;
 
 /// <summary>
+/// The key of a reduction that keeps the row with the lowest key (MPI's <c>MINLOC</c>, LINQ's <c>MinBy</c>): the other
+/// fields travel with it. On one numeric field, auto-property with a setter or record's positional parameter (an integer,
+/// <c>float</c>, <c>double</c>, <c>decimal</c>) of a partial struct:
+/// <c>public partial record struct Weakest(EntityId Player, [MinBy] int Health) : ISingletonComponent;</c>. The generator
+/// writes the struct's <c>IReduction&lt;T&gt;</c>: <c>Identity</c> holds the key's <c>MaxValue</c> (+∞ for <c>float</c>
+/// and <c>double</c>) and every other field at its default, <c>Combine</c> keeps <c>right</c> only when its key is lower
+/// (<c>right.Health &lt; left.Health ? right : left</c>). A tie keeps the left side, the earlier rows, so the result is
+/// the same on any number of threads; a NaN key never replaces another. The method keeps the lowest of its chunk the same
+/// way: <c>if (hp.Value &lt; weakest.Value.Health) weakest.Value = new(player.Id, hp.Value);</c>. One field of the struct
+/// carries <see cref="MinByAttribute"/> or <see cref="MaxByAttribute"/>, and no field another reduction attribute.
+/// </summary>
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
+public sealed class MinByAttribute : Attribute;
+
+/// <summary>
+/// The key of a reduction that keeps the row with the highest key (MPI's <c>MAXLOC</c>, LINQ's <c>MaxBy</c>):
+/// <c>Identity</c> holds the key's <c>MinValue</c> (−∞ for <c>float</c> and <c>double</c>), <c>Combine</c> keeps
+/// <c>right</c> only when its key is higher, so a tie keeps the earlier rows (see <see cref="MinByAttribute"/>).
+/// </summary>
+[AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter)]
+public sealed class MaxByAttribute : Attribute;
+
+/// <summary>
 /// A reduction singleton (<see cref="IReduction{T}"/>) that holds a total across passes: a pass with a
 /// <see cref="Reduce{T}"/> parameter combines its result into the world's value (<c>Combine(world's value, pass's
 /// result)</c>: the earlier rows first) instead of replacing it. Without it, each pass's result replaces the value.
@@ -84,11 +107,61 @@ public sealed class LookupKeyAttribute : Attribute;
 
 /// <summary>
 /// <see cref="LookupKeyAttribute"/> for a key that names one entity (<see cref="IUniqueIndexed{TKey}"/>): the generator adds
-/// <c>IUniqueIndexed&lt;TKey&gt;</c> with the explicit <c>Key</c>. A struct that declares
-/// <see cref="IDirectMapped{TKey}"/> keeps its own <c>Slots</c> and <c>SlotOf</c>; only <c>Key</c> is generated.
+/// <c>IUniqueIndexed&lt;TKey&gt;</c> with the explicit <c>Key</c>. With <see cref="SlotsPerAxis"/>, the index is
+/// direct-mapped over a window of the key's coordinates (<see cref="IDirectMapped{TKey}"/>); a struct that declares
+/// <see cref="IDirectMapped{TKey}"/> without it keeps its own <c>Slots</c> and <c>SlotOf</c>.
 /// </summary>
 [AttributeUsage(AttributeTargets.Field | AttributeTargets.Property | AttributeTargets.Parameter | AttributeTargets.Struct)]
-public sealed class UniqueKeyAttribute : Attribute;
+public sealed class UniqueKeyAttribute : Attribute
+{
+    /// <summary>
+    /// The side of the window of keys the index maps to slots directly, a power of two (0, the default: a hashed index
+    /// only). The generator adds <see cref="IDirectMapped{TKey}"/>: <c>Slots</c> is the side to the power of the key's
+    /// axes, <c>SlotOf</c> each coordinate masked by side − 1, row-major (x fastest, then z, then y), so the keys of any
+    /// window of that side get distinct slots, negative coordinates included. The key is an <c>int</c> (one axis), a
+    /// struct with integer members <c>X</c> and <c>Z</c> (and <c>Y</c>), or a tuple (<c>Item1</c> fastest):
+    /// <c>public partial record struct Chunk([UniqueKey(SlotsPerAxis = 64)] ChunkPos Pos) : IComponent;</c> writes
+    /// <c>Slots =&gt; 4096</c> and <c>SlotOf(pos) =&gt; (pos.Z &amp; 63) * 64 + (pos.X &amp; 63)</c>.
+    /// </summary>
+    public int SlotsPerAxis { get; set; }
+}
+
+/// <summary>
+/// A tile of a grid (<see cref="ITile{TKey}"/>) declared by its shape: the generator adds <c>ITile&lt;TKey&gt;</c> to the
+/// partial component, its key the type of the member marked <see cref="LookupKeyAttribute">[LookupKey]</see> or
+/// <see cref="UniqueKeyAttribute">[UniqueKey]</see>, with the shape's static members (<see cref="ITileShape"/>) from the
+/// properties set here and <c>Beside</c> from the key:
+/// <c>[Tile(Width = 16, Depth = 16)] public partial record struct HeatPlate([LookupKey] PlatePos Pos) : IComponent;</c>.
+/// <c>Beside</c> steps an <c>int</c> key by one along x (west −1, east +1), and a key with integer members <c>X</c> and
+/// <c>Z</c> (and <c>Y</c>, the layers) along the axis of the face, as <see cref="TileFaces"/> names them: north −z, south
+/// +z, west −x, east +x, below −y, above +y. A key of another shape, or a grid whose <c>Beside</c> wraps (a torus), writes
+/// <c>Beside</c> by hand; the generator then writes the rest. A type that declares <c>ITile&lt;TKey&gt;</c> itself gets
+/// the same inferred <c>Beside</c> when it writes none.
+/// </summary>
+[AttributeUsage(AttributeTargets.Struct)]
+public sealed class TileAttribute : Attribute
+{
+    /// <summary>The cells of a row (x), 1 or more (<see cref="ITileShape.Width"/>). Required.</summary>
+    public int Width { get; set; }
+
+    /// <summary>The rows of a layer (z), 1 to 64 (<see cref="ITileShape.Depth"/>). Required.</summary>
+    public int Depth { get; set; }
+
+    /// <summary>The layers (y), 1 or more (<see cref="ITileShape.Height"/>, default 1: a 2D tile).</summary>
+    public int Height { get; set; } = 1;
+
+    /// <summary>The faces that have neighbors (<see cref="ITileShape.Faces"/>, default <see cref="TileFaces.Sides"/>).</summary>
+    public TileFaces Faces { get; set; } = TileFaces.Sides;
+
+    /// <summary>The width of the halo in cells (<see cref="ITileShape.Halo"/>, default 1).</summary>
+    public int Halo { get; set; } = 1;
+
+    /// <summary>Which tiles around are neighbors (<see cref="ITileShape.Neighborhood"/>, default <see cref="TileNeighborhood.Faces"/>).</summary>
+    public TileNeighborhood Neighborhood { get; set; } = TileNeighborhood.Faces;
+
+    /// <summary>What the halo holds where there is no neighbor (<see cref="ITileShape.Boundary"/>, default <see cref="TileBoundary.Border"/>).</summary>
+    public TileBoundary Boundary { get; set; } = TileBoundary.Border;
+}
 
 /// <summary>
 /// The member a world groups the component's tables by (<see cref="IGroup"/>): an <c>int</c> or an enum of

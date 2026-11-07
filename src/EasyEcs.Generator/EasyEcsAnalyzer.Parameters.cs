@@ -123,7 +123,9 @@ public static partial class EasyEcsAnalyzer
     private sealed class Resets
     {
         private readonly ConcurrentDictionary<ITypeSymbol, ConcurrentQueue<IMethodSymbol>> _types = new(SymbolEqualityComparer.Default);
-        private readonly ConcurrentDictionary<string, ConcurrentQueue<IMethodSymbol>> _names = new(); // the generated SetX / RemoveX: X
+        // The generated SetX / RemoveX, by X: the method and the member called, which must be the one generated for the
+        // singleton (GeneratedFor), not a namesake's of another namespace or assembly.
+        private readonly ConcurrentDictionary<string, ConcurrentQueue<(IMethodSymbol Method, ISymbol Called)>> _names = new();
 
         /// <summary>
         /// The EECS086 reports waiting for the end of the compilation: the parameter, its singleton, the method, the
@@ -140,7 +142,7 @@ public static partial class EasyEcsAnalyzer
                 foreach (var pending in Pending)
                 {
                     var (p, singleton, method) = (pending.Parameter, pending.Singleton, pending.Method);
-                    if ((By(_types, singleton.OriginalDefinition, method) ?? By(_names, singleton.Name, method)) is { } reset)
+                    if ((By(_types, singleton.OriginalDefinition, method) ?? ByGenerated(singleton, method, context.Compilation)) is { } reset)
                     {
                         if (pending.Covers)
                             context.ReportDiagnostic(Diagnostic.Create(HandWrittenReduce, p.Locations.FirstOrDefault(),
@@ -166,6 +168,18 @@ public static partial class EasyEcsAnalyzer
         private static IMethodSymbol? By<TKey>(ConcurrentDictionary<TKey, ConcurrentQueue<IMethodSymbol>> resets, TKey key, IMethodSymbol except) =>
             resets.TryGetValue(key, out var methods) ? methods.FirstOrDefault(m => !SymbolEqualityComparer.Default.Equals(m, except)) : null;
 
+        /// <summary>
+        /// A method other than <paramref name="except"/> that resets <paramref name="singleton"/> through a member the
+        /// generator wrote for it (<see cref="GeneratedFor"/>), or null.
+        /// </summary>
+        private IMethodSymbol? ByGenerated(INamedTypeSymbol singleton, IMethodSymbol except, Compilation compilation)
+        {
+            if (!_names.TryGetValue(singleton.Name, out var calls)) return null;
+            foreach (var (method, called) in calls)
+                if (!SymbolEqualityComparer.Default.Equals(method, except) && GeneratedFor(called, singleton, compilation)) return method;
+            return null;
+        }
+
         private void Collect(OperationAnalysisContext context)
         {
             if (context.ContainingSymbol is not IMethodSymbol method || Symbols.Hook(method) is Symbols.HookKind.Create or Symbols.HookKind.Destroy
@@ -183,7 +197,8 @@ public static partial class EasyEcsAnalyzer
                         Add(_types, called.TypeArguments[0].OriginalDefinition, method);
                     else if (called.Name.Length > 6 && (called.Name.StartsWith("Set") || called.Name.StartsWith("Remove")) && Symbols.IsGenerated(called)
                              && Symbols.OnWorld((IInvocationOperation)context.Operation))
-                        Add(_names, called.Name.Substring(called.Name[0] == 'S' ? 3 : 6), method);
+                        _names.GetOrAdd(called.Name.Substring(called.Name[0] == 'S' ? 3 : 6), _ => new ConcurrentQueue<(IMethodSymbol, ISymbol)>())
+                            .Enqueue((method, called));
                     break;
             }
         }

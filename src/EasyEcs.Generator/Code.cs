@@ -39,11 +39,13 @@ internal static class Code
     /// A generated part of a type: <paramref name="body"/> (members, one per line, unindented) inside the type, which
     /// gets <paramref name="bases"/> ("" for none), inside each of its containing types; <paramref name="heads"/> are
     /// their declarations outermost first (<c>partial class Outer&lt;T&gt;</c>, Parts.Heads), in namespace
-    /// <paramref name="ns"/> ("" for the global one).
+    /// <paramref name="ns"/> ("" for the global one); <paramref name="usings"/> are the file's using directives (an alias
+    /// the body names, one per line), after the header.
     /// </summary>
-    public static string Part(string ns, EquatableArray<string> heads, string bases, string body)
+    public static string Part(string ns, EquatableArray<string> heads, string bases, string body, string usings = "")
     {
         var sb = new System.Text.StringBuilder(Header);
+        if (usings.Length > 0) sb.Append(usings).Append('\n');
         if (ns.Length > 0) sb.Append($"namespace {ns};\n\n");
         for (int i = 0; i < heads.Length; i++)
         {

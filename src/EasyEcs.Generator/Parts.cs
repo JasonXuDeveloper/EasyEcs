@@ -25,14 +25,17 @@ internal sealed class Parts
     /// <summary>How a reduction field combines: the attribute it carries.</summary>
     public enum Op { Sum, Product, Min, Max, All, Any }
 
+    /// <summary>The attributes of a reduction that keeps the row with the lowest (highest) key: <see cref="KeptPart"/>.</summary>
+    public const string MinBy = "EasyEcs.MinByAttribute", MaxBy = "EasyEcs.MaxByAttribute";
+
     public const string Key = "EasyEcs.LookupKeyAttribute", UniqueKey = "EasyEcs.UniqueKeyAttribute", Group = "EasyEcs.GroupAttribute",
-        GroupBy = "EasyEcs.GroupByAttribute", OrderBy = "EasyEcs.OrderByAttribute";
+        GroupBy = "EasyEcs.GroupByAttribute", OrderBy = "EasyEcs.OrderByAttribute", Tile = TileParts.Attribute;
 
     /// <summary>
     /// The rule a problem breaks: the analyzer's descriptor for it (EECS062, EECS063, EECS064; a key's and a group's are
-    /// EECS036's).
+    /// EECS036's; a tile's EECS124, a [Tile] on a type it does not fit EECS068's; a window's EECS126).
     /// </summary>
-    public enum Rule { NotPartial, HandWritten, BadField, BadKey, BadGroup, BadOrder }
+    public enum Rule { NotPartial, HandWritten, BadField, BadKey, BadGroup, BadOrder, BadTile, TileSetup, BadWindow }
 
     /// <summary>One thing the generator cannot write: where, which rule, and the message's text.</summary>
     public readonly record struct Problem(ISymbol Where, Rule Rule, string Text);
@@ -57,6 +60,25 @@ internal sealed class Parts
     /// </summary>
     public sealed record OrderPart(string Member, string Type, string Point, int Axes, int Interval, float Margin, bool ReadOnly);
 
+    /// <summary>
+    /// A reduction that keeps the row with the lowest key (<c>[MinBy]</c>, <paramref name="Lowest"/>) or the highest
+    /// (<c>[MaxBy]</c>): the key member and its type (as the part writes it); the other fields travel with it.
+    /// </summary>
+    public sealed record KeptPart(string Key, string Type, bool Lowest);
+
+    /// <summary>
+    /// A tile's members: its key type (as the part writes it), whether the part adds <c>ITile&lt;TKey&gt;</c> (from
+    /// <c>[Tile]</c>), the shape members <c>[Tile]</c> sets (C#, one per line, "" for none) and the body of the inferred
+    /// <c>Beside</c> ("" when the type writes its own).
+    /// </summary>
+    public sealed record TilePart(string Key, bool Declares, string Shape, string Beside);
+
+    /// <summary>
+    /// A direct-mapped window (<c>[UniqueKey(SlotsPerAxis = N)]</c>): the key type (as the part writes it), the slot count
+    /// and the body of <c>SlotOf(key)</c>.
+    /// </summary>
+    public sealed record WindowPart(string Key, int Slots, string SlotOf);
+
     public INamedTypeSymbol Type { get; }
 
     /// <summary>The reduction's fields, in declaration order (empty when it declares none).</summary>
@@ -74,18 +96,27 @@ internal sealed class Parts
     /// <summary>The declared order, or null.</summary>
     public OrderPart? OrderOf { get; private set; }
 
+    /// <summary>The key of a reduction that keeps one row (<c>[MinBy]</c> / <c>[MaxBy]</c>), or null.</summary>
+    public KeptPart? KeptOf { get; private set; }
+
+    /// <summary>The tile's members the generator writes (<c>[Tile]</c>, an inferred <c>Beside</c>), or null.</summary>
+    public TilePart? TileOf { get; private set; }
+
+    /// <summary>The direct-mapped window of the key, or null.</summary>
+    public WindowPart? WindowOf { get; private set; }
+
     /// <summary>What keeps the generator from writing the part (each reported by the analyzer).</summary>
     public List<Problem> Problems { get; } = [];
 
     private Parts(INamedTypeSymbol type) => Type = type;
 
     /// <summary>Whether the type declares a reduction by attributes.</summary>
-    public bool Reduces => Fields.Count > 0 || Problems.Any(p => p.Rule == Rule.BadField);
+    public bool Reduces => Fields.Count > 0 || KeptOf != null || Problems.Any(p => p.Rule == Rule.BadField);
 
     private bool Blocked(Rule rule) => Problems.Any(p => p.Rule == Rule.NotPartial || p.Rule == rule || rule == Rule.BadField && p.Rule == Rule.HandWritten);
 
     /// <summary>Whether the generator writes the reduction's members: declared, and nothing in the way.</summary>
-    public bool WritesReduction => Fields.Count > 0 && !Blocked(Rule.BadField);
+    public bool WritesReduction => (Fields.Count > 0 || KeptOf != null) && !Blocked(Rule.BadField);
 
     /// <summary>Whether the generator writes the key.</summary>
     public bool WritesKey => KeyOf != null && !Blocked(Rule.BadKey);
@@ -96,8 +127,14 @@ internal sealed class Parts
     /// <summary>Whether the generator writes the order's members (and its registration: ComponentGenerator).</summary>
     public bool WritesOrder => OrderOf != null && !Blocked(Rule.BadOrder);
 
+    /// <summary>Whether the generator writes the tile's members.</summary>
+    public bool WritesTile => TileOf != null && !Blocked(Rule.BadTile) && !Blocked(Rule.TileSetup);
+
+    /// <summary>Whether the generator writes the window's <c>Slots</c> and <c>SlotOf</c>: they need the key it writes.</summary>
+    public bool WritesWindow => WindowOf != null && WritesKey && !Blocked(Rule.BadWindow);
+
     /// <summary>Whether the generator writes anything into the type.</summary>
-    public bool Writes => WritesReduction || WritesKey || WritesGroup || WritesOrder;
+    public bool Writes => WritesReduction || WritesKey || WritesGroup || WritesOrder || WritesTile || WritesWindow;
 
     /// <summary>
     /// Whether <paramref name="type"/> or one of its members carries <paramref name="attribute"/>: the cheap test the
@@ -140,7 +177,9 @@ internal sealed class Parts
         parts.ReadKey(members);
         parts.ReadGroup(members);
         parts.ReadOrder(members);
-        if (parts.Fields.Count == 0 && parts.KeyOf == null && parts.GroupOf == null && parts.OrderOf == null && parts.Problems.Count == 0) return null;
+        parts.ReadTile();
+        if (parts.Fields.Count == 0 && parts.KeptOf == null && parts.KeyOf == null && parts.GroupOf == null && parts.OrderOf == null
+            && parts.TileOf == null && parts.Problems.Count == 0) return null;
         if (NotPartial(type) is { } level)
             parts.Problems.Add(new Problem(level, Rule.NotPartial, level.Name));
         return parts;
@@ -148,6 +187,13 @@ internal sealed class Parts
 
     private void ReadReduction(List<Member> members)
     {
+        var kept = members.Where(m => m.Attributes.Any(a => Symbols.Named(a.AttributeClass, MinBy) || Symbols.Named(a.AttributeClass, MaxBy))).ToList();
+        if (kept.Count > 0)
+        {
+            ReadKept(members, kept);
+            return;
+        }
+
         // A reduction attribute on the struct is the op of every field that carries none of its own.
         Op? all = null;
         foreach (var attribute in Type.GetAttributes())
@@ -194,11 +240,51 @@ internal sealed class Parts
         // Every instance field takes part: an unattributed one would be dropped by every Combine.
         foreach (var member in members)
             if (all == null && member.Data && !member.Attributes.Any(a => ReductionIndex(a.AttributeClass) >= 0))
-                Problems.Add(new Problem(member.Where, Rule.BadField, "has no reduction attribute, and the generated Combine would drop it: give it one ([Sum], [Product], [Min], [Max], [All], [Any]) or write IReduction<T> by hand"));
+                Problems.Add(new Problem(member.Where, Rule.BadField, "has no reduction attribute, and the generated Combine would drop it: give it one ([Sum], [Product], [Min], [Max], [All], [Any]), mark the field that picks a whole row [MinBy] or [MaxBy], or write IReduction<T> by hand"));
+        HandWrittenReduction();
+    }
+
+    /// <summary>EECS063: an Identity or Combine written by hand beside the attributes that declare them.</summary>
+    private void HandWrittenReduction()
+    {
         foreach (var name in new[] { "Identity", "Combine" })
             foreach (var own in Type.GetMembers(name))
                 if (!own.IsImplicitlyDeclared && !IsGeneratedPart(own))
                     Problems.Add(new Problem(own, Rule.HandWritten, name));
+    }
+
+    /// <summary>
+    /// <c>[MinBy]</c> / <c>[MaxBy]</c> (<paramref name="kept"/>, the members carrying one): one numeric key, a field or an
+    /// auto-property an initializer can set (Identity sets it), and no other reduction attribute on the struct or its
+    /// fields, whose values travel with the row the key keeps (EECS064).
+    /// </summary>
+    private void ReadKept(List<Member> members, List<Member> kept)
+    {
+        var key = kept[0];
+        bool lowest = key.Attributes.Any(a => Symbols.Named(a.AttributeClass, MinBy));
+        string Of(Member m) => $"[{(m.Attributes.Any(a => Symbols.Named(a.AttributeClass, MinBy)) ? "MinBy" : "MaxBy")}] on '{m.Where.Name}'";
+        string own = lowest ? "MinBy" : "MaxBy";
+        foreach (var attribute in Type.GetAttributes())
+            if (ReductionIndex(attribute.AttributeClass) is var index and >= 0)
+                Problems.Add(new Problem(Type, Rule.BadField, $"carries [{(Op)index}] for its fields, but the fields of a [{own}] reduction travel with the row its key keeps: remove [{(Op)index}] (a total and a row are two singletons)"));
+        foreach (var member in members)
+            foreach (var attribute in member.Attributes)
+                if (ReductionIndex(attribute.AttributeClass) is var index and >= 0)
+                    Problems.Add(new Problem(member.Where, Rule.BadField, $"carries [{(Op)index}], but the fields of a [{own}] reduction travel with the row its key keeps: remove [{(Op)index}] (a total and a row are two singletons)"));
+        if (kept.Count > 1 || key.Attributes.Count(a => Symbols.Named(a.AttributeClass, MinBy) || Symbols.Named(a.AttributeClass, MaxBy)) > 1)
+        {
+            var second = kept.Count > 1 ? kept[1] : key;
+            Problems.Add(new Problem(second.Where, Rule.BadField, kept.Count > 1
+                ? $"is a second key ({Of(key)} and {Of(second)}), but a reduction keeps its row by one key"
+                : "carries both [MinBy] and [MaxBy], but a reduction keeps its row by one key"));
+            return;
+        }
+
+        if (!key.Data) Problems.Add(new Problem(key.Where, Rule.BadField, $"is a computed property, but [{own}] keeps the row by a field (or an auto-property)"));
+        else if (!Numeric(key.Type)) Problems.Add(new Problem(key.Where, Rule.BadField, $"is {key.Type.ToDisplayString()}, but [{own}] compares numbers (an integer type, float, double or decimal)"));
+        else if (!key.Settable) Problems.Add(new Problem(key.Where, Rule.BadField, "cannot be set in an object initializer (readonly, or a property without a setter): Identity starts it at the value no row passes"));
+        else KeptOf = new KeptPart(Code.Escape(key.Name), key.Type.ToDisplayString(Symbols.Fqn), lowest);
+        HandWrittenReduction();
     }
 
     /// <summary>
@@ -209,13 +295,20 @@ internal sealed class Parts
     private void ReadKey(List<Member> members)
     {
         var keys = new List<(ISymbol Where, string Member, ITypeSymbol Type, bool Unique, bool ReadOnly)>();
+        AttributeData? first = null;
         foreach (var a in Type.GetAttributes())
             if (Symbols.Named(a.AttributeClass, Key) || Symbols.Named(a.AttributeClass, UniqueKey))
+            {
+                first ??= a;
                 keys.Add((Type, "this", Type, Symbols.Named(a.AttributeClass, UniqueKey), true));
+            }
         foreach (var member in members)
             foreach (var a in member.Attributes)
                 if (Symbols.Named(a.AttributeClass, Key) || Symbols.Named(a.AttributeClass, UniqueKey))
+                {
+                    first ??= a;
                     keys.Add((member.Where, Code.Escape(member.Name), member.Type, Symbols.Named(a.AttributeClass, UniqueKey), member.ReadOnly));
+                }
         if (keys.Count == 0) return;
         var key = keys[0];
         string Name(ITypeSymbol t) => t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat);
@@ -260,6 +353,93 @@ internal sealed class Parts
         string face = declared != null && (unique || !key.Unique) ? ""
             : $"global::EasyEcs.{(key.Unique ? "IUniqueIndexed" : "IIndexed")}<{KeyOf.Type}>";
         KeyOf = KeyOf with { Interface = face };
+        if (first?.NamedArguments.FirstOrDefault(n => n.Key == "SlotsPerAxis").Value.Value is int side and not 0) ReadWindow(key.Where, key.Type, side);
+    }
+
+    /// <summary>
+    /// <c>[UniqueKey(SlotsPerAxis = N)]</c>: a window of N keys per axis over the key's coordinates
+    /// (<see cref="TileParts.SlotOf"/>), with no <c>Slots</c> or <c>SlotOf</c> written by hand (EECS126).
+    /// </summary>
+    private void ReadWindow(ISymbol where, ITypeSymbol key, int side)
+    {
+        foreach (var name in new[] { "Slots", "SlotOf" })
+            if (TileParts.HandWritten(Type, name, Symbols.DirectMapped) is { } own)
+            {
+                Problems.Add(new Problem(own, Rule.BadWindow, $"writes {name} itself and declares its window with SlotsPerAxis: remove one"));
+                return;
+            }
+
+        if (TileParts.SlotOf(key, side, out int slots, out string? why) is { } body) WindowOf = new WindowPart(KeyOf!.Type, slots, body);
+        else Problems.Add(new Problem(where, Rule.BadWindow, why!));
+    }
+
+    /// <summary>
+    /// A tile (<c>[Tile]</c>, or <c>ITile&lt;TKey&gt;</c> declared by the type): the key (ITile's, else the declared
+    /// key's), the shape members <c>[Tile]</c> sets with none of them written by hand, and <c>Beside</c> inferred from the
+    /// key when the type writes none (<see cref="TileParts.Beside"/>, EECS124); a <c>[Tile]</c> on a type with no key or
+    /// that is no component is EECS068's.
+    /// </summary>
+    private void ReadTile()
+    {
+        AttributeData? tile = null;
+        foreach (var a in Type.GetAttributes())
+            if (Symbols.Named(a.AttributeClass, Tile)) tile = a;
+        var declared = Type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i.OriginalDefinition, TileParts.Interface));
+        if (tile == null && declared == null) return;
+        var key = declared?.TypeArguments[0] ?? (KeyOf != null ? KeyType : null) ?? Symbols.InterfaceKey(Type, out _);
+        if (tile != null && !Symbols.Implements(Type, Symbols.Component))
+        {
+            Problems.Add(new Problem(Type, Rule.TileSetup, "is not a component: [Tile] makes a component the tile of a grid"));
+            return;
+        }
+
+        if (key == null)
+        {
+            if (tile != null)
+                Problems.Add(new Problem(Type, Rule.TileSetup, "has no key: [Tile] needs the member that places the tile in its grid marked [LookupKey] or [UniqueKey]"));
+            return;
+        }
+
+        string keyText = SymbolEqualityComparer.Default.Equals(key, Type) ? SelfName(Type) : key.ToDisplayString(Symbols.Fqn);
+        var shape = new System.Text.StringBuilder();
+        if (tile != null)
+        {
+            var given = new HashSet<string>();
+            foreach (var (name, type) in TileParts.Shape)
+            {
+                var argument = tile.NamedArguments.FirstOrDefault(n => n.Key == name);
+                if (argument.Key == null || argument.Value.Value is not { } boxed) continue;
+                int value = System.Convert.ToInt32(boxed, System.Globalization.CultureInfo.InvariantCulture);
+                given.Add(name);
+                if (TileParts.HandWritten(Type, name, Symbols.TileShape) is { } own)
+                {
+                    Problems.Add(new Problem(own, Rule.BadTile, $"writes {name} itself and declares it with [Tile]: remove one"));
+                    continue;
+                }
+
+                string text = type switch
+                {
+                    "int" => value.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    "TileFaces" => TileParts.FacesText(value, TileParts.FacesAlias),
+                    _ => TileParts.EnumText(type, value),
+                };
+                string declaredType = type switch { "int" => "int", "TileFaces" => TileParts.FacesAlias, _ => "global::EasyEcs." + type };
+                shape.Append("static ").Append(declaredType).Append(" global::EasyEcs.ITileShape.").Append(name).Append(" => ").Append(text).Append(";\n");
+            }
+
+            foreach (var required in new[] { "Width", "Depth" })
+                if (!given.Contains(required))
+                    Problems.Add(new Problem(Type, Rule.BadTile, $"gives [Tile] no {required}: a tile is Width cells by Depth rows ([Tile(Width = 16, Depth = 16)])"));
+        }
+
+        string beside = "";
+        if (TileParts.HandWritten(Type, "Beside", TileParts.Interface) == null)
+        {
+            if (TileParts.Beside(key, TileParts.FacesAlias, out string? why) is { } body) beside = body;
+            else Problems.Add(new Problem(Type, Rule.BadTile, $"writes no Beside, and the generator cannot infer it: {why}"));
+        }
+
+        if (tile != null || beside.Length > 0) TileOf = new TilePart(keyText, tile != null, shape.ToString(), beside);
     }
 
     /// <summary>
@@ -353,6 +533,23 @@ internal sealed class Parts
         else if (Type.GetMembers().FirstOrDefault(m => m is IPropertySymbol p && (p.Name is "OrderKey" or "BoxPoint"
                      || p.ExplicitInterfaceImplementations.Any(i => i.Name is "OrderKey" or "BoxPoint")) && !IsGeneratedPart(m)) is { } own)
             Bad(own, $"writes {own.Name.Substring(own.Name.LastIndexOf('.') + 1)} itself and declares it with [OrderBy]: remove one");
+    }
+
+    /// <summary>
+    /// Why a <c>[ForEach]</c> method that reduces into a <c>[MinBy]</c> / <c>[MaxBy]</c> singleton runs row by row, or null:
+    /// a vector loop would compare each lane's key and carry the other fields with it, a form the vector loops do not
+    /// have yet (docs/plans/backlog.md, "MinBy vector form"). Read before <c>Kernel.Vectorize</c> by the generator and
+    /// EECS055 / EECS056 alike, so both give this reason instead of one about the generated Combine.
+    /// </summary>
+    public static Kernel.ScalarReason? KeptRowReason(IMethodSymbol method)
+    {
+        foreach (var p in method.Parameters)
+            if (Symbols.ReduceElement(p.Type) is INamedTypeSymbol reduced
+                && (Declares(reduced, MinBy) || Declares(reduced, MaxBy)) && Of(reduced) is { KeptOf: { } kept })
+                return new Kernel.ScalarReason(
+                    $"it reduces into {reduced.Name}, which keeps the row with the {(kept.Lowest ? "lowest" : "highest")} {kept.Key} ([{(kept.Lowest ? "MinBy" : "MaxBy")}]): "
+                    + "a vector loop does not keep a row by its key yet, so the method runs row by row", false, null);
+        return null;
     }
 
     /// <summary>Whether a radix sort orders <paramref name="type"/>: an integer, char, bool, float, double or an enum of an integer.</summary>

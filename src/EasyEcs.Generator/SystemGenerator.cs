@@ -1614,8 +1614,15 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         /// values are read from, or null with the reason it runs one row at a time.
         /// </summary>
         public static Kernel.Code? VectorLoop(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, bool parallel,
-            System.Threading.CancellationToken ct, out string? scalar) =>
-            Kernel.Vectorize(method, syntax, model, parallel ? static (i, kind) => kind switch
+            System.Threading.CancellationToken ct, out string? scalar)
+        {
+            if (Parts.KeptRowReason(method) is { } kept)
+            {
+                scalar = kept.Text;
+                return null;
+            }
+
+            return Kernel.Vectorize(method, syntax, model, parallel ? static (i, kind) => kind switch
             {
                 Symbols.ParamKind.Singleton => $"s{i}.Value", // a parallel job's SingletonRef
                 Symbols.ParamKind.Reduction => $"l{i}",
@@ -1626,6 +1633,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 Symbols.ParamKind.Reduction => $"l{i}", // the run's partial result, a local of the batch job
                 _ => $"x{i}",
             }, ct, out scalar);
+        }
 
         /// <summary>The body has a loop or a call (syntax only: a call's target is not resolved).</summary>
         public static bool LoopsOrCalls(MethodDeclarationSyntax syntax) =>

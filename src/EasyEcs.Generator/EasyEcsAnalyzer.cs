@@ -355,8 +355,14 @@ public static partial class EasyEcsAnalyzer
         if (context.SemanticModel.GetDeclaredSymbol((TypeDeclarationSyntax)context.Node, context.CancellationToken) is not { } type) return;
         var shape = type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i, Symbols.TileShape));
         if (shape == null) return;
+        // [Tile]'s arguments are the shape it writes (in a generated part, read from the attribute on this declaration).
+        var tile = type.GetAttributes().FirstOrDefault(a => Symbols.Named(a.AttributeClass, Parts.Tile));
+        if (tile != null && tile.ApplicationSyntaxReference?.SyntaxTree != context.Node.SyntaxTree) tile = null;
+        if (tile != null && !(tile.NamedArguments.Any(n => n.Key == "Width") && tile.NamedArguments.Any(n => n.Key == "Depth"))) return; // EECS124's
         int? Read(string name, int fallback)
         {
+            if (tile?.NamedArguments.FirstOrDefault(n => n.Key == name).Value.Value is { } given)
+                return System.Convert.ToInt32(given, System.Globalization.CultureInfo.InvariantCulture);
             if (shape.GetMembers(name).FirstOrDefault() is not IPropertySymbol member) return null;
             if (type.FindImplementationForInterfaceMember(member) is not IPropertySymbol property
                 || SymbolEqualityComparer.Default.Equals(property.ContainingType, shape)) return fallback;

@@ -583,7 +583,7 @@ internal static class Symbols
     public static string? SetupProblem(INamedTypeSymbol type, AttributeData attribute)
     {
         if (Named(attribute.AttributeClass, AccumulateAttribute))
-            return Implements(type, Singleton) && (Parts.Of(type) is { Fields.Count: > 0 } || ReducesItself(type)) ? null
+            return Implements(type, Singleton) && (Parts.Of(type) is { Fields.Count: > 0 } or { KeptOf: not null } || ReducesItself(type)) ? null
                 : "is not a singleton that combines with itself: [Accumulate] makes a Reduce<T> pass combine its result into a singleton that implements IReduction<T> (by [Sum], [Min], ... or by hand)";
         if (Named(attribute.AttributeClass, NotSavedAttribute))
             return Implements(type, Component) || Implements(type, Singleton) ? null
@@ -1247,6 +1247,7 @@ internal static class Symbols
             if (p.RefKind == RefKind.Ref && SymbolEqualityComparer.Default.Equals(p.Type, target))
                 return $"parameter '{p.Name}' writes it, and the pass's result replaces what it wrote";
         if (IsRunner(method)) return null; // its methods are separate entry points: the caller runs each on its own
+        if (target != null && Accumulates(target)) return null; // each pass's result is combined into the total, none replaced
         foreach (var member in method.ContainingType.GetMembers())
         {
             if (SymbolEqualityComparer.Default.Equals(member, method)) break;
@@ -1615,9 +1616,16 @@ internal static class Symbols
         return members.Count > 0 ? members : null;
     }
 
-    /// <summary>The key type of a tile component (<c>ITile&lt;TKey&gt;</c>), else null.</summary>
-    public static ITypeSymbol? TileKey(ITypeSymbol grid) =>
-        grid.AllInterfaces.FirstOrDefault(i => Named(i.OriginalDefinition, "EasyEcs.ITile<TKey>"))?.TypeArguments[0];
+    /// <summary>
+    /// The key type of a tile component (<c>ITile&lt;TKey&gt;</c>, or <c>[Tile]</c> when the generator writes it: the
+    /// interface a part adds is not in another generator's compilation), else null.
+    /// </summary>
+    public static ITypeSymbol? TileKey(ITypeSymbol grid)
+    {
+        if (grid.AllInterfaces.FirstOrDefault(i => Named(i.OriginalDefinition, TileParts.Interface)) is { } declared) return declared.TypeArguments[0];
+        if (grid is not INamedTypeSymbol named || !Parts.Declares(named, Parts.Tile) || Parts.Of(named) is not { WritesTile: true } parts) return null;
+        return parts.KeyType ?? InterfaceKey(named, out _);
+    }
 
     /// <summary>
     /// The components a parameter reads of other entities than its own: a <c>Lookup&lt;T&gt;</c>'s T, a

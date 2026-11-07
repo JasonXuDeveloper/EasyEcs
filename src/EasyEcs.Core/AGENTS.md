@@ -10,8 +10,11 @@ When you add, rename or delete a file here, update its line (`verify` checks eve
 ```
 Contracts.cs                 IComponent, ITracked, ISingletonComponent, INoStructuralChanges and the other markers
 Declarations.cs              attributes whose code the generators write: [Sum]/[Product]/[Min]/[Max]/[All]/[Any]
-                             (a reduction; on the struct, for its fields without one), [Accumulate] (a total: each pass
-                             combined into the world's value), [LookupKey]/[UniqueKey]/[Group] (an index key, a group), and world setup:
+                             (a reduction; on the struct, for its fields without one), [MinBy]/[MaxBy] (a reduction keeping
+                             the row with the lowest / highest key, MINLOC), [Accumulate] (a total: each pass
+                             combined into the world's value), [LookupKey]/[UniqueKey]/[Group] (an index key, a group;
+                             UniqueKey.SlotsPerAxis: a direct-mapped window), [Tile] (a tile's shape, ITile and its
+                             inferred Beside), and world setup:
                              [GroupBy] (on the member: a group every world splits by), [OrderBy] (the order of the
                              tables, overriding an inferred one), [WhenTargetDestroyed], [NotSaved]
 Entity.cs                    the entity handle (id, version, world): Has/Get/Read/TryGet/GetOrAdd/SetIfChanged/

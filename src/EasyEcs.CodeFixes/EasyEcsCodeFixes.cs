@@ -26,7 +26,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS055", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS119", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "EECS122", "CS0234", "CS0246", "CS0305", "CS0592",
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS119", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "EECS122", "EECS125", "EECS127", "CS0234", "CS0246", "CS0305", "CS0592",
             "CS0200", "CS0272", "CS1501", "CS1729", "CS1739");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -293,6 +293,16 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                         && await Attributed(context.Document, root, type, ops, context.CancellationToken).ConfigureAwait(false) is { } attributed)
                         context.RegisterCodeFix(CodeAction.Create("Declare it with attributes", _ => Task.FromResult(context.Document.WithSyntaxRoot(attributed)),
                             diagnostic.Id + "attributes"), diagnostic);
+                    break;
+                case "EECS125" when node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } type
+                                    && await TileDeclared(context.Document, root, type, diagnostic.Properties, context.CancellationToken).ConfigureAwait(false) is { } tiled:
+                    context.RegisterCodeFix(CodeAction.Create(tiled.Title, _ => Task.FromResult(context.Document.WithSyntaxRoot(tiled.Root)), diagnostic.Id), diagnostic);
+                    break;
+                case "EECS127" when node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } type
+                                    && diagnostic.Properties.TryGetValue("Side", out var side) && side != null
+                                    && await Windowed(context.Document, root, type, side, context.CancellationToken).ConfigureAwait(false) is { } windowed:
+                    context.RegisterCodeFix(CodeAction.Create($"Declare it with SlotsPerAxis = {side}", _ => Task.FromResult(context.Document.WithSyntaxRoot(windowed)),
+                        diagnostic.Id), diagnostic);
                     break;
                 case "EECS069" when node.FirstAncestorOrSelf<TypeDeclarationSyntax>() is { } type:
                     if (!type.AncestorsAndSelf().OfType<TypeDeclarationSyntax>().Any(t => t.Modifiers.Any(SyntaxKind.FileKeyword))
@@ -861,6 +871,50 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
     }
 
     /// <summary>
+    /// EECS125: a tile's hand-written members the generator writes, declared instead: <c>[Tile(...)]</c> with the
+    /// arguments the analyzer read (the shape members and the ITile&lt;TKey&gt; of the base list go), and Beside removed
+    /// when the generator infers the same; the type becomes partial along its chain. Null when there is nothing to do.
+    /// </summary>
+    private static async Task<(SyntaxNode Root, string Title)?> TileDeclared(Document document, SyntaxNode root, TypeDeclarationSyntax type,
+        ImmutableDictionary<string, string?> properties, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        string arguments = properties.TryGetValue("Tile", out var tile) ? tile ?? "" : "";
+        bool beside = properties.TryGetValue("Beside", out var goes) && goes == "1";
+        if (model == null || arguments.Length == 0 && !beside) return null;
+        var shape = new System.Collections.Generic.HashSet<string> { "Width", "Depth", "Height", "Faces", "Halo", "Neighborhood", "Boundary" };
+        bool Static(MemberDeclarationSyntax m) => m.Modifiers.Any(SyntaxKind.StaticKeyword);
+        var rewritten = Declare(model, root, type, new System.Collections.Generic.Dictionary<string, string>(), arguments.Length > 0 ? $"Tile({arguments})" : null,
+            m => Static(m) && (arguments.Length > 0 && m is PropertyDeclarationSyntax p && shape.Contains(p.Identifier.ValueText)
+                               || beside && m is MethodDeclarationSyntax { Identifier.ValueText: "Beside" }),
+            b => arguments.Length > 0 && Generic(b.Type) is { Identifier.ValueText: "ITile" });
+        return rewritten == null ? null : (rewritten, arguments.Length > 0 ? "Declare it with [Tile]" : "Remove Beside: the generator infers it");
+    }
+
+    /// <summary>
+    /// EECS127: hand-written <c>Slots</c> / <c>SlotOf</c> of a window declared as <c>SlotsPerAxis = side</c> on the type's
+    /// <c>[UniqueKey]</c>: both members and the IDirectMapped&lt;TKey&gt; of the base list go, the type becomes partial along
+    /// its chain. Null when no [UniqueKey] is written in this declaration.
+    /// </summary>
+    private static async Task<SyntaxNode?> Windowed(Document document, SyntaxNode root, TypeDeclarationSyntax type, string side, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        var key = type.DescendantNodes().OfType<AttributeSyntax>().FirstOrDefault(a => a.FirstAncestorOrSelf<TypeDeclarationSyntax>() == type
+            && (a.Name is IdentifierNameSyntax { Identifier.ValueText: "UniqueKey" or "UniqueKeyAttribute" }
+                || a.Name is QualifiedNameSyntax { Right.Identifier.ValueText: "UniqueKey" or "UniqueKeyAttribute" }));
+        if (model == null || key == null) return null;
+        var argument = SyntaxFactory.AttributeArgument(SyntaxFactory.ParseExpression(side))
+            .WithNameEquals(SyntaxFactory.NameEquals(SyntaxFactory.IdentifierName("SlotsPerAxis")));
+        var keyed = key.WithArgumentList(key.ArgumentList is { } list ? list.AddArguments(argument) : SyntaxFactory.AttributeArgumentList(SyntaxFactory.SingletonSeparatedList(argument)));
+        var marker = new SyntaxAnnotation();
+        var marked = root.ReplaceNode(type, type.ReplaceNode(key, keyed).WithAdditionalAnnotations(marker));
+        var current = marked.GetAnnotatedNodes(marker).OfType<TypeDeclarationSyntax>().Single();
+        return Declare(model, marked, current, new System.Collections.Generic.Dictionary<string, string>(), null,
+            static m => m.Modifiers.Any(SyntaxKind.StaticKeyword) && m is PropertyDeclarationSyntax { Identifier.ValueText: "Slots" } or MethodDeclarationSyntax { Identifier.ValueText: "SlotOf" },
+            static b => Generic(b.Type) is { Identifier.ValueText: "IDirectMapped" });
+    }
+
+    /// <summary>
     /// EECS067 (and EECS043's second fix): a hand-written Key returning <paramref name="member"/> (<c>this</c>: the value)
     /// declared with <c>[LookupKey]</c> (<c>[UniqueKey]</c> for a unique index) on that member or the type; the Key and the
     /// IIndexed / IUniqueIndexed of the base list go (an IDirectMapped stays: its Slots and SlotOf are the user's), the
@@ -966,7 +1020,11 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         var leading = type.GetLeadingTrivia();
         var indent = leading.Count > 0 && leading.Last().IsKind(SyntaxKind.WhitespaceTrivia) ? leading.Last() : default;
         var next = indent == default ? SyntaxFactory.TriviaList(EndOfLine(root)) : SyntaxFactory.TriviaList(EndOfLine(root), indent);
-        var list = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(SyntaxFactory.ParseName(attribute))))
+        // A name, or a name with its arguments ("Tile(Width = 16, Depth = 16)").
+        int open = attribute.IndexOf('(');
+        var made = open < 0 ? SyntaxFactory.Attribute(SyntaxFactory.ParseName(attribute))
+            : SyntaxFactory.Attribute(SyntaxFactory.ParseName(attribute.Substring(0, open)), SyntaxFactory.ParseAttributeArgumentList(attribute.Substring(open)));
+        var list = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(made))
             .WithLeadingTrivia(leading).WithTrailingTrivia(next);
         var withoutLeading = type.WithoutLeadingTrivia();
         return withoutLeading.WithAttributeLists(withoutLeading.AttributeLists.Insert(0, list));

@@ -38,9 +38,39 @@ public sealed class PartGenerator : IIncrementalGenerator
                 .WithTrackingName("Parts");
             context.RegisterSourceOutput(parts, static (spc, m) => spc.AddSource($"{m!.HintName}.Part.g.cs", SourceText.From(Emit(m), Encoding.UTF8)));
         }
+
+        // A tile that declares ITile<TKey> itself and carries none of the attributes above: its inferred Beside. Found by
+        // the base list's syntax (a type named ITile with one type argument), bound only for those; the declaration that
+        // lists it first builds the model, so a partial type is written once.
+        var tiles = context.SyntaxProvider.CreateSyntaxProvider(
+                static (node, _) => node is TypeDeclarationSyntax { BaseList: { } bases } && bases.Types.Any(static b => IsTileName(b.Type)),
+                static (ctx, ct) => ctx.SemanticModel.GetDeclaredSymbol((TypeDeclarationSyntax)ctx.Node, ct) is INamedTypeSymbol { TypeKind: TypeKind.Struct } type
+                                    && FirstAttribute(type).Item1 == null && FirstTileDeclaration(type, ct) == ctx.Node
+                    ? PartModel.Create(type) : null)
+            .Where(static m => m is not null)
+            .WithTrackingName("TileParts");
+        context.RegisterSourceOutput(tiles, static (spc, m) => spc.AddSource($"{m!.HintName}.Part.g.cs", SourceText.From(Emit(m), Encoding.UTF8)));
     }
 
-    private static readonly string[] Attributes = [.. Parts.Reductions, Parts.Key, Parts.UniqueKey, Parts.Group, Parts.GroupBy, Parts.OrderBy];
+    private static readonly string[] Attributes = [.. Parts.Reductions, Parts.MinBy, Parts.MaxBy, Parts.Key, Parts.UniqueKey, Parts.Group, Parts.GroupBy, Parts.OrderBy, Parts.Tile];
+
+    /// <summary>Whether a base type's syntax names <c>ITile&lt;TKey&gt;</c> (<c>ITile&lt;K&gt;</c>, <c>EasyEcs.ITile&lt;K&gt;</c>).</summary>
+    private static bool IsTileName(TypeSyntax type) => type switch
+    {
+        GenericNameSyntax { Identifier.ValueText: "ITile", TypeArgumentList.Arguments.Count: 1 } => true,
+        QualifiedNameSyntax { Right: { } right } => IsTileName(right),
+        AliasQualifiedNameSyntax { Name: { } name } => IsTileName(name),
+        _ => false,
+    };
+
+    /// <summary>The first declaration of <paramref name="type"/> whose base list names ITile, or null.</summary>
+    private static SyntaxNode? FirstTileDeclaration(INamedTypeSymbol type, System.Threading.CancellationToken ct)
+    {
+        foreach (var reference in type.DeclaringSyntaxReferences)
+            if (reference.GetSyntax(ct) is TypeDeclarationSyntax { BaseList: { } bases } declaration && bases.Types.Any(static b => IsTileName(b.Type)))
+                return declaration;
+        return null;
+    }
 
     /// <summary>
     /// The first attribute a part is written for on <paramref name="type"/>'s declarations, and what carries it: the type
@@ -75,15 +105,17 @@ public sealed class PartGenerator : IIncrementalGenerator
     /// <see cref="Parts.Heads"/>), its name inside the part, and the reduction's fields.
     /// </summary>
     private sealed record PartModel(string Namespace, EquatableArray<string> Heads, string HintName, string Self,
-        EquatableArray<Parts.Field> Fields, Parts.KeyPart? Key, Parts.GroupPart? Group, Parts.OrderPart? Order)
+        EquatableArray<Parts.Field> Fields, Parts.KeptPart? Kept, Parts.KeyPart? Key, Parts.GroupPart? Group, Parts.OrderPart? Order,
+        Parts.TilePart? Tile, Parts.WindowPart? Window)
     {
         public static PartModel? Create(INamedTypeSymbol type)
         {
             if (Parts.Of(type) is not { Writes: true } parts) return null;
             return new PartModel(type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString(),
                 new EquatableArray<string>(Parts.Heads(type)), Symbols.HintName(type), Parts.SelfName(type),
-                new EquatableArray<Parts.Field>(parts.WritesReduction ? parts.Fields.ToArray() : []),
-                parts.WritesKey ? parts.KeyOf : null, parts.WritesGroup ? parts.GroupOf : null, parts.WritesOrder ? parts.OrderOf : null);
+                new EquatableArray<Parts.Field>(parts.WritesReduction ? parts.Fields.ToArray() : []), parts.WritesReduction ? parts.KeptOf : null,
+                parts.WritesKey ? parts.KeyOf : null, parts.WritesGroup ? parts.GroupOf : null, parts.WritesOrder ? parts.OrderOf : null,
+                parts.WritesTile ? parts.TileOf : null, parts.WritesWindow ? parts.WindowOf : null);
         }
     }
 
@@ -101,8 +133,17 @@ public sealed class PartGenerator : IIncrementalGenerator
             body.Append($"{code}\npublic static {self} Combine({self} left, {self} right) => {Initializer(f => Parts.Combine(f.Op, f.Name, f.Type))};\n");
         }
 
+        if (m.Kept is { } kept)
+        {
+            string attribute = kept.Lowest ? "MinBy" : "MaxBy", identity = Parts.Identity(kept.Lowest ? Parts.Op.Min : Parts.Op.Max, kept.Type);
+            body.Append($"/// <summary>The value no row replaces: {kept.Key} at {identity}, the other fields at their defaults (from [{attribute}]).</summary>\n");
+            body.Append($"{code}\npublic static {self} Identity => new {self} {{ {kept.Key} = {identity} }};\n\n");
+            body.Append($"/// <summary>The side with the {(kept.Lowest ? "lower" : "higher")} {kept.Key}, its other fields with it; on a tie <paramref name=\"left\"/>, the earlier rows (from [{attribute}]).</summary>\n");
+            body.Append($"{code}\npublic static {self} Combine({self} left, {self} right) => right.{kept.Key} {(kept.Lowest ? "<" : ">")} left.{kept.Key} ? right : left;\n");
+        }
+
         var bases = new List<string>();
-        if (m.Fields.Length > 0) bases.Add($"global::EasyEcs.IReduction<{self}>");
+        if (m.Fields.Length > 0 || m.Kept != null) bases.Add($"global::EasyEcs.IReduction<{self}>");
         if (m.Key is { } key)
         {
             if (key.Interface.Length > 0) bases.Add(key.Interface);
@@ -128,6 +169,33 @@ public sealed class PartGenerator : IIncrementalGenerator
             body.Append($"{code}\n{modifier}global::System.Numerics.Vector3 {face}.BoxPoint => {order.Point};\n");
         }
 
-        return Code.Part(m.Namespace, m.Heads, string.Join(", ", bases), body.ToString());
+        if (m.Window is { } window)
+        {
+            string face = $"global::EasyEcs.IDirectMapped<{window.Key}>";
+            bases.Add(face);
+            body.Append($"/// <summary>The slots of the window the index maps directly (from [UniqueKey(SlotsPerAxis)]).</summary>\n");
+            body.Append($"{code}\nstatic int {face}.Slots => {window.Slots};\n");
+            body.Append("/// <summary>The slot of <paramref name=\"key\"/>: each coordinate masked to the window, row-major (from [UniqueKey(SlotsPerAxis)]).</summary>\n");
+            body.Append($"{code}\nstatic int {face}.SlotOf({window.Key} key) => {window.SlotOf};\n");
+        }
+
+        string usings = "";
+        if (m.Tile is { } tile)
+        {
+            string face = $"global::EasyEcs.ITile<{tile.Key}>";
+            if (tile.Declares) bases.Add(face);
+            if (tile.Shape.Length > 0)
+            {
+                body.Append("/// <summary>The tile's shape (from [Tile]).</summary>\n");
+                foreach (var line in tile.Shape.TrimEnd('\n').Split('\n')) body.Append($"{code}\n{line}\n");
+            }
+
+            if (tile.Beside.Length > 0)
+                body.Append("/// <summary>The key of the tile beside <paramref name=\"key\"/> across <paramref name=\"face\"/>: one step along the face's axis (north -z, south +z, west -x, east +x, below -y, above +y).</summary>\n")
+                    .Append($"{code}\nstatic {tile.Key} {face}.Beside({tile.Key} key, {TileParts.FacesAlias} face) => {tile.Beside};\n");
+            if (tile.Beside.Length > 0 || tile.Shape.Contains(TileParts.FacesAlias)) usings = $"using {TileParts.FacesAlias} = global::EasyEcs.TileFaces;\n";
+        }
+
+        return Code.Part(m.Namespace, m.Heads, string.Join(", ", bases), body.ToString(), usings);
     }
 }

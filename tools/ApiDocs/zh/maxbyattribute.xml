@@ -1,0 +1,9 @@
+<doc>
+  <member name="T:EasyEcs.MaxByAttribute" source="13667a5e609a">
+    <summary>
+      保留键最大的那一行的归约的键（MPI 的 <c>MAXLOC</c>，LINQ 的 <c>MaxBy</c>）：<c>Identity</c> 里键是它的 <c>MinValue</c>
+      （<c>float</c> 和 <c>double</c> 是 −∞），<c>Combine</c> 只在 <c>right</c> 的键更大时取 <c>right</c>，所以相等时保留先到的行（见
+      <see cref="T:EasyEcs.MinByAttribute" />）。
+    </summary>
+  </member>
+</doc>

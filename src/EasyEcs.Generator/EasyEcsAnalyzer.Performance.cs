@@ -229,7 +229,9 @@ public static partial class EasyEcsAnalyzer
             if (mode != Symbols.SimdOff && !(PairForm.IsPairMethod(method) || Symbols.IsDrain(method))) ReportElementLoops(context, method, syntax);
             return;
         }
-        if (Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out Kernel.ScalarReason? reason) != null) return;
+        // A [MinBy] / [MaxBy] reduction stops the loop before Kernel reads it: the generator's reason (Parts.KeptRowReason).
+        var reason = Parts.KeptRowReason(method);
+        if (reason == null && Kernel.Vectorize(method, syntax, context.SemanticModel, static (i, _) => "", context.CancellationToken, out reason) != null) return;
         if (!(PairForm.IsPairMethod(method) || Symbols.IsDrain(method))) ReportElementLoops(context, method, syntax);
         if (ReportChases(context, method, syntax)
             || mode == Symbols.SimdAuto && AccumulatesByHand(method, syntax, context.SemanticModel, context.CancellationToken)) return; // EECS086's

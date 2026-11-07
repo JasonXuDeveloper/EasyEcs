@@ -1,0 +1,14 @@
+<doc>
+  <member name="T:EasyEcs.MinByAttribute" source="f1ec2d28658b">
+    <summary>
+      保留键最小的那一行的归约的键（MPI 的 <c>MINLOC</c>，LINQ 的 <c>MinBy</c>）：其他字段跟着这一行走。标在 partial struct 的一个数值字段、
+      带 setter 的自动属性或 record 的位置参数上（整数、<c>float</c>、<c>double</c>、<c>decimal</c>）：
+      <c>public partial record struct Weakest(EntityId Player, [MinBy] int Health) : ISingletonComponent;</c>。生成器写出这个 struct 的
+      <c>IReduction&lt;T&gt;</c>：<c>Identity</c> 里键是它的 <c>MaxValue</c>（<c>float</c> 和 <c>double</c> 是 +∞），其他字段都是默认值；
+      <c>Combine</c> 只在 <c>right</c> 的键更小时取 <c>right</c>（<c>right.Health &lt; left.Health ? right : left</c>）。相等时保留左边，也就是
+      先到的行，所以几个线程跑结果都一样；NaN 键永远不会替换别的值。方法按同样的方式保留自己这一块里最小的那行：
+      <c>if (hp.Value &lt; weakest.Value.Health) weakest.Value = new(player.Id, hp.Value);</c>。一个 struct 只有一个字段标
+      <see cref="T:EasyEcs.MinByAttribute" /> 或 <see cref="T:EasyEcs.MaxByAttribute" />，其他字段不能标别的归约特性。
+    </summary>
+  </member>
+</doc>

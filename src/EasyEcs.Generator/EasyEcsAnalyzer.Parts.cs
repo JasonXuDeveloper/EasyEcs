@@ -45,11 +45,13 @@ public static partial class EasyEcsAnalyzer
         "every Combine.", helpLinkUri: Help("EECS064"));
 
     public static readonly DiagnosticDescriptor HandWrittenReduction = new("EECS065", "A reduction the field attributes can declare",
-        "'{0}' combines field by field ({1}): declare it with attributes, and the generator writes Identity and Combine",
+        "'{0}' {1}: declare it with attributes, and the generator writes Identity and Combine",
         Category, DiagnosticSeverity.Warning, true,
         "A hand-written IReduction<T> whose Identity and Combine apply one of sum, product, minimum, maximum, and, or to " +
         "each field is what the reduction attributes declare: [Sum] public int Alive; [Min] public float Lowest; on a " +
-        "partial struct. The generator then writes both members, with the right identity for each field.",
+        "partial struct. One that keeps the side with the lower (higher) key, the left one on a tie, with the key's " +
+        "identity and the other fields at their defaults, is [MinBy] ([MaxBy]) on the key. The generator then writes both " +
+        "members, with the right identity for each field.",
         helpLinkUri: Help("EECS065"));
 
     public static readonly DiagnosticDescriptor WrongIdentity = new("EECS066", "A reduction's Identity is not the identity of its Combine",
@@ -109,6 +111,43 @@ public static partial class EasyEcsAnalyzer
         "generator writes nothing for a declaration that breaks this, so no world would order the tables.",
         helpLinkUri: Help("EECS104"));
 
+    public static readonly DiagnosticDescriptor BadTile = new("EECS124", "A tile the generator cannot complete",
+        "'{0}' {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "A tile (ITile<TKey>, or [Tile]) needs Beside, the key of the tile across each face. The generator writes it from " +
+        "the key when the type writes none: an int key steps west -1 and east +1, a key with integer members X and Z (and " +
+        "Y for layers) steps the member of the face's axis, as TileFaces names them (north -z, south +z, west -x, east +x, " +
+        "below -y, above +y). A key named (X, Y) is not read as (x, depth): TileFaces makes z the depth, and a guess the " +
+        "other way would step the wrong axis without an error. Any other key, and a grid whose Beside wraps (a torus), " +
+        "writes Beside by hand. [Tile] needs Width and Depth, and writes the shape members it sets, so the type does not " +
+        "write them too.", helpLinkUri: Help("EECS124"));
+
+    public static readonly DiagnosticDescriptor TileByHand = new("EECS125", "A tile member the generator writes",
+        "'{0}' writes {1} by hand: {2}",
+        Category, DiagnosticSeverity.Info, true,
+        "A tile's shape members returning constants are what [Tile(Width = ..., Depth = ...)] declares, with ITile<TKey> " +
+        "itself (the key from the member marked [LookupKey] or [UniqueKey]); a Beside that steps each face one along its " +
+        "axis is what the generator infers from the key. The fix declares the shape with [Tile] and removes a Beside the " +
+        "generator writes the same; a Beside that wraps (a periodic grid) stays.", helpLinkUri: Help("EECS125"));
+
+    public static readonly DiagnosticDescriptor BadWindow = new("EECS126", "A direct-mapped window the generator cannot write",
+        "'{0}' {1}",
+        Category, DiagnosticSeverity.Error, true,
+        "[UniqueKey(SlotsPerAxis = N)] maps a window of N keys per axis onto Slots = N to the power of the key's axes, " +
+        "SlotOf masking each coordinate by N - 1. N is a power of two (the mask keeps negative coordinates in the " +
+        "window), the slots fit an array, the key is an int, a struct with integer members X, Z or Y, or a tuple of " +
+        "integers, and the type does not write Slots or SlotOf as well.", helpLinkUri: Help("EECS126"));
+
+    public static readonly DiagnosticDescriptor WindowByHand = new("EECS127", "A direct-mapped window SlotsPerAxis declares",
+        "'{0}' maps its keys onto a window of {1} per axis by hand: [UniqueKey(SlotsPerAxis = {1})] declares Slots and SlotOf",
+        Category, DiagnosticSeverity.Info, true,
+        "An IDirectMapped<TKey> whose Slots is N to the power of the key's axes and whose SlotOf masks each coordinate by " +
+        "N - 1, row-major (x fastest, then z, then y), is what SlotsPerAxis on its [UniqueKey] declares. The fix moves it " +
+        "there, removing both members and the interface.", helpLinkUri: Help("EECS127"));
+
+    // EECS125's properties for its code fix: [Tile]'s arguments ("" when the shape stays), and whether Beside goes.
+    public const string TileArguments = "Tile", BesideGoes = "Beside";
+
     // EECS065 / EECS066's properties for their code fixes: the attribute of each field (name=Op;...), and the Identity
     // that fits the Combine.
     public const string ReductionOps = "Ops", FixedIdentity = "Identity";
@@ -125,6 +164,8 @@ public static partial class EasyEcsAnalyzer
             AnalyzeParts(c, type);
             AnalyzeHandWrittenKey(c, type);
             AnalyzeSetup(c, type);
+            AnalyzeHandWrittenTile(c, type);
+            AnalyzeHandWrittenWindow(c, type);
         }, SymbolKind.NamedType);
         context.RegisterSyntaxNodeAction(AnalyzeReduction, SyntaxKind.StructDeclaration, SyntaxKind.RecordStructDeclaration);
         context.RegisterCompilationStartAction(AnalyzeFormatters);
@@ -159,6 +200,17 @@ public static partial class EasyEcsAnalyzer
                     break;
                 case Parts.Rule.BadOrder:
                     context.ReportDiagnostic(Diagnostic.Create(BadOrder, where, type.Name, problem.Text));
+                    break;
+                case Parts.Rule.BadTile:
+                    context.ReportDiagnostic(Diagnostic.Create(BadTile, where, type.Name, problem.Text));
+                    break;
+                case Parts.Rule.TileSetup:
+                    var attribute = type.GetAttributes().FirstOrDefault(a => Symbols.Named(a.AttributeClass, Parts.Tile));
+                    context.ReportDiagnostic(Diagnostic.Create(BadSetup, attribute?.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken).GetLocation() ?? where,
+                        "Tile", type.Name, problem.Text));
+                    break;
+                case Parts.Rule.BadWindow:
+                    context.ReportDiagnostic(Diagnostic.Create(BadWindow, where, type.Name, problem.Text));
                     break;
             }
         }
@@ -208,6 +260,73 @@ public static partial class EasyEcsAnalyzer
                 ImmutableDictionary<string, string?>.Empty.Add(KeyMember, member), type.Name, name,
                 member == "this" ? "the value itself" : $"'{member}'", attribute, member == "this" ? "the type" : $"'{member}'"));
     }
+
+    /// <summary>
+    /// EECS125: a tile that writes by hand what the generator would: shape members returning constants on a type whose
+    /// key an attribute declares (what <c>[Tile]</c> writes), or a <c>Beside</c> that steps every face of the shape as
+    /// the inferred one (<see cref="TileParts.SameBeside"/>). Reported once per type, at the type, with the fix's
+    /// properties: <c>[Tile]</c>'s arguments as written, and whether Beside goes.
+    /// </summary>
+    private static void AnalyzeHandWrittenTile(SymbolAnalysisContext context, INamedTypeSymbol type)
+    {
+        for (var level = type; level != null; level = level.ContainingType)
+            if (level.IsFileLocal) return;
+        if (type.AllInterfaces.FirstOrDefault(i => Symbols.Named(i.OriginalDefinition, TileParts.Interface)) is not { } tile) return;
+        var key = tile.TypeArguments[0];
+        var compilation = context.Compilation;
+        var token = context.CancellationToken;
+
+        // Beside: the faces the shape has (below and above only with layers), each stepped as the generator would.
+        bool besideGoes = false;
+        if (TileParts.HandWritten(type, "Beside", TileParts.Interface) is IMethodSymbol beside && TileParts.BesideAxes(key, out _) is { } axes
+            && TileParts.ShapeValue(type, "Faces", 15, compilation, token) is { } faces && TileParts.ShapeValue(type, "Height", 1, compilation, token) is { } height)
+            besideGoes = TileParts.SameBeside(beside, axes, faces & (height > 1 ? 63 : 15), compilation, token);
+
+        // The shape: [Tile] reads the key from an attribute, so only such a type moves; every member a constant.
+        var arguments = new List<string>();
+        if (!Parts.Declares(type, Parts.Tile) && (Parts.Declares(type, Parts.Key) || Parts.Declares(type, Parts.UniqueKey)))
+            foreach (var (name, _) in TileParts.Shape)
+            {
+                if (TileParts.HandWritten(type, name, Symbols.TileShape) is not { } own) continue;
+                if (own is not IPropertySymbol property || TileParts.Constant(property, compilation, token) == null
+                    || TileParts.Returned(property, token) is not { } returned)
+                {
+                    arguments.Clear();
+                    break;
+                }
+
+                arguments.Add($"{name} = {returned}");
+            }
+
+        bool shape = arguments.Any(a => a.StartsWith("Width", System.StringComparison.Ordinal)) && arguments.Any(a => a.StartsWith("Depth", System.StringComparison.Ordinal));
+        if (!shape && !besideGoes) return;
+        string what = shape && besideGoes ? "its shape and Beside" : shape ? "its shape" : "Beside";
+        string fix = shape
+            ? $"[Tile({string.Join(", ", arguments)})] declares {(besideGoes ? "them" : "the shape, and ITile with it")}"
+            : $"the generator infers it from the key {key.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)}: remove it";
+        var properties = ImmutableDictionary<string, string?>.Empty.Add(TileArguments, shape ? string.Join(", ", arguments) : "").Add(BesideGoes, besideGoes ? "1" : "");
+        context.ReportDiagnostic(Diagnostic.Create(TileByHand, type.Locations.FirstOrDefault(l => l.IsInSource), properties, type.Name, what, fix));
+    }
+
+    /// <summary>
+    /// EECS127: a unique component keyed by <c>[UniqueKey]</c> whose hand-written <c>Slots</c> and <c>SlotOf</c> are the
+    /// window <c>SlotsPerAxis</c> declares (<see cref="TileParts.HandWindow"/>).
+    /// </summary>
+    private static void AnalyzeHandWrittenWindow(SymbolAnalysisContext context, INamedTypeSymbol type)
+    {
+        for (var level = type; level != null; level = level.ContainingType)
+            if (level.IsFileLocal) return;
+        // A window SlotsPerAxis declares beside hand-written members is EECS126's (BadWindow), not a suggestion.
+        if (!Parts.Declares(type, Parts.UniqueKey) || Parts.Of(type) is not { KeyOf.Unique: true, WindowOf: null, KeyType: { } key } parts
+            || parts.Problems.Any(p => p.Rule == Parts.Rule.BadWindow)
+            || !type.AllInterfaces.Any(i => Symbols.Named(i.OriginalDefinition, Symbols.DirectMapped))
+            || TileParts.HandWindow(type, key, context.Compilation, context.CancellationToken) is not { } side) return;
+        context.ReportDiagnostic(Diagnostic.Create(WindowByHand, type.Locations.FirstOrDefault(l => l.IsInSource),
+            ImmutableDictionary<string, string?>.Empty.Add(WindowSide, side.ToString(System.Globalization.CultureInfo.InvariantCulture)), type.Name, side));
+    }
+
+    // EECS127's property for its code fix: the window's side.
+    public const string WindowSide = "Side";
 
     /// <summary>
     /// The hand-written implementation of <paramref name="face"/>'s <paramref name="name"/> in <paramref name="type"/>
@@ -308,6 +427,9 @@ public static partial class EasyEcsAnalyzer
     private static string What(Parts parts) => string.Join(", ", new[]
     {
         parts.Fields.Count > 0 || parts.Reduces ? "IReduction<T> from its field attributes" : null,
+        parts.TileOf is { Declares: true } ? "ITile<TKey> and the shape of [Tile]" : null,
+        parts.TileOf is { Beside.Length: > 0 } ? "the Beside inferred from its key" : null,
+        parts.WindowOf != null ? "the Slots and SlotOf of SlotsPerAxis" : null,
         parts.KeyOf != null ? $"the Key of [{(parts.KeyOf.Unique ? "UniqueKey" : "LookupKey")}]" : null,
         parts.GroupOf != null ? "the Group of [Group]" : null,
         parts.OrderOf != null ? "the OrderKey and BoxPoint of [OrderBy]" : null,
@@ -332,8 +454,17 @@ public static partial class EasyEcsAnalyzer
         var identity = declaration.Members.OfType<PropertyDeclarationSyntax>().FirstOrDefault(p => p.Identifier.ValueText == "Identity"
             && p.Modifiers.Any(SyntaxKind.StaticKeyword));
         if (combine == null || identity == null
-            || context.SemanticModel.GetDeclaredSymbol(combine, context.CancellationToken) is not { } method
-            || Recognize(context.SemanticModel, combine, method, type, context.CancellationToken) is not { Count: > 0 } ops)
+            || context.SemanticModel.GetDeclaredSymbol(combine, context.CancellationToken) is not { } method)
+            return;
+        if (RecognizeKept(context.SemanticModel, combine, method, type, identity, context.CancellationToken) is var (keyName, lowest))
+        {
+            context.ReportDiagnostic(Diagnostic.Create(HandWrittenReduction, declaration.Identifier.GetLocation(),
+                ImmutableDictionary<string, string?>.Empty.Add(ReductionOps, keyName + "=" + (lowest ? "MinBy" : "MaxBy")), type.Name,
+                $"keeps the side with the {(lowest ? "lower" : "higher")} {keyName}, the left one on a tie ([{(lowest ? "MinBy" : "MaxBy")}] on {keyName})"));
+            return;
+        }
+
+        if (Recognize(context.SemanticModel, combine, method, type, context.CancellationToken) is not { Count: > 0 } ops)
             return;
 
         var members = Parts.Members(type).Where(m => m.Data).ToList();
@@ -365,8 +496,108 @@ public static partial class EasyEcsAnalyzer
         if (all)
             context.ReportDiagnostic(Diagnostic.Create(HandWrittenReduction, declaration.Identifier.GetLocation(),
                 ImmutableDictionary<string, string?>.Empty.Add(ReductionOps, opsText), type.Name,
-                string.Join(", ", members.Select(m => $"{m.Name} by {ops[m.Name]}"))));
+                $"combines field by field ({string.Join(", ", members.Select(m => $"{m.Name} by {ops[m.Name]}"))})"));
     }
+
+    /// <summary>
+    /// A hand-written Combine that keeps one side whole by a numeric key, as <c>[MinBy]</c> / <c>[MaxBy]</c>'s does: a
+    /// conditional over the two parameters comparing one field of each (<c>right.K &lt; left.K ? right : left</c>, in any
+    /// order of operands and sides), keeping the left side on a tie; its Identity sets the key to the identity of the
+    /// minimum (maximum) and every other field to its default (<c>default</c>, 0, false, null, <c>EntityId.Null</c>, or
+    /// left out). The key's name and whether it keeps the lowest; null for any other form.
+    /// </summary>
+    private static (string Key, bool Lowest)? RecognizeKept(SemanticModel model, MethodDeclarationSyntax combine, IMethodSymbol method,
+        INamedTypeSymbol type, PropertyDeclarationSyntax identity, System.Threading.CancellationToken token)
+    {
+        if (method.Parameters.Length != 2 || !method.Parameters.All(p => SymbolEqualityComparer.Default.Equals(p.Type, type))) return null;
+        IParameterSymbol left = method.Parameters[0], right = method.Parameters[1];
+        var returned = combine.ExpressionBody?.Expression
+                       ?? (combine.Body?.Statements is { Count: 1 } statements && statements[0] is ReturnStatementSyntax { Expression: { } single } ? single : null);
+        if (returned == null || Symbols.Unwrap(model.GetOperation(returned, token)) is not IConditionalOperation
+            {
+                Condition: IBinaryOperation { OperatorKind: BinaryOperatorKind.LessThan or BinaryOperatorKind.LessThanOrEqual or BinaryOperatorKind.GreaterThan or BinaryOperatorKind.GreaterThanOrEqual } compare,
+                WhenTrue: var yes, WhenFalse: { } no,
+            })
+            return null;
+        IParameterSymbol? Side(IOperation? o) => Symbols.Unwrap(o) is IParameterReferenceOperation r ? r.Parameter : null;
+        (IParameterSymbol Side, ISymbol Member)? Read(IOperation? o) =>
+            Symbols.Unwrap(o) is IMemberReferenceOperation { Member: IFieldSymbol or IPropertySymbol, Instance: var instance } access && Side(instance) is { } side
+                ? (side, access.Member) : null;
+        if (Read(compare.LeftOperand) is not { } a || Read(compare.RightOperand) is not { } b || a.Member.Name != b.Member.Name
+            || SymbolEqualityComparer.Default.Equals(a.Side, b.Side) || Side(yes) is not { } whenTrue || Side(no) is not { } whenFalse
+            || SymbolEqualityComparer.Default.Equals(whenTrue, whenFalse))
+            return null;
+        string key = a.Member.Name;
+        if (Parts.Members(type).FirstOrDefault(m => m.Name == key) is not { Data: true, Settable: true } member || !Fits(Parts.Op.Min, member.Type)) return null;
+
+        // Which side it keeps when right's key is lower, equal or higher than left's: [MinBy] keeps right, left, left;
+        // [MaxBy] left, left, right.
+        IParameterSymbol Keeps(int order)
+        {
+            int Value(IParameterSymbol side) => SymbolEqualityComparer.Default.Equals(side, right) ? order : 0;
+            int x = Value(a.Side), y = Value(b.Side);
+            bool holds = compare.OperatorKind switch
+            {
+                BinaryOperatorKind.LessThan => x < y,
+                BinaryOperatorKind.LessThanOrEqual => x <= y,
+                BinaryOperatorKind.GreaterThan => x > y,
+                _ => x >= y,
+            };
+            return holds ? whenTrue : whenFalse;
+        }
+
+        bool Is(IParameterSymbol kept, IParameterSymbol side) => SymbolEqualityComparer.Default.Equals(kept, side);
+        bool? lowest = Is(Keeps(-1), right) && Is(Keeps(0), left) && Is(Keeps(1), left) ? true
+            : Is(Keeps(-1), left) && Is(Keeps(0), left) && Is(Keeps(1), right) ? false : null;
+        if (lowest is not { } low) return null;
+
+        // The Identity: the key at the identity of its minimum (maximum), the other fields at their defaults.
+        if (IdentityValue(identity) is not { } start || Symbols.Unwrap(model.GetOperation(start, token)) is not { } created) return null;
+        var sets = new List<(string Name, IOperation Value)>();
+        switch (created)
+        {
+            case IDefaultValueOperation:
+                break;
+            case IObjectCreationOperation creation when SymbolEqualityComparer.Default.Equals(creation.Type, type):
+                // Positional arguments set the members of their names: a record's primary constructor only.
+                if (creation.Arguments.Length > 0 && (!type.IsRecord || creation.Constructor is not { } constructor
+                        || constructor.Parameters.Any(p => Parts.Members(type).All(m => m.Name != p.Name))))
+                    return null;
+                foreach (var argument in creation.Arguments)
+                    if (argument.Parameter is { } parameter) sets.Add((parameter.Name, argument.Value));
+                if (creation.Initializer != null)
+                    foreach (var initializer in creation.Initializer.Initializers)
+                    {
+                        if (initializer is not ISimpleAssignmentOperation { Target: IMemberReferenceOperation { Member: var target } } assignment) return null;
+                        sets.Add((target.Name, assignment.Value));
+                    }
+
+                break;
+            default:
+                return null;
+        }
+
+        bool keySet = false;
+        foreach (var (name, value) in sets)
+        {
+            var operation = Symbols.Unwrap(value);
+            if (name == key)
+            {
+                if (operation?.ConstantValue is not { HasValue: true, Value: { } constant } || !IsIdentity(low ? Parts.Op.Min : Parts.Op.Max, member.Type, constant)) return null;
+                keySet = true;
+            }
+            else if (!IsDefault(operation)) return null;
+        }
+
+        return keySet ? (key, low) : null;
+    }
+
+    /// <summary>Whether <paramref name="value"/> is a default: <c>default</c>, a constant 0, false or null, <c>EntityId.Null</c>.</summary>
+    private static bool IsDefault(IOperation? value) =>
+        value is IDefaultValueOperation
+        || value?.ConstantValue is { HasValue: true } c && (c.Value == null || c.Value is false
+                                                            || c.Value is not bool && c.Value is not string && System.Convert.ToDouble(c.Value, System.Globalization.CultureInfo.InvariantCulture) == 0)
+        || value is IPropertyReferenceOperation { Property: { Name: "Null", IsStatic: true } nullId } && Symbols.Named(nullId.ContainingType, Symbols.EntityId);
 
     private static string Verb(Parts.Op op) => op switch
     {
@@ -607,7 +838,8 @@ public sealed class PartAnalyzer : EasyEcsAnalyzer.Area
         EasyEcsAnalyzer.BadIndexedKey, EasyEcsAnalyzer.BadOrder, EasyEcsAnalyzer.BadPrefab, EasyEcsAnalyzer.BadReductionField,
         EasyEcsAnalyzer.BadSetup, EasyEcsAnalyzer.HandWrittenKey, EasyEcsAnalyzer.HandWrittenReduction,
         EasyEcsAnalyzer.NoFormatter, EasyEcsAnalyzer.NotPartial, EasyEcsAnalyzer.ReductionWrittenTwice,
-        EasyEcsAnalyzer.WrongIdentity);
+        EasyEcsAnalyzer.WrongIdentity, EasyEcsAnalyzer.BadTile, EasyEcsAnalyzer.TileByHand, EasyEcsAnalyzer.BadWindow,
+        EasyEcsAnalyzer.WindowByHand);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeParts(context);
 }

@@ -1,0 +1,35 @@
+<doc>
+  <member name="T:EasyEcs.TileAttribute" source="823573687fb7">
+    <summary>
+      按形状声明的网格瓦片（<see cref="T:EasyEcs.ITile`1" />）：生成器给这个 partial 组件加上 <c>ITile&lt;TKey&gt;</c>，键的类型是标了
+      <see cref="T:EasyEcs.LookupKeyAttribute">[LookupKey]</see> 或 <see cref="T:EasyEcs.UniqueKeyAttribute">[UniqueKey]</see>
+      的成员的类型；形状的静态成员（<see cref="T:EasyEcs.ITileShape" />）来自这里设的属性，<c>Beside</c> 从键推出来：
+      <c>[Tile(Width = 16, Depth = 16)] public partial record struct HeatPlate([LookupKey] PlatePos Pos) : IComponent;</c>。
+      <c>int</c> 键的 <c>Beside</c> 沿 x 走一步（西 −1，东 +1）；带整数成员 <c>X</c> 和 <c>Z</c>（以及表示层的 <c>Y</c>）的键沿这个面的轴走一步，
+      和 <see cref="T:EasyEcs.TileFaces" /> 的定义一致：北 −z，南 +z，西 −x，东 +x，下 −y，上 +y。别的键，或者 <c>Beside</c> 会绕回去的网格
+      （环面），自己写 <c>Beside</c>，其余的仍由生成器写。自己声明了 <c>ITile&lt;TKey&gt;</c> 又没写 <c>Beside</c> 的类型，也会得到同样推出来的
+      <c>Beside</c>。
+    </summary>
+  </member>
+  <member name="P:EasyEcs.TileAttribute.Width" source="cdc8b30fb6af">
+    <summary>每行的格子数（x），至少 1（<see cref="P:EasyEcs.ITileShape.Width" />）。必填。</summary>
+  </member>
+  <member name="P:EasyEcs.TileAttribute.Depth" source="ed3bd285e359">
+    <summary>每层的行数（z），1 到 64（<see cref="P:EasyEcs.ITileShape.Depth" />）。必填。</summary>
+  </member>
+  <member name="P:EasyEcs.TileAttribute.Height" source="2749730e8601">
+    <summary>层数（y），至少 1（<see cref="P:EasyEcs.ITileShape.Height" />，默认 1：二维瓦片）。</summary>
+  </member>
+  <member name="P:EasyEcs.TileAttribute.Faces" source="caa68821a47f">
+    <summary>有邻居的面（<see cref="P:EasyEcs.ITileShape.Faces" />，默认 <see cref="F:EasyEcs.TileFaces.Sides" />）。</summary>
+  </member>
+  <member name="P:EasyEcs.TileAttribute.Halo" source="8c16702292b8">
+    <summary>光环的宽度，单位是格子（<see cref="P:EasyEcs.ITileShape.Halo" />，默认 1）。</summary>
+  </member>
+  <member name="P:EasyEcs.TileAttribute.Neighborhood" source="8598d6de40c1">
+    <summary>周围哪些瓦片算邻居（<see cref="P:EasyEcs.ITileShape.Neighborhood" />，默认 <see cref="F:EasyEcs.TileNeighborhood.Faces" />）。</summary>
+  </member>
+  <member name="P:EasyEcs.TileAttribute.Boundary" source="24cb3b9f793d">
+    <summary>没有邻居的地方光环里放什么（<see cref="P:EasyEcs.ITileShape.Boundary" />，默认 <see cref="F:EasyEcs.TileBoundary.Border" />）。</summary>
+  </member>
+</doc>
