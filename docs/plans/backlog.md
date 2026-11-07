@@ -77,6 +77,30 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       Info + fix for hand `Slots` / `SlotOf`, an Error for a non-power-of-two, EECS064 / EECS065's fix for MinBy);
       the EECS086 `GeneratedFor` fix (resets matched by type, not by name: `analyzer.md` 5); caching assertions and
       GeneratorBenchmark.
+      Built on `feat-generated-members` (not merged yet): `[Tile]` and the inferred `Beside` (EECS124-125),
+      `[UniqueKey(SlotsPerAxis = N)]` (EECS126-127), `[MinBy]` / `[MaxBy]` with the scalar loop (EECS064 / EECS065 /
+      EECS068 extended, EECS055's reason exact), EECS086's resets matched by GeneratedFor, BattleServer's `Battle` an
+      `[Accumulate]` total and `Weakest` a `[MinBy]`; its docs are the "feat-generated-members" section of `docs-todos.md`.
+      Numbers (a shared, busy machine): BattleServerBenchmark Tick 100k base 3.963 / 3.827 ms, head 3.860 / 3.952 ms
+      (a wash, 0 B); ReduceBenchmark Lowest generated against hand-written swaps the lead between two runs (1k: 537 vs
+      864 ns, then 845 vs 650 ns; 1M: 301 vs 314 us, then 253 vs 311 us; 100k: generated behind both times, 32.6 vs
+      27.9 and 32.2 vs 24.6 us, errors 5-7 us), 0 B. Researched: the two forms are the same code. The generated
+      Identity / Combine are the hand-written text, the two structs have the same fields in the same order, and the
+      jobs the generator writes differ only in their names (diffed with the names normalized). `tools/inlining.sh
+      ReduceBenchmark`: every job inlined. The optimized listings (DOTNET_JitDisasm under tools/Inlining, FullOpts) of
+      the benchmark method, `ForEachBatchParallel` and `ForEachBatchRuns` for each job: 0 lines differ once names and
+      addresses are normalized (227, 1191 and 710 bytes each). A run under the exclusive lock with `--launchCount 3`:
+      1k 631 vs 717 ns, 10k 6.12 vs 5.45 us, 100k 35.3 +- 5.7 vs 32.6 +- 6.6 us, 1M 282 vs 346 us, every pair within
+      its error, the lead swapping. What was left was the 4-thread pass's spread on a machine whose other cores ran
+      other agents' work (the lock orders only the processes that take it).
+      - [ ] **MinBy vector form** (the Kernel owner's next item; `finish-scan.md` 5): per lane a compare and a select
+        of every carried field, the lanes folded left to right so a tie keeps the earlier row (bit for bit on any
+        thread count), then BattleServer's `FindWeakest` drops `SimdMode.Off`. Until then `Parts.KeptRowReason` gives
+        EECS055 its reason before `Kernel.Vectorize` runs (SystemGenerator.ForEachModel.VectorLoop and
+        EasyEcsAnalyzer.Performance.AnalyzeVectorLoop): replace that pre-check with the vector form. Also: lambda passes
+        (SystemGenerator.Lambdas.cs) do not get the pre-check, so a lambda reducing into a `[MinBy]` type reports
+        Kernel's own reason; and for a record's positional key Kernel.Reduced reports a property reason before the
+        kept row. The proof: `ReduceBenchmark.LowestGenerated` against `LowestHandWritten` (same class).
 - [ ] **`feat-later-halos`** (Tile.cs, TileSteps.cs, SystemGenerator.Cells.cs, Kernel.Wide.cs, Interleaved.Wide.cs):
       push halos for grid neighbors (D73, roadmap #push-halo: a chunk hands its changed edges to its neighbors'
       halos), and #160 wide rows on AVX2 (heavy math only, by the widelanes numbers).
