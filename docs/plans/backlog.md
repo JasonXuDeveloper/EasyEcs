@@ -1,731 +1,382 @@
 # Backlog: what is left before 4.8 (internal, not published)
 
 The single list of open work, kept in the repository so a new session finds it (AGENTS.md, "Plans that span sessions
-are committed"). Update it when an item starts, merges or is dropped. Designs live next to it (`inner-loops.md`);
-docs to-dos collected while code still changes live in `docs-todos.md`.
+are committed"). Update it when an item starts, merges or is dropped. Designs live next to it (`inner-loops.md`,
+`generated-text.md`, `native-columns.md`, `voxel-rewrite.md`, `finish-scan.md`); docs to-dos collected while code
+still changes live in `docs-todos.md`; the owner's hardware runs in `owner-m4.md`.
 
-Order: every feature (code) -> generated-members scan and paths -> exemplar pass, the refactor (`audit-code`) -> docs
-pass (`audit-docs`) -> bench sync -> `verify` -> master.
-At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`.
+Rewritten on 2026-11-07 from the audit sweep of f9faa23 (reports: plans, core, generator, analyzer, code, naming,
+perf, docs; kept in the session scratchpad, cited below as `core.md §1`, `perf.md P1`, ...). Every open item of the
+eight reports appears once below; the history of finished items is in git (this file before 2026-11-07) and their
+records in `docs-todos.md`.
 
-## Order (set by the owner, 2026-10-26)
+## Owner actions (dashboard and repository settings; agents cannot do these)
 
-Cluster pairs and compress first, then the rest in the order of "Next"; every SIMD path covers ARM64
-(`audit-vector-loops`, "Every vector form runs on ARM64 too"); generators stay fast while they read more source; docs
-last (`docs-todos.md` collects them meanwhile).
+- [x] Cloudflare Pages: `docs/plans/*` and `docs/owner-review.md` excluded from the build watch paths (done by the
+      owner, 2026-11-07).
+- [ ] Delete the remote branch `research-copy-asm` (the proxy refused it from a session), together with every other
+      finished branch, at the very end of the Finish chain, after master (Finish 6).
+- [ ] The hardware runs of `owner-m4.md`, after all code changes (marked "owner, after code" below).
 
-The owner (2026-10-26): every open item of this file is done, in this order, nothing left over: Running, Next,
-Later, then Finish (docs included). Each item runs through the skill that owns its work, and its agent's prompt
-names the skill:
+## Order (set by the owner)
+
+Every code change before any docs (2026-10-26: "先把代码全改完"); every open item done, nothing left over; each item
+runs through the skill that owns its work, and its agent's prompt names it:
 
 | Item | Skills |
 |---|---|
 | any change before it merges | `feature` (definition of done), `audit-naming` on every new name |
-| L1 / L3, L2 / L4, call inliner, inner loops, follow-ups, #160 | `feature`, `audit-vector-loops`, `audit-generator`; `audit-analyzer` for a rule or code fix |
-| G1, analyzer and generators by the official guidance, generated text cleanup, simplification | `audit-generator`, `audit-analyzer` |
-| prefetch gate, microarch M0-M3, borrowed ideas, #164, #157, #159, #153, quiet rechecks | `audit-perf` (+ `audit-vector-loops` for generated loops) |
-| flaky allocation test, exemplar pass, folder restructure | `audit-code` (+ `audit-core` for core code) |
+| vector loops, generated forms, generated text | `feature`, `audit-vector-loops`, `audit-generator`; `audit-analyzer` for a rule or code fix |
+| analyzer rules, code fixes | `audit-analyzer` |
+| core fixes and performance | `audit-core`, `audit-perf` (two rounds, 0 B, nothing slower) |
+| tools, CI, tests, samples, exemplar pass, directory move | `audit-code` |
 | merging an agent's branch | `audit` (triage and merge checks) |
 | docs pass | `audit-docs` |
 | bench sync, master | `verify` |
 
+At most 3 code agents at once; benchmarks serialize on `/tmp/bench.lock`. Lanes below are cut by the files they
+touch, so three can run side by side; within a lane, top-down. A lane marked "after X" starts when X has merged.
+Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on ARM64 too").
+
 ## Running (worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-`feat-inner-loops` (Later: inner loops WP0, WP2, WP3, WP5, WP5b, WP1, WP4, WP6b/c, WP8, with the generated code simplification inside WP0); `feat-later-small` (using alias, EECS031 nested loops, inliner check in CI, #153, quiet rechecks).
+- [ ] **`feat-inner-loops`** (`inner-loops.md`; Kernel*.cs, SystemGenerator.Loops/Elements/Cells/Lambdas.cs,
+      LambdaPass.cs, HandSimd.cs, the analyzer's Lambdas / Views / Forms areas). 25 commits past f9faa23: WP1 lanes and
+      unrolling, EECS099 for two parameters, counted sums as popcount, lambda + structural, lambda + view, WP4's
+      `ParallelFor` lambda over a buffer (aef32bb, LightLambda / HeavyLambda). Left on it: WP4's rest (then the
+      `audit-vector-loops` line "a ParallelFor job's Execute is compiled only in lambda form"), WP6b (EECS103 v2: tile
+      `Load128` -> cell form) and WP6c (v3: `VectorN.Create(span.Slice(i, n))` -> plain loop), each with its code fix;
+      WP8 (fixable-reason audit: scalar methods without a Warning in samples, benchmarks, templates, demo, fences;
+      `generator.md` "WP8" lists the candidates: `--x`, a singleton field written, narrow integer division by a
+      constant, lane sizes that differ); lambda passes fused (Fusion.cs, SystemGenerator.Fusion.cs); and the extra
+      items:
+      a. a cell method over a `Ground<TTile>` tile (was "a `Columns<TTile>` cell", inner-loops.md WP5);
+      b. masked AVX-512 tails for element loops (inner-loops.md section 6: try where runs are mostly tail);
+      c. WP7: HeightMap done; FireDamage per row (drop the `#pragma EECS103`, Zombies.cs:193), TileBenchmark cell
+         cases, and the demo: the owner chose (2026-11-07) to rewrite `MovementBatchSystem.Move` (and
+         `DragBatchSystem`) in the plain form; the page then compares the generated loop with `SimdMode.Off`
+         (docs-todos "Sweep 2026-11-07"); D132 / D133 drafts and D77's rewrite are in docs-todos;
+      d. the ranged blank fill (one fill per gap run, not `SpanHelpers.Fill` per gap) with WP5b (5): VoxelServer's
+         `Flow.cs` as cells, shipped only when not slower than as written (1.62-1.77 against 1.41-1.46 ms before);
+      e. EECS055's "a bool among N fields" reason fixable with the split fix (`analyzer.md` 1d, Kernel.cs:704-705;
+         a method using only the other fields gets the used-fields split);
+      f. one shared wide permute table (Kernel.Wide.cs `Table` memoized: `generated-text.md` 5's duplicate tables,
+         `copy-asm.md` 7's table CSE, Move3 18 against 12 table loads per vector);
+      g. the roadmap's vector-loop forms (D90): masked words in parallel methods (a `ForEachMaskedParallel` runner),
+         `Maybe<T>` in parallel methods and with narrow lanes, masked words of narrow lanes and of wide rows,
+         Atan2 / Asin / Pow lowerings, `Vector2.Clamp` (`generator.md` 8); each ships only where it measures faster;
+      h. `Interleaved.LoadTail`'s `Tail<T>.Rows` created in ThreadSetup, not lazily (docs-todos "fix-parallel-alloc").
+      At its merge: `Kernel.Unrolled.cs` (deleted at f9faa23) must not come back (`generator.md` 11).
+- [ ] **`feat-generated-members`** (Finish 1a; `finish-scan.md` Report 1, names approved 2026-11-07; PartGenerator.cs,
+      Parts.cs, Declarations.cs, Tile.cs, EasyEcsAnalyzer.Parts / Tiles.cs, the code fixes): `[Tile]` writing
+      `ITile<TKey>`, the shape and `Beside`, `Beside` inferred from an `int` key or `X` / `Z` (/ `Y`) members, an Error
+      for a 2D key named `(X, Y)`; `[UniqueKey(SlotsPerAxis = N)]` writing `Slots` / `SlotOf` (its doc comment says the
+      slots wrap); `[MinBy]` / `[MaxBy]` in the scalar form (doc comments and EECS064's message contrast them with
+      `[Min]` / `[Max]`); their rules (Info + fix for a hand-written `Beside` / shape, EECS068 extended to `[Tile]`,
+      Info + fix for hand `Slots` / `SlotOf`, an Error for a non-power-of-two, EECS064 / EECS065's fix for MinBy);
+      the EECS086 `GeneratedFor` fix (resets matched by type, not by name: `analyzer.md` 5); caching assertions and
+      GeneratorBenchmark.
+- [ ] **`feat-later-halos`** (Tile.cs, TileSteps.cs, SystemGenerator.Cells.cs, Kernel.Wide.cs, Interleaved.Wide.cs):
+      push halos for grid neighbors (D73, roadmap #push-halo: a chunk hands its changed edges to its neighbors'
+      halos), and #160 wide rows on AVX2 (heavy math only, by the widelanes numbers).
 
-Merged since the last update: `feat-page-faults` (a user's reservation faults its pages in with `MADV_POPULATE_WRITE`, resident windows skipped, copies left to first touch; the tick filling a reservation 2.2x at 1M and 3.9-4.4x at 16M with 4 KiB pages, 4.2-5.4x and about 11x with 2 MiB; Reserve 16M 1.29-1.32x; `[PageFaultDiagnoser]`; kept grown arrays reverted, GC settings measured and left to users; the VM's free-page reporting recorded in owner-review), `feat-owner-calls` (the owner's calls (a)-(f): `World.CopyEntities<TTag>` kept, 0.70-0.93x with 3 components, WorldSimulation and Migration unchanged; `TileColumnWalk` with `col.Store`, Laplacian loop 52 -> 34 instructions against 33 by hand, 1.01-1.07x of hand at side 32; EECS120, EECS121, EECS116's fix removes the commit and its buffer; (e) and (f) reverted with their causes), `feat-roslyn-guidance` (EECS033 in an analyzer of its own, implementation-only generator stages bound after their syntax provider, shapes per compilation: analyzers on the unit tests 16-20 -> about 10 s, IDE keystroke 401-803 -> about 290 ms, 32.7 -> 22.7 MB), `feat-later-memory` (#164 huge pages for sized arrays, faulted on first touch: 16M chases 1.28-1.67x, Create and Grow within noise; x64 tables as vector literals, Native AOT Move2Gaps / Move3Gaps / Seek 1.13-1.44x; the Step / Move2 100k "regressions" were physical page placement, launchCount 6 rule in audit-perf), `feat-borrowed-rest` (item 7: snapshots stream large copies past the LLC, Capture 1.20-1.26x / Restore 1.11-1.20x at 4M rows, resizes stay memmove; roofline in audit-perf), `feat-field-gaps` (item 8c: `tile.Restart` and `tile.Sweep`, names kept by the owner on 2026-10-30; Linger showed 1-3 B per op at 256 springs / Hop 1: owner (2026-10-30) "需要修复，不应该有分配", fixing on feat-later-small), `feat-small-next` (rename leftovers, EECS033 across assemblies, recorded switches), `feat-generator-cost` (G1: IDE body edit 240 -> 80 ms, 29 -> 16 MB; runners and [EntityMethod] unchanged at runtime), `feat-tiles-rest` (items 11, 12a, 12b: tile pools sized at load, EECS117's fix), `feat-deferred-consume` (item 9, G10: `[ForEach(MaxRows = N)]`, EECS118 / EECS119; the owner chose `MaxRows` and `World.ForEachCollected` on 2026-10-30), tile loads checked once per column loop (`feat-tile-reads`: the generator intercepts `c.Load128 / Load256 / LoadVector(x + k, dy, dz)` in a proven column loop, no public API; Laplacian column loop 61 -> 47 instructions, blur 42 -> 36; Laplacian ping-pong 0.92-0.99x in cache, Side 512 within the machine's noise, Blur9 0.94-1.01x, 0 B; the per-tile frame half measured apart and reverted, the Laplacian 32x32 gap to hand left in owner-review), switches and patterns as lane masks (`feat-switch-masks`, 5f0a52f: item 8j, Grade 0.022-0.133x scalar, 0 B), constructors and helpers of other assemblies (`feat-foreign-bodies`, 020813b: item 8g, recorded as hidden assembly attributes, GeneratorBenchmark equal to base; ARM64 and the WebAssembly demo with an UnsafeAccessor static field left for the owner's M4 run), ArriveRows kept out of its callers (`feat-arrive-runs`, cb65172: Move 0.82-0.84x, D136), body stages catch their exceptions (`feat-stage-catch`, c747fe6: chases, pair cutoffs and fusion sides fall back with a reason; EECS055 names a switch), symmetric pair methods (`feat-symmetric-pairs`, 685bbc2: half lists inferred from
-`ref` + `[Neighbor] ref`, one pair at a time; `Parallel = true` runs 256-row chunks colored at distance two, about 2x
-at 4 threads, same bits on any thread count, floats within rounding of the serial pass; per-chunk buffers and the
-vector loop measured and dropped; PairsBenchmark GeneratedParallel rerun on the owner's M4: no case slower past
-the noise, docs-todos "feat-symmetric-pairs"), ghost rows in MultiWorld (`feat-ghost-rows`: 4 zones side by side, border units
-copied as `Ghost` rows each update, crossings moved with `MoveEntities`, checked against one world; a
-`CopyEntities<TTag>` proposal in `owner-review.md`, not built; CI now checks the sample's output), Emitted<T>'s segments (`feat-emit-segments`, 4925b09: the chunks' lists kept as
-segments, joined only for a span read or a write; EmitParallel 1.4-2x, a `[Drain]` reader about 1.2x, 0 B;
-generator unchanged), fewer copies (`feat-fewer-copies`, 837c956: incremental Capture / Restore, Rollback
-with 16 writes 3.2 ms -> 36 us and BufferSnapshot Restore 78 -> 1.2 us; sorts gather into a spare column and swap it in,
-1M wide rows 77-88 -> 71-81 ms; `FillPool` exact on helper threads, so VoxelServer fills its field buffers once, not
-twice), the generator crash and reason texts (`fix-kernel-foreign`: metadata backing
-fields read as their properties, a translation exception becomes the method's reason), the L2 leftovers (`feat-pairs-2`: parallel pairs, `[Neighbor] ref`, nested-walk
-rewrites, neighbor lists by cost, `Reduce<T>` / `Mut<T>` in pair methods, the cluster renames; the owner's M4 run of
-PairListsBenchmark is open), the zombies' distance field (`feat-zombie-field`, 9c73602), CI fixes (`fix-ci`, ae9d525: Restore gives rows written since the capture their own
-copy on the owner thread, VoxelServer 0 B again; DocCheck 0), L1 ordered rows + L3 compress (`feat-locality-core`), the pair form
-(`feat-locality-pairs`), vector loops through the user's own calls (`feat-call-inliner`), the prefetch gate per form
-(`feat-prefetch-gate`, 216e29a: row chases, fused walks, buffer chases and `DestroyEntities` past the L2; probes and
-vector loops past the last-level cache); generated code tuned for the machine (`feat-microarch`, 9161797: paired
-accumulators for float Min / Max / Fast sums, Energy 1.43-1.47x and Spread 1.89x; the tables initialized at module
-load, LateHoles 2.7-4.5x; masked skip, unrolling, hoisting and branchless rows measured and dropped; streaming stores
-a prototype, `owner-review.md`).
+## Lanes (not started)
 
-The owner's order (2026-10-26): every code change before any docs (generator cost and ARM64 parity included).
-CI runs the unit tests on ARM64 (b1dbdb0).
+### Lane 1: core (src/EasyEcs.Core runtime; the query enumerator templates of ArityGenerator.cs) — 20 items
 
-## Next, in this order
+Starts now; items touching `TileSteps.cs` or `Pairs.cs` wait for feat-later-halos. C12 / C13 / C14 edit
+ArityGenerator.cs: not beside lane 4's generated-text steps.
 
-- [x] **Rename leftovers** (`feat-small-next`; the `ParallelFor*` methods were `ParallelRunnerBenchmark`'s, now `DotNetParallelFor*`) (from feat-renames, internal names, no approval needed): the benchmark methods measuring
-  .NET's `Parallel.For` (`ParallelForEachBenchmark.ParallelFor*`, `SumParallelFor*`, `MassParallelFor*`) take the
-  `DotNet` prefix like `ParallelForBenchmark`'s baselines; `ParallelForEachBenchmark` reads close to
-  `ParallelForBenchmark` (proposal: `ParallelPassBenchmark`); `EmitBenchmark.EmitParallelThenRecords` ->
-  `EmitParallelThenDrain`; the generated `{Owner}EntityMethod` class -> `{Owner}EntityMethods`. Site keys in
-  `docs/src/data/bench.json` move with them.
-- [x] **EECS033 across assemblies** (`feat-small-next`: the bound member must sit in the component's own generated class, `GeneratedFor`; five cases reported before) (found by 8g): it suggested `entity.Spot` for a library component while the
-  program declared its own `Spot`; it matches a component by name across assemblies, and the fix compiled against
-  the wrong type. Match by symbol; a test with two same-named components in two assemblies.
-- [x] **Recorded bodies with switches** (`feat-small-next`: worked as merged, now pinned by `ForeignBodyTests` and two generator tests; no code change) (after the 8j + 8g merge): the inliner inlines switches now; check that a
-  helper of another assembly with a switch expression is recorded and vectorizes, a `ForeignBodyTests` case.
-- [x] **Flaky: `PrefetchingProbesBuffersWalksAndLambdasAllocateNothing`** (fix-flaky-alloc): on-stack replacement
-  compiles on the measuring thread. In the full suite the tiering backlog keeps the four probe jobs' loops at Tier0
-  past the 50 warm-up frames; their OSR compiles land in the window, 168 B each (one compile per job, 672 B in every
-  failing run; 6 failures in 10 instrumented AVX2=0 runs, 1 in 2 normal runs), and none happens with
-  `DOTNET_TC_OnStackReplacement=0` (3 of 3 clean). Fix: `Allocations.WarmUp` runs until the JIT has settled (no
-  compile in the process for 40 runs and 0.5 s). Decision draft in `docs-todos.md`, "fix-flaky-alloc".
+- [ ] **C0. Re-measure the stale bench.json rows before any A/B** (`perf.md` §0 and §2): SparseBenchmark
+      PassOverTheFew (fixed by fa2770f the same day), TileStencil Blur9 / Laplacian, ParallelFor Light, Reduce
+      Sum / Mass, Emit 10k, ParallelQueryComparison (then `tools/inlining.sh` and jitdisasm of `Waypoints.Steer`'s
+      job if still behind Arch / Friflo), OperationBenchmark EntityBatch (batch form slower than its own per-row form:
+      count runs per pass, read the batch job), SingleEntityBenchmark Structural + Filtered (`--launchCount 6`).
+      Proof: the numbers; a case still losing becomes its own item here.
+- [ ] **C1. `RemoveTypes` roots the removed types** (`core.md` §1): `_orderRequests`, `_tileSteps`, `PairState`'s
+      clusters and lists, `_columnSpares` survive `ForgetTypes`; `Mentions` ignores `_orderRequests`, so a reused bit
+      can get another type's `RowOrder`. Files: World.Order.cs, World.Types.cs, TileSteps.cs (after halos), Pairs.cs,
+      Archetype.cs. Proof: `UnloadTests` with an ordered component, a pair method and a tile method (the
+      `WeakReference` dies), a reused bit gets its own order.
+- [ ] **C2. `PairState` keeps a record per table forever, found by a linear scan** (`core.md` §5): drop entries of
+      tables no longer matched, on `TrimExcess` / `RemoveTypes` (shared with C1); a slot per table instead of the scan.
+      Files: Pairs.cs. Proof: a `NeighborTests` case cycling 100 `GroupBy` values; NeighborBenchmark with 64 groups.
+- [ ] **C3. Bulk walks bump `StorageVersion` when nothing moved** (`core.md` §2): `WalkDown` (World.Bulk.cs:171)
+      bumps only when a word op flipped presence. Proof: a `SnapshotTests` case (the second `Capture(into)` after a
+      `SetAll` stays incremental); a `SetAll` + `Capture(into)` per tick benchmark, 0 B.
+- [ ] **C4. The free-id list not sized to the initial capacity** (`core.md` §3): `_freeIds = new int[Meta.Length]`,
+      `Math.Max(free, Meta.Length)` in `Restore`. Files: World.cs, World.Snapshots.cs. Proof: a 0 B test destroying
+      1,000 of a reserved default world, and after a `Restore`.
+- [ ] **C5. Key reservations for a missing index add up without bound** (`core.md` §4): keep the largest, reset in
+      `RemoveTypes` and `TrimExcess`. Files: World.Indexes.cs. Proof: `Allocations.Of` around the first index after
+      100 `Reserve(prefab, 1000)`.
+- [ ] **C6. `Reserve(prefab, count)` takes a negative count and overflows** (`core.md` §6): throw like
+      `ReserveBuffers`, compute in `long`. Files: World.cs. Proof: `Assert.Throws`; changelog Fixes line (docs pass).
+- [ ] **C7. `World.Entities` yields dead handles after the records grow** (`core.md` §7): read `_world.Meta` in
+      `MoveNext`. Files: World.cs. Proof: a test creating past capacity in the loop, then destroying ahead.
+- [ ] **C8. `Dispose` does not return buffer lists to their pools** (`core.md` §8): `ReleaseBuffers` per table.
+      Files: World.Systems.cs, World.Archetypes.cs. Proof: 0 B first writes in the next world.
+- [ ] **C9. ThreadSetup's step list never shrinks** (`core.md` §9): compact in `Forget`. Files: Workers.cs. Proof:
+      `WorkersTests`, 50 load / unload cycles bounded.
+- [ ] **C10. `EmitPool` allocates under its spin gate** (`core.md` §10): allocate after leaving it. Files: Emit.cs.
+      Proof: the Emit 0 B tests.
+- [ ] **C11. P1: helpers chosen on inflated work** (`perf.md` P1): a probe run alone every period while wide,
+      `perItem` learned from alone runs; P1b: a merge pass under the floor runs its 16 chunks on the caller. Files:
+      World.Parallel.cs. Proof: ParallelFor, Reduce, ChunkRows, Emit, ParallelPass, ParallelRunner, ParallelSystems,
+      SystemDispatch, PairsBenchmark GeneratedParallel, TileActive Sparse 4 threads, BattleServer, WorldSimulation,
+      MultiWorld (`--launchCount 6` for the parallel classes); a decision record extending D22 / D130.
+- [ ] **C12. P3: a query over tracked components stamps a word ahead, not a call per row** (`perf.md` P3). Files:
+      ArityGenerator.cs (enumerator template), Query.cs. Proof: ChangeTrackingBenchmark QueryTick / Tick,
+      MicroBenchmarks QueryIterate / QueryWrite (controls), tests of `[Changed<T>]` after a loop (full, break,
+      structural change).
+- [ ] **C13. P4: the query enumerator skips the id load and tombstone test on tables without holes** (`perf.md` P4),
+      one branch with C12. Proof: MicroBenchmarks Query*, ToggleComponent, SparseBenchmark QueryTheFew; Tier1 listing.
+- [ ] **C14. The frame split of `World.Masked` / `Batches`** (#157's last row: the per-table preamble apart from the
+      loop; ceiling about 5 ns of a 20 ns system): jitdisasm of `Masked` on Plain first. Files: ArityGenerator.cs
+      templates. Proof: SystemDispatchBenchmark, the #157 classes; keep or record.
+- [ ] **C15. P5: a retired entity flips bits in place** (`perf.md` P5): rows of a cleanup mask created in the table
+      with the `Retired` column. Files: World.cs, World.Archetypes.cs, World.Indexes.cs; D57 updated. Proof:
+      CleanupBenchmark (106 -> ~60 us), DestroyLogBenchmark, a `Without<Retired>` reader case, the headline worlds equal.
+- [ ] **C16. P6: unsized resizes uninitialized** (`perf.md` P6), after `[PageFaultDiagnoser]` and Tier1 of `Resize`
+      show the clear costs. Files: ComponentInfo.cs, Archetype.cs. Proof: ColdCreateComparison PerEntity,
+      MicroBenchmarks CreateAddDestroy, PageFaultBenchmark Grow, FullCopyBenchmark Grow.
+- [ ] **C17. P7: `Removed<T>` from a log of removals** (`perf.md` P7, low). Files: Archetype.cs, a log file, Query.cs.
+      Proof: RemovalComparison, removal writers' cost.
+- [ ] **C18. P8: integer tuple keys hashed by bytes** (`perf.md` P8, low). Files: ValueIndex.cs. Proof:
+      IndexBenchmark LookupUnique, ValueQueryComparison, IndexComparison.
+- [ ] **C19. The core's unmanaged columns on mimalloc** (owner, 2026-11-07: option (b); `native-columns.md`), last in
+      the lane and after Finish 1b's move: columns off `Array`, Dispose and a finalizer, `GC.AddMemoryPressure`, the
+      NuGet `runtimes/` binaries and the pinned-heap fallback. Proof: `native-columns.md` section 4 (nothing slower,
+      gen2 collections during creation counted); the M4 part is "owner, after code".
 
-- [x] **Renames** (owner, 2026-10-28, naming audit; all unreleased, so no migration, no alias, no code fix):
-  `[ForEachRecord]` / `IForEachRecord<T>` -> `[Drain]` / `IDrain<T>` (zh 排空), `[ForEntity]` -> `[EntityMethod]`
-  (zh 实体方法), `world.ForParallel` -> `world.ParallelFor`. Done on `feat-renames` (D141), waiting to merge; the
-  docs pass of the record pass (`docs-todos.md`, feat-generator-gaps) uses the new names.
+Not to build here: a generated countdown timer (`[Expires]`): the owner kept timers hand-written (2026-11-07,
+owner-review "Countdown timers"); its lesson is a docs to-do.
 
-Agent slots as they free (at most 3): 12c + 12d, 11 + 12a + 12b (one tile branch: padded storage, ping-pong, zero
-rows, edges found while stepping), 8e and 12e merged; 8f + 8g (one generator branch) start once the tile branch merged (they edit Kernel.cs,
-SystemGenerator.cs and Symbols.cs too), then 9, 10, 4, 7, Later, then Finish.
-The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a).
+### Lane 2: analyzer (EasyEcsAnalyzer*.cs, Symbols.cs checks, src/EasyEcs.CodeFixes, AnalyzerTests / CodeFixTests, GeneratorCorpus's filter) — 15 items
 
-1. [x] **L2: the generated pair form** (merged e9c3db8, `feat-pairs-2`; the owner's M4 run of PairListsBenchmark done 2026-10-28, below) (`locality.md` 3.2, 3.4: the owner's rule that users' plain code adapts by itself: order inferred from the pair method, nested walks rewritten, hand-written grids get a code fix): the user writes what one pair does; the generator writes
-       the 8x8 (x86) / 4x4 (ARM64) cluster-pair kernel over L1's blocks with cutoff and self masks, and a nearest form
-       (`NearestPlayer`, zombie targeting). Right after WP0b merges. Then L4: examples rewritten in it.
-       The spread map (nearest 1.06-1.31x, bar 1.5x; owner 2026-10-27: a bar is not a ship gate, a gain beyond the noise
-       with nothing slower ships): re-measure once L1 sorts on its cadence,
-       with a flat grid of blocks searched in rings instead of the prototype's box tree; the nearest form stays in L2.
-       The owner's call on Lookup gathers under `SimdMode.Auto` (2026-10-26): once L1 and WP0b have merged, re-measure
-       the micro-adaptive choice (walk vs rows, D131 Considered) with L1's ordered rows and the lookup job under 32
-       IL locals; on by default only if no case is slower. No per-entity table id.
-       ARM64 (owner's M4 run, `locality.md` 6.1a): crowded maps 2-8x, sparse maps only 1.1-2.1x while neighbor lists
-       reach 2.5-3.4x: L2 ships clusters there too (faster is kept, owner) and optimizes: 4-row blocks and the
-       neighbor-list form on ARM64, picked by density; never a slower case (no re-sort every tick on sparse maps).
-       **Built on `feat-locality-pairs`** (`locality.md` 6.6): `[Neighbor]`, the pass, the generated order / job / vector
-       loop, EECS105-107, cutoff per row, two kinds of entity, ties and the keep-target hint (merged; `[Neighbor]` approved
-       by the owner, 2026-10-27). **`feat-pairs-2`:** writes to j (`[Neighbor] ref`), parallel pair passes, the EECS107
-       fix and nested-walk rewrites, lists of neighbors picked by cost (Auto never slower; the owner's M4 run, 2026-10-28, one round, 0 B:
-       Auto within the error of the best choice in all 24 cases. Generated (clusters): Auto = Off everywhere, and lists
-       On are 1.7-3.2x slower (10k crowd 1,070 / 1,066 / 3,440 us, 10k sparse 482 / 499 / 894, 100k crowd 17.4 / 17.5 /
-       41.0 ms, 100k sparse 7.97 / 8.11 / 13.6 ms for Auto / Off / On), so Auto keeps clusters on ARM64. GeneratedRows:
-       the three within 4 % (10k crowd 3,579 / 3,551 / 3,452 us, inside Auto's 96 us error); lists never win clearly on
-       the M4), `Reduce<T>` / `Mut<T>` in pair methods (GA1); measured and dropped: Lookup gathers under Auto (slower with
-       many target tables), the spread-map grid of clusters (faster spread, slower packed), the cluster prefetch below
-       (slower at every size). L4 (examples) moved to the finish phase (docs-todos).
-       Follow-up after L2 merges (owner, 2026-10-27: "cluster pairs + prefetch, faster?"): prefetch the j block of the
-       pair `k` pairs ahead (its rows' lines of every column the pair method reads) behind a `CacheSizes`
-       gate as item 6 (which one, L2 or last level, measured per form as item 6's gate per form was); i blocks are
-       sequential and need none. Expected to pay only when the ordered table is past the
-       last-level cache (this machine's L3 is 260 MiB: PairsBenchmark at 4M-16M rows, plus a forced-on column just
-       under the cache); ships only if faster there and never slower in the cache (`audit-perf`, two rounds, 0 B).
-       Measured on `feat-pairs-2` (a scratch PairPrefetchBenchmark, 100k-16M rows): slower everywhere, 16M included; dropped.
-2. [x] **ARM64 parity of the generated forms** (merged 186c84d): LD2-4 / ST2-4 for multi-field components, NEON TBL /
-       TBX for wide components (a gate per form), BitMask in registers, the `arm64` CI job asserting loop lines.
-       Owner's M4 run (default job, one round): SteerGenerated 2.07x faster than SteerScalar at 1k, 1.55x at 100k;
-       GlideGenerated 1.87x / 1.63x; 0 B: the ARM gate admits only forms that pay. Not yet known whether it is too
-       strict: a rejected shape (the test's `Brake`, 8 words, 3 fields) gets a benchmark pair with the gate forced
-       open, and the gate loosens if that form wins on the M4. Gathers stay rows (D131); compress comes with L3. The 16-word locals bug (a 3-field gather's
-       `__Loop512` of 34 IL locals) is fixed on `feat-prefetch-gate` (the loop cut to 32; past it the 512 form is dropped).
-3. [x] **Vector loops through the user's own calls** (merged, `feat-call-inliner`) (owner: users should not have to avoid helpers): today a call
-       into user code keeps the method scalar (EECS055 "it calls X.Y"); only Math, the generated members (SetX / IsX
-       ...), Emit.Add, Lookup reads and view members (Kernel.Views.cs, inlined from source, depth 8) are translated.
-       Extend the view inliner to any callee whose source is in the compilation: static helpers, extension methods,
-       component instance methods and properties with bodies (no recursion, no ref out of the row, no lambdas; an
-       early return becomes a mask). Calls into other assemblies, virtual / interface calls stay scalar with that
-       reason. Generator cost (the owner's condition): callee bodies read only in the implementation-output pipeline,
-       once per callee per compilation (cache keyed by the method symbol), syntax-first rejection before any bind, no
-       compilation copy per caller (Kernel.Views copies it today: measure first, IDE and build cases).
-4. [x] **G1** (merged; G6 researched, its option in audit-generator) (generator cost, the part phase 2 left): ForEachModel split into a declaration model and
-       implementation-only body facts; SystemUpdates without Collect; SetFusions reruns; Systems / SystemPlaces share
-       one FAWMN; Kernel's GetSemanticModel calls. G6 (C# 14 extension lookup cost) research only.
-5. [x] **Generated code tuned for the machine** (merged 9161797, branch `feat-microarch`) (`microarch.md`): M0 llvm-mca over every kernel shape, then M1
-       accumulators / unrolling / hoisting, M2 branchless scalar rows / mask tests / "make it a tag" rule, M3
-       prefetch / streaming stores.
-6. [x] **Prefetched lookup chases with a size gate** (`feat-prefetch-gate`: row and vector forms; `feat-prefetch-all`,
-       merged at bbd5c8a; its SVE path is first proven by the arm64 CI job, qemu could not: index probes, relation targets, parallel row methods, fused walks and pairs, lambda passes,
-       `World.DestroyEntities`' id list, SVE's PRFB on ARM64; `borrowed-ideas.md` 5, item 1; decision drafts and docs
-       to-dos in `docs-todos.md`, "feat-prefetch-all"). The owner's rule "a faster case ships, a slower one never":
-       16M 1.28-1.77x across the forms (a shared key's Count 1.04-1.19x), in the cache today's code. A pass prefetches
-       `k` rows ahead (record, then row; a probe's slot or bucket, then entry; k = 8 rows / 16 for vectors) only when
-       the memory it reads is past the last-level cache (`CacheSizes.LastLevel`; some forms past the L2 since, below;
-       read once per process as the GC reads it: Windows `GetLogicalProcessorInformationEx(RelationCache)`, Linux the largest sysfs `index*/size` then
-       `sysconf(_SC_LEVEL3_CACHE_SIZE)`, macOS `hw.l3cachesize` else `hw.perflevel0.l2cachesize`; unknown means off).
-       It reads and prefetches only where a prefetch exists (`Prefetching.IsSupported`: x86 SSE, ARM64 SVE).
-       Left, the owner's: `LookupChaseGateBenchmark` and the prefetch classes on a 32 MiB-LLC x86 box; approve the hidden names `LookupExtensions.Probes`
-       and `LookupExtensions.PrefetchKey`; a gate per form on the L2 (`owner-review.md`).
-   The owner's answers (2026-10-27): the hidden names `LookupExtensions.Probes` / `PrefetchKey` stay; SVE's PRFB stays
-   and the owner runs the CI workflow by hand on the work branch (its arm64 job is the proof; if it fails,
-   `Prefetching.IsSupported` keeps x86 only).
-   - [x] **A gate per form** (branch `feat-prefetch-gate` at 850a6b1, worktree `/workspace/wt-gate`, ready to merge;
-     `borrowed-ideas.md` item 1, "A gate per form"; decision draft and docs to-dos in `docs-todos.md`,
-     "feat-prefetch-gate: a gate per form"): `CacheSizes` (was `LastLevelCache`) reads one core's L2 like the LLC
-     (sysfs level-2 index then sysconf, `GetLogicalProcessorInformationEx` level 2, `hw.perflevel0.l2cachesize` /
-     `hw.l2cachesize`; unknown: the LLC gate). Past the L2: the row form's chases (one thread, parallel, fused walks,
-     buffer elements, lambdas; `Lookup<T>.PrefetchesPastL2`) and `DestroyEntities`' id list: 1.08-2.0x at 262,144 and
-     1.2-1.57x at 1M, Auto equal to Off inside the L2. On the last level: probes (parallel ones too: the owner's list
-     had them on the L2, measured a wash or 1.16x slower at 262k-524k, reverted) and vector loops' chases. The owner's
-     machines: `EASYECS_BENCH_ENTITIES=<sizes between L2 and LLC>` over the prefetch classes.
-   ARM64 without SVE (the M4; owner, 2026-10-26: "is there another instruction or the TLB instead?"): .NET 10 exposes
-   no PRFM (only SVE's PRFB/PRFD, and the M4 has SVE in streaming mode only), so the candidate is a plain load issued
-   ahead (`Locality/Chase.cs` `LoadAhead`: the record of row i + k loaded into a ring, the row touched from it k / 2
-   rows later). Dropped: 1.7x slower than the plain rows on x86 at 16M, and the owner's M4 run (2026-10-27) is slower at
-   every size (1.7-1.9x at 16M, 2.3-3.0x at 1M, 4.4-7.2x at 1k; numbers in `borrowed-ideas.md`); its decision record
-   goes in with the docs pass. On the M4 the gate's Auto equals Off, as it should with no prefetch to issue.
-   Not taken: a native PRFM stub (a native binary per RID in a managed package; a call per prefetch), Apple's
-   data-memory-dependent prefetcher (keys on pointer-like 64-bit values, which an `EntityId` is not). TLB: macOS
-   arm64 keeps 16 KiB pages with no user superpages; Linux arm64 and x86 get huge pages through #164 (NativeMemory
-   2 MiB + madvise). The layout answer works everywhere: L1's readers ordered by target halved the 1M chase without
-   any prefetch.
-7. [x] **Borrowed ideas** (`borrowed-ideas.md`; done on `feat-borrowed-rest`, waiting to merge): ghost rows between
-       worlds in MultiWorld (feat-ghost-rows, merged; VoxelServer's two region worlds with `MoveEntities` at the
-       border belong to Finish step 2a, owner 2026-10-27: "都做呗，voxelserver和multiworld都做"); streaming stores for
-       large copies (Capture / Restore stream a table's columns past the last-level cache: 1.20-1.26x / 1.11-1.20x at
-       4M rows of 80 bytes; resizes a wash, left plain; borrowed-ideas.md section 5, item 5); roofline as `audit-perf`'s
-       measuring method (RooflineBenchmark, worked examples). Timer wheel and NUMA dropped by the owner, vertical batch
-       probes dropped after the 16M re-measure: their records are in `docs-todos.md`, "feat-borrowed-rest", for the
-       docs pass. Scalar group prefetching of probes is built in item 6 (index probes).
-8. [x] **VoxelServer: zombies follow a distance field** (merged: step + commit form, the in-place form dropped for an
-       intermittent allocation; numbers in docs-todos "feat-zombie-field") (approved by the owner, 2026-10-27: "可以做，排进去"). Today a zombie walks the straight line to its target and sticks at walls and the bots' pits. One
-       field per chunk (`DynamicBuffer<PathCost>`, 16 x 16 over the surface height map, a step up of one block
-       walkable) seeded by the players' cells, relaxed as a tile shader: each step sweeps its own tile to settle
-       inside it, red-black tiles so the front crosses two chunks a tick, `ChangedEdges` sleep where no player
-       moved. All zombies read the gradient of one shared field (nearest player for free; ZombieTargetSystem keeps
-       the target for the attack). Proof: TickBenchmark before/after at 50 and 2,000 players, zombies stuck
-       before and not after, grids page and VoxelServer page sections.
-8b. [x] **Bug: a vector loop over components from another assembly crashes the generator** (found by feat-zombie-field,
-       2026-10-27): `Kernel` throws `IndexOutOfRangeException` in `StructLocalLane` (`Kernel.Struct.cs`) or `Resolve`
-       (`Kernel.Lookups.cs`), which drops every generated file of the project (hundreds of unrelated CS7036 / CS0122;
-       CS8785 in the log). Repro: VoxelServer's old straight chase in a test project that references the sample
-       (scratchpad `TmpRepro.cs.txt`, copy it into the test). Fix, regression test, and no generator exception may ever
-       drop the other files (catch per method, report it). First in line.
-8c. [x] **Gaps the distance field met** (feat-zombie-field report; each through `audit-generator`'s rule: build it
-       when it saves users lines or thought). Branch `feat-field-gaps` (unmerged), per gap:
-       - a 2D tile beside a 3D one on one key: answered by `Columns<TTile>` (feat-tiles-pingpong; Tile.cs,
-         `Tile<Scent, Columns<Chunk>>`, test `AGroundTileOverAChunkGridReadsTheChunksRocks`);
-       - colors without generic systems: answered by `[GaussSeidel]` (colors from the key's parities, `ITileColors` /
-         `TileColoring`, EECS117 with its fix); CS8968 stays only for per-color systems written by hand, which no field
-         needs any more;
-       - EECS059 where a checkerboard makes the write safe: answered (the in-place write is `ref Tile` + `[GaussSeidel]`
-         + `Write(row)`, which `Symbols.LookupProblem` does not report; a `Lookup<T>` of the swept cells still is, rightly);
-       - a read-only tile, settling copied into a stackalloc, halo rows: answered by `[GaussSeidel]`'s in-place texture
-         (`Write(row)` writes the texture, the generated `do ... while (Sweep)` repeats the method, halo rows are
-         `At(row).Load128(x, 0, ±1)`); **built** what the scent's settle still lacked: `tile.Restart(value)` (settle
-         from nothing, not from the last values: no count to infinity) and `tile.Sweep` (the sweep's number: rows in
-         turns of direction, setup once per step), EECS115 for both on a tile no sweep steps; names provisional
-         (owner-review "Restart and Sweep"). **Dropped**: a lane-shift helper (owner-review);
-       - `FillPool` and per-thread lists: answered in 12d (`BufferStore<T>.Fill` adds 2 x 32 per thread with lists of
-         its own, a later thread adds its share in `Joined`).
-       Numbers (TileRestartBenchmark, us, 2 rounds, 0 B; Restart / Turn / Linger, Hand by hand without sleeping
-       2,300-4,100 at 1 thread): Springs 4 Hop 8, 1 thread 716-800 / 474-479 / 1,109-1,167; 4 threads 302-351 / 245-274 /
-       506-534; Springs 256 Hop 8, 1 thread 1,960-2,006 / 1,798-1,997 / 2,412-2,520; Springs 4 Hop 1 284-295 / 199-200
-       / 302-327; but Springs 256 Hop 1 (sources creeping a cell, most plates awake) 1,064-1,126 / 1,069-1,104 / 937-1,005:
-       restarting re-settles what was nearly right, so Restart is the user's choice, not a default. Later rewrite of the
-       sample (voxel-rewrite.md step 6) drops: Scent.cs 16-18 (NextScent), 54-72 (Ground), 83-89 (Red, Black);
-       Step.cs 133 generic, 144-149 (color parameter), 159-166 and 175-177 (the stackalloc copy of the halo), 199-228's
-       loop and change test (one sweep per call), 253-254 (ChangedEdges, ScentStep), Settle.cs whole; Chunks.cs 45
-       `new Ground(pos)`, 47-48 RemoveRed / RemoveBlack, 57 NextScent's SetCount; Program.cs 114-117 (four systems ->
-       one), 175 (NextScent's pool), 192-194 (Ground, NextScent, ScentStep, Red, Black in the prefab); Hunt.cs 123
-       `With<Ground>` -> `With<Chunk>`. It needs: seeds as a cell buffer (a `Lookup<Footprint>` parameter, like the
-       `in Hunt` singleton, keeps every tile stepping: `SystemGenerator` lets a step sleep only beside Entity, Scratch,
-       tiles of its grid and tracked components), `scent.Restart()` and turning sweeps through `scent.Sweep`; Trail
-       written in each sweep or by a reader of the settled field (measure both).
-8e. [x] **Symmetric pair methods** (`voxel-rewrite.md` GA4; owner, 2026-10-27: "加，做 GA4"): each unordered pair
-       visited once and both sides written (Newton's third law in MD codes: half neighbor lists), for item merging in
-       VoxelServer and collisions; today a pair writing the neighbor's component it also reads of its row is refused.
-       With or after item 1 (the pair agent), `feature` + `audit-vector-loops`: bit for bit against the per-pair walk,
-       deterministic order, parallel only where the halves cannot race, 0 B, analyzer reasons and naming (`audit-naming`).
-       Status: merged (`feat-symmetric-pairs`): inferred from `ref` +
-       `[Neighbor] ref` of one component (`IPairJob.Symmetric`), half lists, one pair at a time; in parallel
-       (`Parallel = true`, owner 2026-10-28) chunks of 256 rows colored at distance two, color by color (both designs
-       built and measured, per-chunk buffers dropped); its vector loop measured and dropped (docs-todos
-       "feat-symmetric-pairs").
-8d. [x] **Bug: EECS055 reason text** (`voxel-rewrite.md` GA7): VoxelServer's Chase reports `local 'cell' is a ??`
-       (the type name missing); Float reports `LookupExtensions.TryFind, defined in another assembly` where the reason is
-       that a key probe has no vector form. Fix the text, a test per case.
-8f. [x] **The other body stages catch their exceptions** (fix-kernel-foreign's report; built on `feat-stage-catch`,
-       waiting for merge): `Chases.Of`, `PairModel.Create` and `FusionSide.Of` dropped the project's output when they
-       threw. Two real crashes fixed at the root: reads through a local function's (or a lambda's local function's) own
-       Lookup taken as the method's chases (their ordinals past the method's parameters), a partial pair method's
-       singleton cutoff (the implementing part's parameters). Each stage now catches what is left and falls back to
-       the plain form with a reason the analyzer reports through the same call (`Kernel.FailedTo`): no prefetching
-       twin (EECS055 / EECS097), every pair (EECS106 through `PairForm.ReadCutoff`, which now also reports a cutoff the
-       pass cannot compute), no fusion (EECS093). EECS055 names a switch expression and, over a call on a struct
-       (VoxelServer's Chase), the split. Docs to-dos in docs-todos "feat-stage-catch".
-8g. [x] **Constructors and helpers of another assembly, read from what its generator recorded** (branch
-       `feat-foreign-bodies`, unmerged; owner, 2026-10-28: "有没有别的办法解决这种问题呢", "还可以搭配 unsafe accessor
-       之类的吧"): `new Position(x, y)` of a contracts assembly's component was an EECS055 warning (metadata has no
-       constructor body; reading IL fails on reference assemblies, guessing from a record's shape is wrong when a
-       positional property has an initializer). The declaring assembly's generator (Recorder.cs, source output, one
-       file per source file, read once per syntax tree) writes hidden assembly attributes of EasyEcs.Core, which
-       reference assemblies keep: `[ConstructorFields(ctorId, members...)]` per public constructor of a public struct
-       (or `Reason`), `[InlineBody(memberId, body, accessors...)]` per small public helper taking and returning values
-       (static and extension methods, struct members, accessors with a body; names qualified, `this` as `@this`,
-       hidden fields as placeholders, internal static helpers as local functions; or `Reason`). The referencing
-       Kernel (Recorded.cs, cached per assembly symbol) binds a recorded body in a speculative model like a source
-       helper; a hidden instance field of the row's component is a lane, a hidden static readonly field is read
-       once per run through an `[UnsafeAccessor(StaticField)]` extern of the job (`[UnsafeAccessorType]` for an
-       internal owner); a mutable hidden static and a hidden field in a pair method keep the method scalar.
-       An assembly without records keeps "declared in another assembly". Fixed on the way: an expression-bodied
-       constructor (`=> _x = x`) was "does more than set fields"; a constructor whose type has field initializers
-       now stays scalar with its reason (the vector loop gave the initialized field its default).
-       Proof: HotReload's `new Position(...)` again with no EECS055; ForeignBodyTests (vector == row by row, bit for
-       bit, 0 B; the library compiled against its reference assembly); GeneratorTests (metadata-only reference, no
-       records, reasons, the record's text); AOT program; Tier1 x64 AVX-512: the hidden statics are loads before
-       the loop, the private field a lane, no call in the loop. GeneratorBenchmark per keystroke equals the base
-       (EditMethodBodyIde 29.40 MB against 29.39 MB) once the recorder reads a file once per tree (it was +5.5 MB:
-       a syntax provider's transform reruns for every file on every change). Not checked here (x64 machine): ARM64
-       and the WebAssembly demo (Mono AOT) with an UnsafeAccessor static field: the owner's M4 run.
-       Docs to-dos in docs-todos "feat-foreign-bodies (8g)".
-8h. [x] **`CopyEntities<TTag>` prototype + benchmark: measured, not shipped** (owner, 2026-10-28: "做原型+基准";
-       `owner-review.md`, "Ghost rows between worlds"). The prototype is on branch `feat-copy-entities` (unmerged,
-       `GhostCopyBenchmark`, `CopyEntitiesTests`): 0.63-0.92x of the `CreateEntity` loop with 3 components, 0.82-1.00x
-       with 1 component on sorted rows, but 0.92-1.09x with 1 component on scattered rows (MultiWorld's case), and
-       `Border.cs` grows by 5 lines instead of shrinking. Fails "never slower" and "less code"; what would change the
-       verdict is in `owner-review.md`.
-8i. [x] **MoveEntities 0.82-0.84x: `ArriveRows` kept out of its callers** (branch `feat-arrive-runs`, unmerged).
-       The gain of feat-copy-entities was the JIT's inlining, not its copy code: base inlined `ArriveRows` with
-       `CopyRun` into both call sites of `MoveEntities` (Tier1 11.9 KB, 692 stack references); the copy branch's
-       wider signature changed that. `[MethodImpl(NoInlining)]` on `ArriveRows` alone: 3.7 KB, 136, Move
-       0.79-0.84x in 8 of 8 rounds; the rewrite of its row loop alone 0.98-1.00x (a wash, dropped); `Gather`, the
-       column-by-bit map and `Remaps` serve only copies (not ported). 8h's WorldSimulation 10k +1-6 % and SaveRecord
-       +3 % were noise: here 0.93-1.09x and 0.96-1.02x in every build, including a control whose path is base's
-       (base + the copy branch's World fields). Decision record and changelog line in the agent's report, for the
-       docs pass.
-8j. [x] **Switches and patterns become masks** (owner, 2026-10-29: "swtich和pattern matching都需要留意吧"): today
-       `is` patterns over a lane (relational, constant, `and` / `or` / `not`) already vectorize (`Kernel.Pattern`,
-       `WidePattern`), but a switch expression, a switch statement, a property pattern (`p is { X: > 0, Y: < 5 }`),
-       a pattern over a struct (`v is (> 0, > 0)`), and a helper the call inliner meets with a switch in it keep the
-       method scalar, and 8f's EECS055 text tells users to rewrite them by hand. Per the owner's rule the generator
-       lowers the plain form: a switch expression whose arms are patterns over lanes becomes first-match-wins
-       selects (each arm's mask and not-yet-matched, `ConditionalSelect` from the last arm up; `_` the default; a
-       guard `when` and-ed in); a switch statement whose sections only assign (no loop, no jump past the switch)
-       becomes the same masked writes as an if / else chain; property and positional patterns over a struct's
-       fields become the fields' compares; a type pattern over a value type is a constant. Left scalar, each with
-       its own reason: list patterns, a `var` / declaration pattern whose variable is read later as an object, a
-       switch over a non-lane (string, class), a section with a loop or a `goto case`. EECS055 then names only
-       those; 8f's "write it as conditional expressions" text goes. VoxelServer's Zombies `Trail(...) switch` is the
-       proof case (a call on a struct, inlined, then its switch lowered). Proof: generated text and vector == scalar
-       tests per form (NaN, first-match order, a `when` guard, a default arm that is not last), Tier1 with no call
-       and no branch in the loop, a KernelBenchmark case against the scalar loop, ARM64 parity.
-       Done on feat-switch-masks (Kernel.Switches.cs): the forms above lower as described; a switch statement's
-       sections may also return, and a non-exhaustive switch expression sends the lanes no arm matches to the method
-       (it throws as written). KernelBenchmark.Grade, generated / scalar: 0.133 and 0.125 at 1,000 rows, 0.024 and
-       0.022 at 100,000 (two rounds, AVX-512, 0 B); its Tier1 loop has no call and no branch but the back edge.
-       Tests: 3282 normal, 3281 with AVX off, 3282 with AVX-512 off, all passing. Zombies' Chase stays scalar:
-       Nearby is a ref struct reading a DynamicBuffer through a Lookup, which the inliner refuses, so EECS055 names
-       the split (Nearby.Trail into a pass of its own, a field of 4 bytes); after it the method still reads
-       Lookup<Position> (vector lookups need SimdMode.Require), runs in parallel, and calls Vector2.Length (an
-       order of adds not proven the scalar code's). ARM64 parity not run here (no ARM64 machine).
-9. [ ] **G10: deferred consume for chunk load / save** (owner, 2026-10-27; `voxel-rewrite.md` G10): VoxelServer's
-       ChunkRead / ChunkSave load and save outside the pass by hand; the generator turns the plain form (a
-       `[ForEach]` that requests a load or a save) into the deferred one, so users write neither the queue nor the
-       drain. Analyzer rule and code fix for the hand-written form; proof: VoxelServer lines before / after, tests,
-       0 B steady state. The form carries a per-tick budget (`voxel-rewrite.md` GA9: VoxelServer caps requests per
-       tick, `Rules.MaxRequests`; the owner wants the cap kept).
-       **Built on `feat-deferred-consume`, not merged** (names await the owner's review): `[ForEach(MaxRows = N)]`
-       collects the first N rows (Query order) and runs the method on each outside the walk
-       (`World.ForEachCollected`), so it may load and save; `[Consume]` destroys per row. EECS118 (invalid MaxRows),
-       EECS119 (hand-written CollectIds + loop in OnUpdate, code fix), EECS041 names the budget; ids provisional.
-       VoxelServer: ChunkRead / ChunkGenerate / ChunkSave as methods, Systems/Chunks.cs 143 -> 103 lines, output
-       unchanged. TickBenchmark base / head (two rounds, ms, 0 B): 50: 57.4 / 53.9, 54.8 / 55.5; 500: 85.8 / 83.9,
-       85.3 / 86.5; 2000: 133.5 / 147.7, 133.5 / 116.8 (inside the noise). MaxRowsBenchmark generated / hand:
-       1.06-1.14x at budget 64, 1.18-1.30x at 256 (6-10 ns a row: the per-row destroy and lookup), 0 B. Docs to-dos
-       in docs-todos.md (feat-deferred-consume).
-10. [x] **Streaming stores in generated loops, gated** (merged 1b1aa12: Predict 0.86-0.94x, Mix 0.90-0.92x past the
-       cache with the reader counted in, gate off inside; the owner's M4 run, 2026-10-29, one round, 0 B: Auto is the
-       fastest of Auto / Off / On in all 8 cases, 0.80-0.87x of Off at 1M rows and 0.75-0.87x at 16M, so STNP stays gated
-       the same way on ARM64) (owner, 2026-10-27; `microarch.md` M3, prototype
-       `Locality/Streams.cs`): non-temporal stores for a column the method writes without reading, only when the
-       column's bytes are past `CacheSizes.LastLevel`. Measured in a real world with the next pass reading that column
-       counted in; ships when faster in both rounds and never slower (StreamingStoreBenchmark: 1.47x past the cache,
-       a tie inside).
-11. [x] **Ping-pong steps instead of a commit copy** (owner, 2026-10-27: MPI's u / v buffers swapped after a sweep;
-       part of #157's "ping-pong buffer"). Today a tile shader writes `DynamicBuffer<NextX>` and a commit system copies
-       it into `DynamicBuffer<X>` (VoxelServer `WaterCommitSystem`, the grids page's `CommitHeatSystem`): one full copy
-       of every stepped tile per tick. Swap the two buffers' stores instead (O(1) per tile, under the gate; X marked
-       changed, so replication and `[Changed<X>]` see the write). Catch: the stencil skips zero rows (the row mask) and
-       relies on the copy making both buffers equal; after a swap the skipped rows hold the step before last. Chosen
-       (owner, 2026-10-27): the generated step writes every row it skips as zero, with vector stores (a zero row is a
-       few stores, cheaper than the copy it replaces). Per the
-       owner's rule (`audit-generator`): users write the plain step and no commit system; the generator owns the step
-       buffer and the swap (a `Tile` parameter that steps in place in user code's eyes), with an analyzer rule and
-       code fix for a hand-written commit that is a plain copy. Proof: TileStencilBenchmark / TileActiveBenchmark and
-       VoxelServer's TickBenchmark before / after, two rounds, 0 B; the grids page and the VoxelServer page in the
-       docs pass.
-    **Two update forms, one user code** (owner, 2026-10-27): the plain tile step is Jacobi (default, no attribute):
-       each pass is one time step, every cell reads the step before; the generator owns the two buffers, swaps them
-       and writes skipped rows as zero. `[ForEach, GaussSeidel]` (approved name, renamed from `[RedBlack]` on 2026-10-27: red-black is two colors
-       only, a 9- or 27-point stencil needs multicolor ordering; a marker beside `[ForEach]` like `[Consume]`) relaxes toward a settled field in place: one buffer, no commit, the colors inferred from the
-       stencil's offsets (5-point 2 colors, 9-point 4, 27-point 8), sweeps inside a tile until it settles, tiles in
-       color order, settled tiles sleep. Both deterministic and independent of the thread count; they differ in what
-       one pass means, which only the user knows, so the choice is declared. An Info rule suggests `[GaussSeidel]` for a
-       relaxation shape (`d = Min(neighbor + cost)`) whose per-pass value nothing else reads. The docs explain "Jacobi"
-       "Gauss-Seidel", "red-black" and "multicolor" in one plain sentence each where first used (WRITING.md).
-    **With it, the tile gaps the VoxelServer plan found** (`voxel-rewrite.md` section 4): GA10 a tile's cell
-       buffers sized at instantiation from its shape (the hand `SetCount`s of ChunkGenerate, `EnsureCapacity` of
-       Water Wake); GA3 `MaxPooledLength` inferred for those buffers; GA12 tile sleep and wake owned by the tile pass
-       (from the step's edges and `Changed<cell buffer>`) instead of `foreach (id in tile.Facing(e))
-       world.GetEntity(id).SetX()`, written four times in the sample, for Jacobi as `[GaussSeidel]` already does.
-    Done (feat-tiles-rest): ping-pong with zero rows, `[GaussSeidel]`, GA12 sleep / wake and GA10 (the pass sizes the
-       buffers) were already in; this branch added GA3 (c5ffee7): for each `Tile<TCell, TTile>` a method takes, by value
-       or by ref, closed types, the generated file's module initializer raises `DynamicBuffer<TCell>.MaxPooledLength`
-       to the tile's cells (never lowers it), so `FillPool` at start-up fills whole tiles and the pass no longer checks
-       the size; VoxelServer drops the Block / Fluid `MaxPooledLength` lines. EECS117 gets a code fix to
-       `[ForEach, GaussSeidel]` when the key has integer fields to color by. TileStencil / TileActive / TileWoken, two
-       interleaved rounds against 2669d2d: every case within its control's spread (Blur9_Tile, AlwaysOn, Hand), 0 B.
-       Not built: EECS116's fix (owner-review verdict stands).
-12. [x] **Fewer memory copies** (owner, 2026-10-27: "看看还有什么类似的能做的减少内存拷贝的做法"; a-e approved: "这些都可以做"). Each one measured
-       (two rounds, 0 B, nothing slower) and done by the generator or the core where users would otherwise copy:
-       a. [x] **Tiles stored padded, halos exchanged** (MPI's ghost cells; the grids page's TODO(water overlap)): today
-          `Pad()` copies the whole tile and its neighbors' edges into a thread texture every pass. Keep each tile's
-          cells padded in its own buffer (the halo stored beside them), so a step reads its buffer in place and a
-          pass copies only the neighbors' edges into the halo, only the edges that changed (`ChangedEdges` already
-          knows which), and the interior can step while the ring waits (interior / ring overlap). With item 11 the
-          step and its padded buffer ping-pong. Cost to weigh: the halo's memory (27 % of a 16 x 16 tile at r = 1).
-          Renames with it (owner, 2026-10-27): `Pad()` becomes `ExchangeHalo()` (MPI's halo exchange), and
-          `PaddedTile` folds into the tile itself.
-          Settled (feat-tiles-rest): `ExchangeHalo()` and the fold are in (unreleased, no migration: v4.7.0 has no
-          tile API). The interior / ring overlap is not built: in shared memory there is no latency to hide (one
-          thread: exchange 261 us against 253 us for the padded read), and it needs a cursor with two strides.
-       b. [x] **Changed edges found while stepping**: `ChangedEdges` reads the cells and the step again after the step
-          (O(cells), both buffers). The generated step compares each row it writes with the row it read (one vector
-          compare per row it already holds in registers) and returns the faces, so no second pass.
-          Settled: the step compares while the rows are in L1 (already in before this branch); nothing left.
-       c. [x] **Re-sorts swap columns instead of copying back**: `Archetype.Permute` writes each column into a rented
-          scratch and copies it back (and the slots, the presence bits). Write into a spare pinned column and swap it
-          in; the old column becomes the spare (one spare per column size per world, kept for the next sort).
-       d. [x] **Incremental Capture / Restore**: `Capture(into)` copies every table every time. Copy only the columns
-          (or 4,096-row blocks, `BlockTicks`) written since `into` was last captured from this world with no structural
-          change between (`StorageVersion`, `LastWrite`); Restore copies back only what changed since the capture.
-          Rollback netcode captures every tick with few writes per tick.
-          Also win back the cost of fix-ci's restore (owner, 2026-10-27): rows written since the capture now take
-          copies of the snapshot's elements on the owner thread (BufferSnapshotBenchmark Restore 66.6 -> 84.4 us,
-          Rollback 141 -> 177 us, 0 B), so the first parallel write after a restore does not copy on a helper thread.
-          Bar: back to the old times or better with the 0 B steady state kept.
-       e. [x] **Emitted<T> without the join copy**: `Emit<T>.Join` copies every chunk's list into the singleton's list.
-          Keep the chunks' lists in order as segments: `[Drain]` and `ParallelFor` walk the segments (users
-          see no change); a contiguous span is joined only when user code asks for one.
-13. [ ] The rest of "Later" below.
+Starts now; Forms / Views / Lambdas areas wait for feat-inner-loops, Parts / Tiles for feat-generated-members.
+
+- [ ] **A1. A test runs the analyzer over the samples, templates and demo** (`analyzer.md` 1a, `code.md` 3.2):
+      `SamplesAreClean` (sources + generated output, Info included, a negative control); GeneratorCorpus's filter
+      narrowed from all EECS055 / EECS086 to the inherent EECS055 reasons (the EECS086 exception goes with Finish 2c).
+      Files: tests/GeneratorTests.cs, benchmarks/GeneratorCorpus.cs. The gate for every severity raise.
+- [ ] **A2. Finish 2b: EECS086's non-reducing total, EECS109 and EECS055's bool reason become Warnings** (owner,
+      2026-10-27; `analyzer.md` 1b-1d), after the exemplar pass removed their blockers (BattleServer `Battle` ->
+      `[Accumulate]`, VoxelServer's `SendPackets` -> `[Drain]` and its bools split, Actors' `Storage.Save`): EECS086
+      always Warning, the `[Accumulate]` fix extended to a plain numeric struct (a positional record warns without a
+      fix); EECS109 Warning only when the walk could be a static `[Drain]` method (Info with its reason otherwise,
+      `samples/Actors/Host/Storage.cs`), the indexed `for` and the non-ref `foreach` detected too; EECS055's bool
+      reason (code in feat-inner-loops item e). Proof: `analyzer.md` 1b-1d tests, A1 green.
+- [ ] **A3. Rule: `Reduce<T>.Value` read as the total** (`analyzer.md` 3a; common-mistakes #reduce-value), Warning,
+      the accumulation reader shared with Kernel / `Accumulations`. Proof: positives and negatives listed there.
+- [ ] **A4. Rule: `AddSingleton<T>` on a world that has T** (`analyzer.md` 3b; D58), Error in one block, Warning in
+      a hook or `[ForEach]` body, fix to `SetX` / `GetOrAddSingleton`. Proof: tests and a code-fix test.
+- [ ] **A5. Rule: a raw entity index stored in a component** (`analyzer.md` 3c), Warning, EECS017's sibling.
+- [ ] **A6. Rule: a `Scratch<T>` added to and never cleared** (`finish-scan.md` item 7; threading.mdx:1068 says
+      "Code review" today), Warning + a fix inserting `Clear()`; the rule recorded in `audit-analyzer`.
+- [ ] **A7. Locality pitfalls** (docs-todos "Locality phase 0"): `Lookup.Find` from a helper ("not prepared") as a
+      rule; EECS036 / CS0315's message for a `[LookupKey]` member named `Key`; a qualified `[ForEach]` call inside its
+      type. Build or record each.
+- [ ] **A8. Views follow-ups** (docs-todos "feat-views"): EECS053 through views in lambdas (verify first), EECS025 for
+      a never-written view ref field, EECS049 for view locals; EECS049 for a `[WithAny<Q, T>]` whose every type is in
+      `[Without<>]`. Build or record each. After feat-inner-loops.
+- [ ] **A9. EECS021 false positive on a partial static runner** (`analyzer.md` 4): skip the method itself unless its
+      entry point is reachable. Files: Symbols.cs. Proof: the snippet, private and public.
+- [ ] **A10. Build cost: syntax rejection before `GetDeclaredSymbol`** (`analyzer.md` 6) in `AnalyzeVectorLoop` /
+      `AnalyzeParallel`; the Tiles, Views, Records, Pairs, Forms and Fusion areas behind `Core.Create`; the two
+      `ToDisplayString() ==` comparisons (Performance.cs:308, Tiles.cs:315; `generator.md` "In areas owned") by
+      `Symbols.Named`. Proof: GeneratorBenchmark CompileAndAnalyze minus Compile, diagnostics diffed.
+- [ ] **A11. Messages and fixes** (`analyzer.md` 7): EECS118's reasons end with what to write; the drop-the-argument
+      fix for EECS035 / EECS118; EECS024's move-to-a-static-method fix. Proof: CodeFixTests per fix.
+- [ ] **A12. Thin tests and the suppressor** (`analyzer.md` 8): EECS004, 068, 104, 058, 108, 118, 099 / 100, 057 /
+      063 / 070; `UnusedSuppressor` cases for `[Drain]`, hooks, IDE0052, and its justification text.
+- [ ] **A13. Overlap pins** (`analyzer.md` 9) in `AnalyzerTests.OneMistakeIsReportedOnce`: EECS086 / 055, EECS103 /
+      055, EECS109 / 092; IDE0060 suppressed on `[ForEach]` / `[EntityMethod]` parameters (EECS026 owns them).
+- [ ] **A14. Smaller candidates** (`analyzer.md` 3, end): "removing a component to pause it", "a flag where a tag
+      would do" (overlaps A2's bool split): weigh, then build or record in decisions / owner-review.
+- [ ] **A15. Stale instructions** (`analyzer.md` 10, docs-todos S1): `audit-analyzer` SKILL's file list (`.Members`,
+      `.Layout`, `.Lambdas`, `.Views`, `.Records`, `.Pairs`, `.Tiles`, `.Fusion`), its range (EECS002-EECS123) and the
+      overlap test's name; `src/EasyEcs.Generator/AGENTS.md` 135-136 and root `AGENTS.md`'s range; the
+      `GeneratorCorpus.cs` comment; the code comment `EasyEcsAnalyzer.Performance.cs:17` ("the generated member is a
+      suggestion"); an `IForSpan` Execute that is one element loop -> "write it as a lambda pass" (inner-loops.md
+      section 6): build after WP4 merges or record.
+
+### Lane 3: tooling and CI (tools/, .github/, docs/scripts, test and benchmark harness, sample hosts) — 16 items
+
+Starts now. T1 comes before Finish 1b (the move).
+
+- [ ] **T1. `tools/agents.sh` recursive, and maps for tests and benchmarks** (`code.md` 2.2, 2.3, 3.8):
+      `glob("**/*.cs", recursive=True)` before the directory move (otherwise it passes vacuously); `tests/` and
+      `benchmarks/` in the maps (a file's base name or its stem without Tests / Benchmark); the missing files listed
+      (tests: CopyEntitiesTests, KernelTests, ScratchTests, UnusedTests, WorkersTests; benchmarks: ChunkRowsBenchmark,
+      KernelBenchmark, ParallelRunnerBenchmark, ScratchBenchmark, Program.cs, the Comparison project's files); the two
+      file maps one line per file. Proof: `tools/agents.sh --check` fails on a missing file, passes after.
+- [ ] **T2. GameLoop prints "SystemHandle" for every system** (`code.md` 1.1): `system.Name` in
+      `samples/GameLoop/Host/Report.cs:32`; CI checks GameLoop's names and counts (`code.md` 2.5: timing lines
+      strippable by `check-sample.sh`). Proof: CI step fails before the fix.
+- [ ] **T3. Raw allocation baselines and fixed warm-ups in tests** (`code.md` 1.2): ConcurrencyTests:178,
+      LaneMathTests:488 through `Allocations.Baseline` / `Of` / `WarmUp`; the fixed warm-ups of KernelTests,
+      KernelLookupTests, HelperLoopTests, AllocationTests to `Allocations.WarmUp` (KernelTests after
+      feat-inner-loops), and the sentence in `tests/AGENTS.md` goes.
+- [ ] **T4. One generator list for tests, DocCheck and GeneratorCorpus** (`code.md` 3.1): DocCheck lacks View and
+      Prefab generators and the interceptors feature, GeneratorCorpus lacks Prefab; one shared list, parse options and
+      references. Before the docs pass (fences with views and lambda passes). Proof: a DocCheck fence with `[View]`
+      and a lambda pass compiles.
+- [ ] **T5. CI runs `bun run check`** (`code.md` 2.1): a `docs` job on `docs/**` (setup-bun 1.4.2).
+- [ ] **T6. CI checks the public skills list** (`code.md` 2.4): `npx -y skills add . --list` lists only `easyecs`.
+- [ ] **T7. VoxelServer's TickBenchmark built by CI** (`code.md` 2.6): in the slnx or the build job; its job from
+      `BenchmarkConfig`; a README line.
+- [ ] **T8. The committed live demo checked for staleness** (`code.md` 2.7): a source hash beside the bundle.
+- [ ] **T9. Tool scripts: one build helper** (`code.md` 3.4): errors printed, `TargetPath` read, `trap rm` in
+      `loopbound.sh`; `inlining.sh --no-build` in CI (`code.md` 2.8).
+- [ ] **T10. One reflective BenchmarkDotNet runner for tools/Inlining and tools/LoopBound** (`code.md` 3.3): short
+      or full class names, every `[Params]` / `[ParamsSource]` type.
+- [ ] **T11. `tools/bench.sh` resolves a class's project by listing** (`code.md` 3.6), and fails on "No benchmarks
+      to choose from" instead of marking it done.
+- [ ] **T12. `check-sample.sh`'s two copies of the block extraction** (`code.md` 3.7): one function; the README
+      heading convention unified with the page's in the docs pass.
+- [ ] **T13. Stale comments and maps** (`code.md` 3.5, 5): `tools/inlining.sh:4`'s class names; `docs/AGENTS.md`'s
+      scripts line (`lint-terms.ts`, `chromium.ts`, `after-build.ts`, `first-commit-dates.mjs`,
+      `search-expectations.json`); `lint-terms.ts`'s empty `pending` (delete or say why); `benchmarks/AGENTS.md`: a
+      benchmark nests its components, only the headline worlds declare at namespace level.
+- [ ] **T14. The `Locality/` prototypes** (docs-todos "Locality phase 0", `locality.md` status; borrowed-ideas keeps
+      them for the owner's reruns): delete the shipped prototypes and their link into the unit tests, keep the plain
+      baselines the owner's runs need, or record why each stays.
+- [ ] **T15. Benchmark rows**: the EECS096 delegate fallback in LambdaPassBenchmark (docs-todos "feat-inline").
+- [ ] **T16. The arm64 job's first run** is the owner's dispatch (Finish 4; `owner-m4.md` 6).
+
+### Lane 4: vector-loop generator (after feat-inner-loops merges; Kernel*.cs, SystemGenerator*.cs, Recorder.cs, LaneMath.cs, ArityGenerator.cs text) — 18 items
+
+- [ ] **G1. `++` / `--` as a value** (`generator.md` 1): `Expr` lowers it, masked by `_active`; Struct and Pairs paths
+      too. Proof: StructuralLoop / Kernel tests (prefix, postfix, `&&` / `||`, early return, narrow lanes), a
+      KernelBenchmark Expire case, BattleServer and WorldSimulation (their Burn / Thaw / Expire / Fight / Recover).
+- [ ] **G2. A structural change of the method's own component, nothing reading it after** (`generator.md` 2):
+      allowed; the `audit-vector-loops` rule narrowed. Proof: Remove / Disable / Set against the scalar twin, D122's
+      order, the two headline worlds.
+- [ ] **G3. A tag as a parameter** (`generator.md` 3): `in Tag` is a filter with no lanes, `Maybe<Tag>.HasValue` the
+      presence mask. Proof: KernelTests, AccessBenchmark's two cases.
+- [ ] **G4. A `ref` singleton written only as a running sum, count, Min or Max** (`generator.md` 4): the element
+      loops' reduction core, folded into the singleton's field. Proof: KernelTests (non-zero start, bail), a
+      KernelBenchmark sum case.
+- [ ] **G5. `EntityRandom` draws as lanes** (`generator.md` 5): `Bits` / `Float` / `Chance` / `Range(float)` as 8-byte
+      lanes, gated per width; the reason text fixed now and the `audit-vector-loops` line corrected. Proof:
+      EntityRandomTests bit for bit, EntityRandomBenchmark at three widths; ARM64 "owner, after code".
+- [ ] **G6. Reason texts** (`generator.md` 6): an `Entity` receiver call, `DynamicBuffer<T>` parameters, narrow
+      division by a constant (build the power-of-two form), a `Tile<,>` parameter ("write it as a cell method"), the
+      tile cursor's indexer read at the loop's counter (Settle's loops, `generator.md` "In areas owned"; after
+      feat-later-halos: the reason now, then the element-loop form for tile cursors built or recorded). Proof: reason
+      pins, ElementLoopTests for the cursor form.
+- [ ] **G7. Math with no vector form called per lane inside the loop** (`generator.md` 7): `LaneMath.PerLane.*`,
+      gated by operations against calls; D127's Considered. Coordinate with feat-inner-loops' item g (Atan2 / Asin /
+      Pow lowerings). Proof: KernelBenchmark Atan2 / Sin bodies, a light body that must not gate on.
+- [ ] **G8. P2: a uniform table read at a lane index** (`perf.md` P2): a permute (`vpermps`, AVX2 `PermuteVar8x32`,
+      NEON TBL) for N <= 16, a gather past it; BattleServer's Steer back to `SimdMode.Auto`. Proof: KernelBenchmark
+      SteerTable pair, BattleServerBenchmark, tools/loopbound.sh; ARM64 "owner, after code".
+- [ ] **G9. `[MinBy]` / `[MaxBy]`'s vector form** (`finish-scan.md` item 5), after feat-generated-members: proved with
+      ReduceBenchmark (FindWeakest), ties keep the earlier row.
+- [ ] **G10. The ARM gate's rejected `Brake` shape: a benchmark pair forced open** (backlog history, ARM64 parity),
+      then "owner, after code" (`owner-m4.md` 4). Files: KernelBenchmark.cs, Kernel.Wide.cs's gate.
+- [ ] **G11. Incremental rules** (`generator.md` 9): Recorder's SemanticModel per member (9a, use the transform's
+      model), `Symbols.ModelOf` cached (9b), `ClosedSystems` measured before any change (9c). Proof: GeneratorBenchmark
+      EditMethodBody / Ide.
+- [ ] **G12. Dead code** (`generator.md` 11): `PairForm.WritesNeighbor`.
+- [ ] **G13. Generated text cleanup, step 1: the `GeneratedTextTests` guard and output bytes in GeneratorBenchmark**
+      (`generated-text.md` 8; `generator.md` 10).
+- [ ] **G14. Step 2: the file-level alias block** (38,597 `global::`; IL identical).
+- [ ] **G15. Step 3: fusion files reference the systems' jobs** (-76 % fusion text) — after feat-inner-loops' lambda
+      fusion.
+- [ ] **G16. Step 4: printer fixes** (404 `((0))`, names, Arity indentation; IL identical) **and empty hooks as
+      `ISystemCode` defaults** (about 400 `{ }`; SystemCode.cs).
+- [ ] **G17. Step 5: one Tier1-gated round of IL-changing cleanups** (`__d0 = Zero` marks, hoisted scalar setup,
+      `this.v0`, pair broadcasts, struct-local aliases, dead narrow temps, unused masks, `ids, 0`, discards for unused
+      fields, 50 identity copies) with #172's rest (one body per width where Tier1 is equal) and the WP0b follow-ups
+      (GeneratorBenchmark A/B, a locals check over the samples, `.Zero` / `.One` text); the D126 `__s -> __c` copy
+      stays, commented. Proof: Tier1 of the six runners, PGO off, else BenchmarkDotNet.
+- [ ] **G18. Generated members' text** (`generated-text.md`, small): ComponentGenerator's AggressiveInlining text,
+      doc comments per arity (`inheritdoc`), the view's `TryGetX` double lookup.
+
+### Lane 5: renames (after feat-later-halos and feat-generated-members merge; owner, 2026-11-07) — 6 items
+
+- [ ] **R1. `tile.Restart(value)` -> `tile.ColdStart(value)`** (`naming.md` B2; `tile.Sweep` stays): Tile.cs,
+      EECS115, the generator, VoxelServer, tests, benchmarks (TileRestartBenchmark -> TileColdStartBenchmark, site keys
+      with it), ApiDocs zh `tile.xml`.
+- [ ] **R2. The shape `Columns<TTile>` -> `Ground<TTile>`, the column walk `TileColumnWalk<…>` -> `TileColumns<…>`**
+      (`c.Columns(step)` stays; `naming.md` B2): Tile.cs, the generator's tile-load interceptor, tests, samples,
+      ApiDocs zh.
+- [ ] **R3. `World.MaxChunkRows` -> `World.MaxChunkSize`** (`naming.md` B3, A1), with a code fix on CS0117 from
+      the released `World.ParallelChunkRows` (the first released rename: the renamed-member mechanism stays for it).
+- [ ] **R4. Delete the code fixes for names that never shipped** (`naming.md` B4): `RenamedAttributes`
+      (`[IndexKey]` -> `[LookupKey]`) and `RenamedArguments` (`ChunkRows` -> `ChunkSize`) in
+      EasyEcsCodeFixes.Declarations.cs and their CodeFixTests; D129 amended in the docs pass (docs-todos S3).
+- [ ] **R5. Internal and hidden names** (`naming.md` A3-A5, approved as "clearly right"): `BadRecordPass` /
+      `HandWrittenRecordPass` / `AnalyzeRecordPass` / `AnalyzeHandWrittenRecordPass` -> `BadDrain` /
+      `HandWrittenDrain` / `AnalyzeDrain` / `AnalyzeHandWrittenDrain`; tracking names `RecordMethods` / `RecordBodies` /
+      `RecordCode` -> `Drain*` (GeneratorTests' list and the generator's AGENTS.md); the fix `RecordMethod` ->
+      `DrainMethod`; the `DrainTests` / `EmitTests` names; `Emitted<T>.Consume` -> `Drain`; `TileSteps.Sweep(Entity)` ->
+      `NextSweep`; `TileRows.First` / `Last` -> `FirstLayer` / `LastLayer`; `CellRow` -> `PlaneLoads`; `TilePlane.Own` ->
+      `RowBeside`; `TileCells.Pool` -> `SizePool`; `CellRows.cs` -> `TilePlane.cs`; `ChunkRowsBenchmark` ->
+      `ChunkSizeBenchmark` and `GhostCopyBenchmark` -> `CopyEntitiesBenchmark` (site keys and bench.json mapping
+      kept). Run the `StartsWith` / `EndsWith` grep of `naming.md` first.
+- [ ] **R6. `audit-naming` step 4 amended**: "a `ForEach*` name is a pass over rows, except `ForEachCollected`, the
+      collected form of a `[ForEach]` method" (`naming.md` B1). Not approved and kept: `{Owner}ForEach` (not
+      `{Owner}Passes`) and `CopyEntities<TTag>` (not `CopyEntitiesWith`); their reasons go into the naming record
+      (docs-todos).
+
+## Finish (strictly in order; nothing of a later step starts before the earlier one is done)
+
+Starts when every lane above has merged (owner, 2026-10-27: the refactor before docs and benchmarks, so docs and
+numbers are written once about the final code).
+
+- [ ] **1. Directory restructure** (layout approved 2026-11-07: `finish-scan.md` Report 2 plus `tools/perf/`; it
+      supersedes `layout.md`): `git mv` only, alone, after every branch merged and after lane 3's T1; its six commits,
+      `docs/vite.config.ts` recursive, `site.ts:58`, skills' paths, `.DotSettings`, the 107 `tools/perf/` references;
+      `inner-loops.md`'s `CellTests.cs` reference dropped.
+- [ ] **2. The exemplar pass** (#169, `audit-code`; owner, 2026-10-27): every piece of code users read or copy in the
+      most fitting form, new features included. Proof: outputs and README / page output blocks match, 0 B steady
+      state, tests three ways, A/B no slower.
+      a. **VoxelServer** (`voxel-rewrite.md` steps 1-6, 8, 9, owner answers in its section 9): bool splits
+         (`Body.OnGround`, `Exposure.Sunlit`, Input, Visible), Viewers long, SetAbsent, FireDamage per row; `[Accumulate,
+         Sum] Stats`, `SendPackets` -> `[Drain]`, `ReserveBuffers`; AOI without the World; pairs (Keep + Acquire,
+         ChunkRing deleted, Pickup with `[Neighbor] ref`, item merging through symmetric pairs); water in the ping-pong
+         form (Commit and NextFluid deleted, the cell form if feat-inner-loops item d shipped it); the scent as one
+         `[GaussSeidel]` step with `ColdStart` / `Sweep` (Ground / Red / Black / NextScent / Settle deleted); Footing
+         and Terrain as element / cell methods; two region worlds with `MoveEntities` at the border (ghost rows); the
+         34 `UpdateInGroup<Simulation>` -> the default group (`finish-scan.md` 3); line count and `--schedule` before /
+         after; README, the voxel-server page's output and `check-sample.sh`.
+      b. **The other samples, templates and demo**: the three `Checks` copies read the same; ScoringPlugin
+         `GetOrAddBonus`; HotReload `Status` as `[ForEach]` + a reduction; Actors' `Storage.Save` -> a `[Drain]` method
+         (`code.md` 4); MultiWorld `Border.cs` comment (why `CopyEntities` is not used there); GameLoop's counters
+         (comment or `[Accumulate]` like BattleServer); one `Option(args, ...)` shape for the hosts' parsers and
+         FakeClients alike (`code.md` 5); the template's `SpawnSystem` through `Instantiate(prefab, stackalloc
+         Entity[n])`; the demo's Bounce / Fade `SimdMode.Off` (plain `[ForEach]` now that conditional structural
+         changes vectorize, or a comment naming the reason) and `Groups.cs`' comment.
+      c. **Benchmark worlds**: BattleServer (`Battle` -> `[Accumulate]`, then GeneratorCorpus's EECS086 exception
+         deleted; `Weakest` -> `[MinBy]`; NearestPlayer / LootValue host loops -> `[ForEach]` + reductions;
+         `PlanningSystem.Plan` per row after WP1; KillFeed; give `[View]`, `[Prefab]`, `[Drain]`, `[Neighbor]` and a
+         lambda pass a place; keep the `// #region` blocks); WorldSimulation; an A/B per rewritten world.
+      d. Unit tests that show usage (not the ones pinning an old form on purpose).
+      e. Every code example of the docs (fences en + zh, the guides' full examples, the public skill, README),
+         DocCheck at 0; L4 of `locality.md` (ZombieTarget, NearestPlayer, AOI).
+- [ ] **2b.** Lane 2's A2 lands here if it has not (its blockers are 2a / 2c).
+- [ ] **3. Docs pass** (#141, `audit-docs`): everything in `docs-todos.md` ("Sweep 2026-11-07" first), with the
+      analyzer page's guard test (docs-todos: every id anchored, severities equal to the descriptors') committed with
+      the page; DocCheck and ApiDocs at 0.
+- [ ] **4.** The `arm64` CI job's first run (owner's dispatch, `owner-m4.md` 6): a wrong runner label fails at once
+      and is fixed then.
+- [ ] **5.** "Owner, after code": the runs of `owner-m4.md` (1-5, and the x86 prefetch run of 6), each result
+      recorded where the file says.
+- [ ] **6.** `tools/bench.sh --site --sync` on the final code (perf's stale rows re-read, the classes missing from
+      bench.json), README numbers, `verify`, master; then the owner deletes `research-copy-asm` and every finished
+      branch. The owner cuts the release.
 
 ## Done this round (for the record)
 
-- [x] **WP0b** (merged, D126 rewritten, D135): every generated job within the inliner's 32 IL locals (split per width,
-      constants and kept lanes in place, the loads' copy gone), `tools/inlining.sh`; WorldSimulation / BattleServer
-      level, Step / Share / Gate / Seek 6-22 % faster; masked AVX-512 tail retried and dropped (slower). Open
-      follow-ups: GeneratorBenchmark A/B, a locals check over the samples, `.Zero` / `.One` text, one `__d0` mark,
-      discards for unused fields, aliases (with "Generated text cleanup").
-
-- [x] Lookup gathers on request (D131, merged f1767ef), EECS103 (D134), analyzer tests split, zh reference fix
-      (af585ed), generated text survey (`generated-text.md`), generator / analyzer cost phase 2 (merged before
-      c10af12: one analyzer per area, body facts once, syntax-only shapes), locality phase 0 (0e206d8: pairs 3-16x,
-      compress 5-42x, nearest packed only; batch probes and timer wheel in owner-review), the copy fix (carried by
-      WP0b). The remote branch `research-copy-asm` could not be deleted from the session (proxy): the owner deletes it.
-
-## Later
-
-- [x] **Analyzer and incremental generators by the official .NET guidance** (owner, 2026-10-25; phase 2 above is
-      its first part; done on `feat-roslyn-guidance`): EECS033 in an analyzer of its own (`MemberAnalyzer`; the unit
-      tests suppress it: EasyEcs analyzers 20.3 -> 10.1 s in ReportAnalyzer), display strings only when reporting;
-      lambda passes and tile loads bound after their syntax provider (`BoundLater`: Roslyn runs every syntax
-      provider's transform even when the IDE skips its output; unit tests' IDE keystroke 400-803 -> 285-291 ms,
-      32.7 -> 22.7 MB), `Shape.Of` and the friend assemblies of `QueryShape` per compilation. Audited and kept: FAWMN
-      everywhere an attribute marks the input, symbol-free equatable models, the two CompilationProvider Selects
-      (narrow, a string compare), compilation-end rules (each needs every use), `EnableConcurrentExecution` and
-      `ConfigureGeneratedCodeAnalysis(None)` in `Area`, the shared caches (ConditionalWeakTable, thread-safe).
-      Docs to-dos and the decision draft: `docs-todos.md` "feat-roslyn-guidance".
-- [ ] **Inner loops** (`inner-loops.md`), in this order (WP0b, WP0, WP2, WP3, WP5 done on feat-inner-loops): WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
-      WP5 `Cell<TCell,TTile>` (bar: hand-written speed), WP5b (per-tile results, several inputs/outputs, VoxelServer
-      `Flow.cs`), WP1 InlineArray, WP4 ParallelFor lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
-      a small rewrite would vectorize warns).
-- [ ] **Generated text cleanup** (`generated-text.md`, ranked; one agent, SystemGenerator owner, after lookup gathers):
-      1 `GeneratedTextTests` guard first (fails on today's output, allow-list shrinks as each step lands);
-      2 alias block (-20 % text, IL identical); 3 fusion files run the systems' jobs (-76 % fusion output);
-      4 printer fixes and names (IL identical); 5 empty hooks as `ISystemCode` defaults; 6 one Tier1-gated round of
-      the IL-changing cleanups (`__d0`, constants, hoisted setup, `__t`, dead temps, duplicate tables);
-      7 GeneratorBenchmark prints output bytes. Leave the D126 `__s -> __c` copy (comment it).
-- [ ] **Generated code simplification**: continues inside WP0 / WP0b. Done: flat lanes, the pass mask as the start of
-      the active mask, research lessons recorded. Reverted: loads into their own names (Tier1 asm grew, Move3 runner
-      934 -> 1095 instructions). Not done: file-level `using` aliases per closed generic. Gate: identical or better
-      Tier1 asm (`tools/jitdisasm.sh`) and BenchmarkDotNet. Targets seen in a generated job (Showcase DeathSystem):
-      the same body written once per width (Vector512 block, then Vector<T> block): one body per width method or one
-      emitter call per width with the width as a parameter; `global::` everywhere: file-level `using` aliases;
-      identity copies (`var __c1_0 = __s1_0`); per-width constants re-created (`__u1`, `this.v0 = default`);
-      `__d0 = Zero; __d0 |= x` where `__d0 = x` would do. Users read this code (docs "The generator writes" tabs), so
-      readability counts once the asm is equal.
-- [x] **Generator gaps found by the VoxelServer plan** (`voxel-rewrite.md` section 3): built on feat-generator-gaps,
-  merged: G0 enum lanes and single-bool components in vector loops, G5 `[Accumulate]` totals (EECS086's
-  total case and fix), G6 `[Drain]` (EECS108, EECS109 and fix), G4 `World.ReserveBuffers(prefab, count)`; G7
-  not built (owner-review.md). Names approved by the owner (2026-10-27): `[Accumulate]`, `[Drain]` +
-  `IDrain<T>`, `World.ReserveBuffers`. Docs pass: docs-todos.md "feat-generator-gaps". G1 / G2 come with inner-loops WP5 /
-  WP2; G8 / G9 with L2.
-- [x] **A `using` alias to a system does not bind its generated entry point** (feat-later-small): the cause is not the
-  alias. The entry point is a C# 14 extension member of `{FlatName}ForEach` / `{FlatName}EntityMethods` in the owner's
-  namespace, so `Alias.Hunt(world)` binds wherever that namespace is imported, alias or not (GeneratorTests
-  `UsingAliasesBindEntryPoints`, 7 cases: alias to a system, a nested type, a generic owner, `[Drain]`,
-  `[EntityMethod]`, global alias, file-scoped namespace). feat-locality-core's CS7036 came from a file that aliased
-  the owner without importing its namespace: then the call binds to the method itself. EECS122 (provisional id,
-  Warning) reports exactly that call (failed binding, the owner has such a method, the entry points' class not in
-  scope) and its code fix adds `using {namespace};`. LookupOrderBenchmark now calls `Hunters.Hunt(_hunters)`.
-- [x] **Flaky: `ParallelReductionsScratchAndLookupsDoNotAllocate`** (fix-flaky-alloc): the same path as the
-  prefetching test. Its window saw OSR compiles on the measuring thread (updates 53, 62 and 81, in 2 of 4 instrumented
-  full runs; none with OSR off); the other paths were ruled out (the measuring thread made its `Scratch` list during
-  the warm-up in every run; `Allocations.Of` settles background collections; a filter built per pass past bit 255
-  would allocate on every update, and the instrumented runs measured 0 B on the others). Its own failure did not
-  reproduce in 15 full runs before the fix (13 with AVX2 off), so the cause is the shared one by evidence, not by a
-  caught failure. Fix: `Allocations.WarmUp`.
-- [ ] **Native AOT: no class-initialization check per iteration for a loop's tables** (owner's find, 2026-10-26):
-      under Native AOT a loop reading a `static readonly` vector built by code (`Interleaved.Tables*`, `Masks`, the
-      generated `__permN`) tests the class's initialization every iteration and spills around the helper call. The
-      first fix (vectors of literals, 2206090) was reverted with the NEON `fixed` removal (cf43ac4) because the M4
-      measured every multi-field loop 25-58% slower (`audit-vector-loops`, "Read the loop the JIT wrote"). Next:
-      bisect the two on the M4. cf43ac4 vs its parent fc527d5 (owner's M4 run, 2026-10-29, one round, 0 B): the
-      `fixed` removal alone costs 10-21% at 100k on the deinterleaving loops (Move2 17.0 -> 19.1 us, Move3 26.3 ->
-      29.5, Move4 34.6 -> 40.2, Step 20.7 -> 25.1, Integrate 8.7 -> 10.0), Wave, Share, Seek and Brighten flat: real,
-      but short of 25-58%. 2206090 (literals) on top, same run conditions: mixed, not uniform. Glide (NEON TBL
-      lookups) 22.3 -> 23.1 -> 28.9 us at 100k (170 -> 183 -> 206 ns at 1k), Seek 69.3 -> 73.4 -> 76.4 us; faster:
-      Wave 240 -> 217 us, Optional 34.7 -> 31.3 us, Step at 1k 270 -> 210 ns; Move2/3/4 no further change. The
-      revert's 1k figures (Move2 179 ns, Move3 264 ns) did not reproduce (146 / 202 ns): that run was noisy.
-      Decision: NEON LD/ST keep `fixed` (as HEAD has); literals return only where they do not read through a NEON
-      TBL table (x64 permutes, lane masks), NEON lookup tables stay hoisted statics. Then try the fix per path (literals only where AOT pays; or the table read into a local before the loop) and land it only
-      with JIT x64, JIT ARM64 (M4) and Native AOT numbers.
-      **x64 done (feat-aot-tables).** ILC listings of every KernelBenchmark runner at three instruction sets: at
-      `native` (AVX-512) and `x86-64-v3` no runner checks a class inside a vector loop since 5527701 (the checks left
-      are in the prologue, once per call, or a run's setup, once per run: `Maybe<T>`'s zero rows, Glide's layout,
-      Wave's setup). ILC's default x64 baseline has no AVX, so `Vector<T>` is 16 bytes and the loops run their 128-bit
-      form, which still read `Masks.Narrow` with a check per vector: Step, Grade, Share, Wave, Integrate (masked
-      words) and Optional (presence masks, every vector). The x64 128-bit lane masks are now literals (`Masks.Bits32` /
-      `Bits64` pick `Vector128.Create` when `!AdvSimd.IsSupported`); no check is left in any vector loop at any of the
-      three sets (Step's masked loop 85 -> 74 instructions, 9 -> 1 stack accesses; Grade 96 -> 84, 9 -> 0; Optional
-      75-77 -> 63-64, 14-18 -> 3). Under the JIT the Tier1 listings are identical before and after (AVX-512 and
-      `DOTNET_EnableAVX=0`): Tier1 folds an initialized static readonly vector into a constant. The other fix, the
-      masks read into a local before the masked loop (generator: `var __bits` passed to `Lanes32(pass, i, __bits)`),
-      saved one constant load per vector and cost spills at 128 bits; measured, it was not faster than the literal in
-      either round (below), so it was not kept. For the permutes D126 already showed that tables passed in before the
-      loop change nothing per vector. NEON paths unchanged by construction: ARM64 runs the same `Masks.Narrow`, the
-      same `__y` statics and the same `fixed` LD/ST as before (the new arm is behind `!AdvSimd.IsSupported`, a JIT
-      and ILC constant). Numbers (KernelBenchmark *Generated, default job, two rounds, ratio head / base, 0 B):
-      Native AOT `x86-64-v2` Optional 0.70 / 0.70 at 1,000 and 0.72 / 0.68 at 100,000, Holes 1.01 / 0.94 and
-      0.97 / 0.88, everything else within the run's spread (0.89-1.15; the Move2, Move4, Integrate and Share 100k cases above 1.05 in one round fell back in the other, and a six-launch rerun of Share and Move2 read 1.00 and 0.98 at 100,000; their runners are the same code before and after); Native AOT `native` and the JIT (AVX-512)
-      run identical loops before and after (stripped listings equal), and their ratios are the machine's spread: AOT `native` 0.90-1.07 / 0.90-1.12, JIT 0.91-1.09 / 0.95-1.11 (the second JIT head round started under another process's load). Left: the owner's M4 run below, a no-change check.
-      M4 command (owner; ARM64 should show no change, the loops it runs are unchanged):
-
-      ```bash
-      git worktree add ../ecs-base 85e0394
-      git worktree add ../ecs-head feat-aot-tables
-      # in each worktree, alternately, twice; JIT then Native AOT:
-      dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter \
-        '*KernelBenchmark.Move2Generated' '*KernelBenchmark.Move3Generated' '*KernelBenchmark.Move4Generated' \
-        '*KernelBenchmark.StepGenerated' '*KernelBenchmark.HolesGenerated' '*KernelBenchmark.IntegrateGenerated' \
-        '*KernelBenchmark.WaveGenerated' '*KernelBenchmark.ShareGenerated' '*KernelBenchmark.SeekGenerated' \
-        '*KernelBenchmark.GlideGenerated' '*KernelBenchmark.OptionalGenerated' '*KernelBenchmark.BrightenGenerated' \
-        '*KernelBenchmark.GradeGenerated'
-      CustomAfterMicrosoftCommonTargets=$PWD/../ilc-native.targets \
-        dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --runtimes nativeaot10.0 --filter <same filters>
-      ```
-
-      `../ilc-native.targets` holds `<Project><PropertyGroup><IlcInstructionSet>native</IlcInstructionSet></PropertyGroup></Project>`
-      (BenchmarkDotNet 0.15 passes ILC an instruction set it refuses). Add `--launchCount 6` to a 100k case that
-      differs (page placement, `audit-perf`).
-- [ ] **The inliner's limit, checked instead of assumed** (owner, 2026-10-26: "is a fixed JIT budget right when SIMD
-      width differs?"). Answer: `MAX_INL_LCLS = 32` is RyuJIT's implementation constant with no target condition
-      (`inline.h`, release/10.0 and main), the same for x64, ARM64, ReadyToRun and Native AOT, and it counts IL
-      locals, which no vector width changes; per-width register pressure is M1's (`microarch.md`). CI runs
-      `tools/inlining.sh` on the x64 and arm64 jobs (ci.yml; checked in feat-later-small: exit 0 as committed, 89
-      benchmark methods, 87 s with its build; the generator's split turned off, `InlinedLocals = 1000`: 22 failed
-      inlines, "too many locals", exit 1; a failed build now prints its errors and exits 2 instead of a silent 1). Mono (the WebAssembly demo; `mini/method-to-ir.c`,
-      `mono_method_check_inlining`, release/10.0) read: no limit on locals at all ("also consider num_locals?"), an IL
-      size limit of 20 bytes (30 LLVM AOT, 100 LLVM JIT) that `AggressiveInlining` lifts, an inline depth of 10, no
-      inlining in gsharedvt code or of methods with exception clauses: the 32-locals split costs Mono nothing, and
-      every helper a loop inlines must keep `AggressiveInlining` (the demo's runners inline only through it).
-      Decision record with D135 in the docs pass.
-- [x] **`[Accumulate]` users that do not conflict** (`voxel-rewrite.md` GA2; feat-later-accumulate): not built, a
-      record in owner-review.md. VoxelServer `--schedule` at 784260d: 45 systems in 42 stages, no stage lost to `Stats`
-      (or `Filled` / `Carried`): every `Stats` writer but SendChunks runs alone for its own reasons (`World` / `Entity`
-      parameters, `OnUpdate`, `[Consume]` / `MaxRows`), and the three totals' writers that do not (WaterCommit, Float,
-      SendChunks) sit between systems that run alone or conflict on components; still true after the rewrite's step 2.
-      The serial stages come from systems that run alone, not from totals.
-- [x] **EECS031 on nested creation loops** (feat-tiles-pingpong; done in feat-later-small): EECS031 climbs the counted
-      loops enclosing a creation loop while they always run it, keep its bounds invariant and destroy nothing, and
-      reports at the outermost with `Reserve(outer * inner)` (three levels and more); a constant product below the
-      small count is not reported, a loop that destroys the rows of its body stops the climb. Tests: nested positive,
-      three levels, constant product, churn negative, code fix.
-- [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
-- [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
-      push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with
-      WP5 / WP5b, `feature` + `audit-vector-loops`); the vector-loop forms left for later (masked words in parallel
-      methods, `Maybe<T>` in parallel methods and with narrow lanes, masked words of narrow lanes and wide rows,
-      `Atan2` / `Asin` / `Pow` lowerings; each ships only where it measures faster, `audit-vector-loops`). Not
-      actionable here: Unity support waits for a Unity release on .NET 10; the toolchain item is a standing rule.
-- [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 2 MiB columns done on `feat-later-memory` (pinned arrays
-      advised before first touch, reserved and copied ones only; 16M chases 1.28-1.67x, Create / Grow equal; docs-todos
-      "feat-later-memory"); #157 the #138 recommendations: done on feat-later-accumulate (table below); #159 remaining research: done on
-      feat-later-research (borrowed-ideas.md "#159 remainder": the ideas already in EasyEcs listed with their records;
-      `Emit<T>` lists padded apart built and reverted, a wash (1 of 16 pooled lists shared a line); native memory for
-      columns measured by `NativeColumnsBenchmark`, glibc 1.4-2.4x slower past 1M rows, not built, owner-review.md;
-      the helpers' queue line and thread pinning need a quieter or larger machine, owner-review.md; nothing for
-      feat-inner-loops).
-- [x] **#157, the #138 recommendations** (feat-later-accumulate; the #138 report's "Recommended, not built" list, and its
-      stencil items). Numbers: BenchmarkDotNet, six processes per case for the small ones, sides forward then backward.
-
-      | Recommendation | State | Evidence |
-      |---|---|---|
-      | Span mask parameter (a batch method told which rows of a word pass) | dropped (owner, 2026-11-03): the method for one row gets masks through the generated vector loop, and EECS103 rewrites a hand loop into it | decision record in the docs pass (docs-todos "feat-later-accumulate") |
-      | Ping-pong buffer | done before | `ref Tile` steps, TileSteps.cs (ed9f5e9, feat-tiles-pingpong): the second buffer swapped in, no commit |
-      | Tile store | done before | `tile.Write(row)` (Tile.cs:759), `col.Store` of TileColumnWalk (Tile.cs:1346-1356, 23a85f6) |
-      | Tile `Load512` | **built** on feat-inner-loops (0bd1cda; benchmark 47ba69b): `TileCursor.Load512`, the column walk's `Load512` and `Store(Vector512)`, the tile-load interceptor's 512-bit case | TileBenchmark Blur9_Columns512 / Blur9_Columns in the same runs 0.86-0.97, 0 B; with `DOTNET_EnableAVX512=0` the system takes its `Vector512.IsHardwareAccelerated` fallback and reads as Columns |
-      | Small-pass serial fallback | **built** (527d840): a parallel pass over at most 64 rows of one table runs its one chunk uncut | SystemDispatchBenchmark.ParallelPasses 1,003 / 986 -> 408 / 392 ns (0.40x), 0 B; Reduce and Emit results equal |
-      | A stage that runs alone without a region | built and reverted (bbb3391): a wash | ParallelStage 725 / 657 -> 715 / 840 ns: four uncontended locked adds are a few ns against 650-850 ns per stage and its spread |
-      | `Masked` short path | **built** in part (7955c6a): `RowFilter.Mode`'s requires-only plans | Plain 355 / 343 -> 332 / 333 ns, WithOnUpdate 361 / 353 -> 338 / 333, ParallelPasses 408 / 392 -> 349 / 355; the frame split of `Masked` not tried (below) |
-      | Per-participant timestamps | built and reverted (1ffd92d): slower | the span from first claim to last item counts the cursor's contention as work, so a run with helpers "beats" it and the runner stops running light stages alone: ParallelStage 0.72 -> 1.33-1.39 us |
-
-      Head (both kept) against base, every other case: the broad set (SystemDispatch, ParallelSystems, ParallelRunner,
-      ParallelPass, WorldSimulation, BattleServer, Reduce, Emit) two rounds, sides swapped in the second, then six
-      processes per case for those one round put above 1.0: none slower beyond its spread, 0 B. ReduceBenchmark's
-      BoundsParallelLock (a lock taken per row by four threads) read 0.81-1.44x across rounds, its standard deviation
-      15-25 % of its mean: contention, not the code (its pass is cut as before; the lock-free twins on the same rows
-      0.97-1.02x). VoxelServer TickBenchmark, four alternating rounds: 50 / 500 / 2,000 players 0.95 / 0.95 / 1.03.
-
-      Left: the frame split of `Masked` / `Batches` (the per-table preamble apart from the loop, a smaller frame): the
-      research's ceiling is about 5 ns of a 20 ns system; next step is `tools/jitdisasm.sh` of `Masked` on Plain.
-- [x] **Linger at Hop 8 after d666b0d** (feat-later-small): no regression; `[MethodImpl(NoInlining)]` on `Leave` not
-      adopted. Four earlier rounds (2 processes each) read 4 / 256 / 8 6-14 % slower than tip, and the Tier1 code showed
-      `Leave` inlined into the job's `Execute` once its allocation path left (849 -> 1219 B). The A/B on the merged tip
-      (d5991db): base (d666b0d's change reverted), fix and fix + NoInlining, `--launchCount 6`, three interleaved
-      rounds under one hold of the lock, each run started at a load below 2. Fix / base at Hop 8: 0.987 (1 / 4),
-      1.011 (1 / 256), 0.977 (4 / 4), 1.002 (4 / 256); at Hop 1 0.976-1.008, within the rounds' own spread (base
-      4 / 256 / 8: 982 / 946 / 879 us). NoInlining / base: 1.001-1.020 at Hop 8 and up to 1.061 at Hop 1 (4 / 4 / 1),
-      never below fix. So the earlier gap was the spread of 2-process runs on a loaded machine, not the inlining;
-      fix 0 B in every case, base 1 B in one.
-- [x] **Flaky: `NeighborTests.PassesWithResultsAndMutsAllocateNothingOnceWarm`** (feat-later-small's gate on 78fc3ee,
-      8216 B; feat-inner-loops saw 73,824 and 589,920 B, also on c1cad9c, with 11,078 of 12,309 MB in use while a
-      benchmark held 7 GB). Cause (feat-inner-loops' trace, confirmed here): the re-sorts' scratch came from
-      `ArrayPool.Shared` (`RowOrder.Order`'s keys and rows, `Archetype.PermuteBits` and `RebuildTicks`' words), as did
-      `RowClusters.Find`'s; at 90 % of the GC's high-load threshold the pool drops its arrays at every gen2, and
-      `Allocations.Of` starts with one, so each rent allocated (8216 B is the `ulong[1024]` of 1,000 8-byte keys).
-      Fixed: the sort's scratch is the world's (`ColumnSpares.Scratch`, by role, grown to a power of two, cleared by
-      `TrimExcess`), the search's per thread. Tests: `Allocations.PoolRents` counts this thread's rents
-      (ArrayPoolEventSource); before the fix SortingUpdatesAllocateNothing rented 8 times, the Neighbor test 20 and
-      ClusterSearchesRentNothingOnceWarm 3, all 0 after. Not `Near`: a trace at every growth site of the pair passes
-      shows every buffer reaching its size in the worlds' first pass, the same in every run, none in the window (52
-      runs, loaded and with tier-up delayed, never reproduced the 8216 B on a machine with free memory). Both warm-ups
-      of the file's 0 B tests now run through `Allocations.WarmUp`. The generated `ForEachCollected` past 64 ids
-      takes the world's array of its nesting level (`World.TakeCollected` / `ReturnCollected`: a job it runs may call
-      it again), no longer the pool: on 857202b the MaxRows steady-state test rented once per step and a run inside
-      a run 101 times, 0 after; MaxRowsBenchmark level (Generated, budget 256: 1.020 and 0.952, the unchanged
-      HandWritten form 0.980-1.056 in the same rounds). RowOrderBenchmark: four rounds of the class, then Churn1,
-      Reverse and Sorted with `--launchCount 6` in two more rounds each (fix / base 0.908-1.059); the two slower in
-      both of those (Reverse 1M Wide 1.059, Sorted 1k Wide 1.046) in three more rotating rounds of 6 processes against
-      a third build with the words back on the pool: Sorted 1k Wide 0.992; Reverse 1M Wide 1.017 (t 0.89 over 18
-      processes a side), the third build 0.984, and one process of one build ranges 68-88 ms, so the gap is where a
-      process's pages land, not the scratch (the two builds differ only in a 128 KB array). Nothing slower.
-- [x] #153 (feat-later-small): the `--dev` job is in (screening). The default job stays (Warmup 6, 8 x 250 ms, 2
-      processes): Warmup 3 / 150 ms took 244 / 238 s against 375 / 371 s for a fast, a parallel and a memory-bound
-      class, but ParallelPassBenchmark's Tick moved +9-10 % (Parallel=False) in both rounds and +19 % (Parallel=True),
-      EntityJob +28 % in one: the parallel classes keep speeding up for 2-4 s of each process (warmups 1.62-1.70 ms,
-      measured iterations falling to 1.23 ms), which 0.45 s of warm-up cuts off. GeneratorBenchmark: 1188 / 1206 s a
-      run on the default job, of which 801 s operations (Compile and CompileAndAnalyze, 2.6-7 s each, most of it) and
-      16 s per process outside them (24 processes): the corpus checks (compile errors, the analyzer over everything) left
-      the setup for `GeneratorTests.TheBenchmarkCorpusIsClean` (HEAD on the default job: 1960 s, means within the runs' spread). One process
-      (a mutator: BenchmarkDotNet applies an `AsDefault` job over a class's own job) took 642 / 674 s but was not
-      adopted: the default job's two processes differed up to 9 % on Compile (OneNamespace, 3809 vs 4155 ms, sd ~3 %
-      within each), which one process hides, and both one-process rounds read it higher (4262 / 4501 ms against
-      3834 / 3979). Warmups stay too: the generator cases settle in their fifth (Cold 1.3 s -> 0.83 s). For a
-      generator change, run the cases it touches (`audit-generator`).
-- [x] Recheck on a quiet machine: GroupBenchmark.Scan, OperationBenchmark Toggle (feat-later-small, base 2db351d vs
-      tip 99e7a2c, default job, two rounds). Scan: 797 ± 123 vs 814 ± 111 us, then 745 ± 64 vs 712 ± 64: the sign
-      flips, no regression. Toggle: 427 ± 33 vs 449 ± 35, then 458 ± 36 vs 469 ± 27, so the Tier1 code was diffed:
-      the per-row path is the same code (AddBit 279 / 281 B, SetRow, MoveTo's IL identical, World.Components.cs
-      unchanged); tip adds RowOrder.Shrink calls in RemoveRow / Archetype.Remove and a larger World.Run (394 -> 953 B:
-      ThreadSetup.Run, SortDue per update), neither on Toggle's path. Tip leaves MoveTo, CopyRow and GetAddEdge at
-      instrumented Tier0 longer, but 2000 Toggles timed directly are equal tiered (485.8 vs 483.8 us, 460.7 vs 460.7)
-      and fully optimized (509.9 vs 504.0, 522.1 vs 463.6 with base the slower): the BenchmarkDotNet gap is noise.
-- [x] **Fewer page faults on top of huge pages** (done on `feat-page-faults`: counted with `[PageFaultDiagnoser]`
-      (PageFaultBenchmark, PrefaultTouchBenchmark); kept: a user's reservation faulted in (`MADV_POPULATE_WRITE`, resident
-      2 MiB windows skipped, copies left to the first touch): the tick filling it 2.2x faster at 1M and 3.9-4.4x at 16M
-      with 4 KiB pages, 4.2-5.4x and 11.3x with 2 MiB pages, Reserve 16M 1.3x; not kept, causes in owner-review: prefault
-      against the host's huge-page refaults, a pool of disposed worlds' columns, prefaulting copies; GC settings are a
-      docs to-do; docs-todos "feat-page-faults") (owner, 2026-10-31: "大页内存然后减少缺页呢，你要不研究一下改一下"; next
-      free agent slot, before the other Later items): count first (`minflt` / `majflt` from `/proc/self/stat`, `thp_fault_alloc`,
-      `thp_fault_fallback`, `compact_stall` around each op, in a BenchmarkDotNet column) on Create / Grow / Reserve / Load /
-      Capture-Restore / InstantiateEach at 1M and 16M, then try each and keep what pays: prefault a sized array in one call
-      (`MADV_POPULATE_WRITE`, Linux 5.14+, on the 2 MiB interior, instead of one fault per page on first touch) off the hot
-      path (Reserve / load) and its cost against first touch; keep a world's grown arrays instead of handing them back
-      (reuse the old column for the next resize of the same size class, no refault of memory the GC or the host reclaimed);
-      the GC's own settings (`GCRetainVM`, `GCConserveMemory`, regions and `GCgen0size`: a host's choice, measured and written
-      up for users, never set by the library); the free page reporting cause of `feat-later-memory` (does prefault after a
-      pause beat touch?). Each with the cause read before any verdict (perf counters, Tier1 where code changed).
-- [x] **Owner's calls on `owner-review.md` (2026-10-30), each built, measured and kept only if it pays:**
-      (a) `CopyEntities<TTag>(target, ids, set)`: a measured prototype (ghost rows, a column copy per run of rows,
-      the originals kept) against the hand-written `CreateEntity` loop of `samples/MultiWorld/Border.cs`;
-      (b) EECS116's code fix limited to the step method (`ref Tile`, writes become `Write(row)`; the commit method and
-      the `TNext` buffer are left for the user, the compiler reports their stale writes);
-      (c) a public `c.Columns(...)` handing a proven column loop its base column, to close the Laplacian 32x32 gap
-      (48 against 33 instructions; Tier1 listing and TileRestart / ping-pong benchmarks before and after);
-      (d) an Info rule naming why a `TileCursor` load runs checked (the loop the generator cannot prove: the variable
-      written in the body, an unreadable bound; the reasons `TileLoad.Read` returns null for), as EECS055 does.
-      (e) the per-tile frame read once without a second call (`Enter` handing the tile out through an out parameter
-      the job keeps in a register; the reverted Begin/Frame split's untried design), measured on TileActive and
-      TileWoken; (f) a benchmark of `Rows()` walking odd `[GaussSeidel]` sweeps backwards against forwards, to settle
-      the 8c drop with numbers. (e) and (f) by the owner's rule "try it now" (AGENTS.md, 2026-10-30).
-      (c) and (d) edit the generator: after `feat-roslyn-guidance` merges.
-      Done on `feat-owner-calls` (owner's answers 2026-10-31 included): (a) kept, `World.CopyEntities<TTag>`
-      (3 components 0.70-0.93x of the loop, 1 component scattered a wash; MultiWorld keeps its loop); (b) EECS116's fix
-      deletes the commit, its system and `AddSystem<T>()` and the buffer type, and EECS121 reports the other forms;
-      (c) `c.Columns(step)` (`TileColumnWalk` and its `Cursor`) with `col.Store(v, into)`: Laplacian column loop 52 ->
-      34 instructions (hand 33), 0.75-0.90x of Hand past 32x32 at 1 thread and at 4; (d) EECS120 (Info, the
-      reasons of `TileLoad.Read`); (e) and (f) built, measured and reverted (owner-review). Docs: docs-todos
-      "feat-owner-calls".
-
-## Finish
-
-Starts only when every feature is built: every code item of Next and Later is done (owner, 2026-10-26: "先把代码全改完").
-Then, in this order (owner, 2026-10-27: "重构应该排在写文档和 benchmark 前吧，等所有功能先落实好"): 1 the last code
-gaps and the paths, 2 the refactor of every example, 3 the docs, 4-5 the benchmarks and master. Nothing of a later
-step starts before the earlier one is done, so docs and numbers are written once, about the final code.
-
-- [ ] **1a. Generated-members scan** (report and the owner's answers of 2026-11-07: `finish-scan.md`; build `[Tile]`, `[UniqueKey(SlotsPerAxis)]`, `[MinBy]` / `[MaxBy]`) (roadmap "Less code through the generator", D26,
-      `audit-generator`): the API, the battle server and the guides scanned for lines users write twice;
-      what it finds is a code item, built before step 2.
-- [ ] **1b. Directory restructure of the whole repository** (layout approved 2026-11-07: `finish-scan.md` section 2 plus `tools/perf/`) (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only, before the
-  refactor so it lands in the final paths,
-  after every agent branch merges; the layout plan (old → new per file, every path reference)
-  goes to the owner first.
-- [ ] **2. The exemplar pass: the refactor** (#169, `audit-code`; owner, 2026-10-27: "9 的第一步不是重构全部 sample demo
-      benchmark unit test 和文档里的代码例子吗，全用上最正确的最合适的功能（新功能也包含），尤其是 voxelserver 需要大规模重构").
-      Every piece of code users read or copy is rewritten in the most correct, most fitting form, new features
-      included (vector loops through plain `[ForEach]`, `[Accumulate]`, `[Drain]`, `Emit`, `Scratch`,
-      `EntityRandom`, views, `[OrderBy]` / pairs, tiles with `[GaussSeidel]` and the ping-pong step, `IDirectMapped`,
-      `ChunkSize` only where it pays, the least code the generator allows):
-      a. **VoxelServer, a large rewrite** (owner answers in `voxel-rewrite.md` section 9: every zombie looks every
-         tick, output changes accepted, Target kept, item merging through symmetric pairs (8e), Terrain as a Cell
-         method after WP5, a slower generated scent is a generator gap, ghost rows of two region worlds) (owner, 2026-10-26: every high-performance feature, the least user code;
-         2026-10-27: "需要大规模重构"): the plan is `voxel-rewrite.md`, made on 2515638 before L1 / L2, the call
-         inliner, the generator gaps, the prefetch gates, the distance field and the tile items. It found ~7% to cut
-         as line edits; the owner expects a restructure, so it is refreshed now on the tip against everything merged
-         since (systems merged or split, components reshaped for vector loops, pairs instead of rings, tiles instead
-         of hand loops). Its per-system plan is made now, read-only, not at Finish (per system: the features it does not use yet,
-         the lines saved, the generator or feature gaps it exposes); the gaps (lines users would write twice) go into
-         Later as code items, so the rewrite itself only uses what already exists. Bools split (Body.OnGround,
-         Exposure.Sunlit). The plan covers every feature, not only tiles (owner, 2026-10-27: "全部现在的功能都看看",
-         prefetch, cluster pairs, ...): a matrix of every feature, used today or not, where it belongs, and for the
-         automatic ones (prefetch gates, ordered rows, fusion) whether the sample's data and scale trigger them.
-         The rewrite waits for item 11 (+ 12a / 12b): the tile systems are written once, in the ping-pong form
-         (owner: "你得等你的 uv 交换先修好").
-      b. The other samples, `templates/`, the live demo (`demo/`, its page includes the files).
-      c. Benchmark worlds (`BattleServer.cs`: the Battle singleton moves to `[Accumulate]`, then GeneratorBenchmark's
-         EECS086 filter exception is deleted: EECS086's total case reports Shoot, SendFire and SendFireOut, and a
-         benchmark must not keep suppressing a rule our own example breaks; `WorldSimulation.cs`), with an A/B on each
-         rewritten world.
-      d. Unit tests that show usage (fixtures, scenario and feature tests: the forms users would copy), not the tests
-         that pin an old form on purpose (code fixes, analyzer negatives, migrations).
-      e. Every code example of the docs (`docs/content` fences en + zh, the guide pages' full examples, the public
-         skill `skills/easyecs/SKILL.md`, README), DocCheck at 0.
-      Proof: outputs and README / page output blocks match, 0 B steady state, tests three ways, A/B no slower.
-- [ ] **2b. EECS086, EECS109 and EECS055's "a bool among N fields" become Warnings** (owner, 2026-10-27) once the
-      samples use `[Accumulate]` / `[Drain]` and VoxelServer splits its bools (Body.OnGround, Exposure.Sunlit):
-      one line each in the analyzer (pass `true`, fixable, in Kernel.cs for EECS055), with step 2.
-- [ ] **3. Docs pass** (#141, after the refactor: pages describe and include the final code): everything in `docs-todos.md`; DocCheck and ApiDocs kept at 0 (both 0 since the fix-ci merge); decision
-      record for the 8 declined declarations; roadmap item for inner loops; analyzer range EECS002-103.
-- [ ] **4.** The `arm64` CI job (`ci.yml`, `runs-on: ubuntu-24.04-arm`, added b1dbdb0) has never run: it runs on the next
-      push to master or a manual dispatch; if the label is wrong the job fails at once and the label is fixed then.
-- [ ] **5.** `tools/bench.sh --site --sync` (after the refactor: the rewritten benchmark worlds are what the site measures), README numbers, `verify`, master. The owner cuts the release.
+Merged before 2026-11-07, details in git and in docs-todos: the pair form and symmetric pairs (L2, 8e), ARM64 parity,
+the call inliner, G1, microarch M0-M3, the prefetch gates, borrowed ideas, the distance field, the generator's stage
+catches and reason texts (8b, 8d, 8f), foreign bodies (8g), MoveEntities' `ArriveRows` (8i), switch masks (8j),
+`[ForEach(MaxRows = N)]` (G10), streaming stores, ping-pong steps and fewer copies (11, 12a-e), the generator gaps
+(G0, G4-G6), the inliner's limit checked, the owner's calls (a)-(f), huge pages and page faults, #153 / #157 / #159,
+the flaky allocation tests, the Native AOT tables on x64, WP0 / WP0b / WP2 / WP3 / WP5 / WP5b (1)-(4) / WP1 step 1.
+Settled by the owner on 2026-11-07 (records in docs-todos "Sweep 2026-11-07"): the Enter out-tile, the lane-shift
+helper, `Rows()` turning, the page-fault attempts not kept, `[Accumulate]` sharing a stage, the ping-pong read entry
+(the fix shipped), the countdown timers (owner-review); mimalloc chosen for native columns (C19).
