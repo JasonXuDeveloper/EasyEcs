@@ -436,7 +436,13 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
 - [ ] **Inner loops** (`inner-loops.md`), in this order (WP0b, WP0, WP2, WP3, WP5 done on feat-inner-loops): WP0 (Binding / BodyCopy), WP2 element loops, WP3 offsets,
       WP5 `Cell<TCell,TTile>` (bar: hand-written speed), WP5b (per-tile results, several inputs/outputs, VoxelServer
       `Flow.cs`), WP1 InlineArray, WP4 ParallelFor lambda, WP6b/c EECS103 v2/v3, WP8 fixable-reason audit (plain code
-      a small rewrite would vectorize warns).
+      a small rewrite would vectorize warns). On feat-inner-loops (2026-11-07) also done: WP1, WP4, WP5b (b), WP6b
+      (Tile stencils, `HandStencil`) and WP6c (element loops, `HandSimd.Loops`), WP7's FireDamage (the method for one
+      row) and VoxelServer's Sunlit / InWater split, WP8 (e) (a bool used alone: fixable split advice, deferred past a
+      later parameter's inherent reason), (f) (equal NEON tables shared), (h) (`Interleaved.LoadTail`'s copy through
+      ThreadSetup). In measurement: (d) the blank fill of a cell pass's gaps (a zero gap scanned instead of written).
+      Left: lambda fusion; (a) a `Columns<TTile>` cell; (b) masked AVX-512 tails; (g) the roadmap's vector-loop forms;
+      the rest of WP8's scan (Dig and Gone keep their World reason); the demo's batch Move (the owner's call).
 - [ ] **Generated text cleanup** (`generated-text.md`, ranked; one agent, SystemGenerator owner, after lookup gathers):
       1 `GeneratedTextTests` guard first (fails on today's output, allow-list shrinks as each step lands);
       2 alias block (-20 % text, IL identical); 3 fusion files run the systems' jobs (-76 % fusion output);
@@ -549,7 +555,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       reports at the outermost with `Reserve(outer * inner)` (three levels and more); a constant product below the
       small count is not reported, a loop that destroys the rows of its body stops the climb. Tests: nested positive,
       three levels, constant product, churn negative, code fix.
-- [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
+- [ ] Follow-ups: lambda passes do not fuse (lambda + structural change and lambda + view get vector loops on feat-inner-loops).
 - [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
       push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with
       WP5 / WP5b, `feature` + `audit-vector-loops`); the vector-loop forms left for later (masked words in parallel
