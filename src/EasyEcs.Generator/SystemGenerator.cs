@@ -600,8 +600,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world}), p{i} = {StepsType(method, i)}.Of({world}, {(p.Sleeps ? "true" : "false")}, {p.Sweeps})");
             case Symbols.ParamKind.Tile when p.RefKind == "ref":
                 return ($"public {StepsType(method, i)} p{i};", $"p{i} = {StepsType(method, i)}.Of({world}, {(p.Sleeps ? "true" : "false")}, {p.Sweeps})");
+            // A tile taken by value: the halos and neighbors its pass keeps (TileHalos), begun before the pass.
             case Symbols.ParamKind.Tile when method.FirstOfGrid(i):
-                return ($"public object k{i};\npublic global::EasyEcs.TileNeighbors n{i};", $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world})");
+                return ($"public object k{i};\npublic global::EasyEcs.TileNeighbors n{i};\npublic {HalosType(method, i)} h{i};",
+                    $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world}), h{i} = {HalosType(method, i)}.Of({world})");
+            case Symbols.ParamKind.Tile:
+                return ($"public {HalosType(method, i)} h{i};", $"h{i} = {HalosType(method, i)}.Of({world})");
             case Symbols.ParamKind.Emit: // on one thread the singleton's list itself; in parallel the target of the chunks' lists (from the pool)
                 return method.Parallel
                     ? ($"public global::EasyEcs.SingletonRef<global::EasyEcs.Emitted<{p.Type}>> o{i};\npublic global::EasyEcs.DynamicBuffer<{p.Type}> e{i};",
@@ -620,6 +624,21 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     {
         var p = method.Parameters[i];
         return $"global::EasyEcs.TileSteps<{p.Cell}, {p.Shape}, {p.Grid}, {p.Key}, {ColorsType(method)}>";
+    }
+
+    /// <summary>The kept halos of tile parameter <paramref name="i"/> (by value), keyed by the method's <see cref="EmitHalos"/> type.</summary>
+    private static string HalosType(ForEachModel method, int i)
+    {
+        var p = method.Parameters[i];
+        return $"global::EasyEcs.TileHalos<{p.Cell}, {p.Shape}, {p.Grid}, {p.Key}, __ForEach{method.Owner.TypeParameters}.{method.Name}Halos{method.Order}>";
+    }
+
+    /// <summary>The type that keys the halos the passes of a method taking a tile by value keep in each world.</summary>
+    private static void EmitHalos(StringBuilder sb, ForEachModel method)
+    {
+        if (!method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Tile && p.RefKind != "ref")) return;
+        sb.Append($"    /// <summary>Keys the halos <c>{method.Name}</c>'s passes keep.</summary>\n");
+        sb.Append($"    internal readonly struct {method.Name}Halos{method.Order};\n\n");
     }
 
     /// <summary>
@@ -883,7 +902,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         if (suffix.Length == 0 && method.Simd is { VectorTail: true }) EmitJob(sb, owner, method with { Simd = null }, number, "Rows");
         // A method chasing other entities has a twin prefetching them, for the passes past the cache of its form.
         if (suffix.Length == 0 && method.HasChaseTwin) EmitJob(sb, owner, method with { IsChaseTwin = true }, number, "Chases");
-        if (suffix.Length == 0) EmitColors(sb, method);
+        if (suffix.Length == 0)
+        {
+            EmitColors(sb, method);
+            EmitHalos(sb, method);
+        }
         string job = $"{method.Name}Job{number}{suffix}{method.TypeParameters}";
         var components = method.Query.ToArray();
         int index = 0;
@@ -922,7 +945,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Scratch => $"new global::EasyEcs.Scratch<{p.Type}>(ref (t{i} ??= global::EasyEcs.Scratch<{p.Type}>.Of<{method.Name}Job{number}{method.TypeParameters}>()).Value)",
             Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
             Symbols.ParamKind.Tile when p.RefKind == "ref" => $"ref w{i}", // the step's tile, a local the call writes through
-            Symbols.ParamKind.Tile => $"new global::EasyEcs.Tile<{p.Cell}, {p.Shape}>({(runs ? "entities[(int)i]" : "entity")}, in n{method.GridOf(i)})",
+            Symbols.ParamKind.Tile => $"new global::EasyEcs.Tile<{p.Cell}, {p.Shape}>({(runs ? "entities[(int)i]" : "entity")}, in n{method.GridOf(i)}, h{i})",
             Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref this.e{i})", // this: a vector loop's column refs are e1, e2...
             Symbols.ParamKind.View => View(p, i),
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
@@ -967,8 +990,16 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         // A grid's neighbors, found once per entity for every Tile of the grid the method takes.
         string tileEntity = runs ? "entities[(int)i]" : "entity";
-        string grids = string.Concat(Enumerable.Range(0, method.Parameters.Length).Where(method.FirstOfGrid).Select(i =>
-            $"global::EasyEcs.TileNeighbors.Of<{method.Parameters[i].Shape}, {method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {tileEntity}, out n{i}); "));
+        // A tile taken by value reads them from the halos its pass keeps (searched when not kept); the other tiles of its
+        // grid keep them too.
+        string grids = string.Concat(Enumerable.Range(0, method.Parameters.Length).Select(i => method.Parameters[i] switch
+        {
+            { Kind: Symbols.ParamKind.Tile, RefKind: "ref" } p when method.FirstOfGrid(i) =>
+                $"global::EasyEcs.TileNeighbors.Of<{p.Shape}, {p.Grid}, {p.Key}>(k{i}, {tileEntity}, out n{i}); ",
+            { Kind: Symbols.ParamKind.Tile } p when method.FirstOfGrid(i) => $"h{i}.Around<{p.Grid}, {p.Key}>(k{i}, {tileEntity}, out n{i}); ",
+            { Kind: Symbols.ParamKind.Tile, RefKind: not "ref" } => $"h{i}.Adopt({tileEntity}, in n{method.GridOf(i)}); ",
+            _ => "",
+        }));
         if (method.Steps is >= 0 and var steps)
         {
             // A stepping tile: the tiles of the color running that may change step (Enter), each sweep of a Gauss-Seidel
