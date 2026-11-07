@@ -2502,6 +2502,13 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   gets (the view's members inlined; EECS097 says why when it stays scalar). Numbers: StructuralLoopBenchmark Lambda,
   ViewBenchmark Lambda. Remove "lambda + structural change" and "lambda + view" from any list of forms that stay
   scalar (roadmap "Vector loops: forms left for later", the lambda page's limits).
+- **guide/parallel (ParallelFor) + zh, api.mdx + zh:** `world.ParallelFor(ref items, values..., static (ref T item, V
+  v) => …)` (WP4): the lambda takes the element by ref or in, then the values before it; the generator compiles it
+  into an IForSpan<T> job whose chunk loop is a vector loop where the body qualifies; complexity O(n / threads), 0 B
+  after the first call per job. "You write / The generator writes" from ParallelForBenchmark's LightLambda. EECS095's
+  ParallelFor reasons in analyzer.mdx; numbers: ParallelForBenchmark Light / Heavy Lambda against the hand-written
+  jobs (inner-loops.md WP4). Changelog (New) + README "What's new": "ParallelFor takes a lambda over a list's
+  elements, compiled into a vector loop".
 - **Changelog (New) + README "What's new":** "Inline array components and constant-trip loops over them run as
   vector loops"; "Counts (`sum += cond ? 1 : 0`) are mask arithmetic"; "Lambda passes that change structure or
   take a view get vector loops". Changelog (Analyzer): EECS099's new case.
