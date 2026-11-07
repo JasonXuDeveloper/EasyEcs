@@ -274,6 +274,11 @@ internal sealed partial class Kernel
                 var (a, b) = (StructOf(Arg(0)), StructOf(Arg(1)));
                 return Each(paths.Length, f => $"{V}.{m.Name}({a[f]}, {b[f]})");
             }
+            case "Clamp" when m.Parameters.Length == 3: // Min(Max(value, min), max), the order Vector2 / 3 / 4.Clamp takes
+            {
+                var (a, lo, hi) = (StructOf(Arg(0)), StructOf(Arg(1)), StructOf(Arg(2)));
+                return Each(paths.Length, f => $"{V}.Min({V}.Max({a[f]}, {lo[f]}), {hi[f]})");
+            }
             case "Abs" or "SquareRoot" when m.Parameters.Length == 1:
             {
                 var a = StructOf(Arg(0));
