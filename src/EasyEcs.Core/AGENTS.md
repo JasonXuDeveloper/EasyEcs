@@ -116,12 +116,10 @@ TileSteps.cs                 a stepping tile's pass (ref Tile, TileSteps<TCell, 
                              TileColoring); sleeping tiles, woken by the edges that changed, by others' writes of the
                              cells (and of what else the method reads), by tiles that left the grid, queued by color so
                              a sleeping pass walks only them (StepWoken over the generated job's ITileStep.Step)
-TileHalos.cs                 the kept halos of a pass taking a tile by value (TileHalos<TCell, TTile, TGrid, TKey, TJob>,
-                             one per world and method, TileHaloCache its untyped part): each tile's neighbor ids kept
-                             until the index or its membership changes (no search per pass), and its halo ring kept
-                             after an exchange and loaded back while no tile around it changed (its cells written,
-                             removed, the tile gone); a pass where more than a quarter of the tiles changed pulls
-                             every halo (keeping the ids); World.TileState (the tests' view of it)
+TileNeighborCache.cs         the neighbors a pass taking a tile by value found for each tile (TileNeighborCache<TTile,
+                             TGrid, TKey, TJob>, one per world and method), kept until a tile joins, leaves or moves
+                             (the index's Membership): no search per pass; the halo is still pulled every pass (D73);
+                             World.TileState (the tests' view of it)
 Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), handed in
                              chunk order to singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear) as
                              segments, not copied: EmitStore (BufferStore.Segmented) joins them only when read as one

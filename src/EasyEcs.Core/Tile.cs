@@ -394,21 +394,6 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
         _entity = entity;
         _around = ref around;
         _frame = TileFrame<TCell, TTile>.Current;
-        _frame.Halos = null;
-    }
-
-    /// <summary>
-    /// The tile of <paramref name="entity"/>, whose neighbors are <paramref name="around"/>, its halo exchanged through
-    /// <paramref name="halos"/> (the halos its pass keeps; held by the thread's frame, so the tile stays the size its
-    /// row loops keep in registers). Generated code calls this.
-    /// </summary>
-    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public Tile(Entity entity, ref readonly TileNeighbors around, TileHaloCache<TCell, TTile> halos)
-    {
-        _entity = entity;
-        _around = ref around;
-        _frame = TileFrame<TCell, TTile>.Current;
-        _frame.Halos = halos;
     }
 
     /// <summary>The tile's own cells, in the layout of <see cref="ITileShape"/>. O(1).</summary>
@@ -472,35 +457,6 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
             return;
         }
         frame.Loaded = default; // a copy that throws leaves no texture behind
-        if (frame.Halos != null) // the pass keeps halos: out of line, so a stencil's root keeps its inlining budget
-        {
-            ExchangeKept(frame, from, to, border, mask);
-            return;
-        }
-        LoadHalo(frame, from, to, border, mask);
-        Loaded(frame, from, to, mask);
-    }
-
-    /// <summary>
-    /// <see cref="ExchangeHalo(int, int, TCell, bool)"/> in a pass that keeps halos: the kept one put back, else the halo
-    /// exchanged and kept.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void ExchangeKept(TileFrame<TCell, TTile> frame, int from, int to, TCell border, bool mask)
-    {
-        var halos = frame.Halos;
-        if (!halos.TryLoad(_entity.Id, frame, from, to, border, mask, Own(TileLayout.Cells<TTile>())))
-        {
-            LoadHalo(frame, from, to, border, mask);
-            halos.Keep(_entity.Id, frame, from, to, border, mask);
-        }
-        Loaded(frame, from, to, mask);
-    }
-
-    /// <summary>The halo of layers <paramref name="from"/> to <paramref name="to"/> copied from the neighbors into the texture.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private readonly void LoadHalo(TileFrame<TCell, TTile> frame, int from, int to, TCell border, bool mask)
-    {
         // The common shape (a five- or seven-point stencil: one cell of halo, the faces, a border boundary) has its own
         // loop, which the JIT keeps for that shape alone (the condition is a constant): no corner, no remapping.
         if (TTile.Halo == 1 && TTile.Neighborhood == TileNeighborhood.Faces && TTile.Boundary == TileBoundary.Border)
@@ -515,12 +471,6 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
             else LoadPlane<Unmasked>(frame, border);
         }
         else LoadAny(frame, from, to, border, mask);
-    }
-
-    /// <summary>The texture holds this tile's layers <paramref name="from"/> to <paramref name="to"/>.</summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void Loaded(TileFrame<TCell, TTile> frame, int from, int to, bool mask)
-    {
         frame.From = from;
         frame.To = to;
         frame.Masked = mask;
@@ -1550,9 +1500,6 @@ internal sealed class TileFrame<TCell, TTile> where TCell : unmanaged where TTil
 
     /// <summary>The tile this thread steps (a <c>ref Tile</c>); default outside a step.</summary>
     public EntityId Stepping;
-
-    /// <summary>The halos the pass of the tile this thread visits keeps (a tile taken by value, TileHalos), or null.</summary>
-    public TileHaloCache<TCell, TTile> Halos;
 
     /// <summary>A Jacobi step: the cells of the next buffer, which <see cref="Tile{TCell, TTile}.Write"/> hands out; null in place.</summary>
     public TCell[] Next;
