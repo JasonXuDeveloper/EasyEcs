@@ -14,26 +14,13 @@ public record struct BlockPos(int X, int Y, int Z);
 // position: world.ChunkIndex.TryGet(pos, out chunk), the lookup every tick makes thousands of times (the blocks around
 // a body, the chunk an entity is in, the edges of the water). It is direct-indexed: a chunk's slot is its position
 // modulo 64, so the chunks loaded around the players, never 64 apart, each have their own slot, and a lookup reads one
-// array entry (the hash finds the others). Every chunk is an instance of one prefab (Program.cs), with every component
-// and tag below and in Water.cs, so all chunks share one table whatever happens to them. It is also a tile of the
-// world's grid (ITile): 16 x 16 x 32 cells in its buffers, with a neighbor on each side, so the water shader takes a
-// Tile<Fluid, Chunk> and gets its water with the halo of its neighbors' (WaterFlowSystem).
-public partial record struct Chunk([UniqueKey] ChunkPos Pos) : IComponent, IDirectMapped<ChunkPos>, ITile<ChunkPos>
-{
-    static int IDirectMapped<ChunkPos>.Slots => 64 * 64;
-    static int IDirectMapped<ChunkPos>.SlotOf(ChunkPos pos) => (pos.Z & 63) * 64 + (pos.X & 63);
-    static int ITileShape.Width => Terrain.Size;
-    static int ITileShape.Depth => Terrain.Size;
-    static int ITileShape.Height => Terrain.Height;
-
-    static ChunkPos ITile<ChunkPos>.Beside(ChunkPos pos, TileFaces face) => face switch
-    {
-        TileFaces.North => new(pos.X, pos.Z - 1),
-        TileFaces.South => new(pos.X, pos.Z + 1),
-        TileFaces.West => new(pos.X - 1, pos.Z),
-        _ => new(pos.X + 1, pos.Z),
-    };
-}
+// array entry (the hash finds the others): SlotsPerAxis = 64, a window of 64 x 64 slots. Every chunk is an instance of
+// one prefab (Program.cs), with every component and tag below and in Water.cs, so all chunks share one table whatever
+// happens to them. It is also a tile of the world's grid ([Tile]): 16 x 16 x 32 cells in its buffers, with a neighbor on
+// each side (the generator steps the key's X and Z), so the water shader takes a Tile<Fluid, Chunk> and gets its water
+// with the halo of its neighbors' (WaterFlowSystem).
+[Tile(Width = Terrain.Size, Depth = Terrain.Size, Height = Terrain.Height)]
+public partial record struct Chunk([UniqueKey(SlotsPerAxis = 64)] ChunkPos Pos) : IComponent;
 
 // A chunk a player needs that is not loaded: AoiViewSystem records it as an entity, one per chunk (the unique index), and
 // ChunkReadSystem reads it from the region files or ChunkGenerateSystem generates it, a budget a tick, outside the walk

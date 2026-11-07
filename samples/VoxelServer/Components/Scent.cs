@@ -55,21 +55,8 @@ public record struct Footing(byte Value)
 // blocks on the same entity. A Tile<Scent, Ground> is the chunk's field with the edges of its neighbors' around it, as
 // the water's Tile<Fluid, Chunk> is its water: the 2D field cannot be a tile of the 3D Chunk, whose buffers hold a cell
 // per block. Direct-indexed by its position like Chunk, so the four neighbors are four array reads.
-public partial record struct Ground([UniqueKey] ChunkPos Pos) : IComponent, IDirectMapped<ChunkPos>, ITile<ChunkPos>
-{
-    static int IDirectMapped<ChunkPos>.Slots => 64 * 64;
-    static int IDirectMapped<ChunkPos>.SlotOf(ChunkPos pos) => (pos.Z & 63) * 64 + (pos.X & 63);
-    static int ITileShape.Width => Terrain.Size;
-    static int ITileShape.Depth => Terrain.Size;
-
-    static ChunkPos ITile<ChunkPos>.Beside(ChunkPos pos, TileFaces face) => face switch
-    {
-        TileFaces.North => new(pos.X, pos.Z - 1),
-        TileFaces.South => new(pos.X, pos.Z + 1),
-        TileFaces.West => new(pos.X - 1, pos.Z),
-        _ => new(pos.X + 1, pos.Z),
-    };
-}
+[Tile(Width = Terrain.Size, Depth = Terrain.Size)]
+public partial record struct Ground([UniqueKey(SlotsPerAxis = 64)] ChunkPos Pos) : IComponent;
 
 // What a chunk's last step of the field did: whether any column changed, and the edges whose columns changed, which the
 // chunks across them read into their halo.
