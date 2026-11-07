@@ -524,6 +524,36 @@ internal sealed partial class Kernel
         }
     }
 
+    /// <summary>
+    /// The vector loop of a ParallelFor lambda over a buffer's elements (<c>static (ref Hit hit, float keep) =&gt; …</c>):
+    /// its first parameter is the loop's one column, one lane per element, as an element loop's span (Kernel.Loops.cs),
+    /// and the others are values of the call, the job's fields <c>x{i}</c>. Null with the reason when it stays scalar.
+    /// </summary>
+    public static Code? VectorizeElements(IMethodSymbol lambda, IAnonymousFunctionOperation function, SemanticModel model,
+        System.Threading.CancellationToken ct, out string? reason)
+    {
+        try
+        {
+            var lane = new Lane(lambda, true, false, false, model, true, lambda)
+            {
+                Streams = new HashSet<IParameterSymbol>(lambda.Parameters.Take(1), SymbolEqualityComparer.Default),
+            };
+            var code = Vectorize(lane, function.Body, static (i, _) => $"x{i}", ct, out ScalarReason? why);
+            reason = why?.Text;
+            if (code is { Wide: not null } or { Statics.Length: > 0 } or { Gathers: true } or { VectorTail: true } or { StructuralChanges.Length: > 0 })
+            {
+                reason = "it needs a form of the vector loop a ParallelFor over elements does not take (a wide element, gathers, records)";
+                return null;
+            }
+            return code;
+        }
+        catch (System.Exception e) when (e is not System.OperationCanceledException)
+        {
+            reason = Failed(e).Text;
+            return null;
+        }
+    }
+
     private static Code? Vectorize(Lane lane, IOperation root, System.Func<int, Symbols.ParamKind, string> fieldOf,
         System.Threading.CancellationToken ct, out ScalarReason? reason)
     {
@@ -620,6 +650,9 @@ internal sealed partial class Kernel
             }
         return any;
     }
+
+    /// <summary>A ParallelFor's element that a vector loop could take (<see cref="LaneFields"/>): the reason it does not is worth a message.</summary>
+    public static bool LaneStruct(ITypeSymbol element) => LaneFields(element);
 
     /// <summary>
     /// A struct of plain values (numbers, bools, enums, and structs of them): what a vector loop could take, so the reason

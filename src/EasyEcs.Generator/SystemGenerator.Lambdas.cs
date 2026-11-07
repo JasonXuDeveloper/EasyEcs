@@ -14,7 +14,9 @@ namespace EasyEcs.Generator;
 /// Lambda passes (<see cref="LambdaPass"/>): each call <c>world.ForEach(static (ref P p, in V v) =&gt; …)</c> is
 /// intercepted by a method that runs the job a [ForEach] method with the lambda's parameters gets (<see cref="EmitJob"/>,
 /// its vector loop from <see cref="Kernel"/>), the lambda's body copied into the method the job calls, the values
-/// before the lambda in the job's fields. One file per source file, implementation output (an IDE never needs it).
+/// before the lambda in the job's fields; <c>world.ParallelFor(ref items, …, static (ref T item, …) =&gt; …)</c> runs an
+/// <c>IForSpan&lt;T&gt;</c> job whose loop over a chunk's elements is the vector loop of the element as one column
+/// (<see cref="EmitBufferJob"/>). One file per source file, implementation output (an IDE never needs it).
 /// Calls the analyzer reports (EECS095) are skipped; a body naming what another file cannot reach (EECS096) runs
 /// through the lambda's delegate.
 /// </summary>
@@ -43,8 +45,9 @@ public sealed partial class SystemGenerator
     /// <param name="Usings">The using directives the body's extension calls need.</param>
     /// <param name="Returns">The return type of the lambda's delegate: void, or the type of an expression body's value
     /// (<c>h.Value += f.Value</c> is a float), which the pass drops.</param>
+    /// <param name="Element">A ParallelFor over a buffer's elements: the element's type, else null.</param>
     private sealed record LambdaModel(string File, int Position, int Version, string Data, string Where, ForEachModel Method,
-        string? Body, EquatableArray<string> Usings, string Returns)
+        string? Body, EquatableArray<string> Usings, string Returns, string? Element = null)
     {
         public static LambdaModel? Create(SemanticModel model, InvocationExpressionSyntax invocation, System.Threading.CancellationToken ct)
         {
@@ -54,6 +57,7 @@ public sealed partial class SystemGenerator
 
             var lambda = call.Lambda!;
             var function = call.Function!;
+            if (call.Element is { } element) return Buffer(call, element, model, location, invocation, ct);
             var parameters = lambda.Parameters.Select(p =>
             {
                 string declared = LambdaPass.Declared(p);
@@ -136,6 +140,37 @@ public sealed partial class SystemGenerator
                 new EquatableArray<string>(body == null ? [] : BodyCopy.Usings(invocation).Distinct().OrderBy(u => u, System.StringComparer.Ordinal).ToArray()),
                 lambda.ReturnsVoid ? "void" : lambda.ReturnType.ToDisplayString(Symbols.Fqn));
         }
+
+        /// <summary>
+        /// A ParallelFor over a buffer's elements: the element as the job's one column (a component parameter of the
+        /// model, by its ref kind), the values after it; the vector loop from <see cref="Kernel.VectorizeElements"/>.
+        /// </summary>
+        private static LambdaModel Buffer(LambdaPass.Call call, ITypeSymbol element, SemanticModel model, InterceptableLocation location,
+            InvocationExpressionSyntax invocation, System.Threading.CancellationToken ct)
+        {
+            var lambda = call.Lambda!;
+            string type = element.ToDisplayString(Symbols.Fqn);
+            var parameters = lambda.Parameters.Select((p, i) => i == 0
+                ? new ParamModel(Symbols.ParamKind.Component, type, p.RefKind == RefKind.Ref ? "ref" : "in", p.Name, LambdaPass.Declared(p))
+                : new ParamModel(Symbols.ParamKind.Context, p.Type.ToDisplayString(Symbols.Fqn), p.RefKind == RefKind.In ? "in" : "", p.Name, LambdaPass.Declared(p))).ToArray();
+            string? body = LambdaPass.Unreachable(call, model, ct) == null ? LambdaPass.Copy(call, model, ct) : null;
+            string? scalar = null;
+            var simd = body != null ? Kernel.VectorizeElements(lambda, call.Function!, model, ct, out scalar) : null;
+            var owner = new OwnerModel("", "", "", "Lambda", "", true, false, false, "", "", "", "", 0);
+            var method = new ForEachModel(owner, "Lambda", true, true, true, 0,
+                new EquatableArray<string>([type]), new EquatableArray<ParamModel>(parameters),
+                new EquatableArray<string>([]), new EquatableArray<string>([]), new EquatableArray<string>([]),
+                new EquatableArray<string>([]), new EquatableArray<string>([]), new EquatableArray<string>([]), new EquatableArray<string>([]),
+                "void", "", "", new EquatableArray<string>([]), false)
+            {
+                Simd = simd,
+                Scalar = scalar ?? (body == null ? "it runs through its delegate" : ""),
+            };
+            return new LambdaModel(invocation.SyntaxTree.FilePath, invocation.SpanStart, location.Version, location.Data,
+                LambdaPass.Where(invocation.GetLocation()), method, body,
+                new EquatableArray<string>(body == null ? [] : BodyCopy.Usings(invocation).Distinct().OrderBy(u => u, System.StringComparer.Ordinal).ToArray()),
+                lambda.ReturnsVoid ? "void" : lambda.ReturnType.ToDisplayString(Symbols.Fqn), type);
+        }
     }
 
     /// <summary>
@@ -161,11 +196,22 @@ public sealed partial class SystemGenerator
             // A change filter's tick is the first value, the filter's and not the lambda's (LambdaPass.Problem).
             const string since = "__since";
             string tick = method.Since ? $", ulong {since}" : "";
-            type.Append($"    internal static void {method.Name}{k}(this global::EasyEcs.World {world}{tick}{string.Concat(values.Select(v => ", " + v))}, global::System.Delegate {body})\n    {{\n");
+            string items = call.Element != null ? $", ref global::EasyEcs.DynamicBuffer<{call.Element}> __items" : "";
+            type.Append($"    internal static void {method.Name}{k}(this global::EasyEcs.World {world}{items}{tick}{string.Concat(values.Select(v => ", " + v))}, global::System.Delegate {body})\n    {{\n");
             if (call.Body == null) type.Append($"        {method.Name}{k}Delegate = global::System.Runtime.CompilerServices.Unsafe.As<{method.Name}{k}Body>({body});\n");
-            string filter = method.Since ? $"{method.Name}Filter{k}.Since({since})" : $"in {method.Name}Filter{k}";
-            // as a [ForEach] method's pass: the twin past the cache, the rows a vector loop marked changed after it
-            EmitPass(type, method, "__ForEach", k, world, "job", ", " + filter, "", "        ");
+            if (call.Element != null)
+            {
+                // The values into the job's fields, the chunks over the buffer's elements (World.ParallelFor's runner).
+                string fields = string.Join(", ", method.Parameters.Select((p, i) => (p, i)).Where(x => x.p.Kind == Symbols.ParamKind.Context).Select(x => $"x{x.i} = {Escape(x.p.Name)}"));
+                type.Append($"        var job = new {method.Name}Job{k} {{ {fields} }};\n");
+                type.Append($"        {world}.ParallelFor(ref __items, ref job);\n");
+            }
+            else
+            {
+                string filter = method.Since ? $"{method.Name}Filter{k}.Since({since})" : $"in {method.Name}Filter{k}";
+                // as a [ForEach] method's pass: the twin past the cache, the rows a vector loop marked changed after it
+                EmitPass(type, method, "__ForEach", k, world, "job", ", " + filter, "", "        ");
+            }
             type.Append("    }\n\n");
 
             // What the job calls per row: the lambda's body (inlined like a [ForEach] method), or its delegate.
@@ -181,7 +227,8 @@ public sealed partial class SystemGenerator
                 type.Append($"    internal static void {method.Name}_{k}(object __owner{parameters}) => {method.Name}{k}Delegate({arguments});\n\n");
             }
 
-            EmitJob(type, method.Owner, method, k);
+            if (call.Element != null) EmitBufferJob(type, method, call.Element, k);
+            else EmitJob(type, method.Owner, method, k);
         }
 
         type.Append("}\n");
@@ -193,6 +240,41 @@ public sealed partial class SystemGenerator
         sb.Append("    file sealed class InterceptsLocationAttribute : global::System.Attribute\n    {\n");
         sb.Append("        public InterceptsLocationAttribute(int version, string data) { }\n    }\n}\n");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// The job of a ParallelFor over a buffer's elements: an <c>IForSpan&lt;T&gt;</c> whose Execute runs a chunk's elements
+    /// as a [ForEach] job runs a run of rows with one column (the element): the vector loop (<see cref="EmitLoops"/>),
+    /// then the elements left one by one through the method the lambda's body became. The values are its fields.
+    /// </summary>
+    private static void EmitBufferJob(StringBuilder sb, ForEachModel method, string element, int number)
+    {
+        sb.Append($"    internal struct {method.Name}Job{number} : global::EasyEcs.IForSpan<{element}>\n    {{\n");
+        for (int i = 0; i < method.Parameters.Length; i++)
+            if (method.Parameters[i] is { Kind: Symbols.ParamKind.Context } p)
+                sb.Append($"        public {p.Type} x{i};\n");
+        if (sb[sb.Length - 2] != '{') sb.Append('\n');
+        string args = string.Join(", ", method.Parameters.Select((p, i) => i == 0
+            ? $"{p.RefKind} global::System.Runtime.CompilerServices.Unsafe.Add(ref r1, i)"
+            : $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}").Prepend("null"));
+        string call = $"__ForEach.{method.Name}_{number}({args});";
+        const string indent = "            ";
+        sb.Append("        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
+        sb.Append($"        public void Execute(int start, global::System.Span<{element}> c1)\n        {{\n");
+        int start = sb.Length;
+        // The span's ref and length in locals, as a run's columns (EmitJob).
+        sb.Append($"{indent}ref {element} r1 = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c1);\n");
+        sb.Append($"{indent}nint rows = c1.Length;\n");
+        var loops = new StringBuilder();
+        if (method.Simd is { } simd)
+        {
+            EmitLoops(sb, loops, simd, [element], indent, call, false, null, [], start);
+            sb.Append($"{indent}for (; i < rows; i++) // the elements after the last whole vector: the body itself\n{indent}    {call}\n");
+        }
+        else sb.Append($"{indent}for (nint i = 0; i < rows; i++)\n{indent}    {call}\n");
+        sb.Append("        }\n");
+        sb.Append(loops);
+        sb.Append("    }\n\n");
     }
 
     /// <summary>A copied body's lines after the first, indented by <paramref name="indent"/> more.</summary>

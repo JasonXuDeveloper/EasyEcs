@@ -97,7 +97,10 @@ SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(valu
                              EasyEcs.Generated) running the job a [ForEach] method with the lambda's parameters and body
                              gets (body copied with names qualified and constants inlined; the static delegate per
                              row where it cannot be: EECS096); its calls and the tile loads are bound after their syntax
-                             provider (SystemGenerator.BoundLater), so an IDE that skips their output never binds them
+                             provider (SystemGenerator.BoundLater), so an IDE that skips their output never binds them;
+                             world.ParallelFor(ref items, values..., static (ref T item, ...) => ...) -> an IForSpan<T>
+                             job (EmitBufferJob) whose chunk loop is the vector loop of the element as one column
+                             (Kernel.VectorizeElements)
 SystemGenerator.TileLoads.cs tile loads checked once per loop: c.Load128 / Load256 / Load512 / LoadVector(x + k, dy, dz) in a
                              proven column loop -> an interceptor per loop and offset (one file per source file in
                              EasyEcs.Generated, implementation output): Covers, the loop's first and last column against
@@ -119,7 +122,8 @@ PrefabGenerator.cs           [Prefab] -> a part of the struct: static readonly P
 LambdaPass.cs                what a lambda pass call is, read once for the generator and the analyzer: Read (the call,
                              its values, lambda, filters; a change filter's tick first), Problem (EECS095's reason and
                              the captured values), Unreachable (EECS096's reason, through BodyCopy), IsStable, Discards
-                             (an expression lambda's dropped value)
+                             (an expression lambda's dropped value); ParallelFor's element (Call.Element) and its
+                             rules (BufferProblem)
 BodyCopy.cs                  user code copied into a generated file (a lambda pass's body, a method with element loops):
                              Copy (names of types, namespaces and static members qualified, constants as their values,
                              statements a caller replaces), Usings (the directives extension calls need), Unreachable /

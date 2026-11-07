@@ -51,7 +51,7 @@ public static partial class EasyEcsAnalyzer
     private static void AnalyzeLambdaPass(OperationAnalysisContext context)
     {
         var invocation = (IInvocationOperation)context.Operation;
-        if (invocation.TargetMethod.Name is not (LambdaPass.ForEach or LambdaPass.ForEachParallel) || LambdaPass.Read(invocation) is not { } call
+        if (invocation.TargetMethod.Name is not (LambdaPass.ForEach or LambdaPass.ForEachParallel or LambdaPass.ParallelFor) || LambdaPass.Read(invocation) is not { } call
             || invocation.SemanticModel is not { } model)
             return;
         string name = invocation.TargetMethod.Name;
@@ -71,8 +71,8 @@ public static partial class EasyEcsAnalyzer
         }
 
         // EECS049: the lambda's parameters and its own filters (a lambda pass takes no group's); a pass that visits
-        // nothing has no delegate or loop worth a word.
-        if (NeverPassed(context.ReportDiagnostic, $"The lambda of world.{name}(…)", Symbols.Requirements(call.Lambda!, context.CancellationToken, groups: false),
+        // nothing has no delegate or loop worth a word. A ParallelFor visits a buffer's elements, not entities.
+        if (call.Element == null && NeverPassed(context.ReportDiagnostic, $"The lambda of world.{name}(…)", Symbols.Requirements(call.Lambda!, context.CancellationToken, groups: false),
                 AnyOf(call.Lambda!, false, context.CancellationToken), location, "the pass visits no entity"))
             return;
 
@@ -84,6 +84,14 @@ public static partial class EasyEcsAnalyzer
                 ? new[] { Location.Create(blocking.DeclaringSyntaxReferences[0].SyntaxTree, blocking.DeclaringSyntaxReferences[0].Span) }
                 : null;
             context.ReportDiagnostic(Diagnostic.Create(DelegateLambdaPass, location, member, name, unreachable));
+            return;
+        }
+
+        // A ParallelFor's element is the loop's one column: the generator's own call (Kernel.VectorizeElements) gives the reason.
+        if (call.Element is { } element)
+        {
+            if (Kernel.LaneStruct(element) && Kernel.VectorizeElements(call.Lambda!, call.Function!, model, context.CancellationToken, out var why) == null)
+                context.ReportDiagnostic(Diagnostic.Create(ScalarLambdaPass, location, name, why));
             return;
         }
 
