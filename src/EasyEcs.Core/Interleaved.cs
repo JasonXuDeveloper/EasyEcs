@@ -92,7 +92,7 @@ public static partial class Interleaved
     /// </summary>
     public static ref T LoadTail<T>(ref T rows, int count) where T : struct
     {
-        var copy = Tail<T>.Rows ??= new T[64];
+        var copy = Tail<T>.Rows ?? Tail<T>.Create();
         MemoryMarshal.CreateReadOnlySpan(ref rows, count).CopyTo(copy);
         return ref MemoryMarshal.GetArrayDataReference(copy);
     }
@@ -102,9 +102,20 @@ public static partial class Interleaved
         Tail<T>.Rows.AsSpan(0, count).CopyTo(MemoryMarshal.CreateSpan(ref rows, count));
 
     // One copy per thread and type: a vector loop's columns are of distinct types, and it runs no other loop meanwhile.
+    // The first copy of a type is a ThreadSetup step: every helper thread gets its own before it runs a chunk, as the
+    // runner's other per-thread scratch, so no pass allocates it midway.
     private static class Tail<T>
     {
         [ThreadStatic] public static T[] Rows;
+        private static int _setUp;
+
+        /// <summary>This thread's copy, created, and every helper thread's (<see cref="ThreadSetup"/>).</summary>
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static T[] Create()
+        {
+            ThreadSetup.Add(ref _setUp, static () => Rows ??= new T[64], typeof(Tail<T>));
+            return Rows ??= new T[64];
+        }
     }
 
     // The tables ARM64's loops read are static readonly vectors (the x64 forms' are vectors of literals: Masks,
