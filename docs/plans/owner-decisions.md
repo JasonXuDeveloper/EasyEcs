@@ -22,7 +22,7 @@ Finish 2, ...) or a plan file. *Record*, one of:
 
 | Date | Question | State |
 |---|---|---|
-| 2026-11-07 | Can EasyEcs be exported for Node, Rust or Go? ("看看能不能导出给node用，或者rust和go，你研究一下可行性") | Report done (`interop.md`): feasible via a Native AOT C-ABI library; the decisions of its section 4 (scope, package, ABI, distribution, WebAssembly, `ForEachRuns`) are put to the owner. |
+| (none) | | |
 
 ## Open: not yet applied
 
@@ -86,6 +86,16 @@ know. L7 is applied in the dashboard, but the file that documents the dashboard'
 | G22 | 2026-11-04 | Countdown timers as a generated form | not built; the absolute deadline (`Until`) is the lesson | owner-review.md entry, docs-todos "countdown timers' lesson" | due (owner-review entry stays) |
 | G23 | 2026-11-07 | `Beside` inferred for a 2D key named `(X, Y)`? | infer only `X` / `Z` (`Y` as height); an Error explains it otherwise | feat-generated-members | due |
 | G24 | 2026-11-07 | The live demo's `MovementBatchSystem` (hand SIMD under a pragma) | rewrite it (and `DragBatchSystem`) in the plain form; the page compares the generated loop with `SimdMode.Off` | feat-inner-loops item c, docs-todos "The live demo's comparison" | due (D134's demo note) |
+
+## Interop (Node, Rust, Go)
+
+| Id | Date | Question | Answer | Applied | Record |
+|---|---|---|---|---|---|
+| I1 | 2026-11-07 | Can EasyEcs be used from Node, Rust or Go ("看看能不能导出给node用，或者rust和go，你研究一下可行性") | Research first; the report (`interop.md`) shows it works through a Native AOT C-ABI library | `interop.md` | due |
+| I2 | 2026-11-07 | Scope: a C# world driven from other languages, or users who never write C# | A C# world driven from other languages (components and fast systems in C#; host systems as per-run callbacks); run-time components (the flecs model) not built | backlog Lane 6, `interop.md` | due |
+| I3 | 2026-11-07 | Which host languages first | Rust, Node and Go (bindings published as crates.io `easyecs-sys` + safe crate, npm, Go module) | backlog Lane 6 | due |
+| I4 | 2026-11-07 | A WebAssembly npm package | Not built (the native library is faster and multi-threaded for Node servers) | `interop.md` | due |
+| I5 | 2026-11-07 | Package form and ABI prefix | A new package `EasyEcs.Native`; prefix `easyecs_`, `easyecs_abi_version()`, status codes plus `easyecs_last_error()`; no schema file (the C# struct is the schema) | backlog Lane 6 | due |
 
 ## Core and memory
 

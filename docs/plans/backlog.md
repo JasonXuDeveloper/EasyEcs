@@ -336,6 +336,31 @@ Starts now. T1 comes before Finish 1b (the move).
       `{Owner}Passes`) and `CopyEntities<TTag>` (not `CopyEntitiesWith`); their reasons go into the naming record
       (docs-todos).
 
+### Lane 6: interop, `EasyEcs.Native` (owner, 2026-11-07, ledger I1-I5; `interop.md`) — 6 items
+
+After Lane 1's C19 (mimalloc columns: pointer lifetime and retired blocks) and Lane 4's G19 (a bare
+`[StructLayout(Sequential)]` keeps the vector loop). New projects only (`src/EasyEcs.Native`, its tests, a sample), so it
+runs beside any lane once those two merged.
+
+- [ ] **N1. Fixed world ABI** (`interop.md` WP1): `easyecs_abi_version`, world create/destroy, update, update group,
+      count, destroy, is-alive, `easyecs_last_error`; generated into the user's root assembly; every export catches.
+      Proof: tests call the exports through `NativeLibrary`; CI publishes the AOT library and runs a C smoke test beside
+      `tests/EasyEcs.Aot`.
+- [ ] **N2. Per-component exports** (WP2): spawn from arrays, get/set by id, singletons, runs of rows for declared
+      queries, bulk copy in and out; analyzer rules for components that cannot be exported (managed fields,
+      `Explicit` layout). Proof: a generator caching test; `InteropBenchmark` (BenchmarkDotNet: per call, per run,
+      bulk, against the in-process update).
+- [ ] **N3. Header and bindings writer** (WP3): an MSBuild target writing `easyecs.g.h` (`_Static_assert` of sizes and
+      offsets), the Rust `-sys` crate plus a safe wrapper (`Send`, not `Sync`), the Node module (koffi, `.d.ts`), the
+      Go package (cgo). Proof: a smoke test per language in CI.
+- [ ] **N4. Host systems** (WP4): `World.ForEachRuns` over a run-time `ComponentSet` with an access mask, placed in the
+      schedule, run serially; the structural gate's throw inside a callback caught. Proof: tests; a fragmented-archetype
+      benchmark of the per-run cost.
+- [ ] **N5. Packaging**: the `EasyEcs.Native` NuGet package; the crates.io, npm and Go module publishing workflow (CI
+      commits separate; publishing itself is the owner's release step, like NuGet).
+- [ ] **N6. Docs to-dos** (WP6, for the docs pass): `guide/interop.mdx` + zh, `samples/Interop` (the cleaned-up
+      prototype), README, the public skill, decision records I1-I5 and the `interop.md` records list.
+
 ## Finish (strictly in order; nothing of a later step starts before the earlier one is done)
 
 Starts when every lane above has merged (owner, 2026-10-27: the refactor before docs and benchmarks, so docs and

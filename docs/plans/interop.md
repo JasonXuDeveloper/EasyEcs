@@ -1,7 +1,8 @@
 # EasyEcs from Node.js, Rust and Go (feasibility research, 2026-11-07)
 
-> Status: research done, **waiting for the owner's decisions** (section 4; ledger `owner-decisions.md`, "Waiting for the
-> owner"). Owner's request: "看看能不能导出给node用，或者rust和go，你研究一下可行性". Prototype (session scratchpad, not
+> Status: **owner said go (2026-11-07, ledger I1-I5)**: shape 1 + 3 as a new package `EasyEcs.Native`, prefix
+> `easyecs_`, bindings for Rust, Node and Go, no WebAssembly package, no schema file, no run-time components. Work in
+> backlog Lane 6. Owner's request: "看看能不能导出给node用，或者rust和go，你研究一下可行性". Prototype (session scratchpad, not
 > committed): `interop/` with `EcsNative/` (C# Native AOT library), `c/`, `rust/ecs_rs/`, `go/`, `node/` (koffi, Bun),
 > `wasm/run.mjs`.
 
@@ -103,7 +104,7 @@ experimental in .NET 10).
 3. Shape 6 only on an explicit "no C#" goal.
 4. Shape 4: no.
 
-## 4. Owner decisions (open)
+## 4. Owner decisions (asked 2026-11-07; answers above and in the ledger, I2-I5; 2, 3 partly and 7 follow from the scope)
 
 1. Scope: a C# world driven from other languages (1+3), or users who never write C# (6)?
 2. Package form: a new package `EasyEcs.Native`, or a generator mode switched on by a property?
