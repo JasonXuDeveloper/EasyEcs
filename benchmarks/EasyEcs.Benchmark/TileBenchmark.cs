@@ -85,8 +85,11 @@ public record struct HandPlot(Plot Pos) : IComponent, IIndexed<Plot>
 /// <summary>Tags a plate whose step may change it.</summary>
 public struct Awake : IComponent;
 
-/// <summary>What a plate's last step changed: whether anything, and the faces whose edge.</summary>
-public record struct SeedChange(TileFaces Edges, bool Changed) : IComponent;
+/// <summary>The faces whose edge a plate's last step changed.</summary>
+public record struct SeedEdges(TileFaces Edges) : IComponent;
+
+/// <summary>Whether a plate's last step changed anything: a component of its own, so the sleep pass gets a vector loop.</summary>
+public record struct SeedChanged(bool Changed) : IComponent;
 
 /// <summary>Where the neighbors were found: an id that keeps the search from being dropped.</summary>
 public record struct Probe(EntityId North, EntityId SouthEast) : IComponent;
@@ -338,7 +341,8 @@ internal static class TileWorlds
                 for (int i = 7; i <= 9; i++) seeds[8 * 16 + i] = new Seed(1);
             if (awake)
             {
-                plate.Set(new SeedChange());
+                plate.Set(new SeedEdges());
+                plate.Set(new SeedChanged());
                 plate.SetAwake();
             }
         }
@@ -775,14 +779,15 @@ internal static class TileSystems
     public ref struct SparseLifeSystem
     {
         [ForEach(Parallel = true, ChunkSize = 16), With<Awake>]
-        static void Step(Tile<Seed, LifePlot> life, Mut<DynamicBuffer<NextSeed>> next, ref SeedChange change)
+        static void Step(Tile<Seed, LifePlot> life, Mut<DynamicBuffer<NextSeed>> next, ref SeedEdges edges,
+            ref SeedChanged changed)
         {
             var step = next.Write().AsSpan();
             var into = MemoryMarshal.Cast<NextSeed, byte>(step);
             into.Clear();
             Life(life, into);
-            var edges = life.ChangedEdges(MemoryMarshal.Cast<NextSeed, Seed>(step), out bool changed);
-            change = new SeedChange(edges, changed);
+            edges = new SeedEdges(life.ChangedEdges(MemoryMarshal.Cast<NextSeed, Seed>(step), out bool any));
+            changed = new SeedChanged(any);
         }
     }
 
@@ -798,9 +803,9 @@ internal static class TileSystems
     public ref struct SleepSystem
     {
         [ForEach, With<Awake>]
-        static void Sleep(Entity plate, in SeedChange change)
+        static void Sleep(Entity plate, in SeedChanged changed)
         {
-            if (!change.Changed) plate.RemoveAwake();
+            if (!changed.Changed) plate.RemoveAwake();
         }
     }
 
@@ -808,9 +813,9 @@ internal static class TileSystems
     public ref struct WakeSystem
     {
         [ForEach, With<Awake>]
-        static void Wake(in SeedChange change, Tile<Seed, LifePlot> life, World world)
+        static void Wake(in SeedEdges edges, Tile<Seed, LifePlot> life, World world)
         {
-            foreach (var id in life.Facing(change.Edges)) world.GetEntity(id).SetAwake();
+            foreach (var id in life.Facing(edges.Edges)) world.GetEntity(id).SetAwake();
         }
     }
 
