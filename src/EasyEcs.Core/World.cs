@@ -722,9 +722,11 @@ public sealed partial class World : IDisposable
         /// <summary>Move to the next living entity (ids in ascending order). O(1) amortized per id.</summary>
         public bool MoveNext()
         {
-            var meta = _world.Meta; // the records grow, never shrink: the captured length stays inside them
+            // The records grow, never shrink (Meta is assigned only by the constructor and Grow, which always grows), so
+            // the captured length stays inside the current records: no range check per id.
+            ref var meta = ref MemoryMarshal.GetArrayDataReference(_world.Meta);
             while (++_index < _length)
-                if (meta[_index].Archetype != null)
+                if (Unsafe.Add(ref meta, _index).Archetype != null)
                     return true;
             return false;
         }
