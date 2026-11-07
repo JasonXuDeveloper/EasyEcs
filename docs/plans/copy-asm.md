@@ -1,7 +1,10 @@
 # The deinterleave copy (`var __c1_0 = __s1_0;`): IL and asm analysis
 
-Internal. The analysis behind the 32-local rule (`audit-vector-loops`) and the pending merge of `research-copy-asm`
-(`backlog.md`). Paths under the session scratchpad it cites are gone.
+Internal. The analysis behind the 32-local rule (`audit-vector-loops`). Status (2026-11-07): superseded by WP0b
+(D135), which carried the copy fix; `research-copy-asm` is not merged and its remote branch is deleted with the other
+finished branches at the end of the Finish chain (backlog "Owner actions"). Of the follow-ups in section 7, the one
+still open is the table CSE in big runners (backlog, vector-loop generator lane, with the generated text's duplicate
+wide tables); the LSRA one is recorded as not worth it. Paths under the session scratchpad it cites are gone.
 
 Worktree `/workspace/EasyEcs/.claude/worktrees/copy-asm`, branch `research-copy-asm` (base 46314ee). Machine: 4 cores,
 AVX-512 (F/BW/CD/DQ/VL/IFMA/VBMI), .NET SDK 10.0.402. Listings: `DOTNET_TieredPGO=0`, `DOTNET_TC_CallCountingDelayMs=0`,

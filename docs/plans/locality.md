@@ -3,7 +3,15 @@
 The owner's goal: redesign the layers under the vector loops after the HPC and database work that avoids irregular
 access instead of paying for it - GROMACS's cluster pairs (Páll & Hess 2013, "A flexible algorithm for calculating
 pair interactions on SIMD architectures"; the GROMACS pair-list docs) and Polychroniou, Raghavan & Ross, SIGMOD 2015
-("Rethinking SIMD vectorization for in-memory databases"). Nothing here is built yet; phase 0 decides what is.
+("Rethinking SIMD vectorization for in-memory databases").
+
+> Status (2026-11-07): phase 0, L1 (ordered rows, clusters: D137 draft), L2 (the pair form, nearest, lists, parallel
+> and symmetric pair methods: D139 / D140 drafts) and L3 (compress: D138 draft) are built and merged; the owner's M4
+> run of PairListsBenchmark was done on 2026-10-28 (backlog history: Auto within the error of the best choice in all 24
+> cases, clusters kept on ARM64). Left: L4, the examples (ZombieTargetSystem's ChunkRing, BattleServer's NearestPlayer,
+> AOI), in the exemplar pass (backlog Finish 2), and the decision records in the docs pass. The prototypes under
+> `benchmarks/EasyEcs.Benchmark/Locality/` are decided in the backlog's tooling lane. The text below is the plan as
+> it was built.
 
 ## 1. What the sources say, in our terms
 
@@ -529,16 +537,17 @@ gate; the vertical forms stay dropped.
   Auto is never slower than Off beyond the job's noise and gains 5-13 % at width 1 on sparse maps; lists forced on
   are 3-5x slower than the 8-lane loop. The width-1 run is only a proxy for ARM64: under `DOTNET_EnableAVX=0` the
   generated loop runs one pair at a time, while NEON runs a 4-lane loop, for which the pick keeps the ranges unless
-  the lists' entries are a fifth of the candidates. The owner's M4 run of PairListsBenchmark decides.
+  the lists' entries are a fifth of the candidates. The owner's M4 run of PairListsBenchmark (2026-10-28) decided:
+  Auto within the error of the best choice in all 24 cases; lists never win clearly on the M4.
 - **Measured and dropped on `feat-pairs-2`:** Lookup gathers under `SimdMode.Auto` (6.1's LookupGather with L1's
   order: 1.19-1.53x slower with 64 or 1,000 target tables, 1.26-1.32x with presence bits at 1M: they stay on request,
   D131); the run's end hoisted into a local of the generated loops (a wash in two rounds: Generated 100k sparse 4.32 /
   4.18 ms without, 4.09 / 4.31 ms with); the prefetch of the neighbors' clusters 4 ahead behind a `CacheSizes` gate
   (PairPrefetchBenchmark, a scratch benchmark not committed, Off against On, ms: 1M crowd 105 / 96.5 against 125 / 122, 4M crowd 406 / 393 against 480 /
   490, 16M crowd 1,620 against 1,947, sparse alike; the hardware prefetchers already stream the sorted neighbors).
-- **Next (owner-approved follow-up, backlog 8e):** symmetric pair methods, each unordered pair once with both sides
-  written (Newton's third law): half lists of clusters, the neighbor's write reduced across the lanes, and a schedule
-  for parallel passes; not on this branch.
+- **Shipped since (backlog 8e, `feat-symmetric-pairs`):** symmetric pair methods, each unordered pair once with both
+  sides written (Newton's third law): half lists, one pair at a time, parallel by chunks colored at distance two; their
+  vector loop measured and dropped (docs-todos "feat-symmetric-pairs").
 
 ## 7. Order against the work already running
 

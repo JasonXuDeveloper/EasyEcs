@@ -4,6 +4,10 @@ Owner's request (2026-10-26): "调整整个项目的目录结构" (restructure t
 Backlog item: `docs/plans/backlog.md`, Finish, "Directory restructure of the whole repository": `git mv` only, after
 the running agent branches merge; the plan goes to the owner first. This is that plan. Base: master at `2515638`.
 
+> Status (2026-11-07): superseded by `finish-scan.md` Report 2 (the same layout plus 75 newer files and `tools/perf/`),
+> which the owner approved on 2026-11-07, open questions included. Build from that report; this file is deleted with
+> the last move commit of Finish 1b.
+
 ## 0. Summary
 
 - **What moves**: the files of four projects go into folders by concern: `src/EasyEcs.Core` (79 files, flat today),

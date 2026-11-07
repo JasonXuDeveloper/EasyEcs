@@ -184,7 +184,8 @@ A/B: base = bbd5c8a with this branch's benchmark commit, head = the branch, froz
   initializer running the class constructors of `Interleaved`, `Masks`, `Tables32` and `Tables64`): a runner compiled
   at Tier1 before its table had holes no longer calls `CORINFO_HELP_GET_GCSTATIC_BASE` per vector of a masked word
   (LateHoles: 0 such calls in the three runners' Tier1 code, from 6 per vector in Move2's). Native AOT is not
-  changed by it (its preinitialization decides there): the backlog item stays open for AOT.
+  changed by it (its preinitialization decides there). Since done for x64 (feat-aot-tables, merged: the x64 lane masks
+  as literals); the ARM64 no-change check is the owner's M4 run (`owner-m4.md`).
 - **M2 candidate 6, "make it a tag"**: no rule existed. This branch first appended the tag advice to EECS055's reason
   for a bool field; feat-generator-gaps (merged meanwhile) made a bool component of one field a 1-byte lane read as
   a mask (no branch per row) and gave a bool among several fields its own reason ("a vector loop takes a bool in a
@@ -214,7 +215,10 @@ A/B: base = bbd5c8a with this branch's benchmark commit, head = the branch, froz
   to a `jg` / `jne` with the store in a cold block (listing of a probe, 2026-10-27), which is the right code for
   predictable data. These shapes vectorize anyway (a select per vector) when their fields are lanes; a method that
   stays scalar does so for another reason (a call, a bool among several fields), which no branch rewrite changes.
-- **M3 candidate 8, streaming stores** (prototype `Locality/Streams.cs`, `StreamingStoreBenchmark`): a write-only
+- **M3 candidate 8, streaming stores: dropped here, shipped later** (backlog item 10, `feat-streaming-stores`, merged
+  1b1aa12: the gated form the paragraph below asks for, Predict 0.86-0.94x and Mix 0.90-0.92x past the cache with the
+  reader counted in, the owner's M4 run 0.75-0.87x of Off; decision draft in docs-todos, "Sweep 2026-11-07"). The
+  prototype's verdict as recorded then (prototype `Locality/Streams.cs`, `StreamingStoreBenchmark`): a write-only
   column `dst = src * k + c` with non-temporal stores against plain ones. Past the last-level cache (64M floats, two
   256 MB columns against 260 MB) they win 1.47x (49.3 -> 33.4 ms, default job); in the cache (1M floats) they tie
   (271 / 260 us). Not built into the generated loops: it pays only for a column the method writes without reading
@@ -222,7 +226,7 @@ A/B: base = bbd5c8a with this branch's benchmark commit, head = the branch, froz
   streaming store after that load only evicts it), and only for columns of 64M rows; a pass that writes such a
   column also leaves it out of the cache for the next pass that reads it. What would change it: a world whose
   write-only columns exceed the last-level cache (then a gate like the prefetch gate: `LastLevelCache`, the
-  column's bytes, the method's write-only set from Kernel). Recorded in `owner-review.md`.
+  column's bytes, the method's write-only set from Kernel), which is what shipped.
 - **M3 candidate 9, the hardware prefetcher's streams**: a walk reads at most nine columns (the runners' arity, fused
   walks included: a fused walk is one runner over the union of its methods' components) plus the presence and
   change-tick words, under the 32 streams Intel's optimization manual gives its L2 streamer (one per 4 KB page):

@@ -4,9 +4,17 @@
 > sessions. When a work package ships, its reasons go into its decision record (D132-D134), the guide pages describe
 > it, and its section here is deleted; the file is deleted with the last package.
 >
-> Status: WP6a (EECS103 v1) shipped: D134, `HandSimd.cs`. WP0b (jobs within the inliner's 32 IL locals) shipped:
-> D135, `SystemGenerator.Loops.cs`. WP0-WP5 wait for the Lookup-gather work (D131) to merge,
-> since they change `Kernel.cs`; WP6b/c follow WP5/WP2.
+> Status (2026-11-07, checked against f9faa23): shipped and merged: WP6a (EECS103 v1, D134), WP0b (D135), WP0, WP2,
+> WP3, WP5 (`Cell<TCell, TTile>`), WP5b (1)-(4) (several cells, per-tile results, ranges: `ITileLayers`, EECS123) and
+> WP1 step 1 (d619f10). On `feat-inner-loops`, not merged yet: WP1's inline-array lanes and unrolling (bf4e92b,
+> 9a629d4), counted sums as a popcount (2898dcf), lambda passes with structural changes (c064c9d) and with views
+> (0068b72), WP4's `ParallelFor` lambda over a buffer (aef32bb). Running there (backlog "Running"): WP4's rest,
+> WP6b / WP6c, WP7, WP8, lambda passes fused, and its extra items (a `Ground<TTile>` cell, masked AVX-512 tails for
+> element loops, the ranged blank fill with WP5b (5) Flow.cs, EECS055's bool reason fixable, one shared wide permute
+> table, the roadmap's vector-loop forms, `Interleaved.LoadTail` warmed in ThreadSetup). The sections of shipped
+> packages are deleted when the branch merges (this file's rule); section 1 below describes the code before WP0
+> (no `Load512`, `Pad` / `PaddedTile` since renamed `ExchangeHalo` and folded into the tile) and is history until then.
+> `tests/EasyEcs.UnitTest/CellTests.cs` named in WP5 was never written: the cell tests are `TileTests.Cells.cs`.
 
 
 ## 1. What exists today
