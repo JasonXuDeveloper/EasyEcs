@@ -2,6 +2,512 @@
 
 Order agreed with the owner: code first, docs checked and updated in full once at the end.
 
+## Sweep 2026-11-07: read this first (corrections, merged items, missing items, drafts)
+
+The audit sweep of 2026-11-07 (reports: plans, core, generator, analyzer, code, naming, perf, docs) checked this file
+against the code at f9faa23. What changed in the file itself:
+
+- **Targets fixed in place** (pages that do not exist): `guide/analyzers` -> `guide/analyzer`; `guide/emit` ->
+  `guide/threading#emit`; `guide/reductions` -> `guide/threading#reductions`; `guide/worlds` ->
+  `guide/migration-and-unload#move-entities` and `samples/multi-world`; `guide/vector-loops` and
+  `guide/vectorization` -> `guide/systems#vector-loops`; `guide/parallel` -> `guide/threading#parallel-foreach-methods`;
+  `guide/neighbors` -> `guide/pairs` (a new page, see feat-locality-pairs); `guide/prefetch` -> `guide/threading#lookups`;
+  `guide/pairs.mdx` marked a new page; `tiles.mdx` -> `guide/grids`. A page not in `docs/content/guide` today is
+  written only where a to-do says "new page" (`guide/pairs`, the fusion page, the views page, the lambda-pass page).
+- **Facts fixed in place:** `QueryOptions.ParallelChunkRows` is `World.ParallelChunkRows`; the analyzer range is
+  EECS002-EECS123 (S1); `[IndexKey]`, `[ForEach(ChunkRows)]` and `[Archetype]` never shipped, so they get no migration
+  entry (S2, S3); EECS109 is still Info and moves with backlog Finish 2b.
+- **Duplicates merged:** the clusters below (S1-S6) are one item each; the scattered lines point here. The two
+  sections each of feat-prefetch-gate, WP5 and WP5b are now one section each (the later one moved under the earlier).
+- **Checked off:** the stale ApiDocs zh entries (c24847b), fix-zh-reference, D129's record, the `[Drain]` rename in
+  api / glossary / README / cheat sheet (23b2b1e), and six boxes of "Performance checks" / "Also in 4.8" done by
+  earlier branches.
+
+### Merged items
+
+- [ ] **S1. The analyzer's range is EECS002-EECS123** (was 86, 114, 168, 176, 187, 225). Pages that still say
+      EECS002-089: `README.md` (73, 111), `comparison.mdx` (73), `faq.mdx` (36), `features.mdx` (751),
+      `guide/analyzer.mdx` (seoTitle, description: 3-4), `guide/common-mistakes.mdx` (1175),
+      `guide/troubleshooting.mdx` (478), `vs-friflo.mdx` (40), and each zh twin; `architecture.mdx` (281) says
+      EECS002-EECS103. The instruction files (root `AGENTS.md` "analyzer lists EECS002-089",
+      `src/EasyEcs.Generator/AGENTS.md` 135-136 "EECS002-103", `.claude/skills/audit-analyzer/SKILL.md`) are the
+      analyzer lane's (backlog). The analyzer page also says which ids are unused: EECS018, EECS029 and EECS082
+      retired, EECS110-EECS114 never given.
+- [ ] **S2. `ChunkRows` -> `ChunkSize`, `World.ParallelChunkRows` -> `World.MaxChunkSize`** (was 206, 207, 1025,
+      1048-1049, 1567; owner, 2026-11-07: `MaxChunkRows` becomes `MaxChunkSize`, backlog renames lane). The changelog
+      4.8 (en + zh) says `ChunkRows` four times and `chunkRows:` twice, `README.md:335` too: write `ChunkSize` /
+      `chunkSize:` (never released, no migration). `World.ParallelChunkRows` shipped in 4.7: a migration section
+      (`#v4-8-...`, "`World.ParallelChunkRows` is `World.MaxChunkSize`", the CS0117 code fix the renames lane adds), a
+      "Changes that need code changes" changelog line, a README What's new line. `docs/scripts/search-expectations.json`:
+      the en query `ChunkRows` -> `ChunkSize`. The threading guide's chunk section (207) stays its own item.
+- [ ] **S3. `[IndexKey]` -> `[LookupKey]`** (was 107, 206, 1059). Never released: no migration entry, no alias, no code
+      fix (the renames lane deletes `RenamedAttributes`, owner 2026-11-07). The changelog (197, 216, en + zh) names
+      `[LookupKey]` only. **Amend D129** (en + zh): its "a code fix renames it" becomes "`[IndexKey]` never shipped, so
+      no code fix, alias or migration entry (D141's rule)". The same holds for `RenamedArguments`
+      (`ChunkRows` -> `ChunkSize`), which D130 or the reference-design record must not promise either.
+- [x] **S4. Stale ApiDocs zh entries** (was 133, 170): done in c24847b.
+- [ ] **S5. Glossary (glossary.mdx + zh, and tools/ApiDocs/zh/README.md for zh terms), one pass** (was 430 ordered
+      table / cluster / box / margin / cadence, 1037-1041 source fields, 1209 ghost row / halo exchange, 1360 Jacobi /
+      Gauss-Seidel / red-black / multicolor (glossary.mdx entries, not only the ApiDocs glossary), 1975 column walk,
+      the tile layers line of WP5b). Add: shader (grids, high-performance, samples/voxel-server), Dirichlet (grids),
+      prefetch (architecture, why-fast, what-is-ecs), gather (analyzer, systems, threading, roadmap,
+      samples/voxel-server), stream compaction (high-performance, threading, api), entity method, cell method, sweep,
+      `[Accumulate]`, `MaxRows` (budget). zh rows the pages already use (naming sweep A2): cell 格子, layer 层, step 推进
+      (never 步进: rewrite `guide/grids.zh.mdx` 342, 419, 452-453, 479, 677, 687), sweep 扫描, settle 收敛, texture 纹理,
+      budget 预算, accumulate 累计 (adding per row stays 累加), `[MinBy]` / `[MaxBy]` 取最小者 / 取最大者 (MPI's
+      MINLOC). Move the paragraph "A sample's domain words ..." (tools/ApiDocs/zh/README.md 63-64) below the table:
+      every row after it no longer renders as a table. A terrain chunk is 地形, never 区块: `tools/ApiDocs/zh/columns.xml`
+      5-6 (是区块的地面 -> 是一片地形的地面; 和区块方块的 -> 和这片地形方块的), `foreachattribute.xml` 82
+      (要加载或保存的区块 -> 要加载或保存的地形), `itilelayers.xml` 7 (一个区块的水能到的层 -> 一片地形里水能到的层);
+      regenerate the reference (lint:terms rejects 区块). After the renames lane: `Columns<TTile>` is `Ground<TTile>`
+      (地面) and the column walk `TileColumns` (列遍历), so 列 means a table's column and a tile's x position only.
+- [ ] **S6. The public skill: a neighbor search is a pair method** (was the two lines under feat-locality-pairs and
+      feat-pairs-2): the form, writes of the neighbor (`[Neighbor] ref`), results and `Mut<T>` in it, one paragraph.
+
+### Missing from this file until the sweep (docs report A-F, analyzer report 2, naming report A-B)
+
+Breaking changes since v4.7.0 (highest priority):
+- [ ] **Eight rules went from Info to Warning, and EECS055 warns for fixable reasons** (a41a2e3: EECS033, 039, 065,
+      067, 080, 084, 086, 089; ff8440f: EECS055). A build treating warnings as errors breaks: changelog
+      #v4-8-0-breaking (it lists only 027/030/060/061/071), migration #v4-8-analyzer (covers 027/030/053/060/061/071;
+      `migration.mdx:18` "Two analyzer rules report more code, and three warnings are new" is wrong), README. Pages:
+      `guide/analyzer.mdx` table rows (EECS033, 039, 055, 065, 067, 080, 084, 086, 089 say Info; EECS055 and EECS086
+      report Warning or Info by case) and the intro (11-25: "a suggestion (Info) means the same cost written shorter
+      (EECS033, EECS039)", EECS055 "a suggestion"), zh too; `skills/easyecs/SKILL.md` 169 ("EECS055 (a suggestion)") and
+      204 ("The suggestions, EECS033 and EECS039"). Write the severities the code has after Finish 2b.
+- [ ] **`[WithAny<T>]` (one type, stacked) and `QueryFilter.WithAny<T>()` were removed** (b6c7c0b; v4.7.0
+      `ForEachAttributes.cs:66`): a migration section "WithAny takes the set" with the CS0305 code fix
+      (`EasyEcsCodeFixes.Declarations.cs`), a changelog breaking line, a README What's new line; `migration.mdx:18`
+      "Everything else written for 4.7 compiles unchanged" is false.
+- [ ] **The compiler-error migration fixes** on the analyzer page (#migration-fix covers class systems on CS0246 only)
+      and in migration: CS0305 (`WithAny` merged). Only forms released in 4.7 get one: the other fixes of
+      `EasyEcsCodeFixes.Declarations.cs` (the hook attributes, `[GroupBy]` on a struct, `EntityRandom`'s tick) are for
+      forms that never shipped either; whether they go like `RenamedAttributes` is an open question for the owner.
+- [ ] **D115-D117 have no draft anywhere** (87 only reserved the numbers): write them from the commits: hooks found by
+      name and EECS090 (3157a68), `WithAny` takes 2 to 9 types (b6c7c0b), `[GroupBy]` on the grouped member (0052f49),
+      the world advancing `EntityRandom.Tick` on every Update (45d6170). Four choices in three numbers: the pass merges
+      two or takes the next free number. `decisions.mdx:141` (the list of numbers never used) changes with them.
+
+`guide/analyzer.mdx` + zh:
+- [ ] Sections, table rows and fix lines for **EECS090-EECS109 and EECS115-EECS123** (29 ids; F1 in the IDE lands on a
+      missing `#eecsNNN` anchor for each). No entry anywhere in this file yet: **EECS099, EECS100, EECS101, EECS102**;
+      one line only: EECS094, EECS098, EECS119, EECS123. The "Fix" column of EECS055 (the split,
+      `EasyEcsCodeFixes.Split.cs`) and EECS086 (to `Reduce<T>` / `[Accumulate]`) is empty though both have fixes.
+- [ ] The guard test (backlog, docs-pass lane): every descriptor id has an `[#eecsNNN]` anchor on both pages and the
+      table's severity equals the descriptor's (Warning / Info for EECS055, 069, 086, 106, 107).
+- [ ] `skills/easyecs/SKILL.md` never names EECS021 (an entry point colliding with a member).
+
+`api.mdx` + zh and the reference:
+- [ ] Run `tools/ApiDocs` first and read its problem list: 384 reference members show no "Complexity" line though
+      `api.mdx` has rows for many (Emit Add / AddRange 228, Lookup Has / Read 244, EntityRandom 236, DynamicBuffer
+      FillPool 168, RowClusters 66 / 332, EntitySpan Clusters 335, World Query / Read 191-192): the reference is older
+      than the rows, or the rows do not match ApiDocs' lookup.
+- [ ] Complexity rows missing: `[ForEach].FusionMode` and `.MaxRows` as properties, `GaussSeidelAttribute.MaxSweeps`,
+      `Tile<,>.Write` / `ColdStart` (was `Restart`; `Sweep` is at its own to-do), `SystemInfo.FusedWith` / `Loops`,
+      `OrderByAttribute.Box` / `Interval` / `Margin`, `SystemStats`' members, `WorldSnapshot.EntityCount`.
+- [ ] `api.mdx:66` (zh 63) shows `RowClusters.Pairs(reach, into)`: the code is `Pairs(float cutoff, ...)`.
+
+Every guide page (en + zh):
+- [ ] **"Best practices": settle the page anatomy first.** The audit-docs skill (part 3: "best practices: what the
+      battle server and samples do and why") requires the part; `docs/WRITING.md` "Page anatomy" lists eight parts
+      without it, and none of the 27 guide pages (nor the zh twins) has one. One to-do for both files, before any page
+      is written: add "Best practices" to WRITING.md's anatomy (recommended: after "How to use it fast", the habits the
+      battle server and the samples follow, each with its reason and a link to the code) and keep the skill's part as
+      it is; or fold the part into "How to use it fast" in both files. Then every guide page follows the one rule.
+- [ ] **"Before you start"** on the advanced pages: `guide/high-performance` (lanes, masks, gathers, stream
+      compaction), `guide/threading` (reductions after OpenMP, chunks), the new fusion and pairs pages (grids has its
+      to-do at "Owner request 2026-10-24").
+- [ ] **"You write / The generator writes" tabs** on `index.mdx`, `getting-started.mdx`, `cheat-sheet.mdx`, every
+      `samples/*.mdx`, and the guide pages bulk, change-tracking, cleanup-and-disable, hierarchy
+      (`ChildOfEcsExtensions`), prefabs (`[Prefab]` -> `X.Prefab`), saves (`TypeRegistry`, `[NotSaved]`), singletons
+      (`world.X`), snapshots; README: a `<details>` "What the generator writes" under each headline example.
+
+Features missing from where they belong:
+- [ ] **`features.mdx` + zh** has none of the 4.8 features: `[View]`, `[Prefab]` declarations, pass fusion, pair
+      methods (`[Neighbor]`), ordered tables (`[OrderBy]`, `world.Clusters<T>`), `[Accumulate]`, `[Drain]`,
+      `[ForEach(MaxRows)]`, `CopyEntities<TTag>`, `ReserveBuffers`, cell methods (`Cell<,>`), `[GaussSeidel]` /
+      `ColdStart` / `Sweep`, `ITileLayers`, `c.Columns`, `ExchangeHalo` (lambda passes at "feat-inline"). After
+      Finish 1a also `[Tile]`, `[UniqueKey(SlotsPerAxis)]`, `[MinBy]` / `[MaxBy]`.
+- [ ] **`cheat-sheet.mdx` + zh**: `[Accumulate]`, `[Drain]`, `[OrderBy]`, `[Neighbor]`, `[GaussSeidel]`, `MaxRows`,
+      `FusionMode`, `Cell<,>`, `ITileLayers`, `c.Columns`, `CopyEntities`, `ReserveBuffers`, `ExchangeHalo` (views and
+      lambdas have their to-dos).
+- [ ] **The public skill**: `[Drain]`, `[Accumulate]`, cell methods `Cell<,>`, `ITileLayers`, `ReserveBuffers`, pass
+      fusion / `FusionMode`.
+- [ ] **`BattleServer.cs` and the `example.mdx` walkthrough** use none of `[View]`, `[Prefab]`, `[Drain]`,
+      `[Neighbor]`, lambda passes (views and `[Accumulate]` have to-dos): give each a place with the exemplar pass
+      (backlog Finish 2c), then the walkthrough.
+- [ ] **`docs/scripts/search-expectations.json`**: queries (en + zh) for views, prefab declarations, lambda passes,
+      fusion, pair methods, ordered tables, `[Accumulate]`, `[Drain]`, cell methods, `[GaussSeidel]`, `MaxRows`,
+      `CopyEntities` (with EntityMethod, Consume, entity.Run of "Final pass").
+- [ ] **`roadmap.mdx` + zh**: "Push halos" (#push-halo) names `Tile<TCell, TTile>.Pad` (now `ExchangeHalo`) and
+      describes as planned the edge wake-up sleeping tiles already do: rewrite it when feat-later-halos merges (shipped,
+      or what is left); #pair-form "Next: the generated pair form itself" (`[Neighbor]` shipped); "Vector loops: the
+      forms left for later" after feat-inner-loops' item (g) merges (what shipped leaves, Pow is partly done); the
+      Dropped line of D77 is contradicted by `Cell<,>` (D77's rewrite at WP5).
+- [ ] **D90** ("Left for later": masked words of parallel methods, `Maybe<T>` in parallel and narrow lanes, masked
+      words of narrow lanes and wide rows, Atan2 / Asin / Pow, `Vector2.Clamp`): rewrite after item (g) merges.
+
+Stale names and examples on non-history pages:
+- [ ] `guide/snapshots.mdx:293` ("Buffers are copied") and its zh twin contradict copy-on-write buffers (`:81` is at
+      fix-ci's item).
+- [ ] `README.md:340` `IDirectIndexed<TKey>` -> `IDirectMapped<TKey>`, and the changelog 4.8 (en + zh).
+- [ ] Changelog 4.8: "`Pad` copies the tile ..." -> `ExchangeHalo`.
+- [ ] Three pages read `GetSingleton<Emitted<T>>()`, which throws before the first pass emitted anything
+      (finish-scan.md item 9): `guide/threading.mdx` (619, 810), `guide/common-mistakes.mdx` (1059, 1076),
+      `guide/analyzer.mdx` (2360), zh too: write `GetOrAddSingleton`, as the samples do.
+
+Decisions and records the reports found missing:
+- [ ] **The inliner's limit, checked** (backlog Later, done in code): with D135, `MAX_INL_LCLS = 32` is RyuJIT's constant
+      for every target (x64, ARM64, ReadyToRun, Native AOT) and counts IL locals, which no vector width changes; Mono
+      (the WebAssembly demo) has no locals limit, an IL size limit of 20 bytes (30 LLVM AOT, 100 LLVM JIT) that
+      `AggressiveInlining` lifts, an inline depth of 10, no inlining of methods with exception clauses: every helper a
+      loop inlines keeps `AggressiveInlining`. CI runs `tools/inlining.sh` on x64 and arm64 (turned off split: 22 failed
+      inlines, exit 1).
+- [ ] **The reference-design renames of 2026-10-27** (naming sweep A1): one record like D141 naming each old -> new and
+      its source term: `ChunkSize` (OpenMP's chunk size), `MaxChunkSize` (was `ParallelChunkRows`, then
+      `MaxChunkRows`), `IDirectMapped` (a direct-mapped cache), `Lanes.Selection` (a selection vector, was
+      `RowNumbers`), `Lanes.Ballot` (CUDA's ballot), `TileStencil` (was `TileReads`), `TileBoundary.Border` (a
+      Dirichlet boundary). The reasons live only in dc9cfe4 and 24bb649 today.
+- [ ] **`MaxRows` / `World.ForEachCollected`** (naming sweep B1): a record of why the one `ForEach*` name that runs
+      outside a pass keeps the prefix (the collected form of a `[ForEach]` method; chosen by the owner 2026-10-30), and
+      the names the owner kept on 2026-11-07 against the naming sweep: the entry-point class `{Owner}ForEach` (not
+      `{Owner}Passes`) and `CopyEntities<TTag>` (not `CopyEntitiesWith`), each with its reason.
+- [ ] **The countdown timers' lesson** (owner-review "Countdown timers", owner 2026-11-07): where a timer is shown
+      (`guide/structural-changes`, `getting-started`, `project-structure`), say that an absolute deadline read every
+      tick and written once (`clock.Tick < cooldown.Until`, VoxelServer's Zombies) writes no row per tick, and when a
+      countdown is still the right form (the entity does more than go when it runs out).
+- [ ] **The live demo's comparison** (owner, 2026-11-07): `MovementBatchSystem.Move` (and `DragBatchSystem`) become the
+      plain form, so `demo.mdx` + zh compare the generated vector loop with the per-entity loop (`SimdMode.Off`), not
+      hand SIMD with generated SIMD; `demo/EasyEcs.Demo/Groups.cs` (6-11) and the host's labels follow; the page
+      includes the new files; `bun run demo:build` and commit `docs/public/demo`.
+
+Owner's naming decisions of 2026-11-07 (backlog renames lane): every page, fence and reference entry uses
+`tile.ColdStart(value)` (not `Restart`), `Ground<TTile>` (not `Columns<TTile>`), `TileColumns<…>` (not
+`TileColumnWalk<…>`), `World.MaxChunkSize`; every existing to-do of this file that names the old ones means the new.
+
+### owner-review settled 2026-11-07: decision drafts (en + zh)
+
+The owner settled six entries of `docs/owner-review.md` as "not built" (or done) and removed them from it. Each
+becomes a decision record (decisions.mdx + .zh.mdx, the next free numbers at the pass, or a "Considered" paragraph of
+the record named) and a line of the roadmap's Dropped list (roadmap.mdx + zh, linking the record):
+
+- [ ] Roadmap Dropped (en + zh), one line each: the tile handed out by `Enter`; a lane-shift helper for tiles;
+      `Rows()` turning odd `[GaussSeidel]` sweeps by itself; prefaulting copies, a pool of disposed worlds' columns and
+      prefault against huge-page refaults; `[Accumulate]` users sharing a stage; the hand-written step + commit as the
+      recommended tile form (replaced by the generated ping-pong step).
+- [ ] The six records below (en + zh).
+
+**1. The tile handed out by `Enter` (feat-owner-calls (e), 2026-10-31; fold into the tile steps' record).**
+
+en: *Not built: `Enter` handing the tile out.* `TileSteps.Enter(tile, out Tile stepped)` read the thread's frame once
+and handed it to the method's tile, `Sweep` and `Leave` (80fbdcb, reverted). Tier1 of TileActive's PingPong pass,
+base against head: `Enter` 709 -> 802 B (173 -> 196 instructions, 8 -> 15 stack operands), `Leave` 541 -> 469 B, the
+job 1187 -> 1173 B, the walk over awake tiles 2509 -> 2436 B; thread-static base reads per tile 3 -> 2. It saves one
+helper call of a few nanoseconds against a step of microseconds, and adds an out tile zeroed, built on the stack and
+copied through memory (an out parameter is a pointer, never a register). TileActive PingPong and TileWoken Woken
+flipped sign between two interleaved rounds: a wash. What would change it: a pass whose tiles step in well under a
+microsecond (a 4x4 tile of a cheap rule); the generator would then pass the frame as a field of the job read once per
+chunk, without an out tile.
+
+zh: *不做：由 `Enter` 交出瓦片。* `TileSteps.Enter(tile, out Tile stepped)` 每块瓦片只读一次线程的帧，再交给方法的
+瓦片、`Sweep` 和 `Leave`（80fbdcb，已撤回）。TileActive 的 PingPong 遍历的 Tier1 代码，前后对比：`Enter` 709 -> 802
+字节（173 -> 196 条指令，栈操作数 8 -> 15），`Leave` 541 -> 469 字节，作业 1187 -> 1173 字节，遍历醒着的瓦片 2509 ->
+2436 字节；每块瓦片读线程静态基址 3 次 -> 2 次。它省下一次几纳秒的辅助调用（一步要几微秒），却多出一块先清零、在栈上
+构造、再经内存复制出去的 out 瓦片（out 参数是指针，进不了寄存器）。两轮交替测量中 TileActive PingPong 和 TileWoken
+Woken 的正负号互换：持平。什么会改变结论：瓦片一步远低于一微秒的遍历（规则便宜的 4x4 瓦片）；那时生成器把帧作为作业
+的字段、每块只读一次传进去，不用 out 瓦片。
+
+**2. A lane-shift helper for tiles (feat-field-gaps, 8c, 2026-10-30).**
+
+en: *Not built: `FromEast(v, n)` / `FromWest(v, n)`.* The scent's in-row scan shifts a vector the method computed, not
+cells the tile holds (those are `Load128(x ± n)` already), so the helper would be a general SIMD helper, one
+`Vector128.Shuffle(v, Vector128<byte>.Indices ± n)` (PSHUFB, NEON TBL), not tile or ECS code; it saved the sample two
+one-line helpers. What would change it: a second sample or a docs example writing the same shifts.
+
+zh: *不做：`FromEast(v, n)` / `FromWest(v, n)`。* 气味在行内的扫描移动的是方法算出来的向量，不是瓦片里的格子（格子
+已经可以 `Load128(x ± n)`），所以这个辅助是通用的 SIMD 辅助：一次 `Vector128.Shuffle(v, Vector128<byte>.Indices ± n)`
+（PSHUFB，NEON TBL），不属于瓦片或 ECS；它只给示例省下两个一行的辅助方法。什么会改变结论：第二个示例或文档例子写了同样
+的移位。
+
+**3. `Rows()` turning odd `[GaussSeidel]` sweeps by itself (feat-owner-calls (f), e58fb0b, reverted).**
+
+en: *Not built: `Rows()` walking odd sweeps from the last row.* `TileTurnBenchmark` settled a glow written with
+`Rows()` while its springs move, forwards against turned, plus a control set up as the turned one but walking
+forwards. 4 springs visit 9 % (hop 1) and 18 % (hop 8) fewer rows turned (sweeps 281 -> 262, 1,116 -> 922); 256
+springs visit the same rows in the same sweeps both ways. Three rounds, us, 1 thread, forwards / turned (/ control):
+4 springs hop 1: 262 / 271, 260 / 263, 273 / 270 / 277; hop 8: 1,016 / 958, 994 / 952, 1,026 / 955 / 1,013; 256
+springs hop 1: 976 / 1,028, 951 / 1,082, 982 / 1,037 / 1,015; hop 8: 2,225 / 2,303, 2,226 / 2,396, 2,203 / 2,462 /
+2,175. Turned wins 4-7 % where it saves rows and loses 3-14 % where it saves none; the control measures as forwards,
+so the loss is the turned walk (the Tier1 walk differs by one predicted branch and an `lzcnt` for a `tzcnt`; what is
+left is the descending addresses against the hardware prefetcher, which this VM's missing counters cannot show). A
+method that pays for turning turns with `tile.Sweep` (the scent). What would change it: a field written with `Rows()`
+whose sweeps fall by far more than 18 % when turned, or counters showing the loss is not the access order.
+
+zh: *不做：`Rows()` 自己把奇数次扫描从最后一行倒着走。* `TileTurnBenchmark` 让一片用 `Rows()` 写的光晕在光源移动时
+收敛，正向对比反向，另有一个按反向准备、却正向遍历的对照进程。4 个光源时反向少走 9 %（跳 1）和 18 %（跳 8）的行（扫描
+次数 281 -> 262，1,116 -> 922）；256 个光源时两种方向走的行和扫描次数相同。三轮，微秒，单线程，正向 / 反向（/ 对照）：
+4 个光源跳 1：262 / 271，260 / 263，273 / 270 / 277；跳 8：1,016 / 958，994 / 952，1,026 / 955 / 1,013；256 个光源跳
+1：976 / 1,028，951 / 1,082，982 / 1,037 / 1,015；跳 8：2,225 / 2,303，2,226 / 2,396，2,203 / 2,462 / 2,175。反向在
+省行时快 4-7 %，不省行时慢 3-14 %；对照与正向一致，所以慢在反向遍历本身（Tier1 只差一个可预测的分支，以及 `lzcnt`
+换 `tzcnt`；剩下的是地址递减对硬件预取的影响，这台虚拟机没有硬件计数器可以证明）。需要换方向的方法用 `tile.Sweep`
+自己换（气味就是这样）。什么会改变结论：一片用 `Rows()` 写的场，反向后扫描次数减少远超 18 %；或硬件计数器表明慢的
+原因不是访问顺序。
+
+**4. Page faults: what was tried and not kept (feat-page-faults, 2026-10-31; the "Considered" part of its record,
+"feat-page-faults" below).**
+
+en: *Kept: a user's reservation faulted in (`MADV_POPULATE_WRITE`). Not kept:* (a) **prefault to cut the cost of
+huge-page faults**: one call costs what the first touch costs with 2 MiB pages (128 MiB freed 4 s earlier: 536 ms
+touched against 572 ms populated, spread 41-50 ms); the time is the host's: the reference VM (Firecracker, free page
+reporting at order 9) hands free 2 MiB blocks back and faults them back 4 KiB at a time (stime 187 of the 536 ms); with
+4 KiB pages the touch takes 67 ms and populating saves the trap per page (53 ms, 1.27x). (b) **Prefaulting every sized
+array** (a load's, a restore's, a snapshot's tables, `CreateEntities`' rows): a load at 1M entities with huge pages
+1.04-1.06x slower in two rounds (populating zeroes the whole array before the copy writes it, out of the cache by
+then); the resident-window walk was the other cost, skipped through `mincore`. (c) **Keeping a disposed world's columns
+for the next world** (a process-wide spare list, 1 GiB at most): allocations halved (Create 16M 732 -> 366 MB) but
+faults did not move (31,252 against 31,257 per op), Create 16M 1.06x and InstantiateEach 16M 1.08x slower: the GC
+already hands a freed large array's memory back resident. (d) **The GC's settings** are the host's: at 16M
+`GCRetainVM` and `GCgen0size` changed no count; `GCConserveMemory=5` added 20-65 % faults and made Grow, Load, Capture
+and InstantiateEach 1.2-1.6x slower; the segments GC tripled the faults of a load and an InstantiateEach and made
+Capture 1.5x and InstantiateEach 1.2x slower. What would change it: (a) a host that does not report free pages (bare
+metal, most cloud VMs), where nothing is left to cut; (c) a workload that disposes and recreates worlds of one shape
+faster than the GC collects (now the native-columns work item, `docs/plans/native-columns.md`).
+
+zh: *保留：用户预留的数组在预留时预先缺页（`MADV_POPULATE_WRITE`）。不保留：*（a）**用预先缺页减少大页缺页的开销**：
+用 2 MiB 页时一次调用的开销等于第一次触碰（4 秒前释放的 128 MiB：触碰 536 ms，预先缺页 572 ms，波动 41-50 ms）；时间
+花在宿主机上：参考虚拟机（Firecracker，order 9 的空闲页上报）把空闲的 2 MiB 块交还宿主机，宿主机再按 4 KiB 一页缺页
+补回（536 ms 中 stime 187 ms）；用 4 KiB 页时触碰只要 67 ms，预先缺页省下每页一次陷入（53 ms，1.27 倍）。（b）**所有按
+大小分配的数组都预先缺页**（加载、恢复、快照的表，`CreateEntities` 的行）：用大页加载 1M 实体，两轮都慢 1.04-1.06 倍
+（预先缺页在复制写入前把整个数组清零，到复制时已不在缓存里）；另一项开销是遍历常驻窗口，用 `mincore` 跳过。（c）**把
+释放的世界的列留给下一个世界**（进程级备用列表，最多 1 GiB）：分配减半（Create 16M 732 -> 366 MB），缺页不变（每次
+31,252 对 31,257），Create 16M 慢 1.06 倍，InstantiateEach 16M 慢 1.08 倍：GC 本来就把释放的大数组内存常驻地交回。
+（d）**GC 的设置**由宿主程序决定：16M 时 `GCRetainVM` 和 `GCgen0size` 不改变计数；`GCConserveMemory=5` 多出 20-65 %
+缺页，Grow、Load、Capture、InstantiateEach 慢 1.2-1.6 倍；分段 GC 让加载和 InstantiateEach 的缺页变成三倍，Capture 慢
+1.5 倍，InstantiateEach 慢 1.2 倍。什么会改变结论：（a）不上报空闲页的宿主（裸机、多数云虚拟机），那里已无可省；（c）
+比 GC 回收更快地释放、重建同样形状世界的工作负载（现在是原生列的工作项，`docs/plans/native-columns.md`）。
+
+**5. `[Accumulate]` users sharing a stage (voxel-rewrite.md GA2, feat-later-accumulate, 2026-11-02).**
+
+en: *Not built: no stage is lost to an `[Accumulate]` singleton.* The proposal: systems that only add into one
+`[Accumulate]` singleton do not conflict, share a stage, and their pass results are combined into the singleton in
+registration order when the stage ends. The VoxelServer's schedule (784260d, `--schedule`): 45 systems in 42 stages,
+29 systems run alone (an `Entity` or `World` parameter, an `OnUpdate`, a `[Consume]` or `MaxRows` method, no
+`[ForEach]`), and every one of them that writes `Stats` runs alone for those reasons; the three that add to a total
+without running alone (WaterCommit, Float, SendChunks) sit between systems that run alone or conflict on components.
+After the rewrite (totals folded into `[Accumulate] Stats`, WaterCommit deleted) the same holds, and BattleServer's
+`Battle` is written by one system that does not run alone. So a shared-total rule would merge no stage. What would
+change it: a world where two consecutive systems that do not run alone conflict only on one `[Accumulate]` singleton
+(the schedule's "Registration order only" line names just that singleton); the design then stays as GA2 states it
+(each pass's result per system, combined in registration order at the stage end, the bits of the serial run).
+
+zh: *不做：没有阶段因 `[Accumulate]` 单例而丢失。* 提议是：只往同一个 `[Accumulate]` 单例累加的系统互不冲突，可以同处
+一个阶段，阶段结束时按注册顺序把各次遍历的结果合进单例。VoxelServer 的调度（784260d，`--schedule`）：45 个系统分在 42
+个阶段，29 个系统单独运行（有 `Entity` 或 `World` 参数、有 `OnUpdate`、是 `[Consume]` 或 `MaxRows` 方法、没有
+`[ForEach]`），其中写 `Stats` 的都是因为这些原因单独运行；三个不单独运行却累加总数的系统（WaterCommit、Float、
+SendChunks）夹在单独运行或在组件上冲突的系统之间。重写之后（总数并进 `[Accumulate] Stats`，WaterCommit 删除）依然如此，
+BattleServer 的 `Battle` 也只由一个不单独运行的系统写入。所以共享总数的规则一个阶段也合并不了。什么会改变结论：某个
+世界里两个相邻、都不单独运行的系统只在一个 `[Accumulate]` 单例上冲突（调度的“Registration order only”一行只列出这个
+单例）；设计仍按 GA2：每个系统的遍历结果分开保存，阶段结束时按注册顺序合并，与串行运行逐位相同。
+
+**6. The generated ping-pong step against step + commit by hand (feat-tiles-pingpong, merged 2026-10-29; fold into the
+ping-pong step's record, "feat-tiles-pingpong" below).**
+
+en: *Settled: the generated step is the form; the read fix shipped.* After the Tier1 review the `ref Tile` step beat
+the hand-written step + commit past the last-level cache (Blur9 512x512: 198 against 255-260 ms at 1 thread, 72
+against 88-92 ms at 4) and in sparse fields (about 2x at every share of awake tiles), and lost in cache (Blur9 32x32
+529 against 473-505 us, Laplacian 580 against 436-476 us at 1 thread) to the Tile API's checked column loads, which the
+by-value form paid too. The fix shipped: tile loads checked once per column loop (feat-tile-reads: Laplacian column
+loop 61 -> 47 instructions, Blur 42 -> 36; Laplacian ping-pong 0.92-0.99x, Blur9 0.94-1.01x in cache) and
+`c.Columns(step)` with `col.Store` (feat-owner-calls (c): 52 -> 34 instructions against 33 by hand, 1.01-1.07x of hand
+at side 32, 0.75-0.90x past it). VoxelServer TickBenchmark base against head: within noise, 0 B. What would change
+it: nothing left to decide; a new in-cache gap to hand-written code is a generator gap (the owner's rule).
+
+zh: *已定：生成的步进就是推荐写法；读取的修复已发布。* 审过 Tier1 之后，`ref Tile` 步进在超出末级缓存时胜过手写的
+步进 + 提交（Blur9 512x512：单线程 198 对 255-260 ms，4 线程 72 对 88-92 ms），在稀疏的场里也快（醒着的瓦片占任何比例时
+都约 2 倍）；在缓存内输给手写（Blur9 32x32 529 对 473-505 微秒，Laplacian 580 对 436-476 微秒，单线程），原因是 Tile API
+带检查的列读取，按值的写法同样付这笔开销。修复已发布：每个列循环只检查一次瓦片读取（feat-tile-reads：Laplacian 列循环
+61 -> 47 条指令，Blur 42 -> 36；缓存内 Laplacian 乒乓 0.92-0.99 倍，Blur9 0.94-1.01 倍），以及带 `col.Store` 的
+`c.Columns(step)`（feat-owner-calls (c)：52 -> 34 条指令，手写 33 条；边长 32 时是手写的 1.01-1.07 倍，更大时 0.75-0.90
+倍）。VoxelServer TickBenchmark 前后对比：在噪声内，0 字节。什么会改变结论：无可再定；缓存内再出现与手写代码的差距，
+按所有者的规则就是生成器的缺口。
+
+### Decision drafts whose text lived outside git until 2026-11-07
+
+- [ ] D121, D124 and the streaming-stores record below into decisions.mdx + .zh.mdx (with their index rows), and the
+      analyzer rules into the public skill.
+
+**D121. Pass fusion (feat-fusion, merged 42a9d59; reconstructed from its commits 57dd33c, 7c7c123, cda162c, 940f624,
+9250991, b4e8258, 83faba2, since the agent's final report is gone).**
+
+en: *Consecutive passes over the same rows run as one walk.* Decision: consecutive `[ForEach]` methods of a system with
+the same filter (a `[WithAny<A, B>]` set is one condition: the sets must be equal, not their types), no structural
+change, no `Lookup<T>` of what another writes, no per-pass result read by a later one, no change filter on what an
+earlier one writes, and the same `Parallel`, `ChunkSize` and `Slices` run as one generated job: per row for scalar
+methods, per block of 256 rows for batch and vector methods, per word for masked walks; a parallel walk merges every
+method's reductions and records. Two systems ordered one after the other (`[UpdateAfter]` / `[UpdateBefore]`, or
+declared next to each other in one file) get one fused job too (`SystemDeclarations.Fuse`, `ISystemSet.RunFused`):
+the serial plan uses the pair only when both are adjacent in one run of the set, enabled and due, and no system is
+measured; the second system's writes carry its own stage's tick, an exception disables the system that threw
+(`SystemCode.Blame`), each counts its run. A view's fields are its method's components for the rule (a change filter
+on a view's write keeps the next pass apart). Blocks only above the cache: a block-fused walk runs from
+`SystemCode.FusedRows` (131,072 rows) up; below it each pass runs its own whole-table loop, where the rows stay in L2
+between passes, and `RunFused` returns false so each system runs its own code. Three exceptions fuse at any size:
+per-row walks, parallel walks, and two passes writing the same component (the second store of each row hits L1:
+FusionBenchmark Vitals 0.60-0.68 at 10,000 rows). `FusionMode` (`Auto` / `Require` / `Off`, mirroring `SimdMode`):
+EECS093 (Info) names a near miss, EECS094 (Error) a `Require` left apart; `DescribeSchedule` says "one walk",
+`SystemInfo.FusedWith` names the partner. A run without fusions takes no fusion span (SystemDispatch Plain +9 % ->
++4 %, within the error). Why: above L2 the fused walk loads each row once instead of twice (FusionBenchmark, Rows 10k /
+100k / 1M / 8M, cases Movement, MovementParallel, Vitals, Systems: the numbers come from the bench sync, Finish 5).
+Considered: fusing at every size (blocks slower in cache, where the rows stay in L2 anyway), fusing across a
+structural change or a change filter (the second pass would see rows the first moved or a tick it set), fusing lambda
+passes (not built yet: feat-inner-loops' fusion item; the record follows what it ships).
+
+zh: *相邻的、遍历同样行的遍历合成一次遍历。* 决定：一个系统里相邻的 `[ForEach]` 方法，若过滤相同（`[WithAny<A, B>]`
+集合是一个条件：集合要相同，而不只是类型相同）、没有结构变化、不通过 `Lookup<T>` 读别的方法写的组件、后面的方法不读
+前面某次遍历的结果、不对前面写的组件用变化过滤，且 `Parallel`、`ChunkSize`、`Slices` 相同，就作为一个生成的作业运行：
+标量方法逐行合并，批量和向量方法每 256 行一块，掩码遍历按字合并；并行遍历合并每个方法的归约和记录。前后紧接的两个系统
+（`[UpdateAfter]` / `[UpdateBefore]`，或在同一文件里相邻声明）也合成一个作业（`SystemDeclarations.Fuse`、
+`ISystemSet.RunFused`）：串行计划只在两者在集合的一次运行中相邻、都启用且到期、且没有系统在测量时才用；第二个系统的写入
+带自己阶段的 tick，抛异常的系统被禁用（`SystemCode.Blame`），各自计一次运行。视图的字段算作其方法的组件（对视图写入的
+变化过滤让下一次遍历分开）。只在超出缓存时分块：分块合并的遍历从 `SystemCode.FusedRows`（131,072 行）起才运行；更少时
+每次遍历跑自己的整表循环，行在两次遍历之间留在 L2，`RunFused` 返回 false，各系统运行自己的代码。三种情况任何大小都
+合并：逐行遍历、并行遍历、写同一组件的两次遍历（每行第二次写命中 L1：FusionBenchmark Vitals 在 10,000 行时 0.60-0.68）。
+`FusionMode`（`Auto` / `Require` / `Off`，与 `SimdMode` 对应）：EECS093（Info）指出差一点就能合并的情况，EECS094
+（Error）指出 `Require` 却没合并；`DescribeSchedule` 写“one walk”，`SystemInfo.FusedWith` 给出合并的对象。没有合并的
+运行不取合并的 span（SystemDispatch Plain +9 % -> +4 %，误差以内）。原因：超出 L2 时合并的遍历每行只载入一次而不是两次
+（FusionBenchmark，10k / 100k / 1M / 8M 行，Movement、MovementParallel、Vitals、Systems；数字来自基准同步，Finish 5）。
+考虑过：任何大小都合并（缓存内分块更慢，行本来就留在 L2）、跨结构变化或变化过滤合并（第二次遍历会看到第一次移动的行
+或设置的 tick）、合并 lambda 遍历（尚未做：feat-inner-loops 的合并项，记录随它的结果更新）。
+
+**D124. Copy-on-write `DynamicBuffer` lists (feat-cow-buffers; the numbers are also under "feat-cow-buffers merged").**
+
+en: *A buffer list is shared until written.* Decision: an instantiated or cloned entity shares its prefab's or source's
+buffer lists (vLLM's shared blocks); the first write takes one copy, `Clear` drops the share without a copy. The share
+count lives on the list: plain on the owner thread, atomic in parallel passes (`RunChunks` counts the passes that may
+write). A prefab's lists are not counted (shared across worlds and threads, never pooled); counted lists are copied
+when moved across worlds; a singleton's (`Emitted<T>`) lists own their copies. Why (10k entities x 16 elements, 0 B):
+Instantiate unwritten 0.47-0.54x, Clone unwritten 0.56-0.66x; written Instantiate 0.97-1.02x (after the Unshare fix:
+one thread-local lookup per pooled store, a span copy), written Clone 1.00-1.08x; Capture reused 0.17x, Restore
+0.41-0.44x, rollback 0.50x; churn within noise. Considered: paged blocks (`AsSpan` must stay contiguous), an atomic
+count everywhere (2.23x slower written clones), copying at instantiate across threads, shared component values
+(declined in D14).
+
+zh: *缓冲列表在写入前共享。* 决定：实例化或克隆出的实体共享预制体或源实体的缓冲列表（vLLM 的共享块）；第一次写入时
+复制一次，`Clear` 直接放弃共享、不复制。共享计数放在列表上：所有者线程上是普通计数，并行遍历中是原子计数（`RunChunks`
+统计可能写入的遍历）。预制体的列表不计数（跨世界、跨线程共享，从不入池）；计数的列表移到别的世界时复制；单例
+（`Emitted<T>`）的列表各有自己的副本。原因（10k 实体 x 16 个元素，0 字节）：未写入时 Instantiate 0.47-0.54 倍、Clone
+0.56-0.66 倍；写入时 Instantiate 0.97-1.02 倍（修复 Unshare 之后：每个入池的存储只查一次线程本地、用 span 复制），
+Clone 1.00-1.08 倍；复用的 Capture 0.17 倍，Restore 0.41-0.44 倍，回滚 0.50 倍；频繁增删在噪声内。考虑过：分页的块
+（`AsSpan` 必须连续）、处处用原子计数（写入的克隆慢 2.23 倍）、跨线程实例化时复制、共享组件值（D14 已否决）。
+
+**Streaming stores past the last-level cache (feat-streaming-stores, merged 1b1aa12, and feat-borrowed-rest's
+snapshot copies; reconstructed from microarch.md M3, the commits 38cc0a4, ace3517, 54870ee, 6750449, b2f5d0f and the
+backlog's numbers, since `feat-streaming-stores/decision.md` is lost).**
+
+en: *A vector loop streams the columns it writes without reading, past the last-level cache.* Decision: a `[ForEach]`
+method's vector loop writes a column it never reads (each vector assigned before any read, no blocks) with
+non-temporal stores when the run's table is past `CacheSizes.LastLevel` (the gate counts every column the pass moves,
+not only the written one) and the run is long enough (`StreamingStores.MinRows`, 1,024 rows): a `NoInlining`
+`__Stream` method per width runs the head rows through the method up to the first aligned row, then the loop with
+`StreamingStores.Store` (VMOVNTPS on AVX-512 / AVX / SSE2 when aligned, STNP on ARM64, plain otherwise) and a fence.
+Not for bails, gathers, wide components, marked rows, records, reductions, `Maybe<T>`, columns of several fields
+outside the flat loop, nor masked words; a `+=` or a conditional write keeps plain stores. The schedule says
+"write-only columns streamed past the last-level cache". Snapshots stream their full copies the same way past the
+cache; resizes stay `memmove`. Why: the line is written around the caches instead of read first and evicting what
+they hold. Prototype (microarch.md M3): 1.47x past the cache (64M floats: 49.3 -> 33.4 ms), a tie inside (271 / 260
+us). In a real world with the next pass reading the column counted in (StreamingStoreGateBenchmark, x86): Predict
+0.86-0.94x, Mix 0.90-0.92x past the cache, the gate off inside; the owner's M4 (2026-10-29, one round, 0 B): Auto the
+fastest of Auto / Off / On in all 8 cases, 0.80-0.87x of Off at 1M and 0.75-0.87x at 16M, so STNP is gated the same
+way on ARM64. Snapshots at 4M rows of 80 bytes: Capture 1.20-1.26x, Restore 1.11-1.20x faster; resizes a wash.
+Considered: streaming every write (a read-modify-write loads the line anyway, the stream then only evicts it),
+streaming inside the cache (a tie, and the next reader misses), streaming resizes (a wash: bound by allocation and
+first touch).
+
+zh: *超出末级缓存时，向量循环用流式存储写只写不读的列。* 决定：`[ForEach]` 方法的向量循环中，只写不读的列（每个向量
+先赋值再读，没有分块）在本次运行的表超出 `CacheSizes.LastLevel` 时（门槛按遍历移动的所有列计算，不只是写的那一列）、且
+运行足够长（`StreamingStores.MinRows`，1,024 行）时，用非临时存储写入：每个宽度一个 `NoInlining` 的 `__Stream` 方法，
+先让方法逐行处理到第一个对齐的行，再用 `StreamingStores.Store`（对齐时 AVX-512 / AVX / SSE2 的 VMOVNTPS，ARM64 的 STNP，
+否则普通存储）循环，最后一道屏障。不用于中途退出、聚集读取、宽组件、标记行、记录、归约、`Maybe<T>`、平铺循环以外的
+多字段列，也不用于掩码字；`+=` 或带条件的写入保持普通存储。调度写“write-only columns streamed past the last-level
+cache”。快照的整表复制超出缓存时同样流式写入；扩容仍用 `memmove`。原因：缓存行绕过缓存写入，不必先读进来、也不挤掉
+缓存里的数据。原型（microarch.md M3）：超出缓存快 1.47 倍（64M 个 float：49.3 -> 33.4 ms），缓存内持平（271 / 260
+微秒）。在真实世界中把下一次读这列的遍历算进去（StreamingStoreGateBenchmark，x86）：超出缓存时 Predict 0.86-0.94 倍、
+Mix 0.90-0.92 倍，缓存内门槛关闭；所有者的 M4（2026-10-29，一轮，0 字节）：8 个情况中 Auto 在 Auto / Off / On 里都最快，
+1M 时为 Off 的 0.80-0.87 倍，16M 时 0.75-0.87 倍，所以 ARM64 上 STNP 用同样的门槛。快照 4M 行、每行 80 字节：Capture 快
+1.20-1.26 倍，Restore 快 1.11-1.20 倍；扩容持平。考虑过：所有写入都流式（读改写本来就要载入缓存行，流式只会把它挤出）、
+缓存内也流式（持平，下一个读者还会缺失）、扩容流式（持平：瓶颈在分配和第一次触碰）。
+
+**The analyzer rules for the public skill (feat-analyzer, D118-D120; the diff lived in the session scratchpad as
+`docs-todo-analyzer-rules.diff`).** It was written against `docs/public/easyecs-rules.md`, now
+`skills/easyecs/SKILL.md`: port it there, write `[EntityMethod]` for `[ForEntity]` (D141), a `[Drain]` method for the
+event handler (D141), `GetOrAddSingleton` for `GetSingleton` (it throws before the first emit), and the severities the
+code has after Finish 2b (EECS055 warns for a fixable reason, EECS033 / EECS039 are Warnings since a41a2e3, so "The
+suggestions, EECS033 and EECS039" goes).
+
+```diff
+@@ (Emit<T> paragraph)
+-  later system reads `world.GetSingleton<Emitted<T>>().Items` and clears it; the emitting method never takes `Emitted<T>` and emits
+-  one kind of record through one parameter (EECS070).
++  later system reads `world.GetSingleton<Emitted<T>>().Items` and clears it once applied (records nothing clears pile up
++  and are applied again: EECS092); the emitting method never takes `Emitted<T>` and emits one kind of record through one
++  parameter (EECS070).
+@@ (vector loops paragraph)
+-  same across vector widths): keep `Exact` where results must match on every machine. EECS055 (a suggestion) names
+-  why a method stayed scalar (a narrow value out of range, a component too wide for the work, a `Maybe<T>` in a
+-  parallel method, a call outside a condition); put `[ForEach(SimdMode = SimdMode.Require)]` on a hot method so losing the loop fails the
++  same across vector widths): keep `Exact` where results must match on every machine. EECS055 names why a method
++  stayed scalar: a warning when the method can be rewritten and the message says how (split the few fields it uses
++  out of a wide component, name the fields instead of a `ref` local, give a local its value where it is declared), a
++  suggestion when what the method computes stops the loop (a call outside a condition, integer division, a narrow
++  value out of range, a `Maybe<T>` in a parallel method); put `[ForEach(SimdMode = SimdMode.Require)]` on a hot method so losing the loop fails the
+   build (EECS056), `SimdMode.Off` on one that should stay scalar.
+@@ ## Performance
+-- An `EECS` warning means the code costs (EECS025 to EECS032, EECS052, EECS087, and EECS017, EECS020), loses a write
++- An `EECS` warning means the code costs (EECS025 to EECS032, EECS052, EECS055, EECS087, EECS091, and EECS017, EECS020),
++  piles up records (EECS092), loses a write
+@@ (after "Removing a component keeps the row")
++- A pass reads whole rows of each component it takes, so fields that the passes running every update never touch
++  (spawn data, configuration, statistics read now and then) belong in a component of their own: EECS091 names them
++  when they are at least half of a component of 32 bytes or more.
+@@ (new section before "Project layout and debugging")
++## Migrating object-oriented code
++
++No code fix turns a class into components and systems: the class's callers, its references and its virtual methods
++change too, so migrate by hand, feature by feature, with these mappings.
++
++- **A class becomes components.** Split its fields by what changes together and who reads them: `Position`,
++  `Velocity`, `Health`, each a `record struct` implementing `IComponent`. A field read every update by one method and
++  rarely elsewhere goes with the method's other fields; a field only a rare method reads goes into a component of
++  its own (EECS091). A `bool` that marks a state becomes a tag (`Dead`, `Stunned`) when it changes rarely, a field
++  when it flips every update. A constant the class shares with every instance is a singleton (`Rules`), never a
++  field repeated per entity. Collections a class owns become a `DynamicBuffer<T>`.
++- **An instance becomes an entity.** `new Enemy(...)` becomes `world.Instantiate(enemyPrefab, new Position(x, y))` or
++  `world.CreateEntity(...)`; the list the game loop kept (`List<Enemy>`) goes, the world's tables are the list.
++  Removing it from the list is `entity.Destroy()`.
++- **A method becomes a system.** `void Update(float dt)` called per object becomes an `[EcsSystem] ref struct` with a
++  static `[ForEach]` method taking the components it reads (`in`) and writes (`ref`); `dt` comes from a singleton the
++  host sets (`in Clock clock`). A method that does two things becomes two systems; the order the loop called them in
++  becomes registration order or `[UpdateBefore<T>]` / `[UpdateAfter<T>]`. A method called on some objects only becomes
++  a filter (`[With<Boss>]`, `[Without<Dead>]`), not an `if` on a type or a flag. A request for one entity
++  (`player.Heal(10)`) becomes a `[ForEntity]` method.
++- **Inheritance becomes composition.** `class Boss : Enemy` is an entity with the enemy's components plus a `Boss`
++  tag or component; a virtual method overridden per subclass becomes one system per variant, each filtered by its
++  tag. An interface implemented by unrelated classes (`IDamageable`) becomes the component they all hold (`Health`).
++- **A reference becomes an `EntityId`.** A field holding another object (`Enemy target`) becomes
++  `EntityId Target` in a component, read through a `Lookup<T>` parameter (`lookup[target.Target]`), never an `Entity`
++  handle in data (EECS017). A parent and its children are `ChildOf` (`world.Children(parent)`); many-to-one links are
++  an `IRelation` buffer or a component indexed by the `EntityId` (`IIndexed<EntityId>`), so "who targets me" is an
++  index lookup, not a list kept in sync by hand.
++- **An event becomes data.** `event Action<Hit> OnHit` and its handlers become records: the method that raised it
++  takes an `Emit<Hit>` parameter (`hits.Add(new Hit(target, damage))`), and each handler becomes a system after it
++  that reads `world.GetSingleton<Emitted<Hit>>().Items` and clears it (EECS092). A state change others react to is a
++  tag added (`Spawned`) or a tracked write (`ITracked` + `[Changed<T>]`), never a callback.
++- **A singleton object or static state becomes a singleton component.** `GameManager.Instance.Score` becomes
++  `world.Score` (an `ISingletonComponent`); static mutable fields on systems are errors (EECS007).
++- **Services stay outside.** A socket, a file or a database client is not a component: the host keeps it, and a
++  `[NotSaved]` singleton or an `ICleanupComponent` holds the handle the systems need.
+```
+
 ## Code (running)
 
 - [x] #151 (merged 290b3d4) BattleServer.cs (Reduce, EntityRandom, Emit, Scratch, a SimdMode.Require method; MovementSystem.Move as a
@@ -16,9 +522,9 @@ Order agreed with the owner: code first, docs checked and updated in full once a
       -46 % / -43 % were noise), ColdCreate -7..-15 % time but +0.38 MB per reserved world (the free id list, by design:
       say so in docs); dc2785c reverted (36abe0b: without it Reserved 2.22 vs 2.32/2.35 ms, PerEntity 4.70 vs 5.30/5.65).
       Iterate1 -51 %, Iterate2 -75 %, Iterate3 -28 %, With -53 %, BattleServer -10 %.
-- [ ] Recheck on a quiet machine (final run): GroupBenchmark.Scan (+12 %, round 2 bimodal), OperationBenchmark Toggle (+7 %).
-- [ ] Real regressions: root cause, fix, BDN proof.
-- [ ] #153 job tuning A/B (Warmup 6 -> 3, IterationTime 250 -> 150 ms) on WorldSimulation, BattleServer, one micro;
+- [x] (done: backlog feat-later-small, no regression) Recheck on a quiet machine (final run): GroupBenchmark.Scan (+12 %, round 2 bimodal), OperationBenchmark Toggle (+7 %).
+- [x] (done: the rechecks found none) Real regressions: root cause, fix, BDN proof.
+- [x] (done: feat-later-small, the default job stays, `--dev` added) #153 job tuning A/B (Warmup 6 -> 3, IterationTime 250 -> 150 ms) on WorldSimulation, BattleServer, one micro;
       GeneratorBenchmark gets a lighter job of its own (its GlobalSetup generates and analyzes everything per launch,
       each op is ~0.5 s).
 
@@ -37,10 +543,10 @@ Order agreed with the owner: code first, docs checked and updated in full once a
 
 ## Also in 4.8 (owner, 2026-10-23)
 
-- [ ] #138 research (SpanAction-style span runs, stencil SIMD gaps, tick time): agent; report in
+- [x] (done: #157, feat-later-accumulate) #138 research (SpanAction-style span runs, stencil SIMD gaps, tick time): agent; report in
       scratchpad/research138.md, builds only proven wins.
-- [ ] Vector loops over mixed lane widths (int rows into a long total, widen/narrow): agent, with EECS061 below.
-- [ ] EECS061: an explicit `Merges => false` is reported (constant value read).
+- [x] (done: Kernel.Pairs.cs, int into long, float into double) Vector loops over mixed lane widths (int rows into a long total, widen/narrow): agent, with EECS061 below.
+- [x] (done: EasyEcsAnalyzer.Parallel.cs) EECS061: an explicit `Merges => false` is reported (constant value read).
 
 ## Done this round (for the record)
 
@@ -83,7 +589,7 @@ Agents' CLAUDE.md layout edits: port into src/*/CLAUDE.md maps (the root no long
 
 ## Renumbering at merge (naming audit, sent to agents)
 Merge order: declarations, analyzer, hugepages, cow-buffers, sched, structural-simd, fusion, inline, views.
-EECS: declarations 090; analyzer 091-092; fusion 093-094; inline 095-097; views 098-102 (range EECS002-102).
+EECS: declarations 090; analyzer 091-092; fusion 093-094; inline 095-097; views 098-102. The range is now EECS002-EECS123 (merged: "Sweep 2026-11-07", item S1).
 D: views 109-111; inline 112-114; declarations 115-117; analyzer 118-120; fusion 121; structural-simd 122; hugepages 123; cow-buffers 124; sched 125.
 ScalarReason(Text, IsFixable, SplitComponent) owned by feat-analyzer; structural-simd adopts it at merge.
 feat-analyzer rules text -> skills/easyecs/SKILL.md (docs to-do).
@@ -104,14 +610,14 @@ Kept names (decided): AsX/TryGetX (D109), FusionMode (mirrors SimdMode).
   infer ITracked; infer Mut<T>; infer [Consume]; [With<A,B>]/[Without<A,B>] arity; auto Phase; ISystemGroupWithAny;
   Scan<T>; Element<T> for buffers. (Texts were in owner-review.md at d56a82d.)
 - Do: infer ChunkSize after feat-sched merges, if BDN shows inferred >= hand-set (task).
-- Do: rename [IndexKey] -> [LookupKey] (one key, many entities); [UniqueKey] stays. After feat-declarations merges. Public rename: migration, changelog, code fix/analyzer from old name, api.mdx, ApiDocs zh, samples, docs, D record.
+- [x] Done: [IndexKey] -> [LookupKey] (one key, many entities; D129); [UniqueKey] stays. Corrected 2026-11-07: `[IndexKey]` never shipped (not in v4.7.0), so no migration entry, alias or code fix; the code fix `RenamedAttributes` is deleted (owner, 2026-11-07; backlog renames lane) and D129 is amended in the pass (merged: "Sweep 2026-11-07", item S3).
 - Do: retry vectorized reads of other entities: sort lookups by target table first, and AVX-512 (measure; D90 numbers 0.8-1.18 AVX2).
 - widelanes round 2 confirms round 1 (ratio to scalar, 1024 light/heavy, 100k light/heavy): Split 0.17/0.19/0.15/0.21;
   Avx512Permute 0.62/0.34/0.99/0.57; Avx2Transpose 1.13/0.60/1.00/0.76; RowPerVector 1.20/1.28/1.16/1.18;
   Avx2Gather 1.51/2.19/0.99/2.17. Numbers for D118 (split first) and #160's AVX2 gate (heavy math only).
 
 ## Merged feat-analyzer (16989bb, 2026-10-24): EECS055 Warning/Info split, EECS091 cold fields + split code fix, EECS092 uncleared Emitted records, ScalarReason; D118-120. No Core change, so no runtime A/B; tests 2015/2015.
-Docs to-dos: skills/easyecs/SKILL.md text in docs-todo-analyzer-rules.diff (renumbered; incl. "Migrating object-oriented code" section D119 cites); analyzer.mdx en/zh (EECS091/092, EECS055 severity, split fix; range to EECS002-102 at the end); high-performance "split first, the fix writes it"; common-mistakes "Leaving Emitted<T> full" now EECS092; troubleshooting, changelog, roadmap; HotColdBenchmark into bench.json; rerun ReduceBenchmark Bounds*; zh glossary 热字段/冷字段, 遍历; 36 EECS033 hits in docs fences (base).
+Docs to-dos: skills/easyecs/SKILL.md text in docs-todo-analyzer-rules.diff (renumbered; incl. "Migrating object-oriented code" section D119 cites); analyzer.mdx en/zh (EECS091/092, EECS055 severity, split fix; range: EECS002-EECS123 (merged: "Sweep 2026-11-07", item S1)); high-performance "split first, the fix writes it"; common-mistakes "Leaving Emitted<T> full" now EECS092; troubleshooting, changelog, roadmap; HotColdBenchmark into bench.json; rerun ReduceBenchmark Bounds*; zh glossary 热字段/冷字段, 遍历; 36 EECS033 hits in docs fences (base).
 Watch: ParallelEmitsDoNotAllocateAfterWarmUp flaked once (56 B) under load.
 GeneratorBenchmark analyzer cost: one round only (within error) -> rerun in #153.
 
@@ -130,7 +636,7 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - D22 "No spinning, no dedicated threads" is stale (Workers spin 100 µs): rewrite.
 - Changelog / README What's new / migration: float Reduce<T> without ChunkSize on a world whose MaxDegreeOfParallelism != 4 now gets different (thread-independent) bits.
 - guide threading/reductions: determinism without ChunkSize (16 chunks for merging passes).
-- ApiDocs: 38 problems from the declarations merge (oncreate/ondestroy/onupdate attrs, QueryFilter.WithAny<T> entries to delete); rerun tools/ApiDocs and regenerate docs/content/reference.
+- [x] (done: reference regenerated in c24847b, no hook-attribute or `WithAny<T>` page left) ApiDocs: 38 problems from the declarations merge (oncreate/ondestroy/onupdate attrs, QueryFilter.WithAny<T> entries to delete); rerun tools/ApiDocs and regenerate docs/content/reference.
 - Flaky allocation tests (ScratchTests.AParallelPassWithScratchDoesNotAllocateAfterWarmUp, ParallelEmits*): more frequent with the 400k-row Reduce test in the same run; investigate the measurement race (task #166).
 
 ## feat-cow-buffers merged — docs to-dos (D124)
@@ -165,15 +671,15 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 
 ## feat-views merged — docs to-dos (D109-D111 written)
 - Guide page views + prefab declarations ([View] partial ref struct; entity.AsX()/TryGetX(); [Prefab] partial struct -> X.Prefab; world.Instantiate(X.Prefab)); You write / The generator writes.
-- analyzer.mdx: EECS098-102, range EECS002-102 (with fusion 093-094, lambdas 095-097).
-- roadmap, changelog, migration ([Archetype] -> [Prefab] if it was ever public — check), README What's new, public skill, cheat sheet, glossary (view / prefab declaration), example.mdx/BattleServer.
-- ApiDocs: one base fix commit for ~40 stale zh entries (OnUpdate/WithAny/hooks pages, DynamicBuffer + Prefab.SetBuffer copy-on-write text) before the gate passes.
+- analyzer.mdx: EECS098-102 (with fusion 093-094, lambdas 095-097); the range (merged: "Sweep 2026-11-07", item S1).
+- roadmap, changelog, migration (nothing for `[Archetype]`: checked 2026-11-07, it never shipped in v4.7.0), README What's new, public skill, cheat sheet, glossary (view / prefab declaration), example.mdx/BattleServer.
+- [x] (done: c24847b) ApiDocs: one base fix commit for ~40 stale zh entries (OnUpdate/WithAny/hooks pages, DynamicBuffer + Prefab.SetBuffer copy-on-write text) before the gate passes.
 - Follow-ups: lambda + view stays scalar; EECS053 through views in lambdas; EECS025 for never-written view ref fields; EECS049 for view locals.
 
 ## feat-fusion merged — docs to-dos (D121 text in the agent's final report: FusedRows 131,072 threshold, exceptions per-row/parallel/same-written-component)
 - Guide "Pass fusion" (what fuses, FusedRows + 3 exceptions, FusionMode Auto/Require/Off, DescribeSchedule "one walk", SystemInfo.FusedWith, views, error semantics of a fused pair).
 - D121 into decisions.mdx/.zh.mdx (agent did NOT write it).
-- analyzer.mdx: EECS093 (Info), EECS094 (Error); range EECS002-102.
+- analyzer.mdx: EECS093 (Info), EECS094 (Error); the range (merged: "Sweep 2026-11-07", item S1).
 - glossary "pass fusion"; api.mdx FusionMode, SystemCode.FusedRows, SystemInfo.FusedWith, RunFused bool, EntitySpan.Slice; ApiDocs zh entries; changelog; migration (ISystemSet.RunFused returns bool, generated only); README; public skill; bench.json FusionBenchmark.
 - Follow-up: lambda passes don't fuse.
 
@@ -184,7 +690,7 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - Testing guidance (if a page shows asserting 0 B): take the starting count after a blocking full collection.
 - Changelog Fixes: parallel passes no longer allocate the first time a helper waits on the queue.
 - audit-core candidate: Interleaved.LoadTail lazily creates Tail<T>.Rows outside ThreadSetup.
-- AGENTS.md layout: docs/content guide 'analyzer lists EECS002-089' -> current range after the docs pass.
+- AGENTS.md layout: docs/content guide 'analyzer lists EECS002-089' -> the current range (merged: "Sweep 2026-11-07", item S1).
 
 ## feat-loop-shape (D126, D127, merged)
 - guide/systems vector-loop section: flat lanes, integer division and math lowerings, FloatMode.Fast forms, new reason texts.
@@ -203,12 +709,12 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - roadmap.mdx + zh: one Planned item for docs/plans/inner-loops.md's goal (plain loops over buffers / inline arrays / ParallelFor lambdas become vector loops; Cell<TCell,TTile> shaders; EECS103), linking D77/D90. Rewrite the stale "Vector loops: the forms left for later" item (Pow and kin partly done by D127; masked tail D126).
 
 ## feat-lookupkey-chunkrows (D129, D130, merged)
-- Changelog / migration / README What's new: [IndexKey] -> [LookupKey] (code fix), measured chunk sizes (ChunkSize only overrides).
+- Changelog / README What's new: `[LookupKey]` under its final name only (never released as `[IndexKey]`, no migration (merged: "Sweep 2026-11-07", item S3)), measured chunk sizes (ChunkSize only overrides).
 - threading guide #chunk-rows + line 24 (stop telling users to set ChunkSize for heavy rows); analyzer guide EECS054 "when to set it"; api.mdx complexity; performance / why-fast chunking; public skill ChunkSize line; roadmap.
 - bun run lint:terms on D130 zh.
 - DocCheck had 296 pre-existing problems: 108 fences use removed [OnUpdate]/[OnCreate]/[OnDestroy]; new EECS025/EECS067 hits; EECS068/GroupBy errors in analyzer.mdx. ApiDocs 46 pre-existing problems. All for the docs pass (verify gate).
 
-## fix-zh-reference (merged af585ed)
+## fix-zh-reference (merged af585ed; done, its src XML items checked 2026-11-07)
 - `migrate-from-arch.zh.mdx:58`: English "`entity.IsDead` for a tag" -> Chinese.
 - `lint:terms` fails on decisions.zh.mdx: lines ~2305, 2337, 2578 跟踪 -> 追踪 (D118); ~2570 结构门 -> 结构闸门 (D128).
 - `api.zh.mdx` complexity rows keep English words (e.g. "O(count × c)"): Chinese names per tools/ApiDocs/zh/README.md.
@@ -222,7 +728,7 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 
 ## feat-eecs103 (D134, merged)
 - analyzer.mdx + zh: EECS103 section, table row, code-fix line ("Write the method for one row"); EECS range in the
-  guide (EECS002-089 today) and root AGENTS.md to EECS002-103.
+  guide (EECS002-089 today) and root AGENTS.md to EECS002-EECS123 (merged: "Sweep 2026-11-07", item S1).
 - changelog, roadmap, public skill (do not hand-write the vector loop of a batch method; write the method for one row).
 - demo.mdx includes MovementBatchSystem.cs with a #pragma now; the exemplar pass (WP7) rewrites demo Move and
   VoxelServer FireDamageSystem.Hurt as one-row methods and drops both pragmas; rebuild docs/public/demo after.
@@ -363,6 +869,32 @@ Docs to-dos (docs pass):
   world outgrows the cache: keep ids in `in` components".
 - `api.mdx`: nothing (`Lookup<T>.PrefetchesPastLastLevel` / `PrefetchAhead`, `LookupLanes.Prefetches` are hidden, for generated code).
 
+### A gate per form (merged here from its own section, 2026-11-07)
+
+Decision record draft (decisions.mdx + .zh.mdx, next to the prefetch gate's record): **A prefetch gate per form.**
+Decision: each prefetching form reads the cache it pays past. The row form's chases of other entities (one thread,
+parallel, fused walks, a buffer's elements, lambda passes) and `World.DestroyEntities`' id list prefetch once their
+memory leaves one core's L2; index probes (on one thread and in parallel) and the vector loops' chases only past the
+last-level cache. The L2 is read like the last-level cache (Linux sysfs level-2 index then sysconf, Windows
+`GetLogicalProcessorInformationEx` level 2, macOS `hw.perflevel0.l2cachesize` / `hw.l2cachesize`), only where a prefetch
+exists; an unknown L2 uses the last-level gate. Why: between the L2 and the LLC (262,144 and 1M entities on a 2 MiB L2
+/ 260 MiB L3 x86) the row chases run 1.20-1.36x faster, the fused walk 1.44-2.0x, DestroyEntities 1.22-1.35x, the
+buffer chase 1.04-1.26x; inside the L2 the gate keeps today's code (forced on costs 1.12-1.6x). Considered: one gate on
+the L2 for every form (probes 1.13-1.6x slower forced on at 262,144, the vector loop 1.04-2.1x); parallel probes on the
+L2 (the owner's first list: a wash at 262,144, 1.16x slower at 524,288, faster only at 1M: kept on the last level); a
+multiple of the L2 (no form needed one: each that pays, pays from the first size past it). Numbers:
+`borrowed-ideas.md` item 1, "A gate per form".
+
+Docs to-dos (docs pass, en + zh):
+- guide page of `Lookup<T>` (the prefetch section written for feat-prefetch-all): "past the L2 for chases of other
+  entities, past the last-level cache for keyed lookups and vector loops"; the "What it costs" line of each.
+- performance / why-fast: the per-form BenchTable gains the 262,144 size (`tools/bench.sh ProbePrefetchBenchmark
+  ChaseFormsPrefetchBenchmark IdListPrefetchBenchmark LookupChaseGateBenchmark --sync`; the classes' default sizes are
+  now 1k / 262,144 / 1M / 16M).
+- introspection page: DescribeSchedule's scalar line reads "lookups prefetched past the cache" (the form decides which).
+- faq (ARM64 / other machines): the gate reads the L2 too; unknown L2 = the last-level gate.
+- `api.mdx`: nothing (the new `Lookup<T>.PrefetchesPastL2` is hidden for generated code, a name for the owner to see).
+
 ## feat-call-inliner: vector loops inline the user's own calls
 
 - systems.mdx and the guide's "what vectorizes" list: helpers are inlined. Say "write helpers freely", then list the
@@ -401,7 +933,7 @@ Docs to-dos (docs pass):
 - high-performance.mdx + zh: Lookup targets ordered by their target read near rows (LookupOrderBenchmark: Chase 2x,
   64-table gathers 4.6x at 1M); `Lanes.Selection` for a row list from a mask; Compact on every ISA (NEON, SSSE3).
 - architecture.mdx + zh: RowOrder in the table diagram (Archetype.Order, Permute), the cluster side array.
-- glossary + zh: ordered table (有序表), cluster (簇, the unit of an ordered table; 块 is the parallel chunk), box (包围盒), margin (余量), cadence (节奏);
+- (merged: "Sweep 2026-11-07", item S5) glossary + zh: ordered table (有序表), cluster (簇, the unit of an ordered table; 块 is the parallel chunk), box (包围盒), margin (余量), cadence (节奏);
   tools/ApiDocs/zh/README.md glossary gets the same rows.
 - changelog / README What's new: ordered tables (the read path), Lanes.Selection, Compact on ARM64.
 - Benchmarks into bench.json: RowOrder, LookupOrder, Pairs (Core*), Compress (CoreCompact) after the reference run.
@@ -672,7 +1204,7 @@ Docs pass:
 - **example.mdx / BattleServer** (L4, finish phase): the battle server gains a pair method where it searches
   neighbors (the AOI or separation); keep its regions.
 - **Migration / README "What's new"**: a new attribute, no breaking change; README "What's new" entry.
-- **The public skill** (`skills/easyecs/SKILL.md`): "a neighbor search is a pair method, not a grid": the form and the
+- (merged: "Sweep 2026-11-07", item S6) **The public skill** (`skills/easyecs/SKILL.md`): "a neighbor search is a pair method, not a grid": the form and the
   test-first rule.
 
 L4 (moved to the finish phase by the owner, 2026-10-26): what it needs from L2.
@@ -750,7 +1282,7 @@ reach -> cutoff) need no user change. The migration guide's section of the comin
 "needs code changes" entry linking it. `[GaussSeidel]` (formerly proposed as `[RedBlack]`) is the name to use in
 these notes and in any later page; nothing ships under it yet.
 
-Docs pass (guide/pairs.mdx + zh, the section listed under feat-locality-pairs, extended):
+Docs pass (guide/pairs.mdx + zh, a new page, the section listed under feat-locality-pairs, extended):
 - Writes of the neighbor: `[Neighbor] ref` for a pickup, the order (tables' rows), what EECS105 refuses and why, the
   stamps of the written neighbors; no Parallel with it.
 - Parallel pair methods: when they pay (the parallel pass 1.7-2.6x), bit for bit the serial pass, no `[Neighbor]
@@ -769,7 +1301,7 @@ Docs pass (guide/pairs.mdx + zh, the section listed under feat-locality-pairs, e
   read.
 - api.mdx: no new public user-facing name (the new members are on EditorBrowsable(Never) types the generator calls;
   ApiDocs skips them).
-- The public skill: a neighbor search is a pair method; writes of the neighbor, results and `Mut<T>` in it.
+- (merged: "Sweep 2026-11-07", item S6) The public skill: a neighbor search is a pair method; writes of the neighbor, results and `Mut<T>` in it.
 - VoxelServer `Pickup` (L4, finish phase): now buildable as a pair method writing `[Neighbor] ref` the item, the
   inventory as `Mut<DynamicBuffer<ItemStack>>` (NeighborTests.AMutOfTheRowStampsOnlyTheRowsItWrites is that shape).
 
@@ -884,44 +1416,18 @@ Docs to-dos (docs pass):
 - `api.mdx`: nothing; the new members are hidden for generated code (`LookupExtensions.Probes`,
   `LookupExtensions.PrefetchKey`: names for the owner to approve).
 
-## feat-prefetch-gate: a gate per form
-
-Decision record draft (decisions.mdx + .zh.mdx, next to the prefetch gate's record): **A prefetch gate per form.**
-Decision: each prefetching form reads the cache it pays past. The row form's chases of other entities (one thread,
-parallel, fused walks, a buffer's elements, lambda passes) and `World.DestroyEntities`' id list prefetch once their
-memory leaves one core's L2; index probes (on one thread and in parallel) and the vector loops' chases only past the
-last-level cache. The L2 is read like the last-level cache (Linux sysfs level-2 index then sysconf, Windows
-`GetLogicalProcessorInformationEx` level 2, macOS `hw.perflevel0.l2cachesize` / `hw.l2cachesize`), only where a prefetch
-exists; an unknown L2 uses the last-level gate. Why: between the L2 and the LLC (262,144 and 1M entities on a 2 MiB L2
-/ 260 MiB L3 x86) the row chases run 1.20-1.36x faster, the fused walk 1.44-2.0x, DestroyEntities 1.22-1.35x, the
-buffer chase 1.04-1.26x; inside the L2 the gate keeps today's code (forced on costs 1.12-1.6x). Considered: one gate on
-the L2 for every form (probes 1.13-1.6x slower forced on at 262,144, the vector loop 1.04-2.1x); parallel probes on the
-L2 (the owner's first list: a wash at 262,144, 1.16x slower at 524,288, faster only at 1M: kept on the last level); a
-multiple of the L2 (no form needed one: each that pays, pays from the first size past it). Numbers:
-`borrowed-ideas.md` item 1, "A gate per form".
-
-Docs to-dos (docs pass, en + zh):
-- guide page of `Lookup<T>` (the prefetch section written for feat-prefetch-all): "past the L2 for chases of other
-  entities, past the last-level cache for keyed lookups and vector loops"; the "What it costs" line of each.
-- performance / why-fast: the per-form BenchTable gains the 262,144 size (`tools/bench.sh ProbePrefetchBenchmark
-  ChaseFormsPrefetchBenchmark IdListPrefetchBenchmark LookupChaseGateBenchmark --sync`; the classes' default sizes are
-  now 1k / 262,144 / 1M / 16M).
-- introspection page: DescribeSchedule's scalar line reads "lookups prefetched past the cache" (the form decides which).
-- faq (ARM64 / other machines): the gate reads the L2 too; unknown L2 = the last-level gate.
-- `api.mdx`: nothing (the new `Lookup<T>.PrefetchesPastL2` is hidden for generated code, a name for the owner to see).
-
 ## feat-generator-gaps (G0, G4, G5, G6; G7 not built)
 
 Pages to write in the docs pass (en + zh each; zh terms: 块 = a parallel chunk only, never 区块):
 
-- **guide/reductions (Reduce<T>)**: a section "A total across passes: `[Accumulate]`". When: a singleton every pass adds
+- **guide/threading#reductions (Reduce<T>)**: a section "A total across passes: `[Accumulate]`". When: a singleton every pass adds
   to (kills this round, bytes sent). Form: `[Accumulate, Sum] public partial struct Stats : ISingletonComponent { long
   Kills; long Hits; [Max] int Longest; }` and `ref Reduce<Stats>`; the struct-level `[Sum]` for the fields without an
   attribute. Order: the world's value first, then the pass (a non-commutative `Combine` keeps run order). Costs:
   AccumulateBenchmark (100k rows: hand-written `ref Singleton` scalar 232.6 us, `[Accumulate]` 8.3 us, parallel 6.6 us,
   0 B). Pitfall: without `[Accumulate]` the pass replaces the value. EECS086's total case (Info until the singleton
   reduces, then a Warning whose fix takes it as `Reduce<T>` and declares `[Accumulate]`).
-- **guide/emit (Emit<T>)**: a section "Handling the records: `[Drain]`". Form: `[Drain] static void
+- **guide/threading#emit (Emit<T>)**: a section "Handling the records: `[Drain]`". Form: `[Drain] static void
   Send(in EntityUpdate u, ref Stats s, Lookup<Viewers> v, World w)`; runs in declaration order inside the system,
   an entry point `Owner.Method(world, values...)` outside; records in emitted order, then cleared; a pass that throws
   clears nothing; an `Emit<T>` of the same record type is refused (EECS108). Costs: DrainBenchmark (both tally into
@@ -1016,13 +1522,15 @@ Docs pass:
   lookups either way, no line saved), G11 (a helper for the steady-state allocation check: one sample's test
   plumbing). The rule they were judged by: a gap is built when it saves users lines or thought (`audit-generator`).
 - G10 and gated streaming stores are code items (backlog "Next" 9, 10); EECS086 / EECS109 / EECS055's bool reason
-  become Warnings with the VoxelServer rewrite.
+  become Warnings with the VoxelServer rewrite. Corrected 2026-11-07: today EECS086's reducing case is already a
+  Warning, its non-reducing total case is Info, EECS109 is Info and the bool reason inherent; all three move with
+  backlog Finish 2b (analyzer lane), and the pages describe the severities the code has then.
 
 ## Vocabulary renames (owner-approved naming popups, 2026-10-27; code applied)
 
 Each needs a migration entry (old -> new), a changelog line, a README "What's new" line and a decision record that
 names the field each term comes from (audit-naming, "The reference design's vocabulary"):
-- `QueryOptions.ParallelChunkRows` -> `MaxChunkRows` (released in 4.7: migration entry required), and the
+- `World.ParallelChunkRows` (released in 4.7) -> `World.MaxChunkSize` (renamed `MaxChunkRows` first; owner, 2026-11-07: `MaxChunkSize`; migration entry and a code fix on CS0117 required (merged: "Sweep 2026-11-07", item S2)), and the
   `chunkRows` parameter of `world.ParallelFor` -> `chunkSize` (OpenMP's `schedule(static, chunk_size)`).
 - `TileReads` -> `TileStencil` (the cells a tile method reads: a stencil, as in stencil codes).
 - `TileBoundary.Fill` -> `TileBoundary.Border`, and `Pad(from, to, fill, mask)` -> `Pad(from, to, border, mask)`
@@ -1034,7 +1542,7 @@ names the field each term comes from (audit-naming, "The reference design's voca
   `[GaussSeidel]` (feat-zombie-field), `Pad()` -> `ExchangeHalo()` with backlog item 12a.
 
 ## Terminology audit (2026-10-27, read-only agent): docs-pass items
-- Glossary: add each term's source field (vector loop: Burst/ISPC; struct job: Unity IJob*; batch method: IJobChunk;
+- (merged: "Sweep 2026-11-07", item S5) Glossary: add each term's source field (vector loop: Burst/ISPC; struct job: Unity IJob*; batch method: IJobChunk;
   `Mut<T>`/`SetIfChanged`: Bevy `Mut`/`set_if_neq`; change tick: Bevy; tracked: Unity change versions; optional:
   Bevy `Option<&T>`/Flecs `?`; tombstone: databases/LSM, and say compaction once; stage: Bevy sync points; access set:
   Bevy `Access`; prefab: Unity/Flecs; dynamic buffer/cleanup/disabled: Unity; relation/ChildOf: Flecs; group: Flecs
@@ -1045,8 +1553,10 @@ names the field each term comes from (audit-naming, "The reference design's voca
 - `OrderBy.Margin` doc comment: "half of LAMMPS's skin" (both boxes widen by it); keep the name.
 
 ## Owner answers 2026-10-27 (terminology popup)
-- `[ForEach(ChunkRows)]` / `chunkRows:` -> `ChunkSize` / `chunkSize` (applied, with a CS0246 / CS1739 migration
-  code fix): migration, changelog, README, decision record (OpenMP's chunk size), alongside `MaxChunkRows`.
+- `[ForEach(ChunkRows)]` / `chunkRows:` -> `ChunkSize` / `chunkSize` (applied). Corrected 2026-11-07: never released
+  (v4.7.0 had no `ChunkRows` on `[ForEach]`), so no migration entry; the code fix `RenamedArguments` is deleted (owner,
+  2026-11-07); changelog and README name `ChunkSize` only; decision record (OpenMP's chunk size) with the
+  reference-design renames, alongside `MaxChunkSize` (merged: "Sweep 2026-11-07", item S2).
 - `IDirectIndexed<TKey>` -> `IDirectMapped<TKey>` (a direct-mapped cache: collisions fall back to the hash).
 - `FloatMode.Exact` stays; its doc comment says "Burst's Strict + Deterministic".
 - `Lanes.RowNumbers` -> `Lanes.Selection`, documented as the selection vector of DuckDB / Vectorwise.
@@ -1206,7 +1716,7 @@ chunk lookup per zombie).
 
 - Samples index (`samples/README.md`, `docs/content/samples/index.mdx` + `.zh.mdx`, `docs/content/README.md`): the
   MultiWorld row mentions ghost rows and `MoveEntities` at the borders.
-- Glossary (`glossary.mdx` + `.zh.mdx`): "ghost row" (幽灵行) and "halo exchange" (光环交换) beside "Tile and halo";
+- (merged: "Sweep 2026-11-07", item S5) Glossary (`glossary.mdx` + `.zh.mdx`): "ghost row" (幽灵行) and "halo exchange" (光环交换) beside "Tile and halo";
   `tools/ApiDocs/zh/README.md` halo row gains ghost rows = 幽灵行.
 - Threading guide: a world may pass between threads through a `Barrier` post-phase action (the sample's exchange);
   `MoveEntities`' "both worlds owned by the calling thread" says the same.
@@ -1312,7 +1822,7 @@ threads; float sums differ from the serial pass's in the last bits (another orde
   the 1k crowd row was noise.
 - No migration entry: a method EECS105 refused now compiles (both sides, and both sides with Parallel); nothing that
   compiled changes.
-- guide/parallel (or the pair page): `Parallel = true` on a method writing both sides is deterministic across thread
+- guide/threading#parallel-foreach-methods (and the new guide/pairs page): `Parallel = true` on a method writing both sides is deterministic across thread
   counts but not bit for bit with the same method on one thread's serial pass; small tables (< 4 chunks of 256 rows)
   run the serial pass.
 
@@ -1320,8 +1830,7 @@ threads; float sums differ from the serial pass's in the last bits (another orde
 
 - Decision record (en + zh): text in the agent's final report, kept in the scratchpad
   (`feat-streaming-stores/decision.md`); gate counts every column the pass moves, not only the written one.
-- `docs/plans/microarch.md`: candidate 8 from "Dropped" to "Shipped" with the numbers; `owner-review.md`: remove the
-  streaming entry; roadmap item; changelog + README "What's new" (Performance).
+- `docs/plans/microarch.md`: candidate 8 from "Dropped" to "Shipped" with the numbers; `owner-review.md`: nothing (no streaming entry was left there; microarch.md fixed 2026-11-07); roadmap item; changelog + README "What's new" (Performance).
 - Guide page on vector loops (en + zh): what streams and when (write-only column, no blocks, past the LLC, >= 1,024
   rows), the schedule line "write-only columns streamed past the last-level cache", pitfall: `+=` or a conditional
   write keeps plain stores.
@@ -1472,9 +1981,9 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
   - EECS106: "failed to read its cutoff test": every pair runs; EECS106 now also reports a cutoff the pass cannot
     compute once ("its cutoff is not a value the pass can read once: ..."), which the analyzer missed before;
   - EECS093: "failed to read what M reads, writes and filters": the two passes keep their own walks.
-- guide/neighbors (pair methods) + zh: a partial pair method works (the attributes on the defining part, the body on
+- guide/pairs (the new page, feat-locality-pairs) + zh: a partial pair method works (the attributes on the defining part, the body on
   the implementing one); it used to drop the project's generated output.
-- guide/prefetch (or the Lookup page) + zh: reads through a Lookup<T> or an index of a local function's own
+- guide/threading#lookups + zh: reads through a Lookup<T> or an index of a local function's own
   parameters are not the method's chases (they used to crash the generator); only the method's own in components and
   lookups are prefetched.
 - decisions.mdx + zh, next free D: "Every body stage catches its exceptions": Kernel, Chases, PairForm.ReadCutoff and
@@ -1484,7 +1993,7 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
 
 ## feat-switch-masks (8j)
 
-- guide/vector-loops (the page on what a [ForEach] method's vector loop takes) + zh: switches and patterns are lane
+- guide/systems#vector-loops (what a [ForEach] method's vector loop takes) + zh: switches and patterns are lane
   masks now. A switch expression whose arms are patterns over lanes (numbers, enums, bools, structs of them, tuples of
   them) is first match wins: each arm's mask (a `when` guard and-ed in) selects its value over the arms after it; `_`
   or any arm that matches every lane ends it; a row no arm matches goes to the method, which throws
@@ -1522,14 +2031,14 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
 
 ## feat-foreign-bodies (8g)
 
-- guide/vectorization (the vector loop page) + zh, "Calls": a helper of another assembly is inlined like one of the
+- guide/systems#vector-loops + zh, "Calls": a helper of another assembly is inlined like one of the
   project's when that assembly was built with EasyEcs's generator (a contracts project referencing EasyEcs is): its
   public static methods, extension methods, struct methods and property accessors with a body, small and without a
   loop, throw, switch or lambda (the same syntax limits as a helper of the project). Fields and static helpers the
   assembly hides are reached anyway (private fields of a component are lanes like any other; a static readonly field
   of an internal type is read once per run through an `[UnsafeAccessor]` extern of the job). An assembly built
   without the generator (or with an older EasyEcs) keeps "which is defined in another assembly".
-- guide/vectorization + zh, "Struct values": `new Position(x, y)` of a component of another assembly vectorizes when
+- guide/systems#vector-loops + zh, "Struct values": `new Position(x, y)` of a component of another assembly vectorizes when
   that assembly recorded the constructor: a positional record struct, or a constructor whose body only assigns its
   parameters to fields (`=> _x = x;` too, now also in the project itself). Reasons that remain, now named after the
   record: "its constructor does more than set fields from its parameters ('...')", "the parameter 'X' of T's
@@ -1547,7 +2056,7 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
   Recorded (reading side, cached per referenced assembly symbol); only members taking and returning values are
   recorded; the attributes are `EditorBrowsable(Never)` API of EasyEcs.Core (`ConstructorFieldsAttribute`,
   `InlineBodyAttribute`), written only by the generator. EasyEcs.Core records nothing of its own API.
-- guide/vectorization + zh, "Calls": a helper of another assembly taking or returning a class (string, World, an
+- guide/systems#vector-loops + zh, "Calls": a helper of another assembly taking or returning a class (string, World, an
   array) is not recorded; in an IDE, a record follows the edits of its own file (another file's change to what it
   names shows once that file is edited again; a build always reads every file).
 - decisions.mdx + zh: the decision record of this branch (draft in the 8g report).
@@ -1564,9 +2073,10 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
 
 ## feat-renames
 
-- README line about `ChunkRows` says the old name (now `ChunkSize`).
+- README line about `ChunkRows` says the old name (now `ChunkSize`) (merged: "Sweep 2026-11-07", item S2).
+- [x] The `[Drain]` rename where `[ForEachRecord]` appeared in api, glossary, README and the cheat sheet (23b2b1e).
 - decisions index table: no D136 row.
-- The record pass's docs (guide/emit, threading; listed under feat-generator-gaps) are still open, now as `[Drain]`.
+- The record pass's docs (guide/threading#emit; listed under feat-generator-gaps) are still open, now as `[Drain]`.
 
 ## feat-tiles-rest (items 11, 12a, 12b leftovers: tile pools at load, EECS117's fix)
 
@@ -1665,7 +2175,7 @@ guide/systems (en + zh), and the `[EntityMethod]` "The generator writes" tab of 
   library component") pointing to it, if the docs pass judges users meet it.
 - changelog (Fixes) + zh: "EECS033 no longer suggests a generated member of another component of the same name (a
   library's component beside one of the program's), whose fix read the wrong component."
-- guide/vector-loops (the part on helpers of other assemblies, 8g's docs to-dos) + zh: helpers with switch expressions
+- guide/systems#vector-loops (the part on helpers of other assemblies, 8g's docs to-dos) + zh: helpers with switch expressions
   and switch statements whose sections return are recorded and inlined like any other body (patterns, enum members,
   an internal static readonly field in an arm); the full example may show one.
 - decisions.mdx + zh: the record below.
@@ -1957,7 +2467,7 @@ EECS116's fix deleting the commit, EECS121, `World.CopyEntities<TTag>`. Reverted
   copy changes what the pass does); EECS116's fix now also deletes the commit method, its system when the commit was
   all it held with the `AddSystem<T>()` statements naming it, and the buffer's element type when nothing else names it
   (the three titles of the fix; it leaves the commit when anything else names it, and EECS121 reports the copy then).
-- guide/worlds (or the MultiWorld sample page) + zh: `CopyEntities<TTag>(target, ids, set, copied)`: ghost rows, read
+- guide/migration-and-unload#move-entities and samples/multi-world + zh: `CopyEntities<TTag>(target, ids, set, copied)`: ghost rows, read
   replicas, an area of interest copied to a per-client world; the components named once in a `ComponentSet`; links
   into the set remapped, links out nulled; when it pays (several components, rows in runs) and when the plain
   `CreateEntity` loop is as fast (one narrow component, scattered rows: MultiWorld's `Border` stays the loop).
@@ -1972,7 +2482,7 @@ EECS116's fix deleting the commit, EECS121, `World.CopyEntities<TTag>`. Reverted
   `col.Store(v, tile.Write(row))`"; "ghost rows into another world: `CopyEntities<TTag>` with a `ComponentSet`".
 - changelog: New (`c.Columns`, `col.Store`, EECS120, EECS121, `CopyEntities<TTag>`), Changes (EECS116's fix deletes
   the commit). No migration entry: `TileColumns` / `TileColumn` never shipped.
-- glossary (en + zh): column walk (列遍历).
+- (merged: "Sweep 2026-11-07", item S5) glossary (en + zh): column walk (列遍历).
 
 Decision drafts (ids provisional; numbers: shared 4-vCPU VM, BenchmarkDotNet default job, two rounds):
 
@@ -2353,7 +2863,7 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
 
 ### WP5: cell methods (`Cell<TCell, TTile>`, the shader form) — docs to-dos
 
-- **tiles.mdx + zh, new section "One cell at a time" (before the hand-written `Load128` loops, which become the
+- **guide/grids + zh, new section "One cell at a time" (before the hand-written `Load128` loops, which become the
   fallback for what a cell cannot say):** a `[ForEach]` method taking `Cell<TCell, TTile> w` and `out TOut next`
   computes one cell: `w.Value`, `w[dx, dy, dz]` with constant offsets within the shape's halo, `w.X` / `w.Y` / `w.Z`,
   other parameters (components of the tile's entity, singletons, values). The out cell is the entity's
@@ -2374,7 +2884,7 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
 - **performance.mdx + zh:** TileStencilBenchmark's Blur9_Cell / Laplacian_Cell against _Tile / _Hand / _Columns, and
   TileActiveBenchmark's Cell against AlwaysOn, once synced.
 - **Changelog (New):** "A [ForEach] method can compute one cell of a tile (Cell<TCell, TTile>); the generator writes the
-  stencil's vector loop"; link tiles.mdx. **(Performance):** element loops no longer load what they only write; byte
+  stencil's vector loop"; link guide/grids. **(Performance):** element loops no longer load what they only write; byte
   lanes compare saturated sums (Life's neighbor count) in byte lanes.
 - **Roadmap:** the Cell form (inner-loops.md WP5) shipped; WP5b (per-tile results, several inputs and outputs, the
   voxel water as cells) next.
@@ -2405,12 +2915,53 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   started. Tier1 of the blur's pass (checked with DOTNET_JitDisasm): per row one zmm load and eight vaddps from memory,
   a vmulps and a store, no call; Life's row one Vector128 iteration, a vpaddusb chain and three vpcmpeqb.
 
+#### A cell method stepping its tile (merged here from its own section, 2026-11-07)
+
+- **guide/grids + zh ("One cell at a time"):** an `out` parameter of the driving cell's own type (`Cell<Heat, Plate> c,
+  out Heat next`) steps the tile, Jacobi ping-pong: the pass writes each row into the tile's second buffer and swaps
+  the two after the pass (O(1) per tile), so there is no `NextHeat` buffer and no commit system. Skipped rows come out
+  zero from the swap; a method whose blank value is not zero writes them. "You write / The generator writes" shows
+  the method and the schedule line ("steps the tile of 'c' (its second buffer swapped in)"). Not with [GaussSeidel],
+  a second step out, another ref tile, Slices, [EntityMethod] or [Consume] (EECS115 says which).
+- **guide/analyzer (EECS116) + zh:** EECS116 now also reports a commit after a cell method; its message says "write
+  the cell's next value as 'out {cell} {name}'", and the code fix rewrites the out type and `new TNext(...)` to the
+  cell's type, deleting the commit and TNext (offered when the cell type has a public constructor of the same
+  parameter types, or the value is `default`).
+- **guide/analyzer (EECS059) + zh:** an `out` of the driving cell's own type is the step form, no longer EECS059.
+- **guide/analyzer (EECS055) + zh, guide/systems#vector-loops:** lanes four times as wide (byte cells beside float cells, a
+  byte beside an int) stay scalar; the reason says "widen the byte to 2-byte lanes, or split the method so each takes
+  lanes of one size".
+- **decisions.mdx + zh:** the cell step (why `out TCell` of the driver's type, considered: an attribute, a ref cell);
+  `TileLayout.Copy`'s runs under 16 bytes as one or two words, tried and reverted (no change to the exchange in
+  TileExchangeBenchmark, two rounds, and Laplacian_Tile / Blur9_Cell slower in TileStencilBenchmark; cause in the
+  WP5 hand-back). The exchange's lookups inlined, tried and rejected: `[AggressiveInlining]` on `Tile.Of` (h1), and
+  on `Of` and `LoadPlane` (h2), against two base rounds: Halo2 at side 512 / 1 thread 106 and 104 ms on base, 96 (h1)
+  and 107 ms (h2); Laplacian_Cell 290 and 311 ms on base, 308 and 320 ms; Laplacian_Columns 237 and 243 ms, 255 and
+  254 ms; rows that allocated (1 to 672 B). No win inside base's own spread: the exchange's cost per tile (about
+  185 ns in cache, 362 ns past it) is the neighbors' memory, not the calls. LoadFaces / LoadAny (too many locals) are
+  off the 2D path these rows take, so splitting them to the inliner's budget would change none of them.
+- **samples / benchmarks pages:** TileBenchmark's CellBlur / CellWave / CellLife are the step form (no NextWarmth, no
+  commit); performance page rows for Cell move with them.
+- **#157 Tile Load512 (api.mdx + zh, guide/grids + zh, guide/analyzer EECS120 + zh):** `TileCursor.Load512<TLane>`,
+  the column walk's `col.Load512` and `col.Store(Vector512<TLane>, into)` beside Load128 / Load256 / LoadVector (the
+  type row at api.mdx:76 and the complexity row at :266 name them; one unaligned load, two 256-bit halves without
+  Vector512); a column loop of Load512 is checked once like the others (EECS120's description lists it); the tiles
+  page's walk by `Columns(16)` with Load512 for rows of 16 floats, behind `Vector512.IsHardwareAccelerated` with the
+  128-bit walk otherwise (TileStencilBenchmark.Blur9_Columns512). Verdict and numbers: the backlog's #157 row.
+- **decisions.mdx + zh (the halo read in place):** a 2D cell pass of a cross stencil (every shift along x on the cell's
+  own row) reads its halo from the neighbors' buffers, shifting the vectors that cross a row's ends in registers; box
+  stencils copy it into the texture. Why, considered and numbers: docs/plans/inner-loops.md WP5 ("The halo read in
+  place"). why-fast / guide/grids pages: one sentence where the exchange is described; the schedule line says "its halo
+  read in place where the shape allows".
+- **performance page:** TileStencil's Laplacian_Cell moves with it (bench sync); Blur9_Columns512 joins the stencil
+  table where the page lists the Columns forms.
+
 ### LaneMath at 128 bits (Vector128 forms of the generated loops' math) — docs to-dos
 
 - **api.mdx + zh:** no rows. LaneMath is `[EditorBrowsable(Never)]` (generated code calls it, a method never does), so
   ApiDocs leaves it out of the reference and api.mdx lists none of its members; the new `Vector128` overloads follow
   the same rule. Nothing to add unless the class becomes public API.
-- **tiles.mdx + zh ("One cell at a time"):** a cell row of 16 bytes (4 ints or floats, 16 bytes) now runs its Vector128
+- **guide/grids + zh ("One cell at a time"):** a cell row of 16 bytes (4 ints or floats, 16 bytes) now runs its Vector128
   loop also when the method divides integers (the quotient through doubles: AVX widens 4 lanes into one Vector256 of
   doubles, one vdivpd, vcvttpd2dq back) or, under FloatMode.Fast, calls Sinh / Cosh / Tanh / Log10 (4 lanes as one
   Vector256 of doubles, one Exp or Log). An out cell of a struct of several fields still has no Vector128 loop (its
@@ -2438,24 +2989,24 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
 
 ### WP5b (cell methods: several cells, results per tile, X in narrow lanes, the voxel water) — docs to-dos
 
-- **tiles.mdx + zh ("One cell at a time"):** a cell method takes several `Cell<,>` inputs of one tile type (the
+- **guide/grids + zh ("One cell at a time"):** a cell method takes several `Cell<,>` inputs of one tile type (the
   first drives the walk, the others are sampled: `ExchangeHalo(mask: false)`) and several out cells; cells of two tile
   types report EECS115. A row the walk skips is proved: the generator evaluates the method with the driving cells at
   0 and everything else unknown, and skips the row (filling what the method gives there) only when every out cell
   comes out a constant and every result field keeps its start; the schedule line says "rows of 'w': blank rows proved
   constant" or "every row: <reason>". What is not proved: a float multiplied by a sampled or unknown value (NaN times
   0), a choice that depends on a sampled cell with different arms.
-- **tiles.mdx + zh, results per tile:** `ref Reduce<T>` with `T` a component of the tile's entity (`[Sum]` / `[Min]` /
+- **guide/grids + zh, results per tile:** `ref Reduce<T>` with `T` a component of the tile's entity (`[Sum]` / `[Min]` /
   `[Max]` fields): it starts at `T.Identity` per tile, the rows' lanes fold into it, the pass writes it once through
   `Mut<T>` (stamped). Outside a cell method a `Reduce<T>` of a component reports EECS002. Fields of a narrow row are 1
   or 2 bytes (a byte row sums into `ushort` fields: the voxel water's `FlowTally`); a Max kept by the proof needs the
   type's smallest value as its "nothing" (`short.MinValue`), not 0.
-- **tiles.mdx + zh, X in narrow lanes:** a byte or two-byte row reads `c.X` in its lanes (compared, added, cast to
+- **guide/grids + zh, X in narrow lanes:** a byte or two-byte row reads `c.X` in its lanes (compared, added, cast to
   short) while the row's cells fit the lanes (Width up to 256 for bytes); a wider row runs cell by cell, checked by a
   constant the JIT folds.
 - **api.mdx + zh:** `Reduce<T>`'s constraint is `IReduction<T>` (was the singleton marker too): the complexity row is
   unchanged; the reference page regenerates from the XML doc (zh/reduce.xml updated).
-- **guide/analyzers (EECS002):** a `ref Reduce<T>` of a component outside a cell method.
+- **guide/analyzer (EECS002):** a `ref Reduce<T>` of a component outside a cell method.
 - **samples/voxel-server.mdx + zh, README of the sample:** nothing: the port did not land (Numbers), Flow.cs stays
   the hand-written shader.
 - **Changelog (New):** "Cell methods take several cells and out cells, a result per tile (`ref Reduce<T>` of the
@@ -2468,20 +3019,14 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
 - **decisions.mdx + zh (a Reduce<T>'s fold, 9feb02e):** after a vector loop each field of the result folds on its
   own (a sum as the lanes' horizontal sum, a Min / Max lane by lane), since T.Combine is proven field by field;
   Combine per lane cost a call per lane with the accumulators spilled (the cell pass of the voxel water 26.1 -> 7.9 ms
-  at full optimization). guide/reductions (or where Reduce<T>'s vector loop is described) + zh: one sentence.
+  at full optimization). guide/threading#reductions (and guide/systems#vector-loops, where Reduce<T>'s vector loop is described) + zh: one sentence.
 - **performance or faq + zh (warm start):** a server's first seconds run code still tiering: the VoxelServer probe's
   water 46 ms over the 500 ticks after tick 900 (about 1 s in) against 1.4 ms after tick 9,000, about 10,000 methods
   going Tier0 -> Instrumented Tier0 -> Tier1 on one background compiler; what a user can set (ReadyToRun, TieredPGO,
   TieredCompilation) and what it costs; AggressiveOptimization on generated passes not adopted (the core code they
   call still tiers; the steady state loses PGO). Numbers from a BenchmarkDotNet run, not the probe.
 
-### WP1 step 1 (inline arrays not read as one lane) — docs to-dos
-
-- **Changelog (Fixes) + zh:** "A [ForEach] method over a component holding an `[InlineArray]` beside other fields no
-  longer runs a vector loop that read its rows at the wrong size; it runs row by row, and EECS055 (Info) says why."
-  Link guide/systems#vector-loops. analyzer.mdx + zh: the reason in EECS055's list of inherent reasons.
-
-### WP5b (ITileLayers: a cell pass bounded to the layers a component gives) — docs to-dos
+#### ITileLayers: a cell pass bounded to the layers a component gives (merged here from its own section, 2026-11-07)
 
 The name was approved by the owner (2026-11-04, through the lead): `ITileLayers` with `From` / `To`, taken by a cell
 method as `in T` of a component of the tile's entity.
@@ -2493,7 +3038,7 @@ method as `in T` of a component of the tile's entity.
   the layers the stencil reaches up and down). Clamped to the tile; From above To exchanges nothing and fills every row.
   The example: TileLayersBenchmark's Band (the voxel water stays as written: inner-loops.md WP5b). The "Costs" table
   row "ExchangeHalo() of every layer" gains the cell form's answer. The schedule line says "layers of 'x'".
-- **glossary.mdx + zh:** "Tile layers (ITileLayers)": the layers a cell pass covers; zh 瓦片的层范围 (`ITileLayers`), the
+- (merged: "Sweep 2026-11-07", item S5) **glossary.mdx + zh:** "Tile layers (ITileLayers)": the layers a cell pass covers; zh 瓦片的层范围 (`ITileLayers`), the
   glossary of tools/ApiDocs/zh/README.md gains it too.
 - **decisions.mdx + zh:** a record "A cell pass bounded by a component's layers": why a component and not an attribute
   or a callback (the range is per tile and comes from the user's summary, often its neighbors' too: a system computes
@@ -2517,46 +3062,11 @@ method as `in T` of a component of the tile's entity.
   in any order, float sums only under FloatMode.Fast), what it does not cover (bails, paired chains), the numbers
   (TileTallyBenchmark base / head, the water probe 2.71-3.07 -> 1.62-1.77 ms).
 
-### WP5 (a cell method stepping its tile) — docs to-dos
+### WP1 step 1 (inline arrays not read as one lane) — docs to-dos
 
-- **tiles.mdx + zh ("One cell at a time"):** an `out` parameter of the driving cell's own type (`Cell<Heat, Plate> c,
-  out Heat next`) steps the tile, Jacobi ping-pong: the pass writes each row into the tile's second buffer and swaps
-  the two after the pass (O(1) per tile), so there is no `NextHeat` buffer and no commit system. Skipped rows come out
-  zero from the swap; a method whose blank value is not zero writes them. "You write / The generator writes" shows
-  the method and the schedule line ("steps the tile of 'c' (its second buffer swapped in)"). Not with [GaussSeidel],
-  a second step out, another ref tile, Slices, [EntityMethod] or [Consume] (EECS115 says which).
-- **guide/analyzers (EECS116) + zh:** EECS116 now also reports a commit after a cell method; its message says "write
-  the cell's next value as 'out {cell} {name}'", and the code fix rewrites the out type and `new TNext(...)` to the
-  cell's type, deleting the commit and TNext (offered when the cell type has a public constructor of the same
-  parameter types, or the value is `default`).
-- **guide/analyzers (EECS059) + zh:** an `out` of the driving cell's own type is the step form, no longer EECS059.
-- **guide/analyzers (EECS055) + zh, guide/vector-loops:** lanes four times as wide (byte cells beside float cells, a
-  byte beside an int) stay scalar; the reason says "widen the byte to 2-byte lanes, or split the method so each takes
-  lanes of one size".
-- **decisions.mdx + zh:** the cell step (why `out TCell` of the driver's type, considered: an attribute, a ref cell);
-  `TileLayout.Copy`'s runs under 16 bytes as one or two words, tried and reverted (no change to the exchange in
-  TileExchangeBenchmark, two rounds, and Laplacian_Tile / Blur9_Cell slower in TileStencilBenchmark; cause in the
-  WP5 hand-back). The exchange's lookups inlined, tried and rejected: `[AggressiveInlining]` on `Tile.Of` (h1), and
-  on `Of` and `LoadPlane` (h2), against two base rounds: Halo2 at side 512 / 1 thread 106 and 104 ms on base, 96 (h1)
-  and 107 ms (h2); Laplacian_Cell 290 and 311 ms on base, 308 and 320 ms; Laplacian_Columns 237 and 243 ms, 255 and
-  254 ms; rows that allocated (1 to 672 B). No win inside base's own spread: the exchange's cost per tile (about
-  185 ns in cache, 362 ns past it) is the neighbors' memory, not the calls. LoadFaces / LoadAny (too many locals) are
-  off the 2D path these rows take, so splitting them to the inliner's budget would change none of them.
-- **samples / benchmarks pages:** TileBenchmark's CellBlur / CellWave / CellLife are the step form (no NextWarmth, no
-  commit); performance page rows for Cell move with them.
-- **#157 Tile Load512 (api.mdx + zh, tiles.mdx + zh, guide/analyzers EECS120 + zh):** `TileCursor.Load512<TLane>`,
-  the column walk's `col.Load512` and `col.Store(Vector512<TLane>, into)` beside Load128 / Load256 / LoadVector (the
-  type row at api.mdx:76 and the complexity row at :266 name them; one unaligned load, two 256-bit halves without
-  Vector512); a column loop of Load512 is checked once like the others (EECS120's description lists it); the tiles
-  page's walk by `Columns(16)` with Load512 for rows of 16 floats, behind `Vector512.IsHardwareAccelerated` with the
-  128-bit walk otherwise (TileStencilBenchmark.Blur9_Columns512). Verdict and numbers: the backlog's #157 row.
-- **decisions.mdx + zh (the halo read in place):** a 2D cell pass of a cross stencil (every shift along x on the cell's
-  own row) reads its halo from the neighbors' buffers, shifting the vectors that cross a row's ends in registers; box
-  stencils copy it into the texture. Why, considered and numbers: docs/plans/inner-loops.md WP5 ("The halo read in
-  place"). why-fast / tiles pages: one sentence where the exchange is described; the schedule line says "its halo
-  read in place where the shape allows".
-- **performance page:** TileStencil's Laplacian_Cell moves with it (bench sync); Blur9_Columns512 joins the stencil
-  table where the page lists the Columns forms.
+- **Changelog (Fixes) + zh:** "A [ForEach] method over a component holding an `[InlineArray]` beside other fields no
+  longer runs a vector loop that read its rows at the wrong size; it runs row by row, and EECS055 (Info) says why."
+  Link guide/systems#vector-loops. analyzer.mdx + zh: the reason in EECS055's list of inherent reasons.
 
 ## feat-aot-tables (backlog Later: Native AOT, no class-initialization check per iteration for a loop's tables)
 
@@ -2644,7 +3154,7 @@ programs and the JIT are unchanged (their loops were already free of the check s
   or a `RowMask` struct). The method for one row is the form that gets masks (`IForEachMasked` in the generated vector
   loop) and EECS103 rewrites a hand-written vector loop into it. What would reopen it: a batch method whose hand loop
   the generator cannot vectorize, measured against its per-row twin under a sparse filter. Roadmap "Dropped" names it.
-- guide/parallel (or wherever a parallel pass's cost is described) + zh: a parallel `[ForEach]` over a small table
+- guide/threading#parallel-foreach-methods (where a parallel pass's cost is described) + zh: a parallel `[ForEach]` over a small table
   costs about a serial pass (no chunking below 64 rows in one table).
 
 ## feat-later-research (#159 remainder: HPC, vLLM, database, low-latency and allocator ideas)
