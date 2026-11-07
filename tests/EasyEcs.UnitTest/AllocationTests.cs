@@ -145,7 +145,7 @@ public class AllocationTests
 
         for (int i = 0; i < 10; i++) Frame();
         world.TrimExcess();
-        for (int i = 0; i < 10; i++) Frame(); // the dropped tables and edges come back once
+        Allocations.WarmUp(Frame, 10); // the dropped tables and edges come back once, until the JIT settles
         long before = Allocations.Baseline();
         for (int i = 0; i < 100; i++) Frame();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
@@ -339,9 +339,10 @@ public class AllocationTests
             output.ResetWrittenCount();
         }
 
-        for (int round = 0; round < 2000; round++) Cycle(round);
+        int next = 0;
+        Allocations.WarmUp(() => Cycle(next++), 2000);
         long before = Allocations.Baseline();
-        for (int round = 2000; round < 2500; round++) Cycle(round);
+        for (int i = 0; i < 500; i++) Cycle(next++);
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 
@@ -554,7 +555,7 @@ public class AllocationTests
             if (load) world.Load(bytes);
         }
 
-        for (int round = 0; round < 50; round++) Cycle();
+        Allocations.WarmUp(Cycle, 50);
         long before = Allocations.Baseline();
         for (int round = 0; round < 200; round++) Cycle();
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
@@ -568,7 +569,7 @@ public class AllocationTests
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
         world.CreateEntities(new Entity[World.MaxChunkRows * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
         world.AddSystem<ParallelTests.ChunkedIncrement>();
-        for (int i = 0; i < 10; i++) world.Update();
+        Allocations.WarmUp(world.Update, 10);
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 500; i++) world.Update(); }), Is.Zero);
     }
 
@@ -581,7 +582,7 @@ public class AllocationTests
         world.CreateEntities(new Entity[100], new Position(0, 0), new Velocity(1, 1));
         world.AddSystem<ParallelTests.ChunkedIncrement>();
         var moves = world.AddSystem<SystemTests.Moves>();
-        for (int i = 0; i < 10; i++) world.Update();
+        Allocations.WarmUp(world.Update, 10);
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 500; i++) world.Update(); }), Is.Zero);
         Assert.That(moves.Stats.LastEntities, Is.EqualTo(100));
     }

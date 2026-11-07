@@ -152,7 +152,7 @@ public class ConcurrencyTests
     private sealed class Held
     {
         public SpinGate Gate;
-        public volatile bool Entered, Released;
+        public volatile bool Entered, Measuring, Released;
     }
 
     [Test]
@@ -162,12 +162,13 @@ public class ConcurrencyTests
         // creates its wait event the first time a thread waits on it past its spin (56 B on that thread, any time after
         // warm-up when a holder is preempted); the gate spins and yields instead, and still lets one thread in at a time.
         var held = new Held();
-        Allocations.Baseline(); // no background collection runs into the measurement below
         var holder = new Thread(() =>
         {
             using (new SpinScope(ref held.Gate))
             {
                 held.Entered = true;
+                // The 50 ms start once the measurement has: the baseline's collection does not eat into them.
+                while (!held.Measuring) Thread.Yield();
                 Thread.Sleep(50); // long enough for the waiter to stop spinning
                 held.Released = true;
             }
@@ -175,7 +176,8 @@ public class ConcurrencyTests
         holder.Start();
         while (!held.Entered) Thread.Yield();
         bool releasedFirst;
-        long before = GC.GetAllocatedBytesForCurrentThread();
+        long before = Allocations.Baseline();
+        held.Measuring = true;
         using (new SpinScope(ref held.Gate)) releasedFirst = held.Released;
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
         holder.Join();

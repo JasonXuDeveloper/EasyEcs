@@ -351,7 +351,7 @@ public partial class AnalyzerTests
     {
         var library = CSharpCompilation.Create("Library",
             [CSharpSyntaxTree.ParseText("namespace Library; public struct Pair { public EasyEcs.Entity A; public int B; } public struct Ids { public EasyEcs.EntityId A; }", Parse)],
-            Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+            GeneratorHost.References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         using var image = new System.IO.MemoryStream();
         Assert.That(library.Emit(image).Success, Is.True);
@@ -359,7 +359,7 @@ public partial class AnalyzerTests
         async Task<string[]> Ids(string source)
         {
             var user = CSharpCompilation.Create("User", [CSharpSyntaxTree.ParseText("using EasyEcs;\n" + source, Parse)],
-                Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)).Append(reference),
+                GeneratorHost.References.Append(reference),
                 new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
             Driver().RunGeneratorsAndUpdateCompilation(user, out var output, out _);
             return (await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAnalyzerDiagnosticsAsync()).Select(d => d.Id).Distinct().ToArray();
