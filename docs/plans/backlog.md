@@ -122,28 +122,30 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       clusters and lists, `_columnSpares` survive `ForgetTypes`; `Mentions` ignores `_orderRequests`, so a reused bit
       can get another type's `RowOrder`. Files: World.Order.cs, World.Types.cs, TileSteps.cs (after halos), Pairs.cs,
       Archetype.cs. Proof: `UnloadTests` with an ordered component, a pair method and a tile method (the
-      `WeakReference` dies), a reused bit gets its own order.
-- [ ] **C2. `PairState` keeps a record per table forever, found by a linear scan** (`core.md` §5): drop entries of
+      `WeakReference` dies), a reused bit gets its own order. **fix-core-lane1: done except `_tileSteps`** (left to
+      the halos branch, which owns TileSteps.cs: ForgetTypes must drop the `_tileSteps` entries whose type the doomed
+      predicate matches, as `_parallelWork`; then add a tile method to `UnloadTests.OrdersAndPairStatesOfAPluginLetItUnload`).
+- [x] **C2. `PairState` keeps a record per table forever, found by a linear scan** (`core.md` §5): drop entries of
       tables no longer matched, on `TrimExcess` / `RemoveTypes` (shared with C1); a slot per table instead of the scan.
       Files: Pairs.cs. Proof: a `NeighborTests` case cycling 100 `GroupBy` values; NeighborBenchmark with 64 groups.
-- [ ] **C3. Bulk walks bump `StorageVersion` when nothing moved** (`core.md` §2): `WalkDown` (World.Bulk.cs:171)
+- [x] **C3. Bulk walks bump `StorageVersion` when nothing moved** (`core.md` §2): `WalkDown` (World.Bulk.cs:171)
       bumps only when a word op flipped presence. Proof: a `SnapshotTests` case (the second `Capture(into)` after a
       `SetAll` stays incremental); a `SetAll` + `Capture(into)` per tick benchmark, 0 B.
-- [ ] **C4. The free-id list not sized to the initial capacity** (`core.md` §3): `_freeIds = new int[Meta.Length]`,
+- [x] **C4. The free-id list not sized to the initial capacity** (`core.md` §3): `_freeIds = new int[Meta.Length]`,
       `Math.Max(free, Meta.Length)` in `Restore`. Files: World.cs, World.Snapshots.cs. Proof: a 0 B test destroying
       1,000 of a reserved default world, and after a `Restore`.
-- [ ] **C5. Key reservations for a missing index add up without bound** (`core.md` §4): keep the largest, reset in
+- [x] **C5. Key reservations for a missing index add up without bound** (`core.md` §4): keep the largest, reset in
       `RemoveTypes` and `TrimExcess`. Files: World.Indexes.cs. Proof: `Allocations.Of` around the first index after
       100 `Reserve(prefab, 1000)`.
-- [ ] **C6. `Reserve(prefab, count)` takes a negative count and overflows** (`core.md` §6): throw like
+- [x] **C6. `Reserve(prefab, count)` takes a negative count and overflows** (`core.md` §6): throw like
       `ReserveBuffers`, compute in `long`. Files: World.cs. Proof: `Assert.Throws`; changelog Fixes line (docs pass).
-- [ ] **C7. `World.Entities` yields dead handles after the records grow** (`core.md` §7): read `_world.Meta` in
+- [x] **C7. `World.Entities` yields dead handles after the records grow** (`core.md` §7): read `_world.Meta` in
       `MoveNext`. Files: World.cs. Proof: a test creating past capacity in the loop, then destroying ahead.
-- [ ] **C8. `Dispose` does not return buffer lists to their pools** (`core.md` §8): `ReleaseBuffers` per table.
+- [x] **C8. `Dispose` does not return buffer lists to their pools** (`core.md` §8): `ReleaseBuffers` per table.
       Files: World.Systems.cs, World.Archetypes.cs. Proof: 0 B first writes in the next world.
-- [ ] **C9. ThreadSetup's step list never shrinks** (`core.md` §9): compact in `Forget`. Files: Workers.cs. Proof:
+- [x] **C9. ThreadSetup's step list never shrinks** (`core.md` §9): compact in `Forget`. Files: Workers.cs. Proof:
       `WorkersTests`, 50 load / unload cycles bounded.
-- [ ] **C10. `EmitPool` allocates under its spin gate** (`core.md` §10): allocate after leaving it. Files: Emit.cs.
+- [x] **C10. `EmitPool` allocates under its spin gate** (`core.md` §10): allocate after leaving it. Files: Emit.cs.
       Proof: the Emit 0 B tests.
 - [ ] **C11. P1: helpers chosen on inflated work** (`perf.md` P1): a probe run alone every period while wide,
       `perItem` learned from alone runs; P1b: a merge pass under the floor runs its 16 chunks on the caller. Files:
