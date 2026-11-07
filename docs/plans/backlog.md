@@ -3,7 +3,8 @@
 The single list of open work, kept in the repository so a new session finds it (AGENTS.md, "Plans that span sessions
 are committed"). Update it when an item starts, merges or is dropped. Designs live next to it (`inner-loops.md`,
 `generated-text.md`, `native-columns.md`, `voxel-rewrite.md`, `finish-scan.md`); docs to-dos collected while code
-still changes live in `docs-todos.md`; the owner's hardware runs in `owner-m4.md`.
+still changes live in `docs-todos.md`; the owner's hardware runs in `owner-m4.md`. Every decision of the owner, with
+where it is applied and its record, is in `owner-decisions.md` (the ledger): read it before asking the owner again.
 
 Rewritten on 2026-11-07 from the audit sweep of f9faa23 (reports: plans, core, generator, analyzer, code, naming,
 perf, docs; kept in the session scratchpad, cited below as `core.md §1`, `perf.md P1`, ...). Every open item of the
@@ -201,7 +202,7 @@ Starts now; Forms / Views / Lambdas areas wait for feat-inner-loops, Parts / Til
       suggestion"); an `IForSpan` Execute that is one element loop -> "write it as a lambda pass" (inner-loops.md
       section 6): build after WP4 merges or record.
 
-### Lane 3: tooling and CI (tools/, .github/, docs/scripts, test and benchmark harness, sample hosts) — 16 items
+### Lane 3: tooling and CI (tools/, .github/, docs/scripts, test and benchmark harness, sample hosts) — 18 items
 
 Starts now. T1 comes before Finish 1b (the move).
 
@@ -244,6 +245,12 @@ Starts now. T1 comes before Finish 1b (the move).
       baselines the owner's runs need, or record why each stays.
 - [ ] **T15. Benchmark rows**: the EECS096 delegate fallback in LambdaPassBenchmark (docs-todos "feat-inline").
 - [ ] **T16. The arm64 job's first run** is the owner's dispatch (Finish 4; `owner-m4.md` 6).
+- [ ] **T17. The owner's working rules in `AGENTS.md`** (ledger P10, P11; owner 2026-10-27 / 2026-10-30: "用中文对话";
+      2026-10-28: "需要我选的给我弹窗，需要我做的给我命令"): a bullet in Workflows: talk to the owner in Chinese (code,
+      comments, commits and docs stay English); a choice for the owner is asked as a popup, an action only he can take
+      is given as the exact command. Proof: `tools/agents.sh --check`.
+- [ ] **T18. `docs/AGENTS.md`'s Cloudflare table** (ledger L7): the build watch paths include `docs/*` and exclude
+      `docs/plans/*` and `docs/owner-review.md` (set by the owner in the dashboard, 2026-11-07).
 
 ### Lane 4: vector-loop generator (after feat-inner-loops merges; Kernel*.cs, SystemGenerator*.cs, Recorder.cs, LaneMath.cs, ArityGenerator.cs text) — 18 items
 

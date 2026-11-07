@@ -3169,9 +3169,9 @@ No user-visible change (the one core change was reverted), so no changelog, migr
 - decisions.mdx + .zh (dropped, with numbers; text in borrowed-ideas.md "#159 remainder"): padding the chunks'
   `Emit<T>` lists apart (false sharing): a wash, EmitParallel 100,000 0.96x / 1.11x across two rounds with the
   controls moving as much; the cause measured: the pooled lists are 56 bytes, so one pair in 16 shared a line.
-- decisions.mdx + .zh (dropped): the core's unmanaged columns on native memory (`NativeMemory`, mimalloc): glibc's
-  malloc 1.4x slower at 1M rows and 2.4x at 4M (3-6x the page faults; the GC keeps freed memory resident), faster
-  only when the C runtime happens to keep it resident; the upside is world creation only (owner-review.md).
+- Superseded (owner, 2026-11-07, ledger C13): the core's unmanaged columns are not dropped; they move to mimalloc
+  (backlog C19, `native-columns.md`). Its record is written when C19 ships, with this research (glibc's malloc 1.4x
+  slower at 1M rows and 2.4x at 4M, 3-6x the page faults) as the reason `NativeMemory` alone was not chosen.
 - D22 / D125 (or the record that describes the runner): name the ideas the runner already holds under their field
   names for readers who search them (busy-poll with a spin budget, padded claim cursor, morsels), and say that the
   helpers' queue counter sharing a line with its gate is under 1 % (owner-review.md).
