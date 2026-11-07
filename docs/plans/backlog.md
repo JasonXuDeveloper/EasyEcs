@@ -68,7 +68,7 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
          Atan2 / Asin / Pow lowerings, `Vector2.Clamp` (`generator.md` 8); each ships only where it measures faster;
       h. `Interleaved.LoadTail`'s `Tail<T>.Rows` created in ThreadSetup, not lazily (docs-todos "fix-parallel-alloc").
       At its merge: `Kernel.Unrolled.cs` (deleted at f9faa23) must not come back (`generator.md` 11).
-- [ ] **`feat-generated-members`** (Finish 1a; `finish-scan.md` Report 1, names approved 2026-11-07; PartGenerator.cs,
+- [x] **`feat-generated-members`** (Finish 1a; `finish-scan.md` Report 1, names approved 2026-11-07; PartGenerator.cs,
       Parts.cs, Declarations.cs, Tile.cs, EasyEcsAnalyzer.Parts / Tiles.cs, the code fixes): `[Tile]` writing
       `ITile<TKey>`, the shape and `Beside`, `Beside` inferred from an `int` key or `X` / `Z` (/ `Y`) members, an Error
       for a 2D key named `(X, Y)`; `[UniqueKey(SlotsPerAxis = N)]` writing `Slots` / `SlotOf` (its doc comment says the
@@ -77,7 +77,7 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       Info + fix for hand `Slots` / `SlotOf`, an Error for a non-power-of-two, EECS064 / EECS065's fix for MinBy);
       the EECS086 `GeneratedFor` fix (resets matched by type, not by name: `analyzer.md` 5); caching assertions and
       GeneratorBenchmark.
-      Built on `feat-generated-members` (not merged yet): `[Tile]` and the inferred `Beside` (EECS124-125),
+      Merged (6528999): `[Tile]` and the inferred `Beside` (EECS124-125),
       `[UniqueKey(SlotsPerAxis = N)]` (EECS126-127), `[MinBy]` / `[MaxBy]` with the scalar loop (EECS064 / EECS065 /
       EECS068 extended, EECS055's reason exact), EECS086's resets matched by GeneratedFor, BattleServer's `Battle` an
       `[Accumulate]` total and `Weakest` a `[MinBy]`; its docs are the "feat-generated-members" section of `docs-todos.md`.
