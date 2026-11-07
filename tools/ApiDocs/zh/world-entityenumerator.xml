@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <doc>
-  <member name="T:EasyEcs.World.EntityEnumerator" source="fa2659a10395">
-    <summary>按 id 顺序枚举存活实体；超出开始时容量的 id 不会访问到。</summary>
+  <member name="T:EasyEcs.World.EntityEnumerator" source="3663bc617f03">
+    <summary>
+      按 id 顺序枚举存活实体；超出开始时容量的 id 不会访问到。遍历中销毁的实体会被跳过，记录扩容之后也一样（读的是当前的记录）。
+    </summary>
   </member>
   <member name="P:EasyEcs.World.EntityEnumerator.Current" source="e1f20c1e03b7">
     <summary>当前的存活实体。</summary>

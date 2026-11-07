@@ -146,13 +146,14 @@
       O(匹配的表数 + 行数)。只能在所有者线程调用。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Reserve(EasyEcs.Prefab,System.Int32)" source="c90e6f3ca262">
+  <member name="M:EasyEcs.World.Reserve(EasyEcs.Prefab,System.Int32)" source="818fec081684">
     <summary>
       预先扩好 <paramref name="prefab" /> 的实例要进的表和实体存储，接下来 <paramref name="count" /> 次
       <see cref="M:EasyEcs.World.Instantiate(EasyEcs.Prefab)" /> 都不会再扩容：一波刷怪的扩容开销在 tick 之前就付掉了。
       分组（<see cref="M:EasyEcs.World.GroupBy``1" />）把实例放进别的表时，扩的是那张表；带成员的预制体，每个成员的表都扩。
       O(组件数) 加一次扩容。只能在所有者线程调用。
     </summary>
+    <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="count" /> 为负数，或者这些实例会超出一个 World 能容纳的实体数。</exception>
   </member>
   <member name="M:EasyEcs.World.Reserve``2(System.Int32)" source="8708299b293c">
     <summary>
