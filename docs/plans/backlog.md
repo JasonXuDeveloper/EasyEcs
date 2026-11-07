@@ -301,6 +301,10 @@ Starts now. T1 comes before Finish 1b (the move).
       stays, commented. Proof: Tier1 of the six runners, PGO off, else BenchmarkDotNet.
 - [ ] **G18. Generated members' text** (`generated-text.md`, small): ComponentGenerator's AggressiveInlining text,
       doc comments per arity (`inheritdoc`), the view's `TryGetX` double lookup.
+- [ ] **G19. A bare `[StructLayout(LayoutKind.Sequential)]` keeps the vector loop** (`interop.md` 1, finding): today
+      any `[StructLayout]` makes a component's method scalar ("sets its layout"); `Sequential` with no `Pack` and no
+      `Size` is the default layout of a C# struct, so treat it as none. Proof: a GeneratorTests case and the
+      vector-loop test for it; `Explicit`, `Pack` and `Size` keep the current reason.
 
 ### Lane 5: renames (after feat-later-halos and feat-generated-members merge; owner, 2026-11-07) — 6 items
 

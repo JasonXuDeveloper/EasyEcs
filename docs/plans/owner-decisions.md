@@ -22,7 +22,7 @@ Finish 2, ...) or a plan file. *Record*, one of:
 
 | Date | Question | State |
 |---|---|---|
-| 2026-11-07 | Can EasyEcs be exported for Node, Rust or Go? ("看看能不能导出给node用，或者rust和go，你研究一下可行性") | Feasibility report being written; the decisions (whether, which target, which binding) come after the owner reads it. |
+| 2026-11-07 | Can EasyEcs be exported for Node, Rust or Go? ("看看能不能导出给node用，或者rust和go，你研究一下可行性") | Report done (`interop.md`): feasible via a Native AOT C-ABI library; the decisions of its section 4 (scope, package, ABI, distribution, WebAssembly, `ForEachRuns`) are put to the owner. |
 
 ## Open: not yet applied
 
