@@ -416,25 +416,48 @@ internal static class EmitPool<T>
     private static EmitStore<T>[] _free = [];
     private static int _count;
 
+    // Nothing is allocated while the gate is held: a collection that allocation set off would keep every other chunk of
+    // the pass spinning on the gate. A cold pool's list and a full pool's larger array are made outside it.
     public static EmitStore<T> Rent()
     {
         using (new SpinScope(ref Gate))
         {
-            if (_count == 0) return new EmitStore<T>(16);
-            var store = _free[--_count];
-            _free[_count] = null;
-            return store;
+            if (_count != 0)
+            {
+                var store = _free[--_count];
+                _free[_count] = null;
+                return store;
+            }
         }
+
+        return new EmitStore<T>(16); // warm-up only: the pool holds as many lists as segments held at once
     }
 
     public static void Return(EmitStore<T> store)
     {
         if (RuntimeHelpers.IsReferenceOrContainsReferences<T>()) Array.Clear(store.Items, 0, store.Count);
         store.Count = 0;
-        using (new SpinScope(ref Gate))
+        EmitStore<T>[] larger = null;
+        while (true)
         {
-            if (_count == _free.Length) Array.Resize(ref _free, Math.Max(8, _count * 2));
-            _free[_count++] = store;
+            using (new SpinScope(ref Gate))
+            {
+                if (larger != null && larger.Length > _free.Length) // another thread may have grown it meanwhile
+                {
+                    Array.Copy(_free, larger, _count);
+                    _free = larger;
+                }
+
+                if (_count < _free.Length)
+                {
+                    _free[_count++] = store;
+                    return;
+                }
+
+                larger = null;
+            }
+
+            larger = new EmitStore<T>[Math.Max(8, _free.Length * 2)]; // warm-up only, outside the gate
         }
     }
 }

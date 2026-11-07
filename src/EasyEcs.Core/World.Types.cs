@@ -109,6 +109,7 @@ public sealed partial class World
         }
 
         ResetQueryMemo(); // after the cache: refilled by the next queries
+        ForgetPairs(dropped);
 
         if (_prefabTables != null)
             foreach (var pair in new List<KeyValuePair<PrefabKey, Archetype>>(_prefabTables))
@@ -116,7 +117,10 @@ public sealed partial class World
                     _prefabTables.Remove(pair.Key);
     }
 
-    /// <summary>The singletons, indexes, groupings, target rules and parallel work of the types. Inside the gate.</summary>
+    /// <summary>
+    /// The singletons, indexes, key reservations, groupings, orders, target rules, parallel work and sort spares of the
+    /// types. Inside the gate.
+    /// </summary>
     private void ForgetTypes(Func<Type, bool> doomed, List<ushort> bits)
     {
         for (int i = 0; i < _singletons.Length; i++)
@@ -132,7 +136,11 @@ public sealed partial class World
             if (_indexByBit != null && bit < _indexByBit.Length) _indexByBit[bit] = null;
             if (_groupByBit != null && bit < _groupByBit.Length) _groupByBit[bit] = null;
             if (bit < _setUp.Length) _setUp[bit] = false;
+            if (bit < _reservedKeys.Length) _reservedKeys[bit] = 0; // a type reusing the bit reserves its own
         }
+
+        ForgetOrders(doomed, bits);
+        _columnSpares.Clear(); // spare columns of the sorts, managed ones typed by the removed components too
 
         for (int i = _ruleCount - 1; i >= 0; i--)
             if (doomed(_rules[i].GetType()))
@@ -157,7 +165,8 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// Whether this world mentions component <paramref name="bit"/>: a table, a cached query, a grouping or an index.
+    /// Whether this world mentions component <paramref name="bit"/>: a table, a cached query, a grouping, an index or an
+    /// order request (<see cref="OrderRows{T, TOrder}"/>), which a type reusing the bit would otherwise take for its own.
     /// Read from the thread of an unloading context; every structure read is a snapshot or a concurrent dictionary.
     /// </summary>
     internal bool Mentions(int bit)
@@ -168,6 +177,6 @@ public sealed partial class World
         foreach (var key in _queryCache.Keys)
             if (key.Mentions(bit))
                 return true;
-        return GroupTablesOf(bit) != null || IndexOf(bit) != null;
+        return GroupTablesOf(bit) != null || IndexOf(bit) != null || RequestedOrder(bit) != null;
     }
 }

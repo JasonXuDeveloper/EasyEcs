@@ -124,8 +124,14 @@ public sealed partial class World
         /// <summary>Whether <see cref="ApplyWord"/> may change the rows of <paramref name="table"/> (no row moves).</summary>
         bool Words(World world, Archetype table);
 
-        void ApplyWord(World world, Archetype table, int word, ulong rows);
+        /// <summary>
+        /// Change the rows of presence word <paramref name="word"/> set in <paramref name="rows"/>; whether a presence
+        /// bit flipped (the walk then bumps <see cref="StorageVersion"/> once: passes re-read presence bits, snapshots
+        /// compare rows). Values written in place change neither.
+        /// </summary>
+        bool ApplyWord(World world, Archetype table, int word, ulong rows);
 
+        /// <summary>Change one row; whatever moves it or flips a presence bit bumps <see cref="StorageVersion"/> itself.</summary>
         void Apply(World world, Archetype table, int slot, EntityId entity);
     }
 
@@ -138,6 +144,7 @@ public sealed partial class World
     private void WalkDown<TOp>(QueryMatch match, ulong since, ref TOp op) where TOp : struct, IRowOp
     {
         var tables = match.Archetypes;
+        bool flipped = false;
         for (int t = 0; t < tables.Length; t++)
         {
             var table = tables[t];
@@ -148,7 +155,7 @@ public sealed partial class World
             {
                 int words = ((count - 1) >> 6) + 1;
                 for (int w = 0; w < words; w++)
-                    if ((rows.Word(table, w) & RowFilter.RowMask(w, count)) is var passing and not 0) op.ApplyWord(this, table, w, passing);
+                    if ((rows.Word(table, w) & RowFilter.RowMask(w, count)) is var passing and not 0) flipped |= op.ApplyWord(this, table, w, passing);
                     else w = rows.NextPassing(table, w + 1, words) - 1; // words without a passing row
                 continue;
             }
@@ -168,7 +175,7 @@ public sealed partial class World
             }
         }
 
-        StorageVersion++; // passes re-read presence bits
+        if (flipped) StorageVersion++; // passes re-read presence bits; a walk that only wrote values moved nothing
     }
 
     // ---------------- marked rows (MarkedRows): the bulk change after a pass ----------------
@@ -284,27 +291,32 @@ public sealed partial class World
     /// </summary>
     private void WalkMarks<TOp>(MarkedRows marks, ref TOp op, ref bool pass) where TOp : struct, IRowOp
     {
+        bool flipped = false;
         for (int start = 0, end; start < marks.Count; start = end)
         {
             var table = marks.Table(start);
             for (end = start + 1; end < marks.Count && ReferenceEquals(marks.Table(end), table); end++) { }
-            WalkTable(marks, start, end, ref op, ref pass);
+            flipped |= WalkTable(marks, start, end, ref op, ref pass);
         }
 
-        StorageVersion++; // passes re-read presence bits
+        if (flipped) StorageVersion++; // passes re-read presence bits; a walk that only wrote values moved nothing
     }
 
-    /// <summary>The records <paramref name="start"/> to <paramref name="end"/> of <see cref="WalkMarks"/>: those of one table.</summary>
-    private void WalkTable<TOp>(MarkedRows marks, int start, int end, ref TOp op, ref bool pass) where TOp : struct, IRowOp
+    /// <summary>
+    /// The records <paramref name="start"/> to <paramref name="end"/> of <see cref="WalkMarks"/>: those of one table;
+    /// whether a word op flipped a presence bit (<see cref="IRowOp.ApplyWord"/>).
+    /// </summary>
+    private bool WalkTable<TOp>(MarkedRows marks, int start, int end, ref TOp op, ref bool pass) where TOp : struct, IRowOp
     {
         var table = marks.Table(start);
-        if (table.AliveCount == 0) return;
+        if (table.AliveCount == 0) return false;
         if (table.Count == table.AliveCount && op.Words(this, table))
         {
+            bool flipped = false;
             for (int r = start; r < end; r++)
                 if ((marks.Bits(r) & RowFilter.RowMask(marks.Word(r), table.Count)) is var rows and not 0)
-                    op.ApplyWord(this, table, marks.Word(r), rows);
-            return;
+                    flipped |= op.ApplyWord(this, table, marks.Word(r), rows);
+            return flipped;
         }
 
         if (!pass)
@@ -324,6 +336,8 @@ public sealed partial class World
                 if (entity.Index >= 0) op.Apply(this, table, slot, entity); // a tombstone: a row destroyed by a cascade
             }
         }
+
+        return false; // each row's change bumped StorageVersion where it had to
     }
 
     /// <summary>After a walk: the pass it opened ended (its tombstones closed, outside the gate), the marks returned.</summary>
@@ -340,7 +354,7 @@ public sealed partial class World
 
         public readonly bool Words(World world, Archetype table) => Remove.Words(world, table) && !table.HasDisabled;
 
-        public void ApplyWord(World world, Archetype table, int word, ulong rows) => Remove.ApplyWord(world, table, word, rows);
+        public bool ApplyWord(World world, Archetype table, int word, ulong rows) => Remove.ApplyWord(world, table, word, rows);
 
         public void Apply(World world, Archetype table, int slot, EntityId entity) => Remove.Apply(world, table, slot, entity);
     }
@@ -353,7 +367,7 @@ public sealed partial class World
 
         public readonly bool Words(World world, Archetype table) => false;
 
-        public readonly void ApplyWord(World world, Archetype table, int word, ulong rows) { }
+        public readonly bool ApplyWord(World world, Archetype table, int word, ulong rows) => false;
 
         public readonly void Apply(World world, Archetype table, int slot, EntityId entity)
         {
@@ -375,9 +389,9 @@ public sealed partial class World
             table.ColumnIndex(Bit) is var column and >= 0 && (!ComponentType<T>.Grouped || world.GroupTablesOf(Bit) == null) &&
             (!table.HasDisabled || table.DisablerColumn(column) < 0);
 
-        public void ApplyWord(World world, Archetype table, int word, ulong rows)
+        public bool ApplyWord(World world, Archetype table, int word, ulong rows)
         {
-            table.MarkPresentWord(table.ColumnIndex(Bit), word, rows);
+            bool flipped = table.MarkPresentWord(table.ColumnIndex(Bit), word, rows);
             ref T row0 = ref table.Ref<T>(Bit, 0);
             if (rows == ulong.MaxValue && !ComponentType<T>.Watched)
                 MemoryMarshal.CreateSpan(ref Unsafe.Add(ref row0, word << 6), 64).Fill(Value); // a whole word: one fill
@@ -390,6 +404,7 @@ public sealed partial class World
                 }
 
             table.StampWord<T>(word, rows, world.ChangeTick); // the word's summary once, not per row
+            return flipped;
         }
 
         public void Apply(World world, Archetype table, int slot, EntityId entity) =>
@@ -404,17 +419,19 @@ public sealed partial class World
         // A retiring entity may be freed by losing a cleanup component: row by row.
         public readonly bool Words(World world, Archetype table) => !table.HasCleanup;
 
-        public void ApplyWord(World world, Archetype table, int word, ulong rows)
+        public bool ApplyWord(World world, Archetype table, int word, ulong rows)
         {
             int column = table.ColumnIndex(Bit);
             rows = table.MarkAbsentWord(column, word, rows);
             Count += BitOperations.PopCount(rows);
             world.GoneWord(table, column, word, rows, Bit);
+            return rows != 0;
         }
 
         public void Apply(World world, Archetype table, int slot, EntityId entity)
         {
             if (!world.TakeBit(table, slot, Bit)) return;
+            world.StorageVersion++; // passes re-read presence bits
             Count++;
             if (table.HasCleanup) world.Released(ref world.MetaRef(entity.Index));
         }
@@ -427,11 +444,13 @@ public sealed partial class World
 
         public readonly bool Words(World world, Archetype table) => false;
 
-        public readonly void ApplyWord(World world, Archetype table, int word, ulong rows) { }
+        public readonly bool ApplyWord(World world, Archetype table, int word, ulong rows) => false;
 
         public void Apply(World world, Archetype table, int slot, EntityId entity)
         {
-            if (world.TakeBit(table, slot, Bit)) Count++; // the kept value and the tag go
+            if (!world.TakeBit(table, slot, Bit)) return;
+            world.StorageVersion++; // the kept value and the tag go: passes re-read presence bits
+            Count++;
         }
     }
 
@@ -443,13 +462,14 @@ public sealed partial class World
         // In place once the table has the tag's column (after the first disable, which moves the rows).
         public readonly bool Words(World world, Archetype table) => table.ColumnIndex(Tag) >= 0;
 
-        public void ApplyWord(World world, Archetype table, int word, ulong rows)
+        public bool ApplyWord(World world, Archetype table, int word, ulong rows)
         {
             int column = table.ColumnIndex(Bit);
             rows = table.MarkAbsentWord(column, word, rows, keep: true);
             table.MarkPresentWord(table.ColumnIndex(Tag), word, rows);
             Count += BitOperations.PopCount(rows);
             world.GoneWord(table, column, word, rows, Bit);
+            return rows != 0;
         }
 
         public void Apply(World world, Archetype table, int slot, EntityId entity)
@@ -465,18 +485,20 @@ public sealed partial class World
 
         public readonly bool Words(World world, Archetype table) => !ComponentType<T>.Grouped || world.GroupTablesOf(Bit) == null;
 
-        public void ApplyWord(World world, Archetype table, int word, ulong rows)
+        public bool ApplyWord(World world, Archetype table, int word, ulong rows)
         {
             rows = table.MarkAbsentWord(table.ColumnIndex(Tag), word, rows);
             table.MarkPresentWord(table.ColumnIndex(Bit), word, rows);
             Count += BitOperations.PopCount(rows);
             table.StampWord<T>(word, rows, world.ChangeTick); // the word's summary once, not per row
-            if (!ComponentType<T>.Watched) return;
+            if (!ComponentType<T>.Watched) return rows != 0;
             for (ulong r = rows; r != 0; r &= r - 1)
             {
                 int slot = (word << 6) + BitOperations.TrailingZeroCount(r);
                 world.Written(table.Slots[slot].Index, table.Slots[slot].Version, in table.Ref<T>(Bit, slot));
             }
+
+            return rows != 0;
         }
 
         public void Apply(World world, Archetype table, int slot, EntityId entity)
@@ -495,13 +517,15 @@ public sealed partial class World
 
         public readonly bool Words(World world, Archetype table) => true;
 
-        public readonly void ApplyWord(World world, Archetype table, int word, ulong rows)
+        public readonly bool ApplyWord(World world, Archetype table, int word, ulong rows)
         {
             for (ulong r = rows; r != 0; r &= r - 1)
             {
                 int slot = (word << 6) + BitOperations.TrailingZeroCount(r);
                 Apply(world, table, slot, table.Slots[slot]);
             }
+
+            return false; // claims only
         }
 
         public readonly void Apply(World world, Archetype table, int slot, EntityId entity)

@@ -218,37 +218,58 @@ internal static class Workers
 /// </summary>
 internal static class ThreadSetup
 {
-    private static readonly Lock Gate = new();
-    private static Action[] _steps = new Action[16];
-    private static Type[] _types = new Type[16]; // what each step sets up, to forget it with its context
-    private static int _count;                    // published after its step (Volatile)
+    /// <summary>A step: what it runs, the type whose state it sets up, and its number (1, 2, ... in the order added).</summary>
+    private sealed class Step(Action run, Type type, int number)
+    {
+        public readonly Action Run = run;
+        public readonly Type Type = type;
+        public readonly int Number = number;
+    }
 
-    /// <summary>The steps this thread ran.</summary>
+    private static readonly Lock Gate = new();
+
+    // The steps held: the first _held of _steps (Volatile), in the order added. Forget compacts them into a new array
+    // (a thread walking the old one still finds every step it has not run), so an unloaded context's steps leave
+    // for good; the numbers stay, so a thread's count of steps run (_done) needs no adjusting.
+    private static Step[] _steps = new Step[16];
+    private static int _held;
+    private static int _added; // the number of the last step added: published after the step (Volatile)
+
+    /// <summary>The number of the last step this thread ran (every step up to it ran, or was forgotten).</summary>
     [ThreadStatic] private static int _done;
 
     /// <summary>Whether this thread has steps to run.</summary>
-    public static bool Pending => _done != Volatile.Read(ref _count);
+    public static bool Pending => _done != Volatile.Read(ref _added);
 
-    /// <summary>The steps this thread ran.</summary>
+    /// <summary>The number of the last step this thread ran.</summary>
     public static int Done => _done;
 
     /// <summary>The steps added so far.</summary>
-    public static int Count => Volatile.Read(ref _count);
+    public static int Count => Volatile.Read(ref _added);
+
+    /// <summary>The steps held now: those added, less those of unloaded contexts (tests: bounded across reloads).</summary>
+    internal static int Held => Volatile.Read(ref _held);
 
     /// <summary>Run the steps added since this thread last ran them.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void CatchUp()
     {
-        if (_done != Volatile.Read(ref _count)) Run();
+        if (_done != Volatile.Read(ref _added)) Run();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void Run()
     {
-        int count = Volatile.Read(ref _count);
-        var steps = Volatile.Read(ref _steps); // published before the count: holds the first `count` steps
-        for (int i = _done; i < count; i++) Volatile.Read(ref steps[i])?.Invoke();
-        _done = count;
+        // The last number first: every step up to it was published into the array read after it, among its first
+        // _held (read after it too; a compaction writes its array before its count, so a larger count read with the
+        // compacted array finds nulls past its steps). A step past `added` waits for the next run.
+        int added = Volatile.Read(ref _added), held = Volatile.Read(ref _held);
+        var steps = Volatile.Read(ref _steps);
+        held = Math.Min(held, steps.Length);
+        for (int i = 0; i < held; i++)
+            if (Volatile.Read(ref steps[i]) is { } step && step.Number > _done && step.Number <= added)
+                step.Run();
+        _done = added;
     }
 
     /// <summary>
@@ -268,36 +289,38 @@ internal static class ThreadSetup
         Collectible.Watch(type); // the step goes when the context of its type unloads
         lock (Gate)
         {
-            int count = _count;
-            if (count == _steps.Length)
+            int held = _held;
+            if (held == _steps.Length)
             {
-                var steps = new Action[count * 2];
-                var types = new Type[count * 2];
-                Array.Copy(_steps, steps, count);
-                Array.Copy(_types, types, count);
-                _types = types;
+                var steps = new Step[held * 2];
+                Array.Copy(_steps, steps, held);
                 Volatile.Write(ref _steps, steps);
             }
 
-            _steps[count] = step;
-            _types[count] = type;
-            Volatile.Write(ref _count, count + 1);
+            Volatile.Write(ref _steps[held], new Step(step, type, _added + 1));
+            Volatile.Write(ref _held, held + 1);
+            Volatile.Write(ref _added, _added + 1);
         }
 
         Workers.WakeAll();
     }
 
-    /// <summary>Drop the steps of the types <paramref name="from"/> matches (their context unloads): nothing here roots it.</summary>
+    /// <summary>
+    /// Drop the steps of the types <paramref name="from"/> matches (their context unloads): nothing here roots it, and
+    /// the steps held stay bounded by the live contexts' however often plugins reload.
+    /// </summary>
     public static void Forget(Func<Type, bool> from)
     {
         lock (Gate)
         {
-            for (int i = 0; i < _count; i++)
-                if (_types[i] != null && from(_types[i]))
-                {
-                    Volatile.Write(ref _steps[i], null);
-                    _types[i] = null;
-                }
+            var steps = new Step[_steps.Length];
+            int kept = 0;
+            for (int i = 0; i < _held; i++)
+                if (!from(_steps[i].Type))
+                    steps[kept++] = _steps[i];
+            if (kept == _held) return;
+            Volatile.Write(ref _steps, steps);
+            Volatile.Write(ref _held, kept);
         }
     }
 }

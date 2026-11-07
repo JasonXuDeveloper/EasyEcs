@@ -17,7 +17,7 @@ public sealed partial class World : IDisposable
 
     // Next never-used id, and recycled ids (LIFO, so hot ids stay hot and arrays stay bounded by peak population).
     private int _nextId;
-    private int[] _freeIds = new int[64];
+    private int[] _freeIds; // as long as Meta (all destroyed at once), so destroys grow nothing: Grow keeps it so
     private int _freeIdCount;
     private int _entityCount;
 
@@ -43,6 +43,8 @@ public sealed partial class World : IDisposable
         _options = options ?? new WorldOptions();
         Meta = AllocateMeta(Math.Max(1, _options.InitialEntityCapacity), true);
         HugePages.Populate(Meta); // the initial capacity is a reservation: its records written without a fault per page
+        _freeIds = new int[Meta.Length]; // destroying what the initial capacity made room for grows nothing either
+        HugePages.Populate(_freeIds);
         _queryLookup = _queryCache.GetAlternateLookup<QueryLookup>();
         _emptyArchetype = GetOrCreateArchetype(default);
         ArgumentOutOfRangeException.ThrowIfNegative(_options.DestroyLogCapacity, nameof(options));
@@ -72,8 +74,13 @@ public sealed partial class World : IDisposable
     /// growth before the tick. Instances whose groups put them in another table (<see cref="GroupBy{T}"/>) grow that
     /// one. For a prefab with members, every member's table. O(components) plus one growth. Owner thread only.
     /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="count"/> is negative, or its instances would pass the most entities a world holds.</exception>
     public void Reserve(Prefab prefab, int count)
     {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        // Every table's rows are at most the prefab's entities: once their total fits, no product below overflows.
+        if ((long)prefab.Store.EntityCount * count > Array.MaxLength - _nextId)
+            throw new ArgumentOutOfRangeException(nameof(count), count, "More entities than a world can hold.");
         using (Structural())
         {
             var tables = prefab.Store._allArchetypes;
@@ -512,7 +519,7 @@ public sealed partial class World : IDisposable
 
         public readonly bool Words(World world, Archetype table) => false;
 
-        public readonly void ApplyWord(World world, Archetype table, int word, ulong rows) { }
+        public readonly bool ApplyWord(World world, Archetype table, int word, ulong rows) => false;
 
         public void Apply(World world, Archetype table, int slot, EntityId entity)
         {
@@ -689,22 +696,25 @@ public sealed partial class World : IDisposable
 
     private readonly Archetype _emptyArchetype;
 
-    /// <summary>Enumerates alive entities in id order; ids beyond the capacity captured at start are not visited.</summary>
+    /// <summary>
+    /// Enumerates alive entities in id order; ids beyond the capacity captured at start are not visited. Entities
+    /// destroyed during the walk are skipped, also after the records grew (the current records are read).
+    /// </summary>
     public struct EntityEnumerator
     {
         private readonly World _world;
-        private readonly EntityMeta[] _meta;
+        private readonly int _length;
         private int _index;
 
         internal EntityEnumerator(World world)
         {
             _world = world;
-            _meta = world.Meta;
+            _length = world.Meta.Length;
             _index = -1;
         }
 
         /// <summary>The current living entity.</summary>
-        public readonly Entity Current => new(_world, _index, _meta[_index].Version);
+        public readonly Entity Current => new(_world, _index, _world.Meta[_index].Version);
 
         /// <summary>The enumerator itself (<c>foreach</c> support, no allocation).</summary>
         public readonly EntityEnumerator GetEnumerator() => this;
@@ -712,8 +722,8 @@ public sealed partial class World : IDisposable
         /// <summary>Move to the next living entity (ids in ascending order). O(1) amortized per id.</summary>
         public bool MoveNext()
         {
-            var meta = _meta;
-            while (++_index < meta.Length)
+            var meta = _world.Meta; // the records grow, never shrink: the captured length stays inside them
+            while (++_index < _length)
                 if (meta[_index].Archetype != null)
                     return true;
             return false;

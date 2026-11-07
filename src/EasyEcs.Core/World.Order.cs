@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
@@ -14,8 +15,11 @@ public sealed partial class World
     // The spare column of each shape the re-sorts swap in (Archetype.Permute): created by the first sort, kept for the next.
     private readonly ColumnSpares _columnSpares = new();
 
-    // The orders this world was asked for (OrderRows), by component bit; null until the first request.
+    // The orders this world was asked for (OrderRows), by component bit, and the type each makes (RowOrder<T, TOrder>:
+    // its order type may come from another assembly than the component, a plugin's pair method over a host's
+    // component); null until the first request.
     private Func<RowOrder>[] _orderRequests;
+    private Type[] _orderTypes;
 
     /// <summary>The order this world was asked to keep tables holding component <paramref name="bit"/> in, or null.</summary>
     private Func<RowOrder> RequestedOrder(int bit) =>
@@ -43,8 +47,15 @@ public sealed partial class World
         RowOrder.Check(axes, cell, interval, margin, clusterSize);
         int bit = ComponentType<T>.Bit;
         _orderRequests ??= [];
-        if (bit >= _orderRequests.Length) Array.Resize(ref _orderRequests, Math.Max(bit + 1, _orderRequests.Length * 2));
+        _orderTypes ??= [];
+        if (bit >= _orderRequests.Length)
+        {
+            Array.Resize(ref _orderRequests, Math.Max(bit + 1, _orderRequests.Length * 2));
+            Array.Resize(ref _orderTypes, _orderRequests.Length);
+        }
+
         if (_orderRequests[bit] != null) return;
+        _orderTypes[bit] = typeof(RowOrder<T, TOrder>);
         _orderRequests[bit] = () => new RowOrder<T, TOrder>(axes, cell, interval, margin, clusterSize);
         if (ComponentInfo.Of(bit).Defaults?.Order != null) return; // [OrderBy] orders its tables already
         foreach (var table in _allArchetypes)
@@ -54,6 +65,28 @@ public sealed partial class World
                 _ordered = true;
                 _orderedFrom = null; // the list of ordered tables is read again
             }
+    }
+
+    /// <summary>
+    /// The order requests of removed component <paramref name="bits"/>, and every request and table order whose type
+    /// uses the removed types (a plugin's order of a host's component): a request or a kept table's order would root
+    /// the plugin, and a type reusing a removed bit would get the old type's order. Inside the gate (RemoveTypes).
+    /// </summary>
+    private void ForgetOrders(Func<Type, bool> doomed, List<ushort> bits)
+    {
+        if (_orderRequests != null)
+            for (int bit = 0; bit < _orderRequests.Length; bit++)
+                if (_orderRequests[bit] != null && (bits.Contains((ushort)bit) || doomed(_orderTypes[bit])))
+                {
+                    _orderRequests[bit] = null;
+                    _orderTypes[bit] = null;
+                }
+
+        foreach (var table in _allArchetypes)
+            if (table.Order != null && doomed(table.Order.GetType()))
+                table.Order = null;
+        _orderedTables = []; // it may name dropped tables: read again by the next update
+        _orderedFrom = null;
     }
 
     // The ordered tables, rebuilt when the registry changes (_orderedFrom is the registry they were read from).

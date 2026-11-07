@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -457,6 +458,20 @@ public sealed partial class World
         return true;
     }
 
+    /// <summary>The pair states let go of <paramref name="dropped"/>, tables the world dropped (<see cref="PairState.Forget"/>). Inside the gate.</summary>
+    private void ForgetPairs(HashSet<Archetype> dropped)
+    {
+        foreach (var state in _pairStates) state?.Forget(dropped);
+    }
+
+    /// <summary>The tables the pair states keep clusters of, over every pair job (tests).</summary>
+    internal int PairTableCount()
+    {
+        int count = 0;
+        foreach (var state in _pairStates) count += state?.TableCount ?? 0;
+        return count;
+    }
+
     private PairState PairStateOf(int id)
     {
         var states = _pairStates;
@@ -504,10 +519,11 @@ internal sealed class PairState
     /// <summary>The tables of the component are ordered for this job (or by another request or [OrderBy]).</summary>
     public bool Ordered;
 
-    private Clusters[] _tables = new Clusters[4];
-    private int _tableCount;
-    private PairList[] _lists = new PairList[4];
-    private int _listCount;
+    // The clusters of each table met (found by the table: O(1) whatever the count), and the same by slot
+    // (Clusters.Slot, a free slot is null): a table's lists are found by the other's slot. Kept until the world drops
+    // the table (Forget: TrimExcess, RemoveTypes), as the world keeps the table itself.
+    private readonly Dictionary<Archetype, Clusters> _byTable = new(ReferenceEqualityComparer.Instance);
+    private Clusters[] _slots = new Clusters[4];
     private int _pass;
 
     // The margin boxes are kept with: a share of the largest finite reach, grown when boxes escape soon after they were
@@ -685,20 +701,7 @@ internal sealed class PairState
     private Clusters Refresh<T, TOrder>(Archetype table, int bit, int axes, int size)
         where T : struct, IComponent where TOrder : struct, IRowOrder<T>
     {
-        Clusters clusters = null;
-        for (int i = 0; i < _tableCount; i++)
-            if (ReferenceEquals(_tables[i].Table, table))
-            {
-                clusters = _tables[i];
-                break;
-            }
-
-        if (clusters == null)
-        {
-            if (_tableCount == _tables.Length) Array.Resize(ref _tables, _tableCount * 2);
-            _tables[_tableCount++] = clusters = new Clusters(table);
-        }
-
+        if (!_byTable.TryGetValue(table, out var clusters)) clusters = Add(table);
         if (clusters.Pass == _pass) return clusters;
         clusters.Pass = _pass;
         int count = table.Count, n = (count + size - 1) / size;
@@ -728,25 +731,68 @@ internal sealed class PairState
         return clusters;
     }
 
+    /// <summary>The first pass to meet <paramref name="table"/>: its clusters, in the first free slot (cold).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private Clusters Add(Archetype table)
+    {
+        int slot = Array.IndexOf(_slots, null);
+        if (slot < 0)
+        {
+            slot = _slots.Length;
+            Array.Resize(ref _slots, slot * 2);
+        }
+
+        var clusters = _slots[slot] = new Clusters(table, slot);
+        _byTable.Add(table, clusters);
+        return clusters;
+    }
+
+    /// <summary>The first pass to meet the pair (<paramref name="table"/>, <paramref name="other"/>): its list (cold).</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private PairList AddList(Clusters table, Clusters other)
+    {
+        if (other.Slot >= table.Lists.Length) Array.Resize(ref table.Lists, Math.Max(other.Slot + 1, table.Lists.Length * 2));
+        return table.Lists[other.Slot] = new PairList(table, other) { Half = _half && ReferenceEquals(table, other) };
+    }
+
+    /// <summary>
+    /// The world dropped <paramref name="dropped"/> (<see cref="World.TrimExcess"/>, <see cref="World.RemoveTypes(System.Reflection.Assembly)"/>):
+    /// their clusters and every list naming them go, so nothing here holds a table (or the types of its columns) the
+    /// world let go; their slots are free for the tables met next. Owner thread, outside passes. O(tables met²).
+    /// </summary>
+    public void Forget(HashSet<Archetype> dropped)
+    {
+        _mine = _theirs = null; // a pass an exception ended left its matches
+        _own = null;
+        for (int i = 0; i < _slots.Length; i++)
+            if (_slots[i] is { } clusters && dropped.Contains(clusters.Table))
+            {
+                _byTable.Remove(clusters.Table);
+                _slots[i] = null;
+            }
+
+        foreach (var clusters in _slots)
+        {
+            if (clusters == null) continue;
+            var lists = clusters.Lists;
+            for (int j = 0; j < lists.Length; j++)
+                if (lists[j] != null && !ReferenceEquals(_slots[j], lists[j].Other))
+                    lists[j] = null;
+        }
+    }
+
+    /// <summary>How many tables this job keeps clusters of (tests: bounded by the world's tables).</summary>
+    internal int TableCount => _byTable.Count;
+
     private void Keep(Clusters clusters) => clusters.Keep(float.IsFinite(_margin) ? _margin : 0);
 
     /// <summary>The clusters of <paramref name="other"/> each cluster of <paramref name="table"/> meets, drawn again when either was kept again.</summary>
     private PairList ListOf(Clusters table, Clusters other)
     {
-        PairList list = null;
-        for (int i = 0; i < _listCount; i++)
-            if (ReferenceEquals(_lists[i].Table, table) && ReferenceEquals(_lists[i].Other, other))
-            {
-                list = _lists[i];
-                break;
-            }
-
-        if (list == null)
-        {
-            if (_listCount == _lists.Length) Array.Resize(ref _lists, _listCount * 2);
-            _lists[_listCount++] = list = new PairList(table, other) { Half = _half && ReferenceEquals(table, other) };
-        }
-
+        var lists = table.Lists;
+        int slot = other.Slot;
+        var list = (uint)slot < (uint)lists.Length ? lists[slot] : null;
+        list ??= AddList(table, other);
         if (list.Builds != table.Builds || list.OtherBuilds != other.Builds) Draw(list);
         return list;
     }
@@ -1107,9 +1153,15 @@ internal sealed class PairState
     /// rows hold a NaN point gets a box over everything, so it meets every cluster (a NaN distance passes a test of the
     /// form <c>if (d2 &gt;= r2) return</c>).
     /// </summary>
-    private sealed class Clusters(Archetype table)
+    private sealed class Clusters(Archetype table, int slot)
     {
         public readonly Archetype Table = table;
+
+        /// <summary>The slot in its pair state (<see cref="PairState._slots"/>); the index of the lists against it in <see cref="Lists"/>.</summary>
+        public readonly int Slot = slot;
+
+        /// <summary>This table's lists against each other table, by the other's <see cref="Slot"/> (null: not met).</summary>
+        public PairList[] Lists = [];
         public bool Kept, Escapes;
         public int Count, Size, ClusterCount, Builds, Passes, Pass, Axes, Capacity;
         public long Version;

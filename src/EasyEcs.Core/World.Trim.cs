@@ -66,6 +66,7 @@ public sealed partial class World
                 foreach (var table in _allArchetypes) table.ForgetEdges(dropped);
                 foreach (var pair in _queryCache) // holders of an entry see the new match (no entry is removed)
                     Volatile.Write(ref pair.Value.Match, pair.Value.Match.Without(dropped));
+                ForgetPairs(dropped); // a dropped table that comes back is a new one: its old clusters would stay for good
             }
 
             foreach (var table in _allArchetypes) table.Trim();
@@ -171,6 +172,7 @@ public sealed partial class World
         _roots.TrimExcess();
         _prefabTables = null; // prefab table -> table of this world: found again by the next instance
         _columnSpares.Clear(); // the next sort of each shape makes its spare again
+        Array.Clear(_reservedKeys); // reservations for indexes not made yet: the next Reserve asks again
         if (_collectedDepth == 0) Array.Clear(_collected); // ForEachCollected's id arrays: the next run past 64 ids takes one again
     }
 }

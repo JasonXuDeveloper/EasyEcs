@@ -329,13 +329,18 @@ internal sealed class Archetype
         return rows;
     }
 
-    /// <summary><see cref="MarkPresent"/> for the rows of presence word <paramref name="word"/> set in <paramref name="rows"/>. Inside the structural gate.</summary>
-    public void MarkPresentWord(int column, int word, ulong rows)
+    /// <summary>
+    /// <see cref="MarkPresent"/> for the rows of presence word <paramref name="word"/> set in <paramref name="rows"/>;
+    /// whether one of them lacked the component. Inside the structural gate.
+    /// </summary>
+    public bool MarkPresentWord(int column, int word, ulong rows)
     {
-        if (Bits(column) is not { } bits) return;
+        if (Bits(column) is not { } bits) return false; // every row has it
         ref ulong present = ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(bits), word);
-        AbsentOf(column) -= BitOperations.PopCount(rows & ~present);
+        ulong flipped = rows & ~present;
+        AbsentOf(column) -= BitOperations.PopCount(flipped);
         present |= rows;
+        return flipped != 0;
     }
 
     /// <summary>A row dies (destroyed or moved away): it no longer counts as lacking components.</summary>

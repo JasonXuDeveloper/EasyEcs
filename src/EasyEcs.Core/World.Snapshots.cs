@@ -158,7 +158,7 @@ public sealed partial class World
                 _nextId = used;
                 // Ids recorded free, then ids first used after the capture; LIFO takes the recorded ones first.
                 int free = snapshot.FreeCount + (used - snapshot.NextId);
-                if (_freeIds.Length < free) _freeIds = new int[swap ? Math.Max(free, _freeIds.Length * 2) : free];
+                if (_freeIds.Length < free) _freeIds = new int[Math.Max(swap ? Math.Max(free, _freeIds.Length * 2) : free, Meta.Length)]; // as long as the records
                 for (int id = used - 1, i = 0; id >= snapshot.NextId; id--, i++) _freeIds[i] = id;
                 snapshot.FreeIds.AsSpan(0, snapshot.FreeCount).CopyTo(_freeIds.AsSpan(used - snapshot.NextId));
                 _freeIdCount = free;

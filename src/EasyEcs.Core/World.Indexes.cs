@@ -8,7 +8,8 @@ public sealed partial class World
     // Indexed by TypeIndex<ValueIndexFamily, T>.Value; each slot is a ValueIndex<T, TKey>.
     private IValueIndex[] _indexes = [];
 
-    // By component bit: the keys Reserve made room for, for an index created after the reservation (cold).
+    // By component bit: the largest reservation (Reserve) for an index not created yet, which makes room for that many
+    // keys when it is (cold); reset by TrimExcess and RemoveTypes.
     private int[] _reservedKeys = [];
 
     // Indexed by component bit: the index of that component, told when an entity loses it. Null until the first index.
@@ -121,9 +122,14 @@ public sealed partial class World
         {
             int bit = components[i];
             if (!ComponentInfo.Of(bit).Indexed) continue;
+            if (IndexOf(bit) is { } index)
+            {
+                index.ReserveKeys(count);
+                continue;
+            }
+
             if (bit >= _reservedKeys.Length) Array.Resize(ref _reservedKeys, bit + 1);
-            _reservedKeys[bit] += count;
-            IndexOf(bit)?.ReserveKeys(count);
+            _reservedKeys[bit] = Math.Max(_reservedKeys[bit], count); // the next n instances, not a running total
         }
     }
 
@@ -132,7 +138,11 @@ public sealed partial class World
         if (slot >= _indexes.Length) Array.Resize(ref _indexes, Math.Max(slot + 1, _indexes.Length * 2));
         _indexes[slot] = index;
         index.Reserve(Meta.Length);
-        if (bit < _reservedKeys.Length && _reservedKeys[bit] > 0) index.ReserveKeys(_reservedKeys[bit]);
+        if (bit < _reservedKeys.Length && _reservedKeys[bit] > 0)
+        {
+            index.ReserveKeys(_reservedKeys[bit]);
+            _reservedKeys[bit] = 0; // taken: the index makes room for later reservations itself
+        }
         _indexByBit ??= [];
         if (bit >= _indexByBit.Length) Array.Resize(ref _indexByBit, bit + 1);
         _indexByBit[bit] = index;

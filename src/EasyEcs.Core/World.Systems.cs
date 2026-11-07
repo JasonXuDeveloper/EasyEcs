@@ -453,6 +453,8 @@ public sealed partial class World
         // Meta keeps its length (handles index it unchecked); every record moves past its version, so every handle
         // is stale (a handle matching its record's version is alive: Entity.LocateArchetype).
         foreach (ref var meta in Meta.AsSpan()) meta = new EntityMeta { Version = meta.Version + 1 };
+        // The rows' buffer lists go back to their pools (a world per match: the next one takes them), as destroys give them.
+        foreach (var table in _allArchetypes) table.ReleaseBuffers(0, table.Count);
         ClearArchetypes();
         ResetIndexes(false); // an index still held finds nothing
         ClearSingletons();
