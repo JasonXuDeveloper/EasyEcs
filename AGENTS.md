@@ -152,6 +152,10 @@ owner has asked for once must be written where the next session will find it.
   truly the owner's to decide. A proposal you judge not worth doing goes into `docs/owner-review.md` with the reason
   and what would change the verdict, so the owner can review it later; settled choices still get their decision
   record. "Not worth doing" is a verdict reached after trying or after finding the cause (next rule), never "not yet".
+  Every answer the owner gives (a popup, or a message that sets a rule or chooses a design) is appended to
+  `docs/plans/owner-decisions.md`, the ledger, in the same session, with where it is applied (a commit, a backlog
+  item, a plan file); read it before asking him again. The docs pass turns its settled entries into decision records
+  (`decisions.mdx` + `.zh.mdx`), and the ledger then cites the D number.
 - **Try it now; research a problem, never skip it** (owner, 2026-10-30: "做什么都不要defer，应该立马去尝试，遇到问题不应该
   跳过问题，而是研究为什么会出现这个问题"). An idea within reach is tried in the same session, not parked as "later",
   "worth it once ..." or "a follow-up". When something goes wrong (a slower case, an allocation, a wash, a form that

@@ -97,7 +97,9 @@ what it left undone, which goes on the same list (nothing is dropped silently).
    per temporary and the JIT inlines nothing.
 3. Conflicts are usually in `changelog`, `migration`, `decisions` (both sides appended): keep both, renumber a
    duplicated D and fix its anchors and links.
-4. After the code audits are merged, run `audit-docs` once over everything with the collected docs to-dos.
+4. After the code audits are merged, run `audit-docs` once over everything with the collected docs to-dos and the
+   ledger (`docs/plans/owner-decisions.md`): every entry whose record is "due" gets its decision record. An owner's
+   answer given during triage is appended to the ledger at once (AGENTS.md, "Decide, then record").
 5. Finish with `verify`, then fast-forward `master` (no PR unless asked) and push. The owner cuts the release.
 6. Update the skills with what the round taught, then cross-check them (AGENTS.md, Workflows).
 7. Remove finished worktrees (`git worktree remove`, `git worktree prune`): a stale worktree makes BenchmarkDotNet

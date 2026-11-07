@@ -78,7 +78,9 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
 - **Every feature is everywhere it belongs** (`feature`, part 7): its guide page; `features.mdx` and
   the comparison tables when peers differ; `cheat-sheet`, `glossary`, `api.mdx` (complexity) and the generated
   `reference/` (ApiDocs, zh entries); `analyzer.mdx` for its rules; `skills/easyecs/SKILL.md` (the public skill); changelog, README
-  "What's new", migration for a breaking change; a decision record for every non-obvious choice and dropped idea;
+  "What's new", migration for a breaking change; a decision record for every non-obvious choice and dropped idea
+  (the owner's decisions: read `docs/plans/owner-decisions.md`, write the record of every entry still "due", then
+  replace "due" with its D number there);
   the roadmap; the battle server (`BattleServer.cs` regions + `example.mdx` walkthrough) and the samples where it
   belongs, as exemplary code; the file map of each directory it touches (root AGENTS.md layout, `src/*/AGENTS.md`, `tests/` and `benchmarks/AGENTS.md`).
 - **Which declaration**: the cheat sheet has one table by task (what you want -> the attribute, interface or parameter
