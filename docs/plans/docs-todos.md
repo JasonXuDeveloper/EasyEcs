@@ -45,6 +45,11 @@ against the code at f9faa23. What changed in the file itself:
       `[LookupKey]` only. **Amend D129** (en + zh): its "a code fix renames it" becomes "`[IndexKey]` never shipped, so
       no code fix, alias or migration entry (D141's rule)". The same holds for `RenamedArguments`
       (`ChunkRows` -> `ChunkSize`), which D130 or the reference-design record must not promise either.
+      Owner, 2026-11-07: the other migration fixes from forms that never shipped are deleted too (hook attributes,
+      `[GroupBy]` on the struct, EntityRandom's tick by hand; backlog R4): no page or record may still promise them
+      (decisions, migration, analyzer.mdx, AGENTS.md's CodeFixes line, en + zh).
+- [ ] **S7. The prefetch gates' decision record** (en + zh): proven only on this VM's 260 MiB LLC; a run on an x86 box
+      with a 32 MiB LLC (`owner-m4.md` 6) is what would move a gate. Owner, 2026-11-07: that run is not made.
 - [x] **S4. Stale ApiDocs zh entries** (was 133, 170): done in c24847b.
 - [ ] **S5. Glossary (glossary.mdx + zh, and tools/ApiDocs/zh/README.md for zh terms), one pass** (was 430 ordered
       table / cluster / box / margin / cadence, 1037-1041 source fields, 1209 ghost row / halo exchange, 1360 Jacobi /
