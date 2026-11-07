@@ -29,7 +29,11 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 - **Written by hand where the generator writes it** (EECS080-089): a hand-written job instead of `[EntityMethod]`,
   destroying every visited row instead of `[Consume]`, a singleton accumulated row by row instead of `Reduce<T>`,
   other entities read through the World instead of `Lookup<T>`, records appended by hand instead of `Emit<T>`,
-  hand-written parts instead of `[Sum]` / `[LookupKey]` / `[Group]`.
+  hand-written parts instead of `[Sum]` / `[LookupKey]` / `[Group]`; SIMD written by hand (EECS103: a batch method's
+  vector loop as the method for one row, `HandSimd`; a vector loop over a span inside a method as the plain loop,
+  `HandSimd.Loops`; a Tile stencil of cursor loads as the cell method, `HandStencil`). Each form is reported only when
+  its rewrite, put in the method's place in a copy of the compilation (`HandSimd.Rewritten`), gets the generator's
+  loop; anything that does not bind there stays unreported.
 
 ## Principles
 
