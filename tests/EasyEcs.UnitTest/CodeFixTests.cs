@@ -374,6 +374,24 @@ public class CodeFixTests
     [TestCase("EECS065", "Declare it with attributes",
         "public record struct C(int N, long M) : ISingletonComponent, IReduction<C>\n{\n    public static C Identity => new C { M = long.MinValue };\n\n    public static C Combine(C a, C b) => new C { N = a.N + b.N, M = System.Math.Max(a.M, b.M) };\n}",
         "public partial record struct C([Sum] int N, [Max] long M) : ISingletonComponent\n{\n}")]
+    [TestCase("EECS065", "Declare it with attributes",                                                                     // a row kept by its key
+        "public struct C : ISingletonComponent, IReduction<C> { public EntityId Id; public int H; public static C Identity => new C { H = int.MaxValue }; public static C Combine(C a, C b) => b.H < a.H ? b : a; }",
+        "public partial struct C : ISingletonComponent { public EntityId Id; [MinBy] public int H; }")]
+    [TestCase("EECS065", "Declare it with attributes",
+        "public record struct C(EntityId Id, float W) : ISingletonComponent, IReduction<C>\n{\n    public static C Identity => new(EntityId.Null, float.NegativeInfinity);\n\n    public static C Combine(C a, C b) => b.W > a.W ? b : a;\n}",
+        "public partial record struct C(EntityId Id, [MaxBy] float W) : ISingletonComponent\n{\n}")]
+    [TestCase("EECS125", "Declare it with [Tile]",
+        "public record struct Tp(int X, int Z);\npublic record struct Plate([LookupKey] Tp Pos) : IComponent, ITile<Tp>\n{\n    static int ITileShape.Width => 16;\n    static int ITileShape.Depth => 8;\n    static Tp ITile<Tp>.Beside(Tp k, TileFaces f) => f switch { TileFaces.North => k with { Z = k.Z - 1 }, TileFaces.South => k with { Z = k.Z + 1 }, TileFaces.West => k with { X = k.X - 1 }, TileFaces.East => k with { X = k.X + 1 }, _ => k };\n}",
+        "[Tile(Width = 16, Depth = 8)]\npublic partial record struct Plate([LookupKey] Tp Pos) : IComponent\n{\n}")]
+    [TestCase("EECS125", "Declare it with [Tile]",                                                                         // a torus keeps its Beside
+        "public record struct Tp(int X, int Z);\npublic record struct Plate([LookupKey] Tp Pos) : IComponent, ITile<Tp>\n{\n    static int ITileShape.Width => 4;\n    static int ITileShape.Depth => 4;\n    static Tp ITile<Tp>.Beside(Tp k, TileFaces f) => new((k.X + 1) % 4, k.Z);\n}",
+        "[Tile(Width = 4, Depth = 4)]\npublic partial record struct Plate([LookupKey] Tp Pos) : IComponent\n{\n    static Tp ITile<Tp>.Beside(")]
+    [TestCase("EECS125", "Remove Beside: the generator infers it",
+        "public record struct Tp(int X, int Z);\n[Tile(Width = 4, Depth = 4)]\npublic partial record struct Plate([LookupKey] Tp Pos) : IComponent\n{\n    static Tp ITile<Tp>.Beside(Tp k, TileFaces f) => f switch { TileFaces.North => k with { Z = k.Z - 1 }, TileFaces.South => k with { Z = k.Z + 1 }, TileFaces.West => k with { X = k.X - 1 }, TileFaces.East => k with { X = k.X + 1 }, _ => k };\n}",
+        "public partial record struct Plate([LookupKey] Tp Pos) : IComponent\n{\n}")]
+    [TestCase("EECS127", "Declare it with SlotsPerAxis = 64",
+        "public record struct Tp(int X, int Z);\npublic partial record struct C([UniqueKey] Tp Pos) : IComponent, IDirectMapped<Tp>\n{\n    public static int Slots => 4096;\n    public static int SlotOf(Tp p) => (p.Z & 63) * 64 + (p.X & 63);\n}",
+        "public partial record struct C([UniqueKey(SlotsPerAxis = 64)] Tp Pos) : IComponent\n{\n}")]
     [TestCase("EECS066", "Fix the Identity",
         "public struct C : ISingletonComponent, IReduction<C> { public float L; public int First; public static C Identity => default; public static C Combine(C a, C b) => new C { L = System.MathF.Min(a.L, b.L), First = a.First < 0 ? b.First : a.First }; }",
         "public static C Identity => new C { L = float.PositiveInfinity };")]

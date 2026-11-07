@@ -130,6 +130,7 @@ public class FormTests
     [TestCase("[EcsSystem] public ref struct R { static void OnCreate(World world) => world.Peak = default; }", false)]       // set up once
     [TestCase("[EcsSystem] public ref struct R { static void OnUpdate(World world) => world.Peak.High = world.Peak.High / 2; }", false)] // not a constant
     [TestCase("public static class Host { public static void Step(World w) { w.Peak = default; w.Update(); } }", false)]  // not system code
+    [TestCase("namespace Other { public record struct Peak(int High) : ISingletonComponent; [EcsSystem] public ref struct R { static void OnUpdate(World world) => world.SetPeak(0); } }", false)] // a namesake's reset
     public async Task OnlyASingletonResetEachPassIsReported(string reset, bool reported)
     {
         var diagnostics = await GeneratorTests.Analyze([Data + reset + "[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Peak k) => k.High += p.V; }"]);

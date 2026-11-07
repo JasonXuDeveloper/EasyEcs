@@ -41,122 +41,44 @@ public partial class TileTests
     // ---------------- shapes ----------------
 
     /// <summary>A cube of 4 x 3 x 2 cells with a neighbor on each of its six faces.</summary>
-    public record struct Cube(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 4;
-        static int ITileShape.Depth => 3;
-        static int ITileShape.Height => 2;
-        static TileFaces ITileShape.Faces => TileFaces.All;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 4, Depth = 3, Height = 2, Faces = TileFaces.All)]
+    public partial record struct Cube([LookupKey] TilePos Pos) : IComponent;
 
     /// <summary>The cube with its 26 neighbors (Moore).</summary>
-    public record struct MooreCube(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 4;
-        static int ITileShape.Depth => 3;
-        static int ITileShape.Height => 2;
-        static TileFaces ITileShape.Faces => TileFaces.All;
-        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 4, Depth = 3, Height = 2, Faces = TileFaces.All, Neighborhood = TileNeighborhood.All)]
+    public partial record struct MooreCube([LookupKey] TilePos Pos) : IComponent;
 
     /// <summary>The cube with its 18 neighbors across faces and edges, a halo of 2 (its height), clamped.</summary>
-    public record struct EdgeCube(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 4;
-        static int ITileShape.Depth => 3;
-        static int ITileShape.Height => 2;
-        static int ITileShape.Halo => 2;
-        static TileFaces ITileShape.Faces => TileFaces.All;
-        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.FacesAndEdges;
-        static TileBoundary ITileShape.Boundary => TileBoundary.Clamp;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 4, Depth = 3, Height = 2, Faces = TileFaces.All, Halo = 2, Neighborhood = TileNeighborhood.FacesAndEdges, Boundary = TileBoundary.Clamp)]
+    public partial record struct EdgeCube([LookupKey] TilePos Pos) : IComponent;
 
     /// <summary>The cube with its 26 neighbors, a halo of 2, mirrored.</summary>
-    public record struct MirrorCube(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 4;
-        static int ITileShape.Depth => 3;
-        static int ITileShape.Height => 2;
-        static int ITileShape.Halo => 2;
-        static TileFaces ITileShape.Faces => TileFaces.All;
-        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
-        static TileBoundary ITileShape.Boundary => TileBoundary.Mirror;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 4, Depth = 3, Height = 2, Faces = TileFaces.All, Halo = 2, Neighborhood = TileNeighborhood.All, Boundary = TileBoundary.Mirror)]
+    public partial record struct MirrorCube([LookupKey] TilePos Pos) : IComponent;
 
     /// <summary>A column of 16 x 16 x 4 cells, neighbors on its sides only (a voxel world's chunk).</summary>
-    public record struct Column(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 16;
-        static int ITileShape.Depth => 16;
-        static int ITileShape.Height => 4;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 16, Depth = 16, Height = 4)]
+    public partial record struct Column([LookupKey] TilePos Pos) : IComponent;
 
     /// <summary>A column of 8 x 8 x 6 cells with a halo of 2, its corners and its neighbors below and above.</summary>
-    public record struct DeepColumn(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 8;
-        static int ITileShape.Depth => 8;
-        static int ITileShape.Height => 6;
-        static int ITileShape.Halo => 2;
-        static TileFaces ITileShape.Faces => TileFaces.All;
-        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 8, Depth = 8, Height = 6, Faces = TileFaces.All, Halo = 2, Neighborhood = TileNeighborhood.All)]
+    public partial record struct DeepColumn([LookupKey] TilePos Pos) : IComponent;
 
     /// <summary>A 2D plate of 5 x 7 cells.</summary>
-    public record struct Plate(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 5;
-        static int ITileShape.Depth => 7;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 5, Depth = 7)]
+    public partial record struct Plate([LookupKey] TilePos Pos) : IComponent;
 
     /// <summary>The plate with a halo of 2 and its 8 neighbors.</summary>
-    public record struct WidePlate(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 5;
-        static int ITileShape.Depth => 7;
-        static int ITileShape.Halo => 2;
-        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 5, Depth = 7, Halo = 2, Neighborhood = TileNeighborhood.All)]
+    public partial record struct WidePlate([LookupKey] TilePos Pos) : IComponent;
 
     /// <summary>The plate with a halo of 3, its 8 neighbors, clamped.</summary>
-    public record struct ClampPlate(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 5;
-        static int ITileShape.Depth => 7;
-        static int ITileShape.Halo => 3;
-        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
-        static TileBoundary ITileShape.Boundary => TileBoundary.Clamp;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 5, Depth = 7, Halo = 3, Neighborhood = TileNeighborhood.All, Boundary = TileBoundary.Clamp)]
+    public partial record struct ClampPlate([LookupKey] TilePos Pos) : IComponent;
 
     /// <summary>The plate with the widest halo it can have, its width (5), mirrored.</summary>
-    public record struct LimitPlate(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 5;
-        static int ITileShape.Depth => 7;
-        static int ITileShape.Halo => 5;
-        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
-        static TileBoundary ITileShape.Boundary => TileBoundary.Mirror;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 5, Depth = 7, Halo = 5, Neighborhood = TileNeighborhood.All, Boundary = TileBoundary.Mirror)]
+    public partial record struct LimitPlate([LookupKey] TilePos Pos) : IComponent;
 
     /// <summary>A halo one cell wider than the plate: it would reach past the tile beside (EECS072; ExchangeHalo throws too).</summary>
 #pragma warning disable EECS072
@@ -171,15 +93,8 @@ public partial class TileTests
 #pragma warning restore EECS072
 
     /// <summary>A 1D tile: one row of 8 cells, neighbors west and east, a halo of 2.</summary>
-    public record struct Line(TilePos Pos) : IComponent, ITile<TilePos>
-    {
-        readonly TilePos IIndexed<TilePos>.Key => Pos;
-        static int ITileShape.Width => 8;
-        static int ITileShape.Depth => 1;
-        static int ITileShape.Halo => 2;
-        static TileFaces ITileShape.Faces => TileFaces.West | TileFaces.East;
-        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
-    }
+    [Tile(Width = 8, Depth = 1, Faces = TileFaces.West | TileFaces.East, Halo = 2)]
+    public partial record struct Line([LookupKey] TilePos Pos) : IComponent;
 
     public record struct Cell(int V);
     public record struct NextCell(int V);

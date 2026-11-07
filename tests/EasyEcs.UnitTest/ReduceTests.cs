@@ -659,4 +659,117 @@ public partial class ReduceTests
         Allocations.WarmUp(() => small.Update(), 50);
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) small.Update(); }), Is.Zero);
     }
+
+    /// <summary>The entity with the fewest points ([MinBy], MINLOC): the generator writes Identity and Combine.</summary>
+    public partial record struct Least(EntityId Holder, [MinBy] int Score) : ISingletonComponent;
+
+    /// <summary>The entity with the heaviest weight, a float key ([MaxBy]): a NaN never replaces another.</summary>
+    public partial struct Heaviest : ISingletonComponent
+    {
+        public EntityId Holder;
+        [MaxBy] public float Weight;
+    }
+
+    /// <summary>The fewest points of every pass so far ([Accumulate]): an earlier pass keeps a tie.</summary>
+    [Accumulate]
+    public partial record struct Fewest(EntityId Holder, [MinBy] int Score) : ISingletonComponent;
+
+    [EcsSystem]
+    public ref struct FindLeast
+    {
+        [ForEach(Parallel = true, ChunkSize = 256)]
+        static void Find(Entity entity, in Points points, ref Reduce<Least> least)
+        {
+            if (points.Value < least.Value.Score) least.Value = new Least(entity.Id, points.Value);
+        }
+    }
+
+    [EcsSystem]
+    public ref struct FindHeaviest
+    {
+        [ForEach(Parallel = true, ChunkSize = 256)]
+        static void Find(Entity entity, in Weight weight, ref Reduce<Heaviest> heaviest)
+        {
+            if (weight.Value > heaviest.Value.Weight) heaviest.Value = new Heaviest { Holder = entity.Id, Weight = weight.Value };
+        }
+    }
+
+    [EcsSystem]
+    public ref struct FindFewest
+    {
+        [ForEach(Parallel = true, ChunkSize = 256)]
+        static void Find(Entity entity, in Points points, ref Reduce<Fewest> fewest)
+        {
+            if (points.Value < fewest.Value.Score) fewest.Value = new Fewest(entity.Id, points.Value);
+        }
+    }
+
+    /// <summary>
+    /// A kept row is the first of the lowest in row order, as one thread finds it: ties across chunks keep the earlier
+    /// chunk's row, on 1 and 4 threads alike, and the pass allocates nothing after its first.
+    /// </summary>
+    [Test]
+    public void AKeptRowIsTheFirstOfTheLowestOnAnyThreadCount()
+    {
+        int rows = World.MaxChunkRows * 4;
+        foreach (int threads in new[] { 1, 4 })
+        {
+            using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+            var entities = new Entity[rows];
+            world.CreateEntities(entities, new Points(0));
+            for (int i = 0; i < rows; i++) entities[i].Points = new Points(3 + i % 97);
+            foreach (int tie in new[] { 500, World.MaxChunkRows + 7, rows - 1 }) entities[tie].Points = new Points(1);
+            world.AddSystem<FindLeast>();
+            for (int run = 0; run < 3; run++)
+            {
+                world.Update();
+                Assert.That(world.Least, Is.EqualTo(new Least(entities[500].Id, 1)), $"{threads} threads, run {run}");
+            }
+
+            entities[500].Points = new Points(2);                                  // the next tie, in a later chunk
+            world.Update();
+            Assert.That(world.Least, Is.EqualTo(new Least(entities[World.MaxChunkRows + 7].Id, 1)), $"{threads} threads");
+
+            Allocations.WarmUp(() => world.Update(), 20);
+            Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero, $"{threads} threads");
+        }
+    }
+
+    [Test]
+    public void AKeptRowSkipsNaNAndAnEmptyPassKeepsTheIdentity()
+    {
+        foreach (int threads in new[] { 1, 4 })
+        {
+            using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+            world.AddSystem<FindHeaviest>();
+            world.Update();
+            Assert.That(world.Heaviest, Is.EqualTo(new Heaviest { Weight = float.NegativeInfinity }), "no rows: the identity");
+
+            var entities = new Entity[World.MaxChunkRows * 3];
+            world.CreateEntities(entities, new Weight(0));
+            for (int i = 0; i < entities.Length; i++) entities[i].Weight = new Weight(i % 3 == 0 ? float.NaN : i % 50);
+            world.Update();
+            Assert.That(world.Heaviest, Is.EqualTo(new Heaviest { Holder = entities[49].Id, Weight = 49 }), $"{threads} threads");
+        }
+    }
+
+    [Test]
+    public void AnAccumulatedKeptRowKeepsTheEarlierPassOnATie()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        var entities = new Entity[World.MaxChunkRows * 2];
+        world.CreateEntities(entities, new Points(0));
+        for (int i = 0; i < entities.Length; i++) entities[i].Points = new Points(10 + i % 13);
+        world.AddSystem<FindFewest>();
+        world.Update();
+        Assert.That(world.Fewest, Is.EqualTo(new Fewest(entities[0].Id, 10)));
+
+        entities[0].Points = new Points(50);                                         // tied at 10 by a later row: the record stays
+        world.Update();
+        Assert.That(world.Fewest, Is.EqualTo(new Fewest(entities[0].Id, 10)));
+
+        entities[77].Points = new Points(4);                                         // a lower one replaces it
+        world.Update();
+        Assert.That(world.Fewest, Is.EqualTo(new Fewest(entities[77].Id, 4)));
+    }
 }

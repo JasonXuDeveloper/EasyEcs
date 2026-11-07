@@ -421,6 +421,8 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Odd o) => o = new Odd(o.Y, o.X);", "Odd's constructor does more than set fields from its parameters ('Y = x + y;')")]
     [TestCase("[ForEach] static void A(ref F f, in H h) { ref var v = ref f.V; v += h.V; }", "ref local 'v' is not supported: name the parameter's fields instead", true)]
     [TestCase("[ForEach] static void A(ref F f, in H h) { float v; v = h.V; f.V = v; }", "local 'v' has no initializer: give it its value where it is declared", true)]
+    [TestCase("public partial struct Low : ISingletonComponent { public EntityId Id; [MinBy] public float V; } [ForEach] static void A(Entity e, in F f, ref Reduce<Low> l) { if (f.V < l.Value.V) l.Value = new Low { Id = e.Id, V = f.V }; }",
+        "it reduces into Low, which keeps the row with the lowest V ([MinBy]): a vector loop does not keep a row by its key yet, so the method runs row by row")]
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V = e.Id.Index;", "it uses the Entity in 'e.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)", true)]
     [TestCase("public record struct Wide2(int A, long B); static Wide2 At(float v) => new((int)v, 1); [ForEach] static void A(ref F f) { var c = At(f.V); f.V = c.A; }", "local 'c' is a S.Wide2, not a lane type of 4 or 8 bytes")] // the helper's new(...) keeps its type in 'var c'
     [TestCase("[System.Runtime.CompilerServices.InlineArray(4)] public struct Quad { private float _q; } public struct Held : IComponent { public float V; public Quad Q; } [ForEach] static void A(ref Held h) => h.V += 1;", "field Held.Q is an inline array (Quad), which a vector loop does not read")] // as many values as its length, never one lane
@@ -1198,7 +1200,7 @@ public class GeneratorTests
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
         "GroupBy", "TargetPolicies", "NotSaved", "EntityMethods", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
         "SystemPlaces", "SystemFusions", "SetFusions", "ForEachBodies", "RecordBodies", "EntityMethodBodies", "SystemCode", "ForEachCode", "RecordCode",
-        "EntityMethodCode", "RecordedTypes",
+        "EntityMethodCode", "RecordedTypes", "TileParts",
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -1231,7 +1233,10 @@ public class GeneratorTests
             "public struct Fp : IComponent { public float X, Y; } [EcsSystem] public ref struct Pr { [ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X, dy = p.Y - o.Y, d2 = dx * dx + dy * dy; if (d2 >= 4f) return; q.V++; } }" +
             "[Accumulate, Sum] public partial struct Tot : ISingletonComponent { public long N; } [EcsSystem] public ref struct Ac { [ForEach] static void T(in P p, ref Reduce<Tot> t) => t.Value.N += p.V; }" +
             "public record struct Hit(int V); [EcsSystem] public ref struct Rc { [Drain] static void H(in Hit h, ref Clock c) => c.Ticks += h.V; }" +
-            "public static class Rn { [ForEach] static void R(ref P p) => p.V++; } public static class Rd { [Drain] static void H(in Hit h, ref Clock c) => c.Ticks -= h.V; }";
+            "public static class Rn { [ForEach] static void R(ref P p) => p.V++; } public static class Rd { [Drain] static void H(in Hit h, ref Clock c) => c.Ticks -= h.V; }" +
+            "public record struct Tp(int X, int Z); [Tile(Width = 4, Depth = 4)] public partial record struct Tl([UniqueKey(SlotsPerAxis = 8)] Tp Pos) : IComponent;" +
+            "public partial record struct Td(Tp Pos) : IComponent, ITile<Tp> { readonly Tp IIndexed<Tp>.Key => Pos; static int ITileShape.Width => 2; static int ITileShape.Depth => 2; }" +
+            "public partial record struct Lo(EntityId Who, [MinBy] int Hp) : ISingletonComponent;";
         var system = CSharpSyntaxTree.ParseText(code, Parse);
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
         // A lambda pass in a file of its own: its interceptor names the file's checksum, so an edit there is a new model.

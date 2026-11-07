@@ -28,7 +28,7 @@ public partial record struct Terrain([Group] Biome Biome) : IComponent;
 /// PartGenerator and the rules of the declarations it writes parts for: the part's place (nested, generic, every kind
 /// of containing type), EECS062-EECS066, and the caching of its stage.
 /// </summary>
-public class PartTests
+public partial class PartTests
 {
     /// <summary>The generated part files and the compilation with them.</summary>
     private static (string Parts, Compilation Output) Generate(string source)
@@ -334,6 +334,202 @@ public class PartTests
         world.Update();
         for (int i = 0; i < seekers.Length; i++)
             Assert.That(seekers[i].Read<LookupTests.Found>().Id, Is.EqualTo(i % 400 < 300 ? accounts[i % 400].Id : default(EntityId)));
+    }
+
+    // [MinBy] / [MaxBy]: the row kept by its key (MINLOC), the other fields with it.
+    [TestCase("public partial record struct W(EntityId Player, [MinBy] int Health) : ISingletonComponent;",
+        "public static W Identity => new W { Health = int.MaxValue };", "public static W Combine(W left, W right) => right.Health < left.Health ? right : left;")]
+    [TestCase("public partial struct H : ISingletonComponent { public int Id; [MaxBy] public float Weight { get; set; } }",
+        "public static H Identity => new H { Weight = float.NegativeInfinity };", "public static H Combine(H left, H right) => right.Weight > left.Weight ? right : left;")]
+    [TestCase("[Accumulate] public partial struct R : ISingletonComponent { public EntityId Holder; [MinBy] public long Score; }",
+        "public partial struct R : global::EasyEcs.IReduction<R>", "Score = long.MaxValue")]
+    public void AKeptRowIsItsKeysComparison(string source, string identity, string combine)
+    {
+        var (parts, output) = Generate(source);
+        Assert.That(parts.Replace("\r", ""), Does.Contain(identity).And.Contain(combine));
+        Assert.That(Errors(output), Is.Empty, parts);
+    }
+
+    [TestCase("public partial struct K : ISingletonComponent { [MinBy] public int A; [MinBy] public int B; }")]                  // two keys
+    [TestCase("public partial struct K : ISingletonComponent { [MinBy, MaxBy] public int A; }")]                                 // both
+    [TestCase("public partial struct K : ISingletonComponent { [MinBy] public int A; [Sum] public int B; }")]                    // another reduction
+    [TestCase("[Sum] public partial struct K : ISingletonComponent { [MinBy] public int A; public int B; }")]                    // one on the struct
+    [TestCase("public partial struct K : ISingletonComponent { [MinBy] public string A; }")]                                     // not a number
+    [TestCase("public partial struct K : ISingletonComponent { [MinBy] public readonly int A; }")]                               // not settable
+    [TestCase("public partial struct K : ISingletonComponent { public int B; [MinBy] public int A => B; }")]                     // computed
+    public async Task AKeptRowThePartCannotWriteIsReported(string source)
+    {
+        Assert.That(await Ids(source), Is.EqualTo(new[] { "EECS064" }), "one diagnostic, and no error of the generated code");
+        Assert.That(Generate(source).Parts, Is.Empty, "the generator skips what the analyzer reports");
+    }
+
+    // A hand-written reduction that keeps a row by its key: EECS065 (Key=MinBy / MaxBy) when the identity is the key's
+    // extreme with every other field at its default and Combine keeps the left side on a tie.
+    [TestCase("public struct C : ISingletonComponent, IReduction<C> { public EntityId Id; public int H; public static C Identity => new C { H = int.MaxValue }; public static C Combine(C a, C b) => b.H < a.H ? b : a; }", "EECS065")]
+    [TestCase("public record struct C(EntityId Id, int H) : ISingletonComponent, IReduction<C> { public static C Identity => new(EntityId.Null, int.MaxValue); public static C Combine(C a, C b) => a.H > b.H ? b : a; }", "EECS065")]
+    [TestCase("public struct C : ISingletonComponent, IReduction<C> { public int Id; public float W; public static C Identity => new C { W = float.NegativeInfinity }; public static C Combine(C a, C b) { return b.W > a.W ? b : a; } }", "EECS065")]
+    [TestCase("public struct C : ISingletonComponent, IReduction<C> { public EntityId Id; public int H; public static C Identity => new C { H = int.MaxValue }; public static C Combine(C a, C b) => b.H <= a.H ? b : a; }")]  // a tie keeps the later rows
+    [TestCase("public struct C : ISingletonComponent, IReduction<C> { public int Id; public int H; public static C Identity => new C { Id = -1, H = int.MaxValue }; public static C Combine(C a, C b) => b.H < a.H ? b : a; }")]  // another field's identity
+    [TestCase("public struct C : ISingletonComponent, IReduction<C> { public int Id; public int H; public static C Identity => new C { H = 100 }; public static C Combine(C a, C b) => b.H < a.H ? b : a; }")]  // not the key's extreme
+    public async Task AHandWrittenKeptRowIsRead(string source, string id = null)
+    {
+        var ids = await Ids(source);
+        Assert.That(ids, id == null ? Is.Empty.Or.EqualTo(new[] { "EECS066" }) : Is.EqualTo(new[] { id }));
+        if (id != null)
+            Assert.That((await GeneratorTests.Analyze([source])).Single(d => d.Id == id).Properties["Ops"], Does.Contain("MinBy").Or.Contain("MaxBy"));
+    }
+
+    // [UniqueKey(SlotsPerAxis = N)]: a direct-mapped window, each coordinate masked, row-major.
+    [TestCase("public partial record struct C([UniqueKey(SlotsPerAxis = 8)] int Cell) : IComponent;",
+        "static int global::EasyEcs.IDirectMapped<int>.Slots => 8;", "SlotOf(int key) => key & 7;")]
+    [TestCase("public record struct P(int X, int Z); public partial record struct C([UniqueKey(SlotsPerAxis = 64)] P Pos) : IComponent;",
+        "IDirectMapped<global::P>.Slots => 4096;", "SlotOf(global::P key) => (key.Z & 63) * 64 + (key.X & 63);")]
+    [TestCase("public record struct P(int X, int Y, int Z); public partial record struct C([UniqueKey(SlotsPerAxis = 4)] P Pos) : IComponent;",
+        "IDirectMapped<global::P>.Slots => 64;", "SlotOf(global::P key) => ((key.Y & 3) * 4 + (key.Z & 3)) * 4 + (key.X & 3);")]
+    [TestCase("public record struct P(long X, short Z); public partial record struct C([UniqueKey(SlotsPerAxis = 16)] P Pos) : IComponent;",
+        "Slots => 256;", "SlotOf(global::P key) => (key.Z & 15) * 16 + (int)(key.X & 15);")]
+    [TestCase("public partial struct C : IComponent { [UniqueKey(SlotsPerAxis = 2)] public (int, int) Pos; }",
+        "Slots => 4;", "(key.Item2 & 1) * 2 + (key.Item1 & 1);")]
+    public void AWindowIsMaskedRowMajor(string source, string slots, string slotOf)
+    {
+        var (parts, output) = Generate(source);
+        Assert.That(parts.Replace("\r", ""), Does.Contain(slots).And.Contain(slotOf));
+        Assert.That(Errors(output), Is.Empty, parts);
+    }
+
+    [TestCase("public partial record struct C([UniqueKey(SlotsPerAxis = 12)] int Cell) : IComponent;")]                                 // not a power of two
+    [TestCase("public partial record struct C([UniqueKey(SlotsPerAxis = 1)] int Cell) : IComponent;")]                                  // too small
+    [TestCase("public partial record struct C([UniqueKey(SlotsPerAxis = 2048)] (int, int, int) Cell) : IComponent;")]                  // too many slots
+    [TestCase("public partial record struct C([UniqueKey(SlotsPerAxis = 8)] string Name) : IComponent;")]                               // no axes
+    [TestCase("public partial struct C : IComponent, IDirectMapped<int> { [UniqueKey(SlotsPerAxis = 8)] public int Cell; public static int Slots => 8; public static int SlotOf(int key) => key & 7; }")] // written by hand too
+    public async Task AWindowThePartCannotWriteIsReported(string source)
+    {
+        Assert.That(await Ids(source), Is.EqualTo(new[] { "EECS126" }), "one diagnostic, and no error of the generated code");
+        Assert.That(Generate(source).Parts, Does.Not.Contain("IDirectMapped"), "the generator writes no window the analyzer reports");
+    }
+
+    // [Tile]: the shape's members and Beside inferred from the key.
+    [TestCase("public record struct P(int X, int Z); [Tile(Width = 16, Depth = 8)] public partial record struct T([LookupKey] P Pos) : IComponent;",
+        "global::EasyEcs.ITile<global::P>", "static int global::EasyEcs.ITileShape.Width => 16;",
+        "__TileFaces.North => key with { Z = key.Z - 1 },\n    __TileFaces.South => key with { Z = key.Z + 1 },\n    __TileFaces.West => key with { X = key.X - 1 },\n    __TileFaces.East => key with { X = key.X + 1 },\n    _ => throw")]
+    [TestCase("public record struct P(int X, int Y, int Z); [Tile(Width = 4, Depth = 4, Height = 2, Faces = TileFaces.All, Halo = 2, Neighborhood = TileNeighborhood.All, Boundary = TileBoundary.Mirror)] public partial record struct T([UniqueKey] P Pos) : IComponent;",
+        "static __TileFaces global::EasyEcs.ITileShape.Faces => __TileFaces.All;", "static global::EasyEcs.TileBoundary global::EasyEcs.ITileShape.Boundary => global::EasyEcs.TileBoundary.Mirror;",
+        "__TileFaces.Above => key with { Y = key.Y + 1 },")]
+    [TestCase("[Tile(Width = 8, Depth = 1, Faces = TileFaces.West | TileFaces.East)] public partial record struct T([LookupKey] int Index) : IComponent;",
+        "__TileFaces.West | __TileFaces.East", "static int global::EasyEcs.ITileShape.Depth => 1;", "__TileFaces.West => key - 1,\n    __TileFaces.East => key + 1,")]
+    [TestCase("public record struct P(short X, short Z); [Tile(Width = 2, Depth = 2)] public partial record struct T([LookupKey] P Pos) : IComponent;",
+        "ITile<global::P>", "Width => 2;", "__TileFaces.North => key with { Z = (short)(key.Z - 1) },")]
+    [TestCase("public record struct P(int X, int Z); public partial record struct T(P Pos) : IComponent, ITile<P> { readonly P IIndexed<P>.Key => Pos; static int ITileShape.Width => 2; static int ITileShape.Depth => 2; }",
+        "public partial record struct T\n", "static global::P global::EasyEcs.ITile<global::P>.Beside(global::P key, __TileFaces face)", "__TileFaces.East => key with { X = key.X + 1 },")]  // ITile declared: Beside alone
+    [TestCase("public record struct P(int X, int Z); [Tile(Width = 2, Depth = 2)] public partial record struct T([LookupKey] P Pos) : IComponent { static P ITile<P>.Beside(P p, TileFaces f) => p; }",
+        "ITile<global::P>", "Depth => 2;", "Height")]  // a Beside of its own: the shape alone (a torus)
+    public void ATileIsItsShapeAndItsBeside(string source, string head, string shape, string beside)
+    {
+        var (parts, output) = Generate(source);
+        parts = parts.Replace("\r", "");
+        Assert.That(parts, Does.Contain(head).And.Contain(shape));
+        if (beside == "Height") Assert.That(parts, Does.Not.Contain("Beside(").And.Not.Contain(beside), "only what [Tile] sets");
+        else Assert.That(System.Text.RegularExpressions.Regex.Replace(parts, @"\s+", " "), Does.Contain(System.Text.RegularExpressions.Regex.Replace(beside, @"\s+", " ")));
+        Assert.That(Errors(output), Is.Empty, parts);
+    }
+
+    [TestCase("public record struct P(int X, int Y); [Tile(Width = 4, Depth = 4)] public partial record struct T([LookupKey] P Pos) : IComponent;", "TileFaces makes z the depth")]
+    [TestCase("public record struct P(int A, int B); [Tile(Width = 4, Depth = 4)] public partial record struct T([LookupKey] P Pos) : IComponent;", "no integer members X and Z")]
+    [TestCase("public readonly struct P : System.IEquatable<P> { public readonly int X, Z; public bool Equals(P o) => X == o.X && Z == o.Z; } [Tile(Width = 4, Depth = 4)] public partial record struct T([LookupKey] P Pos) : IComponent;", "'with' cannot set")]
+    [TestCase("[Tile(Width = 4, Depth = 4)] public partial record struct T([LookupKey] string Name) : IComponent;", "neither an int")]
+    [TestCase("public record struct P(int X, int Z); [Tile(Width = 4)] public partial record struct T([LookupKey] P Pos) : IComponent;", "Depth")]
+    public async Task ATileThePartCannotWriteIsReported(string source, string reason)
+    {
+        var found = (await GeneratorTests.Analyze([source])).Where(d => d.Id.StartsWith("EECS") && d.Id != "EECS069" || d.Severity == DiagnosticSeverity.Error).ToArray();
+        Assert.That(found.Select(d => d.Id).Distinct(), Is.EqualTo(new[] { "EECS124" }), string.Join("\n", found.Select(d => d.ToString())));
+        Assert.That(found[0].GetMessage(), Does.Contain(reason));
+        Assert.That(Generate(source).Parts, Does.Not.Contain("ITileShape"), "the generator writes no tile the analyzer reports");
+    }
+
+    /// <summary>A shape member written by hand and set by [Tile]: EECS124 at the member (the part, and with it ITile, is not written).</summary>
+    [Test]
+    public async Task AShapeMemberWrittenTwiceIsReported()
+    {
+        var found = (await GeneratorTests.Analyze(["public record struct P(int X, int Z); [Tile(Width = 4, Depth = 4, Halo = 2)] public partial record struct T([LookupKey] P Pos) : IComponent { static int ITileShape.Halo => 2; }"]))
+            .Where(d => d.Id == "EECS124").ToArray();
+        Assert.That(found, Has.Length.EqualTo(1));
+        Assert.That(found[0].GetMessage(), Does.EndWith("writes Halo itself and declares it with [Tile]: remove one"));
+    }
+
+    [TestCase("[Tile(Width = 4, Depth = 4)] public partial struct T : ISingletonComponent { [LookupKey] public int Cell; }")]   // not a component
+    [TestCase("[Tile(Width = 4, Depth = 4)] public partial struct T : IComponent { public int Cell; }")]                        // no key
+    public async Task ATileAttributeOutOfPlaceIsReported(string source) =>
+        Assert.That(await Ids(source), Does.Contain("EECS068"));
+
+    /// <summary>A plate of 4 x 4 cells declared by [Tile], its Beside inferred.</summary>
+    [Tile(Width = 4, Depth = 4)]
+    public partial record struct TilePlate([LookupKey] TileTests.TilePos Pos) : IComponent;
+
+    /// <summary>A row of tiles keyed by an int, unique and direct-mapped over 8 tiles.</summary>
+    [Tile(Width = 8, Depth = 1, Faces = TileFaces.West | TileFaces.East)]
+    public partial record struct TileRow([UniqueKey(SlotsPerAxis = 8)] int Index) : IComponent;
+
+    /// <summary>A chunk keyed by a window of 4 x 4 x 4 positions.</summary>
+    public partial record struct Windowed([UniqueKey(SlotsPerAxis = 4)] TileTests.TilePos Pos) : IComponent;
+
+    private static TileTests.TilePos Step(TileTests.TilePos p, TileFaces face) => face switch
+    {
+        TileFaces.North => p with { Z = p.Z - 1 },
+        TileFaces.South => p with { Z = p.Z + 1 },
+        TileFaces.West => p with { X = p.X - 1 },
+        TileFaces.East => p with { X = p.X + 1 },
+        TileFaces.Below => p with { Y = p.Y - 1 },
+        _ => p with { Y = p.Y + 1 },
+    };
+
+    private static TKey Beside<T, TKey>(TKey key, TileFaces face) where T : ITile<TKey> where TKey : System.IEquatable<TKey> => T.Beside(key, face);
+
+    private static int Slot<T, TKey>(TKey key) where T : IDirectMapped<TKey> where TKey : System.IEquatable<TKey> => T.SlotOf(key);
+
+    private static (int, int, int, int, TileFaces) Shape<T>() where T : ITileShape => (T.Width, T.Depth, T.Height, T.Halo, T.Faces);
+
+    private static int Slots<T, TKey>() where T : IDirectMapped<TKey> where TKey : System.IEquatable<TKey> => T.Slots;
+
+    [Test]
+    public void AnInferredBesideStepsAsTheFacesSay()
+    {
+        foreach (var face in new[] { TileFaces.North, TileFaces.South, TileFaces.West, TileFaces.East, TileFaces.Below, TileFaces.Above })
+            for (int x = -2; x <= 2; x++)
+            for (int z = -2; z <= 2; z++)
+            {
+                var p = new TileTests.TilePos(x, 7, z);
+                Assert.That(Beside<TilePlate, TileTests.TilePos>(p, face), Is.EqualTo(Step(p, face)), $"{p} {face}");
+            }
+
+        Assert.That((Beside<TileRow, int>(5, TileFaces.West), Beside<TileRow, int>(5, TileFaces.East)), Is.EqualTo((4, 6)));
+        Assert.Throws<System.ArgumentOutOfRangeException>(() => Beside<TileRow, int>(5, TileFaces.North));
+        Assert.That(Shape<TilePlate>(), Is.EqualTo((4, 4, 1, 1, TileFaces.Sides)));
+        Assert.That(Shape<TileRow>(), Is.EqualTo((8, 1, 1, 1, TileFaces.West | TileFaces.East)));
+    }
+
+    [Test]
+    public void AWindowGivesEveryKeyOfItsSideItsOwnSlot()
+    {
+        Assert.That((Slots<TileRow, int>(), Slots<Windowed, TileTests.TilePos>()), Is.EqualTo((8, 64)));
+        for (int origin = -9; origin <= 9; origin += 3)
+        {
+            var seen = new System.Collections.Generic.HashSet<int>();
+            for (int y = origin; y < origin + 4; y++)
+            for (int z = origin; z < origin + 4; z++)
+            for (int x = origin; x < origin + 4; x++)
+            {
+                int slot = Slot<Windowed, TileTests.TilePos>(new TileTests.TilePos(x, y, z));
+                Assert.That(slot, Is.InRange(0, 63));
+                Assert.That(seen.Add(slot), Is.True, $"({x}, {y}, {z}) at {origin}");
+            }
+        }
+
+        using var world = new World();
+        var tiles = new Entity[20];
+        for (int i = 0; i < tiles.Length; i++) tiles[i] = world.CreateEntity(new Windowed(new TileTests.TilePos(i - 10, -i, 2 * i)));
+        for (int i = 0; i < tiles.Length; i++)
+            Assert.That(world.WindowedIndex.Get(new TileTests.TilePos(i - 10, -i, 2 * i)), Is.EqualTo(tiles[i]));
+        Assert.That(world.WindowedIndex.TryFind(new TileTests.TilePos(0, 0, 1), out _), Is.False);
     }
 
     [Test]
