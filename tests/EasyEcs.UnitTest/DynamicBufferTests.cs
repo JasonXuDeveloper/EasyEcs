@@ -98,7 +98,7 @@ public class DynamicBufferTests
         ref var bag = ref e.Get<DynamicBuffer<Loot>>();
         Assert.That((bag.Count, bag.Capacity), Is.EqualTo((0, 0)));
         bag.EnsureCapacity(2);
-        Assert.That((bag.Count, bag.Capacity), Is.EqualTo((0, 2)));
+        Assert.That((bag.Count, bag.Capacity >= 2), Is.EqualTo((0, true))); // a pooled list may be longer (a disposed world's)
 
         bag.Add(new Loot(1, 1));
         bag.AddRange([new Loot(2, 2), new Loot(3, 3)]);
