@@ -2749,3 +2749,16 @@ No user-visible change (the one core change was reverted), so no changelog, migr
   bounds stale) and dictionary encoding of keys (`IDirectMapped<TKey>` is the dense key) with their reasons.
 - benchmarks page or performance page (if it lists prototypes): `NativeColumnsBenchmark` is an A/B-only class, not for
   the site.
+
+## feat-inner-loops-rest (what feat-inner-loops left open)
+
+- **demo.mdx + zh "Batch methods and SIMD" (owner, 2026-11-07: the page compares the generated loop with
+  `SimdMode.Off`)**: the batch systems are gone. `MovementSystem` / `DragSystem` are the plain methods in the
+  `Vectorized` group (the generator writes their vector loop); `MovementPerEntitySystem` / `DragPerEntitySystem` run the
+  same methods with `[ForEach(SimdMode = SimdMode.Off)]` in `PerEntity`. Rewrite the section (heading id may stay
+  `#batch-simd` or become `#vector-loops` with a redirect of the anchor), the mermaid node `Update<Batched>()`, the
+  Tabs list (drop MovementBatchSystem / DragBatchSystem, add the two PerEntity files), and the labels in
+  `docs/src/components/demo/index.tsx` ("[ForEach] over Span + SIMD" -> the generated vector loop; "ref / in, one
+  entity at a time" -> SimdMode.Off), en and zh. `runtime.ts` keeps `MotionMs(bool)` (its parameter is now
+  `vectorized`). README line 23 links `demo/EasyEcs.Demo/Systems/MovementBatchSystem.cs` (deleted): link
+  `MovementSystem.cs` and say the generator writes the loop. docs/AGENTS.md "Live demo" names the `Batched` group.
