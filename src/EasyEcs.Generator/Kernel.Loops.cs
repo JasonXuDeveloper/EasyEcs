@@ -95,7 +95,7 @@ internal sealed partial class Kernel
     }
 
     /// <summary>Vector&lt;T&gt;, Vector64..512&lt;T&gt;, or a span of them.</summary>
-    private static bool IsVectorType(ITypeSymbol? type) =>
+    internal static bool IsVectorType(ITypeSymbol? type) =>
         type is INamedTypeSymbol { IsGenericType: true } named
         && (named.Name is "Vector" or "Vector64" or "Vector128" or "Vector256" or "Vector512"
             && named.ContainingNamespace?.ToDisplayString() is "System.Numerics" or "System.Runtime.Intrinsics"

@@ -265,7 +265,14 @@ EasyEcsAnalyzer.Forms.cs     EECS080-085, EECS103, EECS108-109 and EECS119 (rows
 HandSimd.cs                  EECS103's detection, read once for the analyzer and its code fix: a batch [ForEach]
                              method whose body is a hand-written vector loop (prelude of streams and broadcasts, one
                              loop by 1 or by Count, lane-wise operations, a scalar tail) rewritten as the method for one
-                             row (PerRow), which must bind in a copy of the compilation and get Kernel.Vectorize's loop
+                             row (PerRow), which must bind in a copy of the compilation and get Kernel.Vectorize's loop;
+                             v3, a vector loop written by hand over a span inside a method (Loops: the segment and the
+                             plain loop replacing it, kept when Kernel.ElementLoops gives that loop its vector form);
+                             Rewritten: the copy-of-the-compilation check every form shares
+HandStencil.cs               EECS103 v2: a Tile [ForEach] method's stencil of cursor loads (halo, Cast of the out buffer,
+                             a Rows loop of x += lanes, loads at x + dx, CopyTo into the row) as the cell method
+                             (Cell<TCell, TTile>, out TOut: a neighbor per load), kept when Kernel.CellFormOf gives it a
+                             row loop in a copy of the compilation; the fix is v1's PerRow
 EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089: a [ForEach] method doing by hand what a parameter does per
                              chunk (a singleton reset by system code and accumulated row by row: Reduce<T>, reported
                              at the end of the compilation; other entities read through the World: Lookup<T>; records
@@ -322,5 +329,5 @@ Recorded.cs                  those facts read back per referenced assembly (cach
 Symbols.cs                   symbol checks shared by generator and analyzer
 Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
 EquatableArray.cs            array with value equality (generator models cache between edits)
-Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
+Polyfills.cs                 IsExternalInit (records) and System.Index (list patterns) for netstandard2.0; do not delete
 ```

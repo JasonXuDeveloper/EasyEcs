@@ -73,6 +73,29 @@ public static partial class EasyEcsAnalyzer
         "horizontal operations, loads at other offsets, accumulators across vectors and calls into user code are left alone.",
         helpLinkUri: Help("EECS103"));
 
+    /// <summary>EECS103 for a vector loop written by hand over spans inside a [ForEach] method (<see cref="HandSimd.Loops"/>).</summary>
+    public static readonly DiagnosticDescriptor HandWrittenElementLoop = new("EECS103", "Vector code written by hand that the generator writes from the method for one row",
+        "[ForEach] method '{0}' writes by hand the vector loop the generator writes from the plain loop over the elements: {1}",
+        Category, DiagnosticSeverity.Warning, true,
+        "A loop that loads a span of lanes (a buffer's floats) into Vector<T> or Vector128/256/512<T> values, combines them " +
+        "lane by lane and stores them back, with a scalar loop for the elements left over, computes a plain loop over the " +
+        "elements. The generator writes that vector loop from the plain loop (an element loop), at the widest vectors the " +
+        "hardware has, with the same results bit for bit. The fix writes it in place of the vector loop and the scalar " +
+        "loop: each broadcast a scalar local, each vector statement one statement over the element 's[i]'; it is offered " +
+        "only when the generator gives that loop its vector form.",
+        helpLinkUri: Help("EECS103"));
+
+    public static readonly DiagnosticDescriptor HandWrittenStencil = new("EECS103", "Vector code written by hand that the generator writes from the method for one row",
+        "[ForEach] method '{0}' writes by hand the stencil loop the generator writes from the method for one cell: {1}",
+        Category, DiagnosticSeverity.Warning, true,
+        "A Tile method that walks its rows with the cursor's vector loads (Load128, Load256, Load512, LoadVector at x + dx " +
+        "and constant dy, dz), combines them lane by lane and copies each vector into its out buffer computes one cell per " +
+        "lane. The generator writes that loop from the cell method (Cell<TCell, TTile> and 'out TOut'): the halo, every " +
+        "row at the widest vectors the hardware has, the rows nothing changes skipped, the same results bit for bit. The " +
+        "fix writes it: each load a neighbor 't[dx, dy, dz]', each vector local a scalar one; it is offered only when the " +
+        "generator gives the cell method its row loop.",
+        helpLinkUri: Help("EECS103"));
+
     public static readonly DiagnosticDescriptor BadRecordPass = new("EECS108", "Invalid [Drain] method",
         "[Drain] method '{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
@@ -112,9 +135,12 @@ public static partial class EasyEcsAnalyzer
 
     /// <summary>EECS109's property: the record method's parameters after the record ("ref global::S s, ..."), when the fix applies.</summary>
     public const string RecordParameters = "RecordParameters", RecordName = "Record";
-
+    /// <summary>EECS103's properties: the method for one row's (or one cell's, PerRowCell set) parameter list and its statements (one per line).</summary>
     /// <summary>EECS103's properties: the method for one row's parameter list and its statements (one per line).</summary>
-    public const string PerRowParameters = "PerRowParameters", PerRowBody = "PerRowBody";
+    public const string PerRowParameters = "PerRowParameters", PerRowBody = "PerRowBody", PerRowCell = "PerRowCell";
+
+    /// <summary>EECS103 on an element loop: the replaced statements (start and end offsets) and the plain loop's text.</summary>
+    public const string LoopStart = "LoopStart", LoopEnd = "LoopEnd", LoopText = "LoopText";
 
     /// <summary>EECS080's properties: field=parameter pairs, the components' modifiers, the filter attributes, the calls' replacements; EECS084's entity parameter to drop.</summary>
     public const string JobParameters = "Parameters", JobModifiers = "Modifiers", JobFilter = "Filter", JobCall = "Call", DropEntity = "DropEntity";
@@ -508,8 +534,30 @@ public static partial class EasyEcsAnalyzer
     private static void AnalyzeHandWrittenVectorLoop(SyntaxNodeAnalysisContext context)
     {
         var syntax = (MethodDeclarationSyntax)context.Node;
-        if (!HandSimd.MayBe(syntax) || context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
-            || HandSimd.Of(method, syntax, context.SemanticModel, context.CancellationToken) is not { } perRow) return;
+        bool simd = HandSimd.MayBe(syntax), stencil = HandStencil.MayBe(syntax);
+        if (!simd && !stencil || context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method) return;
+        // v2: a Tile method's stencil of cursor loads, as the method for one cell.
+        if (stencil && HandStencil.Of(method, syntax, context.SemanticModel, context.CancellationToken) is { } cell)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(HandWrittenStencil, syntax.Identifier.GetLocation(),
+                ImmutableDictionary<string, string?>.Empty.Add(FixKind, "PerRow").Add(PerRowParameters, cell.Parameters).Add(PerRowBody, string.Join("\n", cell.Statements)).Add(PerRowCell, "true"),
+                method.Name, cell.Summary(method.Name)));
+            return;
+        }
+        if (!simd) return;
+        if (HandSimd.Of(method, syntax, context.SemanticModel, context.CancellationToken) is not { } perRow)
+        {
+            // v3: vector loops written by hand over spans inside the method, each replaced by its plain loop.
+            foreach (var loop in HandSimd.Loops(method, syntax, context.SemanticModel, context.CancellationToken))
+            {
+                var loopProperties = ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ElementLoop")
+                    .Add(LoopStart, loop.Segment.Start.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                    .Add(LoopEnd, loop.Segment.End.ToString(System.Globalization.CultureInfo.InvariantCulture)).Add(LoopText, loop.Replacement);
+                context.ReportDiagnostic(Diagnostic.Create(HandWrittenElementLoop, Location.Create(syntax.SyntaxTree, new Microsoft.CodeAnalysis.Text.TextSpan(loop.Segment.Start, 0)),
+                    loopProperties, method.Name, loop.Summary()));
+            }
+            return;
+        }
         var properties = ImmutableDictionary<string, string?>.Empty.Add(FixKind, "PerRow")
             .Add(PerRowParameters, perRow.Parameters).Add(PerRowBody, string.Join("\n", perRow.Statements));
         context.ReportDiagnostic(Diagnostic.Create(HandWrittenVectorLoop, syntax.Identifier.GetLocation(), properties, method.Name,
@@ -822,7 +870,7 @@ public sealed class FormAnalyzer : EasyEcsAnalyzer.Area
 {
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         EasyEcsAnalyzer.BadConsume, EasyEcsAnalyzer.BadUpdateInterval, EasyEcsAnalyzer.HandWrittenConsume,
-        EasyEcsAnalyzer.HandWrittenEntityJob, EasyEcsAnalyzer.HandWrittenVectorLoop, EasyEcsAnalyzer.BadRecordPass,
+        EasyEcsAnalyzer.HandWrittenEntityJob, EasyEcsAnalyzer.HandWrittenVectorLoop, EasyEcsAnalyzer.HandWrittenElementLoop, EasyEcsAnalyzer.HandWrittenStencil, EasyEcsAnalyzer.BadRecordPass,
         EasyEcsAnalyzer.HandWrittenRecordPass, EasyEcsAnalyzer.HandWrittenCollected);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeForms(context);
