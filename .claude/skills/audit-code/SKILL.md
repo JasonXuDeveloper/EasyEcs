@@ -13,7 +13,7 @@ to change, and fixes it without making it slower. The specialist audits apply th
 
 ## Owns
 
-`tools/` (DocCheck, ApiDocs, bench.sh, jitdisasm.sh), `tests/` (structure and shared fixtures), `benchmarks/`
+`tools/` (DocCheck, ApiDocs, bench.sh, jitdisasm.sh, build.sh, Shared/), `tests/` (structure and shared fixtures), `benchmarks/`
 (harness, shared setups), `samples/`, `templates/`, `demo/`, `.github/` scripts, `docs/scripts/`; and the seams:
 code duplicated across projects, a project reaching into another's internals.
 
@@ -43,9 +43,15 @@ code duplicated across projects, a project reaching into another's internals.
 - **Fast and simple together**: a simplification that costs speed is not one; a fast path that duplicates a slow one
   should share its core.
 
-- **tools/Inlining** runs each benchmark method once: it reads `[Params]` and `[ParamsSource]` (a gate parameter is a
-  `[ParamsSource]`); a benchmark shape it cannot run is a gap in the tool, fixed there. It takes full class names
-  (`KernelBenchmark`, not `Kernel`: a wrong name throws "Sequence contains no matching element").
+- **tools/Inlining and tools/LoopBound** run benchmark classes through one runner, `tools/Shared/BenchmarkRunner.cs`
+  (linked into both): it reads `[Params]` and `[ParamsSource]` of any type (a gate parameter is a `[ParamsSource]`)
+  and takes a class as `KernelBenchmark`, `Kernel` or its full name (none or several matching: an error naming the
+  candidates). A benchmark shape it cannot run is a gap in the runner, fixed there, never a copy in one tool.
+- **One Roslyn host**: the unit tests, DocCheck and GeneratorCorpus drive the generators through
+  `tools/Shared/GeneratorHost.cs` (the package's generators, the parse options with the interceptors feature, the
+  references). A generator added to the package goes into its list, once.
+- **The tool scripts build through `tools/build.sh`** (errors printed, exit 2, the assembly's `TargetPath` echoed;
+  `--no-build` after the solution's build, as CI runs `tools/inlining.sh --no-build`).
 - **Scripted edits of C# keep its escapes**: a Python heredoc rewriting C# string literals broke their escapes;
   check the result or use the Edit tool.
 

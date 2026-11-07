@@ -41,7 +41,8 @@ adding or changing one (CI runs `tools/agents.sh --check`).
 | [`tests/`](tests/AGENTS.md) | adding or changing a test, or finding where a feature is tested |
 <!-- agents-index:end -->
 
-`global.json` requires the .NET 10 SDK (`rollForward: latestFeature`).
+`global.json` requires the .NET 10 SDK 10.0.403 or later (`rollForward: latestFeature`; 10.0.402 brings an ILCompiler with
+a known advisory, which fails the AOT check's restore with NU1903).
 
 ## Layout
 

@@ -206,6 +206,8 @@ Reading the output: build with `-p:EmitCompilerGeneratedFiles=true`, and read on
 - **A ref-struct job called in a loop is copied to a local first**: through a `ref` the JIT reloads it every
   iteration (that alone made `[Drain]` 2x slower than the hand-written walk).
 - **A new tracked stage needs input in GeneratorTests' code**, or its caching assertion has nothing to check.
+- **A new generator goes into `tools/Shared/GeneratorHost.cs`**, the one list the unit tests, DocCheck and
+  GeneratorCorpus drive (`audit-code`); a host left without it reports false errors or measures less than ships.
 
 ## Speed: measure first
 
