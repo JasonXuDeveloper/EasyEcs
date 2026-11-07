@@ -140,3 +140,42 @@ public class RollbackBenchmark
 
     public record struct Life(int Value) : IComponent, ITracked;
 }
+
+/// <summary>
+/// A per-tick reset written in bulk, then a capture into the same snapshot (a rollback ring of one): <c>SetAll</c> of a
+/// tracked component every row holds writes values only, so the capture stays incremental (the rows written: every
+/// row of that column; the untracked column whole). 100,000 entities.
+/// </summary>
+[MemoryDiagnoser]
+public class BulkCaptureBenchmark
+{
+    [Params(100_000)] public int Entities;
+
+    private World _world;
+    private WorldSnapshot _snapshot;
+    private int _tick;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        var entities = new Entity[Entities];
+        _world.CreateEntities(entities, new Charge(0), new Spot(0, 0, 0, 0));
+        _snapshot = _world.Capture();
+        for (int i = 0; i < 4; i++) ResetAndCapture();
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark]
+    public int ResetAndCapture()
+    {
+        _world.SetAll(new Charge(++_tick));
+        return _world.Capture(_snapshot).EntityCount;
+    }
+
+    public record struct Charge(int Value) : IComponent, ITracked;
+
+    public record struct Spot(float X, float Y, float Z, float W) : IComponent, ITracked;
+}

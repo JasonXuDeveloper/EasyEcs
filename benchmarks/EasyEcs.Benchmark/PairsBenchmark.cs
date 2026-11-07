@@ -219,3 +219,48 @@ public class PairsBenchmark
         }
     }
 }
+
+/// <summary>
+/// The generated pair method (<see cref="CrowdPairs"/>) over a crowd of 10,000 split into groups that each spread over
+/// the whole map (<c>GroupBy</c>): one table, or 64 tables met by each other, 4,096 pairs of tables per pass. Measures
+/// what the pass pays per table and per pair of tables besides the pairs themselves (finding their clusters and lists).
+/// </summary>
+[MemoryDiagnoser]
+public class PairGroupsBenchmark
+{
+    private const int Ticks = 20;
+
+    [Params(1, 64)] public int Groups;
+
+    private World _world;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = Crowd.Create(10_000, Density.Crowd);
+        _world.GroupBy<Squad>();
+        var all = new System.Collections.Generic.List<Entity>();
+        foreach (var item in _world.Query<Crowd.Position>()) all.Add(item.Entity);
+        for (int i = 0; i < all.Count; i++) all[i].Set(new Squad(i % Groups));
+        CrowdPairs.Tick(_world); // the first pass sorts the tables: the reference after it
+        var expected = Crowd.Reference(_world);
+        CrowdPairs.Tick(_world);
+        CrowdPairs.Tick(_world);
+        if (Crowd.FirstMismatch(Crowd.Pushes(_world), expected) is var at and >= 0)
+            throw new InvalidOperationException($"the pass differs from the reference at row {at}");
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark(OperationsPerInvoke = Ticks)]
+    public void Generated()
+    {
+        for (int t = 0; t < Ticks; t++) CrowdPairs.Tick(_world);
+    }
+
+    public record struct Squad(int Id) : IComponent, IGroup
+    {
+        public readonly int Group => Id;
+    }
+}
