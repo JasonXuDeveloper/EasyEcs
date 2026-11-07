@@ -784,6 +784,7 @@ internal sealed partial class Kernel
             if (WideComponent(p, touched.TryGetValue(p, out var used) ? used : null, whole, model.Compilation) is { } wide) return wide with { Reason = reason.Reason };
             throw Advised(reason.Reason, p.Type, used != null && !whole.Contains(p) ? used.Select(u => u.Path).ToArray() : null, reason.IsFixable);
         }
+        Unsupported? split = null;
         foreach (var p in method.Parameters)
         {
             var kind = lane.Kind(p);
@@ -801,13 +802,23 @@ internal sealed partial class Kernel
                             flatOnlyOf ??= (p, fields.Length);
                         }
                         if (fields.Length > 1 && fields.FirstOrDefault(f => IsBool(f.Type)) is { } flag)
-                            throw new Unsupported($"field {p.Type.Name}.{flag.Name} is a bool among {fields.Length} fields: a vector loop takes a bool in a component of its own (one byte per row)"); // inherent until the samples split theirs (owner-review)
+                            throw new Unsupported($"field {p.Type.Name}.{flag.Name} is a bool among {fields.Length} fields: a vector loop takes a bool in a component of its own (one byte per row)"); // WideOr: the split advice (fixable) when the method uses that bool alone
                         if (fields.Any(f => SizeOf(f.Type) != SizeOf(fields[0].Type)))
                             throw new Unsupported($"lane types {fields[0].Type.ToDisplayString()} and {fields.First(f => SizeOf(f.Type) != SizeOf(fields[0].Type)).Type.ToDisplayString()} differ in size");
                     }
                     catch (Unsupported unsupported)
                     {
-                        wide = WideOr(p, unsupported);
+                        try
+                        {
+                            wide = WideOr(p, unsupported);
+                        }
+                        catch (Unsupported advised) when (advised.IsFixable)
+                        {
+                            // The split is the fix only when no later parameter keeps the method scalar (the World,
+                            // a Mut<T>, ...): that reason wins, so the advice waits for the end of the parameters.
+                            split ??= advised;
+                            break;
+                        }
                         fields = wide.Paths.Select(path => LaneField.Of(path[path.Length - 1])).ToArray();
                     }
                     components.Add(fields);
@@ -825,6 +836,7 @@ internal sealed partial class Kernel
                     break;
             }
         }
+        if (split != null) throw split;
         if (components.Count == 0) throw new Unsupported("it takes no component");
         // The loop's lanes are the narrowest columns'; a column of lanes twice as wide is a pair of vectors per row
         // vector (Kernel.Pairs.cs), but a component the loop gathers (Kernel.Wide.cs) takes lanes of its own size only.
