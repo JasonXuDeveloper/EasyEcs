@@ -827,3 +827,23 @@ similarity for every `.cs`).
    `EasyEcs.UnitTest.csproj:37` and `audit-analyzer:166` edited). Recommended: as in 2.2.
 8. **`docs/plans/` and `owner-review.md`** (2.6): stay with a Cloudflare exclude (recommended), `plans/`, or `.plans/`.
 9. **`tools/`**: stays flat (recommended), or `tools/perf/` for the performance scripts and projects (107 references).
+
+## Owner's answers (2026-11-07)
+
+Report 1:
+- Tile declarations: build `[Tile]` (`[Tile(Width = 16, Depth = 16)]` writes `ITile<TKey>`, the shape and `Beside`),
+  and infer `Beside` from an `int` key or integer `X` / `Z` (/ `Y` as height) members. A 2D key named `(X, Y)` is
+  not inferred: an Error explains it and the user writes `Beside` (`TileFaces` makes z the depth; a guess the other
+  way would step the wrong axis silently).
+- Direct-mapped windows: build `[UniqueKey(SlotsPerAxis = N)]` generating `Slots` / `SlotOf`.
+- The lowest-key reduction: build `[MinBy]` / `[MaxBy]` (MPI's MINLOC; ties keep the earlier row), prove the vector
+  form of `FindWeakest` with `ReduceBenchmark`.
+- Countdown timers: not built; the record goes to `owner-review.md` with the absolute-deadline (`Until`) lesson for
+  the docs pass.
+
+Report 2:
+- The folder layout of section 2.2 as recommended (Generator keeps `Kernel/`, pair methods under `OrderedTables/`,
+  prefetch files under `Lookups/`, the either-way files as placed in 2.2).
+- `docs/plans/` and `docs/owner-review.md` stay; the owner excludes `docs/plans/*` and `docs/owner-review.md` in
+  Cloudflare's build watch paths (dashboard setting).
+- `tools/` gains `tools/perf/` for the performance scripts and their projects (all 107 references move with them).

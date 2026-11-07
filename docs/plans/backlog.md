@@ -683,10 +683,10 @@ Then, in this order (owner, 2026-10-27: "重构应该排在写文档和 benchmar
 gaps and the paths, 2 the refactor of every example, 3 the docs, 4-5 the benchmarks and master. Nothing of a later
 step starts before the earlier one is done, so docs and numbers are written once, about the final code.
 
-- [ ] **1a. Generated-members scan** (roadmap "Less code through the generator", D26,
+- [ ] **1a. Generated-members scan** (report and the owner's answers of 2026-11-07: `finish-scan.md`; build `[Tile]`, `[UniqueKey(SlotsPerAxis)]`, `[MinBy]` / `[MaxBy]`) (roadmap "Less code through the generator", D26,
       `audit-generator`): the API, the battle server and the guides scanned for lines users write twice;
       what it finds is a code item, built before step 2.
-- [ ] **1b. Directory restructure of the whole repository** (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only, before the
+- [ ] **1b. Directory restructure of the whole repository** (layout approved 2026-11-07: `finish-scan.md` section 2 plus `tools/perf/`) (owner, 2026-10-26: "调整整个项目的目录结构"): `git mv` only, before the
   refactor so it lands in the final paths,
   after every agent branch merges; the layout plan (old → new per file, every path reference)
   goes to the owner first.
