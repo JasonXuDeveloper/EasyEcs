@@ -149,7 +149,7 @@ know. L7 is applied in the dashboard, but the file that documents the dashboard'
 | P10 | 2026-10-27, 10-30 | Language of the conversation | Chinese ("用中文对话") | not in any instruction file: Open, backlog T17 | rule due: AGENTS.md |
 | P11 | 2026-10-28 | How the owner is asked | a choice as a popup, an action as the command to run ("需要我选的给我弹窗，需要我做的给我命令") | not in any instruction file: Open, backlog T17 | rule due: AGENTS.md |
 | P12 | 2026-10-30 | Deferring, skipping problems | never defer: try it now; research the cause of a problem (read the asm) before deciding | d1135fd | rule: AGENTS.md ("Try it now") |
-| P13 | 2026-11-01 | "强推去掉" (drop the force push) | no force push | nothing to change: no skill, hook or instruction file force-pushes (checked 2026-11-07) | rule: none needed |
+| P13 | 2026-11-01, clarified 2026-11-07 | "强推去掉"; "如果需要改commit message之类的才强推，不然不需要" | Force-push only when history must be rewritten (a commit message or author to fix); otherwise plain pushes | AGENTS.md, Rules (Commits) | rule: AGENTS.md |
 | P14 | 2026-11-07 | Open items | none left behind ("不要有backlog"): every open item is done | backlog "Order" | rule: backlog.md |
 | P15 | 2026-11-07 | Check the plans against the code | run every skill over the repository | the sweep of f9faa23, 78ffdd4, 3b0a5cc | none (one round) |
 | P16 | 2026-11-07 | Finished branches | deleted at the very end of Finish, after master (`research-copy-asm` with them) | backlog "Owner actions", Finish 6 | rule: backlog.md |

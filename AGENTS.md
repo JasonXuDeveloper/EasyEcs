@@ -260,5 +260,7 @@ Order in a round: `feature` per change, then the code audits, then `audit-docs`,
   "What's new" entry.
 - Commits: logic, docs and CI in separate commits. The author is the repository owner; the committer is the
   environment's signing identity so the signature shows as Verified. No session links in commit messages.
+  Push without force; force-push (`--force-with-lease`) only when history must be rewritten, such as fixing a
+  commit message or author.
 - The version lives only in `Directory.Build.props` (package, EasyEcs.Core and the bundled generator carry it).
 - Releases are cut manually by the owner (the workflow is in `verify`). Do not trigger releases unless asked.
