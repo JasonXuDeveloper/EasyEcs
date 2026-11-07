@@ -371,9 +371,9 @@ public partial class TileTests
             whole.Update();
             foreach (var (a, _) in columns)
             {
-                var next = a.Get<DynamicBuffer<NextHeat>>();
-                next[0] = new NextHeat(-7);               // layer 0: outside every column's layers but x = 3's
-                next[next.Count - 1] = new NextHeat(-7);  // the last layer
+                var next = a.Get<DynamicBuffer<NextHeat>>().AsSpan();
+                next[0] = new NextHeat(-7);                // layer 0: outside every column's layers but x = 3's
+                next[next.Length - 1] = new NextHeat(-7);  // the last layer
             }
             bounded.Update();
             whole.Update();
