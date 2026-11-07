@@ -1003,6 +1003,57 @@ public class CodeFixTests
             Assert.That(group.Count(), Is.LessThanOrEqualTo(before.Count(d => d.Id == group.Key)), $"the fix adds {group.Key}:\n{text}");
     }
 
+    /// <summary>
+    /// EECS103 v3: each hand-written loop of <see cref="AnalyzerTests.HandWrittenElementLoops"/> becomes the plain loop over
+    /// the elements, which compiles, gets the generator's element loop (no EECS055) and is not offered the fix again.
+    /// </summary>
+    [TestCase(0, "        float k = fade.Value;\n        var s = heat.AsSpan();\n        float vk = k;\n        float add = 0.25f;\n"
+                 + "        for (int i = 0; i < s.Length; i++) s[i] = s[i] * vk + add;\n    }")]
+    [TestCase(1, "        var dst = to.AsSpan();\n        for (int i = 0; i < src.Length; i++) dst[i] = src[i] * gain.Value + 1f;\n    }")]
+    public async Task RewritesAHandWrittenElementLoop(int index, string expected)
+    {
+        var document = Document("using EasyEcs;\n" + AnalyzerTests.Usings + AnalyzerTests.Buffers + "\n" + AnalyzerTests.HandWrittenElementLoops[index].Replace("\r\n", "\n"), generate: true);
+        var before = await Analyze(document);
+        var diagnostic = before.Single(d => d.Id == "EECS103");
+        var actions = new List<CodeAction>();
+        await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        var action = actions.Single(a => a.Title == "Write the plain loop");
+        var operation = (await action.GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
+        var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
+        var text = (await fixedDocument.GetTextAsync()).ToString();
+        Assert.That(text, Does.Contain(expected));
+        var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
+        Assert.That(errors, Is.Empty, text);
+        var after = await Analyze(fixedDocument);
+        Assert.That(after.Where(d => d.Id is "EECS103" or "EECS055"), Is.Empty, text);
+    }
+
+    /// <summary>
+    /// EECS103 v2: each hand-written stencil of <see cref="AnalyzerTests.HandWrittenStencils"/> becomes the cell method,
+    /// which compiles, gets the generator's row loop (no EECS055) and is not offered the fix again.
+    /// </summary>
+    [TestCase(0, "    static void Blur(Cell<Warm, G> warm, out NW next) => next = new NW((warm[-1, 0, 0].T + warm.Value.T + warm[1, 0, 1].T) * (1f / 3));")]
+    [TestCase(1, "    static void Wave(Cell<Warm, G> warm, out NW next)\n    {\n        float here = warm.Value.T;\n"
+                 + "        float sum = warm[-1, 0, 0].T + warm[1, 0, 0].T - 2f * here;\n        next = new NW(here + sum * 0.25f);\n    }")]
+    public async Task RewritesAHandWrittenStencil(int index, string expected)
+    {
+        var document = Document("using EasyEcs;\n" + AnalyzerTests.Usings + AnalyzerTests.TileParts + "\n" + AnalyzerTests.Stencils + "\n"
+                                + AnalyzerTests.HandWrittenStencils[index].Replace("\r\n", "\n"), generate: true);
+        var before = await Analyze(document);
+        var diagnostic = before.Single(d => d.Id == "EECS103");
+        var actions = new List<CodeAction>();
+        await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        var action = actions.Single(a => a.Title == "Write the method for one cell");
+        var operation = (await action.GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
+        var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
+        var text = (await fixedDocument.GetTextAsync()).ToString();
+        Assert.That(text, Does.Contain(expected));
+        var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
+        Assert.That(errors, Is.Empty, text);
+        var after = await Analyze(fixedDocument);
+        Assert.That(after.Where(d => d.Id is "EECS103" or "EECS055"), Is.Empty, text);
+    }
+
     private static async Task<Diagnostic[]> Analyze(Document document)
     {
         var compilation = (await document.Project.GetCompilationAsync())!;

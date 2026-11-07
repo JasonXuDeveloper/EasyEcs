@@ -301,3 +301,163 @@ public partial class AnalyzerTests
         Assert.That(await Count("EECS103", Lanes, source), Is.Zero);
     }
 }
+
+// EECS103 v3: a vector loop written by hand over spans of lanes inside a [ForEach] method (HandSimd.Loops), replaced by
+// the plain loop over the elements the generator vectorizes; the guards that leave a loop alone.
+public partial class AnalyzerTests
+{
+    internal const string Buffers = """
+        public struct Fade : IComponent { public float Value; }
+        public struct Gain : IComponent { public float Value; }
+        public struct Level { public float Value; }
+        """;
+
+    /// <summary>The loops EECS103 reports: a Cast to vectors by one (the buffer decay), loads and stores by Count.</summary>
+    internal static readonly string[] HandWrittenElementLoops =
+    [
+        """
+        [EcsSystem] public ref struct S
+        {
+            [ForEach]
+            static void Decay(ref DynamicBuffer<float> heat, in Fade fade)
+            {
+                float k = fade.Value;
+                var s = heat.AsSpan();
+                int i = 0;
+                if (Vector.IsHardwareAccelerated)
+                {
+                    var vs = MemoryMarshal.Cast<float, Vector<float>>(s);
+                    var vk = new Vector<float>(k);
+                    var add = new Vector<float>(0.25f);
+                    for (int v = 0; v < vs.Length; v++) vs[v] = vs[v] * vk + add;
+                    i = vs.Length * Vector<float>.Count;
+                }
+                for (; i < s.Length; i++) s[i] = s[i] * k + 0.25f;
+            }
+        }
+        """,
+        """
+        [EcsSystem] public ref struct S
+        {
+            [ForEach]
+            static void Scale(in DynamicBuffer<Level> from, ref DynamicBuffer<float> to, in Gain gain)
+            {
+                var src = MemoryMarshal.Cast<Level, float>(from.AsReadOnlySpan());
+                var dst = to.AsSpan();
+                int i = 0;
+                for (; i <= src.Length - Vector<float>.Count; i += Vector<float>.Count)
+                    (new Vector<float>(src.Slice(i)) * gain.Value + Vector<float>.One).CopyTo(dst.Slice(i));
+                for (; i < src.Length; i++) dst[i] = src[i] * gain.Value + 1f;
+            }
+        }
+        """,
+    ];
+
+    [TestCaseSource(nameof(HandWrittenElementLoops))]
+    public async Task HandWrittenElementLoopReports(string source)
+    {
+        await AssertReports("EECS103", Buffers, Usings + source);
+        Assert.That(await Count("EECS103", Buffers, Usings + source), Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task HandWrittenElementLoopNamesThePlainLoop()
+    {
+        var found = (await GeneratorTests.Analyze([Buffers, Usings + HandWrittenElementLoops[0]])).Single(d => d.Id == "EECS103");
+        Assert.That(found.GetMessage(), Does.EndWith("float vk = k; float add = 0.25f; for (int i = 0; i < s.Length; i++) s[i] = s[i] * vk + add;"));
+    }
+
+    // Left alone: no vector loop of the generator's (SimdMode.Off), lanes C# promotes (bytes), no scalar loop for the
+    // elements left, a sum across vectors (another order than element by element).
+    [TestCase("[ForEach(SimdMode = SimdMode.Off)]", "float", "for (int v = 0; v < vs.Length; v++) vs[v] = vs[v] * vk;", "for (; i < s.Length; i++) s[i] = s[i] * k;")]
+    [TestCase("[ForEach]", "byte", "for (int v = 0; v < vs.Length; v++) vs[v] = vs[v] + vs[v];", "for (; i < s.Length; i++) s[i] = (byte)(s[i] + s[i]);")]
+    [TestCase("[ForEach]", "float", "for (int v = 0; v < vs.Length; v++) vs[v] = vs[v] * vk;", "")]
+    [TestCase("[ForEach]", "float", "var sum = Vector<float>.Zero; for (int v = 0; v < vs.Length; v++) sum += vs[v];", "for (; i < s.Length; i++) s[i] = s[i] * k;")]
+    public async Task HandWrittenElementLoopLeavesAlone(string attribute, string lane, string loop, string rest)
+    {
+        string source = Usings + "[EcsSystem] public ref struct S { " + attribute + $" static void Decay(ref DynamicBuffer<{lane}> heat, in Fade fade) {{ float k = fade.Value; var s = heat.AsSpan(); int i = 0; "
+                        + $"if (Vector.IsHardwareAccelerated) {{ var vs = MemoryMarshal.Cast<{lane}, Vector<{lane}>>(s); var vk = new Vector<{lane}>(({lane})k); {loop} i = vs.Length * Vector<{lane}>.Count; }} {rest} }} }}";
+        Assert.That((await Diagnose(Buffers, source)).Where(id => id.StartsWith("CS")), Is.Empty, "the case compiles");
+        Assert.That(await Count("EECS103", Buffers, source), Is.Zero);
+    }
+
+    /// <summary>A cell of one float and the buffer a stencil writes, beside the tiles of <see cref="TileParts"/> (G: 4 by 4).</summary>
+    internal const string Stencils = """
+        public record struct Warm(float T);
+        public record struct NW(float T);
+        """;
+
+    /// <summary>The stencils EECS103 v2 reports: a blur of one CopyTo at a literal width, a wave with vector locals stepping by Count.</summary>
+    internal static readonly string[] HandWrittenStencils =
+    [
+        """
+        [EcsSystem] public ref struct S
+        {
+            [ForEach]
+            static void Blur(Tile<Warm, G> warm, Mut<DynamicBuffer<NW>> next)
+            {
+                warm.ExchangeHalo();
+                var into = MemoryMarshal.Cast<NW, float>(next.Write().AsSpan());
+                foreach (var row in warm.Rows())
+                {
+                    var c = warm.At(row);
+                    for (int x = 0; x < 4; x += 4)
+                        ((c.Load128<float>(x - 1) + c.Load128<float>(x) + c.Load128<float>(x + 1, 0, 1)) * (1f / 3)).CopyTo(into.Slice(row.Index + x));
+                }
+            }
+        }
+        """,
+        """
+        [EcsSystem] public ref struct S
+        {
+            [ForEach]
+            static void Wave(Tile<Warm, G> warm, Mut<DynamicBuffer<NW>> next)
+            {
+                warm.ExchangeHalo();
+                var into = MemoryMarshal.Cast<NW, float>(next.Write().AsSpan());
+                foreach (var row in warm.Rows())
+                {
+                    var c = warm.At(row);
+                    for (int x = 0; x < 4; x += Vector128<float>.Count)
+                    {
+                        var here = c.Load128<float>(x);
+                        var sum = c.Load128<float>(x - 1) + c.Load128<float>(x + 1) - 2f * here;
+                        (here + sum * 0.25f).CopyTo(into.Slice(row.Index + x));
+                    }
+                }
+            }
+        }
+        """,
+    ];
+
+    [TestCaseSource(nameof(HandWrittenStencils))]
+    public async Task HandWrittenStencilReports(string source)
+    {
+        await AssertReports("EECS103", GeneratorTests.Components, TileParts, Stencils, Usings + source);
+        Assert.That(await Count("EECS103", GeneratorTests.Components, TileParts, Stencils, Usings + source), Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task HandWrittenStencilNamesTheCellMethod()
+    {
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, Stencils, Usings + HandWrittenStencils[1]])).Single(d => d.Id == "EECS103");
+        Assert.That(found.GetMessage(), Does.EndWith(
+            "Wave(Cell<Warm, G> warm, out NW next) { float here = warm.Value.T; float sum = warm[-1, 0, 0].T + warm[1, 0, 0].T - 2f * here; next = new NW(here + sum * 0.25f); }"));
+    }
+
+    // Left alone: no vector loop of the generator's (SimdMode.Off), a range of rows (ExchangeHalo(from, to)), a comparison, a
+    // load at a column that is not x plus a constant, a row of half the tile's width.
+    [TestCase("[ForEach(SimdMode = SimdMode.Off)]", "warm.ExchangeHalo();", "c.Load128<float>(x - 1) + c.Load128<float>(x + 1)", "x < 4")]
+    [TestCase("[ForEach]", "warm.ExchangeHalo(0, 1);", "c.Load128<float>(x - 1) + c.Load128<float>(x + 1)", "x < 4")]
+    [TestCase("[ForEach]", "warm.ExchangeHalo();", "Vector128.Max(c.Load128<float>(x - 1), c.Load128<float>(x + 1))", "x < 4")]
+    [TestCase("[ForEach]", "warm.ExchangeHalo();", "c.Load128<float>(0) + c.Load128<float>(x + 1)", "x < 4")]
+    [TestCase("[ForEach]", "warm.ExchangeHalo();", "c.Load128<float>(x - 1) + c.Load128<float>(x + 1)", "x < 2")]
+    public async Task HandWrittenStencilLeavesAlone(string attribute, string halo, string value, string bound)
+    {
+        string source = Usings + "[EcsSystem] public ref struct S { " + attribute + " static void Blur(Tile<Warm, G> warm, Mut<DynamicBuffer<NW>> next) { " + halo
+                        + " var into = MemoryMarshal.Cast<NW, float>(next.Write().AsSpan()); foreach (var row in warm.Rows()) { var c = warm.At(row); "
+                        + $"for (int x = 0; {bound}; x += 4) ({value}).CopyTo(into.Slice(row.Index + x)); }} }} }}";
+        Assert.That((await Diagnose(GeneratorTests.Components, TileParts, Stencils, source)).Where(id => id.StartsWith("CS")), Is.Empty, "the case compiles");
+        Assert.That(await Count("EECS103", GeneratorTests.Components, TileParts, Stencils, source), Is.Zero);
+    }
+}
