@@ -7,10 +7,10 @@ using NUnit.Framework;
 namespace EasyEcs.UnitTest;
 
 /// <summary>
-/// The halos a pass taking a tile by value keeps (TileHalos): the Game of Life on a torus of plates where few plates
-/// change, so most plates take their kept halo back, against the whole torus computed at once, on one thread and on
-/// four; cells written from outside the pass, a plate's cells removed and given back, a plate destroyed and another
-/// created in its place, all seen by the plates around them; the kept halos actually read; 0 B once warm.
+/// The neighbors a pass taking a tile by value keeps (TileNeighborCache): the Game of Life on a torus of plates where
+/// few plates change, against the whole torus computed at once, on one thread and on four; cells written from outside
+/// the pass, a plate's cells removed and given back, a plate destroyed and another created in its place, all seen by
+/// the plates around them; the kept neighbors actually read; 0 B once warm.
 /// </summary>
 public partial class TileTests
 {
@@ -97,12 +97,9 @@ public partial class TileTests
         return next;
     }
 
-    private static TileHaloCache<Life, KeptPlate> KeptHalos(World world) =>
-        world.TileState<TileHaloCache<Life, KeptPlate>>();
-
     [TestCase(1)]
     [TestCase(4)]
-    public void KeptHalosGiveTheGameOfTheWholeTorusWhateverChangesTheGrid(int threads)
+    public void KeptNeighborsGiveTheGameOfTheWholeTorusWhateverChangesTheGrid(int threads)
     {
         var (world, plates) = KeptWorld(threads);
         using var _ = world;
@@ -150,21 +147,21 @@ public partial class TileTests
                     if (cells[z * 16 + x].Alive != grid[place.X * 16 + x, place.Z * 16 + z])
                         Assert.Fail($"step {step}, plate {place}, cell ({x}, {z}): {cells[z * 16 + x].Alive}, expected {grid[place.X * 16 + x, place.Z * 16 + z]}");
             }
-            kept = Math.Max(kept, KeptHalos(world).Kept);
+            kept = Math.Max(kept, world.KeptNeighbors<KeptPlate>());
         }
 
-        // Most plates are still: their halos were kept, and read (a kept halo that was wrong would have failed above).
-        Assert.That(kept, Is.GreaterThanOrEqualTo(Torus * Torus / 2));
+        // Every plate's neighbors were kept, and read (a kept neighbor that was wrong would have failed above).
+        Assert.That(kept, Is.EqualTo(Torus * Torus));
     }
 
     [TestCase(1)]
     [TestCase(4)]
-    public void KeptHalosAllocateNothingOnceWarm(int threads)
+    public void KeptNeighborsAllocateNothingOnceWarm(int threads)
     {
         var (world, _) = KeptWorld(threads);
         using var __ = world;
         Allocations.WarmUp(world.Update, 200);
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
-        Assert.That(KeptHalos(world).Kept, Is.GreaterThanOrEqualTo(Torus * Torus / 2));
+        Assert.That(world.KeptNeighbors<KeptPlate>(), Is.EqualTo(Torus * Torus));
     }
 }
