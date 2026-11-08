@@ -59,10 +59,11 @@ The analyzer still checks every build, so a rule the agent misses becomes a comp
 | File | What it holds |
 | --- | --- |
 | [`/llms.txt`](https://ecs.xgamedev.net/llms.txt) | A summary of EasyEcs, its key facts and a link to the Markdown copy of every English page ([llmstxt.org](https://llmstxt.org) format) |
-| [`/llms-full.txt`](https://ecs.xgamedev.net/llms-full.txt) | The full text of every English page in one file |
-| [`/llms.zh.txt`](https://ecs.xgamedev.net/llms.zh.txt), [`/llms-full.zh.txt`](https://ecs.xgamedev.net/llms-full.zh.txt) | The same for the Chinese pages (also at `/zh/llms.txt` and `/zh/llms-full.txt`) |
+| [`/llms-full.txt`](https://ecs.xgamedev.net/llms-full.txt) | The full text of every English page in one file, the API reference aside |
+| [`/llms-reference.txt`](https://ecs.xgamedev.net/llms-reference.txt) | The generated API reference in one file: every public type and member |
+| [`/llms.zh.txt`](https://ecs.xgamedev.net/llms.zh.txt), [`/llms-full.zh.txt`](https://ecs.xgamedev.net/llms-full.zh.txt), [`/llms-reference.zh.txt`](https://ecs.xgamedev.net/llms-reference.zh.txt) | The same for the Chinese pages (also at `/zh/llms.txt`, `/zh/llms-full.txt` and `/zh/llms-reference.txt`) |
 
-Give an assistant `llms.txt` when it can follow links, `llms-full.txt` when it cannot. The full file includes the
+Give an assistant `llms.txt` when it can follow links, `llms-full.txt` when it cannot, and `llms-reference.txt` too when it needs exact signatures. The full file includes the
 code of the [battle server example](/en/docs/example), so a model sees every feature used together.
 
 ## Markdown copies of every page [#markdown-copies]

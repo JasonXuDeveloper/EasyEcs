@@ -46,10 +46,11 @@ curl -fsSL --create-dirs -o .claude/skills/easyecs/SKILL.md \
 | 文件 | 内容 |
 | --- | --- |
 | [`/llms.zh.txt`](https://ecs.xgamedev.net/llms.zh.txt) | EasyEcs 简介、关键事实，以及每个中文页面 Markdown 版本的链接（[llmstxt.org](https://llmstxt.org) 格式；也可访问 `/zh/llms.txt`） |
-| [`/llms-full.zh.txt`](https://ecs.xgamedev.net/llms-full.zh.txt) | 所有中文页面的全文，合成一个文件（也可访问 `/zh/llms-full.txt`） |
-| [`/llms.txt`](https://ecs.xgamedev.net/llms.txt)、[`/llms-full.txt`](https://ecs.xgamedev.net/llms-full.txt) | 英文页面的同类文件 |
+| [`/llms-full.zh.txt`](https://ecs.xgamedev.net/llms-full.zh.txt) | 除 API 参考外所有中文页面的全文，合成一个文件（也可访问 `/zh/llms-full.txt`） |
+| [`/llms-reference.zh.txt`](https://ecs.xgamedev.net/llms-reference.zh.txt) | 自动生成的 API 参考，合成一个文件：每个公开类型和成员（也可访问 `/zh/llms-reference.txt`） |
+| [`/llms.txt`](https://ecs.xgamedev.net/llms.txt)、[`/llms-full.txt`](https://ecs.xgamedev.net/llms-full.txt)、[`/llms-reference.txt`](https://ecs.xgamedev.net/llms-reference.txt) | 英文页面的同类文件 |
 
-助手能跟随链接时给它 `llms.txt`，不能时给 `llms-full.txt`。全文文件包含[战斗服示例](/zh/docs/example)的代码，模型能看到所有功能放在一起的用法。
+助手能跟随链接时给它 `llms.txt`，不能时给 `llms-full.txt`；需要准确的签名时再加上 `llms-reference.zh.txt`。全文文件包含[战斗服示例](/zh/docs/example)的代码，模型能看到所有功能放在一起的用法。
 
 ## 每页的 Markdown 版本 [#markdown-copies]
 

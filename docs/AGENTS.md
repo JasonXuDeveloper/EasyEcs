@@ -117,7 +117,8 @@ scripts/                 chromium.ts (a headless Chromium for mermaid), git-hist
 - hreflang `en`, `zh`, `zh-CN` and `x-default` on every page with both languages.
 - `scripts/generate-static.ts` moves pages to `x.html` (slash-less URLs serve 200), writes 404.html, the sitemap
   (hreflang alternates, `lastmod` from git), robots.txt (all crawlers, AI crawlers and Baiduspider named),
-  `llms.txt` / `llms-full.txt` and their `.zh` versions, a Markdown copy of every page (`<page>.md`, also served for
+  `llms.txt`, `llms-full.txt` (the written pages) and `llms-reference.txt` (the generated API reference, capped apart)
+  and their `.zh` versions, a Markdown copy of every page (`<page>.md`, also served for
   `Accept: text/markdown` by `functions/[[path]].ts`) and the social cards (`scripts/og.ts`).
 - `scripts/lint-seo.ts` (last step of `bun run build`) fails on: a `<title>` over 60 characters (a Chinese character
   counts as two) or shared with another page, a description outside 70-160 characters (Chinese 40-90), a missing
