@@ -43,7 +43,8 @@ form to it):
 
 | Form | x86 | ARM64 today | ARM64 path to add |
 |---|---|---|---|
-| Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`, `LaneMath.PerLane`), `Lanes.Bits`, `Emit.AddLanes`, EntityRandom draws (`RandomLanes`) | vector | vector (`Vector<T>` is 128-bit) | none needed |
+| Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`, `LaneMath.PerLane`), `Lanes.Bits`, `Emit.AddLanes` | vector | vector (`Vector<T>` is 128-bit) | none needed |
+| EntityRandom draws (`RandomLanes`: six 8-byte multiplies per lane, `RandomLanes.IsAccelerated` = vectors of 256 bits and up) | vector (AVX2, AVX-512; rows under SSE alone) | rows (two lanes of emulated multiplies per 128 bits lose to the scalar draw: EntityRandomBenchmark under `DOTNET_EnableAVX=0`) | owner's M4 run of EntityRandomBenchmark to confirm the gate |
 | Tables at a lane index (`TableLanes.Pick`: AVX-512 / AVX2 VPERMD, `Vector128.Shuffle`) | vector | vector (`Vector128.Shuffle`: TBL) | owner's M4 run of KernelBenchmark SteerTable |
 | Components of several fields, `Vector2/3/4` (`Interleaved`: AVX2 / AVX-512 shuffles, NEON LD2-4 / ST2-4) | vector | vector | none needed |
 | Narrow lanes' masks of a word (`Interleaved.Lanes8` / `Lanes16`: the word's bits spread by a multiply per ulong) | vector | vector (`Vector<T>` of 128 bits: 2 ulongs) | none needed |
@@ -194,8 +195,10 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   (Kernel/Kernel.Random.cs over Core's `RandomLanes`: the ids read as 8-byte lanes from the run's slots, the hash in
   64-bit lanes, narrowed to the method's lanes): `Bits` in 8-byte lanes, `Float` / `Chance` / `Range(float)` /
   `Range(int)` in 4-byte ones; an int `Range` whose bounds are not constants bails the lanes where max < min (the
-  method throws there). Proof: EntityRandomTests bit for bit against SimdMode.Off (holes, versions above 1, parallel
-  chunks); a draw of another entity or a varying stream keeps its reason.
+  method throws there). The loop runs where vectors hold 256 bits or more (`Code.Draws`, `RandomLanes.IsAccelerated`):
+  at 128 bits two lanes of emulated 64-bit multiplies were 1.25 times as slow as the scalar draw (EntityRandomBenchmark
+  under `DOTNET_EnableAVX=0`), at 256 already faster. Proof: EntityRandomTests bit for bit against SimdMode.Off (holes,
+  versions above 1, parallel chunks); a draw of another entity or a varying stream keeps its reason.
 - **Conditions**: `if` / `else` chains, nested ifs, early `return` (a mask of rows still running), ternaries, `&&`,
   `||`, `!`, comparisons across fields of several components and singletons, `Math.Min` / `Max` / `Abs` / `Clamp`,
   the saturating and narrow-lane idioms. `++` / `--` used as a value (`if (--t.Ticks <= 0)`, a timer; `Kernel.Step`):
