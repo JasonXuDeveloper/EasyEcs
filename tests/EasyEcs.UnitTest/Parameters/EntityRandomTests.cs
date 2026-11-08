@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.Intrinsics;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -283,9 +284,14 @@ public class EntityRandomTests
         using var world = new World();
         world.AddSystem<LaneDraws>();
         world.AddSystem<ParallelLaneDraws>();
+        // Below 256 bits (SSE, NEON) two 8-byte lanes of emulated multiplies lose to the scalar draw: the rows run the method.
+        bool rows = !Vector512.IsHardwareAccelerated && !RandomLanes.IsAccelerated;
         foreach (var system in world.DescribeSchedule().Groups[0].Stages.SelectMany(s => s.Systems))
             foreach (var loop in system.Loops)
-                Assert.That(loop, Does.Contain(": vector"), loop);
+            {
+                Assert.That(loop, Does.Contain(": vector").And.Contain("EntityRandom draws (vectors of 256 bits and up)"), loop);
+                Assert.That(loop.Contains("; rows on this hardware"), Is.EqualTo(rows), loop);
+            }
     }
 
     [Test]

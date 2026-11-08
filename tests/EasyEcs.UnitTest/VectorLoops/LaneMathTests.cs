@@ -291,6 +291,7 @@ public class LaneMathTests
 
     private static bool Bits(float a, float b) => BitConverter.SingleToUInt32Bits(a) == BitConverter.SingleToUInt32Bits(b);
     private static bool Bits(double a, double b) => BitConverter.DoubleToUInt64Bits(a) == BitConverter.DoubleToUInt64Bits(b);
+    private static string Hex(double a) => BitConverter.DoubleToUInt64Bits(a).ToString("X16");
 
     private static long Samples(uint stride) => stride == 1 ? 1L << 32 : (1L << 32) / stride + Edges.Length;
 
@@ -515,15 +516,22 @@ public class LaneMathTests
             var want = new Real4();
             LoweredKernels.Angles(ref want, in xs[i]);
             var got = entities[i].Get<Real4>();
-            Assert.That(Bits(got.A, want.A) && Bits(got.B, want.B) && Bits(got.C, want.C) && Bits(got.D, want.D), $"{BitConverter.SingleToUInt32Bits(xs[i].Value):X8}: {got} instead of {want}");
+            Assert.That(Same(got.A, want.A) && Same(got.B, want.B) && Same(got.C, want.C) && Same(got.D, want.D), $"{BitConverter.SingleToUInt32Bits(xs[i].Value):X8}: {got} instead of {want}");
             var wanted = new Real8x4();
             LoweredKernels.DoubleAngles(ref wanted, in ds[i]);
             var gotten = entities[i].Get<Real8x4>();
-            Assert.That(Bits(gotten.A, wanted.A) && Bits(gotten.B, wanted.B) && Bits(gotten.C, wanted.C) && Bits(gotten.D, wanted.D), $"{ds[i].Value}: {gotten} instead of {wanted}");
+            Assert.That(Same(gotten.A, wanted.A) && Same(gotten.B, wanted.B) && Same(gotten.C, wanted.C) && Same(gotten.D, wanted.D), $"{ds[i].Value}: {Hex(gotten.A)} {Hex(gotten.B)} {Hex(gotten.C)} {Hex(gotten.D)} instead of {Hex(wanted.A)} {Hex(wanted.B)} {Hex(wanted.C)} {Hex(wanted.D)}");
         }
         LoweredKernels.Bearing(world);
         for (int i = 0; i < count; i++)
             Assert.That(Bits(entities[i].Get<Real4>().A, MathF.Atan2(xs[i].Value, 1.5f)), $"{xs[i].Value}");
+
+        // The bits, but any NaN for a NaN: these bodies add and multiply NaNs of both signs (an infinite x makes
+        // b = x * x - a the negative default NaN and Abs(a - b) a positive one), and x86 keeps the first operand's
+        // NaN, an order the JIT may swap in a commutative operation (at an infinite x, DoubleAngles' C is the positive
+        // NaN from the method and the Vector512 loop, the negative one from the Vector256 loop under
+        // DOTNET_EnableAVX512=0). Per-lane calls themselves are checked bit for bit by the Bearing loop above.
+        static bool Same(double a, double b) => Bits(a, b) || double.IsNaN(a) && double.IsNaN(b);
     }
 
     /// <summary>The per-lane bodies get their vector loops (the gate opens them); the call alone stays as written.</summary>

@@ -1400,8 +1400,9 @@ public class KernelTests
     /// <summary>
     /// Every vector loop of this assembly's systems runs as one on this hardware, as the skill's table of ARM64 forms says
     /// (audit-vector-loops): each schedule line is printed (the ARM64 CI job shows them), and on ARM64 none says "rows on
-    /// this hardware" except the gathers of other entities (no gather on ARM64 in .NET 10: D131) and a wide component
-    /// whose table lookups do not pay (the gate left it "Vector512 only").
+    /// this hardware" except the gathers of other entities (no gather on ARM64 in .NET 10: D131), EntityRandom draws (two
+    /// 8-byte lanes of emulated multiplies per 128 bits lose to the scalar draw) and a wide component whose table lookups
+    /// do not pay (the gate left it "Vector512 only").
     /// </summary>
     [Test]
     public void EveryVectorFormRunsAsAVectorLoopOnARM64()
@@ -1414,7 +1415,8 @@ public class KernelTests
         Assert.That(lines.Single(l => l.StartsWith("Glide:", StringComparison.Ordinal)), Does.Contain("wide component"));
         if (!System.Runtime.Intrinsics.Arm.AdvSimd.Arm64.IsSupported) Assert.Ignore("ARM64 only: the lines above are this hardware's");
         var rows = lines.Where(l => l.Contains("rows on this hardware", StringComparison.Ordinal)
-            && !l.Contains("gathers", StringComparison.Ordinal) && !l.Contains("(Vector512 only)", StringComparison.Ordinal));
+            && !l.Contains("gathers", StringComparison.Ordinal) && !l.Contains("EntityRandom draws", StringComparison.Ordinal)
+            && !l.Contains("(Vector512 only)", StringComparison.Ordinal));
         Assert.That(rows, Is.Empty);
         Assert.That(lines.Single(l => l.StartsWith("Glide:", StringComparison.Ordinal)), Does.Not.Contain("rows on this hardware"));
     }
