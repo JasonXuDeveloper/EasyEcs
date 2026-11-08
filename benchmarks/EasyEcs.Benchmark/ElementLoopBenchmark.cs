@@ -139,7 +139,44 @@ public class BatchLoopBenchmark
     [Benchmark] public void BatchLoopPerRow() => ElementPasses.BatchLoopPerRow(_world);
 }
 
-/// <summary>The passes of <see cref="ElementLoopBenchmark"/>, <see cref="HeightMapLoopBenchmark"/> and <see cref="BatchLoopBenchmark"/>.</summary>
+/// <summary>
+/// A flat element loop (each field of the elements alike): sparks of two floats scaled and offset in place, as written
+/// (Scalar: SimdMode.Off) and with the loop's vector form (Generated). Elements of 4 to 20 sparks are 8 to 40 floats,
+/// mostly past the last whole vector, which the loop as written runs; 64 is whole vectors. The case a masked AVX-512
+/// tail was measured on (docs/owner-review.md: slower at every length).
+/// </summary>
+[MemoryDiagnoser]
+public class FlatTailBenchmark
+{
+    public record struct Spark2(float X, float Y);
+
+    [Params(10_000)] public int Entities;
+    [Params(4, 12, 20, 64)] public int Elements;
+
+    private World _world;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _world.Reserve<DynamicBuffer<Spark2>, ElementLoopBenchmark.Fade>(Entities);
+        var random = new Random(5);
+        for (int n = 0; n < Entities; n++)
+        {
+            var e = _world.CreateEntity(new DynamicBuffer<Spark2>(), new ElementLoopBenchmark.Fade(0.5f + n % 7 * 0.0625f));
+            var sparks = e.Get<DynamicBuffer<Spark2>>().SetCount(Elements);
+            for (int i = 0; i < Elements; i++) sparks[i] = new Spark2(random.Next(-100, 100) * 0.25f, random.Next(-100, 100) * 0.25f);
+        }
+    }
+
+    [GlobalCleanup]
+    public void Cleanup() => _world.Dispose();
+
+    [Benchmark(Baseline = true)] public void FlatScalar() => ElementPasses.FlatScalar(_world);
+    [Benchmark] public void FlatGenerated() => ElementPasses.FlatGenerated(_world);
+}
+
+/// <summary>The passes of <see cref="ElementLoopBenchmark"/>, <see cref="FlatTailBenchmark"/>, <see cref="HeightMapLoopBenchmark"/> and <see cref="BatchLoopBenchmark"/>.</summary>
 public static class ElementPasses
 {
     internal const int Columns = 256, Layers = 32;
@@ -204,6 +241,20 @@ public static class ElementPasses
             }
         }
         top.CopyTo(map.SetCount(Columns));
+    }
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    internal static void FlatScalar(ref DynamicBuffer<FlatTailBenchmark.Spark2> sparks, in ElementLoopBenchmark.Fade fade)
+    {
+        float k = fade.Value;
+        foreach (ref var e in sparks.AsSpan()) e = new FlatTailBenchmark.Spark2(e.X * k + 0.25f, e.Y * k + 0.25f);
+    }
+
+    [ForEach]
+    internal static void FlatGenerated(ref DynamicBuffer<FlatTailBenchmark.Spark2> sparks, in ElementLoopBenchmark.Fade fade)
+    {
+        float k = fade.Value;
+        foreach (ref var e in sparks.AsSpan()) e = new FlatTailBenchmark.Spark2(e.X * k + 0.25f, e.Y * k + 0.25f);
     }
 
     [ForEach(SimdMode = SimdMode.Off)]
