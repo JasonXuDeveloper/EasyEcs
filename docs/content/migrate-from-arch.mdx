@@ -33,7 +33,7 @@ The package carries the source generator and the analyzer: `[ForEach]` systems, 
 | Arch | EasyEcs | What changes |
 | --- | --- | --- |
 | `World.Create()` | `new World(options)` | A world has one owner thread; run one world per thread. |
-| Any struct is a component | A struct implementing `IComponent` | Add the interface; the analyzer rejects classes ([EECS006](/en/docs/guide/analyzer#eecs006)). |
+| Any struct is a component | A struct implementing `IComponent` | Add the interface; the analyzer rejects classes ([EECS006](/en/docs/guide/help/analyzer#eecs006)). |
 | `QueryDescription` | Filter attributes on a `[ForEach]` method, or a `QueryFilter` | Written once, on the method; the generator keeps the filter in a static field. |
 | `IForEach<T...>` + `InlineQuery` | A `[ForEach]` method in an `[EcsSystem]` | The generator writes the struct job and the call. |
 | `CommandBuffer` + `Playback` | Direct calls | Changes apply at once; later systems see them. |
@@ -46,7 +46,7 @@ The package carries the source generator and the analyzer: `[ForEach]` systems, 
 The rows name the components of the example below (`Health`, the tag `Dead`). For each
 component the generator writes named members (`entity.Health`, `HasHealth`, `SetHealth(…)`, `IsDead`): use them
 in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`) are for generic code
-([generated members](/en/docs/guide/entities-and-components#generated-members)).
+([generated members](/en/docs/guide/basics/entities-and-components#generated-members)).
 
 ### World and entities [#world-and-entities]
 
@@ -301,12 +301,12 @@ machine the EasyEcs version runs the tick in <BenchValue k="peers.easyecs" /> ag
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | Keeping a component as a plain struct without `IComponent` | It cannot be a parameter or a column | Compiler error: the constraint `IComponent` |
-| A class as a component | Rejected | [EECS006](/en/docs/guide/analyzer#eecs006) |
-| Porting the counters object as a field of the system | Systems are stateless | [EECS007](/en/docs/guide/analyzer#eecs007): use a singleton |
-| Storing an `Entity` in a component (Arch's `Entity` was a plain struct) | The column holds references | [EECS017](/en/docs/guide/analyzer#eecs017) (warning): store `EntityId` |
-| A static method without `Entity` or `World` that adds a component | It promised no structural change | [EECS013](/en/docs/guide/analyzer#eecs013): take the `Entity` |
+| A class as a component | Rejected | [EECS006](/en/docs/guide/help/analyzer#eecs006) |
+| Porting the counters object as a field of the system | Systems are stateless | [EECS007](/en/docs/guide/help/analyzer#eecs007): use a singleton |
+| Storing an `Entity` in a component (Arch's `Entity` was a plain struct) | The column holds references | [EECS017](/en/docs/guide/help/analyzer#eecs017) (warning): store `EntityId` |
+| A static method without `Entity` or `World` that adds a component | It promised no structural change | [EECS013](/en/docs/guide/help/analyzer#eecs013): take the `Entity` |
 | Keeping a "pending changes" list to apply after the loop | Works, but costs a second pass | Code review: apply the change where it is decided |
-| A parallel method that changes structure or writes a singleton | Data races | [EECS010](/en/docs/guide/analyzer#eecs010) |
+| A parallel method that changes structure or writes a singleton | Data races | [EECS010](/en/docs/guide/help/analyzer#eecs010) |
 
 ## Related [#related]
 
@@ -314,10 +314,10 @@ machine the EasyEcs version runs the tick in <BenchValue k="peers.easyecs" /> ag
   <Card title="EasyEcs vs Arch" href="/en/docs/vs-arch">
     The two libraries side by side, with every benchmark.
   </Card>
-  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/basics/systems">
     Parameters, filters, ordering, groups and parallel methods.
   </Card>
-  <Card title="Structural changes" href="/en/docs/guide/structural-changes">
+  <Card title="Structural changes" href="/en/docs/guide/changes/structural-changes">
     What applies at once during a pass, and why it is safe.
   </Card>
 </Cards>

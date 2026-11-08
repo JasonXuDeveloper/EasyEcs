@@ -34,7 +34,7 @@ dotnet run -c Release --project samples/MultiWorld -- --updates 50
 
 A unit is a `Position` and a `Velocity`. A ghost is a `Position` and the `Ghost` tag, nothing more: it carries what the
 neighbors read and no `Velocity`, so the systems that move units never write it. The zone's `Tally`
-[singleton](/en/docs/guide/singletons) counts the sightings of its own world only.
+[singleton](/en/docs/guide/basics/singletons) counts the sightings of its own world only.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/MultiWorld/Components.cs</include>
 
@@ -44,7 +44,7 @@ neighbors read and no `Velocity`, so the systems that move units never write it.
 parameter makes the generator write the neighbor search from the distance test, and the neighbors are every entity
 with a `Position`, so the ghosts are seen like the zone's own units. `[Without<Ghost>]` keeps the ghosts from
 looking: what a ghost sees is counted by the zone that owns it. `MoveSystem` and `BounceSystem` read and write units
-only, by their `Velocity`. Each [system](/en/docs/guide/systems) has one job and knows nothing of zones, so the same
+only, by their `Velocity`. Each [system](/en/docs/guide/basics/systems) has one job and knows nothing of zones, so the same
 three serve every zone and the map as one world.
 
 <include lang="csharp" meta='title="Systems.cs"'>../../../samples/MultiWorld/Systems.cs</include>
@@ -54,7 +54,7 @@ three serve every zone and the map as one world.
 `Map` says where the zones are and where each unit starts. `Zone.Create` builds one zone's world with the three
 systems, sight first so that it reads what the last exchange left; `Zone.Run` updates it and waits at the exchange
 after every update. Between two exchanges only its thread touches the world
-([one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)).
+([one world per thread](/en/docs/guide/performance/threading#recommended-one-world-per-thread)).
 
 <include lang="csharp" meta='title="Zone.cs"'>../../../samples/MultiWorld/Zone.cs</include>
 
@@ -63,7 +63,7 @@ after every update. Between two exchanges only its thread touches the world
 `Border.Exchange` runs while every zone waits, so the one thread that runs it may touch every world; it is host code,
 since a system belongs to one world and the border to two. It throws away the last ghosts (`DestroyAll<Ghost>`),
 moves each unit that crossed into the zone it stands in with
-[`MoveEntities`](/en/docs/guide/migration-and-unload#move-entities) (every component goes with it), then copies each
+[`MoveEntities`](/en/docs/guide/saves/migration-and-unload#move-entities) (every component goes with it), then copies each
 unit within sight of a border into the neighbor zone as a ghost. The ghosts are new entities at every exchange: hold
 on to a ghost's position, never to its id.
 
@@ -99,13 +99,13 @@ measurement: the speed of worlds side by side comes from the BenchmarkDotNet sui
 ## Related [#related]
 
 <Cards>
-  <Card icon={<Cpu />} title="Threading" href="/en/docs/guide/threading">
+  <Card icon={<Cpu />} title="Threading" href="/en/docs/guide/performance/threading">
     One world per thread, parallel systems and parallel [ForEach] methods.
   </Card>
-  <Card icon={<Workflow />} title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+  <Card icon={<Workflow />} title="Migration and unload" href="/en/docs/guide/saves/migration-and-unload">
     MoveEntities: entities and what they own to another world.
   </Card>
-  <Card icon={<LayoutGrid />} title="Grid tiles" href="/en/docs/guide/grids">
+  <Card icon={<LayoutGrid />} title="Grid tiles" href="/en/docs/guide/performance/grids">
     Halos inside one world: tiles of cells that read their neighbors' edges.
   </Card>
   <Card icon={<RefreshCw />} title="HotReload sample" href="/en/docs/samples/hot-reload">

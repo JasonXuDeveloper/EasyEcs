@@ -59,8 +59,8 @@ guest.Destroy();                       // retired: alive, tagged Retired, Health
 world.Update();                        // ReleaseSeats frees it: guest.IsAlive is false
 ```
 
-- Every destroy path retires such entities: `Destroy`, `DestroyAll<T>()`, a [hierarchy](/en/docs/guide/hierarchy)
-  cascade or a [target policy](/en/docs/guide/indexes-and-relations#target-policies).
+- Every destroy path retires such entities: `Destroy`, `DestroyAll<T>()`, a [hierarchy](/en/docs/guide/data/hierarchy)
+  cascade or a [target policy](/en/docs/guide/data/indexes-and-relations#target-policies).
 - A system that acquires the resource filters `Without<Retired>`: a retired entity still holds its cleanup
   component, so without the filter it could acquire again after it left:
 
@@ -83,7 +83,7 @@ public ref struct AssignSeats
 - Destroying a retired entity again does nothing. Removing a cleanup component from a live entity just removes it.
 - A retired entity leaves its indexes, and its children go with it. Its other components are gone without a removal:
   `[Removed<T>]` does not visit it, as it visits no destroyed entity
-  ([removal detection](/en/docs/guide/change-tracking#removal-detection)).
+  ([removal detection](/en/docs/guide/changes/change-tracking#removal-detection)).
 - A retired entity is not brought back: `SetAll` leaves it out unless the filter names `Retired`
   (`With<Retired>()`), `Clone()` throws, and `MoveEntities` skips it. `RemoveAll` of a cleanup component reaches
   it, since that is how it is released.
@@ -93,7 +93,7 @@ public ref struct AssignSeats
 
 ### Cleanup component or destroy log [#cleanup-or-destroy-log]
 
-The [destroy log](/en/docs/guide/change-tracking#destroy-log) (`WorldOptions.DestroyLogCapacity`, `world.DestroyedSince`) also
+The [destroy log](/en/docs/guide/changes/change-tracking#destroy-log) (`WorldOptions.DestroyLogCapacity`, `world.DestroyedSince`) also
 reacts to entities going away. The two answer different questions:
 
 | | Cleanup component | Destroy log |
@@ -144,10 +144,10 @@ caster.EnableCooldown();                // back with Ticks = 3
 | `Set(new T(...))` on a disabled `T` | Replaces it: enabled, with the new value |
 | `GetOrAdd<T>()` on a disabled `T` | Enables it with the kept value (as `Enable`), not a default |
 | `Remove<T>()` / `world.RemoveAll<T>(filter)` on a disabled `T` | Drops it: nothing left to enable |
-| `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | The same on every match, in [bulk](/en/docs/guide/bulk) |
+| `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | The same on every match, in [bulk](/en/docs/guide/changes/bulk) |
 
 A disable counts as a removal for `[Removed<T>]`, and an enable as a write for `[Changed<T>]`, so
-[replication](/en/docs/guide/change-tracking#removal-detection) sees both. An indexed component leaves its index while
+[replication](/en/docs/guide/changes/change-tracking#removal-detection) sees both. An indexed component leaves its index while
 disabled. The kept value survives moves, clones, snapshots and saves.
 
 ### Disabling a whole entity [#disable-an-entity]
@@ -196,7 +196,7 @@ switching), then the awake units summed (`DisableComparison`):
 <BenchChart bench="DisableComparison" param="Switched=10000" title="100,000 units, 10,000 fall asleep and wake per operation" />
 
 Pools and effects switch often, where a bit flip beats a row move. When many entities stay off for long, mixed with
-awake ones in one table, [`GroupBy`](/en/docs/guide/groups) on a sleeping state puts them in tables of their own.
+awake ones in one table, [`GroupBy`](/en/docs/guide/data/groups) on a sleeping state puts them in tables of their own.
 
 ### Telling new entities apart: the `Spawned` tag [#spawned-tag]
 
@@ -337,7 +337,7 @@ player is still alive, but only `ReleaseSeatsSystem` sees it, because it asks fo
 | --- | --- | --- |
 | Releasing a resource in every place that destroys | A cleanup component and one system | One release path, also for bulk destroys and cascades |
 | Removing and re-adding a component to pause it | `Disable<T>()` / `Enable<T>()` | The value stays; `Set` would need it stored elsewhere |
-| A loop of `Disable` over many entities | `world.DisableAll<T>(filter)` | 64 rows at a time, one word of presence bits ([bulk](/en/docs/guide/bulk)) |
+| A loop of `Disable` over many entities | `world.DisableAll<T>(filter)` | 64 rows at a time, one word of presence bits ([bulk](/en/docs/guide/changes/bulk)) |
 | A flag field every system tests | A tag and `Without<T>` | Tables without the tag skip the test entirely |
 
 10,000 sessions with an outside resource, 1,000 disconnecting and 1,000 connecting per operation, with a cleanup
@@ -363,23 +363,23 @@ and enabled in bulk and one by one (`BulkBenchmark`):
 | --- | --- | --- |
 | A cleanup system without `With<Retired>` | It releases resources of live entities | Code review |
 | Never removing the last cleanup component | The retired entity stays forever | `world.Count<Retired>()` in your stats |
-| `Disable<T>()` on a cleanup component or `ChildOf` | `InvalidOperationException` | [EECS048](/en/docs/guide/analyzer#eecs048) |
+| `Disable<T>()` on a cleanup component or `ChildOf` | `InvalidOperationException` | [EECS048](/en/docs/guide/help/analyzer#eecs048) |
 | `Set` on a disabled component expecting it to stay disabled | `Set` enables it with the new value; use `Enable` to get the kept value back | By design |
 | Forgetting `Without<Inactive>` on a system | Pooled entities keep moving | Code review |
 | Expecting `[Changed<T>]` to tell new from written | Both are writes | Use a `Spawned` tag |
-| A cleanup component only to tell clients an entity went | Every entity `Destroy` reaches is retired and waits for a system, and only one reader sees it | The [destroy log](/en/docs/guide/change-tracking#destroy-log): many readers, ids only |
+| A cleanup component only to tell clients an entity went | Every entity `Destroy` reaches is retired and waits for a system, and only one reader sees it | The [destroy log](/en/docs/guide/changes/change-tracking#destroy-log): many readers, ids only |
 | Expecting the destroy log to hold a retired entity's values | It holds ids only, and logs the entity when it is freed | A cleanup component reads the values first |
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Bulk changes" href="/en/docs/guide/bulk">
+  <Card title="Bulk changes" href="/en/docs/guide/changes/bulk">
     `DisableAll`, `EnableAll`, `SetAll`, `RemoveAll`.
   </Card>
-  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+  <Card title="Change tracking" href="/en/docs/guide/changes/change-tracking">
     Disabling counts as a removal, enabling as a write.
   </Card>
-  <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
+  <Card title="Hierarchy" href="/en/docs/guide/data/hierarchy">
     Cascades retire children that hold cleanup components.
   </Card>
 </Cards>

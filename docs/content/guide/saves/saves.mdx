@@ -16,13 +16,13 @@ loading again into the same buffers allocates nothing.
 
 <Callout type="idea" title="Use it for">
   Persistence across restarts, replays on disk, crash dumps, shipping a world to another process (a test harness, a
-  replay viewer), keeping data through a [hot reload](/en/docs/guide/migration-and-unload#hot-reload).
+  replay viewer), keeping data through a [hot reload](/en/docs/guide/saves/migration-and-unload#hot-reload).
 </Callout>
 
 <Callout type="warn" title="Skip it for">
-  Rolling back inside one process: a [snapshot](/en/docs/guide/snapshots) is faster and needs no encoding. Moving a
-  player to another server: [`SaveEntities`](/en/docs/guide/migration-and-unload#save-entities) writes just the group.
-  Saving only what persists of an entity and loading it onto a live one: [a record](/en/docs/guide/migration-and-unload#records)
+  Rolling back inside one process: a [snapshot](/en/docs/guide/saves/snapshots) is faster and needs no encoding. Moving a
+  player to another server: [`SaveEntities`](/en/docs/guide/saves/migration-and-unload#save-entities) writes just the group.
+  Saving only what persists of an entity and loading it onto a live one: [a record](/en/docs/guide/saves/migration-and-unload#records)
   is `SaveEntities` with a `ComponentSet`, loaded by `LoadEntitiesInto`.
 </Callout>
 
@@ -103,7 +103,7 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | Every alive entity, with its id and version | Systems, `WorldOptions` |
 | Every component, unmanaged as raw rows, managed through Nino | Indexes (they rebuild on the next lookup) |
 | Disabled components, with their kept values | Groupings (`Load` follows this world's `GroupBy` calls) |
-| [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) elements | Change ticks (every loaded row counts as written, or none with `markWritten: false`: [restart](#restart)) |
+| [`DynamicBuffer<T>`](/en/docs/guide/data/dynamic-buffers) elements | Change ticks (every loaded row counts as written, or none with `markWritten: false`: [restart](#restart)) |
 | Every singleton | Components and singletons left out with `SaveWithout(output, in exclude)` ([restart](#restart)) or marked [`[NotSaved]`](#not-saved) |
 
 Types are recorded by their Nino type id (a hash of the namespace-qualified name), and each column is a
@@ -189,11 +189,11 @@ records nothing; the next deposit is recorded as usual.
   singleton type.
 - **A save of entities takes no singletons.** `SaveEntitiesWith(output, ids, set)` or
   `SaveEntitiesWithout(output, ids, set)` with a set that names one throws `ArgumentException`
-  ([records](/en/docs/guide/migration-and-unload#records)).
+  ([records](/en/docs/guide/saves/migration-and-unload#records)).
 
 A system added later to a world that already holds its state, whatever wrote it, can start from the current tick
 instead: `world.AddSystem<T>(changesFromNow: true)` makes its first run visit only what is written after the call
-([ticks](/en/docs/guide/change-tracking#ticks)). Where a hosted server saves and loads: [hosting](/en/docs/guide/hosting#persistence).
+([ticks](/en/docs/guide/changes/change-tracking#ticks)). Where a hosted server saves and loads: [hosting](/en/docs/guide/production/hosting#persistence).
 
 ### Never saved: `[NotSaved]` [#not-saved]
 
@@ -221,10 +221,10 @@ int linked = next.Count<Link>();                       // 0: the balance came ba
 
 - **Every save leaves it out:** `Save`, `SaveWithout`, and the saves of entities, even with a set that names it. So it
   needs no Nino formatter; a managed component without one that a save would hold is
-  [EECS069](/en/docs/guide/analyzer#eecs069), with `[NotSaved]` as one of its fixes.
+  [EECS069](/en/docs/guide/help/analyzer#eecs069), with `[NotSaved]` as one of its fixes.
 - **A load keeps the world's own value** of a `[NotSaved]` singleton, as `LoadKeeping` does for a kept one: the new
   process sets it before or after the load.
-- **Snapshots and moves copy it.** [`Capture`](/en/docs/guide/snapshots) and `MoveEntities` stay in one process, where
+- **Snapshots and moves copy it.** [`Capture`](/en/docs/guide/saves/snapshots) and `MoveEntities` stay in one process, where
   runtime state still means something.
 - **`SaveWithout` for the rest:** a type that is persisted in one save and left out of another (configuration a
   restart brings anew) stays in a `ComponentSet` ([restart](#restart)).
@@ -298,7 +298,7 @@ catch (InvalidDataException)
 ### Components in plugins [#plugins]
 
 The id lookup is process-wide. While a plugin's old version and its new one are both loaded, their types share ids and
-a load refuses them as ambiguous. Unload the old version first (the [hot reload](/en/docs/guide/migration-and-unload#hot-reload)
+a load refuses them as ambiguous. Unload the old version first (the [hot reload](/en/docs/guide/saves/migration-and-unload#hot-reload)
 order: save, `RemoveTypes`, unload, load the new version, `Load`), or keep the components you save in an assembly
 that is never reloaded, such as a contracts assembly shared by the host and the plugins.
 
@@ -409,17 +409,17 @@ loaded keeping a singleton (`SnapshotBenchmark`):
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | [EECS069](/en/docs/guide/analyzer#eecs069) (with a code fix); mark runtime-only types [`[NotSaved]`](#not-saved) or leave them out with `SaveWithout(output, in exclude)` |
+| A managed component without `[NinoType]` | `Save` throws `InvalidOperationException` (no formatter) | [EECS069](/en/docs/guide/help/analyzer#eecs069) (with a code fix); mark runtime-only types [`[NotSaved]`](#not-saved) or leave them out with `SaveWithout(output, in exclude)` |
 | Reusing a `NinoArrayBufferWriter` without `ResetWrittenCount()` | The new save is appended after the old one | Code review: reset before each save |
 | A plain `Load` after setting the new configuration | The save's singletons replace it, and one the save lacks is removed | `LoadKeeping(input, in keep)` with the configuration's singletons |
 | A component in the keep set of `Load` | `ArgumentException` | Leave it out of the save instead |
 | A singleton a system needs, left out of the save and never set again | The system throws on its first run | Set it before the load and keep it, or set it after |
 | A `Nino.Generator` reference older than the Nino of EasyEcs | A package downgrade: remove the reference, the EasyEcs package brings the generator | Restore (`NU1605`) |
-| An `Entity` handle in a component | A managed column Nino cannot write | [EECS017](/en/docs/guide/analyzer#eecs017) |
+| An `Entity` handle in a component | A managed column Nino cannot write | [EECS017](/en/docs/guide/help/analyzer#eecs017) |
 | Editing the fields of a saved raw component | Old saves are refused | `[NinoType(format: NinoFormat.VersionTolerant)]` from the first save, or a new component type |
 | Renaming a component or moving its namespace | Old saves load without it | `[NinoFormerName]` with the old full name |
 | Old and new plugin versions loaded at once | Ambiguous names: `InvalidDataException` | Unload the old version first |
-| Saving or loading from another thread | Races with the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
+| Saving or loading from another thread | Races with the owner thread | [EECS014](/en/docs/guide/help/analyzer#eecs014) |
 
 ## Compared with other libraries [#compared]
 
@@ -431,13 +431,13 @@ Arch saves through a separate package. 10,000 units with a position and a stock,
 ## Related [#related]
 
 <Cards>
-  <Card title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+  <Card title="Migration and unload" href="/en/docs/guide/saves/migration-and-unload">
     `SaveEntities`, `LoadEntities`, `MoveEntities` and hot reload.
   </Card>
-  <Card title="Snapshots" href="/en/docs/guide/snapshots">
+  <Card title="Snapshots" href="/en/docs/guide/saves/snapshots">
     In-memory copies for rollback.
   </Card>
-  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+  <Card title="Dynamic buffers" href="/en/docs/guide/data/dynamic-buffers">
     Lists saved with their elements.
   </Card>
   <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">

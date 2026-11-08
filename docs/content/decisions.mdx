@@ -347,7 +347,7 @@ reflection; a call on the index is AOT-safe and per world, like `GroupBy<T>()`).
 **Decision.** A world's systems, queries and structural changes run on its owner thread; parallel stages and parallel
 `[ForEach]` are the only parallelism, and the generator proves them safe. Another thread posts to the owner.
 
-**Why.** No locks on any hot path; the rules fit in three lines ([threading](/en/docs/guide/threading)).
+**Why.** No locks on any hot path; the rules fit in three lines ([threading](/en/docs/guide/performance/threading)).
 
 ## D14. No shared components [#d14-no-shared-components]
 
@@ -803,7 +803,7 @@ the structure. The filter is tested on the row itself.
   components) are within the run's error.
 - **The thread rule stays the owner's.** A plain flag store freezes the structure when the gate is free (the owner
   outside any region); inside a parallel region the region's freeze is already held, and the analyzer reports `Run`
-  as a structural call ([EECS010](/en/docs/guide/analyzer#eecs010), EECS013, EECS014).
+  as a structural call ([EECS010](/en/docs/guide/help/analyzer#eecs010), EECS013, EECS014).
 
 **Considered.**
 - **A filter tested through the query cache:** a lookup of the filter's table set per call, which cost more than the
@@ -1216,11 +1216,11 @@ a component.
   hidden additions would be structural changes no reader of the code sees.
 - **An entity map** (an external key to an entity). `IUniqueIndexed<TKey>` is that map, kept by every write.
 - **A built-in `Meter`.** `SystemStats` holds the numbers; publishing them to OpenTelemetry is a few lines of the host's
-  own ([diagnostics](/en/docs/guide/diagnostics)), and EasyEcs stays free of a metrics dependency.
+  own ([diagnostics](/en/docs/guide/production/diagnostics)), and EasyEcs stays free of a metrics dependency.
 - **A world checksum** (for lockstep desync checks). A hash of `world.Save` output does it in user code; a built-in
   one would fix an algorithm and an order for every user.
 - **A partial-snapshot API** (capture some components only). A system that copies the needed values into a ring held
-  by a singleton (the lag-compensation pattern of [snapshots](/en/docs/guide/snapshots)) copies exactly what is
+  by a singleton (the lag-compensation pattern of [snapshots](/en/docs/guide/saves/snapshots)) copies exactly what is
   needed, with no new storage path.
 
 ## D52. An `Entity` used only as an identity does not make a system run alone [#d52-identity-entity]
@@ -1661,7 +1661,7 @@ block of change ticks: before the pass, the blocks it covers are opened at its t
 ## D68. Vector loops without opting in [#d68-vector-loops-without-opting-in]
 
 **Decision.** The generator writes a `Vector<T>` loop for every `[ForEach]` method that qualifies
-([vector loops](/en/docs/guide/systems#vector-loops)): static, per entity, not parallel, no `Entity` / `World` /
+([vector loops](/en/docs/guide/basics/systems#vector-loops)): static, per entity, not parallel, no `Entity` / `World` /
 `Mut<T>` / `Maybe<T>`, components of 1 to 4 fields of one primitive type (several fields split into one vector each
 by deinterleaving loads and interleaving stores, `EasyEcs.Interleaved`), a body of arithmetic, comparisons, branches
 and the `Math` functions with an exact vector counterpart. It is on by default (`SimdMode.Auto`): EECS055 names why a
@@ -1709,7 +1709,7 @@ Later steps took `Vector512` (where the hardware runs it, then `Vector<T>`),
 
 **Decision.** A total over a pass is a `ref Reduce<T>` parameter of a `[ForEach]` method, where `T` is a singleton that
 implements `IReduction<T>` for itself (a static `Identity` and an associative `Combine`)
-([reductions](/en/docs/guide/threading#reductions)). Each chunk of a parallel pass, or the whole pass on one thread,
+([reductions](/en/docs/guide/performance/threading#reductions)). Each chunk of a parallel pass, or the whole pass on one thread,
 accumulates into its own copy starting at `Identity`; when the pass ends the world's runner combines the copies in chunk
 order, which is row order, and the result replaces `T`. The system is scheduled as a writer of `T`. EECS057 rejects a
 second write of `T` in the same pass.
@@ -2216,7 +2216,7 @@ reads once into the system's record. EECS083 reports an interval below 1 or a ph
 - **Keeping the properties next to the attribute.** That gives two ways to say one thing, with an order between them to
   learn. The breaking change is one line per system, and the migration guide shows it.
 - **Run-time cadence.** A server that changes how often a system runs puts the system in a group and updates the group
-  when it is due ([system groups](/en/docs/guide/systems#system-groups)), as
+  when it is due ([system groups](/en/docs/guide/basics/systems#system-groups)), as
   [D51](#d51-not-added) already recommends over a time-based interval.
 
 ## D84. `[Consume]` destroys the visited rows in bulk when it can [#d84-consume]
@@ -2400,7 +2400,7 @@ them has a code fix.
 
 **Why.**
 - **The hand-written forms keep a method on one thread.** A `ref` singleton races in a parallel pass
-  ([EECS010](/en/docs/guide/analyzer#eecs010)). A `World` parameter makes the system run alone in its stage. And
+  ([EECS010](/en/docs/guide/help/analyzer#eecs010)). A `World` parameter makes the system run alone in its stage. And
   [D69](#d69-reductions), [D75](#d75-lookup) and [D78](#d78-emit) measured the parameters against those forms. The
   rules make the faster form the one users meet.
 - **EECS086 waits for a reset.** A first version reported every accumulation. In the docs it fired on 16 examples, and
@@ -2557,7 +2557,7 @@ neither. The world never creates a system. It adds one by type (`AddSystem<T>()`
 and keeps a record of it: enabled, error, interval and phase, last run tick, run count, stats. A `SystemHandle` is a
 (world, slot, version) over that record, and a handle to a removed system throws, as a stale `Entity` does. There is
 no inheritance: what a base class shared is a generic system or a static class of helpers, and a constructor argument
-is a [`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton. EECS074 to EECS077 keep the form, and a code fix on
+is a [`[NotSaved]`](/en/docs/guide/saves/saves#not-saved) singleton. EECS074 to EECS077 keep the form, and a code fix on
 CS0246 rewrites a class system of 4.7.
 
 **Why.**

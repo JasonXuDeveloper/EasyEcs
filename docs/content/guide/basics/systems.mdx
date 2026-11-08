@@ -23,8 +23,8 @@ fast as a hand-written loop.
 
 <Callout type="warn" title="Skip it for">
   A one-off pass that a request or a tool runs between ticks: write a [`[ForEach]`](#foreach-outside-systems) runner
-  or a [query](/en/docs/guide/queries). State that must survive between ticks: put it in a component or a
-  [singleton](/en/docs/guide/singletons), never in a static field of the system ([EECS007](/en/docs/guide/analyzer#eecs007)).
+  or a [query](/en/docs/guide/basics/queries). State that must survive between ticks: put it in a component or a
+  [singleton](/en/docs/guide/basics/singletons), never in a static field of the system ([EECS007](/en/docs/guide/help/analyzer#eecs007)).
 </Callout>
 
 ## How to use it [#how-to-use-it]
@@ -87,7 +87,7 @@ int dealt = world.BurnTotals.Damage;               // 10
 
 A system's hooks are static methods marked with an attribute. Each takes the `World`, the `SystemHandle`, both (in
 either order) or neither, returns void, and a system has at most one of each
-([EECS076](/en/docs/guide/analyzer#eecs076)):
+([EECS076](/en/docs/guide/help/analyzer#eecs076)):
 
 | Hook | When |
 | --- | --- |
@@ -119,7 +119,7 @@ row:
 | `SystemHandle` member | What it is |
 | --- | --- |
 | `Enabled` | `false` skips the system in `Update()` and `Update<TGroup>()`; `true` clears `Error` |
-| `LastRunTick` | the change tick of its last run ([change tracking](/en/docs/guide/change-tracking#ticks)) |
+| `LastRunTick` | the change tick of its last run ([change tracking](/en/docs/guide/changes/change-tracking#ticks)) |
 | `RunCount` | how many times it ran before the current run (0 during the first); a [sliced](#slices) method visits slice `RunCount % N` |
 | `Stats`, `Error` | [measurements](#measuring-systems) and the [exception that switched it off](#errors) |
 | `Name`, `Type`, `World` | its type's name (`Regen<Health>`), the type, the world it was added to |
@@ -127,9 +127,9 @@ row:
 
 `AddSystem<T>()` returns the handle, and adding a system the world already has throws; `System<T>()` and
 `TryGetSystem<T>(out handle)` find one (for tools and tests, never from another system:
-[EECS008](/en/docs/guide/analyzer#eecs008)), `HasSystem<T>()` asks; `world.Systems` lists every handle without
+[EECS008](/en/docs/guide/help/analyzer#eecs008)), `HasSystem<T>()` asks; `world.Systems` lists every handle without
 allocating; `DefaultUpdateCount` counts the default group's updates. A type that is no `[EcsSystem]` given to any of
-them is [EECS077](/en/docs/guide/analyzer#eecs077).
+them is [EECS077](/en/docs/guide/help/analyzer#eecs077).
 
 ```csharp
 if (world.TryGetSystem<BurnSystem>(out var burn)) burn.Enabled = false;
@@ -152,16 +152,16 @@ flowchart TB
 Systems run in registration order unless ordered. Structural changes apply at once, so later methods and systems of
 the same update see them. Everything runs on the thread that calls `Update()`, unless
 `WorldOptions.ParallelSystems` runs systems with no order and no conflict between them at the same time
-([Threading](/en/docs/guide/threading#parallel-systems)); the result is the same as running them in order. To see
+([Threading](/en/docs/guide/performance/threading#parallel-systems)); the result is the same as running them in order. To see
 the stages the world built, what each system reads and writes and why a system waits for another, print
 `world.DescribeSchedule()` (text, or `ToMermaid()` for a diagram:
-[Debugging and diagnostics](/en/docs/guide/diagnostics#schedule)).
+[Debugging and diagnostics](/en/docs/guide/production/diagnostics#schedule)).
 
 ### Ordering [#ordering]
 
 `[UpdateBefore<T>]` and `[UpdateAfter<T>]` move a system just before or after system `T` of the same group, whatever the order they were added in; the others keep their relative order. The order is resolved when
 a system is added: a cycle throws there and the system stays out. The analyzer reports the cycles
-([EECS019](/en/docs/guide/analyzer#eecs019)) and cross-group orderings ([EECS020](/en/docs/guide/analyzer#eecs020))
+([EECS019](/en/docs/guide/help/analyzer#eecs019)) and cross-group orderings ([EECS020](/en/docs/guide/help/analyzer#eecs020))
 it can see.
 
 ### `[UpdateInterval(N, Phase = P)]` [#update-interval]
@@ -170,7 +170,7 @@ A system marked `[UpdateInterval(N)]` runs every N-th update of its group: on th
 multiple of N, so first on the N-th. `Phase` (0 to N - 1) shifts which of the N updates it takes, so systems
 with the same interval spread their work instead of all running on the same tick. The attribute takes constants, so
 the cadence is fixed when the system is compiled; the generator writes it into the system's code
-([EECS083](/en/docs/guide/analyzer#eecs083) reports an interval below 1 or a phase outside 0 to N - 1). To pause a
+([EECS083](/en/docs/guide/help/analyzer#eecs083) reports an interval below 1 or a phase outside 0 to N - 1). To pause a
 system, set `Enabled` on its handle.
 
 ```csharp
@@ -262,10 +262,10 @@ public ref struct HungerSystem
 - **Every form:** per-entity methods, [batch methods](#batch-methods) (runs of rows inside the slice) and
   [parallel methods](#parallel-methods) (the slice is cut into chunks).
 - **Not with change filters:** `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]` and `[RemovedAny<…>]` cannot be
-  sliced, and `Slices` must be at least 1 ([EECS035](/en/docs/guide/analyzer#eecs035)): every run moves the system's
+  sliced, and `Slices` must be at least 1 ([EECS035](/en/docs/guide/help/analyzer#eecs035)): every run moves the system's
   `LastRunTick`, so the changes made in the rows of the other slices would be lost.
 
-Outside systems, [`QueryFilter.Slice(index, of)`](/en/docs/guide/queries#filters) does the same for a `ForEach`
+Outside systems, [`QueryFilter.Slice(index, of)`](/en/docs/guide/basics/queries#filters) does the same for a `ForEach`
 call; a [runner](#foreach-outside-systems) with `Slices = N` takes the slice to visit after the world.
 
 ### `[ForEach]` methods [#foreach-methods]
@@ -276,26 +276,26 @@ over:
 | Parameter | Meaning |
 | --- | --- |
 | `ref T` / `in T` / `ref readonly T`, `T : IComponent` | 1 to 9 components: `ref` to write, `in` to read |
-| [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed), `T : IComponent` | a component the method writes on some rows: `Value` reads, `Write()` and `SetIfChanged(value)` write, and only the rows written are stamped |
+| [`Mut<T>`](/en/docs/guide/changes/change-tracking#set-if-changed), `T : IComponent` | a component the method writes on some rows: `Value` reads, `Write()` and `SetIfChanged(value)` write, and only the rows written are stamped |
 | `ref T` / `in T`, `T : ISingletonComponent` | the world's singleton, resolved once per pass; throws if it was not added |
 | `Entity` | the current entity, for structural changes and lookups |
 | `World` | the world (for creating entities, other singletons) |
 | [`Maybe<T>`](#maybe) | a component the entity may lack |
 | [`ReadOnlyMaybe<T>`](#read-only-maybe) | a component the entity may lack, read only (indexed components too) |
-| [`ref Reduce<T>`](/en/docs/guide/threading#reductions), `T : ISingletonComponent, IReduction<T>` | a total over the rows: each chunk (or the pass on one thread) adds into its own partial result, and the combined result replaces singleton `T` |
-| [`Scratch<T>`](/en/docs/guide/threading#scratch) | the method's working memory on the running thread (a list, a buffer), kept between rows; adds no access |
-| [`Lookup<T>`](/en/docs/guide/threading#lookups), `T : IComponent` | read-only `T` of any entity (`lookup[id]`, `Read`, `Has`; `TryFind`, `Find`, `Count` by key), as it was before the pass; the system reads `T`, in parallel too |
+| [`ref Reduce<T>`](/en/docs/guide/performance/threading#reductions), `T : ISingletonComponent, IReduction<T>` | a total over the rows: each chunk (or the pass on one thread) adds into its own partial result, and the combined result replaces singleton `T` |
+| [`Scratch<T>`](/en/docs/guide/performance/threading#scratch) | the method's working memory on the running thread (a list, a buffer), kept between rows; adds no access |
+| [`Lookup<T>`](/en/docs/guide/performance/threading#lookups), `T : IComponent` | read-only `T` of any entity (`lookup[id]`, `Read`, `Has`; `TryFind`, `Find`, `Count` by key), as it was before the pass; the system reads `T`, in parallel too |
 | `Span<T>` / `ReadOnlySpan<T>`, `EntitySpan` | a [batch method](#batch-methods): runs of rows at once |
 
 | Attribute | Meaning |
 | --- | --- |
-| `[ForEach]` | run the method for every matching entity; `Parallel = true` for [several threads](#parallel-methods) (with `ChunkSize = n`, [the rows a thread takes at a time](/en/docs/guide/threading#chunk-rows)), `Slices = N` for [part of the rows per run](#slices) |
+| `[ForEach]` | run the method for every matching entity; `Parallel = true` for [several threads](#parallel-methods) (with `ChunkSize = n`, [the rows a thread takes at a time](/en/docs/guide/performance/threading#chunk-rows)), `Slices = N` for [part of the rows per run](#slices) |
 | `[With<T>]` | the entity must have `T`, not passed in; repeatable |
 | `[Without<T>]` | the entity must not have `T`; repeatable |
 | `[WithAny<T1, T2>]` | the entity must have at least one of the method's `[WithAny<T1, T2>]` components |
-| `[Changed<T>]` | `T` (`ITracked`) was written since the system last ran ([change tracking](/en/docs/guide/change-tracking)) |
-| `[Removed<T>]` | the entity lost `T` (`ITracked`) since the system last ran ([removal detection](/en/docs/guide/change-tracking#removal-detection)) |
-| `[ChangedAny<T1, …, Tn>]` | at least one of the components (2 to 9, `ITracked`) was written since the system last ran ([any of several](/en/docs/guide/change-tracking#changed-any)) |
+| `[Changed<T>]` | `T` (`ITracked`) was written since the system last ran ([change tracking](/en/docs/guide/changes/change-tracking)) |
+| `[Removed<T>]` | the entity lost `T` (`ITracked`) since the system last ran ([removal detection](/en/docs/guide/changes/change-tracking#removal-detection)) |
+| `[ChangedAny<T1, …, Tn>]` | at least one of the components (2 to 9, `ITracked`) was written since the system last ran ([any of several](/en/docs/guide/changes/change-tracking#changed-any)) |
 | `[RemovedAny<T1, …, Tn>]` | the entity lost at least one of the components since the system last ran |
 
 The properties of `[ForEach]`:
@@ -337,8 +337,8 @@ public ref struct CorpseCleanup
 ```
 
 A method whose whole body is one structural change, the same for every row, is a loop the world runs faster itself: one
-[bulk call](/en/docs/guide/bulk) in the `OnUpdate` method changes each table at once
-([EECS030](/en/docs/guide/analyzer#eecs030) says so):
+[bulk call](/en/docs/guide/changes/bulk) in the `OnUpdate` method changes each table at once
+([EECS030](/en/docs/guide/help/analyzer#eecs030) says so):
 
 ```csharp
 [EcsSystem]
@@ -351,12 +351,12 @@ public ref struct CorpseCleanup
 A method that takes no `World` and uses its `Entity` (if any) only to read (`Id`, `IsAlive`, `Has`,
 `Get`, `Read`, `TryGet`, `TryGetRef`) cannot change structure: its job implements `INoStructuralChanges` and walks
 each table with no per-entity check. A method that may change structure runs alone, and each entity is still visited
-at most once per pass ([Structural changes](/en/docs/guide/structural-changes)).
+at most once per pass ([Structural changes](/en/docs/guide/changes/structural-changes)).
 
 An `Entity` used only as an identity (`Id`, `Version`, `IsAlive`, `==` / `!=`, converted to an `EntityId`) reaches no
 component, so it adds nothing to the system's access: the system is scheduled by its other parameters and may share a
 parallel stage. Any other use of the handle (`Has`, `Get`, another call, passing the `Entity` on) can reach any
-component, and the system runs alone ([parallel systems](/en/docs/guide/threading#parallel-systems)).
+component, and the system runs alone ([parallel systems](/en/docs/guide/performance/threading#parallel-systems)).
 
 Methods run in declaration order. Keep a system's methods in one file: across the files of a partial struct the
 order is per file.
@@ -391,9 +391,9 @@ no structure finds the optional column once per run of rows; one that changes st
 
 `ReadOnlyMaybe<T>` is the same optional parameter with a `ref readonly` `Value`: the method reads `T` and the compiler
 holds it to that, so a tracked `T` is never stamped. It is the one optional parameter an
-[indexed component](/en/docs/guide/indexes-and-relations#value-indexes) accepts: the `ref` of a `Maybe<T>` could change
-the key behind the index's back ([EECS015](/en/docs/guide/analyzer#eecs015)), and reading it through the `Entity`
-instead is a lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)).
+[indexed component](/en/docs/guide/data/indexes-and-relations#value-indexes) accepts: the `ref` of a `Maybe<T>` could change
+the key behind the index's back ([EECS015](/en/docs/guide/help/analyzer#eecs015)), and reading it through the `Entity`
+instead is a lookup per row ([EECS027](/en/docs/guide/help/analyzer#eecs027)).
 
 | The method, for a component some entities lack | Take |
 | --- | --- |
@@ -445,7 +445,7 @@ none is left behind.
   Entities that live on after the method (a buff that lasts, a projectile in flight): `[Consume]` destroys every row
   it visits, so destroy those with `entity.Destroy()` where the method decides. Events that several systems read:
   consume them in the last one, ordered with `[UpdateAfter<T>]`. Sliced methods: a slice's destroys move the rows of
-  the other slices ([EECS085](/en/docs/guide/analyzer#eecs085)).
+  the other slices ([EECS085](/en/docs/guide/help/analyzer#eecs085)).
 </Callout>
 
 How the rows go depends on the method:
@@ -528,10 +528,10 @@ int pending = world.Count<Sale>();             // 0: both sales were consumed
 ```
 
 Cleanup components retire a consumed entity as they do any destroyed one, and the
-[destroy log](/en/docs/guide/change-tracking#destroy-log) records it. A [runner](#foreach-outside-systems) with
+[destroy log](/en/docs/guide/changes/change-tracking#destroy-log) records it. A [runner](#foreach-outside-systems) with
 `[Consume]` consumes through its entry point the same way. A system with a `[Consume]` method runs alone, as a
-system that destroys entities must ([parallel systems](/en/docs/guide/threading#parallel-systems)). A method that
-ends with `entity.Destroy()` on every path is [EECS084](/en/docs/guide/analyzer#eecs084), whose code fix writes
+system that destroys entities must ([parallel systems](/en/docs/guide/performance/threading#parallel-systems)). A method that
+ends with `entity.Destroy()` on every path is [EECS084](/en/docs/guide/help/analyzer#eecs084), whose code fix writes
 `[Consume]`.
 
 ### Batch methods [#batch-methods]
@@ -539,8 +539,8 @@ ends with `entity.Destroy()` on every path is [EECS084](/en/docs/guide/analyzer#
 A method whose component parameters are spans receives runs of consecutive matching rows: element `i` of every span
 belongs to the same entity, and a table where every row matches is one call. Its other parameters can be singletons
 and an `EntitySpan` (`entities[i]` is built only when indexed), nothing else
-([EECS009](/en/docs/guide/analyzer#eecs009)). The spans point into the tables, so the structure is frozen while it
-runs: a change throws, and [EECS013](/en/docs/guide/analyzer#eecs013) reports it at compile time.
+([EECS009](/en/docs/guide/help/analyzer#eecs009)). The spans point into the tables, so the structure is frozen while it
+runs: a change throws, and [EECS013](/en/docs/guide/help/analyzer#eecs013) reports it at compile time.
 
 ```csharp
 using System.Buffers;
@@ -587,14 +587,14 @@ public ref struct SteeringSystem
 }
 ```
 
-The method must be able to run on several threads at once ([EECS010](/en/docs/guide/analyzer#eecs010)): no
+The method must be able to run on several threads at once ([EECS010](/en/docs/guide/help/analyzer#eecs010)): no
 structural change, per entity (not a batch method), singletons only as `in`. It also must not write what another
 row's run reads, such as another entity through `Get`. Fewer than two chunks run on the calling thread. It allocates
 nothing after its first update.
 
-A method that writes a tracked component (a `ref` or a [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed)
+A method that writes a tracked component (a `ref` or a [`Mut<T>`](/en/docs/guide/changes/change-tracking#set-if-changed)
 parameter) is cut by default at multiples of 4,096 rows, so a table of 4,096 rows or fewer runs on one thread
-([why](/en/docs/guide/threading#parallel-foreach-methods)). `ChunkSize = n` sets the rows a thread takes at a time,
+([why](/en/docs/guide/performance/threading#parallel-foreach-methods)). `ChunkSize = n` sets the rows a thread takes at a time,
 the `n` of `schedule(dynamic, n)`, rounded up to 64, for a few hundred heavy rows:
 
 ```csharp
@@ -622,7 +622,7 @@ public ref struct RouteSystem
 }
 ```
 
-How the chunks are claimed, how to choose `n` and what it costs: [chunk size](/en/docs/guide/threading#chunk-rows).
+How the chunks are claimed, how to choose `n` and what it costs: [chunk size](/en/docs/guide/performance/threading#chunk-rows).
 
 ### Vector loop (SIMD) [#vector-loops]
 
@@ -781,7 +781,7 @@ A method gets a vector loop when all of this holds; otherwise it runs row by row
 - **The method:** `static`, per entity (on one thread or `Parallel`), returning nothing; no `Entity`, `World`,
   `Mut<T>`, span, `Scratch<T>`, `Lookup<T>`, `Emit<T>` or `Tile` parameter, and no value taken by `ref`. A
   `Maybe<T>` / `ReadOnlyMaybe<T>` of a component is a lane mask of the rows that have it (on one thread).
-- **Totals:** a [`Reduce<T>`](/en/docs/guide/threading#reductions) keeps one accumulator per lane, folded into the
+- **Totals:** a [`Reduce<T>`](/en/docs/guide/performance/threading#reductions) keeps one accumulator per lane, folded into the
   run's partial result in lane order after the loop, when each field of `T` is a lane of the method's size and
   combines by a sum, a `Min` or a `Max`: declared with `[Sum]` / `[Min]` / `[Max]`, or a hand-written `T.Combine` that
   sets it to the sum, `Min` or `Max` of both sides' field. A float sum needs `FloatMode.Fast` ([below](#float-mode)).
@@ -809,11 +809,11 @@ changes results ([D90](/en/docs/decisions#d90-vector-loops-reach)).
 #### `SimdMode` [#simd-mode]
 
 A method that does not qualify stays a scalar loop: it is correct, only slower, and
-[EECS055](/en/docs/guide/analyzer#eecs055) (a suggestion in the IDE) names the first reason, as Burst's inspector
+[EECS055](/en/docs/guide/help/analyzer#eecs055) (a suggestion in the IDE) names the first reason, as Burst's inspector
 would: a `bool` field, a component too wide for the work done on it (with the fields to split out), a vector sum such
 as `Vector3.Dot` whose order the scalar code does not fix, a call outside a condition. A method whose speed depends
 on its loop says so with `SimdMode = SimdMode.Require`, and the build fails
-([EECS056](/en/docs/guide/analyzer#eecs056)) when an edit takes the loop away.
+([EECS056](/en/docs/guide/help/analyzer#eecs056)) when an edit takes the loop away.
 
 ```csharp tab="Stays scalar" doccheck=expect-EECS055
 public record struct Motion(System.Numerics.Vector3 Value) : IComponent;
@@ -848,7 +848,7 @@ public ref struct MeasureSpeed
 
 By default (`FloatMode.Exact`) a vector loop gives the method's results bit for bit, on every machine. Two things it
 then leaves scalar: `Sin`, `Cos`, `Exp`, `Log`, `Log2` and `Hypot`, whose vector forms are approximations, and a float
-sum into a [`Reduce<T>`](/en/docs/guide/threading#reductions), which a vector loop would add lane by lane, in another
+sum into a [`Reduce<T>`](/en/docs/guide/performance/threading#reductions), which a vector loop would add lane by lane, in another
 order. `[ForEach(FloatMode = FloatMode.Fast)]` accepts both: .NET's vector approximations (within 1 or 2 ulp of the
 scalar functions) and float sums rounded per lane, so results may differ from the scalar method's and between
 machines (as Burst's `FloatMode.Fast`). Integer sums and the `Min` / `Max` of any lane type are exact either way.
@@ -908,7 +908,7 @@ and no `call`.
 <BenchTable bench="KernelBenchmark" />
 
 Vector loops, parallel chunks, batch methods and grid kernels side by side, with what each borrows from Burst,
-OpenMP and the GPU: [high-performance patterns](/en/docs/guide/high-performance).
+OpenMP and the GPU: [high-performance patterns](/en/docs/guide/performance/high-performance).
 
 ### System groups [#system-groups]
 
@@ -951,7 +951,7 @@ whole group can leave frozen or inactive entities out without repeating the filt
 `[WithAny<A, B>]` and a method with `[WithAny<C, D>]` select entities with any of `A`, `B`, `C` and `D`. Queries a system makes in its
 `OnUpdate` method are its own, and [`[ForEach]`](#foreach-outside-systems) runners belong to no group, so no group filter applies to
 them. A filter attribute on a struct that is not a group is a compile error
-([EECS023](/en/docs/guide/analyzer#eecs023)).
+([EECS023](/en/docs/guide/help/analyzer#eecs023)).
 
 ```csharp
 [Without<Frozen>]
@@ -1006,7 +1006,7 @@ bool open = world.ShopIndex.TryFind(new Shop(7), out var shop);   // a message f
 ```
 
 The [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) is the whole program:
-two kinds of actors, messages handled with [`entity.Run`](/en/docs/guide/queries#run-on-one-entity), activation and
+two kinds of actors, messages handled with [`entity.Run`](/en/docs/guide/basics/queries#run-on-one-entity), activation and
 saving.
 
 ### Generic systems [#generic-systems]
@@ -1032,7 +1032,7 @@ public ref struct CountOf<T> where T : struct, IComponent   // world.AddSystem<C
 ```
 
 A system's `[ForEach]` method itself cannot be generic: nothing would supply its type arguments
-([EECS004](/en/docs/guide/analyzer#eecs004)). Attribute type arguments cannot name type parameters (C# rule CS8968),
+([EECS004](/en/docs/guide/help/analyzer#eecs004)). Attribute type arguments cannot name type parameters (C# rule CS8968),
 so filters such as `[With<T>]` name concrete types.
 
 ### `[ForEach]` outside systems [#foreach-outside-systems]
@@ -1077,15 +1077,15 @@ int alive = 0;
 Census.CountAlive<Health>(world, ref alive);      // a generic runner: the type arguments first
 ```
 
-- The method must be static ([EECS005](/en/docs/guide/analyzer#eecs005)); it may be private, and the entry point is
+- The method must be static ([EECS005](/en/docs/guide/help/analyzer#eecs005)); it may be private, and the entry point is
   public when the types it names are public.
 - With `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]` or `[RemovedAny<…>]` the entry point takes the tick to
   look back from, since a runner has no last run of its own; with `Slices = N` it takes the slice (0 to N - 1).
 - Runners may be generic, or members of a generic type: the entry point takes the type arguments.
 - No [group filter](#group-filters) applies to a runner: it belongs to no group.
 - Batch and parallel runners follow the rules of [batch methods](#batch-methods) and [parallel methods](#parallel-methods).
-- The entry point must not collide with another method of the type ([EECS021](/en/docs/guide/analyzer#eecs021)), and
-  a local function cannot be a runner ([EECS024](/en/docs/guide/analyzer#eecs024)).
+- The entry point must not collide with another method of the type ([EECS021](/en/docs/guide/help/analyzer#eecs021)), and
+  a local function cannot be a runner ([EECS024](/en/docs/guide/help/analyzer#eecs024)).
 - Call it on the world's owner thread, like any structural code.
 
 ### Measuring systems [#measuring-systems]
@@ -1126,7 +1126,7 @@ foreach (var system in guarded.Systems)                   // a health check, bet
 `Update()` after `Dispose()` throws `ObjectDisposedException`.
 
 What else a running world can tell you (its tables, an entity's components, memory):
-[Debugging and diagnostics](/en/docs/guide/diagnostics).
+[Debugging and diagnostics](/en/docs/guide/production/diagnostics).
 
 ## Full example [#full-example]
 
@@ -1236,20 +1236,20 @@ move although it was added second, so the grounded unit loses half its speed bef
 
 | Instead of | Do | Why |
 | --- | --- | --- |
-| `ref` on a component the method only reads | `in` ([EECS025](/en/docs/guide/analyzer#eecs025)) | The system can share a stage; a tracked component is not stamped |
-| An `Entity` or `World` parameter the method does not need | Drop it ([EECS026](/en/docs/guide/analyzer#eecs026)) | The job skips structural bookkeeping and may run in parallel |
+| `ref` on a component the method only reads | `in` ([EECS025](/en/docs/guide/help/analyzer#eecs025)) | The system can share a stage; a tracked component is not stamped |
+| An `Entity` or `World` parameter the method does not need | Drop it ([EECS026](/en/docs/guide/help/analyzer#eecs026)) | The job skips structural bookkeeping and may run in parallel |
 | A component of more than 4 numbers, or of two number types, in a hot method | Components of 1 to 4 fields of one number type | The method gets a [vector loop](#vector-loops) |
 | Data a vector loop does not cover (mixed lane types, a lookup table) | A batch method with `Vector<T>` | SIMD over whole runs of rows |
 | `Maybe<T>` in the hottest loop | Two methods with `[With<T>]` / `[Without<T>]` | No presence test per row |
 | `Parallel = true` on light work | A plain `[ForEach]` | The hand-off costs more than it saves |
-| `Parallel = true` over a few hundred heavy rows, one chunk by default | [`ChunkSize = 64`](/en/docs/guide/threading#chunk-rows) | Every thread claims chunks instead of one doing them all |
-| `Maybe<T>` (or a lookup through the `Entity`) that only reads | [`ReadOnlyMaybe<T>`](#read-only-maybe) | A read for the scheduler, never stamped, no lookup per row ([EECS027](/en/docs/guide/analyzer#eecs027)) |
+| `Parallel = true` over a few hundred heavy rows, one chunk by default | [`ChunkSize = 64`](/en/docs/guide/performance/threading#chunk-rows) | Every thread claims chunks instead of one doing them all |
+| `Maybe<T>` (or a lookup through the `Entity`) that only reads | [`ReadOnlyMaybe<T>`](#read-only-maybe) | A read for the scheduler, never stamped, no lookup per row ([EECS027](/en/docs/guide/help/analyzer#eecs027)) |
 | A filter repeated on every method of a cadence | A [group filter](#group-filters) | Written once |
 | Work every tick that could wait | `[UpdateInterval(N, Phase = P)]` | Spread over ticks |
 | `entity.Destroy()` at the end of a method over event entities | [`[Consume]`](#consume) | One `DestroyAll` per table after the pass |
 | `Sin` / `Cos` / `Exp` in a hot method whose last bits nobody compares | [`FloatMode = FloatMode.Fast`](#float-mode) | The method gets its vector loop |
 | Upkeep over every entity on every N-th tick | [`Slices = N`](#slices) | A flat cost per update instead of a spike |
-| A `ref` on a tracked value recomputed every tick that rarely changes | [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) with `SetIfChanged` | Only real changes are stamped: `[Changed<T>]` readers visit fewer rows |
+| A `ref` on a tracked value recomputed every tick that rarely changes | [`Mut<T>`](/en/docs/guide/changes/change-tracking#set-if-changed) with `SetIfChanged` | Only real changes are stamped: `[Changed<T>]` readers visit fewer rows |
 
 A `[ForEach]` system against two plain arrays, `Position += Velocity` over 10,000 entities (`MicroBenchmarks`):
 
@@ -1289,7 +1289,7 @@ needed, and a method that writes a singleton:
 - **Singleton parameters** are resolved once per pass, not per entity.
 - **Ordering** is resolved when systems are added: an update pays nothing for it.
 - **`MeasureSystems`** costs, per system run, two clock reads, two allocation counter reads and one `Count` per
-  `[ForEach]` pass ([diagnostics](/en/docs/guide/diagnostics#what-it-costs)); one field test per run when off.
+  `[ForEach]` pass ([diagnostics](/en/docs/guide/production/diagnostics#what-it-costs)); one field test per run when off.
 - **Parallel methods** allocate nothing after their first update; the runner's work items are reused.
 - **Vector loops** cost nothing to qualify for: they are written at compile time, run per run of rows, and allocate
   nothing.
@@ -1303,55 +1303,55 @@ needed, and a method that writes a singleton:
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| `[EcsSystem]` on a class or a plain struct | No code is generated for it | [EECS074](/en/docs/guide/analyzer#eecs074) (with a code fix): `ref struct` |
-| An instance member in a system | The world never creates a system: it could never be reached | [EECS075](/en/docs/guide/analyzer#eecs075) (with a code fix): `static` |
-| A hook with parameters other than `World` / `SystemHandle`, or two methods for one hook | Nothing calls it | [EECS076](/en/docs/guide/analyzer#eecs076) |
-| `AddSystem<T>`, `[UpdateAfter<T>]` and the like with a `T` that is no `[EcsSystem]` | `AddSystem` throws, the others never find it | [EECS077](/en/docs/guide/analyzer#eecs077) |
-| A mutable static field in a system | State nothing else can see, shared by every world, kept when the system is removed | [EECS007](/en/docs/guide/analyzer#eecs007) |
-| A system referencing another system | The two can no longer change apart | [EECS008](/en/docs/guide/analyzer#eecs008) |
-| A parameter of another type in a system's method | Nothing can supply it | [EECS002](/en/docs/guide/analyzer#eecs002) |
-| No component and no `[With<T>]` | Nothing names what to iterate | [EECS003](/en/docs/guide/analyzer#eecs003) |
-| A generic `[ForEach]` method in a system | No type arguments | [EECS004](/en/docs/guide/analyzer#eecs004); make the system generic |
-| Spans mixed with per-entity parameters | No single value per run | [EECS009](/en/docs/guide/analyzer#eecs009) |
-| A parallel method that changes structure or writes a singleton | Races between chunks | [EECS010](/en/docs/guide/analyzer#eecs010) |
-| `ChunkSize` without `Parallel = true`, or below 0 | A method on one thread has no chunks | [EECS054](/en/docs/guide/analyzer#eecs054) |
-| A `Maybe<T>` of an indexed component | Its `ref` could change the key behind the index's back | [EECS015](/en/docs/guide/analyzer#eecs015): a `ReadOnlyMaybe<T>` |
+| `[EcsSystem]` on a class or a plain struct | No code is generated for it | [EECS074](/en/docs/guide/help/analyzer#eecs074) (with a code fix): `ref struct` |
+| An instance member in a system | The world never creates a system: it could never be reached | [EECS075](/en/docs/guide/help/analyzer#eecs075) (with a code fix): `static` |
+| A hook with parameters other than `World` / `SystemHandle`, or two methods for one hook | Nothing calls it | [EECS076](/en/docs/guide/help/analyzer#eecs076) |
+| `AddSystem<T>`, `[UpdateAfter<T>]` and the like with a `T` that is no `[EcsSystem]` | `AddSystem` throws, the others never find it | [EECS077](/en/docs/guide/help/analyzer#eecs077) |
+| A mutable static field in a system | State nothing else can see, shared by every world, kept when the system is removed | [EECS007](/en/docs/guide/help/analyzer#eecs007) |
+| A system referencing another system | The two can no longer change apart | [EECS008](/en/docs/guide/help/analyzer#eecs008) |
+| A parameter of another type in a system's method | Nothing can supply it | [EECS002](/en/docs/guide/help/analyzer#eecs002) |
+| No component and no `[With<T>]` | Nothing names what to iterate | [EECS003](/en/docs/guide/help/analyzer#eecs003) |
+| A generic `[ForEach]` method in a system | No type arguments | [EECS004](/en/docs/guide/help/analyzer#eecs004); make the system generic |
+| Spans mixed with per-entity parameters | No single value per run | [EECS009](/en/docs/guide/help/analyzer#eecs009) |
+| A parallel method that changes structure or writes a singleton | Races between chunks | [EECS010](/en/docs/guide/help/analyzer#eecs010) |
+| `ChunkSize` without `Parallel = true`, or below 0 | A method on one thread has no chunks | [EECS054](/en/docs/guide/help/analyzer#eecs054) |
+| A `Maybe<T>` of an indexed component | Its `ref` could change the key behind the index's back | [EECS015](/en/docs/guide/help/analyzer#eecs015): a `ReadOnlyMaybe<T>` |
 | `ReadOnlyMaybe<T>.Value` read when the entity lacks `T` | `InvalidOperationException` | Test `HasValue` first |
-| Writing a collection through an `in` parameter | Scheduled as a read, never stamped | [EECS011](/en/docs/guide/analyzer#eecs011) |
-| A structural change through a component's link in a method without `Entity` / `World` | The pass keeps refs into moved rows | [EECS013](/en/docs/guide/analyzer#eecs013) |
-| An interval below 1, a phase outside 0 to N - 1 | No valid cadence | [EECS083](/en/docs/guide/analyzer#eecs083) |
-| `Slices` below 1, or with `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]`, `[RemovedAny<…>]` | The changes in the other slices' rows are lost | [EECS035](/en/docs/guide/analyzer#eecs035) |
+| Writing a collection through an `in` parameter | Scheduled as a read, never stamped | [EECS011](/en/docs/guide/help/analyzer#eecs011) |
+| A structural change through a component's link in a method without `Entity` / `World` | The pass keeps refs into moved rows | [EECS013](/en/docs/guide/help/analyzer#eecs013) |
+| An interval below 1, a phase outside 0 to N - 1 | No valid cadence | [EECS083](/en/docs/guide/help/analyzer#eecs083) |
+| `Slices` below 1, or with `[Changed<T>]`, `[Removed<T>]`, `[ChangedAny<…>]`, `[RemovedAny<…>]` | The changes in the other slices' rows are lost | [EECS035](/en/docs/guide/help/analyzer#eecs035) |
 | A sliced method relied on to visit each row exactly once per cycle | Rows that move between runs can be skipped or visited twice | Code review: slice only work that tolerates it |
-| A `Mut<T>` parameter in a batch method | Batch methods take spans | [EECS009](/en/docs/guide/analyzer#eecs009) |
-| Orderings in a cycle, or across groups | Throws on `AddSystem`; never applies | [EECS019](/en/docs/guide/analyzer#eecs019), [EECS020](/en/docs/guide/analyzer#eecs020) |
-| A private type in a method's parameters | The generated job cannot name it | [EECS022](/en/docs/guide/analyzer#eecs022) |
-| `[With<T>]`, `[Without<T>]` or `[WithAny<T1, T2>]` on a struct that is not a group | Compile error: the filter would do nothing | [EECS023](/en/docs/guide/analyzer#eecs023) |
-| A group's `[With<T>]` or `ISystemGroupWith<T>` with a method's `[Removed<T>]` | Asks for rows that have and lack `T`: the method never runs | [EECS016](/en/docs/guide/analyzer#eecs016) |
-| A group's `[With<X>]` with a method's `[Without<X>]` | No entity matches: the method never runs | [EECS049](/en/docs/guide/analyzer#eecs049) |
+| A `Mut<T>` parameter in a batch method | Batch methods take spans | [EECS009](/en/docs/guide/help/analyzer#eecs009) |
+| Orderings in a cycle, or across groups | Throws on `AddSystem`; never applies | [EECS019](/en/docs/guide/help/analyzer#eecs019), [EECS020](/en/docs/guide/help/analyzer#eecs020) |
+| A private type in a method's parameters | The generated job cannot name it | [EECS022](/en/docs/guide/help/analyzer#eecs022) |
+| `[With<T>]`, `[Without<T>]` or `[WithAny<T1, T2>]` on a struct that is not a group | Compile error: the filter would do nothing | [EECS023](/en/docs/guide/help/analyzer#eecs023) |
+| A group's `[With<T>]` or `ISystemGroupWith<T>` with a method's `[Removed<T>]` | Asks for rows that have and lack `T`: the method never runs | [EECS016](/en/docs/guide/help/analyzer#eecs016) |
+| A group's `[With<X>]` with a method's `[Without<X>]` | No entity matches: the method never runs | [EECS049](/en/docs/guide/help/analyzer#eecs049) |
 | A group's `[WithAny<A, B>]` with a method's `[WithAny<C, D>]`, read as "(A or B) and (C or D)" | The sets merge: entities with any of `A`, `B`, `C` and `D` | Code review |
-| A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): `[LookupKey]` on the type, which implements `IIndexed<T>.Key` explicitly |
-| `ref` on a component the method only reads | Stamps a tracked component, keeps the system out of shared stages | [EECS025](/en/docs/guide/analyzer#eecs025) |
-| An `Entity` or `World` parameter the method never uses | The job keeps its structural bookkeeping | [EECS026](/en/docs/guide/analyzer#eecs026) |
-| An allocation in an `OnUpdate` or `[ForEach]` method | Garbage every update | [EECS028](/en/docs/guide/analyzer#eecs028) |
-| `World.Update()` called from a system | The system runs again inside its own run | [EECS034](/en/docs/guide/analyzer#eecs034) |
-| An edit that takes a hot method's [vector loop](#vector-loops) away (a `bool` field, a call outside a condition) | One row at a time, with the same results | [EECS055](/en/docs/guide/analyzer#eecs055); `SimdMode = SimdMode.Require` makes it [EECS056](/en/docs/guide/analyzer#eecs056) |
+| A public `Key => this` on a record struct actor key | `ToString()` prints `Key` forever: stack overflow | [EECS043](/en/docs/guide/help/analyzer#eecs043) (with a code fix): `[LookupKey]` on the type, which implements `IIndexed<T>.Key` explicitly |
+| `ref` on a component the method only reads | Stamps a tracked component, keeps the system out of shared stages | [EECS025](/en/docs/guide/help/analyzer#eecs025) |
+| An `Entity` or `World` parameter the method never uses | The job keeps its structural bookkeeping | [EECS026](/en/docs/guide/help/analyzer#eecs026) |
+| An allocation in an `OnUpdate` or `[ForEach]` method | Garbage every update | [EECS028](/en/docs/guide/help/analyzer#eecs028) |
+| `World.Update()` called from a system | The system runs again inside its own run | [EECS034](/en/docs/guide/help/analyzer#eecs034) |
+| An edit that takes a hot method's [vector loop](#vector-loops) away (a `bool` field, a call outside a condition) | One row at a time, with the same results | [EECS055](/en/docs/guide/help/analyzer#eecs055); `SimdMode = SimdMode.Require` makes it [EECS056](/en/docs/guide/help/analyzer#eecs056) |
 | `FloatMode.Fast` on state that replays or that peers compare | Results differ in the last bits between machines | Code review: keep `FloatMode.Exact` ([float results](#float-mode)) |
-| A `[ForEach]` method that ends with `entity.Destroy()` on every path | A destroy per row instead of one per table | [EECS084](/en/docs/guide/analyzer#eecs084) (with a code fix): `[Consume]` |
-| `[Consume]` without `[ForEach]`, or with `Slices` | Compile error: destroying a slice moves the rows of the other slices, so an event could wait many runs | [EECS085](/en/docs/guide/analyzer#eecs085) |
+| A `[ForEach]` method that ends with `entity.Destroy()` on every path | A destroy per row instead of one per table | [EECS084](/en/docs/guide/help/analyzer#eecs084) (with a code fix): `[Consume]` |
+| `[Consume]` without `[ForEach]`, or with `Slices` | Compile error: destroying a slice moves the rows of the other slices, so an event could wait many runs | [EECS085](/en/docs/guide/help/analyzer#eecs085) |
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Queries and filters" href="/en/docs/guide/queries">
+  <Card title="Queries and filters" href="/en/docs/guide/basics/queries">
     The same filters, and struct jobs for ad-hoc passes.
   </Card>
-  <Card title="Structural changes" href="/en/docs/guide/structural-changes">
+  <Card title="Structural changes" href="/en/docs/guide/changes/structural-changes">
     Creating, destroying, adding and removing inside a `[ForEach]` method.
   </Card>
-  <Card title="Threading" href="/en/docs/guide/threading">
+  <Card title="Threading" href="/en/docs/guide/performance/threading">
     Parallel stages, one world per thread, input from other threads.
   </Card>
-  <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
+  <Card title="Analyzer rules" href="/en/docs/guide/help/analyzer">
     Every rule a system has to follow, with its fix.
   </Card>
 </Cards>

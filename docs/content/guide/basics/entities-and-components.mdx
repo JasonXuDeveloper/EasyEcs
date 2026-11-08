@@ -19,9 +19,9 @@ monster, can never be written through an old handle.
 </Callout>
 
 <Callout type="warn" title="Skip it for">
-  Data of the whole world (a clock, configuration, a spatial grid): that is a [singleton](/en/docs/guide/singletons).
-  Behavior inside components: components are data, logic goes into [systems](/en/docs/guide/systems). Classes as
-  components: they do not compile ([EECS006](/en/docs/guide/analyzer#eecs006)).
+  Data of the whole world (a clock, configuration, a spatial grid): that is a [singleton](/en/docs/guide/basics/singletons).
+  Behavior inside components: components are data, logic goes into [systems](/en/docs/guide/basics/systems). Classes as
+  components: they do not compile ([EECS006](/en/docs/guide/help/analyzer#eecs006)).
 </Callout>
 
 ## How to use it [#how-to-use-it]
@@ -88,7 +88,7 @@ no behavior. Every member validates the version first:
 
 Two handles are equal when they name the same incarnation in the same world. Destroying an entity bumps its
 version, so every handle to it becomes stale at once, and it never reaches the entity that later reuses the index.
-An entity that holds [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) is retired by
+An entity that holds [cleanup components](/en/docs/guide/changes/cleanup-and-disable#cleanup-components) is retired by
 `Destroy` instead: it stays alive, tagged `Retired`, until a system removes them.
 
 Waves of spawns and clean-ups have bulk forms, each one pass through the structural gate:
@@ -100,10 +100,10 @@ int cleared = world.DestroyAll<Health, Dead>();                    // every dead
 ```
 
 Kinds of entities spawned again and again (an NPC type, a projectile) are best defined once as a
-[prefab](/en/docs/guide/prefabs): `world.Instantiate(prefab)` creates one, `entity.Clone()` copies a living one.
+[prefab](/en/docs/guide/basics/prefabs): `world.Instantiate(prefab)` creates one, `entity.Clone()` copies a living one.
 `world.Instantiate(prefab, new Position(x, y))` creates one with 1 to 9 components given as well, which replace the
 prefab's or join them, in one row copy; the batch form `Instantiate(prefab, span, …)` gives a whole wave the same
-values ([prefabs](/en/docs/guide/prefabs#instantiate-with-values)).
+values ([prefabs](/en/docs/guide/basics/prefabs#instantiate-with-values)).
 
 The world counts and lists its entities:
 
@@ -121,8 +121,8 @@ var sized = new World(new WorldOptions { InitialEntityCapacity = 10_000 });
 ```
 
 Tables grow on their own; to size a table too,
-use [`Reserve<T1, …, Tn>(count)`](/en/docs/guide/structural-changes#bulk) for entities created with exactly
-those components, or [`Reserve(prefab, count)`](/en/docs/guide/prefabs#reserve) for a prefab's instances.
+use [`Reserve<T1, …, Tn>(count)`](/en/docs/guide/changes/structural-changes#bulk) for entities created with exactly
+those components, or [`Reserve(prefab, count)`](/en/docs/guide/basics/prefabs#reserve) for a prefab's instances.
 
 ### Ids, versions and recycling [#entityid]
 
@@ -153,7 +153,7 @@ bool same = reused.Id == fromClient;                   // false
 A component that points at another entity (an owner, a target, a parent) stores the `EntityId`, not the `Entity`.
 An `Entity` holds a reference to its world, so a component with an `Entity` field becomes a managed column: the GC
 scans it, every store pays a write barrier, rows are no longer copied as blocks and saves cannot write it. The
-analyzer warns ([EECS017](/en/docs/guide/analyzer#eecs017)).
+analyzer warns ([EECS017](/en/docs/guide/help/analyzer#eecs017)).
 
 ```csharp
 public record struct Target(EntityId Id) : IComponent;   // 8 bytes, unmanaged
@@ -170,7 +170,7 @@ public ref struct Chase
 ```
 
 To find every entity that points at a target, make the link an indexed component or a relation:
-[Indexes and relations](/en/docs/guide/indexes-and-relations).
+[Indexes and relations](/en/docs/guide/data/indexes-and-relations).
 
 #### Find an entity by a unique key [#unique-key]
 
@@ -190,7 +190,7 @@ bool known = world.AccountIndex.TryGet(2002, out var other);     // false: nobod
 ```
 
 The rules (re-keying, null keys, what each write checks) are in
-[Indexes and relations](/en/docs/guide/indexes-and-relations#unique-keys).
+[Indexes and relations](/en/docs/guide/data/indexes-and-relations#unique-keys).
 
 ### Components [#components]
 
@@ -204,7 +204,7 @@ The generic API works for any component type; the [generated members](#generated
 | `bool TryGet<T>(out T value)` | A **copy** if present. Never a write. |
 | `bool Has<T1..Tn>()` | Whether the entity has all of them. |
 | `Entity Set(in T1 … in Tn)` | Adds or replaces 1 to 9 values, with at most one row move; chainable. |
-| `bool SetIfChanged<T>(in T value)` | Sets `value` like `Set` unless the entity already has it: false then, with nothing written, stamped or indexed ([only when the value changed](/en/docs/guide/change-tracking#set-if-changed)). |
+| `bool SetIfChanged<T>(in T value)` | Sets `value` like `Set` unless the entity already has it: false then, with nothing written, stamped or indexed ([only when the value changed](/en/docs/guide/changes/change-tracking#set-if-changed)). |
 | `ref T GetOrAdd<T>()` | A ref, adding `default` first if missing; an existing value is kept. |
 | `ref T GetOrAdd<T>(in T value)` | A ref, adding `value` first if missing (its key indexed and its group joined, as `Set` does); an existing value is kept. |
 | `Entity Remove<T1..Tn>()` | Removes 1 to 9 components; missing ones are ignored; chainable. |
@@ -220,7 +220,7 @@ bool both = hero.Has<Position, Health>();
 ```
 
 Always change components through a `ref`: `var hp = hero.Get<Health>()` is a copy, and changing it changes nothing in
-the table ([ref and await](/en/docs/guide/refs-and-await)).
+the table ([ref and await](/en/docs/guide/changes/refs-and-await)).
 
 ### Generated members [#generated-members]
 
@@ -234,14 +234,14 @@ the same.
 | a tracked component (`Armor : ITracked`) | `e.Armor` is `ref readonly`; `e.WriteArmor()` returns the `ref`; `e.SetArmorIfChanged(v)` | `Read`; `Get` (stamped as written); `SetIfChanged(new Armor(v))` |
 | an indexed component (`[LookupKey]`, `Zone : IIndexed<int>`) | `e.Zone` is `ref readonly`, no `GetOrAddZone` or `WriteZone`; `e.SetZoneIfChanged(id)`; `world.ZoneIndex` | `Read`; `SetIfChanged(new Zone(id))`; `world.Index<Zone, int>()` |
 | a unique component (`[UniqueKey]`, `Account : IUniqueIndexed<long>`) | as an indexed one; `world.AccountIndex.Get(key)`, `world.AccountIndex.TryGet(key, out e)` | the [one entity of a key](#unique-key) |
-| a grouped component (`[Group]`, `Team : IGroup`) | `e.Team` is `ref readonly`, no `GetOrAddTeam` or `WriteTeam`; `e.SetTeamIfChanged(…)`; `filter.InTeam(group)` | `Read`; `SetIfChanged`; `filter.InGroup<Team>(group)` ([groups](/en/docs/guide/groups)) |
+| a grouped component (`[Group]`, `Team : IGroup`) | `e.Team` is `ref readonly`, no `GetOrAddTeam` or `WriteTeam`; `e.SetTeamIfChanged(…)`; `filter.InTeam(group)` | `Read`; `SetIfChanged`; `filter.InGroup<Team>(group)` ([groups](/en/docs/guide/data/groups)) |
 | a tag (`struct Dead : IComponent`) | `e.IsDead`, `e.SetDead()`, `e.RemoveDead()` | `Has`, `Set(new Dead())`, `Remove` |
-| any component with fields, except a cleanup component | `e.DisableHealth()`, `e.EnableHealth()`, `e.IsHealthDisabled` | [`Disable`](/en/docs/guide/cleanup-and-disable) / [`Enable`](/en/docs/guide/cleanup-and-disable) |
-| a buffer element some code names as `DynamicBuffer<Loot>` | `e.Loot` (`ref readonly`), `e.HasLoot`, `e.WriteLoot()`, `e.GetOrAddLoot()`, `e.RemoveLoot()` | `Read`, `Has`, `Get`, `GetOrAdd`, `Remove` of `DynamicBuffer<Loot>` ([dynamic buffers](/en/docs/guide/dynamic-buffers)) |
-| a relation (`MemberOf : IRelation`), once code names `DynamicBuffer<MemberOf>` | `e.LinkMemberOf(target)`, `e.UnlinkMemberOf(target)`, `e.LinksMemberOf(target)`, `e.MemberOf` (`ref readonly`), `e.HasMemberOf`, `e.RemoveMemberOf()`, `world.MemberOfIndex` | `Link`, `Unlink`, `Links`, `Read`, `Has`, `Remove`, `world.Relations<MemberOf>()` ([relations](/en/docs/guide/indexes-and-relations#relations)) |
-| a singleton (`Clock : ISingletonComponent`) | `world.Clock` (`ref`), `world.HasClock`, `world.GetOrAddClock()`, `world.SetClock(…)`, `world.RemoveClock()` | [`GetSingleton`](/en/docs/guide/singletons), `HasSingleton`, `GetOrAddSingleton`, `GetOrAddSingleton() = …`, `RemoveSingleton` |
+| any component with fields, except a cleanup component | `e.DisableHealth()`, `e.EnableHealth()`, `e.IsHealthDisabled` | [`Disable`](/en/docs/guide/changes/cleanup-and-disable) / [`Enable`](/en/docs/guide/changes/cleanup-and-disable) |
+| a buffer element some code names as `DynamicBuffer<Loot>` | `e.Loot` (`ref readonly`), `e.HasLoot`, `e.WriteLoot()`, `e.GetOrAddLoot()`, `e.RemoveLoot()` | `Read`, `Has`, `Get`, `GetOrAdd`, `Remove` of `DynamicBuffer<Loot>` ([dynamic buffers](/en/docs/guide/data/dynamic-buffers)) |
+| a relation (`MemberOf : IRelation`), once code names `DynamicBuffer<MemberOf>` | `e.LinkMemberOf(target)`, `e.UnlinkMemberOf(target)`, `e.LinksMemberOf(target)`, `e.MemberOf` (`ref readonly`), `e.HasMemberOf`, `e.RemoveMemberOf()`, `world.MemberOfIndex` | `Link`, `Unlink`, `Links`, `Read`, `Has`, `Remove`, `world.Relations<MemberOf>()` ([relations](/en/docs/guide/data/indexes-and-relations#relations)) |
+| a singleton (`Clock : ISingletonComponent`) | `world.Clock` (`ref`), `world.HasClock`, `world.GetOrAddClock()`, `world.SetClock(…)`, `world.RemoveClock()` | [`GetSingleton`](/en/docs/guide/basics/singletons), `HasSingleton`, `GetOrAddSingleton`, `GetOrAddSingleton() = …`, `RemoveSingleton` |
 | each `world.Query<Position, Velocity>()` the code calls | `item.Position`, `item.Velocity` | `item.Component1`, `item.Component2` |
-| any component, on a [prefab](/en/docs/guide/prefabs#generated-members) | `prefab.Position` (`ref readonly`), `HasPosition`, `SetPosition(x, y)`, `RemovePosition()`, `IsDead`, `SetDead()` | `Read`, `Has`, `Set`, `Remove` |
+| any component, on a [prefab](/en/docs/guide/basics/prefabs#generated-members) | `prefab.Position` (`ref readonly`), `HasPosition`, `SetPosition(x, y)`, `RemovePosition()`, `IsDead`, `SetDead()` | `Read`, `Has`, `Set`, `Remove` |
 
 ```csharp
 hero.Position.X += 1;                                      // ref: written in place
@@ -276,18 +276,18 @@ bool changed = hero.SetArmorIfChanged(6);                  // false: Armor is 6 
 
 What a component means beyond its fields (the key it is indexed by, the field its tables are grouped by, how a
 reduction combines) is an attribute on the declaration. The generator writes the interface members in a part of the
-type, so the type is `partial` ([EECS062](/en/docs/guide/analyzer#eecs062)); the setup attributes are registered
+type, so the type is `partial` ([EECS062](/en/docs/guide/help/analyzer#eecs062)); the setup attributes are registered
 once, and every world follows them from its first table holding the type.
 
 | Attribute | On | What it gives | Page |
 | --- | --- | --- | --- |
-| `[LookupKey]` | a field, a property or a positional parameter; or the struct (the whole value is the key) | `IIndexed<TKey>` and its `Key`: a value index, `world.XIndex` | [Value indexes](/en/docs/guide/indexes-and-relations#value-indexes) |
-| `[UniqueKey]` | the same | `IUniqueIndexed<TKey>`: one entity per key | [Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) |
-| `[Group]` | an `int` or enum member | `IGroup` and its `Group`: tables split by the value | [Groups](/en/docs/guide/groups#mark-the-component) |
-| `[GroupBy]` | an `IGroup` struct | every world groups by it, with no `GroupBy<T>()` call | [Groups](/en/docs/guide/groups#group-by) |
-| `[WhenTargetDestroyed(policy)]` | a relation, or a component indexed by an `EntityId` | what destroying a target does to the links, in every world | [Target policies](/en/docs/guide/indexes-and-relations#target-policies) |
-| `[NotSaved]` | a component or a singleton | every save leaves it out; it needs no formatter | [Saves](/en/docs/guide/saves#not-saved) |
-| `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]` | every field of a singleton | `IReduction<T>`: `Identity` and `Combine`, field by field | [Reductions](/en/docs/guide/threading#reductions) |
+| `[LookupKey]` | a field, a property or a positional parameter; or the struct (the whole value is the key) | `IIndexed<TKey>` and its `Key`: a value index, `world.XIndex` | [Value indexes](/en/docs/guide/data/indexes-and-relations#value-indexes) |
+| `[UniqueKey]` | the same | `IUniqueIndexed<TKey>`: one entity per key | [Unique keys](/en/docs/guide/data/indexes-and-relations#unique-keys) |
+| `[Group]` | an `int` or enum member | `IGroup` and its `Group`: tables split by the value | [Groups](/en/docs/guide/data/groups#mark-the-component) |
+| `[GroupBy]` | an `IGroup` struct | every world groups by it, with no `GroupBy<T>()` call | [Groups](/en/docs/guide/data/groups#group-by) |
+| `[WhenTargetDestroyed(policy)]` | a relation, or a component indexed by an `EntityId` | what destroying a target does to the links, in every world | [Target policies](/en/docs/guide/data/indexes-and-relations#target-policies) |
+| `[NotSaved]` | a component or a singleton | every save leaves it out; it needs no formatter | [Saves](/en/docs/guide/saves/saves#not-saved) |
+| `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]`, `[Any]` | every field of a singleton | `IReduction<T>`: `Identity` and `Combine`, field by field | [Reductions](/en/docs/guide/performance/threading#reductions) |
 
 ```csharp tab="You write"
 public partial record struct Owner([LookupKey] EntityId Of) : IComponent;
@@ -303,8 +303,8 @@ public partial record struct Owner : IIndexed<EntityId>
 
 A key computed from several members is still written by hand (`public (int, int) Key => (X, Y);`), and so is a
 reduction whose fields combine together. A hand-written `Key` that returns one member is
-[EECS067](/en/docs/guide/analyzer#eecs067), with a code fix to the attribute; a setup attribute on a type it does
-not fit is [EECS068](/en/docs/guide/analyzer#eecs068).
+[EECS067](/en/docs/guide/help/analyzer#eecs067), with a code fix to the attribute; a setup attribute on a type it does
+not fit is [EECS068](/en/docs/guide/help/analyzer#eecs068).
 
 ### Tags [#tags]
 
@@ -416,10 +416,10 @@ with `false` instead of throwing. After `Destroy` the stored id names nothing: t
 | `CreateEntity()` then `Set` per component | `CreateEntity(a, b, c)`, `Instantiate(prefab)`, or `Instantiate(prefab, a, b)` | One placement instead of one row move per component |
 | `SetX(…)` on a tracked value that rarely changes | `SetXIfChanged(…)` | An equal value is not stamped: `[Changed<T>]` readers skip it |
 | `Set(a)` then `Set(b)` | `Set(a, b)`, `Remove<A, B>()` | Shorter, the same cost |
-| A loop of `CreateEntity` / `Destroy` | `CreateEntities(span, …)`, `DestroyAll<T>(filter)` ([EECS031](/en/docs/guide/analyzer#eecs031)) | One pass through the structural gate per wave |
+| A loop of `CreateEntity` / `Destroy` | `CreateEntities(span, …)`, `DestroyAll<T>(filter)` ([EECS031](/en/docs/guide/help/analyzer#eecs031)) | One pass through the structural gate per wave |
 | `Get<T>()` to read a tracked component | `Read<T>()`, the generated property, `TryGet<T>()` | A `ref` access stamps the row as written |
 | `Has<T>()` then `Get<T>()` | `TryGetRef<T>(out found)` | One lookup |
-| Several `Get` / `TryGetRef` and a `Has<Dead>()` per request | [`entity.Run`](/en/docs/guide/queries#run-on-one-entity) with a `static readonly` filter | One lookup for every component; the refs survive structural changes |
+| Several `Get` / `TryGetRef` and a `Has<Dead>()` per request | [`entity.Run`](/en/docs/guide/basics/queries#run-on-one-entity) with a `static readonly` filter | One lookup for every component; the refs survive structural changes |
 | An `Entity` field in a component | An `EntityId` field | Unmanaged column: no GC scan, block copies |
 
 Per-entity access through handles, 1,000 handles each (`MicroBenchmarks`: `HandleAccess` writes `Position` through
@@ -447,35 +447,35 @@ fighters then lifting it (two structural changes each):
 - **Destroy:** O(components); outside a pass the table's last row fills the hole at once.
 - **Remove a component, add it back:** one presence bit. Gaining a new column: one row copy.
 - **Writes of untracked components** cost nothing extra; tracked ones store one tick
-  ([change tracking](/en/docs/guide/change-tracking#what-it-costs)).
+  ([change tracking](/en/docs/guide/changes/change-tracking#what-it-costs)).
 - After warm-up, none of this allocates.
 
 ## Pitfalls [#pitfalls]
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A class implementing `IComponent` | Does not compile | [EECS006](/en/docs/guide/analyzer#eecs006) |
-| An `Entity` field in a component | A managed column, scanned by the GC, not saved | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
-| Changing a copy: `var hp = e.Get<Health>(); hp.Value--;` | The table is unchanged | [EECS038](/en/docs/guide/analyzer#eecs038) (warning, with a code fix): `ref var hp = ref …` |
+| A class implementing `IComponent` | Does not compile | [EECS006](/en/docs/guide/help/analyzer#eecs006) |
+| An `Entity` field in a component | A managed column, scanned by the GC, not saved | [EECS017](/en/docs/guide/help/analyzer#eecs017) (warning) |
+| Changing a copy: `var hp = e.Get<Health>(); hp.Value--;` | The table is unchanged | [EECS038](/en/docs/guide/help/analyzer#eecs038) (warning, with a code fix): `ref var hp = ref …` |
 | Storing `id.Index` alone | Names whichever entity reuses the index | Store the `EntityId`; `TryGetEntity` checks the version |
-| Reading a tracked component with `Get<T>()` | The row counts as written, every `[Changed<T>]` reader visits it | [EECS025](/en/docs/guide/analyzer#eecs025); the generated property is `ref readonly` |
-| Writing an indexed component through `Get<T>()` | The index keeps the old key | [EECS015](/en/docs/guide/analyzer#eecs015) |
-| A `DynamicBuffer<T>` copied out of an entity | Two entities share one list | [EECS012](/en/docs/guide/analyzer#eecs012) |
+| Reading a tracked component with `Get<T>()` | The row counts as written, every `[Changed<T>]` reader visits it | [EECS025](/en/docs/guide/help/analyzer#eecs025); the generated property is `ref readonly` |
+| Writing an indexed component through `Get<T>()` | The index keeps the old key | [EECS015](/en/docs/guide/help/analyzer#eecs015) |
+| A `DynamicBuffer<T>` copied out of an entity | Two entities share one list | [EECS012](/en/docs/guide/help/analyzer#eecs012) |
 | `Get<T>()` on a component the entity may lack | `InvalidOperationException` | Use `HasX`, `TryGetX` or `TryGetRef` |
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Prefabs and cloning" href="/en/docs/guide/prefabs">
+  <Card title="Prefabs and cloning" href="/en/docs/guide/basics/prefabs">
     Define a kind of entity once, spawn it one at a time or in waves.
   </Card>
-  <Card title="Queries and filters" href="/en/docs/guide/queries">
+  <Card title="Queries and filters" href="/en/docs/guide/basics/queries">
     Select the entities that have a set of components.
   </Card>
-  <Card title="Structural changes" href="/en/docs/guide/structural-changes">
+  <Card title="Structural changes" href="/en/docs/guide/changes/structural-changes">
     Adding, removing, creating and destroying in the middle of a pass.
   </Card>
-  <Card title="ref and await" href="/en/docs/guide/refs-and-await">
+  <Card title="ref and await" href="/en/docs/guide/changes/refs-and-await">
     Why refs into the tables never cross an `await`.
   </Card>
 </Cards>

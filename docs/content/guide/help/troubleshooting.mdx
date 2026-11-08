@@ -6,7 +6,7 @@ icon: LifeBuoy
 faq: true
 ---
 
-Most mistakes never reach run time: the [analyzer](/en/docs/guide/analyzer) rejects them while you type. This page is
+Most mistakes never reach run time: the [analyzer](/en/docs/guide/help/analyzer) rejects them while you type. This page is
 for the rest: the exceptions EasyEcs throws, quoted as they appear, and the problems that throw nothing. Search the
 page for the first words of your message.
 
@@ -54,8 +54,8 @@ a second thread changed the world while its owner did, or code running inside a 
 EasyEcs calls) started another. EasyEcs checks a plain flag, so it catches many such races, not all of them.
 
 **Fix:** change a world from one thread at a time. Other threads hand their changes over as data, through a queue a
-system drains on the owner's thread ([input from other threads](/en/docs/guide/threading#input-from-other-threads),
-[hosting](/en/docs/guide/hosting#requests)), or each thread gets its own world.
+system drains on the owner's thread ([input from other threads](/en/docs/guide/performance/threading#input-from-other-threads),
+[hosting](/en/docs/guide/production/hosting#requests)), or each thread gets its own world.
 
 ## Why does a structural change throw "while the world's structure is frozen"? [#structure-frozen]
 
@@ -67,7 +67,7 @@ InvalidOperationException: A structural change was made while the world's struct
 The change was made while other code held the tables still: inside a parallel stage of systems
 (`ParallelSystems`), a `[ForEach(Parallel = true)]` method, a batch method or `ForEachBatch` job (spans point into
 the columns), or a job marked `INoStructuralChanges`. The analyzer reports the changes it sees there
-([EECS010](/en/docs/guide/analyzer#eecs010), [EECS013](/en/docs/guide/analyzer#eecs013)); this one came through a
+([EECS010](/en/docs/guide/help/analyzer#eecs010), [EECS013](/en/docs/guide/help/analyzer#eecs013)); this one came through a
 helper or a handle it could not follow.
 
 **Fix:** record the change as data (a tag, a component, a request entity) and make it in a system or `[ForEach]`
@@ -85,7 +85,7 @@ throwing: `IsAlive`, `Has<T>()` and `TryGet<T>()`; `Destroy` on such a handle do
 
 **Fix:** check `entity.IsAlive` where an entity may have died since you took its handle, and keep `EntityId`s in
 components, resolving them with `world.TryGetEntity(id, out var entity)`
-([entities and components](/en/docs/guide/entities-and-components)).
+([entities and components](/en/docs/guide/basics/entities-and-components)).
 
 ## Why does `Clone` say the entity is retired? [#clone-retired]
 
@@ -94,7 +94,7 @@ InvalidOperationException: The entity is retired: it is only kept alive (tagged 
 are removed, and cannot be cloned
 ```
 
-An entity with [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) stays alive after
+An entity with [cleanup components](/en/docs/guide/changes/cleanup-and-disable#cleanup-components) stays alive after
 `Destroy`, tagged `Retired`, until a system releases what those components hold. It is still alive, so `IsAlive` is
 true, but it is not brought back: `Clone()` refuses it, `MoveEntities` skips it and `SetAll` leaves it out unless the
 filter names `Retired`.
@@ -108,9 +108,9 @@ InvalidOperationException: Entity has no Mana component
 ```
 
 `Get<T>()` (and the generated `entity.Mana`) needs the component; a component that was removed or
-[disabled](/en/docs/guide/cleanup-and-disable) counts as absent. **Fix:** `TryGet<T>(out var value)` or the generated
+[disabled](/en/docs/guide/changes/cleanup-and-disable) counts as absent. **Fix:** `TryGet<T>(out var value)` or the generated
 `TryGetMana(out …)` where it is optional, `GetOrAdd<T>()` to add a default, or in a `[ForEach]` method a
-[`Maybe<T>`](/en/docs/guide/systems#maybe) parameter or a second method split by `[With<T>]` / `[Without<T>]`.
+[`Maybe<T>`](/en/docs/guide/basics/systems#maybe) parameter or a second method split by `[With<T>]` / `[Without<T>]`.
 
 ## Why is a singleton "not added to this world"? [#singleton-not-added]
 
@@ -123,7 +123,7 @@ Code read a singleton nobody added: `world.GetSingleton<T>()`, the generated `wo
 or a `[ForEach]` method that takes `Clock` as a parameter. A parameter is resolved when its system runs, so the first
 `Update()` throws, even when no entity matches. The world does not invent the singleton, because its default is
 rarely right: a clock with no step would leave every entity standing still, with no error to point at the missing
-setup ([singletons](/en/docs/guide/singletons#in-systems)).
+setup ([singletons](/en/docs/guide/basics/singletons#in-systems)).
 
 **Fix:** add it where the world is built, before the first `Update()` (`world.SetClock(…)`,
 `world.AddSingleton<Clock>()`), or use `GetOrAddSingleton<T>()` / `GetOrAddClock()` where a default value is right.
@@ -136,7 +136,7 @@ world.SetClock(...) or world.Clock = ..., or use GetOrAddClock() to take it as i
 ```
 
 `AddSingleton<T>()` adds a singleton the world does not have yet. It refuses one it has, rather than resetting the
-value every system reads to `default` ([singletons](/en/docs/guide/singletons#api)).
+value every system reads to `default` ([singletons](/en/docs/guide/basics/singletons#api)).
 
 **Fix:** replace the value with `world.SetClock(…)` (or `world.Clock = …`), or take it as it is with
 `GetOrAddClock()` where the code only needs it to exist.
@@ -148,7 +148,7 @@ InvalidOperationException: The entity has no Mana (check HasValue)
 ```
 
 The entity the method visits has no `T`. **Fix:** test `HasValue` before reading `Value`
-([`Maybe<T>`](/en/docs/guide/systems#maybe)).
+([`Maybe<T>`](/en/docs/guide/basics/systems#maybe)).
 
 ## Why does `AddSystem` say the system "is already a system of this world"? [#system-in-a-world]
 
@@ -158,7 +158,7 @@ InvalidOperationException: ReceiveSpawns is already a system of this world
 
 A world runs each system type once. **Fix:** add it once per world; every world has its own record of it, so the
 same type can be added to many worlds. To run one rule twice, over different components, make it a
-[generic system](/en/docs/guide/systems#generic-systems) and add two closed types; to run it more often, update its
+[generic system](/en/docs/guide/basics/systems#generic-systems) and add two closed types; to run it more often, update its
 group more often.
 
 ## Why does `AddSystem` report a cycle? [#ordering-cycle]
@@ -168,7 +168,7 @@ InvalidOperationException: [UpdateBefore] / [UpdateAfter] form a cycle among A, 
 ```
 
 The orderings of the named systems cannot all hold. The analyzer reports the cycles it sees in one compilation
-([EECS019](/en/docs/guide/analyzer#eecs019)); this one spans assemblies. **Fix:** remove one of the orderings.
+([EECS019](/en/docs/guide/help/analyzer#eecs019)); this one spans assemblies. **Fix:** remove one of the orderings.
 
 ## Why does `Descendants` throw "The ChildOf links form a cycle"? [#childof-cycle]
 
@@ -182,7 +182,7 @@ walk up the tree on every `Set`), so the walk finds the cycle when it reaches it
 
 **Fix:** before re-parenting `child` under `parent`, walk up from `parent` through `ChildOf` and refuse when you meet
 `child`. Detach first (`RemoveChildOf()`) when an entity moves under one of its own descendants
-([re-parent and detach](/en/docs/guide/hierarchy#reparent)).
+([re-parent and detach](/en/docs/guide/data/hierarchy#reparent)).
 
 ## Why can a component not be disabled? [#cannot-disable]
 
@@ -190,7 +190,7 @@ walk up the tree on every `Set`), so the walk finds the cycle when it reaches it
 InvalidOperationException: ChildOf cannot be disabled: remove it instead
 ```
 
-`Disable<T>()` keeps a value hidden from queries. A [cleanup component](/en/docs/guide/cleanup-and-disable) and
+`Disable<T>()` keeps a value hidden from queries. A [cleanup component](/en/docs/guide/changes/cleanup-and-disable) and
 `ChildOf` cannot be hidden that way: the world must keep seeing them to finish a destroy and keep a hierarchy. **Fix:**
 remove the component, or disable another component that systems filter on.
 
@@ -204,10 +204,10 @@ InvalidOperationException: MoveEntities cannot run while a query or system itera
 The message names the call: `Capture`, `Restore`, the saves and loads (`Save`, `SaveWithout`, `SaveEntities`,
 `SaveEntitiesWith`, `SaveEntitiesWithout`, `Load`, `LoadKeeping`, `LoadEntities`, `LoadEntitiesInto`), `MoveEntities`, `GroupBy`,
 `RemoveTypes` or `TrimExcess`. They read, rewrite or drop whole tables, which a `foreach` over a query or a running
-system is walking; the analyzer reports them inside a pass it can see ([EECS041](/en/docs/guide/analyzer#eecs041)).
-**Fix:** call them between updates, outside any query loop ([snapshots](/en/docs/guide/snapshots),
-[saves](/en/docs/guide/saves), [unloading](/en/docs/guide/migration-and-unload#remove-types),
-[trimming](/en/docs/guide/diagnostics#trim)). Creating entities, instantiating prefabs (with members too) and other
+system is walking; the analyzer reports them inside a pass it can see ([EECS041](/en/docs/guide/help/analyzer#eecs041)).
+**Fix:** call them between updates, outside any query loop ([snapshots](/en/docs/guide/saves/snapshots),
+[saves](/en/docs/guide/saves/saves), [unloading](/en/docs/guide/saves/migration-and-unload#remove-types),
+[trimming](/en/docs/guide/production/diagnostics#trim)). Creating entities, instantiating prefabs (with members too) and other
 structural changes are fine during a pass. `Restore` also refuses a snapshot of another world
 (`ArgumentException`) and one taken before `RemoveTypes` dropped some of its tables.
 
@@ -229,7 +229,7 @@ A load checks every component against the code that reads it, and a refused load
 - **Size or fields changed:** a raw unmanaged component's fields were added, removed, renamed or retyped since the
   save, or a `[NinoType]` component changed in a way its Nino format does not allow. Make a component whose shape will
   change a `[NinoType]` with the `VersionTolerant` or `Keyed` format, or keep the old type and convert it in a system
-  ([when the code changed](/en/docs/guide/saves#versioning)).
+  ([when the code changed](/en/docs/guide/saves/saves#versioning)).
 - **Raw rows and Nino:** `[NinoType]` was added to or removed from an unmanaged component since the save.
 - **A shared save id:** two types of the process have one id: the same namespace-qualified name (two versions of a
   plugin loaded at once), or a `[NinoFormerName]` that is another type's name. Unload the old version first, or rename
@@ -249,11 +249,11 @@ The component implements `IUniqueIndexed<TKey>`, and the write would give a seco
 The write is checked before it changes anything, so the entity and the world are as they were.
 
 - **Has key already:** another entity holds the key. To move a key, change the holder first, then the new one; a
-  swap goes through a free key ([moving a unique key](/en/docs/guide/common-mistakes#rekey-order)). Enabling a
+  swap goes through a free key ([moving a unique key](/en/docs/guide/help/common-mistakes#rekey-order)). Enabling a
   disabled component claims its key again and fails the same way when someone took it meanwhile.
 - **Several entities at once:** one call would write the same key into many rows: `CreateEntities` or `SetAll` with a
   key, `Instantiate(prefab, entities)` of a prefab that holds one, or `Clone()`. Give each entity its own key
-  ([copies of a unique key](/en/docs/guide/common-mistakes#unique-copies)).
+  ([copies of a unique key](/en/docs/guide/help/common-mistakes#unique-copies)).
 - **The save holds a key twice:** the save was written by code without the unique constraint, or edited. Load it
   into a world of the old code and fix the keys there, or remove the constraint for the migration.
 - **No index registered:** the generator registers the index of every unique component it can name. A type it
@@ -269,7 +269,7 @@ ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes
 `QueryFilter.Slice(index, of)` cuts each table into parts that only `ForEach`, `ForEachEntity`, `ForEachBatch` and
 their parallel forms visit. `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run`, `SetAll` and the other bulk
 calls need every matching row and refuse it. **Fix:** pass those calls the filter without `Slice`; read the share a
-sliced system visited from `system.Stats.LastEntities` ([slices](/en/docs/guide/systems#slices)).
+sliced system visited from `system.Stats.LastEntities` ([slices](/en/docs/guide/basics/systems#slices)).
 
 ## Why does `DestroyedSince` say there is no destroy log? [#no-destroy-log]
 
@@ -280,7 +280,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 The destroy log is off by default: it costs 16 bytes per record, allocated with the world. **Fix:** create the world
 with `new WorldOptions { DestroyLogCapacity = n }`, `n` the destroys that may happen between two reads of the slowest reader.
 When `DestroyedSince` returns `false`, the reader fell further behind than the log holds: send it the whole state
-([the destroy log](/en/docs/guide/change-tracking#destroy-log)).
+([the destroy log](/en/docs/guide/changes/change-tracking#destroy-log)).
 
 ## Why does my system never run? [#system-does-not-run]
 
@@ -299,7 +299,7 @@ Check, in this order:
    disabled component counts as absent.
 6. **There was something to see:** a `[Changed<T>]` method visits only rows written since its system last ran, and a
    `[Removed<T>]` method only entities that lost `T` since then
-   ([change tracking](/en/docs/guide/change-tracking#ticks)).
+   ([change tracking](/en/docs/guide/changes/change-tracking#ticks)).
 
 `WorldOptions.MeasureSystems` counts every run in `system.Stats.Runs`, which tells "never ran" from "ran and did
 nothing".
@@ -318,7 +318,7 @@ under it, run only when the entity can take the work, and say `false`, without r
 
 **Fix:** treat `false` as the answer to the request (the actor is gone, the unit is dead) rather than an error, and
 look up the entity again by its `EntityId` when it may have been replaced
-([`entity.Run`](/en/docs/guide/queries#run-on-one-entity)).
+([`entity.Run`](/en/docs/guide/basics/queries#run-on-one-entity)).
 
 ## Why do my systems not run in parallel? [#not-parallel]
 
@@ -326,7 +326,7 @@ With `ParallelSystems`, a system shares a stage only when its access is known an
 alone when it takes a `World` parameter or an `Entity` it uses for more than its identity, has an `OnUpdate`
 method, has a `[Consume]` method, or has no `[ForEach]` method. Two systems conflict when one writes what the
 other reads or writes, and a `ref` parameter counts as a write even when the body only reads it: use `in`
-([parallel systems](/en/docs/guide/threading#parallel-systems)). An ordering (`[UpdateAfter<T>]`) also puts the later
+([parallel systems](/en/docs/guide/performance/threading#parallel-systems)). An ordering (`[UpdateAfter<T>]`) also puts the later
 system in a later stage.
 
 ## Why does a parallel pass say an index "is not built yet"? [#index-not-built]
@@ -337,7 +337,7 @@ InvalidOperationException: The index of Unit by Team is not built yet, and build
 
 A value index is built by its first lookup. Code on several threads (a parallel `[ForEach]` method, a system of a
 parallel stage, `world.ParallelFor`) that looks one up through the `World` would build it while other threads read it,
-so the lookup refuses. **Fix:** take a [`Lookup<T>`](/en/docs/guide/threading#lookups) parameter and call `TryFind`,
+so the lookup refuses. **Fix:** take a [`Lookup<T>`](/en/docs/guide/performance/threading#lookups) parameter and call `TryFind`,
 `Find` or `Count` on it: the generated job builds the index before the pass. Or look the key up once on the owner
 thread before the update, which builds the index for the passes after it.
 
@@ -350,7 +350,7 @@ InvalidOperationException: This Lookup<Unit> holds no index by Team: a [ForEach]
 The generator prepares the index of a `Lookup<T>` from the calls it sees on the parameter in the method's body. A call
 made elsewhere, in a helper the parameter was passed to, names no index the job knows of. **Fix:** call `TryFind`,
 `Find` or `Count` with that key type on the parameter in the `[ForEach]` method itself, and pass the result to the
-helper ([lookups](/en/docs/guide/threading#lookups)).
+helper ([lookups](/en/docs/guide/performance/threading#lookups)).
 
 ## Why does a tile throw when its halo is exchanged or read? [#tile-throws]
 
@@ -364,46 +364,46 @@ InvalidOperationException: The tile's halo was exchanged without its mask (mask:
 
 - **Layers:** `ExchangeHalo(from, to)` takes layers `0 <= from < to <= Height`.
 - **Cells:** a tile's buffer holds `Width × Depth × Height` cells; fill it to that length when the tile is created
-  ([grids](/en/docs/guide/grids)).
+  ([grids](/en/docs/guide/performance/grids)).
 - **Shape:** the width, depth (1 to 64), height and halo of the `ITileShape` do not fit together; the analyzer reports
-  the shape where it is declared ([EECS072](/en/docs/guide/analyzer#eecs072)).
+  the shape where it is declared ([EECS072](/en/docs/guide/help/analyzer#eecs072)).
 - **Outside the tile and its halo:** a cursor or `tile[x, y, z]` read reached past the halo. Keep every offset within
   `Halo`, or declare a larger halo.
 - **Without its mask:** `Rows(...)` walks the active rows of the mask; a tile exchanged with `mask: false` has none.
-  Exchange with the mask, or walk every row yourself ([tall tiles](/en/docs/guide/grids#layers)).
+  Exchange with the mask, or walk every row yourself ([tall tiles](/en/docs/guide/performance/grids#layers)).
 
 ## Why did my method not get a vector loop? [#no-vector-loop]
 
 The generator writes a vector loop only for a method whose parameters and body it can turn into lanes: components of
 numbers of one size, no `Entity`, `World`, `Mut<T>`, span, `Scratch<T>`, `Lookup<T>`, `Emit<T>` or `Tile` parameter,
 no calls it cannot vectorize. Otherwise the method runs row by row, which is correct and only slower. **Fix:** read
-the reason and change what it names: [EECS055](/en/docs/guide/analyzer#eecs055) (a suggestion, shown in the IDE)
+the reason and change what it names: [EECS055](/en/docs/guide/help/analyzer#eecs055) (a suggestion, shown in the IDE)
 names it for a method that looks meant for a vector loop, `SimdMode = SimdMode.Require` turns it into a build error
-([EECS056](/en/docs/guide/analyzer#eecs056)), and `world.DescribeSchedule()` prints the loop of every method
-(`SystemInfo.Loops`, [vector loops](/en/docs/guide/systems#vector-loops)).
+([EECS056](/en/docs/guide/help/analyzer#eecs056)), and `world.DescribeSchedule()` prints the loop of every method
+(`SystemInfo.Loops`, [vector loops](/en/docs/guide/basics/systems#vector-loops)).
 
 ## Why does my parallel method run on one thread? [#parallel-one-thread]
 
 A parallel `[ForEach]` method splits its rows into chunks, at least 1,024 rows each (4,096 when it writes a tracked
 component), and fewer than two chunks run on the calling thread. A pass whose helpers do not make it faster runs there
 too. A few hundred heavy rows are then one chunk. **Fix:** set
-[`ChunkSize`](/en/docs/guide/threading#chunk-rows) to the rows a thread should take at a time (rows ÷ threads ÷ 4 is a
+[`ChunkSize`](/en/docs/guide/performance/threading#chunk-rows) to the rows a thread should take at a time (rows ÷ threads ÷ 4 is a
 good start, never below 64); light rows keep the default.
 
 ## Why does a float total differ between runs or machines? [#float-total]
 
 A floating-point `Reduce<T>` sum is rounded per chunk, and the default chunk size follows the thread count, so another
-machine cuts other chunks. **Fix:** set [`ChunkSize`](/en/docs/guide/threading#chunk-rows): the total is then the same
+machine cuts other chunks. **Fix:** set [`ChunkSize`](/en/docs/guide/performance/threading#chunk-rows): the total is then the same
 on every run and for any thread count, though not bit for bit the total of the same method with `Parallel = false`
-([reductions](/en/docs/guide/threading#reductions)). Integer totals, minimum and maximum are exact either way.
+([reductions](/en/docs/guide/performance/threading#reductions)). Integer totals, minimum and maximum are exact either way.
 
 ## Why does `EntityRandom` draw the same numbers? [#random-repeats]
 
 A draw is a pure function of (seed, entity, tick, stream). Only `World.Update()` advances the tick: systems run by
 `Update<TGroup>()` alone draw the numbers of the last update again, and two draws of one stream for one entity in one
-step are equal ([EECS088](/en/docs/guide/analyzer#eecs088)). **Fix:** call `World.Update()` once per step (its default
+step are equal ([EECS088](/en/docs/guide/help/analyzer#eecs088)). **Fix:** call `World.Update()` once per step (its default
 group may hold no system), and give each draw of a row its own stream
-([random numbers](/en/docs/guide/threading#entity-random)).
+([random numbers](/en/docs/guide/performance/threading#entity-random)).
 
 ## Why is a generated member missing? [#member-missing]
 
@@ -418,35 +418,35 @@ writes nothing when:
   `SetX(…)`.
 
 The generic API always works: `Get<T>()`, `Read<T>()`, `Set(…)`, `Has<T>()`, `Remove<T>()`, `GetSingleton<T>()`
-([generated members](/en/docs/guide/entities-and-components)).
+([generated members](/en/docs/guide/basics/entities-and-components)).
 
 ## Why did a value I wrote through a `ref` disappear? [#ref-lost]
 
 A `ref` from `entity.Get<T>()` or a query item is valid until the next structural change of
 the world, which can move rows, and never across an `await`. A write through an older `ref` lands in memory the entity
-no longer uses. Read again through the handle after the change ([refs and await](/en/docs/guide/refs-and-await)).
+no longer uses. Read again through the handle after the change ([refs and await](/en/docs/guide/changes/refs-and-await)).
 
 A tracked or indexed component is read-only through `entity.X` and `Read<T>()`: writes go through `Set(…)`, or the
 generated `WriteX()` for a tracked one, so that the change is stamped
-([change tracking](/en/docs/guide/change-tracking#write-as-usual)).
+([change tracking](/en/docs/guide/changes/change-tracking#write-as-usual)).
 
 ## Why did a component vanish after a load? [#save-dropped-data]
 
 A save names each type by its Nino type id (a hash of its namespace-qualified name), and a load skips the types this
 process does not have. A component renamed or moved to another namespace since the save loads as missing: its data is
 dropped without an error. Put `[NinoFormerName("Old.Namespace.Name")]` on the renamed type, and its old rows load
-([when the code changed](/en/docs/guide/saves#versioning)).
+([when the code changed](/en/docs/guide/saves/saves#versioning)).
 
 ## Why did `MoveEntities` leave an entity behind? [#move-skipped]
 
 `MoveEntities` skips the ids it cannot move and counts only the others: a stale id, an id given twice, and an entity
-retired, kept for its [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) (tagged
+retired, kept for its [cleanup components](/en/docs/guide/changes/cleanup-and-disable#cleanup-components) (tagged
 `Retired`). The `moved` span holds `default` at a skipped id's position. A child left out of the group is not
 skipped: it is destroyed with its moved parent. A moved entity also leaves its cleanup components behind, on the
 retired original, so this world's systems release the resource once; the new entity does not have them.
 
 **Fix:** compare the return value with the number of ids, collect a subtree with
-`world.Descendants(root).AddTo(ids, includeRoot: true)` ([moving a hierarchy](/en/docs/guide/hierarchy#moving)), and
+`world.Descendants(root).AddTo(ids, includeRoot: true)` ([moving a hierarchy](/en/docs/guide/data/hierarchy#moving)), and
 give the target world its own resource components after the move.
 
 ## Why does the generator not see an interface another generator adds? [#other-generators]
@@ -466,21 +466,21 @@ until the stack overflows. A log line, a string interpolation or the debugger's 
 trigger it.
 
 **Fix:** declare the key with `[LookupKey]` on the type, which implements `Key` explicitly (or write
-`Shop IIndexed<Shop>.Key => this;` by hand): the index still finds it, and `ToString()` no longer sees it ([common mistakes](/en/docs/guide/common-mistakes#public-key)).
+`Shop IIndexed<Shop>.Key => this;` by hand): the index still finds it, and `ToString()` no longer sees it ([common mistakes](/en/docs/guide/help/common-mistakes#public-key)).
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Common mistakes" href="/en/docs/guide/common-mistakes">
+  <Card title="Common mistakes" href="/en/docs/guide/help/common-mistakes">
     The mistakes, the code that makes them and the fix.
   </Card>
-  <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
+  <Card title="Analyzer rules" href="/en/docs/guide/help/analyzer">
     EECS002 to EECS089, what triggers each and how to fix it.
   </Card>
-  <Card title="Threading" href="/en/docs/guide/threading">
+  <Card title="Threading" href="/en/docs/guide/performance/threading">
     The owner thread and what the world synchronizes.
   </Card>
-  <Card title="Debugging and diagnostics" href="/en/docs/guide/diagnostics">
+  <Card title="Debugging and diagnostics" href="/en/docs/guide/production/diagnostics">
     Look inside a running world: tables, entities, system timing and errors.
   </Card>
 </Cards>

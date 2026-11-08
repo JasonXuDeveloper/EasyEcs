@@ -8,7 +8,7 @@ icon: GitFork
 A ship carries turrets, a turret carries a gun, a squad leader leads its members. `ChildOf(parent)` links an entity
 to its parent: `world.Children(parent)` lists the children, and destroying the parent destroys its descendants, so a
 ship that sinks takes its turrets with it without a line of cleanup code. `ChildOf` is an
-[indexed link](/en/docs/guide/indexes-and-relations#entityid-keys) by `EntityId` like any other, with the destroy cascade
+[indexed link](/en/docs/guide/data/indexes-and-relations#entityid-keys) by `EntityId` like any other, with the destroy cascade
 switched on.
 
 ## When to use it [#when-to-use-it]
@@ -20,7 +20,7 @@ switched on.
 
 <Callout type="warn" title="Skip it for">
   Links that must not kill the linked entity (a target, a follower): use your own `EntityId` key with `Keep` or `Remove`.
-  An entity with several "parents" (a member of many parties): use a [relation](/en/docs/guide/indexes-and-relations#relations).
+  An entity with several "parents" (a member of many parties): use a [relation](/en/docs/guide/data/indexes-and-relations#relations).
   Transform propagation is not built in: the [sample below](#transform-propagation) is a system you write.
 </Callout>
 
@@ -83,7 +83,7 @@ foreach (var part in world.Descendants(ship)) parts++;   // the turret, then its
 ### Re-parent and detach [#reparent]
 
 `ChildOf` is a value like any other: set a new one to re-parent, remove it to make the entity a root. Like your own
-components it has [generated members](/en/docs/guide/entities-and-components): `entity.ChildOf` (read-only: it is
+components it has [generated members](/en/docs/guide/basics/entities-and-components): `entity.ChildOf` (read-only: it is
 indexed), `HasChildOf`, `TryGetChildOf(out link)`, `SetChildOf(parent)`, `SetChildOfIfChanged(parent)`,
 `RemoveChildOf()` and `world.ChildOfIndex`, with `SetChildOf` / `RemoveChildOf` on a prefab too. It has no
 `DisableChildOf`: `ChildOf` cannot be disabled.
@@ -110,9 +110,9 @@ bool gunAlive = gun.IsAlive;               // false
 
 ### Spawn children from a prefab [#instantiate-children]
 
-A child made from a [prefab](/en/docs/guide/prefabs) gets its parent in the same call:
+A child made from a [prefab](/en/docs/guide/basics/prefabs) gets its parent in the same call:
 `world.Instantiate(minion, new ChildOf(boss))` writes the `ChildOf` over the copy in its final table, so the child is
-linked with one row copy and no move ([Give each instance its own values](/en/docs/guide/prefabs#instantiate-with-values)).
+linked with one row copy and no move ([Give each instance its own values](/en/docs/guide/basics/prefabs#instantiate-with-values)).
 The batch form `world.Instantiate(minion, span, new ChildOf(boss))` hangs a whole wave on one parent.
 
 ### Walk up to an ancestor [#ancestors]
@@ -177,7 +177,7 @@ Entity top = Ancestors.Root(cannon);                  // the frigate too: it has
 
 ### Changing what a destroy does [#cascade-policy]
 
-`ChildOf` starts with `TargetPolicy.Destroy`. Like any [target policy](/en/docs/guide/indexes-and-relations#target-policies)
+`ChildOf` starts with `TargetPolicy.Destroy`. Like any [target policy](/en/docs/guide/data/indexes-and-relations#target-policies)
 it can be changed per world: `Remove` makes the children of a destroyed parent roots, `Keep` leaves their `ChildOf`
 pointing at the dead id.
 
@@ -185,7 +185,7 @@ pointing at the dead id.
 world.ChildOfIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // orphans become roots
 ```
 
-- A child that holds a [cleanup component](/en/docs/guide/cleanup-and-disable#cleanup-components) is retired, not freed:
+- A child that holds a [cleanup component](/en/docs/guide/changes/cleanup-and-disable#cleanup-components) is retired, not freed:
   it keeps its cleanup components with the `Retired` tag, and its own children go with it.
 - A cycle (an entity that is its own ancestor) ends: destroying any of them destroys the loop.
 - `ChildOf` cannot be disabled (`Disable<ChildOf>()` throws): a parent's destroy must find its children.
@@ -245,7 +245,7 @@ before its children (O(1) per entity, allocating only when the list grows; clear
 together: a child whose parent stays behind arrives without its `ChildOf` (a root there), and
 `MoveEntities` destroys the originals with their children, so a child you did not list is lost. Both take a
 `ReadOnlySpan<EntityId>`: pass the list's span (`CollectionsMarshal.AsSpan`) rather than a copy of it. See
-[migration](/en/docs/guide/migration-and-unload#move-entities).
+[migration](/en/docs/guide/saves/migration-and-unload#move-entities).
 
 ```csharp
 using System.Runtime.InteropServices;
@@ -409,14 +409,14 @@ ship, does not.
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| Writing `ChildOf` through a `ref` | The index keeps the old parent | [EECS015](/en/docs/guide/analyzer#eecs015) |
-| A parent pointer of your own as an `Entity` field | A managed column, not saved, no cascade | [EECS017](/en/docs/guide/analyzer#eecs017) |
+| Writing `ChildOf` through a `ref` | The index keeps the old parent | [EECS015](/en/docs/guide/help/analyzer#eecs015) |
+| A parent pointer of your own as an `Entity` field | A managed column, not saved, no cascade | [EECS017](/en/docs/guide/help/analyzer#eecs017) |
 | Moving a parent without its children | The children stay and die with the destroyed original | Collect the group with `Descendants` |
 | Collecting a tree with `Children` alone | Grandchildren are left out | `Descendants` walks every level |
 | A `ChildOf` cycle walked with `Descendants` | `InvalidOperationException` when the walk reaches it | At run time |
 | Walking up `ChildOf` without a bound on the steps | A `ChildOf` cycle loops forever | Bound the walk by `world.EntityCount` ([ancestors](#ancestors)) |
-| Re-parenting inside a `Descendants` loop | A new link grows a child list the walk reads (a detached entity is stepped past) | [EECS042](/en/docs/guide/analyzer#eecs042): collect first, then change |
-| `Disable<ChildOf>()` | `InvalidOperationException` | [EECS048](/en/docs/guide/analyzer#eecs048): `Remove<ChildOf>()` |
+| Re-parenting inside a `Descendants` loop | A new link grows a child list the walk reads (a detached entity is stepped past) | [EECS042](/en/docs/guide/help/analyzer#eecs042): collect first, then change |
+| `Disable<ChildOf>()` | `InvalidOperationException` | [EECS048](/en/docs/guide/help/analyzer#eecs048): `Remove<ChildOf>()` |
 | Expecting world positions without a system | There is no built-in transform | Write the [propagation system](#transform-propagation) |
 
 ## Compared with other libraries [#compared]
@@ -429,13 +429,13 @@ Arch and DefaultEcs have none. The same squads, created and destroyed with their
 ## Related [#related]
 
 <Cards>
-  <Card title="Indexes and relations" href="/en/docs/guide/indexes-and-relations">
+  <Card title="Indexes and relations" href="/en/docs/guide/data/indexes-and-relations">
     `EntityId` keys, relations and target policies.
   </Card>
-  <Card title="Cleanup and disable" href="/en/docs/guide/cleanup-and-disable">
+  <Card title="Cleanup and disable" href="/en/docs/guide/changes/cleanup-and-disable">
     Entities that release a resource before they go.
   </Card>
-  <Card title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+  <Card title="Migration and unload" href="/en/docs/guide/saves/migration-and-unload">
     Moving a player and what it owns to another world.
   </Card>
   <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">

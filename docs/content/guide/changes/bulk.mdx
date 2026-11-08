@@ -51,16 +51,16 @@ int lifted = world.RemoveAll<Stun>();                        // the stun lifts f
 
 Without a filter, `RemoveAll<T>()` takes `T` from every entity that has it, and `SetAll` gives it to every alive entity,
 so name what to select (`With<Fighter>()`). Any `QueryFilter` works, including `Without`, `WithAny`, `Changed` and
-[`InGroup`](/en/docs/guide/groups).
+[`InGroup`](/en/docs/guide/data/groups).
 
-`Destroy` on an entity that holds [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) retires
+`Destroy` on an entity that holds [cleanup components](/en/docs/guide/changes/cleanup-and-disable#cleanup-components) retires
 it: it stays alive, tagged `Retired`, until they are released. `SetAll` leaves such entities out, so a bulk write never brings
 one back, unless the filter names the tag (`With<Retired>()`). `RemoveAll` reaches them: removing their cleanup
 components is how they are released.
 
 ### Disable and enable on every match [#disable-all]
 
-`DisableAll<T>(filter)` and `EnableAll<T>(filter)` are [`Disable<T>()`](/en/docs/guide/cleanup-and-disable#disable-a-component) and [`Enable<T>()`](/en/docs/guide/cleanup-and-disable#disable-a-component)
+`DisableAll<T>(filter)` and `EnableAll<T>(filter)` are [`Disable<T>()`](/en/docs/guide/changes/cleanup-and-disable#disable-a-component) and [`Enable<T>()`](/en/docs/guide/changes/cleanup-and-disable#disable-a-component)
 on every match: values are kept and given back.
 
 ```csharp
@@ -68,7 +68,7 @@ int paused = world.DisableAll<Regen>(Rounds.Fighters);     // pause systems that
 int resumed = world.EnableAll<Regen>();                    // restore the kept Regen(2) value
 ```
 
-Disabling regeneration leaves `Health` available to damage and display systems. The [full example](/en/docs/guide/bulk#full-example) below runs a regeneration system and checks that health stays unchanged while paused, then rises again after resuming.
+Disabling regeneration leaves `Health` available to damage and display systems. The [full example](/en/docs/guide/changes/bulk#full-example) below runs a regeneration system and checks that health stays unchanged while paused, then rises again after resuming.
 
 ### Spawn and clear waves [#spawn-and-clear]
 
@@ -84,17 +84,17 @@ world.CreateEntities(volley, new Shot(5), new Position(0, 0));   // one table, r
 int cleared = world.DestroyAll<Shot>();                          // every shot, in one pass
 ```
 
-`world.Instantiate(prefab, span)` spawns a wave from a [prefab](/en/docs/guide/prefabs).
+`world.Instantiate(prefab, span)` spawns a wave from a [prefab](/en/docs/guide/basics/prefabs).
 
 ### What the bulk calls keep [#semantics]
 
 | | `SetAll` | `RemoveAll` | `DisableAll` | `EnableAll` |
 | --- | --- | --- | --- | --- |
-| [Change tracking](/en/docs/guide/change-tracking) | a write per row | a removal per row (tracked `T`) | a removal per row | a write per row |
-| [Indexes](/en/docs/guide/indexes-and-relations) | re-indexed | unlinked | unlinked | re-linked |
-| [Groups](/en/docs/guide/groups) | moved to the value's group | | | |
+| [Change tracking](/en/docs/guide/changes/change-tracking) | a write per row | a removal per row (tracked `T`) | a removal per row | a write per row |
+| [Indexes](/en/docs/guide/data/indexes-and-relations) | re-indexed | unlinked | unlinked | re-linked |
+| [Groups](/en/docs/guide/data/groups) | moved to the value's group | | | |
 | On a disabled `T` | replaced: enabled, with the new value | | | |
-| [Cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components) | | the last one frees a retired entity | refused (throws) | |
+| [Cleanup components](/en/docs/guide/changes/cleanup-and-disable#cleanup-components) | | the last one frees a retired entity | refused (throws) | |
 
 All four are structural changes of the owner thread: call them between updates, from a system's `OnUpdate`, or from a
 `[ForEach]` method that takes an `Entity` or the `World` (a method that takes neither promises no structural change).
@@ -247,12 +247,12 @@ and entity by entity (`BulkBenchmark`):
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A bulk call inside a `[ForEach]` method without `Entity` or `World` | A structural change the pass did not plan for | [EECS013](/en/docs/guide/analyzer#eecs013) |
-| A bulk call from another thread | Races with the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
-| `DisableAll` of a cleanup component or `ChildOf` | `InvalidOperationException` | [EECS048](/en/docs/guide/analyzer#eecs048) |
+| A bulk call inside a `[ForEach]` method without `Entity` or `World` | A structural change the pass did not plan for | [EECS013](/en/docs/guide/help/analyzer#eecs013) |
+| A bulk call from another thread | Races with the owner thread | [EECS014](/en/docs/guide/help/analyzer#eecs014) |
+| `DisableAll` of a cleanup component or `ChildOf` | `InvalidOperationException` | [EECS048](/en/docs/guide/help/analyzer#eecs048) |
 | `SetAll` with a value that should differ per entity | Every entity gets the same value | Use a `[ForEach]` system |
-| `Set` / `Remove` entity by entity over a query | The same result, one structural change per entity | [EECS030](/en/docs/guide/analyzer#eecs030) |
-| `CreateEntity` or `Instantiate(prefab)` in a counted loop | One creation per entity instead of one per wave | [EECS031](/en/docs/guide/analyzer#eecs031): `CreateEntities`, `Instantiate(prefab, span)` |
+| `Set` / `Remove` entity by entity over a query | The same result, one structural change per entity | [EECS030](/en/docs/guide/help/analyzer#eecs030) |
+| `CreateEntity` or `Instantiate(prefab)` in a counted loop | One creation per entity instead of one per wave | [EECS031](/en/docs/guide/help/analyzer#eecs031): `CreateEntities`, `Instantiate(prefab, span)` |
 
 ## Compared with other libraries [#compared]
 
@@ -268,13 +268,13 @@ And a volley of 10,000 shots spawned beside 100,000 fighters, then cleared:
 ## Related [#related]
 
 <Cards>
-  <Card title="Cleanup and disable" href="/en/docs/guide/cleanup-and-disable">
+  <Card title="Cleanup and disable" href="/en/docs/guide/changes/cleanup-and-disable">
     `Disable<T>()` on one entity, cleanup components.
   </Card>
-  <Card title="Structural changes" href="/en/docs/guide/structural-changes">
+  <Card title="Structural changes" href="/en/docs/guide/changes/structural-changes">
     What a structural change is, and when it applies.
   </Card>
-  <Card title="Queries and filters" href="/en/docs/guide/queries">
+  <Card title="Queries and filters" href="/en/docs/guide/basics/queries">
     The `QueryFilter` every bulk call takes.
   </Card>
 </Cards>

@@ -46,7 +46,7 @@ Both libraries name their component interface `IComponent`. During a port, alias
 The rows name the components of the example below (`Health`, the tag `Dead`). For each
 component the generator writes named members (`entity.Health`, `HasHealth`, `SetHealth(…)`, `IsDead`): use them
 in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`) are for generic code
-([generated members](/en/docs/guide/entities-and-components#generated-members)).
+([generated members](/en/docs/guide/basics/entities-and-components#generated-members)).
 
 ### Entities and components [#entities-and-components]
 
@@ -279,11 +279,11 @@ The two versions of the whole tick, on the same machine:
 | --- | --- | --- |
 | Both `IComponent`s imported | Ambiguous references | Compiler error: alias one namespace |
 | Keeping a `[Removed<T>]` component untracked | Removals are not recorded | Add `ITracked` to `T` |
-| Taking `T` as a parameter of a `[Removed<T>]` method | No row can both have and lack `T` | [EECS016](/en/docs/guide/analyzer#eecs016) |
-| Storing an `Entity` in a component (Friflo's link components do) | The column holds references | [EECS017](/en/docs/guide/analyzer#eecs017) (warning): store `EntityId` |
-| Writing an indexed component through `ref` (Friflo re-indexes on `AddComponent`) | The index cannot see the new key | [EECS015](/en/docs/guide/analyzer#eecs015): use `Set` |
+| Taking `T` as a parameter of a `[Removed<T>]` method | No row can both have and lack `T` | [EECS016](/en/docs/guide/help/analyzer#eecs016) |
+| Storing an `Entity` in a component (Friflo's link components do) | The column holds references | [EECS017](/en/docs/guide/help/analyzer#eecs017) (warning): store `EntityId` |
+| Writing an indexed component through `ref` (Friflo re-indexes on `AddComponent`) | The index cannot see the new key | [EECS015](/en/docs/guide/help/analyzer#eecs015): use `Set` |
 | Expecting `Enabled = false` on a whole entity | No such switch | Use a tag and `[Without<T>]` |
-| A static method without `Entity` or `World` that adds a tag | It promised no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |
+| A static method without `Entity` or `World` that adds a tag | It promised no structural change | [EECS013](/en/docs/guide/help/analyzer#eecs013) |
 
 ## Related [#related]
 
@@ -291,10 +291,10 @@ The two versions of the whole tick, on the same machine:
   <Card title="EasyEcs vs Friflo.Engine.ECS" href="/en/docs/vs-friflo">
     The two libraries side by side, with every benchmark.
   </Card>
-  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+  <Card title="Change tracking" href="/en/docs/guide/changes/change-tracking">
     `[Changed<T>]` and `[Removed<T>]` instead of dirty tags and events.
   </Card>
-  <Card title="Prefabs" href="/en/docs/guide/prefabs">
+  <Card title="Prefabs" href="/en/docs/guide/basics/prefabs">
     Templates outside every world, instantiated one at a time or as a wave.
   </Card>
 </Cards>

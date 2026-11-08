@@ -57,7 +57,7 @@ Use `ref` freely inside `[ForEach]` methods, `ForEach` jobs and `Query` loops: e
 - The **`ref` parameters of a `[ForEach]` method** (or a `ForEach` job) stay writable even when the body changes
   the archetype of the entity it visits: the pass copies those writes (for a job, the components in its `WriteMask`)
   to the entity's new row after the body returns. `in` parameters keep showing the values from before the change.
-- **A [`[EntityMethod]`](/en/docs/guide/queries#run-on-one-entity) method**, or a job run on one entity with `entity.Run`, gets the same guarantee:
+- **A [`[EntityMethod]`](/en/docs/guide/basics/queries#run-on-one-entity) method**, or a job run on one entity with `entity.Run`, gets the same guarantee:
   its refs stay the entity's values across its own structural changes, and the components in its `WriteMask` are
   carried to the new row when it returns.
 - **Any other `ref`** (from `entity.Get<T>()`, an item of a `Query` loop, or into another entity) is guaranteed only
@@ -160,12 +160,12 @@ public static class PotionOrders
 }
 ```
 
-More on owner threads and input from other threads: [Threading](/en/docs/guide/threading#input-from-other-threads).
+More on owner threads and input from other threads: [Threading](/en/docs/guide/performance/threading#input-from-other-threads).
 
 ### The exception: singletons [#singletons]
 
 A singleton's storage never moves, so `world.SingletonRef<T>()` returns a handle you can keep, in a field of your
-host or across ticks ([Singletons](/en/docs/guide/singletons#stable-handles)). It is still owner-thread data: keep it,
+host or across ticks ([Singletons](/en/docs/guide/basics/singletons#stable-handles)). It is still owner-thread data: keep it,
 but only touch it on the owner thread.
 
 ## Full example [#full-example]
@@ -343,27 +343,27 @@ singleton accesses (`MicroBenchmarks`):
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| Changing a copy (`var hp = e.Get<Health>()`) | The table is unchanged | [EECS038](/en/docs/guide/analyzer#eecs038) (warning, with a code fix): `ref var` |
+| Changing a copy (`var hp = e.Get<Health>()`) | The table is unchanged | [EECS038](/en/docs/guide/help/analyzer#eecs038) (warning, with a code fix): `ref var` |
 | A `ref` local across an `await` | Does not compile | The C# compiler |
-| A `ref` kept after a structural change | Points at a stale copy or another entity's row | [EECS047](/en/docs/guide/analyzer#eecs047) (warning) in one block: get it again |
+| A `ref` kept after a structural change | Points at a stale copy or another entity's row | [EECS047](/en/docs/guide/help/analyzer#eecs047) (warning) in one block: get it again |
 | A raw index stored instead of the `EntityId` | Names whichever entity reuses the index | Store the `EntityId`; `TryGetEntity` checks the version |
-| An `Entity` stored in a component | A managed column | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
-| A `DynamicBuffer<T>` taken by value | Writes go to a shared list, unstamped | [EECS012](/en/docs/guide/analyzer#eecs012) |
-| Touching the world after an `await` that resumed on the thread pool | Races with the owner thread | Code review: hand the result over as data. [EECS014](/en/docs/guide/analyzer#eecs014) catches only structural changes in a delegate handed to another thread (`Task.Run`, `Parallel.*`), not value writes or code after an `await` |
+| An `Entity` stored in a component | A managed column | [EECS017](/en/docs/guide/help/analyzer#eecs017) (warning) |
+| A `DynamicBuffer<T>` taken by value | Writes go to a shared list, unstamped | [EECS012](/en/docs/guide/help/analyzer#eecs012) |
+| Touching the world after an `await` that resumed on the thread pool | Races with the owner thread | Code review: hand the result over as data. [EECS014](/en/docs/guide/help/analyzer#eecs014) catches only structural changes in a delegate handed to another thread (`Task.Run`, `Parallel.*`), not value writes or code after an `await` |
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Structural changes" href="/en/docs/guide/structural-changes">
+  <Card title="Structural changes" href="/en/docs/guide/changes/structural-changes">
     What moves rows, and what a pass sees.
   </Card>
-  <Card title="Entities and components" href="/en/docs/guide/entities-and-components">
+  <Card title="Entities and components" href="/en/docs/guide/basics/entities-and-components">
     Handles, `EntityId` and the `Get` / `Read` / `TryGetRef` family.
   </Card>
-  <Card title="Threading" href="/en/docs/guide/threading">
+  <Card title="Threading" href="/en/docs/guide/performance/threading">
     Owner threads, and input from other threads.
   </Card>
-  <Card title="Singletons" href="/en/docs/guide/singletons">
+  <Card title="Singletons" href="/en/docs/guide/basics/singletons">
     The one kind of storage whose handle you can keep.
   </Card>
 </Cards>

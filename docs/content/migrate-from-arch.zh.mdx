@@ -30,7 +30,7 @@ dotnet add package EasyEcs
 | Arch | EasyEcs | 变化 |
 | --- | --- | --- |
 | `World.Create()` | `new World(options)` | 每个 World 只属于一个线程；一个线程跑一个 World。 |
-| 任意 struct 都是组件 | 实现 `IComponent` 的 struct | 加上接口；class 会被分析器拒绝（[EECS006](/zh/docs/guide/analyzer#eecs006)）。 |
+| 任意 struct 都是组件 | 实现 `IComponent` 的 struct | 加上接口；class 会被分析器拒绝（[EECS006](/zh/docs/guide/help/analyzer#eecs006)）。 |
 | `QueryDescription` | `[ForEach]` 方法上的过滤特性，或 `QueryFilter` | 只在方法上写一次；生成器把过滤存进静态字段。 |
 | `IForEach<T...>` + `InlineQuery` | `[EcsSystem]` 里的 `[ForEach]` 方法 | struct job 和调用由生成器写。 |
 | `CommandBuffer` + `Playback` | 直接调用 | 变更当场生效，后面的系统能看到。 |
@@ -42,7 +42,7 @@ dotnet add package EasyEcs
 
 表里用的是下面例子中的组件（`Health`、标签 `Dead`）。生成器为每个组件写好具名成员（`entity.Health`、`HasHealth`、
 `SetHealth(…)`、`IsDead`），业务代码直接用它们；排在后面的泛型调用（`Get<T>()`、`Set(c)`、`Remove<T>()`）留给泛型代码
-（[生成的成员](/zh/docs/guide/entities-and-components#generated-members)）。
+（[生成的成员](/zh/docs/guide/basics/entities-and-components#generated-members)）。
 
 ### World 和实体 [#world-and-entities]
 
@@ -293,12 +293,12 @@ sim.Update();   // 一个 tick
 | 错误 | 后果 | 谁来发现 |
 | --- | --- | --- |
 | 组件还是没有 `IComponent` 的普通 struct | 不能当参数，也不能成为列 | 编译错误：`IComponent` 约束 |
-| 用 class 当组件 | 被拒绝 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
-| 把计数器对象搬成系统的字段 | 系统必须无状态 | [EECS007](/zh/docs/guide/analyzer#eecs007)：改用单例 |
-| 组件里存 `Entity`（Arch 的 `Entity` 是普通 struct） | 列里存了引用 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告）：存 `EntityId` |
-| 不带 `Entity` 或 `World` 的静态方法里加组件 | 它承诺了不做结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013)：拿 `Entity` 参数 |
+| 用 class 当组件 | 被拒绝 | [EECS006](/zh/docs/guide/help/analyzer#eecs006) |
+| 把计数器对象搬成系统的字段 | 系统必须无状态 | [EECS007](/zh/docs/guide/help/analyzer#eecs007)：改用单例 |
+| 组件里存 `Entity`（Arch 的 `Entity` 是普通 struct） | 列里存了引用 | [EECS017](/zh/docs/guide/help/analyzer#eecs017)（警告）：存 `EntityId` |
+| 不带 `Entity` 或 `World` 的静态方法里加组件 | 它承诺了不做结构变更 | [EECS013](/zh/docs/guide/help/analyzer#eecs013)：拿 `Entity` 参数 |
 | 保留一个“待处理变更”列表，循环后再应用 | 能跑，但多走一遍 | 代码审查：在决定的地方直接改 |
-| 并行方法里做结构变更或写单例 | 数据竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
+| 并行方法里做结构变更或写单例 | 数据竞争 | [EECS010](/zh/docs/guide/help/analyzer#eecs010) |
 
 ## 相关页面 [#related]
 
@@ -306,10 +306,10 @@ sim.Update();   // 一个 tick
   <Card title="EasyEcs 与 Arch" href="/zh/docs/vs-arch">
     两个库并排对比，附全部跑分。
   </Card>
-  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems">
     参数、过滤、顺序、分组和并行方法。
   </Card>
-  <Card title="结构变更" href="/zh/docs/guide/structural-changes">
+  <Card title="结构变更" href="/zh/docs/guide/changes/structural-changes">
     遍历途中哪些变更当场生效，为什么安全。
   </Card>
 </Cards>

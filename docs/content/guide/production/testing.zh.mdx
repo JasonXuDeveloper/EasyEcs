@@ -83,12 +83,12 @@ public void APoisonedUnitDiesAndScores()
 ### 用数据控制时间和输入 [#time-and-input]
 
 读 `DateTime.Now`、随机数生成器或 socket 的系统没法精确测试。改给它一个单例（带 tick 和步长的时钟、种子、配置），在测试里设置这个
-单例。输入也是数据：测试直接创建网络系统本来会创建的请求实体，或者往输入系统消费的队列里写（[托管](/zh/docs/guide/hosting#requests)）。
+单例。输入也是数据：测试直接创建网络系统本来会创建的请求实体，或者往输入系统消费的队列里写（[托管](/zh/docs/guide/production/hosting#requests)）。
 
 - **间隔：**`[UpdateInterval(4)]` 的系统每四次 `Update()` 跑一次；测试里就调用这么多次 `Update()`。
 - **分组：**`[UpdateInGroup<G>]` 里的系统只在 `world.Update<G>()` 时运行；测试像主机那样调用它。
 - **变更追踪：**`[Changed<T>]` 方法只看到它的系统上次运行以来的写入；在两次更新之间写组件，对第二次更新做断言
-  （[变更追踪](/zh/docs/guide/change-tracking)）。
+  （[变更追踪](/zh/docs/guide/changes/change-tracking)）。
 
 ### 测试错误 [#errors]
 
@@ -182,7 +182,7 @@ public void ABattleSurvivesARestart()
 }
 ```
 
-用上一个版本留下的存档文件跑这样的测试，还能提前发现哪次组件改动会让旧存档加载失败（[存档](/zh/docs/guide/saves#versioning)）。
+用上一个版本留下的存档文件跑这样的测试，还能提前发现哪次组件改动会让旧存档加载失败（[存档](/zh/docs/guide/saves/saves#versioning)）。
 
 ## 完整例子 [#full-example]
 
@@ -401,7 +401,7 @@ Total tests: 5
 ## 开销 [#what-it-costs]
 
 - **一个 World：**一次 `new World()` 和它的 `Dispose()`：实体数组和一张空表。
-- **分析器：**它也在测试项目上运行，所以测试里带状态或有竞争的系统同样编译不过（[分析器规则](/zh/docs/guide/analyzer)）。
+- **分析器：**它也在测试项目上运行，所以测试里带状态或有竞争的系统同样编译不过（[分析器规则](/zh/docs/guide/help/analyzer)）。
 - **游戏代码零开销：**测试只用公开 API；没有要打开的测试模式。
 
 ## 常见陷阱 [#pitfalls]
@@ -411,18 +411,18 @@ Total tests: 5
 | 漏掉系统要读的单例（`[ForEach]` 参数、`World.X` 或 `GetSingleton<T>()`） | `Update()` 抛出 `InvalidOperationException`，信息里有单例的名字 | 测试失败：调用服务器的初始化方法，或者在测试里设置这个单例 |
 | 存档测试里 `Load` 之后才 `AddSingleton` | 抛 `InvalidOperationException`：存档里已经有这个单例 | 在 `Load` 之前添加单例，或者先查 `HasX` |
 | 预热之前就统计分配 | 查询缓存和新表都算进了分配 | 先预热 |
-| 跨 `world.Update()` 持有 `ref` | 更新可能搬动行：`ref` 读到过期内存 | 更新后通过句柄重新读（[ref](/zh/docs/guide/refs-and-await)） |
+| 跨 `world.Update()` 持有 `ref` | 更新可能搬动行：`ref` 读到过期内存 | 更新后通过句柄重新读（[ref](/zh/docs/guide/changes/refs-and-await)） |
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems">
     生命周期、顺序、间隔、分组和错误。
   </Card>
-  <Card title="在 .NET 服务器里托管" href="/zh/docs/guide/hosting">
+  <Card title="在 .NET 服务器里托管" href="/zh/docs/guide/production/hosting">
     同样的初始化，由托管服务按固定 tick 运行。
   </Card>
-  <Card title="存档" href="/zh/docs/guide/saves">
+  <Card title="存档" href="/zh/docs/guide/saves/saves">
     `Save` 保留了什么，代码改了之后存档还能不能加载。
   </Card>
   <Card title="模板" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates">

@@ -17,8 +17,8 @@ icon: Box
 </Callout>
 
 <Callout type="warn" title="不适合">
-  整个 World 只有一份的数据（时钟、配置、空间网格）：这些是[单例组件](/zh/docs/guide/singletons)。组件里写行为：组件只是数据，
-  逻辑放进[系统](/zh/docs/guide/systems)。用 class 做组件：编译不过（[EECS006](/zh/docs/guide/analyzer#eecs006)）。
+  整个 World 只有一份的数据（时钟、配置、空间网格）：这些是[单例组件](/zh/docs/guide/basics/singletons)。组件里写行为：组件只是数据，
+  逻辑放进[系统](/zh/docs/guide/basics/systems)。用 class 做组件：编译不过（[EECS006](/zh/docs/guide/help/analyzer#eecs006)）。
 </Callout>
 
 ## 怎么用 [#how-to-use-it]
@@ -81,7 +81,7 @@ goblin.Destroy();
 | `Destroy()` | 忽略 |
 
 两个句柄指向同一个 World 里的同一代实体时才相等。销毁实体会让版本加一，指向它的所有句柄立刻失效，之后复用这个索引的新实体也不会被旧句柄碰到。
-持有[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的实体则不同：`Destroy` 让它退休，它带着 `Retired` 标签继续存活，直到某个系统移除这些组件。
+持有[清理组件](/zh/docs/guide/changes/cleanup-and-disable#cleanup-components)的实体则不同：`Destroy` 让它退休，它带着 `Retired` 标签继续存活，直到某个系统移除这些组件。
 
 批量生成和清理都有对应的批量接口，每次只过一次结构闸门：
 
@@ -91,10 +91,10 @@ world.CreateEntities(wave, new Position(0, 0), new Health(100));   // 每个实�
 int cleared = world.DestroyAll<Health, Dead>();                    // 所有带 Health 的死亡实体
 ```
 
-反复生成的同类实体（某种 NPC、某种子弹）最好定义成[预制体](/zh/docs/guide/prefabs)：`world.Instantiate(prefab)` 生成一个，
+反复生成的同类实体（某种 NPC、某种子弹）最好定义成[预制体](/zh/docs/guide/basics/prefabs)：`world.Instantiate(prefab)` 生成一个，
 `entity.Clone()` 复制一个活着的实体。`world.Instantiate(prefab, new Position(x, y))` 在生成时再带上 1 到 9 个组件，替换
 预制体里的同类组件或者新加进去，只拷贝一次行；批量版本 `Instantiate(prefab, span, …)` 给一整波实体相同的值
-（[预制体](/zh/docs/guide/prefabs#instantiate-with-values)）。
+（[预制体](/zh/docs/guide/basics/prefabs#instantiate-with-values)）。
 
 World 能统计和列出它的实体：
 
@@ -112,8 +112,8 @@ var sized = new World(new WorldOptions { InitialEntityCapacity = 10_000 });
 ```
 
 表会自己扩容；要连表一起预留：实体恰好带这几个组件时用
-[`Reserve<T1, …, Tn>(count)`](/zh/docs/guide/structural-changes#bulk)，预制体实例用
-[`Reserve(prefab, count)`](/zh/docs/guide/prefabs#reserve)。
+[`Reserve<T1, …, Tn>(count)`](/zh/docs/guide/changes/structural-changes#bulk)，预制体实例用
+[`Reserve(prefab, count)`](/zh/docs/guide/basics/prefabs#reserve)。
 
 ### Id、版本与复用 [#entityid]
 
@@ -141,7 +141,7 @@ bool same = reused.Id == fromClient;                   // false
 
 组件要指向另一个实体（主人、目标、父实体）时，存 `EntityId`，不要存 `Entity`。`Entity` 里有一个指向 World 的引用，
 组件一旦带上 `Entity` 字段，整列就变成托管列：GC 要扫描它，每次写入都有写屏障，行不能再整块复制，存档也写不了它。
-分析器会给出警告（[EECS017](/zh/docs/guide/analyzer#eecs017)）。
+分析器会给出警告（[EECS017](/zh/docs/guide/help/analyzer#eecs017)）。
 
 ```csharp
 public record struct Target(EntityId Id) : IComponent;   // 8 字节，非托管
@@ -157,7 +157,7 @@ public ref struct Chase
 }
 ```
 
-要找出所有指向某个目标的实体，把这个链接做成索引组件或关系：[索引与关系](/zh/docs/guide/indexes-and-relations)。
+要找出所有指向某个目标的实体，把这个链接做成索引组件或关系：[索引与关系](/zh/docs/guide/data/indexes-and-relations)。
 
 #### 按唯一键找实体 [#unique-key]
 
@@ -174,7 +174,7 @@ Entity owner = world.AccountIndex.Get(1001);                     // 没有实体
 bool known = world.AccountIndex.TryGet(2002, out var other);     // false：没人拥有它
 ```
 
-换键的顺序、空键、每种写入检查什么，详见[索引与关系](/zh/docs/guide/indexes-and-relations#unique-keys)。
+换键的顺序、空键、每种写入检查什么，详见[索引与关系](/zh/docs/guide/data/indexes-and-relations#unique-keys)。
 
 ### 组件 [#components]
 
@@ -188,7 +188,7 @@ bool known = world.AccountIndex.TryGet(2002, out var other);     // false：没�
 | `bool TryGet<T>(out T value)` | 有就拿到一份**副本**。不算写入。 |
 | `bool Has<T1..Tn>()` | 是否全都有。 |
 | `Entity Set(in T1 … in Tn)` | 添加或替换 1 到 9 个值，最多搬一次行；可链式调用。 |
-| `bool SetIfChanged<T>(in T value)` | 和 `Set` 一样设置 `value`，但实体已经是这个值时返回 false，不写入、不打 tick、不动索引（[值变了才写](/zh/docs/guide/change-tracking#set-if-changed)）。 |
+| `bool SetIfChanged<T>(in T value)` | 和 `Set` 一样设置 `value`，但实体已经是这个值时返回 false，不写入、不打 tick、不动索引（[值变了才写](/zh/docs/guide/changes/change-tracking#set-if-changed)）。 |
 | `ref T GetOrAdd<T>()` | 返回 ref，没有就先加一个 `default`；已有的值保持不变。 |
 | `ref T GetOrAdd<T>(in T value)` | 返回 ref，没有就先加上 `value`（像 `Set` 一样登记键、进入分组）；已有的值保持不变。 |
 | `Entity Remove<T1..Tn>()` | 移除 1 到 9 个组件，没有的忽略；可链式调用。 |
@@ -203,7 +203,7 @@ hero.Remove<Armor, Name>();
 bool both = hero.Has<Position, Health>();
 ```
 
-改组件一定要通过 `ref`：`var hp = hero.Get<Health>()` 拿到的是副本，改它不会改到表里（见 [ref 与 await](/zh/docs/guide/refs-and-await)）。
+改组件一定要通过 `ref`：`var hp = hero.Get<Health>()` 拿到的是副本，改它不会改到表里（见 [ref 与 await](/zh/docs/guide/changes/refs-and-await)）。
 
 ### 生成成员 [#generated-members]
 
@@ -216,14 +216,14 @@ bool both = hero.Has<Position, Health>();
 | 被追踪的组件（`Armor : ITracked`） | `e.Armor` 是 `ref readonly`；`e.WriteArmor()` 返回 `ref`；`e.SetArmorIfChanged(v)` | `Read`；`Get`（记为写入）；`SetIfChanged(new Armor(v))` |
 | 索引组件（`[LookupKey]`、`Zone : IIndexed<int>`） | `e.Zone` 是 `ref readonly`，没有 `GetOrAddZone` 和 `WriteZone`；`e.SetZoneIfChanged(id)`；`world.ZoneIndex` | `Read`；`SetIfChanged(new Zone(id))`；`world.Index<Zone, int>()` |
 | 唯一组件（`[UniqueKey]`、`Account : IUniqueIndexed<long>`） | 同索引组件；外加 `world.AccountIndex.Get(key)`、`world.AccountIndex.TryGet(key, out e)` | [一个键对应的那个实体](#unique-key) |
-| 分组组件（`[Group]`、`Team : IGroup`） | `e.Team` 是 `ref readonly`，没有 `GetOrAddTeam` 和 `WriteTeam`；`e.SetTeamIfChanged(…)`；`filter.InTeam(group)` | `Read`；`SetIfChanged`；`filter.InGroup<Team>(group)`（[分组](/zh/docs/guide/groups)） |
+| 分组组件（`[Group]`、`Team : IGroup`） | `e.Team` 是 `ref readonly`，没有 `GetOrAddTeam` 和 `WriteTeam`；`e.SetTeamIfChanged(…)`；`filter.InTeam(group)` | `Read`；`SetIfChanged`；`filter.InGroup<Team>(group)`（[分组](/zh/docs/guide/data/groups)） |
 | 标签（`struct Dead : IComponent`） | `e.IsDead`、`e.SetDead()`、`e.RemoveDead()` | `Has`、`Set(new Dead())`、`Remove` |
-| 任何带字段的组件（清理组件除外） | `e.DisableHealth()`、`e.EnableHealth()`、`e.IsHealthDisabled` | [`Disable`](/zh/docs/guide/cleanup-and-disable) / [`Enable`](/zh/docs/guide/cleanup-and-disable) |
-| 代码里写到 `DynamicBuffer<Loot>` 的缓冲元素 | `e.Loot`（`ref readonly`）、`e.HasLoot`、`e.WriteLoot()`、`e.GetOrAddLoot()`、`e.RemoveLoot()` | `DynamicBuffer<Loot>` 的 `Read`、`Has`、`Get`、`GetOrAdd`、`Remove`（[动态缓冲](/zh/docs/guide/dynamic-buffers)） |
-| 关系（`MemberOf : IRelation`），代码里写到 `DynamicBuffer<MemberOf>` 之后 | `e.LinkMemberOf(target)`、`e.UnlinkMemberOf(target)`、`e.LinksMemberOf(target)`、`e.MemberOf`（`ref readonly`）、`e.HasMemberOf`、`e.RemoveMemberOf()`、`world.MemberOfIndex` | `Link`、`Unlink`、`Links`、`Read`、`Has`、`Remove`、`world.Relations<MemberOf>()`（[关系](/zh/docs/guide/indexes-and-relations#relations)） |
-| 单例组件（`Clock : ISingletonComponent`） | `world.Clock`（`ref`）、`world.HasClock`、`world.GetOrAddClock()`、`world.SetClock(…)`、`world.RemoveClock()` | [`GetSingleton`](/zh/docs/guide/singletons)、`HasSingleton`、`GetOrAddSingleton`、`GetOrAddSingleton() = …`、`RemoveSingleton` |
+| 任何带字段的组件（清理组件除外） | `e.DisableHealth()`、`e.EnableHealth()`、`e.IsHealthDisabled` | [`Disable`](/zh/docs/guide/changes/cleanup-and-disable) / [`Enable`](/zh/docs/guide/changes/cleanup-and-disable) |
+| 代码里写到 `DynamicBuffer<Loot>` 的缓冲元素 | `e.Loot`（`ref readonly`）、`e.HasLoot`、`e.WriteLoot()`、`e.GetOrAddLoot()`、`e.RemoveLoot()` | `DynamicBuffer<Loot>` 的 `Read`、`Has`、`Get`、`GetOrAdd`、`Remove`（[动态缓冲](/zh/docs/guide/data/dynamic-buffers)） |
+| 关系（`MemberOf : IRelation`），代码里写到 `DynamicBuffer<MemberOf>` 之后 | `e.LinkMemberOf(target)`、`e.UnlinkMemberOf(target)`、`e.LinksMemberOf(target)`、`e.MemberOf`（`ref readonly`）、`e.HasMemberOf`、`e.RemoveMemberOf()`、`world.MemberOfIndex` | `Link`、`Unlink`、`Links`、`Read`、`Has`、`Remove`、`world.Relations<MemberOf>()`（[关系](/zh/docs/guide/data/indexes-and-relations#relations)） |
+| 单例组件（`Clock : ISingletonComponent`） | `world.Clock`（`ref`）、`world.HasClock`、`world.GetOrAddClock()`、`world.SetClock(…)`、`world.RemoveClock()` | [`GetSingleton`](/zh/docs/guide/basics/singletons)、`HasSingleton`、`GetOrAddSingleton`、`GetOrAddSingleton() = …`、`RemoveSingleton` |
 | 代码里调用过的每个 `world.Query<Position, Velocity>()` | `item.Position`、`item.Velocity` | `item.Component1`、`item.Component2` |
-| [预制体](/zh/docs/guide/prefabs#generated-members)上的任何组件 | `prefab.Position`（`ref readonly`）、`HasPosition`、`SetPosition(x, y)`、`RemovePosition()`、`IsDead`、`SetDead()` | `Read`、`Has`、`Set`、`Remove` |
+| [预制体](/zh/docs/guide/basics/prefabs#generated-members)上的任何组件 | `prefab.Position`（`ref readonly`）、`HasPosition`、`SetPosition(x, y)`、`RemovePosition()`、`IsDead`、`SetDead()` | `Read`、`Has`、`Set`、`Remove` |
 
 ```csharp
 hero.Position.X += 1;                                      // ref：原地写入
@@ -250,17 +250,17 @@ bool changed = hero.SetArmorIfChanged(6);                  // false：Armor 已�
 ### 用特性声明：生成的部分 [#declared-parts]
 
 组件在字段之外的含义（按哪个键建索引、按哪个字段分表、归约怎样合并）写成声明上的特性。生成器在类型的另一个部分里写出接口成员，所以类型要是
-`partial`（[EECS062](/zh/docs/guide/analyzer#eecs062)）；设置类的特性只登记一次，每个 World 从第一张存放这个类型的表开始遵守它们。
+`partial`（[EECS062](/zh/docs/guide/help/analyzer#eecs062)）；设置类的特性只登记一次，每个 World 从第一张存放这个类型的表开始遵守它们。
 
 | 特性 | 加在 | 得到什么 | 页面 |
 | --- | --- | --- | --- |
-| `[LookupKey]` | 字段、属性或位置参数；或者 struct 本身（整个值就是键） | `IIndexed<TKey>` 和它的 `Key`：一个值索引，`world.XIndex` | [值索引](/zh/docs/guide/indexes-and-relations#value-indexes) |
-| `[UniqueKey]` | 同上 | `IUniqueIndexed<TKey>`：每个键一个实体 | [唯一键](/zh/docs/guide/indexes-and-relations#unique-keys) |
-| `[Group]` | `int` 或枚举成员 | `IGroup` 和它的 `Group`：按值分表 | [分组](/zh/docs/guide/groups#mark-the-component) |
-| `[GroupBy]` | 一个 `IGroup` struct | 每个 World 都按它分组，不用调用 `GroupBy<T>()` | [分组](/zh/docs/guide/groups#group-by) |
-| `[WhenTargetDestroyed(policy)]` | 关系，或按 `EntityId` 建索引的组件 | 销毁目标时链接怎样处理，每个 World 都一样 | [目标销毁时](/zh/docs/guide/indexes-and-relations#target-policies) |
-| `[NotSaved]` | 组件或单例 | 所有存档都不写它；它不需要格式化器 | [存档](/zh/docs/guide/saves#not-saved) |
-| `[Sum]`、`[Product]`、`[Min]`、`[Max]`、`[All]`、`[Any]` | 单例的每个字段 | `IReduction<T>`：逐字段的 `Identity` 和 `Combine` | [归约](/zh/docs/guide/threading#reductions) |
+| `[LookupKey]` | 字段、属性或位置参数；或者 struct 本身（整个值就是键） | `IIndexed<TKey>` 和它的 `Key`：一个值索引，`world.XIndex` | [值索引](/zh/docs/guide/data/indexes-and-relations#value-indexes) |
+| `[UniqueKey]` | 同上 | `IUniqueIndexed<TKey>`：每个键一个实体 | [唯一键](/zh/docs/guide/data/indexes-and-relations#unique-keys) |
+| `[Group]` | `int` 或枚举成员 | `IGroup` 和它的 `Group`：按值分表 | [分组](/zh/docs/guide/data/groups#mark-the-component) |
+| `[GroupBy]` | 一个 `IGroup` struct | 每个 World 都按它分组，不用调用 `GroupBy<T>()` | [分组](/zh/docs/guide/data/groups#group-by) |
+| `[WhenTargetDestroyed(policy)]` | 关系，或按 `EntityId` 建索引的组件 | 销毁目标时链接怎样处理，每个 World 都一样 | [目标销毁时](/zh/docs/guide/data/indexes-and-relations#target-policies) |
+| `[NotSaved]` | 组件或单例 | 所有存档都不写它；它不需要格式化器 | [存档](/zh/docs/guide/saves/saves#not-saved) |
+| `[Sum]`、`[Product]`、`[Min]`、`[Max]`、`[All]`、`[Any]` | 单例的每个字段 | `IReduction<T>`：逐字段的 `Identity` 和 `Combine` | [归约](/zh/docs/guide/performance/threading#reductions) |
 
 ```csharp tab="你写的"
 public partial record struct Owner([LookupKey] EntityId Of) : IComponent;
@@ -275,7 +275,7 @@ public partial record struct Owner : IIndexed<EntityId>
 ```
 
 由几个成员算出的键仍然手写（`public (int, int) Key => (X, Y);`），字段要一起合并的归约也是。只返回一个成员的手写 `Key` 报
-[EECS067](/zh/docs/guide/analyzer#eecs067)，代码修复改成特性；设置类特性加在不合适的类型上报 [EECS068](/zh/docs/guide/analyzer#eecs068)。
+[EECS067](/zh/docs/guide/help/analyzer#eecs067)，代码修复改成特性；设置类特性加在不合适的类型上报 [EECS068](/zh/docs/guide/help/analyzer#eecs068)。
 
 ### 标签 [#tags]
 
@@ -381,10 +381,10 @@ id 不再指向任何实体：World 说它已经不存活。
 | 先 `CreateEntity()`，再逐个 `Set` | `CreateEntity(a, b, c)`、`Instantiate(prefab)`，或 `Instantiate(prefab, a, b)` | 一次放置，而不是每个组件搬一次行 |
 | 对很少变化的被追踪值调 `SetX(…)` | `SetXIfChanged(…)` | 值相同就不打 tick：`[Changed<T>]` 读取方会跳过它 |
 | `Set(a)` 后再 `Set(b)` | `Set(a, b)`、`Remove<A, B>()` | 写法更简洁，性能相同 |
-| 循环调用 `CreateEntity` / `Destroy` | `CreateEntities(span, …)`、`DestroyAll<T>(filter)`（[EECS031](/zh/docs/guide/analyzer#eecs031)） | 每波只过一次结构闸门 |
+| 循环调用 `CreateEntity` / `Destroy` | `CreateEntities(span, …)`、`DestroyAll<T>(filter)`（[EECS031](/zh/docs/guide/help/analyzer#eecs031)） | 每波只过一次结构闸门 |
 | 用 `Get<T>()` 读被追踪的组件 | `Read<T>()`、生成的属性、`TryGet<T>()` | `ref` 访问会把这一行记成已写入 |
 | 先 `Has<T>()` 再 `Get<T>()` | `TryGetRef<T>(out found)` | 只查一次 |
-| 每个请求几次 `Get` / `TryGetRef` 再加一次 `Has<Dead>()` | 用 `static readonly` 过滤条件调 [`entity.Run`](/zh/docs/guide/queries#run-on-one-entity) | 所有组件只查一次；ref 跨结构变更依然有效 |
+| 每个请求几次 `Get` / `TryGetRef` 再加一次 `Has<Dead>()` | 用 `static readonly` 过滤条件调 [`entity.Run`](/zh/docs/guide/basics/queries#run-on-one-entity) | 所有组件只查一次；ref 跨结构变更依然有效 |
 | 组件里放 `Entity` 字段 | 放 `EntityId` 字段 | 非托管列：GC 不扫描，可整块复制 |
 
 通过句柄逐个访问，每项 1,000 个句柄（`MicroBenchmarks`：`HandleAccess` 通过句柄写 `Position`，`TryGetEntity` 先按 id 查找，
@@ -409,35 +409,35 @@ id 不再指向任何实体：World 说它已经不存活。
 - **创建：** 均摊 O(组件数)；新的组件组合第一次出现时建一张表。
 - **销毁：** O(组件数)；不在遍历中时，表的最后一行立刻补上空位。
 - **移除组件再加回：** 一个存在位。获得新列：复制一次行。
-- **未追踪组件的写入**没有额外开销；被追踪的多记一个 tick（见[变更追踪](/zh/docs/guide/change-tracking#what-it-costs)）。
+- **未追踪组件的写入**没有额外开销；被追踪的多记一个 tick（见[变更追踪](/zh/docs/guide/changes/change-tracking#what-it-costs)）。
 - 预热之后，以上操作都不分配内存。
 
 ## 常见陷阱 [#pitfalls]
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 用 class 实现 `IComponent` | 编译不过 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
-| 组件里放 `Entity` 字段 | 变成托管列，GC 要扫描，存档写不了 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
-| 改副本：`var hp = e.Get<Health>(); hp.Value--;` | 表里的值没变 | [EECS038](/zh/docs/guide/analyzer#eecs038)（警告，有代码修复）：写成 `ref var hp = ref …` |
+| 用 class 实现 `IComponent` | 编译不过 | [EECS006](/zh/docs/guide/help/analyzer#eecs006) |
+| 组件里放 `Entity` 字段 | 变成托管列，GC 要扫描，存档写不了 | [EECS017](/zh/docs/guide/help/analyzer#eecs017)（警告） |
+| 改副本：`var hp = e.Get<Health>(); hp.Value--;` | 表里的值没变 | [EECS038](/zh/docs/guide/help/analyzer#eecs038)（警告，有代码修复）：写成 `ref var hp = ref …` |
 | 只存 `id.Index` | 会指向之后复用这个索引的实体 | 存 `EntityId`，`TryGetEntity` 会校验版本 |
-| 用 `Get<T>()` 读被追踪的组件 | 这一行被记成已写入，所有 `[Changed<T>]` 读取方都会访问它 | [EECS025](/zh/docs/guide/analyzer#eecs025)；生成的属性是 `ref readonly` |
-| 通过 `Get<T>()` 写索引组件 | 索引里还是旧键 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
-| 把 `DynamicBuffer<T>` 从实体里复制出来 | 两个实体共用一个列表 | [EECS012](/zh/docs/guide/analyzer#eecs012) |
+| 用 `Get<T>()` 读被追踪的组件 | 这一行被记成已写入，所有 `[Changed<T>]` 读取方都会访问它 | [EECS025](/zh/docs/guide/help/analyzer#eecs025)；生成的属性是 `ref readonly` |
+| 通过 `Get<T>()` 写索引组件 | 索引里还是旧键 | [EECS015](/zh/docs/guide/help/analyzer#eecs015) |
+| 把 `DynamicBuffer<T>` 从实体里复制出来 | 两个实体共用一个列表 | [EECS012](/zh/docs/guide/help/analyzer#eecs012) |
 | 对可能没有的组件调用 `Get<T>()` | 抛 `InvalidOperationException` | 用 `HasX`、`TryGetX` 或 `TryGetRef` |
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="预制体与克隆" href="/zh/docs/guide/prefabs">
+  <Card title="预制体与克隆" href="/zh/docs/guide/basics/prefabs">
     一种实体只定义一次，单个生成或成批生成。
   </Card>
-  <Card title="查询与过滤" href="/zh/docs/guide/queries">
+  <Card title="查询与过滤" href="/zh/docs/guide/basics/queries">
     选出拥有一组组件的实体。
   </Card>
-  <Card title="结构变更" href="/zh/docs/guide/structural-changes">
+  <Card title="结构变更" href="/zh/docs/guide/changes/structural-changes">
     在遍历途中增删组件、创建和销毁实体。
   </Card>
-  <Card title="ref 与 await" href="/zh/docs/guide/refs-and-await">
+  <Card title="ref 与 await" href="/zh/docs/guide/changes/refs-and-await">
     为什么指向表的 ref 不能跨过 `await`。
   </Card>
 </Cards>

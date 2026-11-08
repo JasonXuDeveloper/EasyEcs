@@ -1,7 +1,7 @@
 import { glob } from 'node:fs/promises';
 import type { Config } from '@react-router/dev/config';
 
-// content/guide/change-tracking.zh.mdx -> guide/change-tracking
+// content/guide/changes/change-tracking.zh.mdx -> guide/changes/change-tracking
 function getDocSlug(file: string) {
   const parts = file.replace(/\\/g, '/').split('/');
   const stem = (parts.pop() ?? '').replace(/(\.zh)?\.mdx?$/, '');

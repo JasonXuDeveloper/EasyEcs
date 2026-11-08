@@ -21,7 +21,7 @@ for this pattern: the host and channel are a few classes of your own.
 
 <Callout type="warn" title="Skip it for">
   A console tool, a benchmark or a test: `new World()` and a loop are enough ([getting started](/en/docs/getting-started),
-  [testing](/en/docs/guide/testing)). Do not share one world between request handlers behind a lock: a lock around
+  [testing](/en/docs/guide/production/testing)). Do not share one world between request handlers behind a lock: a lock around
   every request serializes the server anyway, and reads without it race with the tick.
 </Callout>
 
@@ -129,7 +129,7 @@ public sealed class FixedStepLoop(World world)
 
 Systems keep a fixed step (a `DeltaTime` in a singleton, or counts of ticks), so the same inputs give the same
 result however the updates were spread over frames. The log line is the signal to look at
-[`system.Stats`](/en/docs/guide/diagnostics#timing): a world that drops ticks often needs less work per tick, more
+[`system.Stats`](/en/docs/guide/production/diagnostics#timing): a world that drops ticks often needs less work per tick, more
 cores, or fewer entities per world.
 
 ### Flatten the spikes of large populations [#slices]
@@ -161,8 +161,8 @@ public ref struct ThinkSystem
 Tables are cut at 64-row words and many small tables spread over the slices, so the work per tick stays even
 without a round-robin of your own. With `[UpdateInterval(M)]` as well, each entity is visited once every N × M updates.
 A slice is not exact under churn (an entity that moves between tables may be skipped or visited twice in one cycle),
-and `[Changed<T>]` / `[Removed<T>]` methods cannot be sliced ([EECS035](/en/docs/guide/analyzer#eecs035)); the
-rules are in [systems](/en/docs/guide/systems#update-interval).
+and `[Changed<T>]` / `[Removed<T>]` methods cannot be sliced ([EECS035](/en/docs/guide/help/analyzer#eecs035)); the
+rules are in [systems](/en/docs/guide/basics/systems#update-interval).
 
 ### Start and stop with the host [#hosted-service]
 
@@ -195,7 +195,7 @@ These two blocks are skipped by the docs' compile check only because it does not
 An exception that leaves `Update()` (a system threw, under the default `SystemErrorPolicy.Throw`) ends `ExecuteAsync`,
 and the host stops: the process fails fast and the platform restarts it. With
 `new WorldOptions { SystemErrors = SystemErrorPolicy.Disable }` the failing system is switched off instead and the
-tick goes on; report its `system.Error` from a health check ([errors](/en/docs/guide/systems#errors)).
+tick goes on; report its `system.Error` from a health check ([errors](/en/docs/guide/basics/systems#errors)).
 
 ### Hand requests to the world [#requests]
 
@@ -233,8 +233,8 @@ of the values: an `Entity` handle used by the handler later would touch the worl
 
 Bound the channel (`Channel.CreateBounded`) so a world that falls behind slows its callers down
 (`BoundedChannelFullMode.Wait`) or refuses them (`DropWrite`, `TryWrite` returning false) instead of growing without
-limit. The [threading guide](/en/docs/guide/threading#input-from-other-threads) shows the same pattern with a plain
-`ConcurrentQueue<T>`. The reader lives in a [`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton the host sets:
+limit. The [threading guide](/en/docs/guide/performance/threading#input-from-other-threads) shows the same pattern with a plain
+`ConcurrentQueue<T>`. The reader lives in a [`[NotSaved]`](/en/docs/guide/saves/saves#not-saved) singleton the host sets:
 no save writes it, so the channel needs no formatter, and a load keeps the world's own.
 
 On shutdown, complete the writer (`requests.Writer.TryComplete()`) after the last tick, then answer what is still in
@@ -242,7 +242,7 @@ the channel. A handler that writes after that gets a `ChannelClosedException` at
 comes ([full example](#full-example), `Arena.RunAsync`).
 
 A request about an entity that exists already carries its `EntityId`. The system finds the entity and runs a
-[`[EntityMethod]`](/en/docs/guide/queries#run-on-one-entity) method on it: one lookup for all the method's components, and
+[`[EntityMethod]`](/en/docs/guide/basics/queries#run-on-one-entity) method on it: one lookup for all the method's components, and
 a filter that rules out a dead unit. The entry point returns `false` when the entity is gone, fails the filter or lacks
 a component, which is the reply:
 
@@ -315,7 +315,7 @@ Load the last save before the first tick, then add only the singletons the save 
 world's singletons, and `AddSingleton` throws on one that was loaded. Save after the loop ends, into a temporary
 file moved over the old one, so a crash during the write never leaves half a save. When systems save or replicate
 `[Changed<T>]` rows, load with `markWritten: false`, so the first tick does not send the loaded world again
-([restart](/en/docs/guide/saves#restart)):
+([restart](/en/docs/guide/saves/saves#restart)):
 
 ```csharp
 using Nino.Core;
@@ -344,7 +344,7 @@ public record struct Clock(long Tick) : ISingletonComponent;
 
 For autosaves while the server runs, call `Save` on the owner between two ticks, then hand the bytes to another thread
 for the disk write: the world is only needed while it encodes. What a save holds and what survives a code change are
-in [saves](/en/docs/guide/saves#versioning).
+in [saves](/en/docs/guide/saves/saves#versioning).
 
 A restart (a deploy, a rolling update) resumes the game but not the process: the new process has its own
 configuration, and connections did not survive. Save without what belongs to the process, and load while keeping
@@ -373,22 +373,22 @@ public static class Restart
 ```
 
 `Load` keeps the singletons in the set exactly as the world holds them, and `markWritten: false` keeps the first tick
-from replicating or saving the whole world again ([restart](/en/docs/guide/saves#restart)).
+from replicating or saving the whole world again ([restart](/en/docs/guide/saves/saves#restart)).
 
 ### Several worlds, health and metrics [#operations]
 
 - **Several worlds:** one loop per world, each its own owner (one hosted service per zone, or one service that starts
   a loop per world). They share nothing, so they need no locks
-  ([one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)). Lower
+  ([one world per thread](/en/docs/guide/performance/threading#recommended-one-world-per-thread)). Lower
   `WorldOptions.MaxDegreeOfParallelism` when `ParallelSystems` worlds and Kestrel share the cores.
 - **Metrics:** with `WorldOptions.MeasureSystems`, read `system.Stats` (`LastTime`, `LastAllocated`, `LastEntities` and
   their totals) for each system of `world.Systems` on the loop, between two updates, and publish a copy: as a status,
-  or as a `Meter` that OpenTelemetry collects ([metrics](/en/docs/guide/diagnostics#metrics)). Log
+  or as a `Meter` that OpenTelemetry collects ([metrics](/en/docs/guide/production/diagnostics#metrics)). Log
   `world.DescribeSchedule()` once at startup, so each deployment's log says which systems ran together
-  ([schedule](/en/docs/guide/diagnostics#schedule)).
+  ([schedule](/en/docs/guide/production/diagnostics#schedule)).
 - **Memory after a peak:** a world keeps the rows of its largest wave. After a match ends, or from a maintenance
   timer when `world.EntityCount` is well below its peak, call `world.TrimExcess()` on the loop between two updates:
-  it drops the empty tables and shrinks the others ([give memory back](/en/docs/guide/diagnostics#trim)). Not every
+  it drops the empty tables and shrinks the others ([give memory back](/en/docs/guide/production/diagnostics#trim)). Not every
   tick: what it drops is allocated again by the next wave.
 - **Health:** under `SystemErrorPolicy.Disable`, a system with a non-null `Error` is switched off; publish that list
   and let the health check report it.
@@ -703,7 +703,7 @@ rest of each 50 ms to request handlers.
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A handler calls `world.CreateEntity` or `entity.Set` | Two threads change one world | [EECS014](/en/docs/guide/analyzer#eecs014) for lambdas handed to `Task.Run` and the like; the runtime when two changes collide; otherwise nothing |
+| A handler calls `world.CreateEntity` or `entity.Set` | Two threads change one world | [EECS014](/en/docs/guide/help/analyzer#eecs014) for lambdas handed to `Task.Run` and the like; the runtime when two changes collide; otherwise nothing |
 | A handler reads components directly | Values torn or stale while the tick moves rows | Nothing: publish a copy |
 | A reply without `RunContinuationsAsynchronously` | The handler runs inside the tick, on the world's thread | Code review |
 | Replying with an `Entity` handle | The handler later touches the world from its own thread | Reply with an `EntityId` or copied values |
@@ -718,13 +718,13 @@ rest of each 50 ms to request handlers.
 ## Related [#related]
 
 <Cards>
-  <Card title="Threading" href="/en/docs/guide/threading">
+  <Card title="Threading" href="/en/docs/guide/performance/threading">
     The owner thread, input from other threads and parallel systems.
   </Card>
-  <Card title="Saves" href="/en/docs/guide/saves">
+  <Card title="Saves" href="/en/docs/guide/saves/saves">
     What `Save` writes, and which code changes a save survives.
   </Card>
-  <Card title="Testing systems" href="/en/docs/guide/testing">
+  <Card title="Testing systems" href="/en/docs/guide/production/testing">
     The same world, built in a test and checked after one update.
   </Card>
   <Card title="Sample: GameLoop" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop">

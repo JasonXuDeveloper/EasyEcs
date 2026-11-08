@@ -22,9 +22,9 @@ fails on them until the code changes.
 
 The `EcsSystem` base class is gone. A system is a `ref struct` of static methods marked `[EcsSystem]`: the world never
 creates one, keeps its bookkeeping (enabled, error, run count, stats) itself and hands out a
-[`SystemHandle`](/en/docs/guide/systems#lifecycle) for it
+[`SystemHandle`](/en/docs/guide/basics/systems#lifecycle) for it
 ([D102](/en/docs/decisions#d102-systems-are-ref-structs)). Code written for 4.7 fails to compile on the base class
-(CS0246), and the IDE offers a [code fix](/en/docs/guide/analyzer#migration-fix) there that rewrites the class.
+(CS0246), and the IDE offers a [code fix](/en/docs/guide/help/analyzer#migration-fix) there that rewrites the class.
 
 | 4.7 | 4.8 |
 | --- | --- |
@@ -41,7 +41,7 @@ creates one, keeps its bookkeeping (enabled, error, run count, stats) itself and
 | a base class shared by several systems | a generic system (`Regen<T>`) or a static class of helpers |
 
 A system with constructor arguments keeps them in the world instead, as a
-[`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton the host sets: no save writes it (a queue or a service has no
+[`[NotSaved]`](/en/docs/guide/saves/saves#not-saved) singleton the host sets: no save writes it (a queue or a service has no
 formatter) and a load keeps it.
 
 ```csharp tab="4.7" doccheck=skip
@@ -89,8 +89,8 @@ world.AddSystem<ReceiveMoves>();
 
 The fix is offered for a class without constructor arguments, an abstract base or a `[ForEach]` method that reads the
 system's bookkeeping; those change by hand as above. The analyzer follows the new form: EECS074 to EECS077 are new
-([`[EcsSystem]` on a type that is no ref struct](/en/docs/guide/analyzer#eecs074), an instance member, an invalid
-hook, a type that is no system where one is named), [EECS007](/en/docs/guide/analyzer#eecs007) is a warning about
+([`[EcsSystem]` on a type that is no ref struct](/en/docs/guide/help/analyzer#eecs074), an instance member, an invalid
+hook, a type that is no system where one is named), [EECS007](/en/docs/guide/help/analyzer#eecs007) is a warning about
 mutable static fields, and EECS029 (an instance `[ForEach]` method) and EECS082 (a cadence override) are gone with
 what they reported.
 
@@ -119,15 +119,15 @@ public ref struct SaveSystem
 ```
 
 An interval that was computed at run time has no attribute form: fix the cadence, or put the system in a
-[system group](/en/docs/guide/systems#system-groups) and update the group when it is due. Code that read
+[system group](/en/docs/guide/basics/systems#system-groups) and update the group when it is due. Code that read
 `system.UpdateInterval` reads the attribute (`typeof(T).GetCustomAttribute<UpdateIntervalAttribute>()`).
 
 ### Analyzer rules that report more: EECS027, EECS030 and EECS053 [#v4-8-analyzer]
 
-[EECS027](/en/docs/guide/analyzer#eecs027) now also reports a per-row lookup of an indexed component through the visited
+[EECS027](/en/docs/guide/help/analyzer#eecs027) now also reports a per-row lookup of an indexed component through the visited
 `Entity`, which it used to leave alone because a `Maybe<T>` of one is an error
-([EECS015](/en/docs/guide/analyzer#eecs015)). Take it as an `in` parameter, or a
-[`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe) when some entities lack it:
+([EECS015](/en/docs/guide/help/analyzer#eecs015)). Take it as an `in` parameter, or a
+[`ReadOnlyMaybe<T>`](/en/docs/guide/basics/systems#read-only-maybe) when some entities lack it:
 
 ```csharp
 public partial record struct Guild([LookupKey] int Id) : IComponent;
@@ -152,7 +152,7 @@ public ref struct Rally
 }
 ```
 
-[EECS030](/en/docs/guide/analyzer#eecs030) now also reports a `[ForEach]` method whose whole body is one structural
+[EECS030](/en/docs/guide/help/analyzer#eecs030) now also reports a `[ForEach]` method whose whole body is one structural
 change of its entity, the same for every row. Move the change into one bulk call in `OnUpdate`:
 
 ```csharp tab="4.7" doccheck=expect-EECS030
@@ -172,12 +172,12 @@ public ref struct CorpseSystem
 }
 ```
 
-[EECS053](/en/docs/guide/analyzer#eecs053) is new: a tracked component taken by `ref` that some path leaves unwritten.
+[EECS053](/en/docs/guide/help/analyzer#eecs053) is new: a tracked component taken by `ref` that some path leaves unwritten.
 Its code fix takes it as a `Mut<T>`.
 
-[EECS060](/en/docs/guide/analyzer#eecs060) is new: a parallel `[ForEach]` method, or the `Execute` of a job run by
+[EECS060](/en/docs/guide/help/analyzer#eecs060) is new: a parallel `[ForEach]` method, or the `Execute` of a job run by
 `ForEachParallel`, that writes a static field or a shared object. A total becomes a
-[`ref Reduce<T>`](/en/docs/guide/threading#reductions) parameter:
+[`ref Reduce<T>`](/en/docs/guide/performance/threading#reductions) parameter:
 
 ```csharp
 public partial struct Hits : ISingletonComponent
@@ -217,10 +217,10 @@ public ref struct TakeHits
 }
 ```
 
-[EECS061](/en/docs/guide/analyzer#eecs061) is new: a parallel job's field read after `ForEachParallel` (each chunk
+[EECS061](/en/docs/guide/help/analyzer#eecs061) is new: a parallel job's field read after `ForEachParallel` (each chunk
 ran a copy). Its code fix runs the job with `ForEach`; for all cores, use a `Reduce<T>` parameter as above.
 
-[EECS071](/en/docs/guide/analyzer#eecs071) is new: `Random.Shared` or `new Random(...)` in a `[ForEach]` method,
+[EECS071](/en/docs/guide/help/analyzer#eecs071) is new: `Random.Shared` or `new Random(...)` in a `[ForEach]` method,
 whose numbers no run repeats. Its code fix draws from an [`EntityRandom`](/en/docs/reference/entityrandom)
 singleton, which the world needs (`world.SetEntityRandom(seed, 0)`, its `Tick` advanced each step):
 
@@ -322,7 +322,7 @@ private static readonly ComponentSet Record = ComponentSet.Create().With<Bank>()
 ```
 
 A whole-world `SaveWithout(output, in exclude)` and `LoadKeeping(input, in keep)` are where sets with singletons go
-([restart](/en/docs/guide/saves#restart)).
+([restart](/en/docs/guide/saves/saves#restart)).
 
 ### `AddSingleton` throws when the singleton exists [#v4-7-add-singleton]
 
@@ -409,7 +409,7 @@ compiler points at every use to change ([D64](/en/docs/decisions#d64-names-of-4-
 4.6 with type arguments does not compile against it, so none changes meaning silently.
 
 The restart calls new in 4.7 have their names from the start: `world.SaveWithout(output, in exclude)` and
-`world.LoadKeeping(input, in keep, markWritten)` ([restart](/en/docs/guide/saves#restart)).
+`world.LoadKeeping(input, in keep, markWritten)` ([restart](/en/docs/guide/saves/saves#restart)).
 
 ### Generated classes [#v4-7-generated-classes]
 
@@ -429,18 +429,18 @@ does: a static call (`HealthPrefabExtensions.SetHealth(prefab, 100)`), a `using 
 ### New analyzer rules: EECS037 to EECS052 [#v4-7-analyzer]
 
 Code that compiled with 4.6 can fail the build with 4.7. The new errors name code that throws or cannot work:
-[EECS040](/en/docs/guide/analyzer#eecs040) to [EECS045](/en/docs/guide/analyzer#eecs045) (`SetIfChanged` of a type
+[EECS040](/en/docs/guide/help/analyzer#eecs040) to [EECS045](/en/docs/guide/help/analyzer#eecs045) (`SetIfChanged` of a type
 it cannot compare, a call a pass refuses, an indexed component added to while its index is walked, a record struct
 key that prints itself, a sliced filter given to a whole-row call, a `Retired` or `Disabled<T>` tag written by
-hand), [EECS048](/en/docs/guide/analyzer#eecs048) to [EECS051](/en/docs/guide/analyzer#eecs051) (`Disable` of a cleanup component or `ChildOf`, a `[ForEach]`
+hand), [EECS048](/en/docs/guide/help/analyzer#eecs048) to [EECS051](/en/docs/guide/help/analyzer#eecs051) (`Disable` of a cleanup component or `ChildOf`, a `[ForEach]`
 method whose filters no entity passes, a second `InGroup` in one filter, `world.Update()` inside a query loop), and
-[EECS036](/en/docs/guide/analyzer#eecs036) now also reports a plain component with two index keys. The new
+[EECS036](/en/docs/guide/help/analyzer#eecs036) now also reports a plain component with two index keys. The new
 warnings name a write that is lost, a ref that may point at the wrong row or work done twice:
-[EECS037](/en/docs/guide/analyzer#eecs037) (a job's `WriteMask`), [EECS038](/en/docs/guide/analyzer#eecs038) (a
-changed copy), [EECS046](/en/docs/guide/analyzer#eecs046) (a `Query` loop that only reads tracked components: loop
-over `Read`), [EECS047](/en/docs/guide/analyzer#eecs047) (a ref used after a structural change: take it again) and
-[EECS052](/en/docs/guide/analyzer#eecs052) (a `Set` right after `CreateEntity` or `Instantiate`: give the component to the creation).
-[EECS039](/en/docs/guide/analyzer#eecs039) is a suggestion. Most have a code fix; a build that treats warnings as
+[EECS037](/en/docs/guide/help/analyzer#eecs037) (a job's `WriteMask`), [EECS038](/en/docs/guide/help/analyzer#eecs038) (a
+changed copy), [EECS046](/en/docs/guide/help/analyzer#eecs046) (a `Query` loop that only reads tracked components: loop
+over `Read`), [EECS047](/en/docs/guide/help/analyzer#eecs047) (a ref used after a structural change: take it again) and
+[EECS052](/en/docs/guide/help/analyzer#eecs052) (a `Set` right after `CreateEntity` or `Instantiate`: give the component to the creation).
+[EECS039](/en/docs/guide/help/analyzer#eecs039) is a suggestion. Most have a code fix; a build that treats warnings as
 errors fails on the warnings until the code changes.
 
 ### `MeasureSystems` measures more [#v4-7-measure-systems]
@@ -489,7 +489,7 @@ of `Nino.Generator`:
 
 An unmanaged component marked `[NinoType]` was saved as raw rows, like any unmanaged component. It is now written by
 its Nino formatter, value by value, so its format decides how it may change between builds
-([when the code changed](/en/docs/guide/saves#versioning)). Keep the attribute where the shape will change; remove it
+([when the code changed](/en/docs/guide/saves/saves#versioning)). Keep the attribute where the shape will change; remove it
 where raw rows (one block per column) are what you want:
 
 ```csharp tab="4.3" doccheck=skip
@@ -508,12 +508,12 @@ public partial record struct Rank(int Tier, int Points) : IComponent;   // by it
 
 ## v4.2 → v4.3 [#v4-2-to-v4-3]
 
-The analyzer gained performance rules ([EECS025 to EECS034](/en/docs/guide/analyzer#eecs025)). Code written for 4.2
+The analyzer gained performance rules ([EECS025 to EECS034](/en/docs/guide/help/analyzer#eecs025)). Code written for 4.2
 compiles unchanged unless a system calls `World.Update()`, or the build treats warnings as errors.
 
 ### New warnings: EECS025 to EECS032 [#v4-3-warnings]
 
-Each names code that works but costs, with the fix in its [section of the analyzer rules](/en/docs/guide/analyzer)
+Each names code that works but costs, with the fix in its [section of the analyzer rules](/en/docs/guide/help/analyzer)
 and, where the change is mechanical, a code fix in the IDE. Apply the fix, or suppress the rule where the code is
 deliberate, with the reason next to it. With a tracked `Armor` and a `Seen` counter:
 
@@ -600,7 +600,7 @@ world.Update();
 ```
 
 A world restored with `Load` already holds the singletons of its save; add only the ones the save did not hold. See
-[singletons in systems](/en/docs/guide/singletons#in-systems).
+[singletons in systems](/en/docs/guide/basics/singletons#in-systems).
 
 ## v4.0 → v4.1 [#v4-0-to-v4-1]
 
@@ -619,11 +619,11 @@ archetype tables (one row per entity, columns 64-byte aligned), which changes a 
   `TryGetEntity` and `IsAlive` take an `EntityId`; a handle converts to one implicitly, so `world.GetEntity(entity)`
   compiles. Store `EntityId`s, not `Entity` handles, in components: a handle holds its world, which makes the column
   managed (scanned by the GC, not copied as a block, not serializable), and the new warning
-  [EECS017](/en/docs/guide/analyzer#eecs017) points at such fields.
+  [EECS017](/en/docs/guide/help/analyzer#eecs017) points at such fields.
 - **`EcsSystem.Priority` is gone.** Systems run in registration order; order them by what they depend on with
   `[UpdateBefore<TSystem>]` / `[UpdateAfter<TSystem>]` on the class. A cycle is
-  [EECS019](/en/docs/guide/analyzer#eecs019), an order against a system of another group
-  [EECS020](/en/docs/guide/analyzer#eecs020).
+  [EECS019](/en/docs/guide/help/analyzer#eecs019), an order against a system of another group
+  [EECS020](/en/docs/guide/help/analyzer#eecs020).
 - **The `World.SystemError` event is gone.** A system's exception propagates out of `Update` (the default), or, with
   `new WorldOptions { SystemErrors = SystemErrorPolicy.Disable }`, switches the system off and stays in
   `system.Error` for the application to read from `world.Systems`. Enable the system again to retry.
@@ -662,14 +662,14 @@ archetype tables (one row per entity, columns 64-byte aligned), which changes a 
   flag instead: a change made while another runs, or inside a parallel stage of systems or a parallel `[ForEach]`,
   throws `InvalidOperationException`; two threads of your own changing one world at once are not caught reliably.
   Make structural changes on the thread that calls `Update` (other threads hand them over as data through a queue a
-  system drains: [input from other threads](/en/docs/guide/threading#input-from-other-threads)), or give each thread
-  its own world. Two analyzer errors point at such code: [EECS013](/en/docs/guide/analyzer#eecs013), a structural
+  system drains: [input from other threads](/en/docs/guide/performance/threading#input-from-other-threads)), or give each thread
+  its own world. Two analyzer errors point at such code: [EECS013](/en/docs/guide/help/analyzer#eecs013), a structural
   change in a `[ForEach]` method that takes no `Entity` or `World` (for example through a handle a component holds:
-  take the `Entity` as a parameter), and [EECS014](/en/docs/guide/analyzer#eecs014), a structural change in a
+  take the `Entity` as a parameter), and [EECS014](/en/docs/guide/help/analyzer#eecs014), a structural change in a
   lambda handed to `Task.Run`, `Parallel.*`, `ThreadPool` or a `Thread` that races with other changes of the same
   world.
-- **EECS007 and EECS008 are errors.** Mutable state in a system ([EECS007](/en/docs/guide/analyzer#eecs007)) and a
-  system referencing a system ([EECS008](/en/docs/guide/analyzer#eecs008)) were warnings in 4.0; code that triggers
+- **EECS007 and EECS008 are errors.** Mutable state in a system ([EECS007](/en/docs/guide/help/analyzer#eecs007)) and a
+  system referencing a system ([EECS008](/en/docs/guide/help/analyzer#eecs008)) were warnings in 4.0; code that triggers
   them no longer builds. Move the state into a component or singleton, and communicate through data. Every rule of
   4.1 is an error except the warnings EECS017, EECS018 and EECS020 named above.
 - **Iteration semantics are stricter.** A pass visits each entity at most once: entities created or moved into a
@@ -682,7 +682,7 @@ archetype tables (one row per entity, columns 64-byte aligned), which changes a 
   growth. The documented rule was already "a ref is valid until the next structural change"; code that relied on
   refs surviving changes must re-read through `entity.Get<T>()`. The `ref` parameters of `[ForEach]` methods and
   `ForEach` jobs stay writable when the body changes the visited entity's archetype. See
-  [refs and await](/en/docs/guide/refs-and-await).
+  [refs and await](/en/docs/guide/changes/refs-and-await).
 - **Removing a component keeps the entity's row.** `Has<T>()`, `Get<T>()` and every query treat the component as
   absent; adding it back is a bit flip.
 - **`Query` results are ref structs.** `QueryEnumerator<…>` and `QueryItem<…>` hold refs into the current table, so
@@ -706,7 +706,7 @@ archetype tables (one row per entity, columns 64-byte aligned), which changes a 
 {/* search: skip */}
 
 - `[ForEach]` methods can take `Span<T>` / `ReadOnlySpan<T>` components (plus singletons) and receive whole runs of
-  rows, for SIMD ([EECS009](/en/docs/guide/analyzer#eecs009) reports mixed signatures). The ad-hoc form is
+  rows, for SIMD ([EECS009](/en/docs/guide/help/analyzer#eecs009) reports mixed signatures). The ad-hoc form is
   `world.ForEachBatch` with an `IForEachBatch<T1..Tn>` job.
 - `world.ForEachEntity` with an `IForEachEntity<T1..Tn>` job receives the `Entity` handle instead of the id.
 - `INoStructuralChanges` marks a job that makes no structural change; the generator adds it to `[ForEach]` methods
@@ -716,29 +716,29 @@ archetype tables (one row per entity, columns 64-byte aligned), which changes a 
   pass through the structural gate.
 - `WorldOptions.MeasureSystems` times every system run into `system.Stats` (`SystemStats`).
 - `[ForEach(Parallel = true)]` (and `world.ForEachParallel` / `ForEachEntityParallel`) runs chunks of
-  `World.ParallelChunkRows` rows on several threads; [EECS010](/en/docs/guide/analyzer#eecs010) reports methods that
+  `World.ParallelChunkRows` rows on several threads; [EECS010](/en/docs/guide/help/analyzer#eecs010) reports methods that
   could race.
 - `world.Capture()` / `world.Restore(snapshot)`: in-memory snapshots of entities, components and singletons
-  ([snapshots](/en/docs/guide/snapshots)).
+  ([snapshots](/en/docs/guide/saves/snapshots)).
 - `ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)` / `Since(since)`, `world.ChangeTick`,
-  `system.LastRunTick`: change tracking ([change tracking](/en/docs/guide/change-tracking)). The job interfaces
+  `system.LastRunTick`: change tracking ([change tracking](/en/docs/guide/changes/change-tracking)). The job interfaces
   gained an optional static `Writes` member (with a default).
 - `[Removed<T>]` and `QueryFilter.Removed<T>(since)`: the entities that lost a tracked component since a tick
-  (replication of what went away), with [EECS016](/en/docs/guide/analyzer#eecs016) for filters no row can pass.
+  (replication of what went away), with [EECS016](/en/docs/guide/help/analyzer#eecs016) for filters no row can pass.
 - `Prefab` and `world.Instantiate(prefab)` / `Instantiate(prefab, span)`: entities from a recipe of components that
   belongs to no world, built with `Set` / `Remove` or the generated `prefab.SetX(…)` / `RemoveX()` (chainable),
   and `SetBuffer(…)` / `SetLoot(…)` for the elements of a `DynamicBuffer<T>`; `entity.Clone()` copies a living
   entity.
 - `IIndexed<TKey>`, `world.Index<T, TKey>()`, `ValueIndex<T, TKey>`: find entities by a component value; relations
-  are indexed `Entity` keys ([indexes and relations](/en/docs/guide/indexes-and-relations)).
+  are indexed `Entity` keys ([indexes and relations](/en/docs/guide/data/indexes-and-relations)).
 - `entity.Read<T>()` returns a `ref readonly T` that never counts as a write of a tracked component, and
   `entity.TryGetRef<T>(out bool found)` returns a `ref T` (a null ref when missing): optional access without a
   copy. `entity.Has<T1..Tn>()` tests several components with one lookup.
 - `DynamicBuffer<T>`: a list per entity as a component, written only through `ref` (each write is a tracked change),
-  copied by snapshots ([dynamic buffers](/en/docs/guide/dynamic-buffers)).
-- [EECS011](/en/docs/guide/analyzer#eecs011) rejects a `[ForEach]` method that changes a collection or class held by
+  copied by snapshots ([dynamic buffers](/en/docs/guide/data/dynamic-buffers)).
+- [EECS011](/en/docs/guide/help/analyzer#eecs011) rejects a `[ForEach]` method that changes a collection or class held by
   an `in` parameter (the change would be neither scheduled as a write nor tracked);
-  [EECS012](/en/docs/guide/analyzer#eecs012) rejects a `DynamicBuffer<T>` copied by value.
+  [EECS012](/en/docs/guide/help/analyzer#eecs012) rejects a `DynamicBuffer<T>` copied by value.
 - The library is marked `IsAotCompatible`: trimming and Native AOT analyzers run on every build, and it publishes
   and runs with Native AOT.
 - `entity.Disable<T>()` / `Enable<T>()` (generated `DisableX()` / `EnableX()` / `IsXDisabled`): switch a component
@@ -762,7 +762,7 @@ archetype tables (one row per entity, columns 64-byte aligned), which changes a 
   arguments: one pass for tools and tests), generic systems, filters on system groups (`[With<T>]` on a group struct
   applies to all its systems), `UpdatePhase` to spread systems with the same `UpdateInterval` over updates,
   `world.GetOrAddX()` for singletons, named query items (`item.Position` for `item.Component1`), code fixes for the
-  analyzer's diagnostics, and [EECS024](/en/docs/guide/analyzer#eecs024) for `[ForEach]` on a local function.
+  analyzer's diagnostics, and [EECS024](/en/docs/guide/help/analyzer#eecs024) for `[ForEach]` on a local function.
 
 ## v3.x → v4.0 [#v3-to-v4-0]
 
@@ -778,7 +778,7 @@ systems synchronous and generates the repetitive parts (arity overloads, per-ent
 v3 had three handle types (`Entity` value, `EntityRef`, `ComponentRef<T>`). v4 has one: `Entity`, a version-checked
 16-byte handle. Component access returns `ref T` directly. Since 4.1 the generator also writes a named member for
 each component (`e.Position`, `e.SetPosition(…)`, `e.HasPosition`), which current code prefers over the generic
-calls in this table ([generated members](/en/docs/guide/entities-and-components#generated-members)).
+calls in this table ([generated members](/en/docs/guide/basics/entities-and-components#generated-members)).
 
 | v3 | v4 |
 | --- | --- |
@@ -848,12 +848,12 @@ public ref struct S
    version). Equality includes the version.
 2. **Stale handles are rejected**: access and structural changes throw; `Destroy` of a stale handle is ignored.
 3. **Removing a component or destroying an entity releases managed references** held by the component.
-4. **Components and singletons must be structs**: the analyzer reports [EECS006](/en/docs/guide/analyzer#eecs006)
+4. **Components and singletons must be structs**: the analyzer reports [EECS006](/en/docs/guide/help/analyzer#eecs006)
    for classes.
 5. Never call `CompactArchetypes()` while iterating (it rewrites rows). 4.1 removed it.
 6. **Systems should be stateless and independent**: the analyzer warns about mutable fields on systems
-   ([EECS007](/en/docs/guide/analyzer#eecs007): move the state into a component or singleton) and about systems
-   referencing other systems ([EECS008](/en/docs/guide/analyzer#eecs008): communicate through data). See
+   ([EECS007](/en/docs/guide/help/analyzer#eecs007): move the state into a component or singleton) and about systems
+   referencing other systems ([EECS008](/en/docs/guide/help/analyzer#eecs008): communicate through data). See
    [ECS principles](/en/docs/ecs-principles).
 7. **`IEvent`, `IEventHandler<T>` and `Publish` are removed.** Write state changes as data (a tag or a field) and
    let later systems query them.
@@ -861,7 +861,7 @@ public ref struct S
    you. v4 runs systems of one priority together only when their generated access does not conflict (`ref` = write,
    `in` = read); systems with an `Entity` / `World` parameter, instance `[ForEach]` methods, an `OnUpdate` override
    or no `[ForEach]` method run alone. The result equals a sequential update. See
-   [threading](/en/docs/guide/threading#parallel-systems).
+   [threading](/en/docs/guide/performance/threading#parallel-systems).
 
 ### Source generator and analyzer [#v4-0-generator]
 
@@ -1167,7 +1167,7 @@ without allocations after warm-up. For questions, open an
   <Card title="Changelog" href="/en/docs/changelog">
     What each release added, improved and fixed.
   </Card>
-  <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
+  <Card title="Analyzer rules" href="/en/docs/guide/help/analyzer">
     Every EECS rule with its fix, including the ones an upgrade brings.
   </Card>
   <Card title="API and complexity" href="/en/docs/api">

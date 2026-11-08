@@ -37,7 +37,7 @@ JavaScript 和 .NET 之间没有逐实体的调用，两边每帧都不分配内
 
 ## 批量方法和 SIMD [#batch-simd]
 
-画布下方实时显示同一份移动工作的两种写法各花多少时间。`DragSystem` 和 `MovementSystem` 是普通的 `[ForEach]` 方法，每个粒子调用一次。`DragBatchSystem` 和 `MovementBatchSystem` 是[批量方法](/zh/docs/guide/systems#batch-methods)：拿到的是一整段连续行的 span，转换成 `Vector128<float>` 后一条指令处理两个粒子，段尾剩下的单个粒子用一次标量计算补上。能这样转换，是因为 `Position` 和 `Velocity` 都正好是两个 float，一段行就是一个 float 数组。
+画布下方实时显示同一份移动工作的两种写法各花多少时间。`DragSystem` 和 `MovementSystem` 是普通的 `[ForEach]` 方法，每个粒子调用一次。`DragBatchSystem` 和 `MovementBatchSystem` 是[批量方法](/zh/docs/guide/basics/systems#batch-methods)：拿到的是一整段连续行的 span，转换成 `Vector128<float>` 后一条指令处理两个粒子，段尾剩下的单个粒子用一次标量计算补上。能这样转换，是因为 `Position` 和 `Velocity` 都正好是两个 float，一段行就是一个 float 数组。
 
 两组系统做的事和结果完全一样，分别放在 `Batched` 和 `PerEntity` 两个系统组里。宿主每帧轮流更新其中一个，并分别计时，所以画面不受影响，两边的耗时也测在同一批粒子上；系统里没有任何模式开关。WebAssembly 的 SIMD 是 128 位，所以这里 `Vector128` 走硬件 SIMD，更宽的向量不行；在服务器上，同样的代码可以换成 `Vector256` 或 `Vector<float>`。数量越大，批量版本省下的时间越明显。
 

@@ -13,7 +13,7 @@ icon: ListOrdered
 
 <Callout type="idea" title="适合">
   只有主人自己用、变了才需要同步或存盘的纯值列表：背包里的物品 id 或堆叠、路点、最近发生的事件、待执行的指令。
-  [关系](/zh/docs/guide/indexes-and-relations#relations)的链接也是动态缓冲，元素类型是 `IRelation`。
+  [关系](/zh/docs/guide/data/indexes-and-relations#relations)的链接也是动态缓冲，元素类型是 `IRelation`。
 </Callout>
 
 <Callout type="warn" title="不适合">
@@ -122,7 +122,7 @@ world.Update();
 | 列表 | 存成 |
 | --- | --- |
 | 只有主人自己用、变了才同步或存盘的纯值：物品 id 或堆叠、路点、本 tick 受到的伤害 | **`DynamicBuffer<T>`** |
-| 元素自带状态（耐久度、带计时的 buff），系统要逐个查询或修改 | **每件一个实体**，用 [`EntityId`](/zh/docs/guide/indexes-and-relations#entityid-keys) 链接指向主人 |
+| 元素自带状态（耐久度、带计时的 buff），系统要逐个查询或修改 | **每件一个实体**，用 [`EntityId`](/zh/docs/guide/data/indexes-and-relations#entityid-keys) 链接指向主人 |
 | 数量少且有固定上限（4 个冷却槽、最近 8 次输入） | 非托管组件里的**固定长度 `[InlineArray]` 数组** |
 | 存盘时整体读写的数据（任务进度、设置） | **组件里的集合**，通过 `ref` 修改 |
 
@@ -164,7 +164,7 @@ ref var stash = ref hero.GetOrAddLoot();                       // 英雄没有�
 ```
 
 关系的缓冲没有 `WriteX()` 和 `GetOrAddX()`：链接带索引，只能通过
-[`Link`](/zh/docs/guide/indexes-and-relations#relations) / [`Unlink`](/zh/docs/guide/indexes-and-relations#relations) 修改。
+[`Link`](/zh/docs/guide/data/indexes-and-relations#relations) / [`Unlink`](/zh/docs/guide/data/indexes-and-relations#relations) 修改。
 
 ### 原地写整个缓冲：`SetCount` [#set-count]
 
@@ -226,7 +226,7 @@ public ref struct ShadeSystem
 ### 不要复制 [#copies]
 
 列表放在组件引用的一个对象里。复制一个 `DynamicBuffer<T>` 值，副本指向的还是同一个列表：通过副本写入不会打 tick，
-把副本存到别处还会让两个实体共用一个列表。分析器会拒绝所有复制（[EECS012](/zh/docs/guide/analyzer#eecs012)）：
+把副本存到别处还会让两个实体共用一个列表。分析器会拒绝所有复制（[EECS012](/zh/docs/guide/help/analyzer#eecs012)）：
 
 ```csharp doccheck=expect-EECS012
 public static class Bags
@@ -245,10 +245,10 @@ public static class Bags
 
 - 行移到另一张表（加了组件）时，列表跟着走。
 - 移除这个组件或销毁实体，列表随之丢弃；再加回组件，从空列表开始。
-- `world.Capture()` 让每个列表与[快照](/zh/docs/guide/snapshots)共用，直到任一方写入（写时复制），所以双方都看不到对方的写入。
+- `world.Capture()` 让每个列表与[快照](/zh/docs/guide/saves/snapshots)共用，直到任一方写入（写时复制），所以双方都看不到对方的写入。
   `Restore` 对之后没写过的行重新共用快照的列表，对写过的行在拥有者线程上把元素复制进去：这一行下一次写入（常在并行遍历中）
   直接用自己的列表，不必在辅助线程上复制一份。
-- `world.Instantiate(prefab)` 和 `entity.Clone()` 给新实体一份自己的列表，元素相同。[预制体](/zh/docs/guide/prefabs)用
+- `world.Instantiate(prefab)` 和 `entity.Clone()` 给新实体一份自己的列表，元素相同。[预制体](/zh/docs/guide/basics/prefabs)用
   `SetBuffer(...)` 设置元素：
 
 ```csharp
@@ -256,7 +256,7 @@ var chest = new Prefab().SetBuffer(new Loot(1), new Loot(2));
 var opened = world.Instantiate(chest);                        // 自己的列表：Loot 1、Loot 2
 ```
 
-- [`Save`](/zh/docs/guide/saves) 会写出元素：非托管元素按原始行写，托管元素走 Nino。
+- [`Save`](/zh/docs/guide/saves/saves) 会写出元素：非托管元素按原始行写，托管元素走 Nino。
 
 ### 反复出现又消失的缓冲：缓冲池、`MaxPooledLength` 和 `FillPool` [#pool]
 
@@ -307,7 +307,7 @@ foreach (var chunk in loaded) chunk.WriteBlock().SetCount(ChunkBlocks);   // 每
 - **池里存多少：** 最多是没人取用期间销毁的那些缓冲的列表，也就是峰值个数、每个 `MaxPooledLength` 个元素。512 个 8,192 字节的方块列表是
   4 MB，进程活多久就占多久。
 - **跨线程：** 每个线程自己留几个列表，其余的按批和所有线程共享的池交换，每批加一次锁。所有者线程从销毁的缓冲收回的列表，也能给
-  [并行 `[ForEach]`](/zh/docs/guide/threading#parallel-foreach-methods) 在辅助线程上的第一次写入用。
+  [并行 `[ForEach]`](/zh/docs/guide/performance/threading#parallel-foreach-methods) 在辅助线程上的第一次写入用。
 
 池省下多少：1,000 个 Actor 各带一个信箱，卸载再重新加载，见[下文](#how-to-use-it-fast)的 `BufferChurnBenchmark` 表；为什么上限按元素类型设置：
 见 [D65](/zh/docs/decisions#d65-buffer-pool-capacity)。
@@ -430,13 +430,13 @@ bags synced: 7
 | 让列表从空开始慢慢长 | 知道大小时调用一次 `EnsureCapacity(n)` | 容量之内的 `Add` 不分配 |
 | 每个 tick 新建列表 | `Clear()` 后重新填充 | `Clear` 保留容量：每 tick 重填的列表长到稳定大小后不再分配 |
 | 不在乎顺序还用 `RemoveAt(i)` | `RemoveAtSwapBack(i)` | O(1)，而不是 O(count) |
-| 用 `ref` 参数只读 | 改成 `in` 参数 | `ref` 会给行打 tick，下游每个 `[Changed<T>]` 读取方都要访问它（[EECS025](/zh/docs/guide/analyzer#eecs025)） |
+| 用 `ref` 参数只读 | 改成 `in` 参数 | `ref` 会给行打 tick，下游每个 `[Changed<T>]` 读取方都要访问它（[EECS025](/zh/docs/guide/help/analyzer#eecs025)） |
 | 只写一遍的整个缓冲，先在栈上填好一个 span 再 `AddRange` | 直接写 `SetCount(n)` 返回的 span | 元素只过一遍，也不用在栈上开一个缓冲那么大的空间 |
 | 在缓冲的 span 上反复读改写很多遍 | 在 `stackalloc` 的 span 上算完，再复制一次进 `SetCount(n)` 返回的 span | 每一遍都在方法自己的内存上跑，缓冲只写一次 |
 | `Add` 之后还用之前的 span | 可能扩容的调用之后重新取 span | `Add`、`AddRange`、`Insert`、`SetCount`、`EnsureCapacity`、`TrimExcess` 都可能换数组 |
 | 超过 4 KB、反复出现又消失的缓冲（地形、大信箱） | 启动时把 [`MaxPooledLength`](#pool) 调到它们的长度 | 新缓冲重用销毁缓冲的列表，不再分配 |
 | World 涨到已知峰值的途中不断分配列表 | 启动时、设好 `MaxPooledLength` 之后调用 [`FillPool(peak)`](#pool) | 列表在第一个 tick 之前就付清 |
-| 只在部分行写入的 `ref` 缓冲 | 改成 [`Mut<DynamicBuffer<T>>`](/zh/docs/guide/change-tracking#set-if-changed)（`x.Write().Add(…)`） | 只给写过的行打 tick（[EECS053](/zh/docs/guide/analyzer#eecs053)） |
+| 只在部分行写入的 `ref` 缓冲 | 改成 [`Mut<DynamicBuffer<T>>`](/zh/docs/guide/changes/change-tracking#set-if-changed)（`x.Write().Add(…)`） | 只给写过的行打 tick（[EECS053](/zh/docs/guide/help/analyzer#eecs053)） |
 
 10 万个装 8 件物品的背包，每 tick 有 1,000 个交易一件物品，再由一个 `[Changed]` 系统发送变化的背包
 （`DynamicBufferBenchmark`），对比把背包存成被追踪组件里的 `List<T>`：
@@ -452,7 +452,7 @@ bags synced: 7
 ## 开销 [#what-it-costs]
 
 - **内存：** 列中每行一个引用，外加每个实体一个对象和一个数组，第一次写入时才创建。没有内联容量，每个列表都在堆上。
-- **每次写入：** 给这一行打一次 tick，和其他[被追踪组件](/zh/docs/guide/change-tracking#what-it-costs)一样。
+- **每次写入：** 给这一行打一次 tick，和其他[被追踪组件](/zh/docs/guide/changes/change-tracking#what-it-costs)一样。
 - **容量之内的添加** 不分配；扩容时数组翻倍（至少 4 个元素）。
 - **缓冲销毁时**（实体被销毁、组件被移除），它的列表清空后交给同一元素类型、下一个写入第一个元素的缓冲，不论在哪个线程；超过
   `MaxPooledLength` 的列表交给 GC，池里最多保留峰值数量的列表（[缓冲池](#pool)）。
@@ -466,12 +466,12 @@ bags synced: 7
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 把缓冲复制到局部变量、字段或另一个实体 | 一个列表两个主人；通过副本的写入不被追踪 | [EECS012](/zh/docs/guide/analyzer#eecs012) |
+| 把缓冲复制到局部变量、字段或另一个实体 | 一个列表两个主人；通过副本的写入不被追踪 | [EECS012](/zh/docs/guide/help/analyzer#eecs012) |
 | 在 `in` 参数或 `Read<T>()` 上调用 `Add` | 编译不过：写入需要 `ref` | 编译器 |
 | `Add` 之后继续用之前的 `AsSpan()`（或 `SetCount` 返回的 span） | span 还指着旧数组 | 代码审查：重新取 span |
-| 用 `ref` 参数读取缓冲 | 访问到的每一行都算作已变化 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
-| `ref` 缓冲只在部分行写入（提前 `return`、`if` 里的 `Add`） | 访问到的每一行都算作已变化，没动过的也算 | [EECS053](/zh/docs/guide/analyzer#eecs053)：改用 `Mut<DynamicBuffer<T>>` |
-| 超过 `MaxPooledLength` 的缓冲反复出现又消失 | 每个销毁的列表都交给 GC，每个新缓冲都要分配 | 启动时调高 [`MaxPooledLength`](#pool)；创建它们的系统的 `TotalAllocated`（[诊断](/zh/docs/guide/diagnostics)）能看出来 |
+| 用 `ref` 参数读取缓冲 | 访问到的每一行都算作已变化 | [EECS025](/zh/docs/guide/help/analyzer#eecs025) |
+| `ref` 缓冲只在部分行写入（提前 `return`、`if` 里的 `Add`） | 访问到的每一行都算作已变化，没动过的也算 | [EECS053](/zh/docs/guide/help/analyzer#eecs053)：改用 `Mut<DynamicBuffer<T>>` |
+| 超过 `MaxPooledLength` 的缓冲反复出现又消失 | 每个销毁的列表都交给 GC，每个新缓冲都要分配 | 启动时调高 [`MaxPooledLength`](#pool)；创建它们的系统的 `TotalAllocated`（[诊断](/zh/docs/guide/production/diagnostics)）能看出来 |
 | 先 `FillPool`，后调高 `MaxPooledLength` | 预留的列表还是旧长度，第一次填满时扩容 | 代码审查：先设容量 |
 | `FillPool` 远超峰值 | 内存一直被占着：列表数 × 容量 | 按实测的峰值预留 |
 | 纯值列表的每个元素都建一个实体 | 每件物品一个实体、一行、一条索引 | 纯值用缓冲 |
@@ -479,13 +479,13 @@ bags synced: 7
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+  <Card title="变更追踪" href="/zh/docs/guide/changes/change-tracking">
     `[Changed<T>]`，以及哪些操作算写入。
   </Card>
-  <Card title="索引与关系" href="/zh/docs/guide/indexes-and-relations#relations">
+  <Card title="索引与关系" href="/zh/docs/guide/data/indexes-and-relations#relations">
     `IRelation` 缓冲：一个实体链接到多个实体。
   </Card>
-  <Card title="存档" href="/zh/docs/guide/saves">
+  <Card title="存档" href="/zh/docs/guide/saves/saves">
     缓冲连同元素一起存盘。
   </Card>
   <Card title="示例：SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">

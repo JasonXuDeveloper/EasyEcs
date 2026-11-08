@@ -1,7 +1,7 @@
 /**
  * Social cards (Open Graph / Twitter, 1200×630 PNG) for every page, drawn at
  * build time with sharp, so they cost nothing at run time:
- * build/client/og/en/docs/guide/queries.png for /en/docs/guide/queries.
+ * build/client/og/en/docs/guide/basics/queries.png for /en/docs/guide/basics/queries.
  *
  * Fonts: Inter (English) and Noto Sans SC (Chinese) are downloaded from Google
  * Fonts, subset to the characters on the cards, into node_modules/.cache. If
@@ -24,7 +24,7 @@ import type { Locale } from '../src/lib/i18n';
 import { analyzerRules } from '../src/lib/site';
 
 export interface Card {
-  /** Page URL, e.g. /en/docs/guide/queries */
+  /** Page URL, e.g. /en/docs/guide/basics/queries */
   url: string;
   lang: Locale;
   /** Small line above the title, e.g. "EasyEcs Docs" */

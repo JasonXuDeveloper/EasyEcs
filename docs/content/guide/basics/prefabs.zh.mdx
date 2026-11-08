@@ -109,13 +109,13 @@ den.Destroy();                                       // ChildOf：巢穴的哥�
 批量形式 `Instantiate(prefab, span, in c1, …, in cn)` 给 span 里每个实体同样的值：只过一次结构闸门，每个给定的列一次填满。
 每个实体都不一样的值（各自的位置），在批量生成之后再写，或者逐个 `Instantiate`。
 
-- **没给的保持预制体的样子。** 预制体里处于[禁用](/zh/docs/guide/cleanup-and-disable#disable-a-component)状态的组件，
+- **没给的保持预制体的样子。** 预制体里处于[禁用](/zh/docs/guide/changes/cleanup-and-disable#disable-a-component)状态的组件，
   如果给了值，就和 `Set` 一样以新值出现并启用；没给的仍然禁用。
-- **其余行为和 `Set` 一致。** 被追踪的组件（复制来的和给定的）都算此刻写入，[索引](/zh/docs/guide/indexes-and-relations)
-  和关系收录新实体，给定的 `ChildOf` 把它挂进[层级](/zh/docs/guide/hierarchy)。
-- **[分组](/zh/docs/guide/groups)：** 给定的分组组件值在放置之前就选好了分组的表，所以仍然没有移动。
+- **其余行为和 `Set` 一致。** 被追踪的组件（复制来的和给定的）都算此刻写入，[索引](/zh/docs/guide/data/indexes-and-relations)
+  和关系收录新实体，给定的 `ChildOf` 把它挂进[层级](/zh/docs/guide/data/hierarchy)。
+- **[分组](/zh/docs/guide/data/groups)：** 给定的分组组件值在放置之前就选好了分组的表，所以仍然没有移动。
 - **[预制体编组](#prefab-groups)：** 整个编组照常创建，再把这些值设到你传入的那个成员的实体上，这个实体要多一次行移动。
-- **[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)** 在任何改动之前检查：给定的键，或者预制体里没被替换的键，
+- **[唯一键](/zh/docs/guide/data/indexes-and-relations#unique-keys)** 在任何改动之前检查：给定的键，或者预制体里没被替换的键，
   已经被别的实体占用时抛 `InvalidOperationException`；多于一个实体的批量生成会让同一个键重复，同样抛异常。
 
 ### `Prefab` API [#prefab-api]
@@ -128,14 +128,14 @@ den.Destroy();                                       // ChildOf：巢穴的哥�
 | `Remove<T1..Tn>()` → `Prefab` | 去掉 1 到 9 个组件，没有的忽略。 |
 | `Has<T>()` | 预制体是否有 `T`。 |
 | `Read<T>()` → `ref readonly T` | 预制体里的值；没有时抛异常。 |
-| `SetBuffer<T>(params ReadOnlySpan<T>)` → `Prefab` | 带这些元素的 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)。 |
+| `SetBuffer<T>(params ReadOnlySpan<T>)` → `Prefab` | 带这些元素的 [`DynamicBuffer<T>`](/zh/docs/guide/data/dynamic-buffers)。 |
 | `SetAbsent<T>()` → `Prefab` | 给 `T` 留一列但不带这个组件，之后加上它不用挪行（[给以后留位置](#set-absent)）。 |
 | `AddMember()` → `Prefab` | 给预制体的编组加一个新[成员](#prefab-groups)。 |
 | `Id` | 在编组的组件里指代这个成员的 `EntityId`。 |
 
 ### 生成的成员 [#generated-members]
 
-和实体一样，项目里的每个组件都会在预制体上生成[命名成员](/zh/docs/guide/entities-and-components#generated-members)：
+和实体一样，项目里的每个组件都会在预制体上生成[命名成员](/zh/docs/guide/basics/entities-and-components#generated-members)：
 
 | 声明 | `Prefab` 上生成的成员 | 等价于 |
 | --- | --- | --- |
@@ -165,7 +165,7 @@ var boss = world.Instantiate(chief);
 
 ### 预制体里的缓冲 [#prefab-buffers]
 
-预制体可以带一个 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)：生成的 `SetLoot(...)`（或 `SetBuffer<T>(...)`）
+预制体可以带一个 [`DynamicBuffer<T>`](/zh/docs/guide/data/dynamic-buffers)：生成的 `SetLoot(...)`（或 `SetBuffer<T>(...)`）
 给它这些元素，每个实例都会拿到自己的列表和元素副本。只要项目里有代码写到了 `DynamicBuffer<Loot>`，元素的成员
 （`SetLoot`、`entity.Loot`、`WriteLoot`）就会生成。
 
@@ -187,7 +187,7 @@ items.Add(new Loot(9, 1));
 int inRecipe = Chests.Common.Loot.Count;             // 仍然是 2
 ```
 
-不要先在外面填好一个 `DynamicBuffer<T>` 再 `Set` 进预制体：缓冲值被复制后会共用同一个列表（[EECS012](/zh/docs/guide/analyzer#eecs012)）。
+不要先在外面填好一个 `DynamicBuffer<T>` 再 `Set` 进预制体：缓冲值被复制后会共用同一个列表（[EECS012](/zh/docs/guide/help/analyzer#eecs012)）。
 
 ### 给以后才加的组件留位置：`SetAbsent<T>` [#set-absent]
 
@@ -255,7 +255,7 @@ int guards = world.ChildOfIndex.Count(warlord);   // 2
 warlord.Destroy();                                   // ChildOf：销毁父实体会连带销毁子实体
 ```
 
-`ChildOf` 是 EasyEcs 的层级链接，见[层级](/zh/docs/guide/hierarchy)。`Instantiate(group, span)` 会为每个元素实例化一整组。
+`ChildOf` 是 EasyEcs 的层级链接，见[层级](/zh/docs/guide/data/hierarchy)。`Instantiate(group, span)` 会为每个元素实例化一整组。
 
 ### 生成前先预留：`Reserve` [#reserve]
 
@@ -281,10 +281,10 @@ world.Instantiate(Kinds.Troll, army);                // 不扩容，不分配
 
 | `Reserve(prefab, n)` 和 `Reserve<T1..Tn>(n)` 会预留 | 不会预留：自己来 |
 | --- | --- |
-| 目标表的行（编组是每个成员的表） | `DynamicBuffer<T>` 元素的列表：[`FillPool`](/zh/docs/guide/dynamic-buffers#pool) |
-| 实体记录，以及销毁它们时要填进去的空闲 id 列表 | [分组](/zh/docs/guide/groups)的其他表（`GroupBy` 按值放实例） |
-| [带索引](/zh/docs/guide/indexes-and-relations)组件的键，之后才创建的索引也算 | 关系链接（来自缓冲写入） |
-| 带[清理组件](/zh/docs/guide/cleanup-and-disable)的实例销毁后等待所在的表 | 其他组件组合的实体：只预留记录用 `EnsureEntityCapacity(n)` |
+| 目标表的行（编组是每个成员的表） | `DynamicBuffer<T>` 元素的列表：[`FillPool`](/zh/docs/guide/data/dynamic-buffers#pool) |
+| 实体记录，以及销毁它们时要填进去的空闲 id 列表 | [分组](/zh/docs/guide/data/groups)的其他表（`GroupBy` 按值放实例） |
+| [带索引](/zh/docs/guide/data/indexes-and-relations)组件的键，之后才创建的索引也算 | 关系链接（来自缓冲写入） |
+| 带[清理组件](/zh/docs/guide/changes/cleanup-and-disable)的实例销毁后等待所在的表 | 其他组件组合的实体：只预留记录用 `EnsureEntityCapacity(n)` |
 
 服务器启动时预留整体峰值，按这个顺序：
 
@@ -293,7 +293,7 @@ world.Instantiate(Kinds.Troll, army);                // 不扩容，不分配
 
 #### 缓冲列表 [#reserve-buffers]
 
-长缓冲先调高 `DynamicBuffer<T>.MaxPooledLength`，再 `FillPool(peak)`：对整个进程生效，要在任何 World 用到这个类型之前（[缓冲池](/zh/docs/guide/dynamic-buffers#pool)）。
+长缓冲先调高 `DynamicBuffer<T>.MaxPooledLength`，再 `FillPool(peak)`：对整个进程生效，要在任何 World 用到这个类型之前（[缓冲池](/zh/docs/guide/data/dynamic-buffers#pool)）。
 
 </Step>
 <Step>
@@ -327,9 +327,9 @@ world.Reserve<Position, Health>(10_000);             // 正好用这两个组件
 
 - **值**按普通结构体复制。组件里的托管引用（`string`、数组、`List<T>`）复制的是引用，副本之间共享它指向的对象。
 - **`DynamicBuffer<T>`** 是例外：每个副本都有自己的列表，元素相同。
-- **[值索引](/zh/docs/guide/indexes-and-relations)**立即收录新实体。副本不能重复[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)：
+- **[值索引](/zh/docs/guide/data/indexes-and-relations)**立即收录新实体。副本不能重复[唯一键](/zh/docs/guide/data/indexes-and-relations#unique-keys)：
   实例化一个键已被别的实体占用的预制体，或者克隆一个带唯一键的实体，都会抛 `InvalidOperationException`（null 键不算键）。
-- **[被追踪的组件](/zh/docs/guide/change-tracking)**算作此刻写入：`[Changed<T>]` 方法能看到每个新实例。副本没有的组件不算移除，`[Removed<T>]` 不会报告。
+- **[被追踪的组件](/zh/docs/guide/changes/change-tracking)**算作此刻写入：`[Changed<T>]` 方法能看到每个新实例。副本没有的组件不算移除，`[Removed<T>]` 不会报告。
 - **不存在的组件仍然不存在。** 一个 `Burning` 已被移除的实体，克隆出来也没有 `Burning`。
 - **`Entity` 字段**按它保存的句柄原样复制。预制体里的句柄不指向目标 World 的任何实体，所以要在实例化之后给每个实例建立链接，
   或者用指向[成员](#prefab-groups)的 `EntityId`。
@@ -472,33 +472,33 @@ boss 50 hp, twin 50 hp
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 预制体的组件里放 `Entity` 字段 | 每个实例都指向同一个不属于任何 World 的句柄 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告）；改用指向成员的 `EntityId` |
+| 预制体的组件里放 `Entity` 字段 | 每个实例都指向同一个不属于任何 World 的句柄 | [EECS017](/zh/docs/guide/help/analyzer#eecs017)（警告）；改用指向成员的 `EntityId` |
 | 预制体里放 World 中某个实体的 `EntityId` | 在每个实例里都变成 `EntityId.Null` | 实例化之后再建立链接 |
-| 先填好 `DynamicBuffer<T>` 值再 `Set` | 所有实例共用这个列表 | [EECS012](/zh/docs/guide/analyzer#eecs012)；改用 `SetLoot(...)` |
-| 在计数循环里 `Instantiate(prefab)` | 每次调用复制一个，而不是一次复制一整波 | [EECS031](/zh/docs/guide/analyzer#eecs031)：`Instantiate(prefab, span)` |
-| 在计数循环里用相同的值 `Instantiate(prefab, values)` | 每次调用复制一个 | [EECS031](/zh/docs/guide/analyzer#eecs031)：带值的批量形式 |
-| 先 `Instantiate`，再 `Set` 一个缺少的组件 | 一次行复制，再加一次行移动 | [EECS052](/zh/docs/guide/analyzer#eecs052)（警告，有代码修复）：把值直接交给 `Instantiate` |
+| 先填好 `DynamicBuffer<T>` 值再 `Set` | 所有实例共用这个列表 | [EECS012](/zh/docs/guide/help/analyzer#eecs012)；改用 `SetLoot(...)` |
+| 在计数循环里 `Instantiate(prefab)` | 每次调用复制一个，而不是一次复制一整波 | [EECS031](/zh/docs/guide/help/analyzer#eecs031)：`Instantiate(prefab, span)` |
+| 在计数循环里用相同的值 `Instantiate(prefab, values)` | 每次调用复制一个 | [EECS031](/zh/docs/guide/help/analyzer#eecs031)：带值的批量形式 |
+| 先 `Instantiate`，再 `Set` 一个缺少的组件 | 一次行复制，再加一次行移动 | [EECS052](/zh/docs/guide/help/analyzer#eecs052)（警告，有代码修复）：把值直接交给 `Instantiate` |
 | 带唯一键的预制体实例化两次，或批量生成多于一个 | 抛 `InvalidOperationException`，什么也没创建 | 每个实例给自己的键 |
-| 在不拥有 World 的线程上 `Instantiate` | 和所有者线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
-| 在不带 `Entity` 或 `World` 参数的 `[ForEach]` 方法里 `Instantiate` | 遍历以为不会有结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
+| 在不拥有 World 的线程上 `Instantiate` | 和所有者线程发生竞争 | [EECS014](/zh/docs/guide/help/analyzer#eecs014) |
+| 在不带 `Entity` 或 `World` 参数的 `[ForEach]` 方法里 `Instantiate` | 遍历以为不会有结构变更 | [EECS013](/zh/docs/guide/help/analyzer#eecs013) |
 | 其他线程正在实例化时修改预制体 | 复制出残缺的数据 | 启动时建好预制体，之后只读 |
 | 对已销毁或已退休的实体调用 `Clone()` | 抛 `InvalidOperationException` | 先查 `IsAlive` 和 `IsRetired` |
-| 指望 `Reserve` 也预留实例缓冲的列表 | 每个缓冲第一次写入仍要分配 | 给元素类型调用 [`FillPool`](/zh/docs/guide/dynamic-buffers#pool) |
+| 指望 `Reserve` 也预留实例缓冲的列表 | 每个缓冲第一次写入仍要分配 | 给元素类型调用 [`FillPool`](/zh/docs/guide/data/dynamic-buffers#pool) |
 | 在生成的那个 tick 里才 `Reserve` | 扩容照样发生在 tick 里 | 启动时或提前一个 tick 预留 |
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="实体与组件" href="/zh/docs/guide/entities-and-components">
+  <Card title="实体与组件" href="/zh/docs/guide/basics/entities-and-components">
     句柄、id、`Set` / `Get`，以及预制体共用的生成成员。
   </Card>
-  <Card title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
+  <Card title="动态缓冲" href="/zh/docs/guide/data/dynamic-buffers">
     每个实体一个列表，每个实例都拿到一份副本。
   </Card>
-  <Card title="层级" href="/zh/docs/guide/hierarchy">
+  <Card title="层级" href="/zh/docs/guide/data/hierarchy">
     预制体编组用的 `ChildOf` 链接和级联销毁。
   </Card>
-  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+  <Card title="变更追踪" href="/zh/docs/guide/changes/change-tracking">
     新实例算作已写入，同步会把它们发出去。
   </Card>
 </Cards>

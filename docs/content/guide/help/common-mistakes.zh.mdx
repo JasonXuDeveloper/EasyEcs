@@ -25,7 +25,7 @@ health.Value -= 10;
 hero.Health.Value -= 10;          // 一样，写在一行里
 ```
 
-之后没有代码再读这个副本时，由 [EECS038](/zh/docs/guide/analyzer#eecs038) 发现（警告，带代码修复）。详见[副本与 ref](/zh/docs/guide/refs-and-await#copies-and-refs)。
+之后没有代码再读这个副本时，由 [EECS038](/zh/docs/guide/help/analyzer#eecs038) 发现（警告，带代码修复）。详见[副本与 ref](/zh/docs/guide/changes/refs-and-await#copies-and-refs)。
 
 ### 组件里存 `Entity` [#entity-in-component]
 
@@ -40,7 +40,7 @@ public record struct Follow(Entity Leader) : IComponent;
 public record struct Follow(EntityId Leader) : IComponent;
 ```
 
-由 [EECS017](/zh/docs/guide/analyzer#eecs017) 发现（警告）。详见 [id、版本号与回收](/zh/docs/guide/entities-and-components#entityid)。
+由 [EECS017](/zh/docs/guide/help/analyzer#eecs017) 发现（警告）。详见 [id、版本号与回收](/zh/docs/guide/basics/entities-and-components#entityid)。
 
 ### 存下标而不是 id [#raw-index]
 
@@ -63,7 +63,7 @@ var item = world.CreateEntity(new Owner(hero.Id));
 if (world.TryGetEntity(item.Owner.Id, out var owner)) { /* 还活着 */ }
 ```
 
-没有规则能发现。详见 [id、版本号与回收](/zh/docs/guide/entities-and-components#entityid)。
+没有规则能发现。详见 [id、版本号与回收](/zh/docs/guide/basics/entities-and-components#entityid)。
 
 ### 该用标签的地方用了标志位 [#flags]
 
@@ -117,7 +117,7 @@ caster.DisableCooldown();               // 被眩晕：冷却暂停
 caster.EnableCooldown();                // 眩晕结束：还是原来的值
 ```
 
-没有规则能发现。详见[禁用组件](/zh/docs/guide/cleanup-and-disable#disable-a-component)。
+没有规则能发现。详见[禁用组件](/zh/docs/guide/changes/cleanup-and-disable#disable-a-component)。
 
 ### record struct 键上写了公开的 `Key => this` [#public-key]
 
@@ -135,7 +135,7 @@ record struct 的 `ToString()` 会打印所有公开属性。`Key` 返回 record
 [LookupKey] public readonly partial record struct Market(long Id) : IComponent;
 ```
 
-由 [EECS043](/zh/docs/guide/analyzer#eecs043) 发现（带代码修复）。完整的写法见 [Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)。
+由 [EECS043](/zh/docs/guide/help/analyzer#eecs043) 发现（带代码修复）。完整的写法见 [Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)。
 
 ### 用 `AddSingleton` 重置单例 [#add-singleton-reset]
 
@@ -155,7 +155,7 @@ world.AddSingleton<Round>();       // 抛异常：World 里已经有 Round
 world.SetRound(2, 0);              // 下一回合，从 tick 0 开始
 ```
 
-没有规则能发现；异常信息里写明了该用哪个调用。详见[添加、读、写](/zh/docs/guide/singletons#add-read-write)。
+没有规则能发现；异常信息里写明了该用哪个调用。详见[添加、读、写](/zh/docs/guide/basics/singletons#add-read-write)。
 
 ## 系统 [#systems]
 
@@ -183,7 +183,7 @@ public ref struct WaveSystem
 }
 ```
 
-由 [EECS007](/zh/docs/guide/analyzer#eecs007) 发现。详见 [ECS 原则第 2 条](/zh/docs/ecs-principles#2-systems-are-stateless)。
+由 [EECS007](/zh/docs/guide/help/analyzer#eecs007) 发现。详见 [ECS 原则第 2 条](/zh/docs/ecs-principles#2-systems-are-stateless)。
 
 ### 一个系统调用另一个系统 [#system-calls-system]
 
@@ -216,7 +216,7 @@ public ref struct KillRewards
 }
 ```
 
-由 [EECS008](/zh/docs/guide/analyzer#eecs008) 发现。详见 [ECS 原则第 3 条](/zh/docs/ecs-principles#3-systems-never-reference-systems)。
+由 [EECS008](/zh/docs/guide/help/analyzer#eecs008) 发现。详见 [ECS 原则第 3 条](/zh/docs/ecs-principles#3-systems-never-reference-systems)。
 
 ### 只读却写成 `ref` 参数 [#ref-that-reads]
 
@@ -251,7 +251,7 @@ public ref struct Throttle
 }
 ```
 
-由 [EECS025](/zh/docs/guide/analyzer#eecs025) 发现（警告，带代码修复）。详见[并行系统](/zh/docs/guide/threading#parallel-systems)。
+由 [EECS025](/zh/docs/guide/help/analyzer#eecs025) 发现（警告，带代码修复）。详见[并行系统](/zh/docs/guide/performance/threading#parallel-systems)。
 
 ### 对没有追踪的组件用 `[Changed<T>]` [#changed-untracked]
 
@@ -279,7 +279,7 @@ public ref struct ShowGold
 }
 ```
 
-由 C# 编译器发现（这个特性要求 `ITracked`，报 CS0315）。详见[标记组件](/zh/docs/guide/change-tracking#mark-the-component)。
+由 C# 编译器发现（这个特性要求 `ITracked`，报 CS0315）。详见[标记组件](/zh/docs/guide/changes/change-tracking#mark-the-component)。
 
 ### 通过 `ref` 读被追踪的组件 [#read-tracked-by-ref]
 
@@ -294,7 +294,7 @@ int before = player.Get<Gold>().Amount;      // Get<T>() 算写：这一行被�
 int amount = player.Gold.Amount;             // ref readonly：不打标记
 ```
 
-由 [EECS025](/zh/docs/guide/analyzer#eecs025) 发现（警告，带代码修复）。详见[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
+由 [EECS025](/zh/docs/guide/help/analyzer#eecs025) 发现（警告，带代码修复）。详见[什么算写入](/zh/docs/guide/changes/change-tracking#what-counts-as-a-write)。
 
 ### 只偶尔写入，却用 `ref` 拿追踪组件 [#ref-writes-every-row]
 
@@ -330,8 +330,8 @@ public ref struct Face
 ```
 
 在系统外面，用 `in` 参数、`Read<T>()` 或生成的属性读，用 `entity.SetIfChanged(...)`（或生成的 `SetFacingIfChanged(...)`）写。
-“有时写”的 `ref` 没有规则能发现；从来不写的那种由 [EECS025](/zh/docs/guide/analyzer#eecs025) 发现。详见
-[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
+“有时写”的 `ref` 没有规则能发现；从来不写的那种由 [EECS025](/zh/docs/guide/help/analyzer#eecs025) 发现。详见
+[什么算写入](/zh/docs/guide/changes/change-tracking#what-counts-as-a-write)。
 
 ### 只读追踪组件的 `Query` 循环 [#query-that-reads]
 
@@ -354,8 +354,8 @@ foreach (var item in world.Read<Rating>())
     total += item.Rating.Value;
 ```
 
-由 [EECS046](/zh/docs/guide/analyzer#eecs046) 发现（警告，带代码修复）。详见
-[只读的循环](/zh/docs/guide/queries#read)。
+由 [EECS046](/zh/docs/guide/help/analyzer#eecs046) 发现（警告，带代码修复）。详见
+[只读的循环](/zh/docs/guide/basics/queries#read)。
 
 ### `[Removed<T>]` 方法接收了 `T` [#removed-takes-t]
 
@@ -382,7 +382,7 @@ public ref struct Extinguish
 }
 ```
 
-由 [EECS016](/zh/docs/guide/analyzer#eecs016) 发现。详见[移除检测](/zh/docs/guide/change-tracking#removal-detection)。
+由 [EECS016](/zh/docs/guide/help/analyzer#eecs016) 发现。详见[移除检测](/zh/docs/guide/changes/change-tracking#removal-detection)。
 
 ### 以为 `[Removed<T>]` 能报告被销毁的实体 [#removed-destroyed]
 
@@ -418,7 +418,7 @@ else
 }
 ```
 
-没有规则能发现。详见[销毁日志](/zh/docs/guide/change-tracking#destroy-log)。
+没有规则能发现。详见[销毁日志](/zh/docs/guide/changes/change-tracking#destroy-log)。
 
 ### 以为 `Count` 或 `Query` 会照顾分帧 [#count-a-slice]
 
@@ -440,8 +440,8 @@ int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // 全部�
 ```
 
 打开 `MeasureSystems` 后，`[ForEach(Slices = N)]` 方法的 `system.Stats.LastEntities` 就是它那一份。过滤条件在同一个方法或类型里构造时由
-[EECS044](/zh/docs/guide/analyzer#eecs044) 发现，否则运行时报错。详见
-[分帧](/zh/docs/guide/systems#slices)。
+[EECS044](/zh/docs/guide/help/analyzer#eecs044) 发现，否则运行时报错。详见
+[分帧](/zh/docs/guide/basics/systems#slices)。
 
 ### 给 `[Changed<T>]` 方法分帧 [#slice-changed]
 
@@ -466,7 +466,7 @@ public ref struct SendGold
 }
 ```
 
-由 [EECS035](/zh/docs/guide/analyzer#eecs035) 发现。
+由 [EECS035](/zh/docs/guide/help/analyzer#eecs035) 发现。
 
 ### 每种 actor 手写一个分组 [#group-per-actor]
 
@@ -493,7 +493,7 @@ public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISys
 [LookupKey] public readonly partial record struct Guild(long Id) : IActor<Guild>;
 ```
 
-没有规则能发现。详见[分组过滤](/zh/docs/guide/systems#group-filters)。
+没有规则能发现。详见[分组过滤](/zh/docs/guide/basics/systems#group-filters)。
 
 ## 结构 [#structure]
 
@@ -512,7 +512,7 @@ hero.SetStunned();
 hero.Health.Value -= 10;
 ```
 
-ref、变更和使用在同一个块里时，由 [EECS047](/zh/docs/guide/analyzer#eecs047)（警告）发现。详见[变更前后的 ref](/zh/docs/guide/structural-changes#refs-across-a-change)。
+ref、变更和使用在同一个块里时，由 [EECS047](/zh/docs/guide/help/analyzer#eecs047)（警告）发现。详见[变更前后的 ref](/zh/docs/guide/changes/structural-changes#refs-across-a-change)。
 
 ### 跨 `await` 拿着 `ref` [#ref-across-await]
 
@@ -529,7 +529,7 @@ await Task.Delay(100);
 if (hero.HasHealth) hero.Health.Value -= 10;
 ```
 
-由 C# 编译器发现。详见 [ref 与 await](/zh/docs/guide/refs-and-await#across-await)。
+由 C# 编译器发现。详见 [ref 与 await](/zh/docs/guide/changes/refs-and-await#across-await)。
 
 ### 通过 `ref` 写被索引的键 [#indexed-by-ref]
 
@@ -553,7 +553,7 @@ public static class Portals
 }
 ```
 
-由 [EECS015](/zh/docs/guide/analyzer#eecs015) 发现。详见[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)。
+由 [EECS015](/zh/docs/guide/help/analyzer#eecs015) 发现。详见[值索引](/zh/docs/guide/data/indexes-and-relations#value-indexes)。
 
 ### 唯一键先给了新主人 [#rekey-order]
 
@@ -579,7 +579,7 @@ dave.SetSeat(11);
 carol.SetSeat(12);
 ```
 
-被拒绝的写入什么都不改：实体保留原来的键，World 保持原样。运行时报错。详见[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)。
+被拒绝的写入什么都不改：实体保留原来的键，World 保持原样。运行时报错。详见[唯一键](/zh/docs/guide/data/indexes-and-relations#unique-keys)。
 
 ### 复制带唯一键的实体或预制体 [#unique-copies]
 
@@ -599,7 +599,7 @@ for (int i = 0; i < guests.Length; i++)
     guests[i] = world.Instantiate(guest, new Seat(100 + i));   // 每个实例一个键
 ```
 
-null 键（`string` 键的默认值）不算键：预制体可以带着它，每个实例都拿到它。运行时报错。详见[预制体](/zh/docs/guide/prefabs)。
+null 键（`string` 键的默认值）不算键：预制体可以带着它，每个实例都拿到它。运行时报错。详见[预制体](/zh/docs/guide/basics/prefabs)。
 
 ### 启用一个已被别人拿走的唯一键 [#disabled-unique]
 
@@ -620,7 +620,7 @@ else
     regular.EnableSeat();
 ```
 
-运行时报错。详见[禁用组件](/zh/docs/guide/cleanup-and-disable#disable-a-component)。
+运行时报错。详见[禁用组件](/zh/docs/guide/changes/cleanup-and-disable#disable-a-component)。
 
 ### 复制 `DynamicBuffer<T>` [#buffer-copy]
 
@@ -652,7 +652,7 @@ public static class Inventory
 }
 ```
 
-由 [EECS012](/zh/docs/guide/analyzer#eecs012) 发现。详见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
+由 [EECS012](/zh/docs/guide/help/analyzer#eecs012) 发现。详见[动态缓冲](/zh/docs/guide/data/dynamic-buffers)。
 
 ### 销毁父实体，却以为子实体还在 [#parent-destroy]
 
@@ -668,7 +668,7 @@ ship.Destroy();                    // 炮塔跟着一起被销毁
 world.ChildOfIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // 孤儿变成根
 ```
 
-没有规则能发现。详见[级联策略](/zh/docs/guide/hierarchy#cascade-policy)。
+没有规则能发现。详见[级联策略](/zh/docs/guide/data/hierarchy#cascade-policy)。
 
 ### 一个实体一个实体地做结构变更 [#loop-of-changes]
 
@@ -687,7 +687,7 @@ foreach (var item in world.Query<Fighter>())
 int frozen = world.SetAll(new Frozen(), QueryFilter.Create().With<Fighter>());
 ```
 
-由 [EECS030](/zh/docs/guide/analyzer#eecs030) 发现（警告，带代码修复）。详见[批量变更](/zh/docs/guide/bulk)。
+由 [EECS030](/zh/docs/guide/help/analyzer#eecs030) 发现（警告，带代码修复）。详见[批量变更](/zh/docs/guide/changes/bulk)。
 
 ### `CreateEntity` 之后紧接着 `Set` [#set-after-create]
 
@@ -704,8 +704,8 @@ var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
 ```
 
 `Instantiate(prefab)` 之后再 `Set` 也一样：把实例自己的组件直接传给 `Instantiate`。由
-[EECS052](/zh/docs/guide/analyzer#eecs052) 发现（警告，带代码修复）。详见
-[创建实体](/zh/docs/guide/entities-and-components#create-entities)。
+[EECS052](/zh/docs/guide/help/analyzer#eecs052) 发现（警告，带代码修复）。详见
+[创建实体](/zh/docs/guide/basics/entities-and-components#create-entities)。
 
 ### 在查询循环里更新 World [#update-in-loop]
 
@@ -726,8 +726,8 @@ foreach (var item in world.Query<Health>())
 world.Update();
 ```
 
-由 [EECS051](/zh/docs/guide/analyzer#eecs051) 发现；在系统里由 [EECS034](/zh/docs/guide/analyzer#eecs034) 发现。详见
-[遍历时增删实体和组件](/zh/docs/guide/structural-changes#during-a-pass)。
+由 [EECS051](/zh/docs/guide/help/analyzer#eecs051) 发现；在系统里由 [EECS034](/zh/docs/guide/help/analyzer#eecs034) 发现。详见
+[遍历时增删实体和组件](/zh/docs/guide/changes/structural-changes#during-a-pass)。
 
 ### 只用 `Children` 收集子树 [#children-only]
 
@@ -743,7 +743,7 @@ var group = new List<EntityId>();
 world.Descendants(hero).AddTo(group, includeRoot: true);   // 英雄，然后是子实体、孙实体……
 ```
 
-没有规则能发现。详见[迁移层级](/zh/docs/guide/hierarchy#moving)。
+没有规则能发现。详见[迁移层级](/zh/docs/guide/data/hierarchy#moving)。
 
 ### 恢复的记录又被存了回去 [#record-written-back]
 
@@ -773,7 +773,7 @@ static Entity Restore(World world, ReadOnlySpan<byte> record)
 }
 ```
 
-没有规则能发现。详见[记录](/zh/docs/guide/migration-and-unload#records)。
+没有规则能发现。详见[记录](/zh/docs/guide/saves/migration-and-unload#records)。
 
 ### 每个 tick 都调 `TrimExcess` [#trim-every-tick]
 
@@ -794,7 +794,7 @@ if (world.DefaultUpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // 2
     world.TrimExcess();
 ```
 
-在 `OnUpdate` 或 `[ForEach]` 方法里由 [EECS028](/zh/docs/guide/analyzer#eecs028) 发现（警告）；宿主的循环里没有规则能发现。详见[高峰过后还回内存](/zh/docs/guide/diagnostics#trim)。
+在 `OnUpdate` 或 `[ForEach]` 方法里由 [EECS028](/zh/docs/guide/help/analyzer#eecs028) 发现（警告）；宿主的循环里没有规则能发现。详见[高峰过后还回内存](/zh/docs/guide/production/diagnostics#trim)。
 
 ## 线程 [#threads]
 
@@ -814,7 +814,7 @@ public static class Network
 World 的结构属于它的所有者线程，World 也不会加锁来共享它。把输入放进队列，由所有者线程上的系统把它变成实体；或者给每个线程一个
 自己的 World。
 
-由 [EECS014](/zh/docs/guide/analyzer#eecs014) 发现。详见[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)。
+由 [EECS014](/zh/docs/guide/help/analyzer#eecs014) 发现。详见[来自其他线程的输入](/zh/docs/guide/performance/threading#input-from-other-threads)。
 
 ### 在并行方法里做结构变更 [#parallel-change]
 
@@ -838,7 +838,7 @@ public ref struct Reap
 }
 ```
 
-由 [EECS010](/zh/docs/guide/analyzer#eecs010) 发现。详见并行 [`[ForEach]`](/zh/docs/guide/threading#parallel-foreach-methods) 方法。
+由 [EECS010](/zh/docs/guide/help/analyzer#eecs010) 发现。详见并行 [`[ForEach]`](/zh/docs/guide/performance/threading#parallel-foreach-methods) 方法。
 
 ### 在并行方法里调 `entity.Run` [#run-in-parallel]
 
@@ -876,7 +876,7 @@ public ref struct HealAll
 }
 ```
 
-由 [EECS010](/zh/docs/guide/analyzer#eecs010) 发现。详见[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)。
+由 [EECS010](/zh/docs/guide/help/analyzer#eecs010) 发现。详见[`entity.Run`](/zh/docs/guide/basics/queries#run-on-one-entity)。
 
 ### 并行方法里共享的计数器 [#shared-counter]
 
@@ -919,7 +919,7 @@ public ref struct Bleed
 }
 ```
 
-由 [EECS060](/zh/docs/guide/analyzer#eecs060) 发现。详见[归约](/zh/docs/guide/threading#reductions)。
+由 [EECS060](/zh/docs/guide/help/analyzer#eecs060) 发现。详见[归约](/zh/docs/guide/performance/threading#reductions)。
 
 ### 把 `Reduce<T>.Value` 当成总数 [#reduce-value]
 
@@ -952,7 +952,7 @@ public ref struct BleedOut
 }
 ```
 
-没有规则能发现：方法能编译，也能运行。详见[归约](/zh/docs/guide/threading#reductions)。
+没有规则能发现：方法能编译，也能运行。详见[归约](/zh/docs/guide/performance/threading#reductions)。
 
 ### 调用之后读并行 job 的字段 [#job-field-after-parallel]
 
@@ -978,10 +978,10 @@ public static class Census
 ```
 
 `ForEachParallel` 每一块跑一份 job 的副本，哪一份都不写回：按 `ref` 传入的 job 保持原来的值。字段里存结果的 job 放到一个线程上跑
-（`world.ForEach`），或者写一个带 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法，
+（`world.ForEach`），或者写一个带 [`Reduce<T>`](/zh/docs/guide/performance/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法，
 它生成的 job 会合并各块。
 
-由 [EECS061](/zh/docs/guide/analyzer#eecs061) 发现，代码修复改成 `ForEach`。
+由 [EECS061](/zh/docs/guide/help/analyzer#eecs061) 发现，代码修复改成 `ForEach`。
 
 ### 让 `Emitted<T>` 一直满着 [#emitted-not-cleared]
 
@@ -1026,7 +1026,7 @@ public ref struct ApplyHitsSystem
 }
 ```
 
-没有规则能发现：分析器分不清是哪个系统在应用这些记录。详见[一遍产出的记录](/zh/docs/guide/threading#emit)。
+没有规则能发现：分析器分不清是哪个系统在应用这些记录。详见[一遍产出的记录](/zh/docs/guide/performance/threading#emit)。
 
 ### 在 `[ForEach]` 方法里用 `Random.Shared` [#shared-random]
 
@@ -1061,7 +1061,7 @@ public ref struct Crits
 }
 ```
 
-由 [EECS071](/zh/docs/guide/analyzer#eecs071) 发现，带代码修复。详见[遍历里的随机数](/zh/docs/guide/threading#entity-random)。
+由 [EECS071](/zh/docs/guide/help/analyzer#eecs071) 发现，带代码修复。详见[遍历里的随机数](/zh/docs/guide/performance/threading#entity-random)。
 
 ### 查找这一遍要写的组件 [#lookup-written]
 
@@ -1081,7 +1081,7 @@ public ref struct Escort
 ```
 
 `Lookup<T>` 读的是其他实体在这一遍之前的 `T`，所以这一遍不能写 `T`：有的行会读到首领写之前的值，有的读到写之后的，并行时还会读到另一个
-线程正在写的行。[`Tile`](/zh/docs/guide/grids) 参数也一样：它读邻居的格子，所以方法把结果写进另一个缓冲。写进你自己的组件，再在后面的
+线程正在写的行。[`Tile`](/zh/docs/guide/performance/grids) 参数也一样：它读邻居的格子，所以方法把结果写进另一个缓冲。写进你自己的组件，再在后面的
 系统里拷回去（双缓冲）：
 
 ```csharp
@@ -1107,18 +1107,18 @@ public ref struct Steer
 }
 ```
 
-由 [EECS059](/zh/docs/guide/analyzer#eecs059) 发现。详见[读取其他实体](/zh/docs/guide/threading#lookups)。
+由 [EECS059](/zh/docs/guide/help/analyzer#eecs059) 发现。详见[读取其他实体](/zh/docs/guide/performance/threading#lookups)。
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="分析器规则" href="/zh/docs/guide/analyzer">
+  <Card title="分析器规则" href="/zh/docs/guide/help/analyzer">
     从 EECS002 到 EECS089 的每一条规则。
   </Card>
   <Card title="ECS 设计原则" href="/zh/docs/ecs-principles">
     这些错误违反的规则。
   </Card>
-  <Card title="ref 与 await" href="/zh/docs/guide/refs-and-await">
+  <Card title="ref 与 await" href="/zh/docs/guide/changes/refs-and-await">
     `ref` 什么时候失效。
   </Card>
   <Card title="常见问题" href="/zh/docs/faq">

@@ -34,7 +34,7 @@ godot --headless --path samples/Godot -- --ticks 120
 
 ## 数据与系统 [#data]
 
-组件直接用 Godot 的 `Vector2`，场地大小和 tick 时长是[单例](/zh/docs/guide/singletons)。系统负责移动和反弹，完全不知道场景的存在。
+组件直接用 Godot 的 `Vector2`，场地大小和 tick 时长是[单例](/zh/docs/guide/basics/singletons)。系统负责移动和反弹，完全不知道场景的存在。
 
 <include lang="csharp" meta='tab="Components.cs"'>../../../samples/Godot/Components.cs</include>
 
@@ -43,7 +43,7 @@ godot --headless --path samples/Godot -- --ticks 120
 ## 节点 [#node]
 
 节点是宿主，系统才是游戏。`Main` 只在 Godot 和 World 之间搬数据：在 `_Ready` 里创建 World 和实体，在 `_PhysicsProcess`
-（Godot 的固定 tick）里调用 `world.Update()`，在 `_ExitTree` 里释放自己创建的东西（[托管 World](/zh/docs/guide/hosting#owner)）。
+（Godot 的固定 tick）里调用 `world.Update()`，在 `_ExitTree` 里释放自己创建的东西（[托管 World](/zh/docs/guide/production/hosting#owner)）。
 每次更新后，它把所有位置拷进一个 float 缓冲，交给 `RenderingServer.MultimeshSetBuffer`：所有实体一次绘制，不用每个实体一个节点。`--ticks` 参数和 CI 检查的报告在
 [`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/Support.cs) 里：这是周边代码，不是本课重点。
 
@@ -65,7 +65,7 @@ updates after the first allocated 0 B
   <Card icon={<Sprout />} title="HelloWorld" href="/zh/docs/samples/hello-world">
     最小的 World：组件、系统、一次更新。
   </Card>
-  <Card icon={<Clock />} title="托管 World" href="/zh/docs/guide/hosting">
+  <Card icon={<Clock />} title="托管 World" href="/zh/docs/guide/production/hosting">
     唯一的所有者、固定步长、随宿主启停。
   </Card>
   <Card icon={<Rocket />} title="快速上手" href="/zh/docs/getting-started">

@@ -8,7 +8,7 @@ icon: Grid3x3
 A server simulates some state as a grid: water that flows between blocks, heat that spreads over a map, light, a nav
 field, a cellular automaton. Each cell's next value depends on the cells around it, so a plain `[ForEach]` method
 over cells would look up neighbors per cell. EasyEcs cuts the grid into tiles, one entity each with its cells in a
-[dynamic buffer](/en/docs/guide/dynamic-buffers), and a `Tile<TCell, TTile>` parameter hands the method the tile
+[dynamic buffer](/en/docs/guide/data/dynamic-buffers), and a `Tile<TCell, TTile>` parameter hands the method the tile
 with a halo of its neighbors' edges: the method is a shader that samples cells with vectors and no edge cases, tiles run
 in parallel, and quiet tiles can sleep.
 
@@ -22,9 +22,9 @@ in parallel, and quiet tiles can sleep.
 
 <Callout type="warn" title="Skip it for">
   A rule that reads no neighbor: a plain `[ForEach]` method over the buffer, or a vector loop over a component.
-  A grid that is one entity: a [batch method](/en/docs/guide/systems#batch-methods) over its span. Sparse objects on
-  a map (units, items): an [index](/en/docs/guide/indexes-and-relations) by cell, not a grid of cells. A stencil that
-  reaches farther than the tile beside: larger tiles ([EECS072](/en/docs/guide/analyzer#eecs072)).
+  A grid that is one entity: a [batch method](/en/docs/guide/basics/systems#batch-methods) over its span. Sparse objects on
+  a map (units, items): an [index](/en/docs/guide/data/indexes-and-relations) by cell, not a grid of cells. A stencil that
+  reaches farther than the tile beside: larger tiles ([EECS072](/en/docs/guide/help/analyzer#eecs072)).
 </Callout>
 
 ## How to use it [#how-to-use-it]
@@ -120,7 +120,7 @@ plate.GetOrAddTemperature().SetCount(16 * 16);
 plate.GetOrAddNextTemperature().SetCount(16 * 16);
 ```
 
-A grid that spawns tiles often builds them from a [prefab](/en/docs/guide/prefabs#prefab-buffers) with both buffers.
+A grid that spawns tiles often builds them from a [prefab](/en/docs/guide/basics/prefabs#prefab-buffers) with both buffers.
 
 </Step>
 <Step>
@@ -250,7 +250,7 @@ access.Write<DynamicBuffer<NextTemperature>>();
 
 - **A reader of the grid.** The system reads the tile component and the cell buffer, so no system that writes them
   shares its stage, and every neighbor is read as it was before the pass. A method that writes either is
-  [EECS059](/en/docs/guide/analyzer#eecs059).
+  [EECS059](/en/docs/guide/help/analyzer#eecs059).
 - **The index is built first.** `Prepared` creates and builds the key's index on the owner thread, before the
   parallel stage, so the threads only read it.
 - **One call per tile.** The method is compiled as a root of its own and called once per entity, so the JIT spends its
@@ -337,7 +337,7 @@ sizes:
 - **`Halo`** (default 1) is the width of the ring: a stencil reaching r cells away needs r, such as the fourth-order
   Laplacian (five points along each axis, r = 2). A cursor's samples reach up to r away, and `Rows(reads)` widens its
   row mask by r. A halo is at most the tile's extent along every axis with neighbors: wider would reach past the tile
-  beside ([EECS072](/en/docs/guide/analyzer#eecs072), and an exception at the first exchange).
+  beside ([EECS072](/en/docs/guide/help/analyzer#eecs072), and an exception at the first exchange).
 - **`Neighborhood`** (default `Faces`) picks the tiles read into the ring's edges and corners: `Faces` (von Neumann:
   4 tiles in 2D, 6 in 3D), `FacesAndEdges` (8 or 18) or `All` (Moore: 8 or 26). A nine-point stencil (the Game of
   Life, a box blur) needs `All`; a seven-point one reads no corner, so it skips the extra searches.
@@ -453,7 +453,7 @@ a mostly quiet grid against stepping every tile.
 
 The generator finds a tile's neighbors in the key's index, a hash probe each (4 to 26 per tile and pass). When the
 keys map onto a bounded range of slots (the plates of a fixed map, the chunks loaded around the players, never 64
-apart), the tile also implements [`IDirectMapped<TKey>`](/en/docs/guide/indexes-and-relations#direct-index) with a
+apart), the tile also implements [`IDirectMapped<TKey>`](/en/docs/guide/data/indexes-and-relations#direct-index) with a
 `[UniqueKey]`, and each search is one array read:
 
 ```csharp
@@ -499,7 +499,7 @@ A key out of range or in a taken slot is still found, through the hash. The Voxe
   temperature and pressure) keeps one cell type per field and takes one `Tile` per field
   (`Tile<Fluid, Chunk> water, Tile<Block, Chunk> blocks`): each field exchanges its halo on its own and is
   sampled with the same offsets. Two tiles of the same cell type and grid would share the thread's texture
-  ([EECS073](/en/docs/guide/analyzer#eecs073)).
+  ([EECS073](/en/docs/guide/help/analyzer#eecs073)).
 
 {/* TODO(water overlap): the MPI-style interior/ring overlap (the interior of a chunk shaded while its ring waits for
 the halo) and a halo exchange of the changed edges only. Describe them here in one bullet each, linking the
@@ -763,9 +763,9 @@ search. The measured numbers of the water shader, by hand against the tile, are 
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A `Tile` parameter and a write of its cell buffer in one method | Neighbors read while other threads write them | [EECS059](/en/docs/guide/analyzer#eecs059): write a second buffer |
-| A halo wider than the tile | It would reach past the tile beside | [EECS072](/en/docs/guide/analyzer#eecs072), and an exception at the first exchange |
-| Two tiles of the same cell type and grid in one method | The second `ExchangeHalo` replaces the first in the thread's texture | [EECS073](/en/docs/guide/analyzer#eecs073): one cell type per field |
+| A `Tile` parameter and a write of its cell buffer in one method | Neighbors read while other threads write them | [EECS059](/en/docs/guide/help/analyzer#eecs059): write a second buffer |
+| A halo wider than the tile | It would reach past the tile beside | [EECS072](/en/docs/guide/help/analyzer#eecs072), and an exception at the first exchange |
+| Two tiles of the same cell type and grid in one method | The second `ExchangeHalo` replaces the first in the thread's texture | [EECS073](/en/docs/guide/help/analyzer#eecs073): one cell type per field |
 | A pass that reads cells it updated in the same pass | Results depend on the visit order and the thread count | Review: write into a step buffer, commit after |
 | `Rows(reads)` for a stencil whose result is not zero where everything it reads is zero | The rows it skips keep the last step's values | Review: `Rows(TileStencil.All)` or every row |
 | A nine-point stencil with the default `Neighborhood` | The corners of the halo hold the boundary, not the diagonal tiles | Tests: `TileNeighborhood.All` |
@@ -778,13 +778,13 @@ search. The measured numbers of the water shader, by hand against the tile, are 
 ## Related [#related]
 
 <Cards>
-  <Card title="High-performance patterns" href="/en/docs/guide/high-performance">
+  <Card title="High-performance patterns" href="/en/docs/guide/performance/high-performance">
     Vector loops, parallel chunks and batch methods, and where tiles fit among them.
   </Card>
-  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+  <Card title="Dynamic buffers" href="/en/docs/guide/data/dynamic-buffers">
     The cells of a tile: `SetCount`, the buffer pool and change tracking.
   </Card>
-  <Card title="Indexes and relations" href="/en/docs/guide/indexes-and-relations#direct-index">
+  <Card title="Indexes and relations" href="/en/docs/guide/data/indexes-and-relations#direct-index">
     The key a tile is found by, and direct-mapped keys.
   </Card>
   <Card title="VoxelServer" href="/en/docs/samples/voxel-server">

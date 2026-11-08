@@ -20,10 +20,10 @@ is allocation-free.
 </Callout>
 
 <Callout type="warn" title="Skip it for">
-  Per-tick logic: write a [`[ForEach]`](/en/docs/guide/systems#foreach-methods) method in a system instead. It is
+  Per-tick logic: write a [`[ForEach]`](/en/docs/guide/basics/systems#foreach-methods) method in a system instead. It is
   generated, ordered with the other systems, scheduled in parallel stages and as fast as the fastest hand-written
   loop. Looking entities up by a value or by the entity they point at: use an
-  [index](/en/docs/guide/indexes-and-relations), not a scan.
+  [index](/en/docs/guide/data/indexes-and-relations), not a scan.
 </Callout>
 
 ## How to use it [#how-to-use-it]
@@ -82,11 +82,11 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 
 | Need | Use |
 | --- | --- |
-| Per-entity logic of a system | a [`[ForEach]`](/en/docs/guide/systems#foreach-methods) method |
-| Arithmetic over many rows in a system | a batch [`[ForEach]`](/en/docs/guide/systems#batch-methods) method (spans, SIMD) |
-| Heavy per-entity work in a system | [`[ForEach(Parallel = true)]`](/en/docs/guide/systems#parallel-methods) |
-| A component the entity may or may not have | a [`Maybe<T>`](/en/docs/guide/systems#maybe) parameter, or two methods split by `With` / `Without` |
-| A pass outside systems, as a method | a [`[ForEach]`](/en/docs/guide/systems#foreach-outside-systems) runner: a static method with a generated entry point |
+| Per-entity logic of a system | a [`[ForEach]`](/en/docs/guide/basics/systems#foreach-methods) method |
+| Arithmetic over many rows in a system | a batch [`[ForEach]`](/en/docs/guide/basics/systems#batch-methods) method (spans, SIMD) |
+| Heavy per-entity work in a system | [`[ForEach(Parallel = true)]`](/en/docs/guide/basics/systems#parallel-methods) |
+| A component the entity may or may not have | a [`Maybe<T>`](/en/docs/guide/basics/systems#maybe) parameter, or two methods split by `With` / `Without` |
+| A pass outside systems, as a method | a [`[ForEach]`](/en/docs/guide/basics/systems#foreach-outside-systems) runner: a static method with a generated entry point |
 | The fastest ad-hoc loop | `world.ForEach<T1..Tn, TJob>(ref job, filter)` with a [struct job](#foreach-a-struct-job) |
 | Ad-hoc loop that needs the `Entity` | `world.ForEachEntity<T1..Tn, TJob>(ref job, filter)` |
 | Ad-hoc arithmetic over runs of rows | `world.ForEachBatch<T1..Tn, TJob>(ref job, filter)` |
@@ -97,10 +97,10 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | "How many …?" / "Is there any …?" | `world.Count<T1..Tn>(filter)` / `world.Any<T1..Tn>(filter)` |
 | Destroy every match | `world.DestroyAll<T1..Tn>(filter)` |
 | Up to N matches to serve, destroy or save this tick | [`world.CollectIds<T1..Tn>(span, filter)`](#collect-ids) |
-| Only rows written or removed since a tick | `Changed<T>(tick)` / `Removed<T>(tick)`, `ChangedAny<T1..Tn>(tick)` / `RemovedAny<T1..Tn>(tick)` for any of several ([change tracking](/en/docs/guide/change-tracking)) |
-| A pass that writes only the rows whose value changed | a [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) parameter of a `[ForEach]` method |
-| A share of the rows per pass, every row once per N passes | `Slice(index, of)` with a `ForEach` call, or [`[ForEach(Slices = N)]`](/en/docs/guide/systems#slices) |
-| Entities by a value, or pointing at an entity | `world.Index<T, TKey>().Find(key)` ([indexes](/en/docs/guide/indexes-and-relations)) |
+| Only rows written or removed since a tick | `Changed<T>(tick)` / `Removed<T>(tick)`, `ChangedAny<T1..Tn>(tick)` / `RemovedAny<T1..Tn>(tick)` for any of several ([change tracking](/en/docs/guide/changes/change-tracking)) |
+| A pass that writes only the rows whose value changed | a [`Mut<T>`](/en/docs/guide/changes/change-tracking#set-if-changed) parameter of a `[ForEach]` method |
+| A share of the rows per pass, every row once per N passes | `Slice(index, of)` with a `ForEach` call, or [`[ForEach(Slices = N)]`](/en/docs/guide/basics/systems#slices) |
+| Entities by a value, or pointing at an entity | `world.Index<T, TKey>().Find(key)` ([indexes](/en/docs/guide/data/indexes-and-relations)) |
 
 ### Filters [#filters]
 
@@ -113,15 +113,15 @@ int cleared = world.DestroyAll<Position>(QueryFilter.Create().With<Dead>());
 | `Removed<T>(since)` | entities that lost tracked `T` at or after `since` and still lack it | `[Removed<T>]` |
 | `ChangedAny<T1..Tn>(since)` | entities where at least one of the tracked components it has was written at or after `since` | `[ChangedAny<T1, …, Tn>]` |
 | `RemovedAny<T1..Tn>(since)` | entities that lost at least one of the tracked components at or after `since` and still lack it | `[RemovedAny<T1, …, Tn>]` |
-| `InGroup<T>(group)` | entities whose `T` is in one [group](/en/docs/guide/groups) | none; the generated `filter.InTeam(group)` for an `IGroup` component `Team` |
-| `Slice(index, of)` | slice `index` of the `of` slices of every matching table's rows, cut at 64-row words; `ForEach`, `ForEachEntity`, `ForEachBatch` and their `Parallel` forms only | `[ForEach(Slices = N)]` ([slices](/en/docs/guide/systems#slices)) |
+| `InGroup<T>(group)` | entities whose `T` is in one [group](/en/docs/guide/data/groups) | none; the generated `filter.InTeam(group)` for an `IGroup` component `Team` |
+| `Slice(index, of)` | slice `index` of the `of` slices of every matching table's rows, cut at 64-row words; `ForEach`, `ForEachEntity`, `ForEachBatch` and their `Parallel` forms only | `[ForEach(Slices = N)]` ([slices](/en/docs/guide/basics/systems#slices)) |
 | `Since(tick)` | the same filter, its `Changed`, `Removed`, `ChangedAny` and `RemovedAny` parts moved to another tick | |
 
 Every filter can be repeated and combined. The `ChangedAny` parts of a filter join one set that passes when any
 of its components passes (and the `RemovedAny` parts another); the sets combine with everything else with AND. A
 filter holds one tick: its `Changed`, `Removed`, `ChangedAny` and `RemovedAny` parts must name the same one (else
 `ArgumentException`), and `Since(tick)` moves them together, so a filter kept in a field is reused after every update,
-or [for each client](/en/docs/guide/change-tracking#per-client) with the tick it acknowledged:
+or [for each client](/en/docs/guide/changes/change-tracking#per-client) with the tick it acknowledged:
 
 ```csharp
 public record struct Armor(int Value) : IComponent, ITracked;
@@ -141,7 +141,7 @@ int dirty = world.Count<Armor>(Replication.Dirty.Since(mark));
 `Slice(index, of)` keeps a pass to part of each table: passes with each index from 0 to `count - 1` in turn visit
 every row once. Only the `ForEach` family honours it; `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run` and
 the bulk calls (`SetAll`, `RemoveAll`, …) need every matching row and throw `ArgumentException` for a sliced filter.
-In a system, [`[ForEach(Slices = N)]`](/en/docs/guide/systems#slices) picks the slice for you.
+In a system, [`[ForEach(Slices = N)]`](/en/docs/guide/basics/systems#slices) picks the slice for you.
 
 ### `Query`: a foreach loop [#query-loop]
 
@@ -153,9 +153,9 @@ The enumerator and its items are ref structs holding refs into the current table
 - items count as a write of every tracked (`ITracked`) component they hand out, whether or not the loop stores
   through them. To read tracked components without stamping them (a save, a send), loop over
   [`Read`](#read) instead, or use a struct job with `WriteMask => 0`, a `[ForEach]` method with `in` parameters, or
-  `entity.Read<T>()` ([what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write)).
+  `entity.Read<T>()` ([what counts as a write](/en/docs/guide/changes/change-tracking#what-counts-as-a-write)).
 
-A loop may create, destroy, add and remove; the rules are in [Structural changes](/en/docs/guide/structural-changes).
+A loop may create, destroy, add and remove; the rules are in [Structural changes](/en/docs/guide/changes/structural-changes).
 
 ### `Read`: a loop that only reads [#read]
 
@@ -202,7 +202,7 @@ components only, so the pass never loads the entity rows. A job that must hold a
 
 Job parameters are all `ref`, so a job says which components it actually writes with an optional
 `static int WriteMask`: bit k - 1 for component k, default -1 (all of them). Only those count as written for
-[change tracking](/en/docs/guide/change-tracking), and only those are carried over to the entity's new row when the
+[change tracking](/en/docs/guide/changes/change-tracking), and only those are carried over to the entity's new row when the
 job changes the archetype of the entity it visits. `INoStructuralChanges` promises that `Execute` never creates,
 destroys, adds or removes: the pass then skips the bookkeeping that keeps changes safe and freezes the structure, so
 a change made anyway throws instead of tearing rows. Generated `[ForEach]` jobs set both from the method.
@@ -321,9 +321,9 @@ bool applied = Requests.TakeHit(unit, 30);   // false: dead, no Health, or not a
 
 It returns `false`, without running the method, when the entity lacks a component, fails the filter or is not alive.
 A struct job written by hand and handed to `entity.Run` only is what `[EntityMethod]` writes: the analyzer suggests the
-method ([EECS080](/en/docs/guide/analyzer#eecs080), with a code fix that converts the job and its calls). A method
+method ([EECS080](/en/docs/guide/help/analyzer#eecs080), with a code fix that converts the job and its calls). A method
 that only fits a pass (a span, an `EntitySpan`, a `Reduce<T>`, a `Scratch<T>`) or that also has `[ForEach]` is
-[EECS081](/en/docs/guide/analyzer#eecs081).
+[EECS081](/en/docs/guide/help/analyzer#eecs081).
 
 The entry point is `entity.Run<T1..Tn, TJob>(ref job, filter)` with the generated job, and you can call it with a
 job of your own where one has to hand values back through its fields after the run. The job is an `IForEachEntity`
@@ -359,7 +359,7 @@ What follows holds for `[EntityMethod]` methods and jobs alike:
 
 - **The refs survive the job's own structural changes**, as in `ForEachEntity`: the components in `WriteMask` are copied
   to the entity's new row after `Execute`, also when it throws, so what was written before the exception stays.
-- **Only `WriteMask` count as written** for [change tracking](/en/docs/guide/change-tracking), and only when `Run`
+- **Only `WriteMask` count as written** for [change tracking](/en/docs/guide/changes/change-tracking), and only when `Run`
   returns `true`. The default, `WriteMask => -1`, stamps every component the job takes; a job that writes nothing
   declares `WriteMask => 0`.
 - **`false` is not "dead"**: it also means a missing component or a filter that failed. Test `entity.IsAlive` when
@@ -370,12 +370,12 @@ What follows holds for `[EntityMethod]` methods and jobs alike:
   through the query cache). A filter tests the row the way a query does (`Without`, `WithAny`, `Changed<T>(tick)`,
   groups), with no lookup of the query's tables; build it once, in a `static readonly` field.
 - **For the analyzer, `Run` is a structural change** (its job may make one), rejected where those are: in a
-  parallel `[ForEach]` method ([EECS010](/en/docs/guide/analyzer#eecs010)), in a `[ForEach]` method that takes no
-  `Entity` or `World` ([EECS013](/en/docs/guide/analyzer#eecs013)) and off the world's owner thread
-  ([EECS014](/en/docs/guide/analyzer#eecs014)).
+  parallel `[ForEach]` method ([EECS010](/en/docs/guide/help/analyzer#eecs010)), in a `[ForEach]` method that takes no
+  `Entity` or `World` ([EECS013](/en/docs/guide/help/analyzer#eecs013)) and off the world's owner thread
+  ([EECS014](/en/docs/guide/help/analyzer#eecs014)).
 
 An actor is the typical user: each message handler finds the actor's entity (through a
-[value index](/en/docs/guide/indexes-and-relations)) and runs one job on it. The
+[value index](/en/docs/guide/data/indexes-and-relations)) and runs one job on it. The
 [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) is a whole program built this way.
 
 1,000 calls, each on another of 10,000 entities, with 1, 3 or 5 components, with or without a `Without<Dead>` filter
@@ -395,7 +395,7 @@ thread-pool threads claim the chunks one at a time as they finish, like OpenMP's
 runs on its own copy of the job, so state accumulated in its fields is not merged back. Fewer than two chunks run on
 the calling thread. `ForEachBatchParallel` (an `IForEachBatch` job) cuts the same chunks and hands each the runs of
 consecutive rows it holds as spans, as `ForEachBatch` does on one thread: the form a parallel
-[reduction](/en/docs/guide/threading#reductions) runs in, with a run's partial result in a local.
+[reduction](/en/docs/guide/performance/threading#reductions) runs in, with a run's partial result in a local.
 
 ```csharp
 public struct Heal : IForEach<Health>, INoStructuralChanges
@@ -414,7 +414,7 @@ world.ForEachParallel<Health, Heal>(ref heal, Filters.Active);   // each row run
 The last argument, `chunkSize`, sets the rows a thread takes at a time (the `n` of `schedule(dynamic, n)`, rounded up
 to 64; 0, the default, chooses from the row count): for a few hundred rows that cost microseconds each, which the
 default would leave in one chunk. It is what `[ForEach(Parallel = true, ChunkSize = n)]` passes
-([chunk size](/en/docs/guide/threading#chunk-rows)).
+([chunk size](/en/docs/guide/performance/threading#chunk-rows)).
 
 ```csharp
 public record struct Plan(int Cost) : IComponent;
@@ -438,7 +438,7 @@ world.ForEachParallel<Plan, Replan>(ref replan, chunkSize: 64);
 ```
 
 The job must not read what another row's job writes (another entity, a singleton), and nothing else may change the
-world during the call. [`[ForEach(Parallel = true)]`](/en/docs/guide/systems#parallel-methods) compiles a system method
+world during the call. [`[ForEach(Parallel = true)]`](/en/docs/guide/basics/systems#parallel-methods) compiles a system method
 to the same chunked run.
 
 ### `Count` and `Any` [#count]
@@ -612,9 +612,9 @@ not a mover, but the job over `Position` alone counts it.
 | A `Query` that only reads tracked components | [`Read<T1..Tn>`](#read), a job with `WriteMask => 0`, or `in` parameters | `Query` items stamp what they hand out |
 | `ForEachEntity` when the entity is rarely used | A batch job with `EntitySpan` | Handles built only for the rows that need one |
 | A scalar loop over many rows | A batch job with `Vector<T>` | The JIT does not vectorize on its own |
-| `Count(...) > 0` | `Any(...)` | Stops at the first match ([EECS032](/en/docs/guide/analyzer#eecs032)) |
+| `Count(...) > 0` | `Any(...)` | Stops at the first match ([EECS032](/en/docs/guide/help/analyzer#eecs032)) |
 | Several `Get` / `TryGetRef` and a `Has<Dead>()` per request | A [`[EntityMethod]`](#run-on-one-entity) method with `[Without<Dead>]` | One lookup; the refs are carried across structural changes |
-| Scanning for a key | A [value index](/en/docs/guide/indexes-and-relations) | O(matches) instead of O(rows) |
+| Scanning for a key | A [value index](/en/docs/guide/data/indexes-and-relations) | O(matches) instead of O(rows) |
 | A `Read` loop that copies ids into a span and breaks when it is full | [`CollectIds`](#collect-ids) | A table whose rows all match is one copy |
 
 The same write, `Position += Velocity` over 10,000 entities: two plain arrays (`RawArrayWrite`), a `[ForEach]`
@@ -661,32 +661,32 @@ Against Friflo.Engine.ECS on the same world: one component, two components scala
 | Storing a query item | Does not compile; keep `item.Entity` | The C# compiler |
 | A `Query` loop that only reads tracked components | Every visited row counts as written | Loop over [`Read<T1..Tn>`](#read) |
 | `INoStructuralChanges` on a job that changes structure | `InvalidOperationException` at the change | At run time |
-| Structural change in a batch job | `InvalidOperationException`: the spans point into the tables | At run time ([EECS013](/en/docs/guide/analyzer#eecs013) for `[ForEach]` methods) |
-| A parallel job that writes a singleton or another entity | Races between chunks | Code review ([EECS010](/en/docs/guide/analyzer#eecs010) for `[ForEach]` methods) |
+| Structural change in a batch job | `InvalidOperationException`: the spans point into the tables | At run time ([EECS013](/en/docs/guide/help/analyzer#eecs013) for `[ForEach]` methods) |
+| A parallel job that writes a singleton or another entity | Races between chunks | Code review ([EECS010](/en/docs/guide/help/analyzer#eecs010) for `[ForEach]` methods) |
 | `Changed`, `Removed`, `ChangedAny` or `RemovedAny` with different ticks in one filter | `ArgumentException` | At run time |
-| A sliced filter (`Slice`) passed to `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run` or a bulk call | `ArgumentException`: the call needs every matching row | [EECS044](/en/docs/guide/analyzer#eecs044) |
-| `Update()` called from inside a query loop of the same world | Every system runs while the loop walks the tables, and the update closes the loop's holes under it: rows it has not reached move behind it and are missed | [EECS051](/en/docs/guide/analyzer#eecs051); [EECS034](/en/docs/guide/analyzer#eecs034) when called from a system |
+| A sliced filter (`Slice`) passed to `Query`, `Read`, `Count`, `Any`, `DestroyAll`, `entity.Run` or a bulk call | `ArgumentException`: the call needs every matching row | [EECS044](/en/docs/guide/help/analyzer#eecs044) |
+| `Update()` called from inside a query loop of the same world | Every system runs while the loop walks the tables, and the update closes the loop's holes under it: rows it has not reached move behind it and are missed | [EECS051](/en/docs/guide/help/analyzer#eecs051); [EECS034](/en/docs/guide/help/analyzer#eecs034) when called from a system |
 | An `entity.Run` job without `WriteMask` | The default (-1) stamps every tracked component the job takes | Declare `WriteMask` (`0` for a job that only reads) |
 | `INoStructuralChanges` on a `Run` job that changes structure | `InvalidOperationException` at the change | At run time |
 | Treating `false` from `Run` as "dead" | It also means a missing component or a filter that failed | Code review: test `IsAlive` |
 | `QueryFilter.Create()…` built at every `Run` or query call | The filter is rebuilt and looked up at every call | Code review: a `static readonly` field |
-| `entity.Run` inside a parallel `[ForEach]` method | Its job may change structure from several threads | [EECS010](/en/docs/guide/analyzer#eecs010) |
-| A struct job written by hand only to be handed to `entity.Run` | Code the generator writes, kept in sync by hand | [EECS080](/en/docs/guide/analyzer#eecs080) (with a code fix): an `[EntityMethod]` method |
-| An `[EntityMethod]` method that is an instance method, also has `[ForEach]`, or takes a span, an `EntitySpan`, a `Reduce<T>` or a `Scratch<T>` | Compile error: one entity has no pass | [EECS081](/en/docs/guide/analyzer#eecs081) |
+| `entity.Run` inside a parallel `[ForEach]` method | Its job may change structure from several threads | [EECS010](/en/docs/guide/help/analyzer#eecs010) |
+| A struct job written by hand only to be handed to `entity.Run` | Code the generator writes, kept in sync by hand | [EECS080](/en/docs/guide/help/analyzer#eecs080) (with a code fix): an `[EntityMethod]` method |
+| An `[EntityMethod]` method that is an instance method, also has `[ForEach]`, or takes a span, an `EntitySpan`, a `Reduce<T>` or a `Scratch<T>` | Compile error: one entity has no pass | [EECS081](/en/docs/guide/help/analyzer#eecs081) |
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/basics/systems">
     The same filters as attributes, ordered and scheduled.
   </Card>
-  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+  <Card title="Change tracking" href="/en/docs/guide/changes/change-tracking">
     `Changed<T>` and `Removed<T>`: only what changed since a tick.
   </Card>
-  <Card title="Structural changes" href="/en/docs/guide/structural-changes">
+  <Card title="Structural changes" href="/en/docs/guide/changes/structural-changes">
     What a pass sees when entities change under it.
   </Card>
-  <Card title="Indexes and relations" href="/en/docs/guide/indexes-and-relations">
+  <Card title="Indexes and relations" href="/en/docs/guide/data/indexes-and-relations">
     Find entities by value without a scan.
   </Card>
 </Cards>

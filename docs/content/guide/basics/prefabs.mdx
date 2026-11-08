@@ -118,16 +118,16 @@ pass through the structural gate and each given column filled at once. Values th
 each) are written after the batch, or with one `Instantiate` per entity.
 
 - **What the prefab does not give stays as it is.** A given component the prefab keeps
-  [disabled](/en/docs/guide/cleanup-and-disable#disable-a-component) is present and enabled with the given value, as
+  [disabled](/en/docs/guide/changes/cleanup-and-disable#disable-a-component) is present and enabled with the given value, as
   `Set` does; a disabled one you do not give stays disabled.
 - **Everything follows as with `Set`.** Tracked components (the copied and the given ones) count as written,
-  [indexes](/en/docs/guide/indexes-and-relations) and relations learn the entity, and a given `ChildOf` links it into
-  the [hierarchy](/en/docs/guide/hierarchy).
-- **[Groups](/en/docs/guide/groups):** a given value of a grouped component chooses the group's table before the entity
+  [indexes](/en/docs/guide/data/indexes-and-relations) and relations learn the entity, and a given `ChildOf` links it into
+  the [hierarchy](/en/docs/guide/data/hierarchy).
+- **[Groups](/en/docs/guide/data/groups):** a given value of a grouped component chooses the group's table before the entity
   is placed, so it still costs no move.
 - **[Prefab groups](#prefab-groups):** the whole group is created, then the values are set on the entity of the member
   you passed, which costs that entity one row move.
-- **[Unique keys](/en/docs/guide/indexes-and-relations#unique-keys)** are checked before anything changes: a given key,
+- **[Unique keys](/en/docs/guide/data/indexes-and-relations#unique-keys)** are checked before anything changes: a given key,
   or a key of the prefab you do not replace, that another entity holds throws `InvalidOperationException`, and so
   does a batch of more than one entity that would repeat a key.
 
@@ -141,14 +141,14 @@ each) are written after the batch, or with one `Instantiate` per entity.
 | `Remove<T1..Tn>()` → `Prefab` | Drops 1 to 9 components; missing ones are ignored. |
 | `Has<T>()` | Whether the prefab has `T`. |
 | `Read<T>()` → `ref readonly T` | The prefab's value; throws if it has none. |
-| `SetBuffer<T>(params ReadOnlySpan<T>)` → `Prefab` | A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) with these elements. |
+| `SetBuffer<T>(params ReadOnlySpan<T>)` → `Prefab` | A [`DynamicBuffer<T>`](/en/docs/guide/data/dynamic-buffers) with these elements. |
 | `SetAbsent<T>()` → `Prefab` | A column for `T` without the component, so adding it later moves no row ([room for later](#set-absent)). |
 | `AddMember()` → `Prefab` | A new [member](#prefab-groups) of the prefab's group. |
 | `Id` | The `EntityId` that names this member inside the group's components. |
 
 ### Generated members [#generated-members]
 
-Like an entity, a prefab gets [named members](/en/docs/guide/entities-and-components#generated-members) for every
+Like an entity, a prefab gets [named members](/en/docs/guide/basics/entities-and-components#generated-members) for every
 component of your project:
 
 | Declared | Generated on `Prefab` | Same as |
@@ -181,7 +181,7 @@ var boss = world.Instantiate(chief);
 
 ### Buffers in a prefab [#prefab-buffers]
 
-A prefab can carry a [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers): the generated `SetLoot(...)` (or
+A prefab can carry a [`DynamicBuffer<T>`](/en/docs/guide/data/dynamic-buffers): the generated `SetLoot(...)` (or
 `SetBuffer<T>(...)`) gives it these elements, and every instance gets a list of its own with a copy of them. The
 element's members (`SetLoot`, `entity.Loot`, `WriteLoot`) are generated once some code of the project names
 `DynamicBuffer<Loot>`.
@@ -205,7 +205,7 @@ int inRecipe = Chests.Common.Loot.Count;             // still 2
 ```
 
 Do not `Set(new DynamicBuffer<T>())` and fill it outside the prefab: a buffer value copied around shares its list
-([EECS012](/en/docs/guide/analyzer#eecs012)).
+([EECS012](/en/docs/guide/help/analyzer#eecs012)).
 
 ### Room for a component added later: `SetAbsent<T>` [#set-absent]
 
@@ -276,7 +276,7 @@ int guards = world.ChildOfIndex.Count(warlord);   // 2
 warlord.Destroy();                                   // ChildOf: destroying the parent destroys its children
 ```
 
-`ChildOf` is EasyEcs's hierarchy link: see [Hierarchy](/en/docs/guide/hierarchy). `Instantiate(group, span)`
+`ChildOf` is EasyEcs's hierarchy link: see [Hierarchy](/en/docs/guide/data/hierarchy). `Instantiate(group, span)`
 instantiates the group once per element.
 
 ### Reserve before the wave: `Reserve` [#reserve]
@@ -306,10 +306,10 @@ What a reservation covers, beside the rows:
 
 | Reserved by `Reserve(prefab, n)` and `Reserve<T1..Tn>(n)` | Not reserved: do it yourself |
 | --- | --- |
-| The rows of the target table (every member's table for a group) | The lists of `DynamicBuffer<T>` elements: [`FillPool`](/en/docs/guide/dynamic-buffers#pool) |
-| The entity records, and the list of free ids their destruction fills | A [group](/en/docs/guide/groups)'s other tables (`GroupBy` puts instances by value) |
-| The keys of their [indexed](/en/docs/guide/indexes-and-relations) components, also for an index created later | Relation links (they come from buffer writes) |
-| The table they wait in once destroyed, when they hold [cleanup components](/en/docs/guide/cleanup-and-disable) | Entities with other components: `EnsureEntityCapacity(n)` for the records alone |
+| The rows of the target table (every member's table for a group) | The lists of `DynamicBuffer<T>` elements: [`FillPool`](/en/docs/guide/data/dynamic-buffers#pool) |
+| The entity records, and the list of free ids their destruction fills | A [group](/en/docs/guide/data/groups)'s other tables (`GroupBy` puts instances by value) |
+| The keys of their [indexed](/en/docs/guide/data/indexes-and-relations) components, also for an index created later | Relation links (they come from buffer writes) |
+| The table they wait in once destroyed, when they hold [cleanup components](/en/docs/guide/changes/cleanup-and-disable) | Entities with other components: `EnsureEntityCapacity(n)` for the records alone |
 
 Reserving a whole server's peak at start-up, in order:
 
@@ -319,7 +319,7 @@ Reserving a whole server's peak at start-up, in order:
 #### Buffer lists [#reserve-buffers]
 
 Raise `DynamicBuffer<T>.MaxPooledLength` for long buffers, then `FillPool(peak)`: process-wide, before any world
-uses the type ([the buffer pool](/en/docs/guide/dynamic-buffers#pool)).
+uses the type ([the buffer pool](/en/docs/guide/data/dynamic-buffers#pool)).
 
 </Step>
 <Step>
@@ -356,10 +356,10 @@ freed with 0 bytes allocated in each step.
 - **Values** are copied like any struct. A managed reference inside a component (a `string`, an array, a `List<T>`)
   is copied as a reference, so the copies share what it points to.
 - **A `DynamicBuffer<T>`** is the exception: every copy gets a list of its own with the same elements.
-- **[Value indexes](/en/docs/guide/indexes-and-relations)** learn the new entity at once. A copy cannot repeat a
-  [unique key](/en/docs/guide/indexes-and-relations#unique-keys): instantiating a prefab whose key another entity
+- **[Value indexes](/en/docs/guide/data/indexes-and-relations)** learn the new entity at once. A copy cannot repeat a
+  [unique key](/en/docs/guide/data/indexes-and-relations#unique-keys): instantiating a prefab whose key another entity
   holds, or cloning an entity with a unique key, throws `InvalidOperationException` (a null key is no key).
-- **[Tracked components](/en/docs/guide/change-tracking)** count as written now: `[Changed<T>]` methods see every new
+- **[Tracked components](/en/docs/guide/changes/change-tracking)** count as written now: `[Changed<T>]` methods see every new
   instance. A component the copy lacks is not a removal: `[Removed<T>]` does not report it.
 - **Absent components stay absent.** A clone of an entity whose `Burning` was removed has no `Burning`.
 - **An `Entity` field** is copied as the handle it holds. In a prefab it names no entity of the target world, so give
@@ -511,33 +511,33 @@ destroyed:
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| An `Entity` field in a prefab's component | Every instance points at the same handle, of no world | [EECS017](/en/docs/guide/analyzer#eecs017) (warning); use an `EntityId` to a member |
+| An `Entity` field in a prefab's component | Every instance points at the same handle, of no world | [EECS017](/en/docs/guide/help/analyzer#eecs017) (warning); use an `EntityId` to a member |
 | An `EntityId` of a world's entity in a prefab | Becomes `EntityId.Null` in every instance | Set links after instantiating |
-| Filling a `DynamicBuffer<T>` value before `Set` | Every instance shares that list | [EECS012](/en/docs/guide/analyzer#eecs012); use `SetLoot(...)` |
-| `Instantiate(prefab)` in a counted loop | One copy per call instead of one wave | [EECS031](/en/docs/guide/analyzer#eecs031): `Instantiate(prefab, span)` |
-| `Instantiate(prefab, values)` in a counted loop with the same values | One copy per call | [EECS031](/en/docs/guide/analyzer#eecs031): the batch form with the values |
-| `Instantiate` then `Set` of a missing component | A row copy, then a row move | [EECS052](/en/docs/guide/analyzer#eecs052) (warning, with a code fix): give it to `Instantiate` |
+| Filling a `DynamicBuffer<T>` value before `Set` | Every instance shares that list | [EECS012](/en/docs/guide/help/analyzer#eecs012); use `SetLoot(...)` |
+| `Instantiate(prefab)` in a counted loop | One copy per call instead of one wave | [EECS031](/en/docs/guide/help/analyzer#eecs031): `Instantiate(prefab, span)` |
+| `Instantiate(prefab, values)` in a counted loop with the same values | One copy per call | [EECS031](/en/docs/guide/help/analyzer#eecs031): the batch form with the values |
+| `Instantiate` then `Set` of a missing component | A row copy, then a row move | [EECS052](/en/docs/guide/help/analyzer#eecs052) (warning, with a code fix): give it to `Instantiate` |
 | A prefab with a unique key instantiated twice, or in a batch of more than one | `InvalidOperationException`, nothing created | Give each instance its own key |
-| `Instantiate` on a thread that does not own the world | Races with the owner | [EECS014](/en/docs/guide/analyzer#eecs014) |
-| `Instantiate` in a `[ForEach]` method without `Entity` or `World` | The pass assumes no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |
+| `Instantiate` on a thread that does not own the world | Races with the owner | [EECS014](/en/docs/guide/help/analyzer#eecs014) |
+| `Instantiate` in a `[ForEach]` method without `Entity` or `World` | The pass assumes no structural change | [EECS013](/en/docs/guide/help/analyzer#eecs013) |
 | Changing a prefab while other threads instantiate it | Torn copies | Build prefabs at startup, then only read them |
 | `Clone()` on a destroyed or retired entity | `InvalidOperationException` | Check `IsAlive` and `IsRetired` |
-| Counting on `Reserve` for the instances' buffer lists | The first write of each buffer still allocates | [`FillPool`](/en/docs/guide/dynamic-buffers#pool) for the element type |
+| Counting on `Reserve` for the instances' buffer lists | The first write of each buffer still allocates | [`FillPool`](/en/docs/guide/data/dynamic-buffers#pool) for the element type |
 | `Reserve` inside the spawning tick | The growth happens in the tick anyway | Reserve at start-up or a tick ahead |
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Entities and components" href="/en/docs/guide/entities-and-components">
+  <Card title="Entities and components" href="/en/docs/guide/basics/entities-and-components">
     Handles, ids, `Set` / `Get` and the generated members prefabs share.
   </Card>
-  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+  <Card title="Dynamic buffers" href="/en/docs/guide/data/dynamic-buffers">
     Lists per entity, which every instance gets a copy of.
   </Card>
-  <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
+  <Card title="Hierarchy" href="/en/docs/guide/data/hierarchy">
     `ChildOf` links and cascading destroy for prefab groups.
   </Card>
-  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+  <Card title="Change tracking" href="/en/docs/guide/changes/change-tracking">
     New instances count as written: replication sends them.
   </Card>
 </Cards>

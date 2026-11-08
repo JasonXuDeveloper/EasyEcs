@@ -9,7 +9,7 @@ EasyEcs 分析器和源生成器一起打包发布，违反 [ECS 原则](/zh/doc
 EECS035、EECS036）除了两条警告都是错误；这两条针对的是能跑、但有代价的写法（EECS017、EECS020）。生成器会跳过无效输入，由分析器报出来，
 所以“没生成”一定意味着“报了错”。性能规则（EECS025 到 EECS034，以及 EECS039、EECS046、EECS052、EECS053）找的是能跑、但做了多余工作的代码，级别说明是哪一种
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）：警告表示这样写有代价
-（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/threading#reductions)是它的单例唯一的写入，EECS058 不让 `Scratch<T>` 的内存存进 World，EECS059 不让 `Lookup<T>`（或瓦片）读本次遍历要写的组件；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；部件规则（EECS062 到 EECS069）检查生成器按特性（`[Sum]`、`[LookupKey]`、`[Group]`）写入成员的类型和设置特性，并为手写的归约或键建议对应的特性；EECS070 让 `Emit<T>` 的记录保持行的顺序，EECS071 找出一次运行无法重现的随机数；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。系统规则（EECS074 到 EECS077）让系统保持为只有静态成员、钩子有效的 `ref struct`，并拒绝在需要系统的地方给出的非系统类型。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。参数规则（EECS086 到 EECS089）把让方法只能单线程运行的代码指向按块做同样工作的参数：逐行累加的单例改用 `Reduce<T>`，通过 `World` 读取其他实体改用 `Lookup<T>`，追加到单例列表的记录改用 `Emit<T>`，抽了两次的随机流各用一个自己的流。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
+（EECS025 到 EECS032，以及 EECS046、EECS052、EECS053）；建议（信息级别）表示代价相同、只是写法更简洁（EECS033、EECS039）；错误表示代码根本不能这样写（EECS034，在系统里执行World 更新）。用法规则（EECS037、EECS038，以及 EECS040 到 EECS045、EECS047 到 EECS051）找的是能编译、但做的不是它看起来在做的事的调用和声明：运行时会抛异常或根本行不通的报错误，写入会丢失、或 ref 可能指向错误的行的报警告。向量循环规则说明方法为什么一行一行地跑（EECS055，建议），并在必须向量化的方法没有向量化时让构建失败（EECS056）；EECS057 保证[归约](/zh/docs/guide/performance/threading#reductions)是它的单例唯一的写入，EECS058 不让 `Scratch<T>` 的内存存进 World，EECS059 不让 `Lookup<T>`（或瓦片）读本次遍历要写的组件；线程规则（EECS060、EECS061）找出多线程代码会竞争或丢失的写入；部件规则（EECS062 到 EECS069）检查生成器按特性（`[Sum]`、`[LookupKey]`、`[Group]`）写入成员的类型和设置特性，并为手写的归约或键建议对应的特性；EECS070 让 `Emit<T>` 的记录保持行的顺序，EECS071 找出一次运行无法重现的随机数；瓦片规则（EECS072、EECS073）拒绝光环装不下的网格瓦片，以及会共用一张纹理的两个瓦片。系统规则（EECS074 到 EECS077）让系统保持为只有静态成员、钩子有效的 `ref struct`，并拒绝在需要系统的地方给出的非系统类型。声明规则（EECS080 到 EECS085）为手写的代码（单实体 job、销毁所访问实体的遍历）建议能生成它的特性，并拒绝无法生效的特性。参数规则（EECS086 到 EECS089）把让方法只能单线程运行的代码指向按块做同样工作的参数：逐行累加的单例改用 `Reduce<T>`，通过 `World` 读取其他实体改用 `Lookup<T>`，追加到单例列表的记录改用 `Emit<T>`，抽了两次的随机流各用一个自己的流。一条规则如果只有一种机械的改法，IDE 会把它作为代码修复提供出来（EasyEcs.CodeFixes，同一个包），而且只在改完能编译时才提供。
 
 ## 什么时候看 [#when-to-use-it]
 
@@ -122,9 +122,9 @@ EECS076（[D60](/zh/docs/decisions#d60-one-diagnostic-per-mistake)）。
 
 每个参数都必须是以下之一：实现 `IComponent` 或 `ISingletonComponent` 的 `ref` / `in` / `ref readonly` 结构体，`IComponent`
 结构体的 `Span<T>` / `ReadOnlySpan<T>`，它的 `Maybe<T>` 或 `ReadOnlyMaybe<T>`（可选组件），`Mut<T>`，`ref Reduce<T>`
-（[归约](/zh/docs/guide/threading#reductions)；不带 `ref` 时部分结果只是一份副本），[`Scratch<T>`](/zh/docs/guide/threading#scratch)，
-组件的 [`Lookup<T>`](/zh/docs/guide/threading#lookups)，`Entity`，或者 `World`。
-[系统之外](/zh/docs/guide/systems#foreach-outside-systems)的 `[ForEach]` 方法还可以接收任意其他类型的值，由生成的入口从调用方传进来。
+（[归约](/zh/docs/guide/performance/threading#reductions)；不带 `ref` 时部分结果只是一份副本），[`Scratch<T>`](/zh/docs/guide/performance/threading#scratch)，
+组件的 [`Lookup<T>`](/zh/docs/guide/performance/threading#lookups)，`Entity`，或者 `World`。
+[系统之外](/zh/docs/guide/basics/systems#foreach-outside-systems)的 `[ForEach]` 方法还可以接收任意其他类型的值，由生成的入口从调用方传进来。
 
 ```csharp doccheck=expect-EECS002
 [EcsSystem]
@@ -262,7 +262,7 @@ public ref struct SpawnSystem
 }
 ```
 
-每个实体的状态放进组件，每个 World 的状态放进[单例](/zh/docs/guide/singletons)：
+每个实体的状态放进组件，每个 World 的状态放进[单例](/zh/docs/guide/basics/singletons)：
 
 ```csharp
 public record struct Spawned(int Count) : ISingletonComponent;
@@ -358,7 +358,7 @@ public ref struct DriftAllSystem
 
 并行方法会同时在多个线程上跑一块块的行，所以它不能做结构变更（static、不接收 `World`、`Entity` 只用来读：`Id`、`Has`、`Get` 等；不能调 `entity.Run`，它要做所有者线程上遍历的簿记，它的 job 也可能改结构），
 必须逐实体运行（不能是批量方法），也不能写单例（`ref` 单例会在块之间产生竞争）。要读其他实体，用
-[`Lookup<T>`](/zh/docs/guide/threading#lookups) 代替 `World`；它在并行方法里是允许的。
+[`Lookup<T>`](/zh/docs/guide/performance/threading#lookups) 代替 `World`；它在并行方法里是允许的。
 
 ```csharp doccheck=expect-EECS010
 [EcsSystem]
@@ -421,7 +421,7 @@ public ref struct GridSystem
 **按值持有 `DynamicBuffer<T>`。** 错误。代码修复：加 `in`；或者在每个调用方都传变量时，连同调用方的实参一起改成 `ref`。重写方法和接口
 方法的签名是共享的，不提供修复。
 
-[`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 指向它的列表，所以值的副本指向同一个列表：通过副本写入永远不会被标记为变更，
+[`DynamicBuffer<T>`](/zh/docs/guide/data/dynamic-buffers) 指向它的列表，所以值的副本指向同一个列表：通过副本写入永远不会被标记为变更，
 把副本存起来又会让第二个实体（或快照）拿到同一个列表。规则会报出：`DynamicBuffer<T>` 类型的字段或属性，按值传递的参数或返回值，
 不是 `ref` 局部变量的局部变量，对已有缓冲的赋值，以及把已有缓冲传给 `Set`、`CreateEntity` 或其他会把它存起来的泛型方法。
 
@@ -441,7 +441,7 @@ public static class Bags
 ```
 
 通过实体去拿缓冲：`ref` / `in` 参数，`ref var bag = ref entity.Get<DynamicBuffer<T>>()`，`entity.Read<DynamicBuffer<T>>()`。新的
-组件值写 `new DynamicBuffer<T>()`（或 `default`），它不持有列表；[预制体](/zh/docs/guide/prefabs)用 `SetBuffer(…)` 或生成的
+组件值写 `new DynamicBuffer<T>()`（或 `default`），它不持有列表；[预制体](/zh/docs/guide/basics/prefabs)用 `SetBuffer(…)` 或生成的
 `SetLoot(…)` 填元素：
 
 ```csharp
@@ -464,7 +464,7 @@ public static class Bags
 **承诺不做结构变更的 `[ForEach]` 方法做了结构变更。** 错误。没有代码修复。
 
 一个 static、不接收 `Entity` 或 `World`（或者 `Entity` 只用来读）的 `[ForEach]` 方法，在生成器看来不会改变结构，所以遍历时每次调用后
-都不再重新检查存储，系统也会和其他系统同处一个[并行阶段](/zh/docs/guide/threading#parallel-systems)。如果它还是通过别处拿到的句柄或
+都不再重新检查存储，系统也会和其他系统同处一个[并行阶段](/zh/docs/guide/performance/threading#parallel-systems)。如果它还是通过别处拿到的句柄或
 World 改了结构，两件事都会出错：遍历还拿着指向已移动行的引用，并行阶段里的变更会抛异常。
 
 在这样的方法里，规则会报出对 `Entity` 结构成员（`Set`、`Remove`、`Destroy`、`GetOrAdd`、`Clone`、`Disable`、`Enable`、
@@ -503,7 +503,7 @@ public ref struct MarkTargets
 ```
 
 规则只看方法自身的代码：在它调用的辅助方法里做的变更不会追踪。不过在并行阶段或并行 `[ForEach]` 里，运行时照样会为此抛异常
-（[World 同步了什么](/zh/docs/guide/threading#what-the-world-synchronizes)）。
+（[World 同步了什么](/zh/docs/guide/performance/threading#what-the-world-synchronizes)）。
 
 ## EECS014 [#eecs014]
 
@@ -533,7 +533,7 @@ public static class Spawner
 
 交给某个线程、从此由它拥有的 World（每线程一个 World、在委托里新建的 World）不会报；调用方立刻等待的交接（`await`、`Wait()`、
 `Result`、`GetAwaiter().GetResult()`）也不会报：没有东西和它并行。把变更作为数据，经由所有者线程上某个系统消费的队列交过去
-（[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)），或者给另一个线程它自己的 World：
+（[来自其他线程的输入](/zh/docs/guide/performance/threading#input-from-other-threads)），或者给另一个线程它自己的 World：
 
 ```csharp
 public static class WorldThreads
@@ -561,8 +561,8 @@ public static class WorldThreads
 **通过 ref 写被索引的组件。** 错误。代码修复（代码只读时）：`Get<T>()` 改成 `Read<T>()`，`ref` 局部变量改成 `ref readonly`，
 `[ForEach]` 参数改成 `in` / `ReadOnlySpan<T>`。
 
-[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)追踪的是 `Set`、`CreateEntity` 和 `CreateEntities`；通过 `ref` 写入会
-背着它改掉键。对于实现了 `IIndexed<TKey>` 的组件（或者 `IGroup`，它的[分组](/zh/docs/guide/groups)也是一种键），规则会报出：
+[值索引](/zh/docs/guide/data/indexes-and-relations#value-indexes)追踪的是 `Set`、`CreateEntity` 和 `CreateEntities`；通过 `ref` 写入会
+背着它改掉键。对于实现了 `IIndexed<TKey>` 的组件（或者 `IGroup`，它的[分组](/zh/docs/guide/data/groups)也是一种键），规则会报出：
 
 - 在实体上调用 `Get<T>()`、`GetOrAdd<T>()` 或 `TryGetRef<T>()`；
 - 绑定到它的 `ref` 局部变量，或者通过查询项给它（或它的字段）赋值；
@@ -582,7 +582,7 @@ public ref struct TakePortals
 }
 ```
 
-用 `in`、`ReadOnlySpan<T>`、[`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe)（部分实体没有它时）、`Read<T>()` 或生成的属性读，
+用 `in`、`ReadOnlySpan<T>`、[`ReadOnlyMaybe<T>`](/zh/docs/guide/basics/systems#read-only-maybe)（部分实体没有它时）、`Read<T>()` 或生成的属性读，
 用 `Set`（或生成的 `SetX`）写：
 
 ```csharp
@@ -638,7 +638,7 @@ public ref struct ReplicateFire
 
 `Entity` 持有对它所在 World 的引用，所以带 `Entity` 字段（或者字段的结构体里含有 `Entity`，不论来自本程序集还是别的程序集）的组件或单例，
 以及元素含有 `Entity` 的 `DynamicBuffer<T>`，都是托管类型：它的列要被垃圾回收器扫描，每次写入都要付写屏障，
-行不能整块复制，[存档](/zh/docs/guide/saves)写不了它，[迁移](/zh/docs/guide/migration-and-unload#entityid-rewriting)也不会改写它。
+行不能整块复制，[存档](/zh/docs/guide/saves/saves)写不了它，[迁移](/zh/docs/guide/saves/migration-and-unload#entityid-rewriting)也不会改写它。
 
 ```csharp doccheck=expect-EECS017
 public record struct Chase(Entity Prey) : IComponent;          // 托管列
@@ -812,8 +812,8 @@ public static class Report
 **只读的写访问。** 警告。代码修复：组件或单例改成 `in`，span 改成 `ReadOnlySpan<T>`，`Get<T>()` 改成 `Read<T>()`，
 `WriteX()` 改成 `.X`，方法从不写入的 `Mut<T>` 改成 `in T`。
 
-`ref` 参数（批量方法里的 `Span<T>`）会把它的类型放进系统的写集合：任何[并行阶段](/zh/docs/guide/threading#parallel-systems)
-都不会让这个系统和读该类型的系统同时运行。如果是[追踪变化的组件](/zh/docs/guide/change-tracking)，方法访问的每一行还会
+`ref` 参数（批量方法里的 `Span<T>`）会把它的类型放进系统的写集合：任何[并行阶段](/zh/docs/guide/performance/threading#parallel-systems)
+都不会让这个系统和读该类型的系统同时运行。如果是[追踪变化的组件](/zh/docs/guide/changes/change-tracking)，方法访问的每一行还会
 被打 tick，`[Changed<T>]` 系统就会去处理没人改过的行。`entity.Get<T>()` 和生成的 `entity.WriteX()` 同样会给行打 tick。
 规则会逐个检查用法：赋值、`++`、`ref` 或 `out` 实参、非 `readonly` 方法、`ref` 局部变量、`this ref` 扩展方法
 （`DynamicBuffer<T>.Add`）都算写入，遇到这些就保留写访问。只通过 `.Value` 使用的 `Mut<T>` 参数是在读，同样会报。
@@ -849,7 +849,7 @@ public ref struct ArmorBonus
 `ReadOnlyMaybe<T>` 直接删掉。
 
 每个参数在每一行或每一遍上都有开销：组件的列要加载、要前进，单例要解析、要作为一次访问参与调度，`Entity` 每行都要构造句柄，
-而且和 `World` 一样会让系统[单独运行](/zh/docs/guide/threading#parallel-systems)。方法只要求实体有某个组件时，用过滤条件表达。
+而且和 `World` 一样会让系统[单独运行](/zh/docs/guide/performance/threading#parallel-systems)。方法只要求实体有某个组件时，用过滤条件表达。
 没用到的追踪组件 `ref` 参数会报告，但不提供修复：它会给访问到的每一行打 tick，换成 `[With<T>]` 就不会了。没用到的 `Mut<T>`
 在写入之前不打 tick，所以和 `in` 参数一样提供 `[With<T>]` 修复。方法体为空时视为还在编写中，不报告。
 
@@ -887,7 +887,7 @@ public ref struct CountSurvivors
 `[ForEach]` 方法的参数按表或按遍解析一次：组件是循环顺着走的一列，单例是循环开始前取好的 `ref`。通过被访问的 `Entity`
 （`entity.Velocity`、`entity.Has<T>()`、`entity.TryGet<T>(...)`）或 `World`（`World.Clock`）查同样的数据，每一行都要重新查一遍：
 实体记录、所在的表、对应的列。规则只报告每一行都会执行的查询（不在分支、循环里，也不在提前 `return` 之后），并且排除方法自己
-添加或移除的组件。带索引的组件也算在内：`in` 参数或 [`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe) 读它们，
+添加或移除的组件。带索引的组件也算在内：`in` 参数或 [`ReadOnlyMaybe<T>`](/zh/docs/guide/basics/systems#read-only-maybe) 读它们，
 既不用逐行查找，也不会产生 EECS015 禁止的写入。
 
 ```csharp doccheck=expect-EECS027,expect-EECS055
@@ -940,7 +940,7 @@ public ref struct Steer
 }
 ```
 
-值放在结构体、span 和 `stackalloc` 里；一行要填充的列表用 [`Scratch<T>`](/zh/docs/guide/threading#scratch) 参数，每个线程一个、用前清空，`[ForEach]` 方法的消息会指出它；传数值，不传字符串：
+值放在结构体、span 和 `stackalloc` 里；一行要填充的列表用 [`Scratch<T>`](/zh/docs/guide/performance/threading#scratch) 参数，每个线程一个、用前清空，`[ForEach]` 方法的消息会指出它；传数值，不传字符串：
 
 ```csharp
 [EcsSystem]
@@ -961,7 +961,7 @@ public ref struct Steer
 **对查询结果逐个实体做结构变化。** 警告。代码修复：改成批量调用。
 
 逐个实体做结构变化，每次调用只移动（或翻转）一行，每次都要经过结构闸门。`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`
-和 `DestroyAll` 会一起修改一张表里所有匹配的行，一次处理整字的行（[批量修改](/zh/docs/guide/bulk)）。规则报告这样的
+和 `DestroyAll` 会一起修改一张表里所有匹配的行，一次处理整字的行（[批量修改](/zh/docs/guide/changes/bulk)）。规则报告这样的
 `foreach`：遍历 `world.Query<...>()`，循环体只有一个这类调用，作用在 item 的实体上，且每一行用的值都一样。对查询已经要求的
 组件做 `Set` 只是写值，不移动行，不报告。
 
@@ -1048,7 +1048,7 @@ foreach (var item in world.Query<Health>(QueryFilter.Create().With<Burning>())) 
 
 **有同等含义的生成成员可用的泛型调用。** 信息。代码修复：改用生成的成员。
 
-生成器会为每个组件、单例、缓冲区元素和查询形状写出[具名成员](/zh/docs/guide/entities-and-components#generated-members)，
+生成器会为每个组件、单例、缓冲区元素和查询形状写出[具名成员](/zh/docs/guide/basics/entities-and-components#generated-members)，
 每个成员都调用对应的泛型 API：调用相同，代价也相同，所以这条规则是建议而不是警告。只有当该成员在当前编译里确实生成了、而且行为完全相同（包括返回的引用种类）时，规则才会建议：
 追踪组件的 `Get<T>()` 改成 `WriteX()`（它的 `entity.X` 是只读的）；缓冲区的成员只在别处代码仍写着 `DynamicBuffer<T>`
 时才建议（生成器只为代码以这种方式写到的元素类型生成缓冲区成员）。
@@ -1123,7 +1123,7 @@ public ref struct SendFire
 }
 ```
 
-切法和节奏见[分帧](/zh/docs/guide/systems#slices)。
+切法和节奏见[分帧](/zh/docs/guide/basics/systems#slices)。
 
 ## EECS036 [#eecs036]
 
@@ -1147,14 +1147,14 @@ public partial record struct Mount([UniqueKey] EntityId Rider) : IComponent;
 public partial record struct Mount([LookupKey] EntityId Rider) : IComponent;
 ```
 
-唯一索引检查什么，见[唯一键](/zh/docs/guide/indexes-and-relations#unique-keys)。
+唯一索引检查什么，见[唯一键](/zh/docs/guide/data/indexes-and-relations#unique-keys)。
 
 ## EECS037 [#eecs037]
 
 **job 的 `WriteMask` 与 `Execute` 实际写入的不一致。** 警告。代码修复：改成 `Execute` 需要的 `WriteMask`。
 
 手写的 job（`IForEach<...>`、`IForEachEntity<...>`、`IForEachBatch<...>`）用 `static int WriteMask` 声明它写哪些组件（第 `k` 个组件对应
-第 `k - 1` 位，`-1` 表示全部，也是默认值）。循环会给它列出的[追踪变化的组件](/zh/docs/guide/change-tracking)在访问的每一行上打 tick，
+第 `k - 1` 位，`-1` 表示全部，也是默认值）。循环会给它列出的[追踪变化的组件](/zh/docs/guide/changes/change-tracking)在访问的每一行上打 tick，
 并在 `Execute` 移动实体时把其余的组件带过去。`Execute` 写了、`WriteMask` 却漏掉的追踪组件永远不会被打 tick，`[Changed<T>]` 系统就看不到
 这次变化；`Execute` 只读的追踪组件仍会在每一行上被打 tick，`[Changed<T>]` 系统就会去处理没人改过的行。规则用与 EECS025 相同的判定，
 拿常量 `WriteMask`（或默认值）和它在 `Execute` 里看到的写入做比较；计算出来的 `WriteMask` 和 `SelfStamped` 里的位不在检查之列。
@@ -1212,7 +1212,7 @@ mana.Value -= 10;
 
 **不追踪变化的组件用了 `Mut<T>`。** 建议（信息级别）。代码修复：`ref T`。
 
-[`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 只给 `[ForEach]` 方法写过的行打 tick，这只对带 `ITracked` 的组件有意义。
+[`Mut<T>`](/zh/docs/guide/changes/change-tracking#set-if-changed) 只给 `[ForEach]` 方法写过的行打 tick，这只对带 `ITracked` 的组件有意义。
 对其他组件，它和 `ref` 参数是同一种写入，只是写法更长（`.Value`、`.Write()`）。规则报出只通过 `.Value` 和 `.Write()` 使用的、
 未追踪的 `T` 的 `Mut<T>`；调用了 `SetIfChanged` 的保留它的比较。
 
@@ -1348,7 +1348,7 @@ public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { M
 
 **需要全部行的地方用了切片过滤条件。** 错误。没有代码修复。
 
-[`QueryFilter.Slice(index, of)`](/zh/docs/guide/systems#slices) 把每张表切成 `of` 份，只有遍历（`ForEach`、`ForEachEntity`、
+[`QueryFilter.Slice(index, of)`](/zh/docs/guide/basics/systems#slices) 把每张表切成 `of` 份，只有遍历（`ForEach`、`ForEachEntity`、
 `ForEachBatch` 及其并行形式）接受其中一份。`Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run` 和批量调用需要每一个匹配的行，
 所以遇到切片过滤条件会抛 `ArgumentException`。规则会顺着局部变量和 `static readonly` 字段追踪过滤条件，还会报出会抛
 `ArgumentOutOfRangeException` 的常量 `Slice` 调用（`of` 小于 1，`index` 不在 `0..of - 1` 内）。`Slice(0, 1)` 就是整张表，不算切片。
@@ -1368,8 +1368,8 @@ int count = world.Count<Health>();
 
 **手动写入由 World 维护的标签。** 错误。没有代码修复。
 
-`Retired` 标记一个因[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)而被保留的实体，`Disabled<T>` 标记一个
-[对查询隐藏](/zh/docs/guide/cleanup-and-disable#disable-a-component)的组件。World 在 `Destroy`、`Disable<T>()` 和 `Enable<T>()` 里
+`Retired` 标记一个因[清理组件](/zh/docs/guide/changes/cleanup-and-disable#cleanup-components)而被保留的实体，`Disabled<T>` 标记一个
+[对查询隐藏](/zh/docs/guide/changes/cleanup-and-disable#disable-a-component)的组件。World 在 `Destroy`、`Disable<T>()` 和 `Enable<T>()` 里
 添加和移除它们，同时处理它们所代表的东西：`Retired` 连带销毁钩子和销毁日志，`Disabled<T>` 连带被隐藏的值。直接写入它们
 （对标签本身调用 `Set`、`GetOrAdd`、`Remove`、`SetIfChanged`、`Disable`、`Enable`，以及 `CreateEntity`、`CreateEntities`、`Instantiate`、
 `SetAll`、`RemoveAll`、`DisableAll`、`EnableAll`、`Prefab.Set`），标签说的就是 World 从没做过的事。读取它们（`Has`、`IsDisabled`、
@@ -1389,9 +1389,9 @@ hero.EnableHealth();
 
 **只读取追踪变化组件的查询循环。** 警告。代码修复：`Read<T1..Tn>`。
 
-`Query` 的 item 以 `ref` 交出组件，分不清读和写，所以会给它访问到的每一行[追踪变化的组件](/zh/docs/guide/change-tracking)打 tick。
+`Query` 的 item 以 `ref` 交出组件，分不清读和写，所以会给它访问到的每一行[追踪变化的组件](/zh/docs/guide/changes/change-tracking)打 tick。
 一个只读的循环（求和、发送同步数据、查找）就会让每个 `[Changed<T>]` 系统去访问没人改过的行。`world.Read<T1..Tn>()` 遍历同样的行，
-组件是 `ref readonly`，不打 tick（[Read](/zh/docs/guide/queries#read)）。规则报告对 `world.Query<...>()` 的 `foreach`：其中至少有一个
+组件是 `ref readonly`，不打 tick（[Read](/zh/docs/guide/basics/queries#read)）。规则报告对 `world.Query<...>()` 的 `foreach`：其中至少有一个
 追踪变化的组件，而循环体只通过 `Entity` 和读取组件来使用 item；有写入、对组件取了 `ref`、或把 item 传给别处的，保留 `Query`。
 
 ```csharp
@@ -1440,9 +1440,9 @@ health.Value -= 5;
 
 **不能禁用的组件。** 错误。没有代码修复。
 
-[`Disable<T>()`](/zh/docs/guide/cleanup-and-disable#disable-a-component) 隐藏一个组件并保留它的值。
-[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)负责让退休的实体留到它的资源释放完，`ChildOf` 是父实体销毁时用来找到
-[子实体](/zh/docs/guide/hierarchy)的依据：一旦被隐藏，两者都会被遗忘。所以 `Disable<T>()` 和 `DisableAll<T>()` 对它们抛
+[`Disable<T>()`](/zh/docs/guide/changes/cleanup-and-disable#disable-a-component) 隐藏一个组件并保留它的值。
+[清理组件](/zh/docs/guide/changes/cleanup-and-disable#cleanup-components)负责让退休的实体留到它的资源释放完，`ChildOf` 是父实体销毁时用来找到
+[子实体](/zh/docs/guide/data/hierarchy)的依据：一旦被隐藏，两者都会被遗忘。所以 `Disable<T>()` 和 `DisableAll<T>()` 对它们抛
 `InvalidOperationException`，生成器也不为它们生成 `DisableX`。规则报出这两种调用。
 
 ```csharp doccheck=expect-EECS048
@@ -1459,7 +1459,7 @@ unit.RemoveChildOf();
 
 **没有实体能通过的过滤条件。** 错误。没有代码修复。
 
-`[ForEach]` 方法访问的是通过它自己和它所在[分组](/zh/docs/guide/systems#system-groups)全部过滤条件的实体：组件参数、`[With<T>]`、
+`[ForEach]` 方法访问的是通过它自己和它所在[分组](/zh/docs/guide/basics/systems#system-groups)全部过滤条件的实体：组件参数、`[With<T>]`、
 `[Changed<T>]`、分组上的 `[With<T>]` 和 `ISystemGroupWith<T>` 要求有某个组件；`[Without<T>]` 和 `ISystemGroupWithout<T>` 要求没有。一个组件既被要求有、
 又被要求没有，就没有实体可访问，方法永远不会运行，也没有任何提示。规则报在排除它的那个过滤条件上。
 
@@ -1487,7 +1487,7 @@ public ref struct ReviveSystem
 
 **一个过滤条件里的第二个分组。** 错误。没有代码修复。
 
-`QueryFilter.InGroup<T>(group)`（以及生成的 `InX(group)`）记录过滤条件要遍历哪一个[分组](/zh/docs/guide/groups)的表。再指定另一个分组，
+`QueryFilter.InGroup<T>(group)`（以及生成的 `InX(group)`）记录过滤条件要遍历哪一个[分组](/zh/docs/guide/data/groups)的表。再指定另一个分组，
 无论是另一个组件还是另一个常量值，构造过滤条件时都会抛 `ArgumentException`。规则报在链上的第二次调用。
 
 ```csharp
@@ -1537,7 +1537,7 @@ world.Update();
 途中还多出一张可能没有别的实体用的表。把组件交给创建调用，它就和其他组件一起落进最终的表
 （[D59](/zh/docs/decisions#d59-analyzer-rules)）。规则报出存进局部变量的创建调用，后面紧跟着对一个创建时没给的组件的 `local.Set(value)`
 或生成的 `local.SetX(...)`，且这个值不依赖该实体、也不来自方法调用；修复把值移进创建调用。分组组件、World 自己的标签、已经带了九个组件
-的创建，以及用 [`SetAbsent<T>()`](/zh/docs/guide/prefabs#set-absent) 声明了这一列的预制体的 `Instantiate` 不报（这时 Set 只翻转一个
+的创建，以及用 [`SetAbsent<T>()`](/zh/docs/guide/basics/prefabs#set-absent) 声明了这一列的预制体的 `Instantiate` 不报（这时 Set 只翻转一个
 存在位，不搬行）。
 
 ```csharp doccheck=expect-EECS052
@@ -1555,9 +1555,9 @@ var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
 
 **追踪变化的组件以 `ref` 传入，却只在部分行上写入。** 警告。代码修复：`Mut<T>`。
 
-[追踪变化的组件](/zh/docs/guide/change-tracking)（`ITracked`，以及所有 `DynamicBuffer<T>`）的 `ref` 参数会给方法访问到的每一行打 tick，
+[追踪变化的组件](/zh/docs/guide/changes/change-tracking)（`ITracked`，以及所有 `DynamicBuffer<T>`）的 `ref` 参数会给方法访问到的每一行打 tick，
 不管写没写。方法只在部分行上写它（提前 `return`、写在 `if` 里、循环可能一次都不执行），没动的行也被打了 tick，于是每个 `[Changed<T>]`
-系统都会再访问它们一遍：同步把它们再发一次，存档把它们再写一次。[`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed)
+系统都会再访问它们一遍：同步把它们再发一次，存档把它们再写一次。[`Mut<T>`](/zh/docs/guide/changes/change-tracking#set-if-changed)
 参数只给它写过的行打 tick：通过 `Write()`，或者值确实变了的 `SetIfChanged`
 （[D66](/zh/docs/decisions#d66-a-ref-written-on-some-rows)）。
 
@@ -1605,7 +1605,7 @@ public ref struct RespawnSystem
 
 **不合法的 `[ForEach(ChunkSize = N)]`。** 错误。代码修复：去掉 `ChunkSize`；之前跳过这个方法的生成器会重新生成它。
 
-`ChunkSize` 是[并行方法](/zh/docs/guide/threading#chunk-rows)的一个线程每次取的行数：0 表示由运行时按测得的每行开销决定，大于 0 则指定
+`ChunkSize` 是[并行方法](/zh/docs/guide/performance/threading#chunk-rows)的一个线程每次取的行数：0 表示由运行时按测得的每行开销决定，大于 0 则指定
 （向上取整到 64）。没有 `Parallel = true` 的方法只在一个线程上跑，没有块可言；负数没有意义。
 
 ```csharp tab="报告" doccheck=expect-EECS054
@@ -1640,16 +1640,16 @@ public ref struct PlanRoutes
 }
 ```
 
-改成并行（像这里，几百行重活），或者去掉 `ChunkSize`。轻量的行两者都不需要：保持默认的块（[什么时候设](/zh/docs/guide/threading#chunk-rows)）。
+改成并行（像这里，几百行重活），或者去掉 `ChunkSize`。轻量的行两者都不需要：保持默认的块（[什么时候设](/zh/docs/guide/performance/threading#chunk-rows)）。
 
 ## EECS055 [#eecs055]
 
 **一行一行执行的 `[ForEach]` 方法。** 建议（信息级别）。没有代码修复。
 
-符合条件的 `[ForEach]` 方法会被生成器写成[向量循环](/zh/docs/guide/systems#vector-loops)。一个看起来就是为向量循环写的方法（静态、
+符合条件的 `[ForEach]` 方法会被生成器写成[向量循环](/zh/docs/guide/basics/systems#vector-loops)。一个看起来就是为向量循环写的方法（静态、
 只接收由普通值组成的组件、单例和值），只要缺了一个条件，就会收到这条消息，消息里写出第一个原因：组件对方法在它身上做的工作来说太宽、有 `bool`
 字段、循环没有向量版本的调用、写入的目标不是 lane。方法只用到宽组件的少数字段时，消息末尾会列出它们：把它们拆成自己的组件。它相当于 Burst 的
-Inspector：构建时就知道哪个方法保持标量、为什么，[`DescribeSchedule()`](/zh/docs/guide/systems#vector-loops) 还会列出每个方法的循环。
+Inspector：构建时就知道哪个方法保持标量、为什么，[`DescribeSchedule()`](/zh/docs/guide/basics/systems#vector-loops) 还会列出每个方法的循环。
 方法照样正确运行，只是一行一行地跑。
 
 ```csharp tab="报告" doccheck=expect-EECS055
@@ -1721,7 +1721,7 @@ public ref struct Recharge
 
 **归约的结果会被另一处写入覆盖。** 错误。没有代码修复。
 
-[`Reduce<T>` 参数](/zh/docs/guide/threading#reductions)给每一块行一个部分结果，这一遍结束时用合并后的结果替换单例 `T`。同一个方法或系统里
+[`Reduce<T>` 参数](/zh/docs/guide/performance/threading#reductions)给每一块行一个部分结果，这一遍结束时用合并后的结果替换单例 `T`。同一个方法或系统里
 第二个 `Reduce<T>`，或者同一个方法的 `ref T` 参数，在同一遍里也写 `T`：一个结果会悄悄覆盖另一个。
 
 ```csharp tab="报告" doccheck=alone,expect-EECS057
@@ -1769,7 +1769,7 @@ public ref struct CountUnits
 
 **把临时内存存进了 World。** 错误。没有代码修复。
 
-[`Scratch<T>`](/zh/docs/guide/threading#scratch) 的值属于运行方法的线程，这个线程接下来运行的行（任何一遍的）都会复用它。把它持有的东西
+[`Scratch<T>`](/zh/docs/guide/performance/threading#scratch) 的值属于运行方法的线程，这个线程接下来运行的行（任何一遍的）都会复用它。把它持有的东西
 （列表、数组、span、持有它们的结构体）的引用存进组件、单例、`Maybe`、`Mut` 或 `Reduce`，就把这块内存交给了实体：之后的行会在实体不知情时改掉它，
 并行遍历时还是在别的线程上改。
 
@@ -1808,13 +1808,13 @@ public ref struct ChartRoutes
 }
 ```
 
-把这一行算出的东西拷进组件自己的存储（值，或者[动态缓冲](/zh/docs/guide/dynamic-buffers)），或者一开始就把数据放在组件里。
+把这一行算出的东西拷进组件自己的存储（值，或者[动态缓冲](/zh/docs/guide/data/dynamic-buffers)），或者一开始就把数据放在组件里。
 
 ## EECS059 [#eecs059]
 
 **查找了这一遍会写的组件。** 错误。没有代码修复。
 
-[`Lookup<T>`](/zh/docs/guide/threading#lookups) 读取的是任意实体在这一遍之前的 `T`，所以这一遍运行时谁都不能写 `T`。方法自己写 `T`
+[`Lookup<T>`](/zh/docs/guide/performance/threading#lookups) 读取的是任意实体在这一遍之前的 `T`，所以这一遍运行时谁都不能写 `T`。方法自己写 `T`
 （`ref`、`Mut`、可写的 `Maybe` 或 span 参数）时，会读到一些写入之前的行、一些写入之后的行，并行时还会读到别的线程正在写的行。
 
 ```csharp tab="报告" doccheck=expect-EECS059
@@ -1902,7 +1902,7 @@ public ref struct TakeHits
 }
 ```
 
-总数放进 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 单例；每个实体的结果放进它这一行的组件，由这一遍之后的系统读取。
+总数放进 [`Reduce<T>`](/zh/docs/guide/performance/threading#reductions) 单例；每个实体的结果放进它这一行的组件，由这一遍之后的系统读取。
 每行一次 `Interlocked` 调用也能消掉这条警告，代价是每行都争抢同一条缓存行。
 
 ## EECS061 [#eecs061]
@@ -1957,7 +1957,7 @@ public static class Reports
 }
 ```
 
-要在所有核上对大量行求总数，改写成带 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法：
+要在所有核上对大量行求总数，改写成带 [`Reduce<T>`](/zh/docs/guide/performance/threading#reductions) 参数的 `[ForEach(Parallel = true)]` 方法：
 每一块保留一个部分结果，这一遍把它们合并起来。
 
 ## EECS062 [#eecs062]
@@ -2144,7 +2144,7 @@ public partial struct Squad : IComponent
 **没有 Nino 格式化器的托管组件或单例。** 代码会保存包含这个类型的内容时是警告，否则是建议（信息级别）。代码修复：标记 `[NinoType]`
 并改成 partial，或者标记 `[NotSaved]`。
 
-[存档](/zh/docs/guide/saves)把非托管组件按原始行写出。其他组件和单例都用 Nino 写，而 Nino 需要 `[NinoType]` 生成的格式化器，所以包含这个类型的存档会抛异常。
+[存档](/zh/docs/guide/saves/saves)把非托管组件按原始行写出。其他组件和单例都用 Nino 写，而 Nino 需要 `[NinoType]` 生成的格式化器，所以包含这个类型的存档会抛异常。
 对组件来说，代码调用了 `Save`、`SaveWithout` 或 `SaveEntities` 时这条规则是警告。对单例来说，只有 `Save` 或 `SaveWithout` 才是警告，
 因为实体存档不写单例。重启后会重建的运行时状态（连接、缓存）改为标记 `[NotSaved]`。
 
@@ -2241,7 +2241,7 @@ World 里需要这个单例（`world.SetEntityRandom(seed, 0)`），推进模拟
 
 **无效的瓦片形状。** 错误。没有代码修复。
 
-[瓦片](/zh/docs/guide/grids#halo)（`ITileShape`）是 Width x Depth x Height 个格子，Depth 1 到 64（一层的活跃行是一个 64 位字），
+[瓦片](/zh/docs/guide/performance/grids#halo)（`ITileShape`）是 Width x Depth x Height 个格子，Depth 1 到 64（一层的活跃行是一个 64 位字），
 光环至少一个格子。光环从旁边瓦片朝向这边的格子拷来，所以在每条有邻居的轴上（它的 `Faces`）最多和瓦片一样长，边界镜像时每条轴都是如此：
 和 MPI 的幽灵格子宽度一样，不会比子区域更宽。规则读形状的常量成员；规则检查不了的形状，`Tile.ExchangeHalo` 会抛出异常。
 
@@ -2347,8 +2347,8 @@ public ref struct HealSystem
 **系统有实例成员。** 错误。代码修复：把成员改成 static，适用于字段、属性，以及没用到 `this` 的方法。
 
 World 从不创建系统：系统的代码是静态的，它的簿记（启用、错误、运行次数、统计）归 World 所有，通过它的
-[`SystemHandle`](/zh/docs/guide/systems#lifecycle) 读取。实例字段、属性、事件、构造函数或方法永远没法被调用到。状态放进组件和单例，
-配置放进单例（队列或服务放进 [`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例）。
+[`SystemHandle`](/zh/docs/guide/basics/systems#lifecycle) 读取。实例字段、属性、事件、构造函数或方法永远没法被调用到。状态放进组件和单例，
+配置放进单例（队列或服务放进 [`[NotSaved]`](/zh/docs/guide/saves/saves#not-saved) 单例）。
 
 ```csharp tab="报告" doccheck=expect-EECS075
 [EcsSystem]
@@ -2411,7 +2411,7 @@ world.AddSystem<Regeneration>();                           // 能编译，但没
 
 **手写的单实体 job。** 建议（信息级别）。代码修复：改写成 `[EntityMethod]` 方法，并改掉每一处调用。
 
-实现 `IForEachEntity<T1..Tn>`、创建后马上交给 `entity.Run` 的结构体，正是 [`[EntityMethod]`](/zh/docs/guide/queries#run-on-one-entity)
+实现 `IForEachEntity<T1..Tn>`、创建后马上交给 `entity.Run` 的结构体，正是 [`[EntityMethod]`](/zh/docs/guide/basics/queries#run-on-one-entity)
 从静态方法生成的东西：方法的 `ref` 参数构成 `WriteMask`，过滤特性构成 `QueryFilter`，其余参数就是入口接收的值，
 `INoStructuralChanges` 由方法调用了什么推出来。只有当这个结构体的每一处使用都是这样的调用时，规则才报告它：
 `var job = new J { ... };` 紧跟着 `entity.Run<.., J>(ref job)`，不带过滤条件，或者过滤条件放在 `static readonly` 字段里。
@@ -2505,7 +2505,7 @@ public ref struct Regeneration
 （`Entity` 参数没有别的用处时也一并删掉）。
 
 处理事件或命令实体、每条路径都以 `entity.Destroy()` 结尾的方法，就是一次消费式遍历。
-[`[Consume]`](/zh/docs/guide/systems#consume) 在遍历结束时恰好销毁这次访问过的行；不做结构变更的方法，这些行一次销毁
+[`[Consume]`](/zh/docs/guide/basics/systems#consume) 在遍历结束时恰好销毁这次访问过的行；不做结构变更的方法，这些行一次销毁
 （按它的过滤条件做一次 `DestroyAll`，整张表一起释放），而不是每行一次销毁、留一个空洞。放在条件里或 `return` 之后的销毁不报告。
 
 ```csharp tab="报告" doccheck=expect-EECS084
@@ -2573,7 +2573,7 @@ public ref struct CountDamage
 **每次更新都会重置、再逐行累加的单例。** 建议（信息级别）。没有代码修复。
 
 这一遍的每一行都写同一个 `ref` 单例参数，于是有两个后果。方法不能并行，因为每一块都会争用这个单例（[EECS010](#eecs010)）。
-它的向量循环也没有通道来放这个单例。[`ref Reduce<T>`](/zh/docs/guide/threading#reductions) 参数给每一块一个自己的部分结果，
+它的向量循环也没有通道来放这个单例。[`ref Reduce<T>`](/zh/docs/guide/performance/threading#reductions) 参数给每一块一个自己的部分结果，
 从 `T` 的单位元开始，遍历结束时把各个部分结果合并进 `T`。和、最小值、最大值都一样，但方法可以用 `Parallel = true`，也能进向量循环。
 
 这一遍的结果会替换 `T`。所以这条规则只报告系统代码在 `OnCreate` 之外重置的单例：整体赋值、给字段赋常量、`AddSingleton`、
@@ -2631,7 +2631,7 @@ public ref struct CountCrowd
 
 接收 `World` 的 `[ForEach]` 方法可能做结构变更。所以它的系统在自己的阶段里单独运行，遍历它的行时也要做结构变更需要的检查。
 假设这个方法用 `World` 只是为了找到其他实体（`TryGetEntity`、`GetEntity`），并从它们身上读取自己不写的组件。那么每个组件一个
-[`Lookup<T>`](/zh/docs/guide/threading#lookups) 参数就能做同样的事，不需要 `World`：`lookup[id]` 是 `ReadOnlyMaybe<T>`，`Read(id)`
+[`Lookup<T>`](/zh/docs/guide/performance/threading#lookups) 参数就能做同样的事，不需要 `World`：`lookup[id]` 是 `ReadOnlyMaybe<T>`，`Read(id)`
 是 `ref readonly`，`Has(id)` 判断有没有。系统按这些组件的读者调度，和不写它们的系统共用一个阶段，方法也可以并行。
 
 ```csharp tab="报告" doccheck=alone,expect-EECS087
@@ -2776,7 +2776,7 @@ internal ref struct WaveSystem
 ```
 
 只有在类之外不需要跟着改任何东西时才提供这个修复：没有构造函数参数（它们改成宿主设置的
-[`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例），没有抽象基类（共用的代码放进静态类或泛型系统），也没有读系统簿记的
+[`[NotSaved]`](/zh/docs/guide/saves/saves#not-saved) 单例），没有抽象基类（共用的代码放进静态类或泛型系统），也没有读系统簿记的
 `[ForEach]` 方法。
 
 ## 未使用成员警告 [#never-used]
@@ -2789,16 +2789,16 @@ internal ref struct WaveSystem
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="常见错误" href="/zh/docs/guide/common-mistakes">
+  <Card title="常见错误" href="/zh/docs/guide/help/common-mistakes">
     这些规则能抓到的错误，以及哪条规则都抓不到的。
   </Card>
-  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems">
     `[ForEach]` 方法能接收什么、怎样被调度。
   </Card>
   <Card title="ECS 设计原则" href="/zh/docs/ecs-principles">
     分析器背后的规则。
   </Card>
-  <Card title="多线程与并行" href="/zh/docs/guide/threading">
+  <Card title="多线程与并行" href="/zh/docs/guide/performance/threading">
     并行阶段、并行方法和所有者线程。
   </Card>
 </Cards>

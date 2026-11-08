@@ -81,14 +81,14 @@ hands out a `ref`, whether or not the code stores through it:
 | --- | --- |
 | `ref T` parameters of `[ForEach]` methods (`Span<T>` for batch methods) and of struct jobs (`WriteMask`) | `in T` parameters, `ReadOnlySpan<T>` |
 | A [`Mut<T>`](#set-if-changed) parameter: `Write()`, and `SetIfChanged(value)` when the value differs (that row only) | `Mut<T>.Value`, and `SetIfChanged(value)` with an equal value |
-| `Query` items (the enumerator stamps every row it visits) | [`world.Read<T1..Tn>`](/en/docs/guide/queries#read) items, `TryGet<T>(out T)` (a copy), `entity.Read<T>()` (read-only) |
+| `Query` items (the enumerator stamps every row it visits) | [`world.Read<T1..Tn>`](/en/docs/guide/basics/queries#read) items, `TryGet<T>(out T)` (a copy), `entity.Read<T>()` (read-only) |
 | `entity.Get<T>()`, `TryGetRef<T>(out found)` when found, `GetOrAdd<T>()`, `Set(...)`, `SetIfChanged(value)` and `SetXIfChanged(…)` when the value differs | `Has<T>()`, `SetIfChanged(value)` and `SetXIfChanged(…)` with an equal value |
 | `CreateEntity(...)`, `CreateEntities(...)`, `Instantiate(...)`, `Clone()` with the component | removing the component (a [removal](#removal-detection)) |
 | `entity.Enable<T>()`, `world.EnableAll<T>()` (the kept value comes back) | `entity.Disable<T>()` (a removal) |
-| `world.Restore(snapshot)`, `world.Load(bytes)`, `LoadEntities(...)`, `LoadEntitiesInto(...)` (every restored or loaded row) | `LoadEntitiesInto(..., markWritten: false)`: every component the record holds gets tick 0, replaced or added. For restoring a persisted record without saving or sending it back ([a restored record](/en/docs/guide/migration-and-unload#records)). `world.Load(bytes, markWritten: false)`: every loaded row gets tick 0 and no row counts as removed, for a restart that resumes a saved world ([restart](/en/docs/guide/saves#restart)) |
-| `entity.Run<…>(ref job)` ([one entity](/en/docs/guide/queries#run-on-one-entity)): the components in the job's `WriteMask` (all of them unless the job overrides `WriteMask`; declare `WriteMask => 0` for a read-only job), stamped only when `Run` returns true | `entity.Run` that returns false: the job did not run |
+| `world.Restore(snapshot)`, `world.Load(bytes)`, `LoadEntities(...)`, `LoadEntitiesInto(...)` (every restored or loaded row) | `LoadEntitiesInto(..., markWritten: false)`: every component the record holds gets tick 0, replaced or added. For restoring a persisted record without saving or sending it back ([a restored record](/en/docs/guide/saves/migration-and-unload#records)). `world.Load(bytes, markWritten: false)`: every loaded row gets tick 0 and no row counts as removed, for a restart that resumes a saved world ([restart](/en/docs/guide/saves/saves#restart)) |
+| `entity.Run<…>(ref job)` ([one entity](/en/docs/guide/basics/queries#run-on-one-entity)): the components in the job's `WriteMask` (all of them unless the job overrides `WriteMask`; declare `WriteMask => 0` for a read-only job), stamped only when `Run` returns true | `entity.Run` that returns false: the job did not run |
 
-A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) is a list that can only change through a `ref`, so its
+A [`DynamicBuffer<T>`](/en/docs/guide/data/dynamic-buffers) is a list that can only change through a `ref`, so its
 writes are always tracked.
 
 ### Ticks [#ticks]
@@ -169,7 +169,7 @@ world.Update();                     // the step visits 1,000 NPCs; the replicati
 ```
 
 A `ref` parameter of a tracked component that some path leaves unwritten (an early `return`, a write inside an `if`)
-is the case `Mut<T>` is for, and the analyzer says so ([EECS053](/en/docs/guide/analyzer#eecs053)): its code fix
+is the case `Mut<T>` is for, and the analyzer says so ([EECS053](/en/docs/guide/help/analyzer#eecs053)): its code fix
 takes the component as a `Mut<T>`, reads through `Value` and writes through `Write()` on the paths that write.
 
 ```csharp tab="Reported" doccheck=system,expect-EECS053
@@ -192,8 +192,8 @@ static void Settle(Mut<Position> position, in Destination destination)
 
 Code outside systems has the same choice: `entity.SetIfChanged(value)` sets the component like `Set` (added when
 missing) unless the entity already has that value, and returns false then, with nothing written, stamped or indexed.
-The generator gives every tracked, [indexed](/en/docs/guide/indexes-and-relations) or
-[grouped](/en/docs/guide/groups) component with fields its own form, `SetXIfChanged(…)`, which takes the
+The generator gives every tracked, [indexed](/en/docs/guide/data/indexes-and-relations) or
+[grouped](/en/docs/guide/data/groups) component with fields its own form, `SetXIfChanged(…)`, which takes the
 constructor's arguments like `SetX`:
 
 ```csharp
@@ -201,7 +201,7 @@ bool moved = npcs[7].SetPositionIfChanged(1, 0);   // false: one step taken, it 
 ```
 
 A comparison written by hand before a `Set` (`if (e.Position.X != x) e.SetPosition(x, y);`) is what
-`SetXIfChanged` does, and [EECS033](/en/docs/guide/analyzer#eecs033) suggests it, with a code fix.
+`SetXIfChanged` does, and [EECS033](/en/docs/guide/help/analyzer#eecs033) suggests it, with a code fix.
 
 - **Equality** is `IEquatable<T>` when the component implements it (record structs do), called without boxing; else,
   for an unmanaged component, its bytes; else `SetIfChanged` throws `NotSupportedException` and no `SetXIfChanged` is
@@ -211,8 +211,8 @@ A comparison written by hand before a `Set` (`if (e.Position.X != x) e.SetPositi
   the row stamped although nothing changed (a stamp too many, never a change missed). Make a component with `float`
   or `double` fields a record struct, so it compares them as numbers.
 - **Where `Mut<T>` works:** per-entity methods, also parallel ones and ones that change structure (a write after the
-  entity moved stamps its new row). Batch methods take spans instead ([EECS009](/en/docs/guide/analyzer#eecs009)).
-  An indexed or grouped component is never written through a ref ([EECS015](/en/docs/guide/analyzer#eecs015)):
+  entity moved stamps its new row). Batch methods take spans instead ([EECS009](/en/docs/guide/help/analyzer#eecs009)).
+  An indexed or grouped component is never written through a ref ([EECS015](/en/docs/guide/help/analyzer#eecs015)):
   use `entity.SetXIfChanged(…)` for it. For a component without `ITracked`, `Mut<T>` is a plain `ref`.
 - **For the scheduler**, a `Mut<T>` parameter is a write of `T`: the system never shares a parallel stage with a
   reader of `T`.
@@ -256,12 +256,12 @@ writes the entity's other components, and a batch method receives removed rows i
   <Accordion title="Destroyed entities">
     A destroyed entity has no row, so `[Removed<T>]` does not visit it. The [destroy log](#destroy-log) reports it
     instead: `world.DestroyedSince(tick, …)` lists the entities destroyed since a tick, for any number of readers. An
-    entity retired by `Destroy` because it holds [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components)
+    entity retired by `Destroy` because it holds [cleanup components](/en/docs/guide/changes/cleanup-and-disable#cleanup-components)
     keeps its row until they go, but losing its other components is not a removal either: nothing reports it until the
     destroy log does, when it is freed.
   </Accordion>
   <Accordion title="Lacking is not losing">
-    An entity created, instantiated from a [prefab](/en/docs/guide/prefabs) or cloned without `T` never lost it,
+    An entity created, instantiated from a [prefab](/en/docs/guide/basics/prefabs) or cloned without `T` never lost it,
     so it is not reported.
   </Accordion>
   <Accordion title="After a restore">
@@ -419,8 +419,8 @@ Despawns.Send(zone, zoneAcks, gone);            // client 0: despawn 0v1
 - **Ids keep their version:** each id is the incarnation that died, so a recycled index names the new entity with
   another version and the client's map of ids stays right.
 - **What counts as destroyed:** the moment `IsAlive` turns false. `Destroy`, `DestroyEntities`, a
-  [hierarchy](/en/docs/guide/hierarchy) or [relation](/en/docs/guide/indexes-and-relations#target-policies) cascade, `MoveEntities` out of this world; an entity holding
-  [cleanup components](/en/docs/guide/cleanup-and-disable) when its last one is removed (until then it is alive,
+  [hierarchy](/en/docs/guide/data/hierarchy) or [relation](/en/docs/guide/data/indexes-and-relations#target-policies) cascade, `MoveEntities` out of this world; an entity holding
+  [cleanup components](/en/docs/guide/changes/cleanup-and-disable) when its last one is removed (until then it is alive,
   tagged `Retired`); `Restore` and `Load` for every entity alive before and not after. `Dispose` records nothing,
   and the log itself is not part of a snapshot or a save.
 - **Threads:** call it on the owner thread or from a system of a parallel stage. With the log off it throws
@@ -603,16 +603,16 @@ All of it on one page with the other features: [Performance guide](/en/docs/perf
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| Changing a collection inside a component through `in` | The row is not stamped, so `[Changed<T>]` misses it | [EECS011](/en/docs/guide/analyzer#eecs011) |
-| `[Removed<T>]` on a method that also requires `T` | Asks for rows that have and lack `T` at once: no row passes | [EECS016](/en/docs/guide/analyzer#eecs016) |
-| `[Removed<T>]` with no component parameter or `[With<U>]` | Nothing names what the method iterates | [EECS003](/en/docs/guide/analyzer#eecs003) |
-| `ref` parameter that only reads | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) |
-| `ref` parameter written on some rows only (an early `return`, a write in an `if`) | Every visited row counts as changed, also the rows it left alone | [EECS053](/en/docs/guide/analyzer#eecs053): a [`Mut<T>`](#set-if-changed) parameter |
+| Changing a collection inside a component through `in` | The row is not stamped, so `[Changed<T>]` misses it | [EECS011](/en/docs/guide/help/analyzer#eecs011) |
+| `[Removed<T>]` on a method that also requires `T` | Asks for rows that have and lack `T` at once: no row passes | [EECS016](/en/docs/guide/help/analyzer#eecs016) |
+| `[Removed<T>]` with no component parameter or `[With<U>]` | Nothing names what the method iterates | [EECS003](/en/docs/guide/help/analyzer#eecs003) |
+| `ref` parameter that only reads | Every visited row counts as changed | [EECS025](/en/docs/guide/help/analyzer#eecs025) |
+| `ref` parameter written on some rows only (an early `return`, a write in an `if`) | Every visited row counts as changed, also the rows it left alone | [EECS053](/en/docs/guide/help/analyzer#eecs053): a [`Mut<T>`](#set-if-changed) parameter |
 | `LoadEntitiesInto(..., markWritten: false)` for values the receivers do not have yet | The loaded rows are not changes, so `[Changed<T>]` replication never sends them | Code review: a replicator to new clients sends the full state itself |
 | Expecting destroyed entities in `[Removed<T>]` | They have no row: no filter visits them | Read them from the [destroy log](#destroy-log) (`WorldOptions.DestroyLogCapacity`, `DestroyedSince`) |
 | A destroy log smaller than the destroys of a client's longest lag | `DestroyedSince` returns false for that client on every read: it resyncs over and over | Code review: size it to destroys per second times the allowed lag; watch `DestroyLogOldestTick` |
 | A `ref` parameter on a value recomputed every tick that rarely changes | Every visited row counts as changed, so every `[Changed<T>]` reader visits them all | Code review: a [`Mut<T>`](#set-if-changed) parameter with `SetIfChanged` |
-| `SetIfChanged` on a component with managed fields and no `IEquatable<T>` | `NotSupportedException`; no `SetXIfChanged` is generated | [EECS040](/en/docs/guide/analyzer#eecs040): make it a record struct or implement `IEquatable<T>` |
+| `SetIfChanged` on a component with managed fields and no `IEquatable<T>` | `NotSupportedException`; no `SetXIfChanged` is generated | [EECS040](/en/docs/guide/help/analyzer#eecs040): make it a record struct or implement `IEquatable<T>` |
 | Several `[Changed<T>]` attributes where any change should count | Only rows where every one changed pass | Code review: `[ChangedAny<T1, …, Tn>]` |
 | `Changed`, `Removed`, `ChangedAny` or `RemovedAny` parts of one filter with different ticks | `ArgumentException`: a filter has one tick | At run time |
 
@@ -634,16 +634,16 @@ The full comparison, with ten written rows and with removals:
 ## Related [#related]
 
 <Cards>
-  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/basics/systems">
     Parameters, filters, ordering and groups of the methods that read changes.
   </Card>
-  <Card title="Queries and filters" href="/en/docs/guide/queries">
+  <Card title="Queries and filters" href="/en/docs/guide/basics/queries">
     `QueryFilter`, `Count`, `Any` and struct jobs for ad-hoc readers.
   </Card>
-  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+  <Card title="Dynamic buffers" href="/en/docs/guide/data/dynamic-buffers">
     A list per entity whose every write is tracked.
   </Card>
-  <Card title="Snapshots" href="/en/docs/guide/snapshots">
+  <Card title="Snapshots" href="/en/docs/guide/saves/snapshots">
     Restoring a world counts every row as written, or removed.
   </Card>
 </Cards>

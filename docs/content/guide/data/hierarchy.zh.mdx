@@ -7,7 +7,7 @@ icon: GitFork
 
 船上装着炮塔，炮塔上装着炮管，队长带着队员。`ChildOf(parent)` 把实体挂到父实体下：`world.Children(parent)` 列出子实体，
 销毁父实体时后代一并销毁。船沉了，炮塔跟着没了，一行清理代码都不用写。`ChildOf` 和其他
-按 `EntityId` [带索引的链接](/zh/docs/guide/indexes-and-relations#entityid-keys)没有区别，只是默认打开了级联销毁。
+按 `EntityId` [带索引的链接](/zh/docs/guide/data/indexes-and-relations#entityid-keys)没有区别，只是默认打开了级联销毁。
 
 ## 什么时候用 [#when-to-use-it]
 
@@ -18,7 +18,7 @@ icon: GitFork
 
 <Callout type="warn" title="不适合">
   不该连带杀死对方的链接（攻击目标、跟随者）：用自己的 `EntityId` 键，配 `Keep` 或 `Remove`。一个实体有多个“父亲”
-  （同时属于多支队伍）：用[关系](/zh/docs/guide/indexes-and-relations#relations)。变换传播不是内置功能，
+  （同时属于多支队伍）：用[关系](/zh/docs/guide/data/indexes-and-relations#relations)。变换传播不是内置功能，
   [下面的示例](#transform-propagation)是你自己写的系统。
 </Callout>
 
@@ -78,7 +78,7 @@ foreach (var part in world.Descendants(ship)) parts++;   // 先是炮塔，再�
 ### 换父实体、解除挂接 [#reparent]
 
 `ChildOf` 就是一个普通的值：设一个新值就是换父实体，移除它，实体就成了根。它和你自己的组件一样有
-[生成成员](/zh/docs/guide/entities-and-components)：`entity.ChildOf`（只读：它被索引）、`HasChildOf`、`TryGetChildOf(out link)`、
+[生成成员](/zh/docs/guide/basics/entities-and-components)：`entity.ChildOf`（只读：它被索引）、`HasChildOf`、`TryGetChildOf(out link)`、
 `SetChildOf(parent)`、`SetChildOfIfChanged(parent)`、`RemoveChildOf()` 和 `world.ChildOfIndex`，预制体上也有
 `SetChildOf` / `RemoveChildOf`。没有 `DisableChildOf`：`ChildOf` 不能被禁用。
 
@@ -104,8 +104,8 @@ bool gunAlive = gun.IsAlive;               // false
 
 ### 用预制体生成子实体 [#instantiate-children]
 
-从[预制体](/zh/docs/guide/prefabs)生成的子实体，可以在同一次调用里拿到父实体：`world.Instantiate(minion, new ChildOf(boss))`
-把 `ChildOf` 直接写进副本所在的最终表，一次行复制就挂好，不用再移动（见[每个实例带上自己的值](/zh/docs/guide/prefabs#instantiate-with-values)）。
+从[预制体](/zh/docs/guide/basics/prefabs)生成的子实体，可以在同一次调用里拿到父实体：`world.Instantiate(minion, new ChildOf(boss))`
+把 `ChildOf` 直接写进副本所在的最终表，一次行复制就挂好，不用再移动（见[每个实例带上自己的值](/zh/docs/guide/basics/prefabs#instantiate-with-values)）。
 批量形式 `world.Instantiate(minion, span, new ChildOf(boss))` 把一整波挂到同一个父实体下。
 
 ### 向上找祖先 [#ancestors]
@@ -166,14 +166,14 @@ Entity top = Ancestors.Root(cannon);                  // 也是护卫舰：它�
 
 ### 改变销毁的行为 [#cascade-policy]
 
-`ChildOf` 的初始策略是 `TargetPolicy.Destroy`。和其他[目标策略](/zh/docs/guide/indexes-and-relations#target-policies)一样，
+`ChildOf` 的初始策略是 `TargetPolicy.Destroy`。和其他[目标策略](/zh/docs/guide/data/indexes-and-relations#target-policies)一样，
 可以按 World 修改：`Remove` 让被销毁父实体的子实体变成根，`Keep` 让它们的 `ChildOf` 继续指向那个死去的 id。
 
 ```csharp
 world.ChildOfIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // 孤儿变成根
 ```
 
-- 持有[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的子实体不会被直接释放，而是“退休”：带着
+- 持有[清理组件](/zh/docs/guide/changes/cleanup-and-disable#cleanup-components)的子实体不会被直接释放，而是“退休”：带着
   `Retired` 标签保留清理组件，它自己的子实体照样随它而去。
 - 环（实体是自己的祖先）会正常结束：销毁其中任何一个，整个环都会被销毁。
 - `ChildOf` 不能被禁用（`Disable<ChildOf>()` 会抛异常）：父实体销毁时必须找得到子实体。
@@ -231,7 +231,7 @@ world.Update();                            // barrel：WorldPosition(11, 2)
 然后一起迁移：父实体
 没跟过去的子实体，到了那边会去掉 `ChildOf`（成为根）；而 `MoveEntities` 销毁原实体时会连同子实体一起销毁，没列出的子实体
 就丢了。两者都接收 `ReadOnlySpan<EntityId>`：直接传列表的 span（`CollectionsMarshal.AsSpan`），不必复制一份数组。
-详见[迁移](/zh/docs/guide/migration-and-unload#move-entities)。
+详见[迁移](/zh/docs/guide/saves/migration-and-unload#move-entities)。
 
 ```csharp
 using System.Runtime.InteropServices;
@@ -390,14 +390,14 @@ turret alive: True, gun alive: False
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 通过 `ref` 写 `ChildOf` | 索引还记着旧的父实体 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
-| 自己用 `Entity` 字段存父指针 | 托管列，存不了盘，也没有级联 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
+| 通过 `ref` 写 `ChildOf` | 索引还记着旧的父实体 | [EECS015](/zh/docs/guide/help/analyzer#eecs015) |
+| 自己用 `Entity` 字段存父指针 | 托管列，存不了盘，也没有级联 | [EECS017](/zh/docs/guide/help/analyzer#eecs017) |
 | 只迁移父实体，不带子实体 | 子实体留在原地，随原实体一起被销毁 | 用 `Descendants` 收集整组 |
 | 只用 `Children` 收集整棵树 | 漏掉孙实体 | `Descendants` 会走完每一层 |
 | 用 `Descendants` 遍历成环的 `ChildOf` | 走到环上时抛 `InvalidOperationException` | 运行时 |
 | 沿 `ChildOf` 向上走却不限制步数 | `ChildOf` 成环时死循环 | 用 `world.EntityCount` 限制步数（[向上找祖先](#ancestors)） |
-| 在 `Descendants` 循环里换父实体 | 新的链接让遍历正在读的子实体列表增长（解除挂接的实体会被跳过） | [EECS042](/zh/docs/guide/analyzer#eecs042)：先收集，再修改 |
-| `Disable<ChildOf>()` | 抛 `InvalidOperationException` | [EECS048](/zh/docs/guide/analyzer#eecs048)：改用 `Remove<ChildOf>()` |
+| 在 `Descendants` 循环里换父实体 | 新的链接让遍历正在读的子实体列表增长（解除挂接的实体会被跳过） | [EECS042](/zh/docs/guide/help/analyzer#eecs042)：先收集，再修改 |
+| `Disable<ChildOf>()` | 抛 `InvalidOperationException` | [EECS048](/zh/docs/guide/help/analyzer#eecs048)：改用 `Remove<ChildOf>()` |
 | 没写系统却指望有世界坐标 | 没有内置变换 | 写一个[传播系统](#transform-propagation) |
 
 ## 和其他库的对比 [#compared]
@@ -410,13 +410,13 @@ Friflo 有内置层级（`AddChild`），但删除父实体会先把子实体摘
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="索引与关系" href="/zh/docs/guide/indexes-and-relations">
+  <Card title="索引与关系" href="/zh/docs/guide/data/indexes-and-relations">
     `EntityId` 键、关系和目标策略。
   </Card>
-  <Card title="清理与禁用" href="/zh/docs/guide/cleanup-and-disable">
+  <Card title="清理与禁用" href="/zh/docs/guide/changes/cleanup-and-disable">
     离开前要先释放资源的实体。
   </Card>
-  <Card title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
+  <Card title="迁移与卸载" href="/zh/docs/guide/saves/migration-and-unload">
     把玩家和他拥有的一切迁移到另一个 World。
   </Card>
   <Card title="示例：SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">

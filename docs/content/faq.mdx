@@ -18,7 +18,7 @@ can model moving vehicles, devices or workers as entities and run movement, stat
 The architectural fit matters more than the label. Use an ECS when the same operations run over many changing items
 and predictable hot-path costs matter. A conventional database-backed CRUD service with little shared per-item work
 usually has no need for an ECS. EasyEcs supplies the world, queries, systems and state management; you supply the
-transport and host. The [ASP.NET Core and Worker hosting guide](/en/docs/guide/hosting) shows one way to connect HTTP
+transport and host. The [ASP.NET Core and Worker hosting guide](/en/docs/guide/production/hosting) shows one way to connect HTTP
 requests to a world without touching it from request threads.
 
 ## Is EasyEcs production ready? [#production-ready]
@@ -53,7 +53,7 @@ What allocates, on purpose: creating a world, the first entity of a new componen
 of a query shape, a table or a `DynamicBuffer<T>` growing past its capacity, and cold tools such as `DescribeTables`.
 `InitialEntityCapacity`, `Reserve<T1, …, Tn>(count)`, `Reserve(prefab, count)` and
 `bag.EnsureCapacity(n)` move growth out of the tick. With `WorldOptions.MeasureSystems`, `system.Stats.LastAllocated`
-names the system that allocates ([diagnostics](/en/docs/guide/diagnostics#timing)).
+names the system that allocates ([diagnostics](/en/docs/guide/production/diagnostics#timing)).
 
 ## Does a world give memory back after a peak? [#memory-after-a-peak]
 
@@ -62,7 +62,7 @@ without allocating, and a world that once held a million entities keeps their ro
 empty tables, shrinks the others to what they hold (rounded up to a power of two) and releases the buffers of saves,
 loads and migrations. Handles, queries, indexes and snapshots keep working. Call it on the owner thread at a quiet
 moment (after a match, from a maintenance task), not every tick: what it drops is allocated again on next use
-([give memory back](/en/docs/guide/diagnostics#trim)).
+([give memory back](/en/docs/guide/production/diagnostics#trim)).
 
 ## Is it thread-safe? [#is-it-thread-safe]
 
@@ -73,18 +73,18 @@ The rules are explicit and short ([D13](/en/docs/decisions#d13-one-owner-thread-
 - **Structural changes belong to the owner thread.** Adding or removing components and creating or destroying
   entities check a plain owner flag: a change made inside a parallel stage, a parallel `[ForEach]` or a pass that
   promised none throws instead of tearing the tables. The analyzer reports the off-thread changes it can see
-  ([EECS013, EECS014](/en/docs/guide/analyzer)).
+  ([EECS013, EECS014](/en/docs/guide/help/analyzer)).
 - **The parallelism EasyEcs adds is checked.** `WorldOptions.ParallelSystems` runs systems together only when their
   generated access does not conflict, with the same result as running them one by one; a
   `[ForEach(Parallel = true)]` method must change no structure and write no singleton (EECS010); its threads claim
   chunks of rows as they finish (OpenMP's `schedule(dynamic, n)`), and `ChunkSize = n` sizes them for a few hundred heavy
-  rows ([chunk size](/en/docs/guide/threading#chunk-rows)). A total over the rows is a `Reduce<T>` parameter, a
-  partial result per chunk ([reductions](/en/docs/guide/threading#reductions)); a parallel method that writes a static
+  rows ([chunk size](/en/docs/guide/performance/threading#chunk-rows)). A total over the rows is a `Reduce<T>` parameter, a
+  partial result per chunk ([reductions](/en/docs/guide/performance/threading#reductions)); a parallel method that writes a static
   or shared object is EECS060, a parallel job's field read after the pass EECS061.
 - **Input from other threads** (network, IO) goes into a queue of yours that one system drains on the owner thread.
 
 Never keep a `ref` across an `await`: keep the `Entity` and get the component again. More in
-[Threading](/en/docs/guide/threading) and [ref and await](/en/docs/guide/refs-and-await).
+[Threading](/en/docs/guide/performance/threading) and [ref and await](/en/docs/guide/changes/refs-and-await).
 
 ## How do I run EasyEcs in ASP.NET Core or a Worker Service? [#hosting]
 
@@ -93,15 +93,15 @@ it when the host stops. Request handlers never touch the world: they write reque
 system drains each tick (with a `TaskCompletionSource` for the reply), and read an immutable status the world
 publishes. A request for one entity (an actor, a player) is handled on that entity, on the owner thread, by a
 `[EntityMethod]` method: one lookup for all the components the method needs, and `false` when the entity is gone or
-does not match ([one entity](/en/docs/guide/queries#run-on-one-entity)). No hosting package is
-needed; [Hosting in a .NET server](/en/docs/guide/hosting) has the whole server.
+does not match ([one entity](/en/docs/guide/basics/queries#run-on-one-entity)). No hosting package is
+needed; [Hosting in a .NET server](/en/docs/guide/production/hosting) has the whole server.
 
 ## How do I test a system? [#testing]
 
 Build a world in the test, add the system and the entities and singletons it needs, call `world.Update()` and assert
 on the components. Systems never call each other, so there is nothing to mock; share the server's setup method so the
 test runs the real order. A zero-allocation budget is one more test: count
-`GC.GetAllocatedBytesForCurrentThread()` around warm updates ([Testing systems](/en/docs/guide/testing)).
+`GC.GetAllocatedBytesForCurrentThread()` around warm updates ([Testing systems](/en/docs/guide/production/testing)).
 
 ## How should I structure an EasyEcs project? [#project-structure]
 
@@ -109,7 +109,7 @@ The way `dotnet new easyecs` lays it out: components in `Components/` (one file 
 one system per file in `Systems/` with one job each, and `Program.cs` as the host that builds the world, sets the
 singletons, adds the systems in one place and runs the loop. Groups give each cadence its own update, input from other
 threads goes through a mailbox (a queue in a `readonly` field of the system that drains it), and `--tests` adds one
-test file per system ([Structuring a real project](/en/docs/guide/project-structure)).
+test file per system ([Structuring a real project](/en/docs/guide/basics/project-structure)).
 
 ## How do I debug an ECS world? [#debugging]
 
@@ -118,7 +118,7 @@ returns an entity's component values (the debugger shows them too when you expan
 every system with `WorldOptions.MeasureSystems` and counts the bytes it allocated and the entities it visited,
 `world.DescribeSchedule()` shows the stages and why each system waits, and `system.Error` keeps the exception of a
 system switched off by `SystemErrorPolicy.Disable`. Read them on the owner thread between updates
-([Debugging and diagnostics](/en/docs/guide/diagnostics)).
+([Debugging and diagnostics](/en/docs/guide/production/diagnostics)).
 
 ## Can I use EasyEcs with Unity or Godot? [#unity-godot]
 
@@ -160,10 +160,10 @@ One tool per need:
 
 | Need | Call | Page |
 | --- | --- | --- |
-| Undo, rollback, prediction, replays in memory | `world.Capture()` / `world.Restore(snapshot)` | [Snapshots](/en/docs/guide/snapshots) |
-| A whole world to disk, a database or another process | `world.Save(output)` / `world.Load(bytes)` | [Saves](/en/docs/guide/saves) |
-| A group of entities (a player and what it owns) to another world or server | `SaveEntities` / `LoadEntities`, `MoveEntities` | [Migration and unloading](/en/docs/guide/migration-and-unload) |
-| The durable part of an actor, restored onto its entity without counting as a change | `SaveEntitiesWith(output, ids, set)` / `LoadEntitiesInto(bytes, entities, markWritten: false)` | [Records](/en/docs/guide/migration-and-unload#records) |
+| Undo, rollback, prediction, replays in memory | `world.Capture()` / `world.Restore(snapshot)` | [Snapshots](/en/docs/guide/saves/snapshots) |
+| A whole world to disk, a database or another process | `world.Save(output)` / `world.Load(bytes)` | [Saves](/en/docs/guide/saves/saves) |
+| A group of entities (a player and what it owns) to another world or server | `SaveEntities` / `LoadEntities`, `MoveEntities` | [Migration and unloading](/en/docs/guide/saves/migration-and-unload) |
+| The durable part of an actor, restored onto its entity without counting as a change | `SaveEntitiesWith(output, ids, set)` / `LoadEntitiesInto(bytes, entities, markWritten: false)` | [Records](/en/docs/guide/saves/migration-and-unload#records) |
 
 ```csharp
 using System.Buffers;
@@ -209,7 +209,7 @@ vector loops is compiled out and `Vector<T>` is 16 bytes. A server that knows it
 ```
 
 The binary then runs only on CPUs with those instructions: `native` fits a build on the machine (or the image) that
-runs it, a level fits a fleet. Deploying a server: [hosting](/en/docs/guide/hosting#deploy).
+runs it, a level fits a fleet. Deploying a server: [hosting](/en/docs/guide/production/hosting#deploy).
 
 ## Why are there no events? [#why-are-there-no-events]
 
@@ -259,7 +259,7 @@ Structural changes apply at once, also in the middle of a pass
 while the pass runs and the pass never sees rows shift, so code reads as it is written and no second, deferred
 version of the world exists. Parallel jobs make no structural change; a system after them, on the owner thread,
 makes it from the data they wrote ([D3](/en/docs/decisions#d3-no-command-buffer-for-parallel-jobs)). What a pass
-sees when you change structure inside it: [Structural changes](/en/docs/guide/structural-changes).
+sees when you change structure inside it: [Structural changes](/en/docs/guide/changes/structural-changes).
 
 ## How do I order systems? [#order-systems]
 
@@ -268,7 +268,7 @@ Systems run in the order you register them. To make one depend on another, name 
 ordering never reshuffles the others ([D5](/en/docs/decisions#d5-order-systems-by-dependencies-not-priorities)).
 A cycle throws in `AddSystem` and is reported by EECS019 when the analyzer can see it. There are no integer
 priorities: `Priority` was removed in 4.1. Systems that run on a different cadence go into a
-[system group](/en/docs/guide/systems) updated by its own call, or mark it `[UpdateInterval(N, Phase = P)]`.
+[system group](/en/docs/guide/basics/systems) updated by its own call, or mark it `[UpdateInterval(N, Phase = P)]`.
 
 ## How do I change a component? [#how-do-i-change-a-component]
 
@@ -303,12 +303,12 @@ Three mistakes to avoid:
 - Read with `in`, not `ref`: every `ref` access to an `ITracked` component counts as a change, so replication
   would send rows nobody changed. The generated property of a tracked component is read-only for this reason;
   `entity.WriteX()` is the write, and a loop that only reads walks `world.Read<…>()` instead of `Query`
-  ([EECS046](/en/docs/guide/analyzer#eecs046)). A method that writes only some of the rows it visits takes `Mut<T>`, which stamps
+  ([EECS046](/en/docs/guide/help/analyzer#eecs046)). A method that writes only some of the rows it visits takes `Mut<T>`, which stamps
   only the rows it writes; `SetIfChanged` (and the generated `entity.SetXIfChanged(...)`) writes only when the value
-  differs ([what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write)).
+  differs ([what counts as a write](/en/docs/guide/changes/change-tracking#what-counts-as-a-write)).
 - Change a collection inside a component through a `ref` to the component, never through `in`: change tracking and
-  the scheduler would miss it ([EECS011](/en/docs/guide/analyzer#eecs011)). For a list per entity, use a
-  [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers).
+  the scheduler would miss it ([EECS011](/en/docs/guide/help/analyzer#eecs011)). For a list per entity, use a
+  [`DynamicBuffer<T>`](/en/docs/guide/data/dynamic-buffers).
 
 ## How many component types can a world have? [#component-limit]
 
@@ -334,7 +334,7 @@ JetBrains' `[MeansImplicitUse]`, which Rider and ReSharper read
 EasyEcs without its analyzers (`ExcludeAssets="analyzers"` on the package, or a reference to the sources without
 the generator as an `Analyzer`), and then no code is generated either. A component or singleton that
 declares members with attributes (`[Sum]`, `[LookupKey]`, `[Group]`) is partial, with the types around it: the
-generator writes those members into the type itself ([EECS062](/en/docs/guide/analyzer#eecs062)).
+generator writes those members into the type itself ([EECS062](/en/docs/guide/help/analyzer#eecs062)).
 
 ## Related [#related]
 

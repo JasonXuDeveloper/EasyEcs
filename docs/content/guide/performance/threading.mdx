@@ -68,7 +68,7 @@ public static class Zones
 
 The [MultiWorld sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/MultiWorld) runs this layout
 and prints entity-updates per second. To move a player to a zone of another thread, hand it across as bytes: the
-source's owner writes the group with [`SaveEntities`](/en/docs/guide/migration-and-unload#save-entities) and posts the
+source's owner writes the group with [`SaveEntities`](/en/docs/guide/saves/migration-and-unload#save-entities) and posts the
 bytes to a queue the target's owner drains, which calls `LoadEntities`. `MoveEntities` is only for two worlds owned by
 the same thread.
 
@@ -106,7 +106,7 @@ and the one change tick per stage that keeps `[Changed<T>]` exact would become o
 runs sooner as one system with several `[ForEach]` methods. `world.DescribeSchedule()` shows the stages
 the world built, each system's reads and writes, and why a system waits for the stage before its own; it reads the
 schedule published by the last `AddSystem` / `RemoveSystem`, so a diagnostics endpoint may call it from any thread
-([Debugging and diagnostics](/en/docs/guide/diagnostics#schedule)).
+([Debugging and diagnostics](/en/docs/guide/production/diagnostics#schedule)).
 
 ```csharp
 public record struct Body(float X, float Y, float Vx, float Vy) : IComponent;
@@ -168,7 +168,7 @@ first exception of a stage is rethrown on the calling thread after the stage; wi
 ### Parallel `[ForEach]` methods [#parallel-foreach-methods]
 
 `[ForEach(Parallel = true)]` splits one method's rows into chunks across threads. It must make no structural change,
-run per entity and write no singleton ([EECS010](/en/docs/guide/analyzer#eecs010)); a total over the rows is a
+run per entity and write no singleton ([EECS010](/en/docs/guide/help/analyzer#eecs010)); a total over the rows is a
 [`Reduce<T>`](#reductions), a row's working list a [`Scratch<T>`](#scratch), a read of another entity a
 [`Lookup<T>`](#lookups), records for a later system an [`Emit<T>`](#emit), random numbers an
 [`EntityRandom`](#entity-random):
@@ -188,7 +188,7 @@ Parallel systems and parallel methods compose: inside a parallel stage, a parall
 another system's method runs on its own thread instead of waiting.
 
 A parallel method may write a tracked component, through a `ref` or a
-[`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) parameter: each chunk stamps only its own rows, and by
+[`Mut<T>`](/en/docs/guide/changes/change-tracking#set-if-changed) parameter: each chunk stamps only its own rows, and by
 default the chunks of such a method are cut at multiples of 4,096 rows (at least 4,096), the blocks whose change-tick
 summary their rows share, so no two threads update one summary. `Mut<T>.Write()` and `SetIfChanged` are as safe in a
 chunk as a `ref`. A table of 4,096 rows or fewer is then a single chunk.
@@ -258,7 +258,7 @@ public ref struct CrowdPressure
 
 - **Rounded up to 64.** A word of presence bits and change ticks stays with one thread, so `ChunkSize = 10` takes 64.
 - **Per table.** Each matching table is cut on its own, at multiples of `n` from its first row; a chunk never spans two
-  tables, and a table's last chunk holds what is left. A sliced method ([`Slices`](/en/docs/guide/systems#slices)) cuts
+  tables, and a table's last chunk holds what is left. A sliced method ([`Slices`](/en/docs/guide/basics/systems#slices)) cuts
   the slice it visits.
 - **Tracked writes.** Chunks of a method that writes a tracked component may split a 4,096-row block of change ticks:
   before the pass, the blocks it covers are opened at the pass's tick, and the threads that share one set their words
@@ -270,9 +270,9 @@ public ref struct CrowdPressure
   light rows keep the default. Fewer than two chunks run on the calling thread, and a pass whose helpers do not make
   it faster runs there too ([what it costs](#what-it-costs)).
 - **Where it goes.** `ChunkSize` needs `Parallel = true` and is 0 (the default: chosen from the row count) or more
-  ([EECS054](/en/docs/guide/analyzer#eecs054)). Ad hoc, the parallel calls take it as their last argument:
+  ([EECS054](/en/docs/guide/help/analyzer#eecs054)). Ad hoc, the parallel calls take it as their last argument:
   `world.ForEachParallel(ref job, filter, chunkSize: 64)` and `ForEachEntityParallel`
-  ([queries](/en/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)).
+  ([queries](/en/docs/guide/basics/queries#on-several-threads-foreachparallel-and-foreachentityparallel)).
 
 Why the default stays chosen from the row count, how a split block keeps its change ticks exact and what else was
 weighed (guided scheduling, per-thread summaries): [D67](/en/docs/decisions#d67-chunk-rows). The
@@ -284,12 +284,12 @@ parallel methods, and the time is that of the whole run. With `ParallelSystems`,
 own runs.
 
 How chunk size fits with vector loops, batch methods and grid kernels, and the OpenMP / MPI terms for each:
-[high-performance patterns](/en/docs/guide/high-performance).
+[high-performance patterns](/en/docs/guide/performance/high-performance).
 
 #### Totals over the rows: `Reduce<T>` [#reductions]
 
-A parallel method writes its own rows only: it may not write a singleton ([EECS010](/en/docs/guide/analyzer#eecs010)),
-and a shared counter would race ([EECS060](/en/docs/guide/analyzer#eecs060)). A total over every row (a count, a sum, a
+A parallel method writes its own rows only: it may not write a singleton ([EECS010](/en/docs/guide/help/analyzer#eecs010)),
+and a shared counter would race ([EECS060](/en/docs/guide/help/analyzer#eecs060)). A total over every row (a count, a sum, a
 minimum, a bounding box) is a `ref Reduce<T>` parameter: OpenMP's `reduction(+: x)`, MPI's `Allreduce`. Each chunk adds into
 a partial result of its own, with no lock and no atomic per row, and when the pass ends the partial results are
 combined and replace singleton `T`.
@@ -301,7 +301,7 @@ combined and replace singleton `T`.
 
 <Callout type="warn" title="Skip it for">
   A result per entity: write it into a component of the row. A total that a few rows change per tick: keep it up to
-  date in the systems that change those rows (or read a [`[Changed<T>]`](/en/docs/guide/change-tracking) pass) instead
+  date in the systems that change those rows (or read a [`[Changed<T>]`](/en/docs/guide/changes/change-tracking) pass) instead
   of visiting every row. A value the method needs while it runs: `Value` holds this chunk's partial result, not the
   total.
 </Callout>
@@ -319,7 +319,7 @@ by field.
 
 **Take a `ref Reduce<T>` parameter** and write the fields of `Value` (a field: this chunk's partial result), or call
 `Combine(value)` with one row's contribution. It is taken by `ref` so the partial result stays in a register; a
-`Reduce<T>` without `ref` is [EECS002](/en/docs/guide/analyzer#eecs002).
+`Reduce<T>` without `ref` is [EECS002](/en/docs/guide/help/analyzer#eecs002).
 
 </Step>
 <Step>
@@ -382,10 +382,10 @@ Console.WriteLine($"{crowd.Count} units between x = {crowd.MinX} and x = {crowd.
 - **By hand when it is not field by field.** A result whose fields combine together (the busiest cell and its count,
   a top three) implements `IReduction<T>` itself: `Identity` and an associative `Combine`, which need not be
   commutative (partial results are combined in row order). An attribute reduction must give every field an
-  attribute ([EECS064](/en/docs/guide/analyzer#eecs064)), and its type must be `partial`
-  ([EECS062](/en/docs/guide/analyzer#eecs062)); a hand-written one that the attributes could declare is
-  [EECS065](/en/docs/guide/analyzer#eecs065), and an `Identity` that changes what it is combined with (0 for a
-  minimum) is [EECS066](/en/docs/guide/analyzer#eecs066).
+  attribute ([EECS064](/en/docs/guide/help/analyzer#eecs064)), and its type must be `partial`
+  ([EECS062](/en/docs/guide/help/analyzer#eecs062)); a hand-written one that the attributes could declare is
+  [EECS065](/en/docs/guide/help/analyzer#eecs065), and an `Identity` that changes what it is combined with (0 for a
+  minimum) is [EECS066](/en/docs/guide/help/analyzer#eecs066).
 - **Exact or reproducible.** Integer results are exact on every run and thread count. A floating-point sum is rounded
   per chunk, so it depends on where chunks begin: with a fixed [`ChunkSize`](#chunk-rows) it is the same on every run
   and for any thread count (the tests check 1, 2, 3, 4 and 8 threads), but not bit for bit the result of the same
@@ -396,15 +396,15 @@ Console.WriteLine($"{crowd.Count} units between x = {crowd.MinX} and x = {crowd.
 - **In a vector loop** each lane keeps its own accumulator, folded in lane order into the run's partial result, when
   every field is declared `[Sum]`, `[Min]` or `[Max]` (or a hand-written `Combine` sets it to the sum, `Min` or `Max`
   of both sides' field) and the fields are lanes of the method's size
-  ([vector loops](/en/docs/guide/systems#vector-loops)); `[Product]`, `[All]` and `[Any]` stay row by row. A float sum takes the loop only under
+  ([vector loops](/en/docs/guide/basics/systems#vector-loops)); `[Product]`, `[All]` and `[Any]` stay row by row. A float sum takes the loop only under
   `FloatMode.Fast`, since lanes add in another order; integer sums, minimums and maximums stay exact.
 - **What it costs:** per row, an add into a local: a reducing method runs over each chunk's runs of rows, and the JIT
   keeps the run's partial result, passed by `ref` to the inlined method, in a register. Per chunk, its job copy, kept
   until the pass ends and then combined in chunk order; 0 bytes after the first pass. No lock, no `Interlocked`, no
   false sharing: each chunk's partial result is stored once.
 - **What the analyzer checks:** a second `Reduce<T>` of the same `T` in the method or system, or a `ref T` next to it,
-  would replace one result with another ([EECS057](/en/docs/guide/analyzer#eecs057)). The generated job of a reducing
-  method merges its chunks' copies, so [EECS061](/en/docs/guide/analyzer#eecs061) (a job field read after a parallel
+  would replace one result with another ([EECS057](/en/docs/guide/help/analyzer#eecs057)). The generated job of a reducing
+  method merges its chunks' copies, so [EECS061](/en/docs/guide/help/analyzer#eecs061) (a job field read after a parallel
   pass) leaves it alone.
 
 `ReduceBenchmark` measures an integer sum, a float sum and a bounding box over 1,000 and 1,000,000 rows with
@@ -426,7 +426,7 @@ still needs the static state. The world's runner passes the job by `ref`, alloca
 results in chunk order ([D69](/en/docs/decisions#d69-reductions)).
 
 A reducing method runs as a batch job: each chunk hands it the runs of consecutive rows it holds
-([`ForEachBatchParallel`](/en/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel)), and
+([`ForEachBatchParallel`](/en/docs/guide/basics/queries#on-several-threads-foreachparallel-and-foreachentityparallel)), and
 the run's partial result is a local the JIT keeps in a register. Run per row, the partial result would live in the
 chunk's copy of the job, a load and a store on every row.
 
@@ -446,7 +446,7 @@ that thread finds what the last one left.
 <Callout type="warn" title="Skip it for">
   A small buffer with a bound known up front: `stackalloc` (`Span<int> kept = stackalloc int[24];`) is fastest and
   needs nothing else. Anything that must outlive the row: that belongs in a component, a
-  [dynamic buffer](/en/docs/guide/dynamic-buffers) or a singleton.
+  [dynamic buffer](/en/docs/guide/data/dynamic-buffers) or a singleton.
 </Callout>
 
 ```csharp
@@ -473,11 +473,11 @@ public ref struct CountNeighbors
   another: clear what you use at the start of the row.
 - **Not data of the world.** It adds nothing to the system's reads or writes, so it changes no schedule; and storing
   what it holds by reference into a component, a singleton, a `Maybe`, a `Mut` or a `Reduce` hands one thread's
-  memory to the next row that reuses it ([EECS058](/en/docs/guide/analyzer#eecs058)).
+  memory to the next row that reuses it ([EECS058](/en/docs/guide/help/analyzer#eecs058)).
 - **Its memory is the thread's**, released when the thread ends, not when the world is disposed; thread-pool threads
   live long, so a buffer that grew large stays large.
 - **What it costs:** one lookup of the thread's value per chunk (per pass on one thread), then a field read per row;
-  0 bytes after each thread's first use. [EECS028](/en/docs/guide/analyzer#eecs028) does not report the one-time
+  0 bytes after each thread's first use. [EECS028](/en/docs/guide/help/analyzer#eecs028) does not report the one-time
   `??= new()`. A method whose body loops or calls is called once per row instead of inlined into the row loop: inlined,
   its own loop would run out of registers beside the row loop's and keep its counters on the stack.
 
@@ -500,7 +500,7 @@ would take the `World` and call `TryGetEntity`, which keeps it on one thread. A 
 
 <Callout type="warn" title="Skip it for">
   The row's own components: take them as parameters. A component the same method writes: a lookup would read rows
-  before or after their write ([EECS059](/en/docs/guide/analyzer#eecs059)).
+  before or after their write ([EECS059](/en/docs/guide/help/analyzer#eecs059)).
 </Callout>
 
 | Member | Returns |
@@ -548,7 +548,7 @@ public ref struct MatchLogins
   `Lookup<T>` gets `T`'s value index created and built before the pass (on the owner thread, before the parallel stage
   of its system). An index reached any other way inside a parallel region that is not built yet throws instead of
   building; serial passes still build it on the first lookup.
-- **[EECS010](/en/docs/guide/analyzer#eecs010) accepts it** in a parallel method, where a `World` parameter is
+- **[EECS010](/en/docs/guide/help/analyzer#eecs010) accepts it** in a parallel method, where a `World` parameter is
   rejected.
 - **What it costs:** one entity lookup per read (`TryGetEntity`, then the row's column), a hash probe per key lookup.
   On one thread it is faster than the `World` parameter with `TryGetEntity` and `TryGet`
@@ -563,7 +563,7 @@ public ref struct MatchLogins
 
 A pass often produces records for a later system: the hits an attack system finds for the system that applies
 damage, the packets of an area of interest, the spawns a rule asks for. A parallel method may not append to a shared
-list ([EECS060](/en/docs/guide/analyzer#eecs060)) or create entities ([EECS010](/en/docs/guide/analyzer#eecs010)).
+list ([EECS060](/en/docs/guide/help/analyzer#eecs060)) or create entities ([EECS010](/en/docs/guide/help/analyzer#eecs010)).
 An `Emit<T>` parameter, taken by value, appends to its chunk's own list, with no lock and no atomic; when the pass
 ends, the lists are appended to singleton `Emitted<T>` in chunk order, which is row order: Unity's `NativeStream`, a
 GPU's stream compaction.
@@ -576,7 +576,7 @@ GPU's stream compaction.
 <Callout type="warn" title="Skip it for">
   A result per entity: write it into a component of the row. A total over the rows: a [`Reduce<T>`](#reductions).
   Records the same pass must read: they reach `Emitted<T>` only when the pass ends
-  ([EECS070](/en/docs/guide/analyzer#eecs070)).
+  ([EECS070](/en/docs/guide/help/analyzer#eecs070)).
 </Callout>
 
 <Steps>
@@ -592,7 +592,7 @@ GPU's stream compaction.
 </Step>
 <Step>
 
-**Apply and clear** in a later system: it reads `Emitted<T>.Items` (a [dynamic buffer](/en/docs/guide/dynamic-buffers)),
+**Apply and clear** in a later system: it reads `Emitted<T>.Items` (a [dynamic buffer](/en/docs/guide/data/dynamic-buffers)),
 applies the records, and clears them, so nothing is applied twice.
 
 </Step>
@@ -675,7 +675,7 @@ missing).
 - **Passes append.** Several systems may emit one `T` in an update (melee and spells both emit damage), each in its
   turn; the system that applies the records clears them. The emitting system is scheduled as a writer of
   `Emitted<T>`, so a reader waits for it, and a method that both emits and takes `Emitted<T>`, or emits one type
-  through two parameters, is [EECS070](/en/docs/guide/analyzer#eecs070).
+  through two parameters, is [EECS070](/en/docs/guide/help/analyzer#eecs070).
 - **Applying in parallel.** The records are a list: [`world.ParallelFor`](#parallel-for) runs a job over its
   elements in chunks, for work per record that writes only the record (a roll, an encoding).
 - **Saved like a buffer.** Snapshots and saves copy the records left in `Emitted<T>`.
@@ -684,7 +684,7 @@ missing).
   `Emitted<T>`.
 
 Records appended to a singleton's list by hand, row by row, keep the method on one thread:
-[EECS089](/en/docs/guide/analyzer#eecs089) points them to `Emit<T>`. `EmitBenchmark` compares a parallel and a serial
+[EECS089](/en/docs/guide/help/analyzer#eecs089) points them to `Emit<T>`. `EmitBenchmark` compares a parallel and a serial
 `Emit<T>` with a component written per row and scanned after, a `ConcurrentQueue` and an `Interlocked` cursor into a
 shared array ([D78](/en/docs/decisions#d78-emit)).
 
@@ -741,14 +741,14 @@ world.AddSystem<WanderSystem>();
 
 - **One stream per draw.** The same four inputs give the same number, so two draws of one stream for one entity in
   one tick are equal: give each call site its own stream (0, 1, 2, ...), and vary it in a loop
-  ([EECS088](/en/docs/guide/analyzer#eecs088), with a code fix that takes the next free stream).
+  ([EECS088](/en/docs/guide/help/analyzer#eecs088), with a code fix that takes the next free stream).
 - **The world advances the tick.** Every `World.Update()` adds one to `Tick` before any system runs, so each update
   draws new numbers; `Update<TGroup>()` leaves it, so a group run between two updates draws what the update drew. The
   numbers of an entity depend on its id (index and version), so a recycled id draws a new sequence.
 - **Pure and allocation-free.** Four rounds of SplitMix64's finalizer: a draw is a few multiplications, no state is
   written, so the method keeps its reads (`in EntityRandom`) and stays parallel.
 - **What the analyzer checks:** `Random.Shared`, `new Random()` and a `System.Random` field in a `[ForEach]` method
-  are [EECS071](/en/docs/guide/analyzer#eecs071) (warning), with a code fix to `EntityRandom`.
+  are [EECS071](/en/docs/guide/help/analyzer#eecs071) (warning), with a code fix to `EntityRandom`.
 
 `EntityRandomBenchmark` measures a draw against SplitMix64, Philox, `Random.Shared` and a seeded `Random`, and a pass
 over 100,000 rows with `EntityRandom` and with `Random.Shared` ([D79](/en/docs/decisions#d79-entity-random)).
@@ -814,8 +814,8 @@ public ref struct CriticalSystem
 
 - **A copy of the job per chunk.** What `Execute` writes into the job's fields is not merged back: a total is a
   [`Reduce<T>`](#reductions) of a `[ForEach]` method, and a field read after the call is
-  [EECS061](/en/docs/guide/analyzer#eecs061). A write to memory every chunk shares is
-  [EECS060](/en/docs/guide/analyzer#eecs060).
+  [EECS061](/en/docs/guide/help/analyzer#eecs061). A write to memory every chunk shares is
+  [EECS060](/en/docs/guide/help/analyzer#eecs060).
 - **No structural change.** The world's structure is frozen while the job runs: a structural change throws. The list
   must not change while the call runs, and a chunk writes only its own elements or indexes.
 - **Chunks.** About four per thread, a multiple of 64 indexes between 1,024 and `World.MaxChunkRows`; the last
@@ -857,7 +857,7 @@ public ref struct ReceiveMoves
 
 Set the queue with `world.SetMoveInbox(inbox)` and register the system with `world.AddSystem<ReceiveMoves>()` before
 the systems that consume `MoveIntent`. The queue's type, bound and back-pressure are your choice. Keep the queue in a
-[`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton: no save writes it, so a managed queue needs no formatter,
+[`[NotSaved]`](/en/docs/guide/saves/saves#not-saved) singleton: no save writes it, so a managed queue needs no formatter,
 and a load keeps the one the host set. The [GameLoop sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop)
 drains a mailbox from a network thread this way.
 
@@ -875,14 +875,14 @@ What catches a change made off the owner thread:
 
 | Where the change comes from | Caught by |
 | --- | --- |
-| A `[ForEach]` method without `Entity` or `World` changing structure through a handle it holds | [EECS013](/en/docs/guide/analyzer#eecs013) at compile time; the runtime throws in a parallel stage |
+| A `[ForEach]` method without `Entity` or `World` changing structure through a handle it holds | [EECS013](/en/docs/guide/help/analyzer#eecs013) at compile time; the runtime throws in a parallel stage |
 | A system of a parallel stage, or a parallel job, changing structure through a helper | The runtime: the structure is frozen, every structural change throws |
-| A lambda handed to `Task.Run`, `Parallel.*`, `ThreadPool`, `new Thread` or `new Timer` changing a world the code around it also changes | [EECS014](/en/docs/guide/analyzer#eecs014) at compile time |
+| A lambda handed to `Task.Run`, `Parallel.*`, `ThreadPool`, `new Thread` or `new Timer` changing a world the code around it also changes | [EECS014](/en/docs/guide/help/analyzer#eecs014) at compile time |
 | Your own threads in any other way | Nothing reliable: hand the change to the owner as data |
 
 Every structural call counts here, including the less obvious ones: `entity.Run<…>(ref job)` (a job may change
 structure) and `LoadEntitiesInto` belong to the owner thread too, and the analyzer treats them as structural
-([EECS010](/en/docs/guide/analyzer#eecs010), [EECS014](/en/docs/guide/analyzer#eecs014)).
+([EECS010](/en/docs/guide/help/analyzer#eecs010), [EECS014](/en/docs/guide/help/analyzer#eecs014)).
 
 ## Full example [#full-example]
 
@@ -1001,7 +1001,7 @@ changes what an update computes, only how many threads compute it.
 - **Split by data, not by method.** Two systems that write different components run together; one that writes
   everything runs alone.
 - **Read with `in`.** A `ref` that only reads declares a write, and a write conflicts
-  ([EECS025](/en/docs/guide/analyzer#eecs025) reports it).
+  ([EECS025](/en/docs/guide/help/analyzer#eecs025) reports it).
 - **Size the chunks of few heavy rows.** A parallel method over a few hundred rows of microseconds each sets
   [`ChunkSize`](#chunk-rows), so every thread gets some; one over many light rows keeps the default.
 - **Reduce, do not share.** A count or a sum over a parallel pass is a [`Reduce<T>`](#reductions) parameter: a
@@ -1048,37 +1048,37 @@ over 100,000 rows, sequential and parallel (`ParallelPassBenchmark`):
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A structural change inside a parallel method | Chunks on other threads would tear the tables | [EECS010](/en/docs/guide/analyzer#eecs010) |
-| A `ref` singleton in a parallel method | Chunks race on one value | [EECS010](/en/docs/guide/analyzer#eecs010) |
-| Changing a collection through an `in` parameter | Scheduled as a read: races with parallel readers | [EECS011](/en/docs/guide/analyzer#eecs011) |
-| A structural change through a held handle in a method that takes no `Entity` | The system shares a stage it should not | [EECS013](/en/docs/guide/analyzer#eecs013) |
-| `Task.Run(() => world.CreateEntity(...))` beside the owner | Two threads change one world | [EECS014](/en/docs/guide/analyzer#eecs014) |
-| A `ref` parameter that only reads | Declares a write: fewer systems run together | [EECS025](/en/docs/guide/analyzer#eecs025) |
+| A structural change inside a parallel method | Chunks on other threads would tear the tables | [EECS010](/en/docs/guide/help/analyzer#eecs010) |
+| A `ref` singleton in a parallel method | Chunks race on one value | [EECS010](/en/docs/guide/help/analyzer#eecs010) |
+| Changing a collection through an `in` parameter | Scheduled as a read: races with parallel readers | [EECS011](/en/docs/guide/help/analyzer#eecs011) |
+| A structural change through a held handle in a method that takes no `Entity` | The system shares a stage it should not | [EECS013](/en/docs/guide/help/analyzer#eecs013) |
+| `Task.Run(() => world.CreateEntity(...))` beside the owner | Two threads change one world | [EECS014](/en/docs/guide/help/analyzer#eecs014) |
+| A `ref` parameter that only reads | Declares a write: fewer systems run together | [EECS025](/en/docs/guide/help/analyzer#eecs025) |
 | A few hundred heavy rows in a parallel method without `ChunkSize` | One chunk: one thread works, the others wait | Code review: [`ChunkSize`](#chunk-rows) |
 | `ChunkSize` on many light rows | A claim per small chunk: more overhead, no gain | Code review: keep the default |
-| `ChunkSize` without `Parallel = true`, or below 0 | Compile error: a method on one thread has no chunks | [EECS054](/en/docs/guide/analyzer#eecs054) |
+| `ChunkSize` without `Parallel = true`, or below 0 | Compile error: a method on one thread has no chunks | [EECS054](/en/docs/guide/help/analyzer#eecs054) |
 | Code that expects chunks in row order, or one per thread | Chunks are claimed as threads finish, in any order and on any thread | Code review: write each row's result to its own row |
-| A static counter or a shared list written by a parallel method | Lost updates, a corrupted list | [EECS060](/en/docs/guide/analyzer#eecs060); use [`Reduce<T>`](#reductions) |
-| A sum kept in a job field, read after `ForEachParallel` | Still the old value: each chunk ran a copy | [EECS061](/en/docs/guide/analyzer#eecs061) |
-| A `Reduce<T>` parameter without `ref` | Compile error: a copy would lose the result | [EECS002](/en/docs/guide/analyzer#eecs002) |
+| A static counter or a shared list written by a parallel method | Lost updates, a corrupted list | [EECS060](/en/docs/guide/help/analyzer#eecs060); use [`Reduce<T>`](#reductions) |
+| A sum kept in a job field, read after `ForEachParallel` | Still the old value: each chunk ran a copy | [EECS061](/en/docs/guide/help/analyzer#eecs061) |
+| A `Reduce<T>` parameter without `ref` | Compile error: a copy would lose the result | [EECS002](/en/docs/guide/help/analyzer#eecs002) |
 | Reading `Reduce<T>.Value` as the total inside the method | It is this chunk's partial result | Code review: read `T` after the pass |
-| Two `Reduce<T>` of one `T`, or a `ref T` beside it | One result replaces the other | [EECS057](/en/docs/guide/analyzer#eecs057) |
+| Two `Reduce<T>` of one `T`, or a `ref T` beside it | One result replaces the other | [EECS057](/en/docs/guide/help/analyzer#eecs057) |
 | A `Combine` that is not associative (an average of averages) | The result depends on where chunks begin | Code review: reduce the sum and the count, divide after |
 | A float total compared across machines with the default chunks | It differs in the last bits | Set [`ChunkSize`](#chunk-rows) |
 | A `Scratch<T>` list used without clearing it | The row sees the last row's items | Code review: `Clear()` at the start of the row |
-| A reference a `Scratch<T>` holds stored into a component | The next row on that thread changes this entity's data | [EECS058](/en/docs/guide/analyzer#eecs058) |
-| A `Lookup<T>` of a component the same method writes | Rows read before or after their write, torn on another thread | [EECS059](/en/docs/guide/analyzer#eecs059): write another component (double buffering) |
-| A `World` parameter in a parallel method to read other entities | Compile error | [EECS010](/en/docs/guide/analyzer#eecs010): a `Lookup<T>` |
+| A reference a `Scratch<T>` holds stored into a component | The next row on that thread changes this entity's data | [EECS058](/en/docs/guide/help/analyzer#eecs058) |
+| A `Lookup<T>` of a component the same method writes | Rows read before or after their write, torn on another thread | [EECS059](/en/docs/guide/help/analyzer#eecs059): write another component (double buffering) |
+| A `World` parameter in a parallel method to read other entities | Compile error | [EECS010](/en/docs/guide/help/analyzer#eecs010): a `Lookup<T>` |
 | A value index reached through a helper inside a parallel pass, before anything built it | `InvalidOperationException` | Call `TryFind` / `Find` / `Count` on the `Lookup<T>` parameter itself |
-| A reduction type that is not `partial`, or a field without an attribute | Compile error: the generator cannot write `Identity` and `Combine` | [EECS062](/en/docs/guide/analyzer#eecs062), [EECS064](/en/docs/guide/analyzer#eecs064) |
-| `Identity` 0 for a minimum, written by hand | Every chunk's minimum becomes 0 | [EECS066](/en/docs/guide/analyzer#eecs066): `[Min]` |
-| A singleton reset in `OnUpdate` and added to row by row | One thread, no vector loop | [EECS086](/en/docs/guide/analyzer#eecs086): `ref Reduce<T>` |
-| Reading `Emitted<T>` in the method that emits `T` | Compile error: the records arrive when the pass ends | [EECS070](/en/docs/guide/analyzer#eecs070) |
+| A reduction type that is not `partial`, or a field without an attribute | Compile error: the generator cannot write `Identity` and `Combine` | [EECS062](/en/docs/guide/help/analyzer#eecs062), [EECS064](/en/docs/guide/help/analyzer#eecs064) |
+| `Identity` 0 for a minimum, written by hand | Every chunk's minimum becomes 0 | [EECS066](/en/docs/guide/help/analyzer#eecs066): `[Min]` |
+| A singleton reset in `OnUpdate` and added to row by row | One thread, no vector loop | [EECS086](/en/docs/guide/help/analyzer#eecs086): `ref Reduce<T>` |
+| Reading `Emitted<T>` in the method that emits `T` | Compile error: the records arrive when the pass ends | [EECS070](/en/docs/guide/help/analyzer#eecs070) |
 | Not clearing `Emitted<T>` after applying it | The next update applies the same records again | Code review: `Items.Clear()` in the applying system |
-| Records added to a singleton's list row by row | One thread | [EECS089](/en/docs/guide/analyzer#eecs089): `Emit<T>` |
-| `Random.Shared` or `new Random()` in a `[ForEach]` method | Different numbers on every run and thread count | [EECS071](/en/docs/guide/analyzer#eecs071): `EntityRandom` |
-| Two draws of one stream for one entity | The same number twice | [EECS088](/en/docs/guide/analyzer#eecs088): one stream per draw |
-| Reading a `ParallelFor` job's field after the call | Still the old value: each chunk ran a copy | [EECS061](/en/docs/guide/analyzer#eecs061) |
+| Records added to a singleton's list row by row | One thread | [EECS089](/en/docs/guide/help/analyzer#eecs089): `Emit<T>` |
+| `Random.Shared` or `new Random()` in a `[ForEach]` method | Different numbers on every run and thread count | [EECS071](/en/docs/guide/help/analyzer#eecs071): `EntityRandom` |
+| Two draws of one stream for one entity | The same number twice | [EECS088](/en/docs/guide/help/analyzer#eecs088): one stream per draw |
+| Reading a `ParallelFor` job's field after the call | Still the old value: each chunk ran a copy | [EECS061](/en/docs/guide/help/analyzer#eecs061) |
 
 ## Compared with other ECS libraries [#compared-with-other-ecs-libraries]
 
@@ -1101,13 +1101,13 @@ against the parallel runners of the others:
 ## Related [#related]
 
 <Cards>
-  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/basics/systems">
     Parameters, ordering, groups and parallel methods.
   </Card>
-  <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
+  <Card title="Analyzer rules" href="/en/docs/guide/help/analyzer">
     EECS010 to EECS014, the parallel rules EECS057 to EECS061, EECS070 and EECS071.
   </Card>
-  <Card title="High-performance patterns" href="/en/docs/guide/high-performance">
+  <Card title="High-performance patterns" href="/en/docs/guide/performance/high-performance">
     Vector loops, chunks, grid tiles and their OpenMP, MPI and Burst names.
   </Card>
   <Card title="Sample: MultiWorld" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/MultiWorld">

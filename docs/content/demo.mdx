@@ -56,7 +56,7 @@ page writes it into the `Pointer` singleton, and `AttractSystem` reads it on the
 
 Below the canvas, the page shows what the same motion costs written two ways, measured live. `DragSystem` and
 `MovementSystem` are plain `[ForEach]` methods, called once per spark. `DragBatchSystem` and `MovementBatchSystem` are
-[batch methods](/en/docs/guide/systems#batch-methods): they receive spans over runs of whole rows, cast them to
+[batch methods](/en/docs/guide/basics/systems#batch-methods): they receive spans over runs of whole rows, cast them to
 `Vector128<float>` and work on two sparks per instruction, with one scalar step for an odd spark at the end. The cast
 is valid because `Position` and `Velocity` are two floats each, so a run of rows is one float array.
 

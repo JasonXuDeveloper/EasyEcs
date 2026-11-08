@@ -14,13 +14,13 @@ come first, then the ones specific to EasyEcs. For the pattern itself, start wit
 
 An identity and nothing else: no fields, no methods. In EasyEcs an `Entity` is a 16-byte handle (world, index,
 version); every access checks the version, so a handle to a destroyed entity throws instead of reaching whatever
-reuses its index. See [Entities and components](/en/docs/guide/entities-and-components).
+reuses its index. See [Entities and components](/en/docs/guide/basics/entities-and-components).
 
 ## EntityId [#entityid]
 
 The 8-byte, unmanaged form of an entity: index plus version, without the world. Components store `EntityId`s to
 point at other entities; `world.TryGetEntity(id, out entity)` turns one back into a checked handle. See
-[Indexes and relations](/en/docs/guide/indexes-and-relations).
+[Indexes and relations](/en/docs/guide/data/indexes-and-relations).
 
 ## Component [#component]
 
@@ -33,18 +33,18 @@ The members the generator adds to a `partial` struct from attributes on its decl
 `[UniqueKey]` writes the explicit `Key` of `IIndexed<TKey>`, `[Group]` the `Group` of `IGroup`, and `[Sum]`,
 `[Min]`, `[Max]` and their kin the `Identity` and `Combine` of a reduction. Setup attributes on the type
 (`[GroupBy]`, `[WhenTargetDestroyed]`, `[NotSaved]`) are registered for every world instead. See
-[Entities and components](/en/docs/guide/entities-and-components#declared-parts).
+[Entities and components](/en/docs/guide/basics/entities-and-components#declared-parts).
 
 ## Tag [#tag]
 
 A component with no fields (`Dead`, `Stunned`). It only says yes or no, so systems use it in filters
 (`[Without<Dead>]`), and adding or removing it never copies data after the first time. See
-[Entities and components](/en/docs/guide/entities-and-components).
+[Entities and components](/en/docs/guide/basics/entities-and-components).
 
 ## Singleton [#singleton]
 
 A struct implementing `ISingletonComponent`: one value per world, such as a clock, configuration or a spatial grid.
-A `[ForEach]` method takes it as a `ref` or `in` parameter. See [Singletons](/en/docs/guide/singletons).
+A `[ForEach]` method takes it as a `ref` or `in` parameter. See [Singletons](/en/docs/guide/basics/singletons).
 
 ## Archetype [#archetype]
 
@@ -68,14 +68,14 @@ at a time. See [Architecture](/en/docs/architecture).
 
 The question "which entities have these components and pass this filter?". A `[ForEach]` method is a query; outside
 systems, `world.Query<T…>()` (`world.Read<T…>()` for a loop that only reads), `Count`, `Any` and struct jobs ask
-it. See [Queries and filters](/en/docs/guide/queries).
+it. See [Queries and filters](/en/docs/guide/basics/queries).
 
 ## Filter [#filter]
 
 The conditions of a query beyond its components: `With`, `Without`, `WithAny`, `Changed`, `Removed`, `ChangedAny`,
 `RemovedAny`, `InGroup` and `Slice` (the part of the rows one pass visits, [slice](#slice)).
 They are attributes on `[ForEach]` methods, or a `QueryFilter` kept in a `static readonly` field. See
-[Queries and filters](/en/docs/guide/queries#filters).
+[Queries and filters](/en/docs/guide/basics/queries#filters).
 
 ## Query cache [#query-cache]
 
@@ -87,20 +87,20 @@ created. Readers never lock. See [Architecture](/en/docs/architecture#query-cach
 
 The first updates of a world, which create the tables, the query cache entries and the buffers that later updates
 reuse. After warm-up, queries, iteration, component access and structural changes allocate nothing, so an allocation
-test runs one update before it counts bytes. See [Testing systems](/en/docs/guide/testing#allocations).
+test runs one update before it counts bytes. See [Testing systems](/en/docs/guide/production/testing#allocations).
 
 ## System [#system]
 
 An `[EcsSystem] ref struct` of static methods with one job, never an object. Its `[ForEach]` methods run over every
 matching entity on each update; it keeps no state of its own and never calls another system. See
-[Systems](/en/docs/guide/systems).
+[Systems](/en/docs/guide/basics/systems).
 
 ## System handle [#system-handle]
 
 A `SystemHandle`: what `AddSystem<T>()`, `System<T>()` and `world.Systems` return, a handle to the world's record of
 one system (`Enabled`, `Error`, `LastRunTick`, `RunCount`, `Stats`, `Name`). Like an `Entity`, it turns stale when its
 system is removed. Hooks may take it to read their own system's record. See
-[Systems](/en/docs/guide/systems#lifecycle).
+[Systems](/en/docs/guide/basics/systems#lifecycle).
 
 ## System set [#system-set]
 
@@ -115,19 +115,19 @@ simulation and persistence can run at their own cadence. Systems without the att
 which `world.Update()` runs. A group can filter the entities of all its systems: `[With<T>]`, `[Without<T>]` and
 `[WithAny<T1, T2>]` on the group struct, or `ISystemGroupWith<T>` / `ISystemGroupWithout<T>` implemented by the group or an interface
 it implements (the way a generic interface gives each actor type its own group). See
-[Systems](/en/docs/guide/systems#system-groups).
+[Systems](/en/docs/guide/basics/systems#system-groups).
 
 ## Update and tick [#update]
 
 An update is one call of `world.Update()` (or `world.Update<G>()`): every enabled system of the group runs once, in
 order, unless its `[UpdateInterval]` skips this update. A tick is one step of the simulation at a fixed rate; a
-server's loop calls `Update()` once per tick. See [Systems](/en/docs/guide/systems#one-update).
+server's loop calls `Update()` once per tick. See [Systems](/en/docs/guide/basics/systems#one-update).
 
 ## Stage [#stage]
 
 A run of consecutive systems with no order and no conflicting [access](#access-set) between them. With
 `WorldOptions.ParallelSystems`, a stage's systems run at the same time; without it, every system is its own stage.
-See [Threading](/en/docs/guide/threading#parallel-systems).
+See [Threading](/en/docs/guide/performance/threading#parallel-systems).
 
 ## Access set [#access-set]
 
@@ -135,7 +135,7 @@ What a system reads and writes, generated from its `[ForEach]` parameters: a `re
 write, an `in` one a read, a `Mut<T>` parameter a write of `T`, and `[Changed<T>]` or `[Removed<T>]` reads `T`. Two systems conflict when one writes what
 the other reads or writes. A system that can reach the whole world (an `Entity` or `World` parameter, an
 `OnUpdate` method, a `[Consume]` method) runs alone. Only systems that do not conflict share a [stage](#stage). See
-[Threading](/en/docs/guide/threading#parallel-systems).
+[Threading](/en/docs/guide/performance/threading#parallel-systems).
 
 ## Runner [#runner]
 
@@ -143,7 +143,7 @@ What runs parallel work for a world: the systems of a stage, or the chunks of a 
 works through the items together with up to `WorldOptions.MaxDegreeOfParallelism - 1` reusable thread-pool work
 items, so a parallel run allocates nothing. It wakes those helpers only while measured runs show they make the work
 faster; a busy runner leaves the items to the calling thread. See
-[Threading](/en/docs/guide/threading#parallel-systems).
+[Threading](/en/docs/guide/performance/threading#parallel-systems).
 
 ## Chunk [#chunk]
 
@@ -151,46 +151,46 @@ A slice of the matching rows of a parallel method (`[ForEach(Parallel = true)]`,
 rows, by default about four per thread, between 1,024 and 16,384 rows (a multiple of 4,096 when the method writes a
 tracked component), or `ChunkSize` rounded up to 64. The [runner](#runner)'s threads claim the chunks one at a time
 as they finish (OpenMP's `schedule(dynamic, n)`); fewer than two chunks run on the calling thread alone. See
-[chunk size](/en/docs/guide/threading#chunk-rows).
+[chunk size](/en/docs/guide/performance/threading#chunk-rows).
 
 ## Reduction [#reduction]
 
 A total over the rows of a pass, computed in parts and combined: a `Reduce<T>` parameter of a `[ForEach]` method
 gives each [chunk](#chunk) (or the pass on one thread) its own partial result starting at `T.Identity`, and when the
 pass ends the partial results are combined with `T.Combine`, in row order, into singleton `T`. `[Sum]`, `[Min]`,
-`[Max]` and their kin on its fields make the generator write both. OpenMP's `reduction`, MPI's `Allreduce`. See [reductions](/en/docs/guide/threading#reductions).
+`[Max]` and their kin on its fields make the generator write both. OpenMP's `reduction`, MPI's `Allreduce`. See [reductions](/en/docs/guide/performance/threading#reductions).
 
 ## Scratch [#scratch]
 
 A `[ForEach]` method's working memory on the thread running it: a `Scratch<T>` parameter holds one `T` per method
 and thread, kept between rows, passes and worlds and never reset, so a list is allocated once per thread. OpenMP's
-`threadprivate`. See [scratch](/en/docs/guide/threading#scratch).
+`threadprivate`. See [scratch](/en/docs/guide/performance/threading#scratch).
 
 ## Lookup [#lookup]
 
 A read of another entity's component from a `[ForEach]` method: a `Lookup<T>` parameter reads `T` of any entity
 (by id, or by key for an indexed `T`) as it was before the pass, and schedules the system as a reader of `T`, so the
 method may run in parallel. MPI's one-sided `Get`, Unity's `ComponentLookup`. See
-[lookups](/en/docs/guide/threading#lookups).
+[lookups](/en/docs/guide/performance/threading#lookups).
 
 ## Emitted records [#emit]
 
 Records a pass produces for a later system (hits, packets): an `Emit<T>` parameter appends to its [chunk](#chunk)'s
 own list, and when the pass ends the lists are appended in row order to singleton `Emitted<T>`. A `[Drain]` method
-then handles each record once, in that order, and clears them (it drains the list). Unity's `NativeStream`. See [emit](/en/docs/guide/threading#emit).
+then handles each record once, in that order, and clears them (it drains the list). Unity's `NativeStream`. See [emit](/en/docs/guide/performance/threading#emit).
 
 ## Stream (`EntityRandom`) [#stream]
 
 The fourth input of an `EntityRandom` draw, beside the seed, the entity and the tick: each call site of a method
 draws from its own stream (0, 1, 2, ...), so two draws for one entity in one tick differ. The same four inputs give
-the same number on any thread and in any row order. See [random numbers](/en/docs/guide/threading#entity-random).
+the same number on any thread and in any row order. See [random numbers](/en/docs/guide/performance/threading#entity-random).
 
 ## Tile and halo [#tile]
 
 A tile is one entity of a grid cut into boxes of cells: a component implementing `ITile<TKey>` (its shape and key) and
 a `DynamicBuffer<TCell>` of its cells. The halo is the ring of cells around it, `Halo` cells wide, that
 `Tile<TCell, TTile>.ExchangeHalo()` copies from the facing edges of its neighbors (MPI's ghost cells, a CUDA tile's apron).
-See [grid tiles](/en/docs/guide/grids).
+See [grid tiles](/en/docs/guide/performance/grids).
 
 ## Vector loop [#vector-loop]
 
@@ -198,13 +198,13 @@ The SIMD loop the generator writes for a per-row `[ForEach]` method over compone
 (`Vector512` where the CPU has AVX-512, then `Vector<T>`): the method's body computed for as many rows per
 instruction as a vector holds, with masks for its branches and
 the method itself for the rows left over. EECS055 names why a method got none. See
-[vector loops](/en/docs/guide/systems#vector-loops).
+[vector loops](/en/docs/guide/basics/systems#vector-loops).
 
 ## Slice [#slice]
 
 The part of each matching table one run of a `[ForEach(Slices = N)]` method visits: about 1 / N of its rows, cut at
 64-row words, slice `RunCount % N` of the system's runs. Every row is visited once per N runs. See
-[Systems](/en/docs/guide/systems#slices).
+[Systems](/en/docs/guide/basics/systems#slices).
 
 ## Schedule [#schedule]
 
@@ -212,7 +212,7 @@ The order in which a world runs its systems: per [group](#system-group), its [st
 `world.DescribeSchedule()` returns it, as text (`ToString`) or a Mermaid diagram (`ToMermaid`), with the
 registration-only pairs: two systems whose [access](#access-set) conflicts and that no `[UpdateBefore<T>]` /
 `[UpdateAfter<T>]` chain orders, so they run in registration order and registering them the other way round changes
-what the later one sees. See [Debugging and diagnostics](/en/docs/guide/diagnostics#schedule).
+what the later one sees. See [Debugging and diagnostics](/en/docs/guide/production/diagnostics#schedule).
 
 ## Struct job [#struct-job]
 
@@ -220,20 +220,20 @@ A struct implementing `IForEach<T…>`, `IForEachEntity<T…>` or `IForEachBatch
 loop calls. The JIT inlines it, so there is no delegate and no virtual call per entity. The generator writes one for
 every `[ForEach]` method. `entity.Run<T…, TJob>(ref job)` runs an `IForEachEntity` job on one entity. A job's
 `static int WriteMask` names the components it writes; implementing `INoStructuralChanges` promises no structural change.
-See [Queries and filters](/en/docs/guide/queries#foreach-a-struct-job).
+See [Queries and filters](/en/docs/guide/basics/queries#foreach-a-struct-job).
 
 ## Entry point [#entry-point]
 
-The static method the generator writes next to a `[ForEach]` method outside a system (a [runner](/en/docs/guide/systems#foreach-outside-systems))
+The static method the generator writes next to a `[ForEach]` method outside a system (a [runner](/en/docs/guide/basics/systems#foreach-outside-systems))
 or an `[EntityMethod]` method, named like it: `Reports.SumHealth(world, ref total)` runs the pass over a world,
 `Requests.TakeHit(unit, damage)` runs the method on one entity and returns whether it ran. See
-[one entity](/en/docs/guide/queries#run-on-one-entity).
+[one entity](/en/docs/guide/basics/queries#run-on-one-entity).
 
 ## Event entity [#event-entity]
 
 An entity that stands for something that happened or was asked (a hit, a sale, a client's command), created by one
 system or thread and handled once by another. `[ForEach, Consume]` destroys the rows its pass visited, so each event
-is handled once and none is left behind. See [Systems](/en/docs/guide/systems#consume).
+is handled once and none is left behind. See [Systems](/en/docs/guide/basics/systems#consume).
 
 ## Batch method [#batch-method]
 
@@ -241,50 +241,50 @@ A `[ForEach]` method whose component parameters are spans (`Span<Position>`, `Re
 runs of consecutive matching rows, element `i` of every span being the same entity, and a whole table in one call
 when every row matches; an `EntitySpan` parameter gives the entities of the run. The spans point into the tables, so
 the structure is [frozen](#frozen-structure) while it runs. Write one to vectorize a loop. See
-[Systems](/en/docs/guide/systems#batch-methods).
+[Systems](/en/docs/guide/basics/systems#batch-methods).
 
 ## Optional component (`Maybe<T>`) [#maybe]
 
 A `[ForEach]` parameter for a component the entity may lack: the method visits every entity with its other
 components, and `HasValue` says whether this one also has `T`. `ReadOnlyMaybe<T>` is the read-only one, which an
-indexed component accepts too. See [Systems](/en/docs/guide/systems#maybe).
+indexed component accepts too. See [Systems](/en/docs/guide/basics/systems#maybe).
 
 ## `Mut<T>` [#mut]
 
 A `[ForEach]` parameter for a component the method may write: `Value` reads it, `Write()` and `SetIfChanged(value)`
 (when the value differs) write it, and only the rows written are stamped, so a `[Changed<T>]` reader skips the rows
 whose value stayed the same. The scheduler counts it as a write of `T`. See
-[Change tracking](/en/docs/guide/change-tracking#set-if-changed).
+[Change tracking](/en/docs/guide/changes/change-tracking#set-if-changed).
 
 ## Change tick [#change-tick]
 
 A counter of the world (`world.ChangeTick`) that grows once per stage and once after each update. Tracked rows record
 the tick of their last write, and each system records the tick it last ran at (`LastRunTick`). See
-[Change tracking](/en/docs/guide/change-tracking#ticks).
+[Change tracking](/en/docs/guide/changes/change-tracking#ticks).
 
 ## Tracked component [#tracked-component]
 
 A component that also implements `ITracked`. Its rows record when they were written or removed, so
 `[Changed<T>]` and `[Removed<T>]` visit only those rows. It costs 8 bytes per row; untracked components pay nothing.
-See [Change tracking](/en/docs/guide/change-tracking).
+See [Change tracking](/en/docs/guide/changes/change-tracking).
 
 ## Destroy log [#destroy-log]
 
 The ring of the last destroyed entities a world keeps when `WorldOptions.DestroyLogCapacity` is set, each with the change tick
 of its destruction (a [retired entity](#retired-entity) counts when it is freed). `world.DestroyedSince(since, …)` lists those destroyed since a reader's tick, so each client keeps
-its own mark. See [Change tracking](/en/docs/guide/change-tracking#destroy-log).
+its own mark. See [Change tracking](/en/docs/guide/changes/change-tracking#destroy-log).
 
 ## Structural change [#structural-change]
 
 Anything that changes which components an entity has, or which entities exist: create, destroy, `Set` of a new
 component, `Remove`, `Disable`. In EasyEcs it applies at once, even in the middle of a pass, with no command buffer.
-See [Structural changes](/en/docs/guide/structural-changes).
+See [Structural changes](/en/docs/guide/changes/structural-changes).
 
 ## Pass [#pass]
 
 One walk over the matching rows: a run of a `[ForEach]` method, a `ForEach` job or a `Query` loop. A pass visits each
 entity at most once, skips the entities that stop matching before their turn, and does not visit the ones that join
-a matching table during it. See [Structural changes](/en/docs/guide/structural-changes#during-a-pass).
+a matching table during it. See [Structural changes](/en/docs/guide/changes/structural-changes#during-a-pass).
 
 ## Tombstone [#tombstone]
 
@@ -292,14 +292,14 @@ The row an entity leaves when it is destroyed or moves to another table during a
 table's last row fills the hole at once; during one, the row stays as a tombstone that passes skip, so no row shifts
 under a loop. The last pass to end closes the tombstones by moving live rows into them. This is why you can destroy
 or remove while iterating, with no command buffer. See
-[Structural changes](/en/docs/guide/structural-changes#keeping-tables-dense).
+[Structural changes](/en/docs/guide/changes/structural-changes#keeping-tables-dense).
 
 ## Frozen structure [#frozen-structure]
 
 A pass that holds refs or spans into the tables for longer than one call freezes the world's structure while it
 runs: [batch methods](#batch-method), jobs that implement `INoStructuralChanges`, parallel methods and parallel
 stages. A structural change inside one throws `InvalidOperationException`. See
-[Structural changes](/en/docs/guide/structural-changes#frozen-passes).
+[Structural changes](/en/docs/guide/changes/structural-changes#frozen-passes).
 
 ## Structural gate [#structural-gate]
 
@@ -308,20 +308,20 @@ belong to the [owner thread](#owner-thread), so the gate is a plain flag the own
 instruction. It throws `InvalidOperationException` when a change is reentered from code running under the gate, or
 made while the structure is [frozen](#frozen-structure), instead of tearing the tables. It cannot see every change
 made from another thread at the same moment; the analyzer reports the ones it can (EECS013, EECS014). See
-[Threading](/en/docs/guide/threading#what-the-world-synchronizes).
+[Threading](/en/docs/guide/performance/threading#what-the-world-synchronizes).
 
 ## Owner thread [#owner-thread]
 
 The thread that calls a world's `Update` and makes its structural changes. A world has one at a time; a server runs
 one world per thread and hands input to it through a [mailbox](#mailbox). See
-[Threading](/en/docs/guide/threading#terms-process-world-owner-thread).
+[Threading](/en/docs/guide/performance/threading#terms-process-world-owner-thread).
 
 ## Mailbox [#mailbox]
 
 A queue your code owns that carries input from other threads (network, timers, a database) to a world's owner
 thread. EasyEcs has none of its own: other threads post messages, and a system on the owner thread takes them and
 turns each into data, such as a request entity. See
-[Threading](/en/docs/guide/threading#input-from-other-threads).
+[Threading](/en/docs/guide/performance/threading#input-from-other-threads).
 
 ## Actor [#actor]
 
@@ -335,81 +335,81 @@ runs on its entity with `entity.Run`. See
 
 A recipe of component values that belongs to no world (`new Prefab().SetHealth(30)`), so no query ever sees it.
 `world.Instantiate(prefab)` creates an entity, or a wave, with a copy of every value. See
-[Prefabs](/en/docs/guide/prefabs).
+[Prefabs](/en/docs/guide/basics/prefabs).
 
 ## Dynamic buffer [#dynamic-buffer]
 
 A `DynamicBuffer<T>` component: a list that belongs to one entity, such as a bag of loot or a path. Its writes need
 a `ref`, so every change is tracked, and snapshots copy its elements. See
-[Dynamic buffers](/en/docs/guide/dynamic-buffers).
+[Dynamic buffers](/en/docs/guide/data/dynamic-buffers).
 
 ## Buffer pool [#buffer-pool]
 
 Where the lists of dead [dynamic buffers](#dynamic-buffer) wait, per element type, for the next buffer's first write:
 entities with buffers that come and go allocate nothing once warm. `DynamicBuffer<T>.MaxPooledLength` caps the length a
 list may have to go back, and `DynamicBuffer<T>.FillPool(n)` fills it at start-up. See
-[the buffer pool](/en/docs/guide/dynamic-buffers#pool).
+[the buffer pool](/en/docs/guide/data/dynamic-buffers#pool).
 
 ## Value index [#value-index]
 
 A lookup from a key to the entities whose component has that key: `[LookupKey]` on the member that is the key (the
 generator writes `IIndexed<TKey>`), `world.XIndex` or `world.Index<T, TKey>()` to query it. The index follows every `Set`; a comparable key also gives sorted ranges. A
 unique index (`[UniqueKey]`, `IUniqueIndexed<TKey>`) holds one entity per key, found with `Get`, and refuses a write that would
-duplicate a key. See [Indexes and relations](/en/docs/guide/indexes-and-relations).
+duplicate a key. See [Indexes and relations](/en/docs/guide/data/indexes-and-relations).
 
 ## Relation [#relation]
 
 A link from one entity to another. One link per entity is a component indexed by an `EntityId`; many links of one
 kind per entity are `IRelation` elements of a buffer. Both answer "who links to this entity?". See
-[Indexes and relations](/en/docs/guide/indexes-and-relations).
+[Indexes and relations](/en/docs/guide/data/indexes-and-relations).
 
 ## Hierarchy [#hierarchy]
 
 Parent and child entities linked by the built-in `ChildOf` component. `world.Children(parent)` lists the children,
-`world.Descendants(root)` walks the whole subtree depth first, and destroying a parent destroys its descendants. See [Hierarchy](/en/docs/guide/hierarchy).
+`world.Descendants(root)` walks the whole subtree depth first, and destroying a parent destroys its descendants. See [Hierarchy](/en/docs/guide/data/hierarchy).
 
 ## Group (IGroup) [#group]
 
 A component implementing `IGroup` (`[Group]` on its member) whose value splits tables once the type is `[GroupBy]`
 (or after `world.GroupBy<T>()`): the entities of one zone,
 map or match share tables, so a query of that group walks only its rows. Not to be confused with a
-[system group](#system-group). See [Groups](/en/docs/guide/groups).
+[system group](#system-group). See [Groups](/en/docs/guide/data/groups).
 
 ## Cleanup component [#cleanup-component]
 
 A component implementing `ICleanupComponent`. `Destroy` on its entity retires it instead of freeing it: the other components go and the
 `Retired` tag is added; the entity stays alive until a system releases the resource (a socket, a seat) and removes the component.
-Until then it is not moved, cloned or brought back by `SetAll`. See [Cleanup and disable](/en/docs/guide/cleanup-and-disable#cleanup-components).
+Until then it is not moved, cloned or brought back by `SetAll`. See [Cleanup and disable](/en/docs/guide/changes/cleanup-and-disable#cleanup-components).
 
 ## Retired entity [#retired-entity]
 
 An entity that `Destroy` found holding [cleanup components](#cleanup-component): it is still alive (`IsAlive` is
 true), keeps only those components and the `Retired` tag (`entity.IsRetired`), and is freed when a system removes the
 last one. "Destroyed" always means freed: the id is no longer alive, and the [destroy log](#destroy-log) records it
-then. See [Cleanup and disable](/en/docs/guide/cleanup-and-disable#cleanup-components).
+then. See [Cleanup and disable](/en/docs/guide/changes/cleanup-and-disable#cleanup-components).
 
 ## Disabled component [#disabled-component]
 
 A component hidden by `entity.Disable<T>()`: the value stays, but queries, `Has` and `Get` act as if the entity
 lacked it until `Enable<T>()`. The entity carries the `Disabled<T>` tag meanwhile, which queries can ask for. See
-[Cleanup and disable](/en/docs/guide/cleanup-and-disable#disable-a-component).
+[Cleanup and disable](/en/docs/guide/changes/cleanup-and-disable#disable-a-component).
 
 ## Snapshot [#snapshot]
 
 An in-memory copy of a world: `world.Capture()` takes one, `world.Restore(snapshot)` rolls back to it. Used for
-undo, rollback and resetting a world between tests. See [Snapshots](/en/docs/guide/snapshots).
+undo, rollback and resetting a world between tests. See [Snapshots](/en/docs/guide/saves/snapshots).
 
 ## Save [#save]
 
 A world, or some of its entities, written as bytes: `world.Save` and `world.Load`. Unmanaged components are written
-as raw rows, managed ones through Nino (`[NinoType]`). See [Saves](/en/docs/guide/saves).
+as raw rows, managed ones through Nino (`[NinoType]`). See [Saves](/en/docs/guide/saves/saves).
 
 ## ComponentSet [#component-set]
 
 A set of component and singleton types, built once and kept in a `static readonly` field:
 `ComponentSet.Create().With<Bank>().WithSingleton<Rates>()`. It names the components `SaveEntities` writes (a record
 of what persists), the types a restart's `SaveWithout(output, exclude)` leaves out and the singletons `LoadKeeping(input, keep)`
-keeps. See [Saves](/en/docs/guide/saves#restart).
+keeps. See [Saves](/en/docs/guide/saves/saves#restart).
 
 ## Migration [#migration]
 
@@ -417,27 +417,27 @@ Moving related entities, such as a player and what it owns, to another world: `S
 through bytes (another process), or `MoveEntities` directly (another world of the thread). Links inside the group
 follow the new ids. A record saves only what persists: `SaveEntities` with a `ComponentSet`, loaded onto entities
 that exist already with `LoadEntitiesInto` (`markWritten: false` keeps the restored values from counting as changed).
-See [Migration and unloading](/en/docs/guide/migration-and-unload).
+See [Migration and unloading](/en/docs/guide/saves/migration-and-unload).
 
 ## Collectible ALC [#collectible-alc]
 
 A collectible `AssemblyLoadContext`: .NET's way to load a plugin and unload it later. `world.RemoveTypes(context)`
 removes the plugin's systems, components and singletons from a world, so the context can unload while the world
-keeps running. See [Migration and unloading](/en/docs/guide/migration-and-unload).
+keeps running. See [Migration and unloading](/en/docs/guide/saves/migration-and-unload).
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Entities and components" href="/en/docs/guide/entities-and-components">
+  <Card title="Entities and components" href="/en/docs/guide/basics/entities-and-components">
     Handles, ids, components, tags and where they are stored.
   </Card>
-  <Card title="Systems" href="/en/docs/guide/systems">
+  <Card title="Systems" href="/en/docs/guide/basics/systems">
     `[ForEach]`, batch and parallel methods, groups, ordering and intervals.
   </Card>
-  <Card title="Threading" href="/en/docs/guide/threading">
+  <Card title="Threading" href="/en/docs/guide/performance/threading">
     The owner thread, stages, the runner and input from other threads.
   </Card>
-  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+  <Card title="Change tracking" href="/en/docs/guide/changes/change-tracking">
     Change ticks, `[Changed<T>]` and `[Removed<T>]`.
   </Card>
 </Cards>

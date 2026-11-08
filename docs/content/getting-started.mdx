@@ -58,7 +58,7 @@ public record struct Burning(int Ticks) : IComponent;   // a status that comes a
 public struct Dead : IComponent;                        // a tag: no fields
 ```
 
-Components must be structs: a class fails the build with [EECS006](/en/docs/guide/analyzer#eecs006). Keep them
+Components must be structs: a class fails the build with [EECS006](/en/docs/guide/help/analyzer#eecs006). Keep them
 small and split what systems read separately, because a pass loads only the columns it uses.
 
 </Step>
@@ -82,7 +82,7 @@ for (int i = 0; i < units.Length; i += 10) units[i].SetBurning(40);   // every t
 `CreateEntities` places a whole wave in its final table at once; `world.CreateEntity(a, b, …)` creates one entity
 the same way. An `Entity` is a handle. Ids are recycled after `Destroy()`, and the handle's version makes sure an
 old handle never reaches the entity that reuses its id. More in
-[Entities and components](/en/docs/guide/entities-and-components).
+[Entities and components](/en/docs/guide/basics/entities-and-components).
 
 </Step>
 <Step>
@@ -104,7 +104,7 @@ scout.RemoveBurning();                       // removes it: the entity keeps its
 
 Adding and removing a component are **structural changes**. They apply at once, anywhere, even in the middle of a
 system's pass. A `ref` stays valid until the next structural change and never across `await`
-([ref and await](/en/docs/guide/refs-and-await)).
+([ref and await](/en/docs/guide/changes/refs-and-await)).
 
 </Step>
 <Step>
@@ -125,7 +125,7 @@ foreach (var item in world.Query<Position>(alive))
     front = MathF.Max(front, item.Position.X);          // items hand out refs; item.Entity is the handle
 ```
 
-Queries allocate nothing. More in [Queries and filters](/en/docs/guide/queries), including struct jobs, the fastest
+Queries allocate nothing. More in [Queries and filters](/en/docs/guide/basics/queries), including struct jobs, the fastest
 ad-hoc pass.
 
 </Step>
@@ -161,14 +161,14 @@ public ref struct BurnSystem
 
 The generator compiles each method into a struct job that the JIT inlines into the row loop: no delegate, no
 virtual call per entity. The `ref` and `in` keywords also tell the scheduler what the system touches, which is how
-[parallel systems](/en/docs/guide/threading) stay safe. More in [Systems](/en/docs/guide/systems).
+[parallel systems](/en/docs/guide/performance/threading) stay safe. More in [Systems](/en/docs/guide/basics/systems).
 
 </Step>
 <Step>
 
 ### Keep world state in a singleton [#singletons]
 
-Systems keep no state of their own ([EECS007](/en/docs/guide/analyzer#eecs007)). Data with one value per world,
+Systems keep no state of their own ([EECS007](/en/docs/guide/help/analyzer#eecs007)). Data with one value per world,
 such as a clock or a score, is a **singleton**: a struct implementing `ISingletonComponent`. Add it to
 `Components.cs`:
 
@@ -187,14 +187,14 @@ public ref struct ClockSystem
 }
 ```
 
-More in [Singletons](/en/docs/guide/singletons).
+More in [Singletons](/en/docs/guide/basics/singletons).
 
 </Step>
 <Step>
 
 ### React to state and order systems [#order-systems]
 
-Systems never call each other ([EECS008](/en/docs/guide/analyzer#eecs008)); they cooperate through data. The
+Systems never call each other ([EECS008](/en/docs/guide/help/analyzer#eecs008)); they cooperate through data. The
 death system writes a state, the `Dead` tag, and the corpse system reacts to it without the death system knowing it
 exists. `[UpdateAfter<T>]` orders them by data flow. Add to `Systems.cs`:
 
@@ -441,20 +441,20 @@ The simulation uses the core of EasyEcs. Each of these adds one capability to it
 
 | To | Read |
 | --- | --- |
-| Lay the program out as a real project: folders, one system per file, tests | [Structuring a real project](/en/docs/guide/project-structure) |
+| Lay the program out as a real project: folders, one system per file, tests | [Structuring a real project](/en/docs/guide/basics/project-structure) |
 | Design features as data plus one-job systems | [ECS principles](/en/docs/ecs-principles) |
-| Send clients only what changed, or went away | [Change tracking](/en/docs/guide/change-tracking) |
-| Spawn kinds of units from a recipe | [Prefabs](/en/docs/guide/prefabs) |
-| Find a player by name, the items of an owner | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
-| Give each unit a list (a bag, a path) | [Dynamic buffers](/en/docs/guide/dynamic-buffers) |
-| Use every core | [Threading](/en/docs/guide/threading) |
-| Save the world and load it after a restart | [Saves](/en/docs/guide/saves) |
-| Run the world in ASP.NET Core or a Worker Service | [Hosting in a .NET server](/en/docs/guide/hosting) |
-| Test each system and the whole tick | [Testing systems](/en/docs/guide/testing) |
+| Send clients only what changed, or went away | [Change tracking](/en/docs/guide/changes/change-tracking) |
+| Spawn kinds of units from a recipe | [Prefabs](/en/docs/guide/basics/prefabs) |
+| Find a player by name, the items of an owner | [Indexes and relations](/en/docs/guide/data/indexes-and-relations) |
+| Give each unit a list (a bag, a path) | [Dynamic buffers](/en/docs/guide/data/dynamic-buffers) |
+| Use every core | [Threading](/en/docs/guide/performance/threading) |
+| Save the world and load it after a restart | [Saves](/en/docs/guide/saves/saves) |
+| Run the world in ASP.NET Core or a Worker Service | [Hosting in a .NET server](/en/docs/guide/production/hosting) |
+| Test each system and the whole tick | [Testing systems](/en/docs/guide/production/testing) |
 | See every API on one page | [Cheat sheet](/en/docs/cheat-sheet) |
 
 <Cards>
-  <Card title="Structuring a real project" href="/en/docs/guide/project-structure">
+  <Card title="Structuring a real project" href="/en/docs/guide/basics/project-structure">
     The same program as a project: folders, one system per file, the host, tests.
   </Card>
   <Card title="Features" href="/en/docs/features">

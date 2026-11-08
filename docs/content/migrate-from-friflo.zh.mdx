@@ -43,7 +43,7 @@ dotnet add package EasyEcs
 
 表里用的是下面例子中的组件（`Health`、标签 `Dead`）。生成器为每个组件写好具名成员（`entity.Health`、`HasHealth`、
 `SetHealth(…)`、`IsDead`），业务代码直接用它们；排在后面的泛型调用（`Get<T>()`、`Set(c)`、`Remove<T>()`）留给泛型代码
-（[生成的成员](/zh/docs/guide/entities-and-components#generated-members)）。
+（[生成的成员](/zh/docs/guide/basics/entities-and-components#generated-members)）。
 
 ### 实体和组件 [#entities-and-components]
 
@@ -274,11 +274,11 @@ world.Update();
 | --- | --- | --- |
 | 两个 `IComponent` 都导入了 | 引用不明确 | 编译错误：给一个命名空间起别名 |
 | `[Removed<T>]` 用的组件没加追踪 | 移除不会被记录 | 给 `T` 加上 `ITracked` |
-| `[Removed<T>]` 方法把 `T` 当参数 | 没有哪一行既有 `T` 又没有 `T` | [EECS016](/zh/docs/guide/analyzer#eecs016) |
-| 组件里存 `Entity`（Friflo 的链接组件就这么做） | 列里存了引用 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告）：存 `EntityId` |
-| 通过 `ref` 写索引组件（Friflo 在 `AddComponent` 时重建索引） | 索引看不到新键 | [EECS015](/zh/docs/guide/analyzer#eecs015)：用 `Set` |
+| `[Removed<T>]` 方法把 `T` 当参数 | 没有哪一行既有 `T` 又没有 `T` | [EECS016](/zh/docs/guide/help/analyzer#eecs016) |
+| 组件里存 `Entity`（Friflo 的链接组件就这么做） | 列里存了引用 | [EECS017](/zh/docs/guide/help/analyzer#eecs017)（警告）：存 `EntityId` |
+| 通过 `ref` 写索引组件（Friflo 在 `AddComponent` 时重建索引） | 索引看不到新键 | [EECS015](/zh/docs/guide/help/analyzer#eecs015)：用 `Set` |
 | 指望整个实体 `Enabled = false` | 没有这个开关 | 用标签加 `[Without<T>]` |
-| 不带 `Entity` 或 `World` 的静态方法里加标签 | 它承诺了不做结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
+| 不带 `Entity` 或 `World` 的静态方法里加标签 | 它承诺了不做结构变更 | [EECS013](/zh/docs/guide/help/analyzer#eecs013) |
 
 ## 相关页面 [#related]
 
@@ -286,10 +286,10 @@ world.Update();
   <Card title="EasyEcs 与 Friflo.Engine.ECS" href="/zh/docs/vs-friflo">
     两个库并排对比，附全部跑分。
   </Card>
-  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+  <Card title="变更追踪" href="/zh/docs/guide/changes/change-tracking">
     用 `[Changed<T>]` 和 `[Removed<T>]` 代替脏标签和事件。
   </Card>
-  <Card title="预制体" href="/zh/docs/guide/prefabs">
+  <Card title="预制体" href="/zh/docs/guide/basics/prefabs">
     不属于任何 World 的模板，可以一个个实例化，也可以一波生成。
   </Card>
 </Cards>

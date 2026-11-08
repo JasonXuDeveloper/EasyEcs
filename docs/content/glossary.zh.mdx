@@ -12,12 +12,12 @@ EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解
 ## 实体（Entity） [#entity]
 
 只是一个身份，没有字段，也没有方法。EasyEcs 里的 `Entity` 是一个 16 字节的句柄（World、下标、版本号）；每次访问都会校验版本号，
-所以指向已销毁实体的句柄会直接抛异常，不会碰到复用这个下标的新实体。见[实体与组件](/zh/docs/guide/entities-and-components)。
+所以指向已销毁实体的句柄会直接抛异常，不会碰到复用这个下标的新实体。见[实体与组件](/zh/docs/guide/basics/entities-and-components)。
 
 ## EntityId [#entityid]
 
 实体的 8 字节非托管形式：下标加版本号，不含 World。组件里要指向别的实体时存 `EntityId`；用
-`world.TryGetEntity(id, out entity)` 换回一个经过校验的句柄。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+`world.TryGetEntity(id, out entity)` 换回一个经过校验的句柄。见[索引与关系](/zh/docs/guide/data/indexes-and-relations)。
 
 ## 组件（Component） [#component]
 
@@ -28,17 +28,17 @@ EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解
 
 生成器根据声明上的特性往 `partial` 结构体里加的成员：`[LookupKey]` 或 `[UniqueKey]` 写出 `IIndexed<TKey>` 的显式 `Key`，`[Group]`
 写出 `IGroup` 的 `Group`，`[Sum]`、`[Min]`、`[Max]` 等写出归约的 `Identity` 和 `Combine`。类型上的初始化特性（`[GroupBy]`、
-`[WhenTargetDestroyed]`、`[NotSaved]`）则登记给每个 World。见[实体与组件](/zh/docs/guide/entities-and-components#declared-parts)。
+`[WhenTargetDestroyed]`、`[NotSaved]`）则登记给每个 World。见[实体与组件](/zh/docs/guide/basics/entities-and-components#declared-parts)。
 
 ## 标签（Tag） [#tag]
 
 没有字段的组件，比如 `Dead`、`Stunned`。它只表达“是或否”，系统拿它做过滤（`[Without<Dead>]`）；除了第一次，增删标签都不会搬数据。
-见[实体与组件](/zh/docs/guide/entities-and-components)。
+见[实体与组件](/zh/docs/guide/basics/entities-and-components)。
 
 ## 单例（Singleton） [#singleton]
 
 实现 `ISingletonComponent` 的结构体：每个 World 只有一份，比如时钟、配置、空间网格。`[ForEach]` 方法以 `ref` 或 `in`
-参数接收它。见[单例](/zh/docs/guide/singletons)。
+参数接收它。见[单例](/zh/docs/guide/basics/singletons)。
 
 ## 原型（Archetype） [#archetype]
 
@@ -58,13 +58,13 @@ EasyEcs 文档里的术语，每个用几句话讲清，并链接到详细讲解
 ## 查询（Query） [#query]
 
 “哪些实体拥有这些组件、并且满足这个过滤条件？”这个问题本身。`[ForEach]` 方法就是一个查询；系统之外用 `world.Query<T…>()`（只读的循环用
-`world.Read<T…>()`）、`Count`、`Any` 和结构体 job 提问。见[查询与过滤](/zh/docs/guide/queries)。
+`world.Read<T…>()`）、`Count`、`Any` 和结构体 job 提问。见[查询与过滤](/zh/docs/guide/basics/queries)。
 
 ## 过滤条件（Filter） [#filter]
 
 组件之外的查询条件：`With`、`Without`、`WithAny`、`Changed`、`Removed`、`ChangedAny`、`RemovedAny`、`InGroup` 和 `Slice`
 （一次遍历只访问一部分行，见[分帧](#slice)）。写在 `[ForEach]` 方法上就是特性，
-在其他代码里就是存放在 `static readonly` 字段里的 `QueryFilter`。见[查询与过滤](/zh/docs/guide/queries#filters)。
+在其他代码里就是存放在 `static readonly` 字段里的 `QueryFilter`。见[查询与过滤](/zh/docs/guide/basics/queries#filters)。
 
 ## 查询缓存（Query cache） [#query-cache]
 
@@ -74,18 +74,18 @@ World 记着每种查询匹配哪些表。一种查询第一次用时扫一遍�
 ## 预热（Warm-up） [#warm-up]
 
 World 最初的几次更新：建好表、查询缓存和之后反复使用的缓冲。预热之后，查询、遍历、组件访问和结构变更都零分配，
-所以分配测试先跑一次更新，再开始统计字节数。见[测试系统](/zh/docs/guide/testing#allocations)。
+所以分配测试先跑一次更新，再开始统计字节数。见[测试系统](/zh/docs/guide/production/testing#allocations)。
 
 ## 系统（System） [#system]
 
 只有静态方法、只做一件事的 `[EcsSystem] ref struct`，从来不是对象。每次更新，它的 `[ForEach]` 方法会处理所有匹配的实体；系统自身不保存状态，
-也从不调用别的系统。见[系统](/zh/docs/guide/systems)。
+也从不调用别的系统。见[系统](/zh/docs/guide/basics/systems)。
 
 ## 系统句柄（System handle） [#system-handle]
 
 即 `SystemHandle`：`AddSystem<T>()`、`System<T>()` 和 `world.Systems` 返回的东西，指向 World 里某个系统的记录（`Enabled`、`Error`、
 `LastRunTick`、`RunCount`、`Stats`、`Name`）。和 `Entity` 一样，系统被移除后它就失效。钩子可以接收它，读自己系统的记录。
-见[系统](/zh/docs/guide/systems#lifecycle)。
+见[系统](/zh/docs/guide/basics/systems#lifecycle)。
 
 ## 系统集合（System set） [#system-set]
 
@@ -97,173 +97,173 @@ World 最初的几次更新：建好表、查询缓存和之后反复使用的�
 实现 `ISystemGroup` 的结构体。标了 `[UpdateInGroup<G>]` 的系统只在 `world.Update<G>()` 时执行，所以输入、模拟和存盘可以各按各的节奏跑。
 没标这个特性的系统属于默认分组，由 `world.Update()` 执行。分组可以给它所有的系统统一过滤实体：在分组结构体上写 `[With<T>]`、
 `[Without<T>]`、`[WithAny<T1, T2>]`，或者让分组自己、它实现的接口实现 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`（一个泛型接口就这样给每种
-actor 类型各配一个分组）。见[系统](/zh/docs/guide/systems#system-groups)。
+actor 类型各配一个分组）。见[系统](/zh/docs/guide/basics/systems#system-groups)。
 
 ## 更新与 tick（Update、tick） [#update]
 
 一次更新就是调用一次 `world.Update()`（或 `world.Update<G>()`）：分组里每个启用的系统按顺序各跑一次，被 `[UpdateInterval]`
-跳过的除外。tick 是模拟按固定频率走的一步；服务器的主循环每个 tick 调用一次 `Update()`。见[系统](/zh/docs/guide/systems#one-update)。
+跳过的除外。tick 是模拟按固定频率走的一步；服务器的主循环每个 tick 调用一次 `Update()`。见[系统](/zh/docs/guide/basics/systems#one-update)。
 
 ## 阶段（Stage） [#stage]
 
 一串相邻、彼此没有顺序约束、[读写](#access-set)也不冲突的系统。打开 `WorldOptions.ParallelSystems` 后，同一阶段的系统同时执行；
-不打开时，每个系统各自是一个阶段。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
+不打开时，每个系统各自是一个阶段。见[多线程与并行](/zh/docs/guide/performance/threading#parallel-systems)。
 
 ## 访问集（Access set） [#access-set]
 
 一个系统读什么、写什么，由生成器根据 `[ForEach]` 参数得出：`ref` 的组件或单例算写，`in` 的算读，`Mut<T>` 参数算写 `T`，
 `[Changed<T>]`、`[Removed<T>]` 算读 `T`。一个写了另一个读或写的东西，两个系统就冲突。能碰到整个 World 的系统（带 `Entity` 或 `World` 参数、
-有 `OnUpdate` 方法、有 `[Consume]` 方法）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
+有 `OnUpdate` 方法、有 `[Consume]` 方法）独占运行。只有互不冲突的系统才会进同一个[阶段](#stage)。见[多线程与并行](/zh/docs/guide/performance/threading#parallel-systems)。
 
 ## 执行器（Runner） [#runner]
 
 World 用来跑并行工作的部件：一个阶段里的系统，或者一个并行方法的各个块。调用线程和最多 `WorldOptions.MaxDegreeOfParallelism - 1`
 个复用的线程池工作项一起领取任务，所以并行执行零分配。只有实测表明帮手线程确实让工作变快时，它才去唤醒它们；执行器正忙时，
-任务留给调用线程自己跑。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
+任务留给调用线程自己跑。见[多线程与并行](/zh/docs/guide/performance/threading#parallel-systems)。
 
 ## 块（Chunk） [#chunk]
 
 并行方法（`[ForEach(Parallel = true)]`、`ForEachParallel`）把匹配的行切成的一段：行数是 64 的倍数，默认每个线程大约四块，
 在 1,024 到 16,384 行之间（方法写被追踪组件时是 4,096 的倍数），或者是 `ChunkSize` 向上取整到 64。[执行器](#runner)的线程做完一块
-就领下一块（OpenMP 的 `schedule(dynamic, n)`）；不足两块时只在调用线程上跑。见[块大小](/zh/docs/guide/threading#chunk-rows)。
+就领下一块（OpenMP 的 `schedule(dynamic, n)`）；不足两块时只在调用线程上跑。见[块大小](/zh/docs/guide/performance/threading#chunk-rows)。
 
 ## 归约（Reduction） [#reduction]
 
 对一遍里所有行求的总数，分段计算再合并：`[ForEach]` 方法的 `Reduce<T>` 参数给每个[块](#chunk)（单线程时是整遍）一个从 `T.Identity`
 开始的部分结果，这一遍结束时用 `T.Combine` 按行的顺序把部分结果合并进单例 `T`。字段上标 `[Sum]`、`[Min]`、`[Max]` 等特性，生成器就会写出这两个成员。
 就是 OpenMP 的 `reduction`、MPI 的 `Allreduce`。
-见[归约](/zh/docs/guide/threading#reductions)。
+见[归约](/zh/docs/guide/performance/threading#reductions)。
 
 ## 临时空间（Scratch） [#scratch]
 
 `[ForEach]` 方法在运行它的线程上的工作内存：`Scratch<T>` 参数每个方法、每个线程持有一个 `T`，在行、遍历和 World 之间保留，从不重置，
-所以列表每个线程只分配一次。就是 OpenMP 的 `threadprivate`。见[临时空间](/zh/docs/guide/threading#scratch)。
+所以列表每个线程只分配一次。就是 OpenMP 的 `threadprivate`。见[临时空间](/zh/docs/guide/performance/threading#scratch)。
 
 ## 查找（Lookup） [#lookup]
 
 在 `[ForEach]` 方法里读另一个实体的组件：`Lookup<T>` 参数读取任意实体在这一遍之前的 `T`（按 id，带索引的 `T` 还能按键），系统按 `T` 的读者调度，
-所以方法可以并行。就是 MPI 的单边 `Get`、Unity 的 `ComponentLookup`。见[查找](/zh/docs/guide/threading#lookups)。
+所以方法可以并行。就是 MPI 的单边 `Get`、Unity 的 `ComponentLookup`。见[查找](/zh/docs/guide/performance/threading#lookups)。
 
 ## 发出的记录（Emit） [#emit]
 
 一遍产生、留给后面系统处理的记录（命中、数据包）：`Emit<T>` 参数追加到所在[块](#chunk)自己的列表，遍历结束时这些列表按行的顺序追加到单例
-`Emitted<T>`。`[Drain]` 方法再按这个顺序把每条记录处理一次，然后清空（排空列表）。就是 Unity 的 `NativeStream`。见[发出记录](/zh/docs/guide/threading#emit)。
+`Emitted<T>`。`[Drain]` 方法再按这个顺序把每条记录处理一次，然后清空（排空列表）。就是 Unity 的 `NativeStream`。见[发出记录](/zh/docs/guide/performance/threading#emit)。
 
 ## 流（`EntityRandom` 的 stream） [#stream]
 
 `EntityRandom` 抽取的第四个输入，和种子、实体、tick 并列：方法里每个调用点用自己的流（0、1、2……），同一个实体在同一个 tick 的两次抽取才不同。
-同样的四个输入在任何线程、任何行顺序下都得到同一个数。见[随机数](/zh/docs/guide/threading#entity-random)。
+同样的四个输入在任何线程、任何行顺序下都得到同一个数。见[随机数](/zh/docs/guide/performance/threading#entity-random)。
 
 ## 瓦片和光环（Tile、Halo） [#tile]
 
 瓦片是把网格切成一箱箱格子后的一个实体：一个实现 `ITile<TKey>` 的组件（形状和键），加上格子的 `DynamicBuffer<TCell>`。光环是围着它、
-宽 `Halo` 个格子的一圈，`Tile<TCell, TTile>.ExchangeHalo()` 从邻居朝向它的边拷进来（MPI 的幽灵格子、CUDA 瓦片的 apron）。见[网格瓦片](/zh/docs/guide/grids)。
+宽 `Halo` 个格子的一圈，`Tile<TCell, TTile>.ExchangeHalo()` 从邻居朝向它的边拷进来（MPI 的幽灵格子、CUDA 瓦片的 apron）。见[网格瓦片](/zh/docs/guide/performance/grids)。
 
 ## 向量循环（Vector loop） [#vector-loop]
 
 生成器为组件有 1 到 4 个同样大小数值的逐行 `[ForEach]` 方法写出的 SIMD 循环（CPU 支持 AVX-512 时用 `Vector512`，之后用 `Vector<T>`）：一条指令按向量能装下的行数计算方法体，分支变成掩码，
-剩下的行调用方法本身。方法没有得到向量循环时，EECS055 说明原因。见[向量循环](/zh/docs/guide/systems#vector-loops)。
+剩下的行调用方法本身。方法没有得到向量循环时，EECS055 说明原因。见[向量循环](/zh/docs/guide/basics/systems#vector-loops)。
 
 ## 分帧（Slice） [#slice]
 
 `[ForEach(Slices = N)]` 方法一次运行访问的那部分行：每张匹配表约 1/N 的行，按 64 行的位字切分，取系统运行次数的第 `RunCount % N` 片。
-每 N 次运行，每行恰好访问一次。见[系统](/zh/docs/guide/systems#slices)。
+每 N 次运行，每行恰好访问一次。见[系统](/zh/docs/guide/basics/systems#slices)。
 
 ## 调度（Schedule） [#schedule]
 
 World 执行系统的顺序：每个[分组](#system-group)的[阶段](#stage)，以及各阶段里的系统。`world.DescribeSchedule()` 返回它，
 可以输出文本（`ToString`）或 Mermaid 图（`ToMermaid`），还列出只靠注册顺序排定的系统对：两个系统的[读写](#access-set)冲突，
 却没有 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 链给它们排序，于是按注册顺序执行，反过来注册就会改变后一个看到的数据。
-见[调试与诊断](/zh/docs/guide/diagnostics#schedule)。
+见[调试与诊断](/zh/docs/guide/production/diagnostics#schedule)。
 
 ## 结构体 job（Struct job） [#struct-job]
 
 实现 `IForEach<T…>`、`IForEachEntity<T…>` 或 `IForEachBatch<T…>` 的结构体，行循环调用它的 `Execute` 方法。JIT 会把它内联，
 所以每个实体既没有委托调用，也没有虚调用。生成器为每个 `[ForEach]` 方法写一个。`entity.Run<T…, TJob>(ref job)` 在单个实体上跑一个
 `IForEachEntity` job。job 的 `static int WriteMask` 指明它写哪些组件；实现 `INoStructuralChanges` 表示保证不做结构变更。
-见[查询与过滤](/zh/docs/guide/queries#foreach-a-struct-job)。
+见[查询与过滤](/zh/docs/guide/basics/queries#foreach-a-struct-job)。
 
 ## 入口方法（Entry point） [#entry-point]
 
-生成器在系统之外的 `[ForEach]` 方法（[runner](/zh/docs/guide/systems#foreach-outside-systems)）或 `[EntityMethod]` 方法旁边写的同名静态方法：
+生成器在系统之外的 `[ForEach]` 方法（[runner](/zh/docs/guide/basics/systems#foreach-outside-systems)）或 `[EntityMethod]` 方法旁边写的同名静态方法：
 `Reports.SumHealth(world, ref total)` 在一个 World 上跑这一遍，`Requests.TakeHit(unit, damage)` 在单个实体上运行方法，返回它有没有运行。
-见[单个实体](/zh/docs/guide/queries#run-on-one-entity)。
+见[单个实体](/zh/docs/guide/basics/queries#run-on-one-entity)。
 
 ## 事件实体（Event entity） [#event-entity]
 
 表示发生过或被请求的一件事的实体（一次命中、一笔交易、客户端的一个命令），由一个系统或线程创建，由另一个系统处理一次。
-`[ForEach, Consume]` 销毁这一遍访问过的行，所以每个事件只处理一次，也不会有遗留。见[系统](/zh/docs/guide/systems#consume)。
+`[ForEach, Consume]` 销毁这一遍访问过的行，所以每个事件只处理一次，也不会有遗留。见[系统](/zh/docs/guide/basics/systems#consume)。
 
 ## 批量方法（Batch method） [#batch-method]
 
 组件参数是 span（`Span<Position>`、`ReadOnlySpan<Velocity>`）的 `[ForEach]` 方法。它每次拿到一段连续的匹配行，每个 span 的第 `i`
 个元素属于同一个实体；一张表的行全部匹配时，整张表只调用一次。加一个 `EntitySpan` 参数就能拿到这段行对应的实体。span 直接指向表，
-所以它运行期间结构是[冻结](#frozen-structure)的。想把循环向量化时就写批量方法。见[系统](/zh/docs/guide/systems#batch-methods)。
+所以它运行期间结构是[冻结](#frozen-structure)的。想把循环向量化时就写批量方法。见[系统](/zh/docs/guide/basics/systems#batch-methods)。
 
 ## 可选组件（`Maybe<T>`） [#maybe]
 
 `[ForEach]` 方法里表示“实体可能没有”的组件参数：方法访问所有具备其他组件的实体，`HasValue` 说明这个实体是否也有 `T`。
-`ReadOnlyMaybe<T>` 是它的只读版本，带索引的组件也能用。见[系统](/zh/docs/guide/systems#maybe)。
+`ReadOnlyMaybe<T>` 是它的只读版本，带索引的组件也能用。见[系统](/zh/docs/guide/basics/systems#maybe)。
 
 ## `Mut<T>` [#mut]
 
 `[ForEach]` 方法里可能被写的组件参数：`Value` 读它，`Write()` 和 `SetIfChanged(value)`（值不同时）写它，只有写过的行才打 tick，
-所以 `[Changed<T>]` 的读取方会跳过值没变的行。调度器把它算作写 `T`。见[变更追踪](/zh/docs/guide/change-tracking#set-if-changed)。
+所以 `[Changed<T>]` 的读取方会跳过值没变的行。调度器把它算作写 `T`。见[变更追踪](/zh/docs/guide/changes/change-tracking#set-if-changed)。
 
 ## 变更 tick（Change tick） [#change-tick]
 
 World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每次更新结束再加一。被追踪的行记下最后一次写入时的 tick，
-每个系统记下自己上次执行时的 tick（`LastRunTick`）。见[变更追踪](/zh/docs/guide/change-tracking#ticks)。
+每个系统记下自己上次执行时的 tick（`LastRunTick`）。见[变更追踪](/zh/docs/guide/changes/change-tracking#ticks)。
 
 ## 被追踪的组件（Tracked component） [#tracked-component]
 
 同时实现了 `ITracked` 的组件。它的行会记录何时被写入或移除，所以 `[Changed<T>]` 和 `[Removed<T>]` 只访问这些行。
-每行多 8 字节；不追踪的组件没有任何开销。见[变更追踪](/zh/docs/guide/change-tracking)。
+每行多 8 字节；不追踪的组件没有任何开销。见[变更追踪](/zh/docs/guide/changes/change-tracking)。
 
 ## 销毁日志（Destroy log） [#destroy-log]
 
 设置了 `WorldOptions.DestroyLogCapacity` 时，World 保存的一个环形缓冲：最近销毁的实体，以及各自被销毁时的变更 tick（[退休的实体](#retired-entity)在释放时才算）。
-`world.DestroyedSince(since, …)` 列出某个读取方的 tick 以来销毁的实体，所以每个客户端各自保存自己的 tick。见[变更追踪](/zh/docs/guide/change-tracking#destroy-log)。
+`world.DestroyedSince(since, …)` 列出某个读取方的 tick 以来销毁的实体，所以每个客户端各自保存自己的 tick。见[变更追踪](/zh/docs/guide/changes/change-tracking#destroy-log)。
 
 ## 结构变更（Structural change） [#structural-change]
 
 改变实体有哪些组件、或者 World 里有哪些实体的操作：创建、销毁、`Set` 一个新组件、`Remove`、`Disable`。在 EasyEcs 里它立即生效，
-遍历途中也一样，不需要命令缓冲。见[结构变更](/zh/docs/guide/structural-changes)。
+遍历途中也一样，不需要命令缓冲。见[结构变更](/zh/docs/guide/changes/structural-changes)。
 
 ## 遍历（Pass） [#pass]
 
 对匹配行的一次完整走查：一次 `[ForEach]` 方法的执行、一个 `ForEach` job 或一个 `Query` 循环。一次遍历里每个实体最多访问一次；
 轮到之前就不再匹配的实体会跳过；遍历途中才进入匹配表的实体，这次遍历不会访问。
-见[结构变更](/zh/docs/guide/structural-changes#during-a-pass)。
+见[结构变更](/zh/docs/guide/changes/structural-changes#during-a-pass)。
 
 ## 墓碑（Tombstone） [#tombstone]
 
 [遍历](#pass)途中实体被销毁、或搬到别的表之后留下的那一行。不在遍历中时，表的最后一行立刻填上这个空洞；遍历中则留下一块墓碑，
 所有遍历都跳过它，这样循环底下的行不会挪动。最后一个遍历结束时，把存活的行搬进墓碑，把它们补上。所以遍历时可以直接销毁实体、
-移除组件，不需要命令缓冲。见[结构变更](/zh/docs/guide/structural-changes#keeping-tables-dense)。
+移除组件，不需要命令缓冲。见[结构变更](/zh/docs/guide/changes/structural-changes#keeping-tables-dense)。
 
 ## 冻结的结构（Frozen structure） [#frozen-structure]
 
 有些遍历在一次调用之外还持有指向表的 ref 或 span，它们运行期间会冻结 World 的结构：[批量方法](#batch-method)、实现了
 `INoStructuralChanges` 的 job、并行方法和并行阶段。在里面做结构变更会抛 `InvalidOperationException`。
-见[结构变更](/zh/docs/guide/structural-changes#frozen-passes)。
+见[结构变更](/zh/docs/guide/changes/structural-changes#frozen-passes)。
 
 ## 结构闸门（Structural gate） [#structural-gate]
 
 每次结构变更都要经过的检查（EasyEcs 内部的 `World.Structural()`）。结构变更只属于[所有者线程](#owner-thread)，所以闸门只是一个
 由所有者置位、清除的普通标志，不用原子指令。变更在闸门内重入，或者发生在结构[冻结](#frozen-structure)期间，它直接抛
 `InvalidOperationException`，而不是把表写坏。别的线程恰好同时做的变更它不一定看得见；分析器能看到的会报出来（EECS013、EECS014）。
-见[多线程与并行](/zh/docs/guide/threading#what-the-world-synchronizes)。
+见[多线程与并行](/zh/docs/guide/performance/threading#what-the-world-synchronizes)。
 
 ## 所有者线程（Owner thread） [#owner-thread]
 
 调用 World 的 `Update`、执行其结构变更的那个线程。一个 World 同一时间只有一个所有者线程；服务器通常每个线程一个 World，
-其他线程的输入通过[邮箱](#mailbox)交给它。见[多线程与并行](/zh/docs/guide/threading#terms-process-world-owner-thread)。
+其他线程的输入通过[邮箱](#mailbox)交给它。见[多线程与并行](/zh/docs/guide/performance/threading#terms-process-world-owner-thread)。
 
 ## 邮箱（Mailbox） [#mailbox]
 
 由你的代码持有的队列，把其他线程（网络、定时器、数据库）的输入送到 World 的所有者线程。EasyEcs 自己不带：其他线程投递消息，
-所有者线程上的一个系统取出消息，把每条变成数据，比如一个请求实体。见[多线程与并行](/zh/docs/guide/threading#input-from-other-threads)。
+所有者线程上的一个系统取出消息，把每条变成数据，比如一个请求实体。见[多线程与并行](/zh/docs/guide/performance/threading#input-from-other-threads)。
 
 ## Actor [#actor]
 
@@ -274,97 +274,97 @@ World 上的一个计数器（`world.ChangeTick`），每个阶段加一，每�
 ## 预制体（Prefab） [#prefab]
 
 一份不属于任何 World 的组件值配方（`new Prefab().SetHealth(30)`），所以任何查询都看不到它。`world.Instantiate(prefab)`
-按配方复制出一个实体，或者一整波。见[预制体](/zh/docs/guide/prefabs)。
+按配方复制出一个实体，或者一整波。见[预制体](/zh/docs/guide/basics/prefabs)。
 
 ## 动态缓冲（Dynamic buffer） [#dynamic-buffer]
 
 `DynamicBuffer<T>` 组件：属于某个实体的列表，比如背包里的战利品、一条路径。写它必须拿 `ref`，所以每次修改都会被追踪，
-快照也会复制其中的元素。见[动态缓冲](/zh/docs/guide/dynamic-buffers)。
+快照也会复制其中的元素。见[动态缓冲](/zh/docs/guide/data/dynamic-buffers)。
 
 ## 缓冲池（Buffer pool） [#buffer-pool]
 
 销毁的[动态缓冲](#dynamic-buffer)的列表按元素类型在这里等着，给下一个缓冲的第一次写入用：带缓冲的实体反复出现又消失，预热后不分配。
 `DynamicBuffer<T>.MaxPooledLength` 限定多长的列表能还回来，`DynamicBuffer<T>.FillPool(n)` 在启动时把池填满。
-见[缓冲池](/zh/docs/guide/dynamic-buffers#pool)。
+见[缓冲池](/zh/docs/guide/data/dynamic-buffers#pool)。
 
 ## 值索引（Value index） [#value-index]
 
 从键到实体的查找表：在作为键的成员上标 `[LookupKey]`（生成器写出 `IIndexed<TKey>`），用 `world.XIndex` 或 `world.Index<T, TKey>()` 查询。每次 `Set` 索引都会跟着更新；
 键可比较时还能按区间有序遍历。唯一索引（`[UniqueKey]`、`IUniqueIndexed<TKey>`）一个键只对应一个实体，用 `Get` 查找，并拒绝会让键重复的写入。
-见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+见[索引与关系](/zh/docs/guide/data/indexes-and-relations)。
 
 ## 关系（Relation） [#relation]
 
 一个实体指向另一个实体的链接。每个实体一条链接时，用以 `EntityId` 为键的索引组件；同一种链接有多条时，用缓冲里的 `IRelation`
-元素。两种都能回答“谁链接到了这个实体？”。见[索引与关系](/zh/docs/guide/indexes-and-relations)。
+元素。两种都能回答“谁链接到了这个实体？”。见[索引与关系](/zh/docs/guide/data/indexes-and-relations)。
 
 ## 层级（Hierarchy） [#hierarchy]
 
 用内置的 `ChildOf` 组件把父子实体连起来。`world.Children(parent)` 列出子实体，`world.Descendants(root)` 深度优先走完整棵子树，
 销毁父实体会连带销毁它的所有后代。
-见[层级](/zh/docs/guide/hierarchy)。
+见[层级](/zh/docs/guide/data/hierarchy)。
 
 ## 分组（IGroup） [#group]
 
 实现 `IGroup` 的组件（成员上标 `[Group]`）；类型标了 `[GroupBy]`（或调用了 `world.GroupBy<T>()`）后，它的值会把表拆开：同一个场景、地图或对局的实体共用一批表，
-查询这一组时只遍历它自己的行。不要和[系统分组](#system-group)混淆。见[分组](/zh/docs/guide/groups)。
+查询这一组时只遍历它自己的行。不要和[系统分组](#system-group)混淆。见[分组](/zh/docs/guide/data/groups)。
 
 ## 清理组件（Cleanup component） [#cleanup-component]
 
 实现 `ICleanupComponent` 的组件。对它所在的实体调用 `Destroy` 不会释放实体，而是让它退休：其他组件被移除，加上 `Retired` 标签；实体会一直存活，
-直到某个系统释放了对应的资源（一个连接、一个座位）并移除这个组件。在那之前它不会被搬走、克隆，也不会被 `SetAll` 带回来。见[清理与禁用](/zh/docs/guide/cleanup-and-disable#cleanup-components)。
+直到某个系统释放了对应的资源（一个连接、一个座位）并移除这个组件。在那之前它不会被搬走、克隆，也不会被 `SetAll` 带回来。见[清理与禁用](/zh/docs/guide/changes/cleanup-and-disable#cleanup-components)。
 
 ## 退休的实体（Retired entity） [#retired-entity]
 
 `Destroy` 时还持有[清理组件](#cleanup-component)的实体：它仍然存活（`IsAlive` 为 true），只剩这些组件和 `Retired` 标签
 （`entity.IsRetired`），等某个系统移除最后一个清理组件时才被释放。“销毁”一律指释放：id 不再存活，[销毁日志](#destroy-log)也在这时记下它。
-见[清理与禁用](/zh/docs/guide/cleanup-and-disable#cleanup-components)。
+见[清理与禁用](/zh/docs/guide/changes/cleanup-and-disable#cleanup-components)。
 
 ## 禁用的组件（Disabled component） [#disabled-component]
 
 用 `entity.Disable<T>()` 藏起来的组件：值还在，但在 `Enable<T>()` 之前，查询、`Has` 和 `Get` 都当实体没有它。
-这期间实体带着 `Disabled<T>` 标签，查询可以按它过滤。见[清理与禁用](/zh/docs/guide/cleanup-and-disable#disable-a-component)。
+这期间实体带着 `Disabled<T>` 标签，查询可以按它过滤。见[清理与禁用](/zh/docs/guide/changes/cleanup-and-disable#disable-a-component)。
 
 ## 快照（Snapshot） [#snapshot]
 
 World 在内存里的一份拷贝：`world.Capture()` 拍下，`world.Restore(snapshot)` 回滚。用于撤销、回滚预测，以及测试之间重置 World。
-见[快照](/zh/docs/guide/snapshots)。
+见[快照](/zh/docs/guide/saves/snapshots)。
 
 ## 存档（Save） [#save]
 
 把一个 World 或其中部分实体写成字节：`world.Save` 和 `world.Load`。非托管组件按原始行写出，托管组件经 Nino 序列化（`[NinoType]`）。
-见[存档](/zh/docs/guide/saves)。
+见[存档](/zh/docs/guide/saves/saves)。
 
 ## ComponentSet [#component-set]
 
 一组组件和单例类型，建一次，存放在 `static readonly` 字段里：`ComponentSet.Create().With<Bank>().WithSingleton<Rates>()`。
 它指定 `SaveEntities` 写哪些组件（一份只含需要持久化内容的记录），重启时 `SaveWithout(output, exclude)` 不写哪些类型，
-以及 `LoadKeeping(input, keep)` 保留哪些单例。见[存档](/zh/docs/guide/saves#restart)。
+以及 `LoadKeeping(input, keep)` 保留哪些单例。见[存档](/zh/docs/guide/saves/saves#restart)。
 
 ## 迁移（Migration） [#migration]
 
 把相关的实体（比如一个玩家和他拥有的东西）搬到另一个 World：经由字节用 `SaveEntities` 和 `LoadEntities`（可以跨进程），
 或者在同一线程的两个 World 之间直接用 `MoveEntities`。组内的链接会改成新的 id。记录只保存需要持久化的部分：`SaveEntities` 配一个 `ComponentSet` 写出，再用 `LoadEntitiesInto`
-放到已有的实体上（`markWritten: false` 让恢复的值不算变更）。见[迁移与卸载](/zh/docs/guide/migration-and-unload)。
+放到已有的实体上（`markWritten: false` 让恢复的值不算变更）。见[迁移与卸载](/zh/docs/guide/saves/migration-and-unload)。
 
 ## 可回收的 ALC（Collectible ALC） [#collectible-alc]
 
 可回收的 `AssemblyLoadContext`：.NET 用来加载插件、之后再卸载的机制。`world.RemoveTypes(context)` 从 World 里移除插件的系统、
-组件和单例，于是这个上下文可以卸载，而 World 照常运行。见[迁移与卸载](/zh/docs/guide/migration-and-unload)。
+组件和单例，于是这个上下文可以卸载，而 World 照常运行。见[迁移与卸载](/zh/docs/guide/saves/migration-and-unload)。
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="实体与组件" href="/zh/docs/guide/entities-and-components">
+  <Card title="实体与组件" href="/zh/docs/guide/basics/entities-and-components">
     句柄、id、组件、标签，以及它们存在哪里。
   </Card>
-  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems">
     `[ForEach]`、批量方法和并行方法、分组、顺序和间隔。
   </Card>
-  <Card title="多线程与并行" href="/zh/docs/guide/threading">
+  <Card title="多线程与并行" href="/zh/docs/guide/performance/threading">
     所有者线程、阶段、执行器，以及来自其他线程的输入。
   </Card>
-  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+  <Card title="变更追踪" href="/zh/docs/guide/changes/change-tracking">
     变更 tick、`[Changed<T>]` 和 `[Removed<T>]`。
   </Card>
 </Cards>

@@ -27,7 +27,7 @@ icon: Stethoscope
 
 ### 看一个实体 [#entity]
 
-`entity.Describe()` 以 `ComponentValue` 的形式返回实体的组件：每个值装箱后的副本，[被禁用](/zh/docs/guide/cleanup-and-disable#disable-a-component)
+`entity.Describe()` 以 `ComponentValue` 的形式返回实体的组件：每个值装箱后的副本，[被禁用](/zh/docs/guide/changes/cleanup-and-disable#disable-a-component)
 的组件 `Enabled` 为 false。失效的句柄返回空数组。在调试器里，`Entity` 显示为 `Entity 1000v1`（下标和版本号），展开后是 id、
 是否存活和它的组件，展开时才去读。
 
@@ -42,7 +42,7 @@ foreach (var component in guard.Describe())
 ### 看所有的表 [#tables]
 
 `world.DescribeTables()` 每张表返回一个 `TableInfo`：`Columns`（每列有组件的 `Type`、没有这个组件的行数 `Absent`，以及
-[分组](/zh/docs/guide/groups) World 里的 `Group`）、存活实体数 `Entities`、在用的行数 `Rows`、已分配的行数 `Capacity`，
+[分组](/zh/docs/guide/data/groups) World 里的 `Group`）、存活实体数 `Entities`、在用的行数 `Rows`、已分配的行数 `Capacity`，
 以及这些行占的字节数 `Bytes`。
 
 ```csharp
@@ -58,9 +58,9 @@ foreach (var table in world.DescribeTables())
 
 - **内存在哪：** 看每张表的 `Bytes`。它跟着 `Capacity` 走，不跟着 `Entities` 走：一张表装过一波实体，行就留着给下一波用，
   直到 [`TrimExcess`](#trim) 把它缩小。
-- **移除过的组件：** 列的 `Absent` 是移除或禁用了这个组件的行数，因为[移除时行保留](/zh/docs/guide/entities-and-components#storage)。
+- **移除过的组件：** 列的 `Absent` 是移除或禁用了这个组件的行数，因为[移除时行保留](/zh/docs/guide/basics/entities-and-components#storage)。
   占比很大，说明这张表的大部分实体已经没有这个组件了。
-- **组件组合：** 每一种不同的组件组合就是一张表。几百张小表说明代码加出了很多种组合；[分组](/zh/docs/guide/groups)则是有意拆表。
+- **组件组合：** 每一种不同的组件组合就是一张表。几百张小表说明代码加出了很多种组合；[分组](/zh/docs/guide/data/groups)则是有意拆表。
   `Entities` 为 0 的表是以前装过实体的组合，`TrimExcess` 会把它们丢掉。
 - **空洞：** `Rows` 大于 `Entities`，是进行中的遍历留下的空洞，遍历结束就合上。
 
@@ -70,7 +70,7 @@ foreach (var table in world.DescribeTables())
 
 打开 `WorldOptions.MeasureSystems` 后，每个系统的每次运行（`OnUpdate` 加上它的 `[ForEach]` 方法）都会被统计：`system.Stats`
 里有 `Runs`、`LastTime`、`TotalTime`、`AverageTime`，还有下面的字节数和实体数。`world.Systems` 列出所有系统且不分配内存，状态页可以直接找出最慢的那个
-（[统计系统耗时](/zh/docs/guide/systems#measuring-systems)）。
+（[统计系统耗时](/zh/docs/guide/basics/systems#measuring-systems)）。
 
 ```csharp
 [EcsSystem]
@@ -93,14 +93,14 @@ foreach (var system in measured.Systems)
 
 | 字段 | 内容 |
 | --- | --- |
-| `LastAllocated`、`TotalAllocated` | 最近一次运行和所有运行在托管堆上分配的字节数：运行这个系统的线程上的分配，加上替它的并行 [`[ForEach]`](/zh/docs/guide/systems#parallel-methods) 方法跑分块的辅助线程上的分配。同一个并行阶段里的其他系统不会算进来。 |
+| `LastAllocated`、`TotalAllocated` | 最近一次运行和所有运行在托管堆上分配的字节数：运行这个系统的线程上的分配，加上替它的并行 [`[ForEach]`](/zh/docs/guide/basics/systems#parallel-methods) 方法跑分块的辅助线程上的分配。同一个并行阶段里的其他系统不会算进来。 |
 | `LastEntities`、`TotalEntities` | 最近一次运行和所有运行里，`[ForEach]` 方法匹配到的实体数：每个方法的查询在遍历开始时数一次（带上它的过滤条件；`[Changed<T>]` / `[Removed<T>]` 只算系统上次运行以来写过或移除过的行），各方法相加。 |
 
 实体数怎么理解：
 
 - **开始时匹配的数量，不是逐个访问的数量。** 会改结构的遍历里，这是个上限：轮到之前就被销毁或移走的实体算进去了，但没被访问。
 - **只算 `[ForEach]` 方法。** `OnUpdate` 里的查询和循环不算。
-- **分帧的方法只报自己那一份。** `[ForEach(Slices = N)]` 方法报的是匹配数除以 N（[分帧](/zh/docs/guide/systems#slices)）。
+- **分帧的方法只报自己那一份。** `[ForEach(Slices = N)]` 方法报的是匹配数除以 N（[分帧](/zh/docs/guide/basics/systems#slices)）。
 
 ```csharp
 foreach (var system in measured.Systems)
@@ -264,7 +264,7 @@ public sealed class SystemMetrics : IDisposable
 ```
 
 在最后一次 `AddSystem` 之后创建它（数组按 `world.Systems` 的数量分配），World 要开着 `MeasureSystems`；在拥有 World 的循环里，
-每次 `world.Update()` 之后调 `Publish`（[托管](/zh/docs/guide/hosting#operations)）。OpenTelemetry 在 `WithMetrics` 里
+每次 `world.Update()` 之后调 `Publish`（[托管](/zh/docs/guide/production/hosting#operations)）。OpenTelemetry 在 `WithMetrics` 里
 `AddMeter("Game.World")` 就能收到；`dotnet-counters monitor --counters Game.World` 不用任何配置就能看。测量值在每次采集时分配，
 在导出器的线程上，不在 tick 上。
 
@@ -297,7 +297,7 @@ Console.WriteLine($"gave back {before - after:N0} bytes of tables");
 
 默认情况下，系统抛出的异常会传出 `Update()`。设成 `SystemErrors = SystemErrorPolicy.Disable` 后，出错的系统会被关掉，异常留在
 `system.Error` 里，更新继续往下跑：故障变成了健康检查能读的数据。把 `Enabled` 设回 `true` 会清掉 `Error` 并重试这个系统
-（[错误处理](/zh/docs/guide/systems#errors)）。
+（[错误处理](/zh/docs/guide/basics/systems#errors)）。
 
 ```csharp
 using var guarded = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
@@ -309,7 +309,7 @@ foreach (var system in guarded.Systems)
 
 ### 在哪个线程读 [#threads]
 
-在 World 的所有者线程上、两次更新之间读诊断数据，就像[托管指南](/zh/docs/guide/hosting#reads)发布状态那样：读到的是一个完整
+在 World 的所有者线程上、两次更新之间读诊断数据，就像[托管指南](/zh/docs/guide/production/hosting#reads)发布状态那样：读到的是一个完整
 tick 之后的数字。`world.DescribeTables()` 也可以在别的线程上调，看个大概（不会破坏 World），但同一时刻正在变的表可能读到一半。
 `world.DescribeSchedule()` 在任何线程上都安全。`entity.Describe()`、`system.Stats` 和 `TrimExcess()` 只属于所有者线程：别的线程
 通过拷贝读统计，就像[指标](#metrics)那样。
@@ -509,24 +509,24 @@ CooldownSystem: 3 runs, off: a cooldown went below zero
 | 在系统里或每个 tick 调 `DescribeTables()` / `Describe()` | 热路径上分配内存 | 代码审查 |
 | 更新进行中从别的线程读 `DescribeTables()` | 读到正在变的表的中间状态 | 在所有者线程上、两次更新之间读 |
 | 以为实体走了 `Bytes` 就会降 | 表保留容量给下一波实体 | 高峰过后调 `TrimExcess()` |
-| 每个 tick 都调 `TrimExcess()` | 表被丢掉又重建，扩容重新付一遍：tick 上出现分配 | 放进维护任务里调（[常见错误](/zh/docs/guide/common-mistakes#trim-every-tick)） |
-| 在 `Query` 循环或 `[ForEach]` 方法里调 `TrimExcess()` | `InvalidOperationException` | [EECS041](/zh/docs/guide/analyzer#eecs041)：在两次更新之间调 |
+| 每个 tick 都调 `TrimExcess()` | 表被丢掉又重建，扩容重新付一遍：tick 上出现分配 | 放进维护任务里调（[常见错误](/zh/docs/guide/help/common-mistakes#trim-every-tick)） |
+| 在 `Query` 循环或 `[ForEach]` 方法里调 `TrimExcess()` | `InvalidOperationException` | [EECS041](/zh/docs/guide/help/analyzer#eecs041)：在两次更新之间调 |
 | 在导出器的线程上读 `system.Stats` | tick 正在写的结构体被读到一半 | 在所有者线程上发布一份拷贝 |
 | 以为 `LastEntities` 会算上 `OnUpdate` 里的查询 | 只统计 `[ForEach]` 遍历 | 真需要就在 `OnUpdate` 里自己数 |
 | 调度里留着只靠注册顺序的系统对 | 调换 `AddSystem` 的顺序，系统看到的数据就变了 | 加上 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
-| 测试里也开着 `SystemErrorPolicy.Disable` | 出错的系统悄悄停掉，测试却在检查别的东西 | 测试里保持默认的 `Throw`（[测试](/zh/docs/guide/testing#errors)） |
+| 测试里也开着 `SystemErrorPolicy.Disable` | 出错的系统悄悄停掉，测试却在检查别的东西 | 测试里保持默认的 `Throw`（[测试](/zh/docs/guide/production/testing#errors)） |
 | 日志里只记 `entity.Id.Index` | 下标会被之后的实体复用 | 记实体本身或它的 `EntityId`（`1000v1`） |
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems#measuring-systems">
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems#measuring-systems">
     统计系统耗时、错误处理和系统列表。
   </Card>
-  <Card title="在 .NET 服务器里托管" href="/zh/docs/guide/hosting#operations">
+  <Card title="在 .NET 服务器里托管" href="/zh/docs/guide/production/hosting#operations">
     从 World 的循环里发布健康状态和指标。
   </Card>
-  <Card title="问题排查" href="/zh/docs/guide/troubleshooting">
+  <Card title="问题排查" href="/zh/docs/guide/help/troubleshooting">
     EasyEcs 抛出的异常是什么意思，怎么修。
   </Card>
   <Card title="架构" href="/zh/docs/architecture#storage-model">

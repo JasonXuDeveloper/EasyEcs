@@ -20,7 +20,7 @@ an `IRelation` buffer links one entity to many.
 
 <Callout type="warn" title="Skip it for">
   A key you only filter by in a full pass: a plain `[ForEach]` reads it anyway. Few keys holding many entities each
-  that you walk whole (16 zones of 100,000 players): [groups](/en/docs/guide/groups) put each key in its own tables
+  that you walk whole (16 zones of 100,000 players): [groups](/en/docs/guide/data/groups) put each key in its own tables
   and walk them at full speed. A dictionary you would keep in sync by hand: the index is that dictionary.
 </Callout>
 
@@ -60,10 +60,10 @@ partial record struct Zone : IIndexed<int>
 </Tabs>
 
 The key is explicit, so it stays out of the record's members and its `ToString()`. The struct, and every type it is
-nested in, is `partial` so the generator can add to it ([EECS062](/en/docs/guide/analyzer#eecs062), with a code fix).
+nested in, is `partial` so the generator can add to it ([EECS062](/en/docs/guide/help/analyzer#eecs062), with a code fix).
 A `Key` written by hand that returns one member is reported with the attribute as its fix
-([EECS067](/en/docs/guide/analyzer#eecs067)), and two keys on one component are
-[EECS036](/en/docs/guide/analyzer#eecs036).
+([EECS067](/en/docs/guide/help/analyzer#eecs067)), and two keys on one component are
+[EECS036](/en/docs/guide/help/analyzer#eecs036).
 
 ```csharp
 var alpha = world.CreateEntity(new Callsign("alpha"), new Zone(1));
@@ -82,7 +82,7 @@ int inTwo = zones.Count(2);                         // 1
 
 Read an indexed component with `in`, `Read<T>()` or the generated property (`alpha.Zone`, a `ref readonly`), and write
 it with `Set` or the generated `SetX`. A write through a `ref` would change the key behind the index's back, so the
-analyzer rejects it ([EECS015](/en/docs/guide/analyzer#eecs015)). A component has one index, with one key type.
+analyzer rejects it ([EECS015](/en/docs/guide/help/analyzer#eecs015)). A component has one index, with one key type.
 
 `Find(key).Count` (also on `world.Children(parent)`) is how many entities had the key when the lookup ran, without a
 walk: size a buffer from it rather than walking the matches twice. An entity destroyed during the loop is skipped by the
@@ -122,7 +122,7 @@ if (world.ShopIndex.TryFind(new Shop(7), out var found)) { /* the shop with id 7
 On a record struct, a public `Key => this` property joins the generated `ToString()`, which prints `Key`, which prints
 `Key` again, until the stack overflows. The generated explicit implementation keeps `Key` out of the record's members;
 a `Key` written by hand that returns the value itself or one member is reported with the attribute as its fix
-([EECS067](/en/docs/guide/analyzer#eecs067)). The
+([EECS067](/en/docs/guide/help/analyzer#eecs067)). The
 [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) builds on this: one type per
 kind of actor is its key, its system group and the group's filter.
 
@@ -156,7 +156,7 @@ The first ordered walk sorts the keys once; from then on the index keeps them so
 ### `EntityId` keys: one link per entity [#entityid-keys]
 
 A component holding an `EntityId` and indexed by it is a link: each arrow has one owner, and the index answers which
-arrows an owner has. Store the `EntityId`, not the `Entity` handle ([EECS017](/en/docs/guide/analyzer#eecs017)): the id
+arrows an owner has. Store the `EntityId`, not the `Entity` handle ([EECS017](/en/docs/guide/help/analyzer#eecs017)): the id
 is 8 bytes, unmanaged and saved with the world, and a handle converts to it implicitly.
 
 ```csharp
@@ -174,7 +174,7 @@ foreach (var arrow in world.OwnedByIndex.Find(archer)) { /* each arrow of the ar
 
 An `EntityId` carries the entity's version, so a link to a destroyed entity never matches a later entity that reuses
 its index. To turn an id back into a handle, `world.TryGetEntity(id, out var entity)` also says whether it still lives.
-The parent-child link is built in: see [Hierarchy](/en/docs/guide/hierarchy).
+The parent-child link is built in: see [Hierarchy](/en/docs/guide/data/hierarchy).
 
 ### Unique keys: one entity per key [#unique-keys]
 
@@ -207,8 +207,8 @@ catch (InvalidOperationException)
 
 - **Every write is checked**, before it changes anything: `Set` and the generated `SetX`, `CreateEntity`,
   `CreateEntities`, `GetOrAdd` (it claims the default value's key), `Enable` / `EnableAll`, `SetAll`, `Instantiate`
-  (with or without [given components](/en/docs/guide/prefabs#instantiate-with-values)), `Clone`, and the arrivals of
-  `LoadEntities`, `LoadEntitiesInto` and `MoveEntities` ([migration](/en/docs/guide/migration-and-unload#unique-keys)).
+  (with or without [given components](/en/docs/guide/basics/prefabs#instantiate-with-values)), `Clone`, and the arrivals of
+  `LoadEntities`, `LoadEntitiesInto` and `MoveEntities` ([migration](/en/docs/guide/saves/migration-and-unload#unique-keys)).
   A write that would repeat a key throws `InvalidOperationException` naming the component, the key and the entity
   that holds it. A `Load` of a save that gives one key to two entities throws `InvalidDataException`.
 - **A refused write leaves the world as it was.** The entity keeps its value and its table, a call with several
@@ -224,7 +224,7 @@ catch (InvalidOperationException)
 - **A null key is no key.** Any number of entities may hold a `string` key that is null; no lookup finds them, and
   `TryGet(null, out _)` is false. A default value key (`0`) is a key like any other.
 - **`EntityId` keys cannot be unique.** Loads and moves rewrite `EntityId`s after they copy the rows, too late to check
-  them first, so `IUniqueIndexed<EntityId>` is rejected ([EECS036](/en/docs/guide/analyzer#eecs036)): index such a
+  them first, so `IUniqueIndexed<EntityId>` is rejected ([EECS036](/en/docs/guide/help/analyzer#eecs036)): index such a
   link with `IIndexed<EntityId>`. EECS036 also rejects a unique component with a second key type.
 - **Each world has its own keys.** Two worlds may each have an entity with account 1001.
 
@@ -303,7 +303,7 @@ players are never 64 apart, and the lookup physics, water and AOI make for every
 ### Relations: many links per entity [#relations]
 
 An entity holds one component of each type, so an `EntityId` key gives each entity one link. A relation gives it any
-number: its elements implement `IRelation` and live in a [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers), and
+number: its elements implement `IRelation` and live in a [`DynamicBuffer<T>`](/en/docs/guide/data/dynamic-buffers), and
 `world.Relations<T>()` finds the entities linking to a target.
 
 ```csharp
@@ -326,7 +326,7 @@ knight.Unlink<MemberOf>(blue);                                // leaves blue
 
 `Link` adds the buffer if the entity has none, then appends the link and indexes it. Read the links with
 `Read<DynamicBuffer<T>>()` or an `in` parameter; write them with `Link`, `Unlink` or a `Set` of a whole
-buffer, so the index follows (a `ref` write is [EECS015](/en/docs/guide/analyzer#eecs015)).
+buffer, so the index follows (a `ref` write is [EECS015](/en/docs/guide/help/analyzer#eecs015)).
 
 Once some code names `DynamicBuffer<MemberOf>` (a `[ForEach]` parameter, a `Read`), the generator adds named members
 for the relation:
@@ -394,8 +394,8 @@ public partial record struct SummonedBy([LookupKey] EntityId Summoner) : ICompon
 public record struct InGuild(EntityId Target) : IRelation;
 ```
 
-`ChildOf`, the [hierarchy](/en/docs/guide/hierarchy) link, is `Destroy` from the start. The attribute on a type that
-links to no entity is reported ([EECS068](/en/docs/guide/analyzer#eecs068)).
+`ChildOf`, the [hierarchy](/en/docs/guide/data/hierarchy) link, is `Destroy` from the start. The attribute on a type that
+links to no entity is reported ([EECS068](/en/docs/guide/help/analyzer#eecs068)).
 
 ### Symmetric relations: one link on each side [#symmetric-relations]
 
@@ -608,7 +608,7 @@ entity.
 | A dictionary from key to entity checked by hand before each write | `IUniqueIndexed<TKey>`, `Get` / `TryGet` | One hash probe per write, checked on every path that writes |
 | A hand-written grid of entity ids beside a unique index | [`IDirectMapped<TKey>`](#direct-index) | One array entry per lookup, kept by every write, with the hash behind it |
 | Sorting a query's results each tick | `Range` / `Descending` | The keys stay sorted as they change |
-| Walking many big keys whole | [`GroupBy`](/en/docs/guide/groups) | A group's rows are contiguous in their own tables |
+| Walking many big keys whole | [`GroupBy`](/en/docs/guide/data/groups) | A group's rows are contiguous in their own tables |
 
 100 items changing hands among 100,000, then 100 inventories counted, and 8,192 chunk lookups by position through a
 unique index, a direct index and a hand-written grid (`IndexBenchmark`: `LookupUnique`, `LookupDirect`,
@@ -648,14 +648,14 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| Writing an indexed component through `ref`, `Get<T>()` or a query item | The index keeps the old key | [EECS015](/en/docs/guide/analyzer#eecs015) |
-| Storing an `Entity` handle in a component | A managed column, write barriers, not saved | [EECS017](/en/docs/guide/analyzer#eecs017) |
-| Giving entities the indexed component or a new key inside a `Find` loop over it | The walk can read another key's entities (removing the component and destroying entities are fine) | [EECS042](/en/docs/guide/analyzer#eecs042): collect first, then change |
-| A public `Key => this` on a record struct | `ToString()` prints `Key` forever: a stack overflow | [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix): `[LookupKey]` on the struct, or `Shop IIndexed<Shop>.Key => this;` |
-| `[LookupKey]` or `[UniqueKey]` on a struct (or in a type) that is not `partial` | Compile error: the generator cannot add the key | [EECS062](/en/docs/guide/analyzer#eecs062) (with a code fix) |
-| A hand-written `Key` that returns one member | Works, but a public `Key` joins the record's `ToString()` and equality members | [EECS067](/en/docs/guide/analyzer#eecs067) (with a code fix): `[LookupKey]` on the member |
-| `[WhenTargetDestroyed]` on a type that links to no entity | Compile error: no target to watch | [EECS068](/en/docs/guide/analyzer#eecs068) |
-| Using an index from another thread | Indexes belong to the owner thread | [Threading](/en/docs/guide/threading#what-the-world-synchronizes) |
+| Writing an indexed component through `ref`, `Get<T>()` or a query item | The index keeps the old key | [EECS015](/en/docs/guide/help/analyzer#eecs015) |
+| Storing an `Entity` handle in a component | A managed column, write barriers, not saved | [EECS017](/en/docs/guide/help/analyzer#eecs017) |
+| Giving entities the indexed component or a new key inside a `Find` loop over it | The walk can read another key's entities (removing the component and destroying entities are fine) | [EECS042](/en/docs/guide/help/analyzer#eecs042): collect first, then change |
+| A public `Key => this` on a record struct | `ToString()` prints `Key` forever: a stack overflow | [EECS043](/en/docs/guide/help/analyzer#eecs043) (with a code fix): `[LookupKey]` on the struct, or `Shop IIndexed<Shop>.Key => this;` |
+| `[LookupKey]` or `[UniqueKey]` on a struct (or in a type) that is not `partial` | Compile error: the generator cannot add the key | [EECS062](/en/docs/guide/help/analyzer#eecs062) (with a code fix) |
+| A hand-written `Key` that returns one member | Works, but a public `Key` joins the record's `ToString()` and equality members | [EECS067](/en/docs/guide/help/analyzer#eecs067) (with a code fix): `[LookupKey]` on the member |
+| `[WhenTargetDestroyed]` on a type that links to no entity | Compile error: no target to watch | [EECS068](/en/docs/guide/help/analyzer#eecs068) |
+| Using an index from another thread | Indexes belong to the owner thread | [Threading](/en/docs/guide/performance/threading#what-the-world-synchronizes) |
 | Indexing one component by two key types | `InvalidOperationException`: one index per component | At run time |
 | A `null` key (the default of a `string`) | The entity is indexed nowhere | By design |
 | A unique key another entity holds | `InvalidOperationException`; nothing changes | At run time: `TryGet` first, or move the key from its holder first |
@@ -663,7 +663,7 @@ follow, then the followers of 100 players counted and walked (`RelationBenchmark
 | `Clone`, `CreateEntities` or `Instantiate(prefab, span)` of several entities with a unique key | `InvalidOperationException`: the copies would share it | Give each entity its own key |
 | `IDirectMapped<TKey>` over sparse keys or a huge range (account ids) | A slot array as long as the range, mostly empty, or most keys colliding | Plain `IUniqueIndexed<TKey>` |
 | A slot function whose keys held at once collide (a modulo smaller than the loaded area) | Lookups go to the hash: no gain | Make `Slots` cover the keys a world holds at once |
-| `IUniqueIndexed<EntityId>`, or a unique component with a second key type | Compile error | [EECS036](/en/docs/guide/analyzer#eecs036): `IIndexed<EntityId>` for links |
+| `IUniqueIndexed<EntityId>`, or a unique component with a second key type | Compile error | [EECS036](/en/docs/guide/help/analyzer#eecs036): `IIndexed<EntityId>` for links |
 | A symmetric link written on one side only | One player is the other's friend, not the reverse | One helper writes both sides ([symmetric relations](#symmetric-relations)) |
 
 ## Compared with other libraries [#compared]
@@ -675,20 +675,20 @@ Friflo indexes components (`IIndexedComponent`) and links (`ILinkComponent`, `IL
 
 <BenchChart bench="RelationComparison" title="Friend lists: 100 players change whom they follow, then 100 follower lists are read" />
 
-Ranges and a zone lookup, with the zone as a value index and as a [group](/en/docs/guide/groups):
+Ranges and a zone lookup, with the zone as a value index and as a [group](/en/docs/guide/data/groups):
 
 <BenchChart bench="ValueQueryComparison" title="Count a rating range and sum the gold of four zones of 100,000 players" />
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
+  <Card title="Hierarchy" href="/en/docs/guide/data/hierarchy">
     `ChildOf`, `Children` and destroy cascades.
   </Card>
-  <Card title="Groups" href="/en/docs/guide/groups">
+  <Card title="Groups" href="/en/docs/guide/data/groups">
     Tables split by value: the fastest walk of a whole key.
   </Card>
-  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+  <Card title="Dynamic buffers" href="/en/docs/guide/data/dynamic-buffers">
     The buffers that hold relation links.
   </Card>
   <Card title="Sample: GameLoop" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop">

@@ -56,8 +56,8 @@ guest.Destroy();                       // 退休：仍然存活，带 Retired �
 world.Update();                        // ReleaseSeats 释放它：guest.IsAlive 为 false
 ```
 
-- 所有销毁途径都会让这类实体“退休”：`Destroy`、`DestroyAll<T>()`、[层级](/zh/docs/guide/hierarchy)级联、
-  [目标策略](/zh/docs/guide/indexes-and-relations#target-policies)。
+- 所有销毁途径都会让这类实体“退休”：`Destroy`、`DestroyAll<T>()`、[层级](/zh/docs/guide/data/hierarchy)级联、
+  [目标策略](/zh/docs/guide/data/indexes-and-relations#target-policies)。
 - 申请资源的系统用 `Without<Retired>` 过滤：退休的实体还留着清理组件，不过滤的话，它离开以后还可能再申请一次：
 
 ```csharp
@@ -78,7 +78,7 @@ public ref struct AssignSeats
 
 - 再次销毁已退休的实体没有任何效果。从存活实体上移除清理组件，就只是移除而已。
 - 退休的实体会离开它所在的索引，它的子实体也随之而去。它的其他组件被拿掉，但不算移除：`[Removed<T>]` 不会访问它，
-  就像不会访问任何已销毁的实体一样（[移除检测](/zh/docs/guide/change-tracking#removal-detection)）。
+  就像不会访问任何已销毁的实体一样（[移除检测](/zh/docs/guide/changes/change-tracking#removal-detection)）。
 - 退休的实体不会被带回来：过滤条件没写 `Retired`（`With<Retired>()`）时 `SetAll` 不会碰它，`Clone()` 会抛异常，
   `MoveEntities` 会跳过它。清理组件的 `RemoveAll` 会处理到它，因为释放它靠的就是这个。
 - `MoveEntities` 不带走清理组件：原实体带着它们退休，另一个 World 里的新实体没有它们。
@@ -86,7 +86,7 @@ public ref struct AssignSeats
 
 ### 清理组件还是销毁日志 [#cleanup-or-destroy-log]
 
-[销毁日志](/zh/docs/guide/change-tracking#destroy-log)（`WorldOptions.DestroyLogCapacity`、`world.DestroyedSince`）同样能对实体离开做出反应。
+[销毁日志](/zh/docs/guide/changes/change-tracking#destroy-log)（`WorldOptions.DestroyLogCapacity`、`world.DestroyedSince`）同样能对实体离开做出反应。
 两者解决的是不同的问题：
 
 | | 清理组件 | 销毁日志 |
@@ -136,9 +136,9 @@ caster.EnableCooldown();                // 回来时 Ticks 仍是 3
 | 对被禁用的 `T` 调用 `Set(new T(...))` | 替换它：重新启用，值是新的 |
 | 对被禁用的 `T` 调用 `GetOrAdd<T>()` | 带着保留的值重新启用（和 `Enable` 一样），不是默认值 |
 | 对被禁用的 `T` 调用 `Remove<T>()` / `world.RemoveAll<T>(filter)` | 丢弃它：没有可启用的了 |
-| `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 对所有匹配实体做同样的事，见[批量操作](/zh/docs/guide/bulk) |
+| `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 对所有匹配实体做同样的事，见[批量操作](/zh/docs/guide/changes/bulk) |
 
-禁用对 `[Removed<T>]` 来说算一次移除，启用对 `[Changed<T>]` 来说算一次写入，所以[同步](/zh/docs/guide/change-tracking#removal-detection)
+禁用对 `[Removed<T>]` 来说算一次移除，启用对 `[Changed<T>]` 来说算一次写入，所以[同步](/zh/docs/guide/changes/change-tracking#removal-detection)
 两边都能看到。被索引的组件在禁用期间离开索引。保留的值在挪行、克隆、快照和存档中都不会丢。
 
 ### 禁用整个实体 [#disable-an-entity]
@@ -185,7 +185,7 @@ int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>());   // �
 <BenchChart bench="DisableComparison" param="Switched=10000" title="10 万个单位，每次操作 10,000 个入睡、醒来" />
 
 对象池和特效切换很频繁，翻转一个位比挪一次行划算。如果大量实体长时间关闭、又和醒着的实体混在同一张表里，可以对睡眠状态
-做 [`GroupBy`](/zh/docs/guide/groups)，把它们放进自己的表。
+做 [`GroupBy`](/zh/docs/guide/data/groups)，把它们放进自己的表。
 
 ### 区分新实体：`Spawned` 标签 [#spawned-tag]
 
@@ -324,7 +324,7 @@ after the update: alive False, seats released 1
 | --- | --- | --- |
 | 在每个销毁的地方各自释放资源 | 一个清理组件加一个系统 | 只有一条释放路径，批量销毁和级联也覆盖 |
 | 移除再加回组件来暂停它 | `Disable<T>()` / `Enable<T>()` | 值保留下来；用 `Set` 得先把值存到别处 |
-| 对大量实体循环调用 `Disable` | `world.DisableAll<T>(filter)` | 按 64 行一批（一个存在位字）整块处理（[批量操作](/zh/docs/guide/bulk)） |
+| 对大量实体循环调用 `Disable` | `world.DisableAll<T>(filter)` | 按 64 行一批（一个存在位字）整块处理（[批量操作](/zh/docs/guide/changes/bulk)） |
 | 每个系统都判断的标志字段 | 标签加 `Without<T>` | 没有这个标签的表完全不用判断 |
 
 1 万个持有外部资源的会话，每次操作 1,000 个断开、1,000 个连入，对比用清理组件和在销毁前手动释放普通组件（`CleanupBenchmark`）；
@@ -347,23 +347,23 @@ after the update: alive False, seats released 1
 | --- | --- | --- |
 | 清理系统没写 `With<Retired>` | 把存活实体的资源也释放了 | 代码审查 |
 | 从不移除最后一个清理组件 | 退休的实体永远留着 | 在统计里看 `world.Count<Retired>()` |
-| 对清理组件或 `ChildOf` 调用 `Disable<T>()` | 抛 `InvalidOperationException` | [EECS048](/zh/docs/guide/analyzer#eecs048) |
+| 对清理组件或 `ChildOf` 调用 `Disable<T>()` | 抛 `InvalidOperationException` | [EECS048](/zh/docs/guide/help/analyzer#eecs048) |
 | 对被禁用的组件 `Set`，以为它还是禁用状态 | `Set` 会用新值重新启用它；要拿回保留的值用 `Enable` | 设计如此 |
 | 系统忘了写 `Without<Inactive>` | 池里的实体还在动 | 代码审查 |
 | 指望 `[Changed<T>]` 区分新建和写入 | 两者都算写入 | 用 `Spawned` 标签 |
-| 只为了通知客户端实体没了而加清理组件 | 每个调用了 `Destroy` 的实体都会退休、等系统处理，而且只有一个读者看得到 | 用[销毁日志](/zh/docs/guide/change-tracking#destroy-log)：多个读者，只给 id |
+| 只为了通知客户端实体没了而加清理组件 | 每个调用了 `Destroy` 的实体都会退休、等系统处理，而且只有一个读者看得到 | 用[销毁日志](/zh/docs/guide/changes/change-tracking#destroy-log)：多个读者，只给 id |
 | 指望销毁日志里有退休实体的值 | 日志只记 id，而且在实体释放时才记 | 先用清理组件读出这些值 |
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="批量操作" href="/zh/docs/guide/bulk">
+  <Card title="批量操作" href="/zh/docs/guide/changes/bulk">
     `DisableAll`、`EnableAll`、`SetAll`、`RemoveAll`。
   </Card>
-  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+  <Card title="变更追踪" href="/zh/docs/guide/changes/change-tracking">
     禁用算移除，启用算写入。
   </Card>
-  <Card title="层级" href="/zh/docs/guide/hierarchy">
+  <Card title="层级" href="/zh/docs/guide/data/hierarchy">
     级联销毁会让持有清理组件的子实体退休。
   </Card>
 </Cards>

@@ -19,8 +19,8 @@ icon: Cog
 </Callout>
 
 <Callout type="warn" title="不适合">
-  请求或工具在两个 tick 之间跑的一次性遍历：写成 [`[ForEach]`](#foreach-outside-systems) runner 或者[查询](/zh/docs/guide/queries)。
-  需要跨 tick 保留的状态：放进组件或[单例组件](/zh/docs/guide/singletons)，绝不放在系统的静态字段里（[EECS007](/zh/docs/guide/analyzer#eecs007)）。
+  请求或工具在两个 tick 之间跑的一次性遍历：写成 [`[ForEach]`](#foreach-outside-systems) runner 或者[查询](/zh/docs/guide/basics/queries)。
+  需要跨 tick 保留的状态：放进组件或[单例组件](/zh/docs/guide/basics/singletons)，绝不放在系统的静态字段里（[EECS007](/zh/docs/guide/help/analyzer#eecs007)）。
 </Callout>
 
 ## 怎么用 [#how-to-use-it]
@@ -81,7 +81,7 @@ int dealt = world.BurnTotals.Damage;               // 10
 ### 生命周期 [#lifecycle]
 
 系统的钩子是标了特性的静态方法。参数取 `World`、`SystemHandle`、两者（顺序随意）或都不取，返回 void，每种钩子一个系统最多一个
-（[EECS076](/zh/docs/guide/analyzer#eecs076)）：
+（[EECS076](/zh/docs/guide/help/analyzer#eecs076)）：
 
 | 钩子 | 时机 |
 | --- | --- |
@@ -112,15 +112,15 @@ World 把它对一个系统的了解存成数据，`SystemHandle` 指向这份�
 | `SystemHandle` 成员 | 含义 |
 | --- | --- |
 | `Enabled` | 设为 `false` 后，`Update()` 和 `Update<TGroup>()` 都会跳过它；设为 `true` 清掉 `Error` |
-| `LastRunTick` | 上次运行时的变更 tick（见[变更追踪](/zh/docs/guide/change-tracking#ticks)） |
+| `LastRunTick` | 上次运行时的变更 tick（见[变更追踪](/zh/docs/guide/changes/change-tracking#ticks)） |
 | `RunCount` | 在本次运行之前已经运行过的次数（第一次运行时为 0）；[分帧](#slices)方法访问第 `RunCount % N` 片 |
 | `Stats`、`Error` | [运行统计](#measuring-systems)和[让它停用的异常](#errors) |
 | `Name`、`Type`、`World` | 类型名（`Regen<Health>`）、类型本身、所在的 World |
 | `IsAlive` | 系统被移除或 World 释放后为 false，这时其他成员都会抛异常 |
 
 `AddSystem<T>()` 返回句柄，World 已经有这个系统时再加会抛异常；`System<T>()` 和 `TryGetSystem<T>(out handle)` 查找系统（给工具和测试用，
-不能在别的系统里用：[EECS008](/zh/docs/guide/analyzer#eecs008)），`HasSystem<T>()` 判断有没有；`world.Systems` 列出所有句柄，不分配内存；
-`DefaultUpdateCount` 统计默认分组的更新次数。传给这些 API 的类型不是 `[EcsSystem]` 时报 [EECS077](/zh/docs/guide/analyzer#eecs077)。
+不能在别的系统里用：[EECS008](/zh/docs/guide/help/analyzer#eecs008)），`HasSystem<T>()` 判断有没有；`world.Systems` 列出所有句柄，不分配内存；
+`DefaultUpdateCount` 统计默认分组的更新次数。传给这些 API 的类型不是 `[EcsSystem]` 时报 [EECS077](/zh/docs/guide/help/analyzer#eecs077)。
 
 ```csharp
 if (world.TryGetSystem<BurnSystem>(out var burn)) burn.Enabled = false;
@@ -142,21 +142,21 @@ flowchart TB
 
 没有排序约束时，系统按注册顺序运行。结构变更立即生效，同一次更新里后面的方法和系统都能看到。所有工作都在调用 `Update()`
 的线程上执行；开启 `WorldOptions.ParallelSystems` 后，彼此没有顺序约束、也没有访问冲突的系统会同时运行
-（见[多线程与并行](/zh/docs/guide/threading#parallel-systems)），结果和按顺序运行完全一样。想看 World 排出了哪些阶段、每个系统
+（见[多线程与并行](/zh/docs/guide/performance/threading#parallel-systems)），结果和按顺序运行完全一样。想看 World 排出了哪些阶段、每个系统
 读写了什么、某个系统为什么要等另一个，打印 `world.DescribeSchedule()` 即可（文本，或者用 `ToMermaid()` 画成图：
-[调试与诊断](/zh/docs/guide/diagnostics#schedule)）。
+[调试与诊断](/zh/docs/guide/production/diagnostics#schedule)）。
 
 ### 执行顺序 [#ordering]
 
 `[UpdateBefore<T>]` 和 `[UpdateAfter<T>]` 把系统挪到同一分组里系统 `T` 的紧前或紧后，不管它们是按什么顺序添加的；
 其他系统的相对顺序不变。顺序在添加系统时就确定了：出现环会当场抛异常，这个系统不会被加进去。分析器能发现它看得到的环
-（[EECS019](/zh/docs/guide/analyzer#eecs019)）和跨分组的排序（[EECS020](/zh/docs/guide/analyzer#eecs020)）。
+（[EECS019](/zh/docs/guide/help/analyzer#eecs019)）和跨分组的排序（[EECS020](/zh/docs/guide/help/analyzer#eecs020)）。
 
 ### `[UpdateInterval(N, Phase = P)]` [#update-interval]
 
 标了 `[UpdateInterval(N)]` 的系统，每 N 次分组更新才跑一次：更新计数是 N 的倍数时运行，所以第一次是第 N 次更新。`Phase`
 （0 到 N - 1）决定它占 N 次里的哪一次，同样间隔的系统可以错开，不必挤在同一个 tick。特性只接受常量，节奏在编译时就定了；
-生成器把它写进系统的代码（间隔小于 1 或相位不在 0 到 N - 1 之间时报 [EECS083](/zh/docs/guide/analyzer#eecs083)）。要暂停系统，
+生成器把它写进系统的代码（间隔小于 1 或相位不在 0 到 N - 1 之间时报 [EECS083](/zh/docs/guide/help/analyzer#eecs083)）。要暂停系统，
 设置它的句柄的 `Enabled`。
 
 ```csharp
@@ -241,10 +241,10 @@ public ref struct HungerSystem
 - **各种写法都支持：** 逐实体方法、[批处理方法](#batch-methods)（片内成段的行）和[并行方法](#parallel-methods)（把这一片
   再切成块）。
 - **不能和变化过滤一起用：** `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 都不能分帧，`Slices`
-  也不能小于 1（[EECS035](/zh/docs/guide/analyzer#eecs035)）：系统每次运行都会推进自己的 `LastRunTick`，其他片里的行
+  也不能小于 1（[EECS035](/zh/docs/guide/help/analyzer#eecs035)）：系统每次运行都会推进自己的 `LastRunTick`，其他片里的行
   发生的变化就丢了。
 
-在系统之外，[`QueryFilter.Slice(index, of)`](/zh/docs/guide/queries#filters) 给 `ForEach` 调用做同样的事；带
+在系统之外，[`QueryFilter.Slice(index, of)`](/zh/docs/guide/basics/queries#filters) 给 `ForEach` 调用做同样的事；带
 `Slices = N` 的 [runner](#foreach-outside-systems)，入口在 World 之后接收要访问的分帧。
 
 ### `[ForEach]` 方法 [#foreach-methods]
@@ -254,26 +254,26 @@ public ref struct HungerSystem
 | 参数 | 含义 |
 | --- | --- |
 | `ref T` / `in T` / `ref readonly T`，`T : IComponent` | 1 到 9 个组件：`ref` 写，`in` 读 |
-| [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed)，`T : IComponent` | 方法只在部分行上写的组件：`Value` 读，`Write()` 和 `SetIfChanged(value)` 写，只有写过的行才打 tick |
+| [`Mut<T>`](/zh/docs/guide/changes/change-tracking#set-if-changed)，`T : IComponent` | 方法只在部分行上写的组件：`Value` 读，`Write()` 和 `SetIfChanged(value)` 写，只有写过的行才打 tick |
 | `ref T` / `in T`，`T : ISingletonComponent` | World 的单例组件，每次遍历只解析一次；没添加时抛异常 |
 | `Entity` | 当前实体，用来做结构变更和查找 |
 | `World` | World 本身（创建实体、访问其他单例） |
 | [`Maybe<T>`](#maybe) | 实体可能没有的组件 |
 | [`ReadOnlyMaybe<T>`](#read-only-maybe) | 实体可能没有、只读的组件（带索引的组件也行） |
-| [`ref Reduce<T>`](/zh/docs/guide/threading#reductions)，`T : ISingletonComponent, IReduction<T>` | 对所有行求的一个总结果：每一块（单线程时是整遍）累加进自己的部分结果，合并后的结果替换单例 `T` |
-| [`Scratch<T>`](/zh/docs/guide/threading#scratch) | 方法在当前线程上的工作内存（列表、缓冲），在行之间保留；不增加读写 |
-| [`Lookup<T>`](/zh/docs/guide/threading#lookups)，`T : IComponent` | 只读地读取任意实体在这一遍之前的 `T`（`lookup[id]`、`Read`、`Has`；按键 `TryFind`、`Find`、`Count`）；系统算作读 `T`，并行也能用 |
+| [`ref Reduce<T>`](/zh/docs/guide/performance/threading#reductions)，`T : ISingletonComponent, IReduction<T>` | 对所有行求的一个总结果：每一块（单线程时是整遍）累加进自己的部分结果，合并后的结果替换单例 `T` |
+| [`Scratch<T>`](/zh/docs/guide/performance/threading#scratch) | 方法在当前线程上的工作内存（列表、缓冲），在行之间保留；不增加读写 |
+| [`Lookup<T>`](/zh/docs/guide/performance/threading#lookups)，`T : IComponent` | 只读地读取任意实体在这一遍之前的 `T`（`lookup[id]`、`Read`、`Has`；按键 `TryFind`、`Find`、`Count`）；系统算作读 `T`，并行也能用 |
 | `Span<T>` / `ReadOnlySpan<T>`、`EntitySpan` | [批处理方法](#batch-methods)：一次处理成段的行 |
 
 | 特性 | 含义 |
 | --- | --- |
-| `[ForEach]` | 对每个匹配的实体执行方法；`Parallel = true` 表示[多线程](#parallel-methods)（加上 `ChunkSize = n` 指定[一个线程每次领多少行](/zh/docs/guide/threading#chunk-rows)），`Slices = N` 表示[每次运行只处理一部分行](#slices) |
+| `[ForEach]` | 对每个匹配的实体执行方法；`Parallel = true` 表示[多线程](#parallel-methods)（加上 `ChunkSize = n` 指定[一个线程每次领多少行](/zh/docs/guide/performance/threading#chunk-rows)），`Slices = N` 表示[每次运行只处理一部分行](#slices) |
 | `[With<T>]` | 实体必须有 `T`，`T` 不作为参数传入；可重复 |
 | `[Without<T>]` | 实体不能有 `T`；可重复 |
 | `[WithAny<T1, T2>]` | 实体至少要有方法上某个 `[WithAny<T1, T2>]` 的组件 |
-| `[Changed<T>]` | `T`（`ITracked`）在系统上次运行之后被写过（[变更追踪](/zh/docs/guide/change-tracking)） |
-| `[Removed<T>]` | 实体在系统上次运行之后失去了 `T`（`ITracked`）（[移除检测](/zh/docs/guide/change-tracking#removal-detection)） |
-| `[ChangedAny<T1, …, Tn>]` | 这些组件（2 到 9 个，`ITracked`）中至少一个在系统上次运行之后被写过（[任意一个](/zh/docs/guide/change-tracking#changed-any)） |
+| `[Changed<T>]` | `T`（`ITracked`）在系统上次运行之后被写过（[变更追踪](/zh/docs/guide/changes/change-tracking)） |
+| `[Removed<T>]` | 实体在系统上次运行之后失去了 `T`（`ITracked`）（[移除检测](/zh/docs/guide/changes/change-tracking#removal-detection)） |
+| `[ChangedAny<T1, …, Tn>]` | 这些组件（2 到 9 个，`ITracked`）中至少一个在系统上次运行之后被写过（[任意一个](/zh/docs/guide/changes/change-tracking#changed-any)） |
 | `[RemovedAny<T1, …, Tn>]` | 实体在系统上次运行之后至少失去了其中一个组件 |
 
 `[ForEach]` 的属性：
@@ -315,7 +315,7 @@ public ref struct CorpseCleanup
 ```
 
 整个方法体只是一次结构变化、每一行都一样的方法，是一个 world 自己能跑得更快的循环：在 `OnUpdate` 方法里一次
-[批量调用](/zh/docs/guide/bulk)，一次改完整张表（[EECS030](/zh/docs/guide/analyzer#eecs030) 会指出这一点）：
+[批量调用](/zh/docs/guide/changes/bulk)，一次改完整张表（[EECS030](/zh/docs/guide/help/analyzer#eecs030) 会指出这一点）：
 
 ```csharp
 [EcsSystem]
@@ -327,11 +327,11 @@ public ref struct CorpseCleanup
 
 不带 `World`、`Entity` 参数（如果有）只用来读（`Id`、`IsAlive`、`Has`、`Get`、`Read`、`TryGet`、`TryGetRef`）的方法，
 不可能改变结构：它的 job 实现 `INoStructuralChanges`，遍历每张表时不做逐实体检查。
-可能改变结构的方法单独运行，每个实体在一次遍历里仍然最多被访问一次（见[结构变更](/zh/docs/guide/structural-changes)）。
+可能改变结构的方法单独运行，每个实体在一次遍历里仍然最多被访问一次（见[结构变更](/zh/docs/guide/changes/structural-changes)）。
 
 只把 `Entity` 当身份用（`Id`、`Version`、`IsAlive`、`==` / `!=`、转换成 `EntityId`）的方法碰不到任何组件，`Entity` 不给系统增加读写：
 系统按其他参数调度，可以和别的系统排进同一个并行阶段。句柄的其他用法（`Has`、`Get`、别的调用、把 `Entity` 传出去）可能碰到任何组件，
-系统就单独运行（见[并行系统](/zh/docs/guide/threading#parallel-systems)）。
+系统就单独运行（见[并行系统](/zh/docs/guide/performance/threading#parallel-systems)）。
 
 方法按声明顺序执行。一个系统的方法放在同一个文件里：partial 结构体分散在多个文件时，顺序只在每个文件内有效。
 
@@ -362,8 +362,8 @@ public ref struct Regeneration
 #### 只读：`ReadOnlyMaybe<T>` [#read-only-maybe]
 
 `ReadOnlyMaybe<T>` 也是可选参数，只是 `Value` 返回 `ref readonly`：方法只读 `T`，编译器会把住这一点，被追踪的 `T` 永远不会被打 tick。
-[带索引的组件](/zh/docs/guide/indexes-and-relations#value-indexes)只能用它当可选参数：`Maybe<T>` 给出的 `ref` 可能背着索引改掉键
-（[EECS015](/zh/docs/guide/analyzer#eecs015)），改从 `Entity` 上读又是每行查一次（[EECS027](/zh/docs/guide/analyzer#eecs027)）。
+[带索引的组件](/zh/docs/guide/data/indexes-and-relations#value-indexes)只能用它当可选参数：`Maybe<T>` 给出的 `ref` 可能背着索引改掉键
+（[EECS015](/zh/docs/guide/help/analyzer#eecs015)），改从 `Entity` 上读又是每行查一次（[EECS027](/zh/docs/guide/help/analyzer#eecs027)）。
 
 | 方法对一个有些实体没有的组件 | 用 |
 | --- | --- |
@@ -411,7 +411,7 @@ public ref struct Rally
 <Callout type="warn" title="不适合">
   方法处理完还要继续存在的实体（持续的 buff、飞行中的投射物）：`[Consume]` 会销毁它访问的每一行，这种实体在方法里按条件
   `entity.Destroy()`。好几个系统都要读的事件：在最后一个系统里消费，用 `[UpdateAfter<T>]` 排好顺序。分帧的方法：一个分帧的销毁会挪动
-  其他分帧的行（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
+  其他分帧的行（[EECS085](/zh/docs/guide/help/analyzer#eecs085)）。
 </Callout>
 
 行怎么销毁取决于方法：
@@ -490,16 +490,16 @@ long banked = world.Takings.Gold;              // 42
 int pending = world.Count<Sale>();             // 0：两笔交易都被消费了
 ```
 
-清理组件让被消费的实体退休，和其他被销毁的实体一样，[销毁日志](/zh/docs/guide/change-tracking#destroy-log)也会记下它。带
+清理组件让被消费的实体退休，和其他被销毁的实体一样，[销毁日志](/zh/docs/guide/changes/change-tracking#destroy-log)也会记下它。带
 `[Consume]` 的 [runner](#foreach-outside-systems) 通过入口方法以同样的方式消费。有 `[Consume]` 方法的系统独自运行，销毁实体的系统都得这样
-（[并行系统](/zh/docs/guide/threading#parallel-systems)）。每条路径都以 `entity.Destroy()` 结尾的方法报
-[EECS084](/zh/docs/guide/analyzer#eecs084)，它的代码修复会改写成 `[Consume]`。
+（[并行系统](/zh/docs/guide/performance/threading#parallel-systems)）。每条路径都以 `entity.Destroy()` 结尾的方法报
+[EECS084](/zh/docs/guide/help/analyzer#eecs084)，它的代码修复会改写成 `[Consume]`。
 
 ### 批处理方法 [#batch-methods]
 
 组件参数是 span 的方法会拿到成段的连续匹配行：每个 span 的第 `i` 个元素属于同一个实体，所有行都匹配的表只调用一次。
-其他参数只能是单例组件和 `EntitySpan`（`entities[i]` 只在取下标时构造），别的都不行（[EECS009](/zh/docs/guide/analyzer#eecs009)）。
-span 直接指向表，所以方法运行期间结构是冻结的：做结构变更会抛异常，[EECS013](/zh/docs/guide/analyzer#eecs013) 在编译期就会报出来。
+其他参数只能是单例组件和 `EntitySpan`（`entities[i]` 只在取下标时构造），别的都不行（[EECS009](/zh/docs/guide/help/analyzer#eecs009)）。
+span 直接指向表，所以方法运行期间结构是冻结的：做结构变更会抛异常，[EECS013](/zh/docs/guide/help/analyzer#eecs013) 在编译期就会报出来。
 
 ```csharp
 using System.Buffers;
@@ -543,11 +543,11 @@ public ref struct SteeringSystem
 }
 ```
 
-方法必须能同时在多个线程上跑（[EECS010](/zh/docs/guide/analyzer#eecs010)）：不做结构变更，逐实体执行（不能是批处理方法），
+方法必须能同时在多个线程上跑（[EECS010](/zh/docs/guide/help/analyzer#eecs010)）：不做结构变更，逐实体执行（不能是批处理方法），
 单例组件只能用 `in`。它也不能写别的行会读的东西，比如通过 `Get` 写另一个实体。不足两块时在调用线程上执行。第一次更新之后不再分配内存。
 
-写被追踪组件的方法（`ref` 或 [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 参数）默认按 4,096 行的倍数切块，
-所以不超过 4,096 行的表只在一个线程上跑（[原因](/zh/docs/guide/threading#parallel-foreach-methods)）。`ChunkSize = n` 指定一个线程每次领多少行，
+写被追踪组件的方法（`ref` 或 [`Mut<T>`](/zh/docs/guide/changes/change-tracking#set-if-changed) 参数）默认按 4,096 行的倍数切块，
+所以不超过 4,096 行的表只在一个线程上跑（[原因](/zh/docs/guide/performance/threading#parallel-foreach-methods)）。`ChunkSize = n` 指定一个线程每次领多少行，
 也就是 `schedule(dynamic, n)` 里的 `n`，向上取整到 64，适合只有几百行、每行很重的情况：
 
 ```csharp
@@ -575,7 +575,7 @@ public ref struct RouteSystem
 }
 ```
 
-块怎么领、`n` 怎么选、开销多少，见[`ChunkSize`](/zh/docs/guide/threading#chunk-rows)。
+块怎么领、`n` 怎么选、开销多少，见[`ChunkSize`](/zh/docs/guide/performance/threading#chunk-rows)。
 
 ### 向量循环：生成器写的 SIMD [#vector-loops]
 
@@ -722,7 +722,7 @@ for (; i < rows; i++)   // 4. 尾部，以及没有 shuffle 指令时的每一�
 
 - **方法：** `static`、逐实体（单线程或 `Parallel` 都行）、没有返回值；没有 `Entity`、`World`、`Mut<T>`、span、`Scratch<T>`、
   `Lookup<T>`、`Emit<T>` 或 `Tile` 参数，也没有按 `ref` 传的值。组件的 `Maybe<T>` / `ReadOnlyMaybe<T>` 是有这个组件的行组成的通道掩码（单线程时）。
-- **汇总：** [`Reduce<T>`](/zh/docs/guide/threading#reductions) 每条通道一个累加器，循环结束后按通道顺序合进这段行的部分结果。条件是 `T`
+- **汇总：** [`Reduce<T>`](/zh/docs/guide/performance/threading#reductions) 每条通道一个累加器，循环结束后按通道顺序合进这段行的部分结果。条件是 `T`
   的每个字段都是方法那么大的通道，并且按求和、`Min` 或 `Max` 合并：用 `[Sum]` / `[Min]` / `[Max]` 声明，或者手写的 `T.Combine`
   把它设成两边该字段的和、`Min` 或 `Max`。浮点求和要 `FloatMode.Fast`（[见下](#float-mode)）。
   标了 `[Product]`、`[All]` 或 `[Any]` 的字段让方法逐行运行，EECS055 会指出是哪个字段。
@@ -742,9 +742,9 @@ for (; i < rows; i++)   // 4. 尾部，以及没有 shuffle 指令时的每一�
 
 #### `SimdMode` [#simd-mode]
 
-不符合条件的方法保持标量循环：结果是对的，只是慢，[EECS055](/zh/docs/guide/analyzer#eecs055)（IDE 里的建议）会像 Burst 的
+不符合条件的方法保持标量循环：结果是对的，只是慢，[EECS055](/zh/docs/guide/help/analyzer#eecs055)（IDE 里的建议）会像 Burst 的
 Inspector 一样说出第一个原因：`bool` 字段、组件对它上面的工作来说太宽（并列出该拆出的字段）、`Vector3.Dot` 这种标量代码没有固定顺序的向量求和、
-条件之外的调用。速度取决于向量循环的方法用 `SimdMode = SimdMode.Require` 写明，之后哪次改动让它失去循环，构建就会失败（[EECS056](/zh/docs/guide/analyzer#eecs056)）。
+条件之外的调用。速度取决于向量循环的方法用 `SimdMode = SimdMode.Require` 写明，之后哪次改动让它失去循环，构建就会失败（[EECS056](/zh/docs/guide/help/analyzer#eecs056)）。
 
 ```csharp tab="保持标量" doccheck=expect-EECS055
 public record struct Motion(System.Numerics.Vector3 Value) : IComponent;
@@ -778,7 +778,7 @@ public ref struct MeasureSpeed
 #### 浮点结果：`FloatMode` [#float-mode]
 
 默认（`FloatMode.Exact`）下，向量循环在每台机器上都给出和方法逐位相同的结果。这时有两样它保持标量：`Sin`、`Cos`、`Exp`、`Log`、`Log2`
-和 `Hypot`，它们的向量形式是近似；以及累加进 [`Reduce<T>`](/zh/docs/guide/threading#reductions) 的浮点总和，向量循环会按 lane 各自相加，
+和 `Hypot`，它们的向量形式是近似；以及累加进 [`Reduce<T>`](/zh/docs/guide/performance/threading#reductions) 的浮点总和，向量循环会按 lane 各自相加，
 顺序不同。`[ForEach(FloatMode = FloatMode.Fast)]` 两样都接受：.NET 的向量近似（和标量函数相差 1 到 2 ulp），以及按 lane 舍入的浮点总和，
 所以结果可能和标量方法不同，不同机器之间也可能不同（同 Burst 的 `FloatMode.Fast`）。整数总和以及任何 lane 类型的 `Min` / `Max` 怎样都精确。
 
@@ -833,7 +833,7 @@ public ref struct SteeringSystem
 <BenchTable bench="KernelBenchmark" />
 
 向量循环、并行块、批处理方法和网格内核放在一起对照，以及每种借自 Burst、OpenMP 和 GPU 的什么：
-[高性能写法](/zh/docs/guide/high-performance)。
+[高性能写法](/zh/docs/guide/performance/high-performance)。
 
 ### 系统分组 [#system-groups]
 
@@ -872,7 +872,7 @@ long inputs = world.UpdateCount<InputGroup>();   // 到目前为止 Update<Input
 被冻结或未激活的实体，不用在每个方法上重复写。分组的 `[WithAny<T1, T2>]` 并入方法自己的 `WithAny` 集合，放宽的是“至少有一个”
 这个条件：分组写 `[WithAny<A, B>]`、方法写 `[WithAny<C, D>]`，选出的是 `A`、`B`、`C`、`D` 至少有一个的实体。系统在 `OnUpdate` 方法里自己做的查询不受影响；
 [`[ForEach]`](#foreach-outside-systems) runner 不属于任何分组，分组过滤也管不到它。过滤特性写在不是分组的结构体上会编译报错
-（[EECS023](/zh/docs/guide/analyzer#eecs023)）。
+（[EECS023](/zh/docs/guide/help/analyzer#eecs023)）。
 
 ```csharp
 [Without<Frozen>]
@@ -926,7 +926,7 @@ bool open = world.ShopIndex.TryFind(new Shop(7), out var shop);   // 消息找�
 ```
 
 完整程序见 [Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)：两种 actor、
-用 [`entity.Run`](/zh/docs/guide/queries#run-on-one-entity) 处理消息、激活和保存。
+用 [`entity.Run`](/zh/docs/guide/basics/queries#run-on-one-entity) 处理消息、激活和保存。
 
 ### 泛型系统 [#generic-systems]
 
@@ -948,7 +948,7 @@ public ref struct CountOf<T> where T : struct, IComponent   // world.AddSystem<C
 }
 ```
 
-系统里的 `[ForEach]` 方法本身不能是泛型的：没有人能给它提供类型参数（[EECS004](/zh/docs/guide/analyzer#eecs004)）。特性的类型参数
+系统里的 `[ForEach]` 方法本身不能是泛型的：没有人能给它提供类型参数（[EECS004](/zh/docs/guide/help/analyzer#eecs004)）。特性的类型参数
 不能引用类型形参（C# 规则 CS8968），所以 `[With<T>]` 这类过滤只能写具体类型。
 
 ### 系统之外的 `[ForEach]` [#foreach-outside-systems]
@@ -992,13 +992,13 @@ int alive = 0;
 Census.CountAlive<Health>(world, ref alive);      // 泛型 runner：先写类型参数
 ```
 
-- 方法必须是静态的（[EECS005](/zh/docs/guide/analyzer#eecs005)）；它可以是 private，入口在它引用的类型都公开时也是公开的。
+- 方法必须是静态的（[EECS005](/zh/docs/guide/help/analyzer#eecs005)）；它可以是 private，入口在它引用的类型都公开时也是公开的。
 - 带 `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]` 或 `[RemovedAny<…>]` 时，入口要接收一个回看的起点 tick，因为
   runner 没有自己的“上次运行”；带 `Slices = N` 时，入口接收要访问的分帧（0 到 N - 1）。
 - runner 可以是泛型方法，也可以是泛型类型的成员：入口会接收类型参数。
 - [分组过滤](#group-filters)对 runner 不起作用：它不属于任何分组。
 - 批处理和并行 runner 遵循[批处理方法](#batch-methods)和[并行方法](#parallel-methods)的规则。
-- 入口不能和类型里已有的方法冲突（[EECS021](/zh/docs/guide/analyzer#eecs021)），局部函数也不能当 runner（[EECS024](/zh/docs/guide/analyzer#eecs024)）。
+- 入口不能和类型里已有的方法冲突（[EECS021](/zh/docs/guide/help/analyzer#eecs021)），局部函数也不能当 runner（[EECS024](/zh/docs/guide/help/analyzer#eecs024)）。
 - 和其他结构变更代码一样，要在 World 的所有者线程上调用。
 
 ### 统计系统耗时 [#measuring-systems]
@@ -1035,7 +1035,7 @@ foreach (var system in guarded.Systems)                   // 健康检查，在�
 
 `Dispose()` 之后再调用 `Update()` 会抛 `ObjectDisposedException`。
 
-运行中的 World 还能告诉你什么（表、实体的组件、内存）：见[调试与诊断](/zh/docs/guide/diagnostics)。
+运行中的 World 还能告诉你什么（表、实体的组件、内存）：见[调试与诊断](/zh/docs/guide/production/diagnostics)。
 
 ## 完整例子 [#full-example]
 
@@ -1144,20 +1144,20 @@ run order: MoveSystem
 
 | 别这样 | 这样做 | 原因 |
 | --- | --- | --- |
-| 只读的组件写成 `ref` | 改成 `in`（[EECS025](/zh/docs/guide/analyzer#eecs025)） | 系统能共享并行阶段；被追踪的组件不会被打 tick |
-| 方法用不到却带了 `Entity` 或 `World` 参数 | 去掉（[EECS026](/zh/docs/guide/analyzer#eecs026)） | job 跳过结构变更簿记，还能并行 |
+| 只读的组件写成 `ref` | 改成 `in`（[EECS025](/zh/docs/guide/help/analyzer#eecs025)） | 系统能共享并行阶段；被追踪的组件不会被打 tick |
+| 方法用不到却带了 `Entity` 或 `World` 参数 | 去掉（[EECS026](/zh/docs/guide/help/analyzer#eecs026)） | job 跳过结构变更簿记，还能并行 |
 | 热点方法里一个组件装了 4 个以上的数，或两种数值类型 | 拆成每个 1 到 4 个同类型字段的组件 | 方法得到[向量循环](#vector-loops) |
 | 向量循环覆盖不到的数据（混合的 lane 类型、查找表） | 用 `Vector<T>` 的批处理方法 | 对整段行做 SIMD |
 | 最热的循环里用 `Maybe<T>` | 用 `[With<T>]` / `[Without<T>]` 拆成两个方法 | 每行不用判断存在位 |
 | 很轻的计算也 `Parallel = true` | 普通 `[ForEach]` | 分发的开销比省下的多 |
-| 只有几百行重活的 `Parallel = true`，默认只成一块 | [`ChunkSize = 64`](/zh/docs/guide/threading#chunk-rows) | 每个线程都领块，而不是一个线程包圆 |
-| 只读的 `Maybe<T>`（或通过 `Entity` 逐行查找） | [`ReadOnlyMaybe<T>`](#read-only-maybe) | 调度时算读，从不打 tick，也不用每行查找（[EECS027](/zh/docs/guide/analyzer#eecs027)） |
+| 只有几百行重活的 `Parallel = true`，默认只成一块 | [`ChunkSize = 64`](/zh/docs/guide/performance/threading#chunk-rows) | 每个线程都领块，而不是一个线程包圆 |
+| 只读的 `Maybe<T>`（或通过 `Entity` 逐行查找） | [`ReadOnlyMaybe<T>`](#read-only-maybe) | 调度时算读，从不打 tick，也不用每行查找（[EECS027](/zh/docs/guide/help/analyzer#eecs027)） |
 | 同一个节奏的每个方法都重复写一个过滤 | [分组过滤](#group-filters) | 只写一次 |
 | 可以等的工作每个 tick 都做 | `[UpdateInterval(N, Phase = P)]` | 分摊到多个 tick |
 | 处理事件实体的方法最后 `entity.Destroy()` | [`[Consume]`](#consume) | 这一遍之后每张表一次 `DestroyAll` |
 | 最后几位没人比较的热点方法里用 `Sin` / `Cos` / `Exp` | [`FloatMode = FloatMode.Fast`](#float-mode) | 方法得到向量循环 |
 | 每 N 个 tick 把所有实体维护一遍 | [`Slices = N`](#slices) | 每次更新开销平稳，没有尖峰 |
-| 每个 tick 都重算、但很少变的被追踪值用 `ref` 写 | [`Mut<T>`](/zh/docs/guide/change-tracking#set-if-changed) 加 `SetIfChanged` | 只有真正的变化打 tick：`[Changed<T>]` 读取方访问的行更少 |
+| 每个 tick 都重算、但很少变的被追踪值用 `ref` 写 | [`Mut<T>`](/zh/docs/guide/changes/change-tracking#set-if-changed) 加 `SetIfChanged` | 只有真正的变化打 tick：`[Changed<T>]` 读取方访问的行更少 |
 
 `[ForEach]` 系统对比两个普通数组，对 1 万个实体做 `Position += Velocity`（`MicroBenchmarks`）：
 
@@ -1191,7 +1191,7 @@ run order: MoveSystem
 - **单例组件参数**每次遍历只解析一次，不是每个实体一次。
 - **执行顺序**在添加系统时确定：更新时不付任何代价。
 - **`MeasureSystems`** 每次系统运行读两次时钟、两次分配计数器，每次 `[ForEach]` 遍历一次 `Count`
-  （[调试与诊断](/zh/docs/guide/diagnostics#what-it-costs)）；关闭时每次运行一次字段判断。
+  （[调试与诊断](/zh/docs/guide/production/diagnostics#what-it-costs)）；关闭时每次运行一次字段判断。
 - **并行方法**第一次更新之后不再分配内存，执行器的工作项会复用。
 - **向量循环**本身没有额外开销：它在编译时写好，按段运行，不分配内存。
 - **`[UpdateInterval]`** 只在添加系统时读一次；每次更新对每个系统判断一次计数。
@@ -1202,55 +1202,55 @@ run order: MoveSystem
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| `[EcsSystem]` 标在 class 或普通 struct 上 | 不会为它生成代码 | [EECS074](/zh/docs/guide/analyzer#eecs074)（带代码修复）：改成 `ref struct` |
-| 系统里有实例成员 | World 从不创建系统：这个成员永远访问不到 | [EECS075](/zh/docs/guide/analyzer#eecs075)（带代码修复）：改成 `static` |
-| 钩子的参数不是 `World` / `SystemHandle`，或同一种钩子写了两个 | 没人会调用它 | [EECS076](/zh/docs/guide/analyzer#eecs076) |
-| `AddSystem<T>`、`[UpdateAfter<T>]` 等用了不是 `[EcsSystem]` 的 `T` | `AddSystem` 抛异常，其他的永远找不到它 | [EECS077](/zh/docs/guide/analyzer#eecs077) |
-| 系统里有可变的静态字段 | 别人看不到的状态，所有 World 共用，系统移除后还在 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
-| 系统引用另一个系统 | 两者再也不能独立修改 | [EECS008](/zh/docs/guide/analyzer#eecs008) |
-| 系统方法里有其他类型的参数 | 没有人能提供它 | [EECS002](/zh/docs/guide/analyzer#eecs002) |
-| 没有组件参数，也没有 `[With<T>]` | 不知道要遍历什么 | [EECS003](/zh/docs/guide/analyzer#eecs003) |
-| 系统里的泛型 `[ForEach]` 方法 | 没有类型参数 | [EECS004](/zh/docs/guide/analyzer#eecs004)；改成泛型系统 |
-| span 和逐实体参数混用 | 一段行对应不到单个值 | [EECS009](/zh/docs/guide/analyzer#eecs009) |
-| 并行方法改结构或写单例组件 | 块之间发生竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
-| 没有 `Parallel = true` 却设 `ChunkSize`，或小于 0 | 单线程的方法没有块 | [EECS054](/zh/docs/guide/analyzer#eecs054) |
-| 被索引组件用 `Maybe<T>` | 它的 `ref` 可能绕过索引改掉键 | [EECS015](/zh/docs/guide/analyzer#eecs015)：改用 `ReadOnlyMaybe<T>` |
+| `[EcsSystem]` 标在 class 或普通 struct 上 | 不会为它生成代码 | [EECS074](/zh/docs/guide/help/analyzer#eecs074)（带代码修复）：改成 `ref struct` |
+| 系统里有实例成员 | World 从不创建系统：这个成员永远访问不到 | [EECS075](/zh/docs/guide/help/analyzer#eecs075)（带代码修复）：改成 `static` |
+| 钩子的参数不是 `World` / `SystemHandle`，或同一种钩子写了两个 | 没人会调用它 | [EECS076](/zh/docs/guide/help/analyzer#eecs076) |
+| `AddSystem<T>`、`[UpdateAfter<T>]` 等用了不是 `[EcsSystem]` 的 `T` | `AddSystem` 抛异常，其他的永远找不到它 | [EECS077](/zh/docs/guide/help/analyzer#eecs077) |
+| 系统里有可变的静态字段 | 别人看不到的状态，所有 World 共用，系统移除后还在 | [EECS007](/zh/docs/guide/help/analyzer#eecs007) |
+| 系统引用另一个系统 | 两者再也不能独立修改 | [EECS008](/zh/docs/guide/help/analyzer#eecs008) |
+| 系统方法里有其他类型的参数 | 没有人能提供它 | [EECS002](/zh/docs/guide/help/analyzer#eecs002) |
+| 没有组件参数，也没有 `[With<T>]` | 不知道要遍历什么 | [EECS003](/zh/docs/guide/help/analyzer#eecs003) |
+| 系统里的泛型 `[ForEach]` 方法 | 没有类型参数 | [EECS004](/zh/docs/guide/help/analyzer#eecs004)；改成泛型系统 |
+| span 和逐实体参数混用 | 一段行对应不到单个值 | [EECS009](/zh/docs/guide/help/analyzer#eecs009) |
+| 并行方法改结构或写单例组件 | 块之间发生竞争 | [EECS010](/zh/docs/guide/help/analyzer#eecs010) |
+| 没有 `Parallel = true` 却设 `ChunkSize`，或小于 0 | 单线程的方法没有块 | [EECS054](/zh/docs/guide/help/analyzer#eecs054) |
+| 被索引组件用 `Maybe<T>` | 它的 `ref` 可能绕过索引改掉键 | [EECS015](/zh/docs/guide/help/analyzer#eecs015)：改用 `ReadOnlyMaybe<T>` |
 | 实体没有 `T` 时读 `ReadOnlyMaybe<T>.Value` | 抛 `InvalidOperationException` | 先判断 `HasValue` |
-| 通过 `in` 参数修改集合 | 被当成读来调度，也不会打 tick | [EECS011](/zh/docs/guide/analyzer#eecs011) |
-| 不带 `Entity` / `World` 的方法通过组件里的链接做结构变更 | 遍历拿着指向已搬走行的 ref | [EECS013](/zh/docs/guide/analyzer#eecs013) |
-| 间隔小于 1、相位不在 0 到 N - 1 之间 | 节奏无效 | [EECS083](/zh/docs/guide/analyzer#eecs083) |
-| `Slices` 小于 1，或和 `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 一起用 | 其他分帧里的行发生的变化会丢失 | [EECS035](/zh/docs/guide/analyzer#eecs035) |
+| 通过 `in` 参数修改集合 | 被当成读来调度，也不会打 tick | [EECS011](/zh/docs/guide/help/analyzer#eecs011) |
+| 不带 `Entity` / `World` 的方法通过组件里的链接做结构变更 | 遍历拿着指向已搬走行的 ref | [EECS013](/zh/docs/guide/help/analyzer#eecs013) |
+| 间隔小于 1、相位不在 0 到 N - 1 之间 | 节奏无效 | [EECS083](/zh/docs/guide/help/analyzer#eecs083) |
+| `Slices` 小于 1，或和 `[Changed<T>]`、`[Removed<T>]`、`[ChangedAny<…>]`、`[RemovedAny<…>]` 一起用 | 其他分帧里的行发生的变化会丢失 | [EECS035](/zh/docs/guide/help/analyzer#eecs035) |
 | 指望分帧方法每轮恰好访问每行一次 | 两次运行之间移动过的行可能被跳过或访问两次 | 代码审查：只对容忍这一点的工作分帧 |
-| 批处理方法里用 `Mut<T>` 参数 | 批处理方法拿的是 span | [EECS009](/zh/docs/guide/analyzer#eecs009) |
-| 排序形成环，或跨分组排序 | `AddSystem` 时抛异常；排序不生效 | [EECS019](/zh/docs/guide/analyzer#eecs019)、[EECS020](/zh/docs/guide/analyzer#eecs020) |
-| 方法参数用了 private 类型 | 生成的 job 引用不到它 | [EECS022](/zh/docs/guide/analyzer#eecs022) |
-| `[With<T>]`、`[Without<T>]` 或 `[WithAny<T1, T2>]` 写在不是分组的结构体上 | 编译报错：这个过滤不会起任何作用 | [EECS023](/zh/docs/guide/analyzer#eecs023) |
-| 分组的 `[With<T>]` 或 `ISystemGroupWith<T>` 碰上方法的 `[Removed<T>]` | 要求一行既有 `T` 又没有 `T`：方法永远不会运行 | [EECS016](/zh/docs/guide/analyzer#eecs016) |
-| 分组的 `[With<X>]` 碰上方法的 `[Without<X>]` | 没有实体能满足：方法永远不会运行 | [EECS049](/zh/docs/guide/analyzer#eecs049) |
+| 批处理方法里用 `Mut<T>` 参数 | 批处理方法拿的是 span | [EECS009](/zh/docs/guide/help/analyzer#eecs009) |
+| 排序形成环，或跨分组排序 | `AddSystem` 时抛异常；排序不生效 | [EECS019](/zh/docs/guide/help/analyzer#eecs019)、[EECS020](/zh/docs/guide/help/analyzer#eecs020) |
+| 方法参数用了 private 类型 | 生成的 job 引用不到它 | [EECS022](/zh/docs/guide/help/analyzer#eecs022) |
+| `[With<T>]`、`[Without<T>]` 或 `[WithAny<T1, T2>]` 写在不是分组的结构体上 | 编译报错：这个过滤不会起任何作用 | [EECS023](/zh/docs/guide/help/analyzer#eecs023) |
+| 分组的 `[With<T>]` 或 `ISystemGroupWith<T>` 碰上方法的 `[Removed<T>]` | 要求一行既有 `T` 又没有 `T`：方法永远不会运行 | [EECS016](/zh/docs/guide/help/analyzer#eecs016) |
+| 分组的 `[With<X>]` 碰上方法的 `[Without<X>]` | 没有实体能满足：方法永远不会运行 | [EECS049](/zh/docs/guide/help/analyzer#eecs049) |
 | 分组的 `[WithAny<A, B>]` 加方法的 `[WithAny<C, D>]`，当成“(A 或 B) 且 (C 或 D)” | 两个集合合并：选出 `A`、`B`、`C`、`D` 至少有一个的实体 | 代码审查 |
-| record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | [EECS043](/zh/docs/guide/analyzer#eecs043)（有代码修复）：类型上标 `[LookupKey]`，由它显式实现 `IIndexed<T>.Key` |
-| 只读的组件写成 `ref` | 被追踪的组件被打 tick，系统也没法共享阶段 | [EECS025](/zh/docs/guide/analyzer#eecs025) |
-| 方法从不使用的 `Entity` 或 `World` 参数 | job 保留结构变更簿记 | [EECS026](/zh/docs/guide/analyzer#eecs026) |
-| `OnUpdate` 或 `[ForEach]` 方法里分配内存 | 每次更新都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028) |
-| 在系统里调用 `World.Update()` | 系统在自己的运行里再次运行 | [EECS034](/zh/docs/guide/analyzer#eecs034) |
-| 一次修改让热点方法丢了[向量循环](#vector-loops)（一个 `bool` 字段、条件之外的一次调用） | 一次一行，结果不变 | [EECS055](/zh/docs/guide/analyzer#eecs055)；`SimdMode = SimdMode.Require` 让它报 [EECS056](/zh/docs/guide/analyzer#eecs056) |
+| record struct 的 actor 键上写公开的 `Key => this` | `ToString()` 无限打印 `Key`：栈溢出 | [EECS043](/zh/docs/guide/help/analyzer#eecs043)（有代码修复）：类型上标 `[LookupKey]`，由它显式实现 `IIndexed<T>.Key` |
+| 只读的组件写成 `ref` | 被追踪的组件被打 tick，系统也没法共享阶段 | [EECS025](/zh/docs/guide/help/analyzer#eecs025) |
+| 方法从不使用的 `Entity` 或 `World` 参数 | job 保留结构变更簿记 | [EECS026](/zh/docs/guide/help/analyzer#eecs026) |
+| `OnUpdate` 或 `[ForEach]` 方法里分配内存 | 每次更新都产生垃圾 | [EECS028](/zh/docs/guide/help/analyzer#eecs028) |
+| 在系统里调用 `World.Update()` | 系统在自己的运行里再次运行 | [EECS034](/zh/docs/guide/help/analyzer#eecs034) |
+| 一次修改让热点方法丢了[向量循环](#vector-loops)（一个 `bool` 字段、条件之外的一次调用） | 一次一行，结果不变 | [EECS055](/zh/docs/guide/help/analyzer#eecs055)；`SimdMode = SimdMode.Require` 让它报 [EECS056](/zh/docs/guide/help/analyzer#eecs056) |
 | 要回放或对端要比较的状态用了 `FloatMode.Fast` | 不同机器之间末几位不同 | 代码审查：保持 `FloatMode.Exact`（[浮点结果](#float-mode)） |
-| `[ForEach]` 方法每条路径最后都 `entity.Destroy()` | 每行销毁一次，而不是每张表一次 | [EECS084](/zh/docs/guide/analyzer#eecs084)（带代码修复）：`[Consume]` |
-| `[Consume]` 没有配 `[ForEach]`，或配了 `Slices` | 编译错误：销毁一个分帧会挪动其他分帧的行，事件可能要等很多次运行 | [EECS085](/zh/docs/guide/analyzer#eecs085) |
+| `[ForEach]` 方法每条路径最后都 `entity.Destroy()` | 每行销毁一次，而不是每张表一次 | [EECS084](/zh/docs/guide/help/analyzer#eecs084)（带代码修复）：`[Consume]` |
+| `[Consume]` 没有配 `[ForEach]`，或配了 `Slices` | 编译错误：销毁一个分帧会挪动其他分帧的行，事件可能要等很多次运行 | [EECS085](/zh/docs/guide/help/analyzer#eecs085) |
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="查询与过滤" href="/zh/docs/guide/queries">
+  <Card title="查询与过滤" href="/zh/docs/guide/basics/queries">
     同样的过滤，以及临时遍历用的结构体 job。
   </Card>
-  <Card title="结构变更" href="/zh/docs/guide/structural-changes">
+  <Card title="结构变更" href="/zh/docs/guide/changes/structural-changes">
     在 `[ForEach]` 方法里创建、销毁、添加和移除。
   </Card>
-  <Card title="多线程与并行" href="/zh/docs/guide/threading">
+  <Card title="多线程与并行" href="/zh/docs/guide/performance/threading">
     并行阶段、每线程一个 World、来自其他线程的输入。
   </Card>
-  <Card title="分析器规则" href="/zh/docs/guide/analyzer">
+  <Card title="分析器规则" href="/zh/docs/guide/help/analyzer">
     系统要遵守的每条规则，以及修复方法。
   </Card>
 </Cards>

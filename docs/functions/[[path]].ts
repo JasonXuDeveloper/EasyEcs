@@ -46,7 +46,7 @@ export const onRequest: PagesFunction<Env> = async (context) => {
     return context.next();
   }
 
-  // Markdown copies of the docs pages (/en/docs/guide/queries.md, also .mdx)
+  // Markdown copies of the docs pages (/en/docs/guide/basics/queries.md, also .mdx)
   if (markdownFilePattern.test(url.pathname)) {
     return withMarkdownHeaders(await context.next(), url.pathname);
   }
@@ -139,8 +139,8 @@ async function serveMarkdown(
   url: URL,
 ) {
   const assetUrl = new URL(url);
-  // The Markdown copy of /en/docs/guide/queries (or .../queries/) is
-  // /en/docs/guide/queries.md; /en/docs is /en/docs.md.
+  // The Markdown copy of /en/docs/guide/basics/queries (or .../queries/) is
+  // /en/docs/guide/basics/queries.md; /en/docs is /en/docs.md.
   const pathname = url.pathname.replace(/\/+$/, '');
   assetUrl.pathname = /\.mdx?$/.test(pathname) ? pathname : `${pathname}.md`;
 
@@ -194,7 +194,7 @@ function getLocale(request: Request) {
 }
 
 /**
- * `/` -> `/en`, `/docs/guide/threading` -> `/en/docs/guide/threading`: the
+ * `/` -> `/en`, `/docs/guide/performance/threading` -> `/en/docs/guide/performance/threading`: the
  * library's comments and README link to locale-less `/docs/...` URLs.
  */
 function localizePath(pathname: string, locale: 'en' | 'zh') {

@@ -13,13 +13,13 @@ icon: Save
 
 <Callout type="idea" title="适合">
   跨重启持久化、写到磁盘的回放、崩溃现场转储、把 World 交给另一个进程（测试工具、回放查看器）、在
-  [热重载](/zh/docs/guide/migration-and-unload#hot-reload)时保住数据。
+  [热重载](/zh/docs/guide/saves/migration-and-unload#hot-reload)时保住数据。
 </Callout>
 
 <Callout type="warn" title="不适合">
-  进程内回滚：[快照](/zh/docs/guide/snapshots)更快，也不用编码。把玩家迁到另一台服务器：
-  [`SaveEntities`](/zh/docs/guide/migration-and-unload#save-entities) 只写这一组实体。只存实体里需要持久化的部分、再读回到活着的实体上：
-  用[记录](/zh/docs/guide/migration-and-unload#records)，即带 `ComponentSet` 的 `SaveEntities`，由 `LoadEntitiesInto` 读回。
+  进程内回滚：[快照](/zh/docs/guide/saves/snapshots)更快，也不用编码。把玩家迁到另一台服务器：
+  [`SaveEntities`](/zh/docs/guide/saves/migration-and-unload#save-entities) 只写这一组实体。只存实体里需要持久化的部分、再读回到活着的实体上：
+  用[记录](/zh/docs/guide/saves/migration-and-unload#records)，即带 `ComponentSet` 的 `SaveEntities`，由 `LoadEntitiesInto` 读回。
 </Callout>
 
 ## 怎么用 [#how-to-use-it]
@@ -95,7 +95,7 @@ long tick = restarted.Clock.Tick;                                      // 1234
 | 每个存活实体，连同 id 和版本号 | 系统、`WorldOptions` |
 | 每个组件：非托管的按原始行，托管的走 Nino | 索引（下次查找时重建） |
 | 被禁用的组件及其保留的值 | 分组设置（`Load` 按本 World 的 `GroupBy` 调用分组） |
-| [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 的元素 | 变更 tick（每个加载的行都算作被写入；`markWritten: false` 时都不算，见[重启](#restart)） |
+| [`DynamicBuffer<T>`](/zh/docs/guide/data/dynamic-buffers) 的元素 | 变更 tick（每个加载的行都算作被写入；`markWritten: false` 时都不算，见[重启](#restart)） |
 | 每个单例 | 用 `SaveWithout(output, in exclude)` 排除的组件和单例（见[重启](#restart)），以及标了 [`[NotSaved]`](#not-saved) 的类型 |
 
 类型按 Nino 类型 id 记录（带命名空间的完整名字的哈希），每列是一个带长度前缀的片段，所以加载时会跳过当前进程没有的组件类型。当前进程
@@ -166,10 +166,10 @@ int interest = resumed.Rates.Interest;                                 // 7：�
 - **集合只建一次**，放在 `static readonly` 字段里：集合是值类型，每次 `With` 或 `WithSingleton` 都返回一个新集合。运行时才知道类型的框架用
   `With(typeof(...))` 添加，组件类型和单例类型都接受。
 - **实体存档不接受单例。** `SaveEntitiesWith(output, ids, set)` 或 `SaveEntitiesWithout(output, ids, set)` 的集合里有单例时抛 `ArgumentException`
-  （见[记录](/zh/docs/guide/migration-and-unload#records)）。
+  （见[记录](/zh/docs/guide/saves/migration-and-unload#records)）。
 
 之后才加到已经有状态的 World 上的系统（不管状态是谁写的），也可以从当前 tick 开始算：`world.AddSystem<T>(changesFromNow: true)`
-让它第一次运行只访问调用之后写入的行（[tick](/zh/docs/guide/change-tracking#ticks)）。托管的服务器在哪里存档、读档，见[托管](/zh/docs/guide/hosting#persistence)。
+让它第一次运行只访问调用之后写入的行（[tick](/zh/docs/guide/changes/change-tracking#ticks)）。托管的服务器在哪里存档、读档，见[托管](/zh/docs/guide/production/hosting#persistence)。
 
 ### 永不保存：`[NotSaved]` [#not-saved]
 
@@ -196,9 +196,9 @@ int linked = next.Count<Link>();                       // 0：余额回来了，
 ```
 
 - **任何存档都不包含它：**`Save`、`SaveWithout`，以及实体存档，即使集合里点了它的名。所以它不需要 Nino 格式化器；存档会包含、
-  却没有格式化器的托管组件会报 [EECS069](/zh/docs/guide/analyzer#eecs069)，`[NotSaved]` 是修复之一。
+  却没有格式化器的托管组件会报 [EECS069](/zh/docs/guide/help/analyzer#eecs069)，`[NotSaved]` 是修复之一。
 - **读档保留 World 自己的值：**标了 `[NotSaved]` 的单例和 `LoadKeeping` 保留的单例一样不被替换，新进程在读档之前或之后设置它都行。
-- **快照和搬移照常复制它。**[`Capture`](/zh/docs/guide/snapshots) 和 `MoveEntities` 都在同一个进程里，运行时状态在这里仍然有意义。
+- **快照和搬移照常复制它。**[`Capture`](/zh/docs/guide/saves/snapshots) 和 `MoveEntities` 都在同一个进程里，运行时状态在这里仍然有意义。
 - **其余的用 `SaveWithout`：**在一种存档里要保存、在另一种存档里不保存的类型（重启时换新的配置），仍放在 `ComponentSet` 里
   （见[重启](#restart)）。
 
@@ -266,7 +266,7 @@ catch (InvalidDataException)
 ### 插件里的组件 [#plugins]
 
 按 id 查找类型是进程级的。插件的旧版本和新版本同时加载时，它们的类型 id 相同，读档会因为类型 id 有歧义而拒绝加载。先卸载旧版本（按
-[热重载](/zh/docs/guide/migration-and-unload#hot-reload)的顺序：存档、`RemoveTypes`、卸载、加载新版本、`Load`），或者把要存档的组件
+[热重载](/zh/docs/guide/saves/migration-and-unload#hot-reload)的顺序：存档、`RemoveTypes`、卸载、加载新版本、`Load`），或者把要存档的组件
 放进一个永远不会重载的程序集，比如宿主和插件共用的契约程序集。
 
 ## 完整例子 [#full-example]
@@ -372,17 +372,17 @@ bob follows alice
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 托管组件没有 `[NinoType]` | `Save` 抛 `InvalidOperationException`（没有格式化器） | [EECS069](/zh/docs/guide/analyzer#eecs069)（有代码修复）；只在运行时有意义的类型标 [`[NotSaved]`](#not-saved)，或用 `SaveWithout(output, in exclude)` 排除 |
+| 托管组件没有 `[NinoType]` | `Save` 抛 `InvalidOperationException`（没有格式化器） | [EECS069](/zh/docs/guide/help/analyzer#eecs069)（有代码修复）；只在运行时有意义的类型标 [`[NotSaved]`](#not-saved)，或用 `SaveWithout(output, in exclude)` 排除 |
 | 复用 `NinoArrayBufferWriter` 却没调 `ResetWrittenCount()` | 新存档接在旧存档后面 | 代码审查：每次存档前先重置 |
 | 设好新配置之后用普通的 `Load` | 存档里的单例把它替换掉，存档里没有的单例被删掉 | 用 `LoadKeeping(input, in keep)` 保留配置单例 |
 | `Load` 的保留集合里放了组件 | 抛 `ArgumentException` | 改为存档时排除它 |
 | 系统要用的单例被排除出存档，之后又没人再设 | 系统第一次运行就抛异常 | 加载前设好并保留，或者加载后再设 |
 | 引用的 `Nino.Generator` 比 EasyEcs 用的 Nino 旧 | 包降级：删掉这个引用，EasyEcs 包已经带了生成器 | 还原（`NU1605`） |
-| 组件里存了 `Entity` 句柄 | 托管列，Nino 写不了 | [EECS017](/zh/docs/guide/analyzer#eecs017) |
+| 组件里存了 `Entity` 句柄 | 托管列，Nino 写不了 | [EECS017](/zh/docs/guide/help/analyzer#eecs017) |
 | 修改已存档的原始行组件的字段 | 旧存档被拒绝 | 从第一次存档起用 `[NinoType(format: NinoFormat.VersionTolerant)]`，或加一个新组件类型 |
 | 重命名组件或换了命名空间 | 旧存档加载时丢掉它 | 用 `[NinoFormerName]` 标上旧的完整名字 |
 | 新旧两个插件版本同时加载 | 名字歧义：`InvalidDataException` | 先卸载旧版本 |
-| 在其他线程存档或读档 | 和所有者线程竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 在其他线程存档或读档 | 和所有者线程竞争 | [EECS014](/zh/docs/guide/help/analyzer#eecs014) |
 
 ## 和其他库的对比 [#compared]
 
@@ -394,13 +394,13 @@ Friflo 写 JSON（`EntitySerializer`），DefaultEcs 的二进制序列化器每
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
+  <Card title="迁移与卸载" href="/zh/docs/guide/saves/migration-and-unload">
     `SaveEntities`、`LoadEntities`、`MoveEntities` 和热重载。
   </Card>
-  <Card title="快照" href="/zh/docs/guide/snapshots">
+  <Card title="快照" href="/zh/docs/guide/saves/snapshots">
     用于回滚的内存拷贝。
   </Card>
-  <Card title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
+  <Card title="动态缓冲" href="/zh/docs/guide/data/dynamic-buffers">
     连同元素一起存盘的列表。
   </Card>
   <Card title="示例：SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">

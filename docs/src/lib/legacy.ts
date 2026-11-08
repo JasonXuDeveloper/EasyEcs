@@ -7,7 +7,7 @@
  *   (`legacyFrontmatter`, used by the frontmatter schema in source.config.ts);
  * - the H1 and the "[Docs index](README.md) ·" breadcrumb under it are dropped
  *   (the page renders its own title, the sidebar replaces the breadcrumb);
- * - relative links to other pages become site URLs (`/en/docs/guide/queries`),
+ * - relative links to other pages become site URLs (`/en/docs/guide/basics/queries`),
  *   links to files outside content/ (README, benchmarks)
  *   become GitHub blob URLs.
  *
@@ -89,7 +89,7 @@ function isLegacyFile(file: string) {
   return legacy;
 }
 
-/** content/guide/queries.md -> /en/docs/guide/queries; README and index -> the folder */
+/** content/guide/basics/queries.md -> /en/docs/guide/basics/queries; README and index -> the folder */
 export function contentFileUrl(relative: string) {
   const parts = relative.split(/[\\/]/);
   const name = (parts.pop() ?? '').replace(/(\.zh)?\.mdx?$/, '');

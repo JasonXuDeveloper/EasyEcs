@@ -73,7 +73,7 @@ public ref struct MovementSystem
 ```
 
 `ref` 表示系统要写，`in` 表示只读。生成器靠这两个关键字生成循环、判断哪些系统可以并行，并告诉
-[变更追踪](/zh/docs/guide/change-tracking)哪些行被写过。
+[变更追踪](/zh/docs/guide/changes/change-tracking)哪些行被写过。
 
 ## 从哪里开始 [#where-to-start]
 
@@ -109,32 +109,32 @@ flowchart LR
 指南每页讲一个概念，按用到的先后排列。
 
 <Cards>
-  <Card icon={<FolderTree />} title="项目结构" href="/zh/docs/guide/project-structure">
+  <Card icon={<FolderTree />} title="项目结构" href="/zh/docs/guide/basics/project-structure">
     组件、系统、宿主循环和测试各放在哪，照 `dotnet new easyecs` 的布局。
   </Card>
-  <Card icon={<Boxes />} title="实体与组件" href="/zh/docs/guide/entities-and-components">
+  <Card icon={<Boxes />} title="实体与组件" href="/zh/docs/guide/basics/entities-and-components">
     句柄、id、标签和生成的成员。
   </Card>
-  <Card icon={<Search />} title="查询与过滤" href="/zh/docs/guide/queries">
+  <Card icon={<Search />} title="查询与过滤" href="/zh/docs/guide/basics/queries">
     `Query`、`Count`、`Any`、`QueryFilter`、结构体 job，以及在单个实体上运行的 `[EntityMethod]` 方法。
   </Card>
-  <Card icon={<Workflow />} title="系统" href="/zh/docs/guide/systems">
+  <Card icon={<Workflow />} title="系统" href="/zh/docs/guide/basics/systems">
     `[ForEach]` 方法、排序、分组、执行频率、事件消费和错误处理。
   </Card>
-  <Card icon={<Zap />} title="变更追踪" href="/zh/docs/guide/change-tracking">
+  <Card icon={<Zap />} title="变更追踪" href="/zh/docs/guide/changes/change-tracking">
     只访问系统上次运行以来被写过或被移除的行。
   </Card>
-  <Card icon={<Network />} title="多线程与并行" href="/zh/docs/guide/threading">
+  <Card icon={<Network />} title="多线程与并行" href="/zh/docs/guide/performance/threading">
     每个 World 一个所有者线程，并行系统与并行 `[ForEach]`。
   </Card>
-  <Card icon={<TriangleAlert />} title="常见错误" href="/zh/docs/guide/common-mistakes">
+  <Card icon={<TriangleAlert />} title="常见错误" href="/zh/docs/guide/help/common-mistakes">
     最先出错的地方，以及拦下它的规则或分析器错误。
   </Card>
 </Cards>
 
-指南的其余页面讲单例组件、结构变更、`ref` 与 `await`、动态缓冲、索引与关系、层级、分组、清理与禁用、[预制体](/zh/docs/guide/prefabs)、批量操作、快照、存档、
-迁移与卸载、[托管](/zh/docs/guide/hosting)、[测试](/zh/docs/guide/testing)、[调试与诊断](/zh/docs/guide/diagnostics)、
-[问题排查](/zh/docs/guide/troubleshooting)，以及每条[分析器规则](/zh/docs/guide/analyzer)。
+指南的其余页面讲单例组件、结构变更、`ref` 与 `await`、动态缓冲、索引与关系、层级、分组、清理与禁用、[预制体](/zh/docs/guide/basics/prefabs)、批量操作、快照、存档、
+迁移与卸载、[托管](/zh/docs/guide/production/hosting)、[测试](/zh/docs/guide/production/testing)、[调试与诊断](/zh/docs/guide/production/diagnostics)、
+[问题排查](/zh/docs/guide/help/troubleshooting)，以及每条[分析器规则](/zh/docs/guide/help/analyzer)。
 
 ## 对比 [#compare]
 

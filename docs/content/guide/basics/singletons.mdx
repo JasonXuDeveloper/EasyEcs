@@ -7,7 +7,7 @@ icon: Globe
 
 Some state belongs to the whole world, not to an entity: the tick clock, the match configuration, a score, a spatial
 grid. A singleton is a struct that implements `ISingletonComponent`, with exactly one value per world. It is where
-world-level state goes, since systems keep none ([EECS007](/en/docs/guide/analyzer#eecs007)), and because it lives in
+world-level state goes, since systems keep none ([EECS007](/en/docs/guide/help/analyzer#eecs007)), and because it lives in
 the world, two worlds on two threads never share it.
 
 ## When to use it [#when-to-use-it]
@@ -101,11 +101,11 @@ if (world.TryGetSingleton<Clock>(out var copy)) Console.WriteLine(copy.Tick);
 world.RemoveScore();
 ```
 
-The generated members follow the rules of [generated members](/en/docs/guide/entities-and-components#generated-members):
+The generated members follow the rules of [generated members](/en/docs/guide/basics/entities-and-components#generated-members):
 `SetX` and `GetOrAddX(…)` have one overload per public constructor, and a singleton without fields gets no
 `GetOrAddX`. `world.GetOrAddClock(0, 0.05f)` is the setup that leaves a value alone (a loaded save's clock keeps
 its tick); `world.SetClock(0, 0.05f)` overwrites it. Writing `GetOrAddSingleton(new Clock(…))` instead of the generated
-member is [EECS033](/en/docs/guide/analyzer#eecs033), with a code fix.
+member is [EECS033](/en/docs/guide/help/analyzer#eecs033), with a code fix.
 
 ### Stable handles [#stable-handles]
 
@@ -122,7 +122,7 @@ clock.Value.Tick++;                          // later: a ref, no lookup
   value. `AddSingleton<T>()` on an existing singleton throws instead of resetting it.
 - `RemoveSingleton<T>()` detaches it: writes through the old handle no longer reach the world, also after the
   singleton is added again. Take a new handle then.
-- [Snapshots](/en/docs/guide/snapshots) restore singletons into the same storage, so handles keep working after a
+- [Snapshots](/en/docs/guide/saves/snapshots) restore singletons into the same storage, so handles keep working after a
   `Restore`.
 - Generated `[ForEach]` jobs resolve each singleton parameter once per pass; parallel jobs, which are copied to
   other threads, carry a `SingletonRef<T>`.
@@ -133,12 +133,12 @@ clock.Value.Tick++;                          // later: a ref, no lookup
 - With `WorldOptions.ParallelSystems`, a system that takes a singleton by `ref` writes it: it never shares a stage
   with another system that reads or writes the same singleton. Take it by `in` when the system only reads it.
 - A `[ForEach(Parallel = true)]` method takes singletons only by `in`: every chunk would race on a `ref`
-  ([EECS010](/en/docs/guide/analyzer#eecs010)). A total over the rows is a `ref Reduce<T>` parameter instead: each
+  ([EECS010](/en/docs/guide/help/analyzer#eecs010)). A total over the rows is a `ref Reduce<T>` parameter instead: each
   chunk adds into its own partial result, and `[Sum]`, `[Min]`, `[Max]` (and `[Product]`, `[All]`, `[Any]`) on the
   singleton's fields declare how the partial results combine
-  ([reductions](/en/docs/guide/threading#reductions)).
+  ([reductions](/en/docs/guide/performance/threading#reductions)).
 - A singleton that holds a collection (a grid of cells, a queue) and is changed through an `in` parameter is scheduled
-  as a read: [EECS011](/en/docs/guide/analyzer#eecs011) asks for `ref`.
+  as a read: [EECS011](/en/docs/guide/help/analyzer#eecs011) asks for `ref`.
 
 ## Full example [#full-example]
 
@@ -266,11 +266,11 @@ changes on the next update: with the poison doubled, both remaining units die on
 
 | Instead of | Do | Why |
 | --- | --- | --- |
-| `GetSingleton<T>()` (or `World.X`) per entity inside a loop | A singleton parameter of the `[ForEach]` method | Resolved once per pass ([EECS027](/en/docs/guide/analyzer#eecs027) in a `[ForEach]` method) |
+| `GetSingleton<T>()` (or `World.X`) per entity inside a loop | A singleton parameter of the `[ForEach]` method | Resolved once per pass ([EECS027](/en/docs/guide/help/analyzer#eecs027) in a `[ForEach]` method) |
 | A lookup on every call from host code | A `SingletonRef<T>` kept from setup | No lookup |
-| `ref` for a singleton the system only reads | `in` | Lets the system share a parallel stage ([EECS025](/en/docs/guide/analyzer#eecs025)) |
+| `ref` for a singleton the system only reads | `in` | Lets the system share a parallel stage ([EECS025](/en/docs/guide/help/analyzer#eecs025)) |
 | A static field | A singleton | Per world, saved and snapshotted with it |
-| A singleton holding runtime state (a connection, a cache) given a Nino formatter only to compile | [`[NotSaved]`](/en/docs/guide/saves#not-saved) on the type | Saves skip it, a load keeps the world's own value |
+| A singleton holding runtime state (a connection, a cache) given a Nino formatter only to compile | [`[NotSaved]`](/en/docs/guide/saves/saves#not-saved) on the type | Saves skip it, a load keeps the world's own value |
 
 1,000 singleton reads and writes through `GetSingleton<T>()`, next to 1,000 component writes through entity handles
 (`MicroBenchmarks`):
@@ -293,29 +293,29 @@ A pass that writes a singleton for each of 100,000 entities, against Friflo.Engi
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| State kept in a system field instead | Invisible to other systems, lost on remove, shared by worlds if static | [EECS007](/en/docs/guide/analyzer#eecs007) |
-| A class implementing `ISingletonComponent` | Does not compile | [EECS006](/en/docs/guide/analyzer#eecs006) |
+| State kept in a system field instead | Invisible to other systems, lost on remove, shared by worlds if static | [EECS007](/en/docs/guide/help/analyzer#eecs007) |
+| A class implementing `ISingletonComponent` | Does not compile | [EECS006](/en/docs/guide/help/analyzer#eecs006) |
 | `AddSingleton<T>()` to reset a singleton the world has | `InvalidOperationException`; the value stays | Replace it with `world.SetX(…)` |
 | Reading a singleton before it was added (`world.X`, `GetSingleton<T>()`, a `[ForEach]` parameter) | `InvalidOperationException`, naming the call that adds it | Add it at setup, or use `GetOrAddX()` where the default is right |
-| A `ref` singleton in a parallel method | Races between chunks | [EECS010](/en/docs/guide/analyzer#eecs010) |
-| `AddSingleton` or `RemoveSingleton` in a batch method, a parallel method or a parallel stage | `InvalidOperationException`: both go through the structural gate, and the structure is frozen there | [EECS010](/en/docs/guide/analyzer#eecs010), [EECS013](/en/docs/guide/analyzer#eecs013), and at run time |
-| Changing a collection in a singleton through `in` | Scheduled as a read | [EECS011](/en/docs/guide/analyzer#eecs011) |
+| A `ref` singleton in a parallel method | Races between chunks | [EECS010](/en/docs/guide/help/analyzer#eecs010) |
+| `AddSingleton` or `RemoveSingleton` in a batch method, a parallel method or a parallel stage | `InvalidOperationException`: both go through the structural gate, and the structure is frozen there | [EECS010](/en/docs/guide/help/analyzer#eecs010), [EECS013](/en/docs/guide/help/analyzer#eecs013), and at run time |
+| Changing a collection in a singleton through `in` | Scheduled as a read | [EECS011](/en/docs/guide/help/analyzer#eecs011) |
 | Writing through a `SingletonRef<T>` after `RemoveSingleton` | The write reaches nothing | Take a new handle after re-adding |
 | A list of players in a singleton | Duplicates what entities and queries give | Make them entities with a tag |
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/basics/systems">
     Singleton parameters, resolved once per pass.
   </Card>
   <Card title="ECS principles" href="/en/docs/ecs-principles">
     Why systems are stateless and state is data.
   </Card>
-  <Card title="Threading" href="/en/docs/guide/threading">
+  <Card title="Threading" href="/en/docs/guide/performance/threading">
     One world per thread and parallel stages.
   </Card>
-  <Card title="Snapshots" href="/en/docs/guide/snapshots">
+  <Card title="Snapshots" href="/en/docs/guide/saves/snapshots">
     Singletons are captured and restored with the world.
   </Card>
 </Cards>

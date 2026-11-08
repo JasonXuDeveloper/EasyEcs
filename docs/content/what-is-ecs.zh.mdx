@@ -154,7 +154,7 @@ EasyEcs 是 archetype ECS，但去掉了这种设计在“来来去去的状态�
 这样能用，但系统看到的是一个马上就要变的状态，效果的先后也取决于缓冲什么时候回放。
 
 EasyEcs 的结构变更立即生效，遍历途中也一样。一次遍历里每个实体仍然最多访问一次，遍历途中新进表的实体留到下一次遍历，
-同一次更新里排在后面的系统都能看到这次变更。详见[结构变更](/zh/docs/guide/structural-changes)。
+同一次更新里排在后面的系统都能看到这次变更。详见[结构变更](/zh/docs/guide/changes/structural-changes)。
 
 ## ECS 能并行执行系统吗？ [#parallel]
 
@@ -163,7 +163,7 @@ EasyEcs 的结构变更立即生效，遍历途中也一样。一次遍历里每
 （`WorldOptions.ParallelSystems`）。单个重系统还可以用 `[ForEach(Parallel = true)]` 把行分给多个核。
 
 对服务器来说，最简单的并行往往是每个线程一个 World，比如每张地图或每个场景一个：World 之间什么都不共享，完全不需要同步。
-详见[多线程与并行](/zh/docs/guide/threading)。
+详见[多线程与并行](/zh/docs/guide/performance/threading)。
 
 ## ECS 比面向对象更快吗？ [#ecs-vs-oop]
 

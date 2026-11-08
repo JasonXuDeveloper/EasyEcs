@@ -6,7 +6,7 @@ icon: LifeBuoy
 faq: true
 ---
 
-大多数错误到不了运行时：你还在写代码，[分析器](/zh/docs/guide/analyzer)就拒绝了它们。这一页讲剩下的：EasyEcs 抛出的异常（照原文
+大多数错误到不了运行时：你还在写代码，[分析器](/zh/docs/guide/help/analyzer)就拒绝了它们。这一页讲剩下的：EasyEcs 抛出的异常（照原文
 引用），以及什么都不抛的问题。在页面里搜索你那条信息的开头几个词。
 
 | 信息开头 | 小节 |
@@ -47,7 +47,7 @@ changes are made by the world's owner thread, one at a time
 某个变更内部（你自己包在 EasyEcs 调用外面的回调）又发起了一个。EasyEcs 检查的是一个普通标志，能抓住很多这类竞争，但不是全部。
 
 **修法：**同一时刻只让一个线程改 World。其他线程把改动作为数据交出来，经由一个队列，由所有者线程上的系统读空
-（[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)、[托管](/zh/docs/guide/hosting#requests)），
+（[来自其他线程的输入](/zh/docs/guide/performance/threading#input-from-other-threads)、[托管](/zh/docs/guide/production/hosting#requests)），
 或者每个线程各用一个 World。
 
 ## 为什么结构变更报 “while the world's structure is frozen”？ [#structure-frozen]
@@ -59,7 +59,7 @@ InvalidOperationException: A structural change was made while the world's struct
 
 变更发生时，有别的代码正把表固定住：`ParallelSystems` 的并行阶段、`[ForEach(Parallel = true)]` 方法、批处理方法或
 `ForEachBatch` job（span 指向列内部），或者标记了 `INoStructuralChanges` 的 job。分析器能看到的变更它会报
-（[EECS010](/zh/docs/guide/analyzer#eecs010)、[EECS013](/zh/docs/guide/analyzer#eecs013)）；这一个是经由它追踪不到的辅助
+（[EECS010](/zh/docs/guide/help/analyzer#eecs010)、[EECS013](/zh/docs/guide/help/analyzer#eecs013)）；这一个是经由它追踪不到的辅助
 方法或句柄发生的。
 
 **修法：**把变更记成数据（标签、组件、请求实体），在一个单独运行的系统或 `[ForEach]` 方法里执行：带 `Entity` 或 `World` 参数的
@@ -76,7 +76,7 @@ InvalidOperationException: Entity is not alive (destroyed, or a default handle)
 对这样的句柄调用 `Destroy` 什么也不做。
 
 **修法：**实体可能在你拿到句柄之后死掉的地方，先查 `entity.IsAlive`；组件里存 `EntityId`，用
-`world.TryGetEntity(id, out var entity)` 解析（[实体与组件](/zh/docs/guide/entities-and-components)）。
+`world.TryGetEntity(id, out var entity)` 解析（[实体与组件](/zh/docs/guide/basics/entities-and-components)）。
 
 ## 为什么 `Clone` 说实体 “is retired”？ [#clone-retired]
 
@@ -85,7 +85,7 @@ InvalidOperationException: The entity is retired: it is only kept alive (tagged 
 are removed, and cannot be cloned
 ```
 
-带[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)的实体 `Destroy` 之后仍然活着，带上 `Retired` 标签，
+带[清理组件](/zh/docs/guide/changes/cleanup-and-disable#cleanup-components)的实体 `Destroy` 之后仍然活着，带上 `Retired` 标签，
 直到某个系统释放了这些组件持有的资源。它还活着，`IsAlive` 为 true，但不会再被带回来：`Clone()` 拒绝它，`MoveEntities` 跳过它，
 过滤条件里没写 `Retired` 时 `SetAll` 也不碰它。
 
@@ -97,9 +97,9 @@ are removed, and cannot be cloned
 InvalidOperationException: Entity has no Mana component
 ```
 
-`Get<T>()`（以及生成的 `entity.Mana`）要求组件存在；被移除或[被禁用](/zh/docs/guide/cleanup-and-disable)的组件都算不存在。
+`Get<T>()`（以及生成的 `entity.Mana`）要求组件存在；被移除或[被禁用](/zh/docs/guide/changes/cleanup-and-disable)的组件都算不存在。
 **修法：**可有可无的地方用 `TryGet<T>(out var value)` 或生成的 `TryGetMana(out …)`，要默认值就用 `GetOrAdd<T>()`；在
-`[ForEach]` 方法里用 [`Maybe<T>`](/zh/docs/guide/systems#maybe) 参数，或者按 `[With<T>]` / `[Without<T>]` 拆成两个方法。
+`[ForEach]` 方法里用 [`Maybe<T>`](/zh/docs/guide/basics/systems#maybe) 参数，或者按 `[With<T>]` / `[Without<T>]` 拆成两个方法。
 
 ## 为什么单例 “not added to this world”？ [#singleton-not-added]
 
@@ -110,7 +110,7 @@ InvalidOperationException: Singleton Clock was not added to this world: set it b
 
 代码读了一个没人添加过的单例：`world.GetSingleton<T>()`、生成的 `world.Clock`、`world.SingletonRef<T>()`，或者把 `Clock`
 当参数的 `[ForEach]` 方法。参数在系统运行时解析，所以第一次 `Update()` 就会抛异常，哪怕一个匹配的实体都没有。World 不会凭空造一个单例，
-因为默认值很少是对的：步长为零的时钟会让所有实体原地不动，却没有任何报错指向漏掉的初始化（[单例](/zh/docs/guide/singletons#in-systems)）。
+因为默认值很少是对的：步长为零的时钟会让所有实体原地不动，却没有任何报错指向漏掉的初始化（[单例](/zh/docs/guide/basics/singletons#in-systems)）。
 
 **修法：**在建 World 的地方、第一次 `Update()` 之前添加它（`world.SetClock(…)`、`world.AddSingleton<Clock>()`），
 默认值合适的地方用 `GetOrAddSingleton<T>()` / `GetOrAddClock()`。
@@ -123,7 +123,7 @@ world.SetClock(...) or world.Clock = ..., or use GetOrAddClock() to take it as i
 ```
 
 `AddSingleton<T>()` 只添加 World 里还没有的单例。已经有时它拒绝执行，不会把所有系统都在读的值重置成 `default`
-（[单例](/zh/docs/guide/singletons#api)）。
+（[单例](/zh/docs/guide/basics/singletons#api)）。
 
 **修法：** 用 `world.SetClock(…)`（或 `world.Clock = …`）替换值；代码只需要它存在时，用 `GetOrAddClock()` 原样取用。
 
@@ -133,7 +133,7 @@ world.SetClock(...) or world.Clock = ..., or use GetOrAddClock() to take it as i
 InvalidOperationException: The entity has no Mana (check HasValue)
 ```
 
-方法访问的实体没有 `T`。**修法：**读 `Value` 之前先检查 `HasValue`（[`Maybe<T>`](/zh/docs/guide/systems#maybe)）。
+方法访问的实体没有 `T`。**修法：**读 `Value` 之前先检查 `HasValue`（[`Maybe<T>`](/zh/docs/guide/basics/systems#maybe)）。
 
 ## 为什么 `AddSystem` 说系统 “already belongs to a world”？ [#system-in-a-world]
 
@@ -142,7 +142,7 @@ InvalidOperationException: ReceiveSpawns is already a system of this world
 ```
 
 每个系统类型在一个 World 里只跑一份。**修法：**每个 World 只加一次；每个 World 都有自己的一条记录，所以同一个类型可以加到很多 World 里。
-同一条规则要对不同的组件各跑一遍，就写成[泛型系统](/zh/docs/guide/systems#generic-systems)，加两个封闭类型；要跑得更频繁，就更频繁地更新它的分组。
+同一条规则要对不同的组件各跑一遍，就写成[泛型系统](/zh/docs/guide/basics/systems#generic-systems)，加两个封闭类型；要跑得更频繁，就更频繁地更新它的分组。
 
 ## 为什么 `AddSystem` 报顺序成环？ [#ordering-cycle]
 
@@ -150,7 +150,7 @@ InvalidOperationException: ReceiveSpawns is already a system of this world
 InvalidOperationException: [UpdateBefore] / [UpdateAfter] form a cycle among A, B
 ```
 
-列出的这些系统之间的顺序无法同时满足。分析器会报它在一次编译里看到的环（[EECS019](/zh/docs/guide/analyzer#eecs019)）；这个环跨了
+列出的这些系统之间的顺序无法同时满足。分析器会报它在一次编译里看到的环（[EECS019](/zh/docs/guide/help/analyzer#eecs019)）；这个环跨了
 程序集。**修法：**去掉其中一条顺序。
 
 ## 为什么 `Descendants` 报 “The ChildOf links form a cycle”？ [#childof-cycle]
@@ -163,7 +163,7 @@ InvalidOperationException: The ChildOf links form a cycle
 某个后代下面。EasyEcs 不在换父时检查（那样每次 `Set` 都要往上走一遍），所以遍历走到环的时候才发现。
 
 **修法：**把 `child` 挂到 `parent` 下之前，从 `parent` 沿 `ChildOf` 往上走，碰到 `child` 就拒绝。实体要挂到自己的后代下面时，
-先解除挂接（`RemoveChildOf()`）（[换父实体、解除挂接](/zh/docs/guide/hierarchy#reparent)）。
+先解除挂接（`RemoveChildOf()`）（[换父实体、解除挂接](/zh/docs/guide/data/hierarchy#reparent)）。
 
 ## 为什么有的组件不能禁用？ [#cannot-disable]
 
@@ -171,7 +171,7 @@ InvalidOperationException: The ChildOf links form a cycle
 InvalidOperationException: ChildOf cannot be disabled: remove it instead
 ```
 
-`Disable<T>()` 让值保留、但对查询隐藏。[清理组件](/zh/docs/guide/cleanup-and-disable)和 `ChildOf` 不能这样隐藏：World 要一直看到
+`Disable<T>()` 让值保留、但对查询隐藏。[清理组件](/zh/docs/guide/changes/cleanup-and-disable)和 `ChildOf` 不能这样隐藏：World 要一直看到
 它们，才能完成销毁、维持层级。**修法：**移除这个组件，或者禁用另一个系统会过滤的组件。
 
 ## 为什么 `Capture`、`Restore`、`Save`、`Load`、`MoveEntities`、`RemoveTypes`、`TrimExcess` 要等遍历结束？ [#during-a-pass]
@@ -183,9 +183,9 @@ InvalidOperationException: MoveEntities cannot run while a query or system itera
 
 消息里写着被拒绝的调用：`Capture`、`Restore`、存档和加载（`Save`、`SaveWithout`、`SaveEntities`、`SaveEntitiesWith`、`SaveEntitiesWithout`、`Load`、
 `LoadKeeping`、`LoadEntities`、`LoadEntitiesInto`）、`MoveEntities`、`GroupBy`、`RemoveTypes` 或 `TrimExcess`。它们要读、重写或丢弃整张表，
-而查询的 `foreach` 或正在运行的系统正在遍历这些表；分析器在它看得到的遍历里会报出这些调用（[EECS041](/zh/docs/guide/analyzer#eecs041)）。
-**修法：**在两次更新之间、任何查询循环之外调用它们（[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、
-[卸载](/zh/docs/guide/migration-and-unload#remove-types)、[修剪](/zh/docs/guide/diagnostics#trim)）。遍历期间创建实体、实例化预制体（带成员的也可以）
+而查询的 `foreach` 或正在运行的系统正在遍历这些表；分析器在它看得到的遍历里会报出这些调用（[EECS041](/zh/docs/guide/help/analyzer#eecs041)）。
+**修法：**在两次更新之间、任何查询循环之外调用它们（[快照](/zh/docs/guide/saves/snapshots)、[存档](/zh/docs/guide/saves/saves)、
+[卸载](/zh/docs/guide/saves/migration-and-unload#remove-types)、[修剪](/zh/docs/guide/production/diagnostics#trim)）。遍历期间创建实体、实例化预制体（带成员的也可以）
 和其他结构变更都没问题。`Restore` 也会拒绝另一个 World
 的快照（`ArgumentException`），以及 `RemoveTypes` 丢掉其中某些表之前拍的快照。
 
@@ -204,7 +204,7 @@ InvalidDataException: A damaged save: …
 
 - **Not an EasyEcs save：**这些字节是别的东西、被截断了，或者是另一个存档格式版本写的（EasyEcs 4.3 及更早版本的存档）。
 - **大小或字段变了：**存档之后，原始行组件的字段被增、删、改名或改了类型，或者 `[NinoType]` 组件的改动超出了它的 Nino 格式允许的范围。
-  结构会变的组件标成 `VersionTolerant` 或 `Keyed` 格式的 `[NinoType]`，或者保留旧类型、再用系统转换（[代码改了之后](/zh/docs/guide/saves#versioning)）。
+  结构会变的组件标成 `VersionTolerant` 或 `Keyed` 格式的 `[NinoType]`，或者保留旧类型、再用系统转换（[代码改了之后](/zh/docs/guide/saves/saves#versioning)）。
 - **原始行与 Nino：**存档之后，给非托管组件加上或去掉了 `[NinoType]`。
 - **存档 id 冲突：**进程里两个类型的 id 相同：带命名空间的全名相同（同一插件的两个版本同时加载），或者某个 `[NinoFormerName]` 正好是
   另一个类型的名字。先卸载旧版本，或者给其中一个改名。
@@ -223,9 +223,9 @@ InvalidOperationException: Seat is unique, but its module registered no index (�
 World 都保持原样。
 
 - **已经有这个键：**另一个实体持有这个键。要转移一个键，先改持有者，再改新的那个；互换要经过一个空闲的键
-  （[转移唯一键](/zh/docs/guide/common-mistakes#rekey-order)）。启用一个被禁用的组件会重新认领它的键，期间键被别人拿走了，也会这样失败。
+  （[转移唯一键](/zh/docs/guide/help/common-mistakes#rekey-order)）。启用一个被禁用的组件会重新认领它的键，期间键被别人拿走了，也会这样失败。
 - **一次给多个实体：**一次调用会把同一个键写进很多行：带键的 `CreateEntities` 或 `SetAll`、预制体带着键时的
-  `Instantiate(prefab, entities)`，或者 `Clone()`。给每个实体各自的键（[复制唯一键](/zh/docs/guide/common-mistakes#unique-copies)）。
+  `Instantiate(prefab, entities)`，或者 `Clone()`。给每个实体各自的键（[复制唯一键](/zh/docs/guide/help/common-mistakes#unique-copies)）。
 - **存档里有重复的键：**存档是没有唯一约束的代码写的，或者被改过。先用旧代码的 World 加载并把键修好，或者迁移期间先去掉约束。
 - **没有注册索引：**生成器会为它能看到的每个唯一组件注册索引。它看不到的类型（反射创建的，或者在没用生成器编译的程序集里）需要
   每个 World 在第一次写入前调一次 `world.Index<T, TKey>()`。
@@ -238,7 +238,7 @@ ArgumentException: A sliced filter (QueryFilter.Slice) applies to ForEach passes
 
 `QueryFilter.Slice(index, of)` 把每张表切成几份，只有 `ForEach`、`ForEachEntity`、`ForEachBatch` 及其并行形式会按份访问。
 `Query`、`Read`、`Count`、`Any`、`DestroyAll`、`entity.Run`、`SetAll` 和其他批量调用需要所有匹配的行，所以拒绝它。**修法：**给这些
-调用传不带 `Slice` 的过滤条件；分帧系统访问了多少，看 `system.Stats.LastEntities`（[分帧](/zh/docs/guide/systems#slices)）。
+调用传不带 `Slice` 的过滤条件；分帧系统访问了多少，看 `system.Stats.LastEntities`（[分帧](/zh/docs/guide/basics/systems#slices)）。
 
 ## 为什么 `DestroyedSince` 说没有销毁日志？ [#no-destroy-log]
 
@@ -248,7 +248,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
 
 销毁日志默认是关的：每条记录 16 字节，和 World 一起分配。**修法：**用 `new WorldOptions { DestroyLogCapacity = n }` 创建 World，`n` 是最慢的
 读者两次读取之间可能发生的销毁次数。`DestroyedSince` 返回 `false`，说明这个读者落后的比日志装得下的还多：把完整状态重新发给它
-（[销毁日志](/zh/docs/guide/change-tracking#destroy-log)）。
+（[销毁日志](/zh/docs/guide/changes/change-tracking#destroy-log)）。
 
 ## 为什么我的系统从不运行？ [#system-does-not-run]
 
@@ -263,7 +263,7 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
    `[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]`，以及分组自己或它实现的任何接口带来的 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`
    （泛型 actor 接口就带着它们）。被禁用的组件算不存在。
 6. **确实有东西可看：**`[Changed<T>]` 方法只访问它的系统上次运行以来被写过的行，`[Removed<T>]` 方法只访问那之后失去 `T` 的实体
-   （[变更追踪](/zh/docs/guide/change-tracking#ticks)）。
+   （[变更追踪](/zh/docs/guide/changes/change-tracking#ticks)）。
 
 `WorldOptions.MeasureSystems` 会在 `system.Stats.Runs` 里统计每次运行，能分清“从没跑过”和“跑了但什么都没做”。
 
@@ -279,13 +279,13 @@ InvalidOperationException: The world keeps no destroy log: set WorldOptions.Dest
    去掉过滤条件再试一次，就能和前两种情况分开。
 
 **修法：**把 `false` 当成请求的结果（actor 没了、单位死了），而不是错误；实体可能已被替换时，按 `EntityId` 重新查找
-（[`entity.Run`](/zh/docs/guide/queries#run-on-one-entity)）。
+（[`entity.Run`](/zh/docs/guide/basics/queries#run-on-one-entity)）。
 
 ## 为什么我的系统没有并行？ [#not-parallel]
 
 开了 `ParallelSystems`，系统只有在访问集已知、且不冲突时才会共享一个阶段。带 `World` 参数或不只当身份用的 `Entity` 参数、有 `OnUpdate` 方法、
 有 `[Consume]` 方法，或者一个 `[ForEach]` 方法都没有的系统，都单独运行。一个写另一个读或写的东西，两个系统就冲突；`ref` 参数即使
-方法体只读也算写：改用 `in`（[并行系统](/zh/docs/guide/threading#parallel-systems)）。顺序（`[UpdateAfter<T>]`）也会把后面的
+方法体只读也算写：改用 `in`（[并行系统](/zh/docs/guide/performance/threading#parallel-systems)）。顺序（`[UpdateAfter<T>]`）也会把后面的
 系统放进后面的阶段。
 
 ## 为什么并行遍历说索引 “is not built yet”？ [#index-not-built]
@@ -295,7 +295,7 @@ InvalidOperationException: The index of Unit by Team is not built yet, and build
 ```
 
 值索引由第一次查找建立。在多个线程上跑的代码（并行 `[ForEach]` 方法、并行阶段里的系统、`world.ParallelFor`）通过 `World` 去查，
-就会在别的线程读它的同时建它，所以查找会拒绝。**修法：**用 [`Lookup<T>`](/zh/docs/guide/threading#lookups) 参数，在它上面调
+就会在别的线程读它的同时建它，所以查找会拒绝。**修法：**用 [`Lookup<T>`](/zh/docs/guide/performance/threading#lookups) 参数，在它上面调
 `TryFind`、`Find` 或 `Count`：生成的 job 会在遍历前建好索引。或者在更新前，在所有者线程上查一次这个键，之后的遍历就有索引了。
 
 ## 为什么 `Lookup<T>` 说它 “holds no index”？ [#lookup-no-index]
@@ -306,7 +306,7 @@ InvalidOperationException: This Lookup<Unit> holds no index by Team: a [ForEach]
 
 生成器按方法体里对这个参数的调用来准备 `Lookup<T>` 的索引。在别处发起的调用（参数被传进的辅助方法里）指向的索引，job 并不知道。
 **修法：**在 `[ForEach]` 方法本身里，用这个键类型对参数调 `TryFind`、`Find` 或 `Count`，再把结果传给辅助方法
-（[查找](/zh/docs/guide/threading#lookups)）。
+（[查找](/zh/docs/guide/performance/threading#lookups)）。
 
 ## 为什么瓦片在交换光环或读取时抛异常？ [#tile-throws]
 
@@ -319,37 +319,37 @@ InvalidOperationException: The tile's halo was exchanged without its mask (mask:
 ```
 
 - **层：**`ExchangeHalo(from, to)` 要求 `0 <= from < to <= Height`。
-- **格子：**瓦片的缓冲要有 `Width × Depth × Height` 个格子；创建瓦片时就填到这个长度（[网格](/zh/docs/guide/grids)）。
-- **形状：**`ITileShape` 的宽、深（1 到 64）、高和光环对不上；分析器在声明处报告这个形状（[EECS072](/zh/docs/guide/analyzer#eecs072)）。
+- **格子：**瓦片的缓冲要有 `Width × Depth × Height` 个格子；创建瓦片时就填到这个长度（[网格](/zh/docs/guide/performance/grids)）。
+- **形状：**`ITileShape` 的宽、深（1 到 64）、高和光环对不上；分析器在声明处报告这个形状（[EECS072](/zh/docs/guide/help/analyzer#eecs072)）。
 - **超出瓦片和光环：**游标或 `tile[x, y, z]` 读到了光环之外。让每个偏移都在 `Halo` 之内，或者声明更大的光环。
 - **没有掩码：**`Rows(...)` 走掩码里的活跃行；用 `mask: false` 交换光环的瓦片一行都没有。带掩码交换，或者自己走每一行
-  （[高瓦片](/zh/docs/guide/grids#layers)）。
+  （[高瓦片](/zh/docs/guide/performance/grids#layers)）。
 
 ## 为什么我的方法没有得到向量循环？ [#no-vector-loop]
 
 只有参数和方法体能变成通道的方法，生成器才写向量循环：组件里是同一种大小的数，没有 `Entity`、`World`、`Mut<T>`、span、`Scratch<T>`、
 `Lookup<T>`、`Emit<T>` 或 `Tile` 参数，没有它无法向量化的调用。否则方法逐行运行，结果正确，只是慢一些。**修法：**读出原因，改掉它点名的东西：
-看起来是为向量循环写的方法，[EECS055](/zh/docs/guide/analyzer#eecs055)（建议，在 IDE 里显示）会点名原因；`SimdMode = SimdMode.Require`
-把它变成构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)）；`world.DescribeSchedule()` 打印每个方法拿到的循环
-（`SystemInfo.Loops`，[向量循环](/zh/docs/guide/systems#vector-loops)）。
+看起来是为向量循环写的方法，[EECS055](/zh/docs/guide/help/analyzer#eecs055)（建议，在 IDE 里显示）会点名原因；`SimdMode = SimdMode.Require`
+把它变成构建错误（[EECS056](/zh/docs/guide/help/analyzer#eecs056)）；`world.DescribeSchedule()` 打印每个方法拿到的循环
+（`SystemInfo.Loops`，[向量循环](/zh/docs/guide/basics/systems#vector-loops)）。
 
 ## 为什么我的并行方法只在一个线程上跑？ [#parallel-one-thread]
 
 并行 `[ForEach]` 方法把行切成块，每块至少 1,024 行（写被追踪的组件时 4,096 行），不到两块就在调用线程上跑。辅助线程帮不上忙的遍历，
-也在那里跑。几百个很重的行于是只有一块。**修法：**把 [`ChunkSize`](/zh/docs/guide/threading#chunk-rows) 设成一个线程每次拿的行数
+也在那里跑。几百个很重的行于是只有一块。**修法：**把 [`ChunkSize`](/zh/docs/guide/performance/threading#chunk-rows) 设成一个线程每次拿的行数
 （从 行数 ÷ 线程数 ÷ 4 开始，不低于 64）；轻的行保持默认。
 
 ## 为什么浮点总和在不同运行或机器上不一样？ [#float-total]
 
 浮点的 `Reduce<T>` 求和按块舍入，默认块大小跟着线程数走，所以换台机器就切出别的块。**修法：**设
-[`ChunkSize`](/zh/docs/guide/threading#chunk-rows)：这样每次运行、任何线程数下总和都一样，只是不与同一方法 `Parallel = false` 时的总和逐位相同
-（[归约](/zh/docs/guide/threading#reductions)）。整数总和、最小值和最大值怎样都是精确的。
+[`ChunkSize`](/zh/docs/guide/performance/threading#chunk-rows)：这样每次运行、任何线程数下总和都一样，只是不与同一方法 `Parallel = false` 时的总和逐位相同
+（[归约](/zh/docs/guide/performance/threading#reductions)）。整数总和、最小值和最大值怎样都是精确的。
 
 ## 为什么 `EntityRandom` 抽出同样的数？ [#random-repeats]
 
 一次抽取是 (seed, entity, tick, stream) 的纯函数。只有 `World.Update()` 推进 tick：只靠 `Update<TGroup>()` 运行的系统会再抽出上一次更新的数；
-同一步里同一实体对同一个流抽两次，结果相等（[EECS088](/zh/docs/guide/analyzer#eecs088)）。**修法：**每一步调用一次 `World.Update()`
-（它的默认分组里可以没有系统），一行里的每次抽取用自己的流（[随机数](/zh/docs/guide/threading#entity-random)）。
+同一步里同一实体对同一个流抽两次，结果相等（[EECS088](/zh/docs/guide/help/analyzer#eecs088)）。**修法：**每一步调用一次 `World.Update()`
+（它的默认分组里可以没有系统），一行里的每次抽取用自己的流（[随机数](/zh/docs/guide/performance/threading#entity-random)）。
 
 ## 为什么某个生成成员不见了？ [#member-missing]
 
@@ -361,30 +361,30 @@ InvalidOperationException: The tile's halo was exchanged without its mask (mask:
 - 组件带索引（`IIndexed<TKey>`）：没有 `GetOrAddX()`，`entity.X` 是只读的；用 `SetX(…)` 写。
 
 泛型 API 始终可用：`Get<T>()`、`Read<T>()`、`Set(…)`、`Has<T>()`、`Remove<T>()`、`GetSingleton<T>()`
-（[生成成员](/zh/docs/guide/entities-and-components)）。
+（[生成成员](/zh/docs/guide/basics/entities-and-components)）。
 
 ## 为什么通过 `ref` 写的值不见了？ [#ref-lost]
 
 `entity.Get<T>()` 或查询项给出的 `ref`，只在 World 下一次结构变更之前有效（变更可能搬动行），也绝不能跨 `await`。通过旧 `ref`
-写入，落在了实体已经不用的内存上。变更之后通过句柄重新读（[ref 与 await](/zh/docs/guide/refs-and-await)）。
+写入，落在了实体已经不用的内存上。变更之后通过句柄重新读（[ref 与 await](/zh/docs/guide/changes/refs-and-await)）。
 
 被追踪或带索引的组件，通过 `entity.X` 和 `Read<T>()` 拿到的是只读的：写入走 `Set(…)`，被追踪的组件也可以用生成的 `WriteX()`，
-这样变更才会被打上 tick（[变更追踪](/zh/docs/guide/change-tracking#write-as-usual)）。
+这样变更才会被打上 tick（[变更追踪](/zh/docs/guide/changes/change-tracking#write-as-usual)）。
 
 ## 为什么加载后某个组件不见了？ [#save-dropped-data]
 
 存档按 Nino 类型 id（带命名空间的全名的哈希）记录每个类型，加载时跳过这个进程里没有的类型。存档之后被改名或挪了命名空间的组件，加载时
 就当作不存在：数据被丢弃，也不报错。给改了名的类型标上 `[NinoFormerName("旧命名空间.旧名字")]`，旧的行就能读回来
-（[代码改了之后](/zh/docs/guide/saves#versioning)）。
+（[代码改了之后](/zh/docs/guide/saves/saves#versioning)）。
 
 ## 为什么 `MoveEntities` 留下了某个实体？ [#move-skipped]
 
-`MoveEntities` 会跳过搬不了的 id，返回值只数搬走的：失效的 id、重复给出的 id，以及已经退休、只为[清理组件](/zh/docs/guide/cleanup-and-disable#cleanup-components)
+`MoveEntities` 会跳过搬不了的 id，返回值只数搬走的：失效的 id、重复给出的 id，以及已经退休、只为[清理组件](/zh/docs/guide/changes/cleanup-and-disable#cleanup-components)
 留着的实体（带 `Retired` 标签）。被跳过的 id 在 `moved` 里对应的位置是 `default`。没放进这组的子实体不算跳过：它会随搬走的父实体一起被销毁。
 搬走的实体还会把清理组件留在原处、留在退休的原实体上，让这个 World 的系统只释放一次资源；新实体没有这些组件。
 
 **修法：** 拿返回值和 id 个数比较；用 `world.Descendants(root).AddTo(ids, includeRoot: true)` 收集整棵子树
-（[迁移层级](/zh/docs/guide/hierarchy#moving)）；搬完之后在目标 World 里给它加上自己的资源组件。
+（[迁移层级](/zh/docs/guide/data/hierarchy#moving)）；搬完之后在目标 World 里给它加上自己的资源组件。
 
 ## 为什么生成器看不到另一个生成器加上的接口？ [#other-generators]
 
@@ -399,21 +399,21 @@ record struct 自己就是自己的键（`IIndexed<TSelf>`，actor 写法），�
 都会触发。
 
 **修法：**在类型上用 `[LookupKey]` 声明键，生成器会显式实现 `Key`（也可以手写 `Shop IIndexed<Shop>.Key => this;`）。索引照样找得到它，`ToString()` 却看不到它了
-（[常见错误](/zh/docs/guide/common-mistakes#public-key)）。
+（[常见错误](/zh/docs/guide/help/common-mistakes#public-key)）。
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="常见错误" href="/zh/docs/guide/common-mistakes">
+  <Card title="常见错误" href="/zh/docs/guide/help/common-mistakes">
     常见的错误、会犯错的代码，以及修法。
   </Card>
-  <Card title="分析器规则" href="/zh/docs/guide/analyzer">
+  <Card title="分析器规则" href="/zh/docs/guide/help/analyzer">
     EECS002 到 EECS089，各自由什么触发、怎么修。
   </Card>
-  <Card title="多线程与并行" href="/zh/docs/guide/threading">
+  <Card title="多线程与并行" href="/zh/docs/guide/performance/threading">
     所有者线程，以及 World 同步了什么。
   </Card>
-  <Card title="调试与诊断" href="/zh/docs/guide/diagnostics">
+  <Card title="调试与诊断" href="/zh/docs/guide/production/diagnostics">
     查看运行中的 World：表、实体、系统耗时和出错的系统。
   </Card>
 </Cards>

@@ -12,7 +12,7 @@ memory, at the speed of a plain query over a smaller world.
 
 <Callout type="info" title="Not system groups">
   These are groups of entities. Groups of *systems* that run at their own cadence (`ISystemGroup`,
-  `[UpdateInGroup<T>]`, `World.Update<T>()`) are another feature: see [Systems](/en/docs/guide/systems).
+  `[UpdateInGroup<T>]`, `World.Update<T>()`) are another feature: see [Systems](/en/docs/guide/basics/systems).
 </Callout>
 
 ## When to use it [#when-to-use-it]
@@ -24,8 +24,8 @@ memory, at the speed of a plain query over a smaller world.
 
 <Callout type="warn" title="Skip it for">
   Keys with few entities each (a guild id, an owner): each group costs tables of its own, so use a
-  [value index](/en/docs/guide/indexes-and-relations#value-indexes). Values that change every tick: each change moves
-  the row. A world per partition when the partitions never interact: [one world per thread](/en/docs/guide/threading#recommended-one-world-per-thread)
+  [value index](/en/docs/guide/data/indexes-and-relations#value-indexes). Values that change every tick: each change moves
+  the row. A world per partition when the partitions never interact: [one world per thread](/en/docs/guide/performance/threading#recommended-one-world-per-thread)
   needs no filter at all.
 </Callout>
 
@@ -82,7 +82,7 @@ world.GroupBy<Match>();                                        // once, before t
 ```
 
 `[GroupBy]` on a member of a type that is not a component, or `[Group]` on a member that is not an `int` or an
-`int` enum, is reported ([EECS068](/en/docs/guide/analyzer#eecs068), [EECS036](/en/docs/guide/analyzer#eecs036)).
+`int` enum, is reported ([EECS068](/en/docs/guide/help/analyzer#eecs068), [EECS036](/en/docs/guide/help/analyzer#eecs036)).
 
 </Step>
 <Step>
@@ -129,7 +129,7 @@ walker.SetZone(2);                                             // now walked by 
 </Steps>
 
 A grouped component is written only with `Set`: a write through a `ref` would change the value without moving the row,
-so the analyzer rejects it as it does for indexed components ([EECS015](/en/docs/guide/analyzer#eecs015)).
+so the analyzer rejects it as it does for indexed components ([EECS015](/en/docs/guide/help/analyzer#eecs015)).
 `Set` is allowed while a query walks the group.
 
 ### Groups in systems [#in-systems]
@@ -335,11 +335,11 @@ group, as a value index and as a plain component a scan compares (`GroupBenchmar
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| Writing the grouped component through a `ref` | The row stays in its old group | [EECS015](/en/docs/guide/analyzer#eecs015) |
-| A group per player, guild or owner | A table per key: memory and fragmentation | Use a [value index](/en/docs/guide/indexes-and-relations#value-indexes) |
+| Writing the grouped component through a `ref` | The row stays in its old group | [EECS015](/en/docs/guide/help/analyzer#eecs015) |
+| A group per player, guild or owner | A table per key: memory and fragmentation | Use a [value index](/en/docs/guide/data/indexes-and-relations#value-indexes) |
 | A value that changes every tick | A row copy per change | Keep it a plain component |
-| Two `InGroup` calls with different groups in one filter | `ArgumentException`: a filter holds one group | [EECS050](/en/docs/guide/analyzer#eecs050): one filter per group |
-| `GroupBy` during a pass | Throws: it moves rows | [EECS041](/en/docs/guide/analyzer#eecs041); call it at setup |
+| Two `InGroup` calls with different groups in one filter | `ArgumentException`: a filter holds one group | [EECS050](/en/docs/guide/help/analyzer#eecs050): one filter per group |
+| `GroupBy` during a pass | Throws: it moves rows | [EECS041](/en/docs/guide/help/analyzer#eecs041); call it at setup |
 
 ## Compared with other libraries [#compared]
 
@@ -351,13 +351,13 @@ indexed component, counting a rating range and summing the gold of four zones:
 ## Related [#related]
 
 <Cards>
-  <Card title="Indexes and relations" href="/en/docs/guide/indexes-and-relations">
+  <Card title="Indexes and relations" href="/en/docs/guide/data/indexes-and-relations">
     Lookups by key, ranges and links.
   </Card>
-  <Card title="Queries and filters" href="/en/docs/guide/queries">
+  <Card title="Queries and filters" href="/en/docs/guide/basics/queries">
     `QueryFilter`, `Count`, `Query` and struct jobs.
   </Card>
-  <Card title="Threading" href="/en/docs/guide/threading">
+  <Card title="Threading" href="/en/docs/guide/performance/threading">
     One world per thread: partitions that never meet.
   </Card>
   <Card title="Sample: GameLoop" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop">

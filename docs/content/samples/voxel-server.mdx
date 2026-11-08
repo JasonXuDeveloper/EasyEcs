@@ -24,33 +24,33 @@ after each tick. See [the client and the server](#client-and-server).
 
 Each technique below has its own section, with the code that uses it.
 
-- **A tick in three groups**: [system groups](/en/docs/guide/systems#system-groups) for input, simulation and
+- **A tick in three groups**: [system groups](/en/docs/guide/basics/systems#system-groups) for input, simulation and
   replication, each run by its own `world.Update<TGroup>()` ([one tick](#one-tick)).
 - **One system, one job**: 35 small systems, each reacting to one piece of data (a tag, a changed component, a
   request entity) and handing data to the next; none calls another.
-- **A chunk is an entity, its state presence bits**: a [unique index](/en/docs/guide/indexes-and-relations#unique-keys)
-  finds the chunk at a position, [dynamic buffers](/en/docs/guide/dynamic-buffers) hold its blocks and water, and every
-  chunk comes from one [prefab](/en/docs/guide/prefabs) with all its tags, so a change of state never moves it to
+- **A chunk is an entity, its state presence bits**: a [unique index](/en/docs/guide/data/indexes-and-relations#unique-keys)
+  finds the chunk at a position, [dynamic buffers](/en/docs/guide/data/dynamic-buffers) hold its blocks and water, and every
+  chunk comes from one [prefab](/en/docs/guide/basics/prefabs) with all its tags, so a change of state never moves it to
   another table ([a chunk's life](#chunks)).
 - **Chunks that follow the players and are kept**: a group of entities saved and loaded back with
-  [`SaveEntities` and `LoadEntities`](/en/docs/guide/migration-and-unload), after the pass ([a chunk's life](#chunks)).
+  [`SaveEntities` and `LoadEntities`](/en/docs/guide/saves/migration-and-unload), after the pass ([a chunk's life](#chunks)).
 - **Areas of interest without polling**: four systems react to four changes; who sees a chunk is counted through an
-  index, and a [cleanup component](/en/docs/guide/cleanup-and-disable) keeps where a destroyed entity was seen until
+  index, and a [cleanup component](/en/docs/guide/changes/cleanup-and-disable) keeps where a destroyed entity was seen until
   its despawn is sent ([areas of interest](#aoi)).
 - **Water as GPU passes**: a parallel SIMD shader over a tile of the grid that loads its own halo, then a commit, with a
   stencil that skips dry rows and buffers that are not cleared ([water](#water)).
 - **SIMD where the data is a grid or a column**: the water, the height map, fire damage in a
-  [batch method](/en/docs/guide/systems#batch-methods) ([SIMD](#simd)).
+  [batch method](/en/docs/guide/basics/systems#batch-methods) ([SIMD](#simd)).
 - **Time and state are data**: cooldowns, fires and an item's age are the tick they end; digging, death and respawn
   are components and entities ([items](#items), [zombies](#zombies)).
-- **A sorted scoreboard**: an [ordered index](/en/docs/guide/indexes-and-relations#ordered-index) of the players by
+- **A sorted scoreboard**: an [ordered index](/en/docs/guide/data/indexes-and-relations#ordered-index) of the players by
   blocks dug ([leaderboard](#leaderboard)).
-- **Send only what changed**: [`[Changed<T>]`, `[ChangedAny<..>]`](/en/docs/guide/change-tracking#changed-any),
-  [`Maybe<T>` and `ReadOnlyMaybe<T>`](/en/docs/guide/systems#maybe) and a [bulk removal](/en/docs/guide/bulk)
+- **Send only what changed**: [`[Changed<T>]`, `[ChangedAny<..>]`](/en/docs/guide/changes/change-tracking#changed-any),
+  [`Maybe<T>` and `ReadOnlyMaybe<T>`](/en/docs/guide/basics/systems#maybe) and a [bulk removal](/en/docs/guide/changes/bulk)
   ([replication](#replication)).
-- **Save on stop, allocation-free buffers**: [`SaveWithout` and `LoadKeeping`](/en/docs/guide/saves#restart) into a
+- **Save on stop, allocation-free buffers**: [`SaveWithout` and `LoadKeeping`](/en/docs/guide/saves/saves#restart) into a
   reused writer, and a buffer pool sized for chunks ([the program](#program)).
-- **Measured**: [`MeasureSystems` and `DescribeSchedule`](/en/docs/guide/diagnostics).
+- **Measured**: [`MeasureSystems` and `DescribeSchedule`](/en/docs/guide/production/diagnostics).
 
 ## Where the ideas come from [#ideas]
 
@@ -108,7 +108,7 @@ flowchart LR
   unload --> send
 ```
 
-A tick has three parts, and each is a [system group](/en/docs/guide/systems#system-groups): a struct that names it,
+A tick has three parts, and each is a [system group](/en/docs/guide/basics/systems#system-groups): a struct that names it,
 and `[UpdateInGroup<T>]` on its systems.
 
 <include lang="csharp" meta='title="Groups.cs"'>../../../samples/VoxelServer/Groups.cs</include>
@@ -127,7 +127,7 @@ two systems.
 ## The data [#data]
 
 The components, one file per part of the world. Comments say what each value means and who writes it. A chunk is an
-entity: its `Chunk` key is a [direct-indexed](/en/docs/guide/indexes-and-relations#direct-index) unique key
+entity: its `Chunk` key is a [direct-indexed](/en/docs/guide/data/indexes-and-relations#direct-index) unique key
 (`world.ChunkIndex`, a chunk's slot its position modulo 64, so a lookup reads one array entry),
 its 8,192 blocks and their water two byte buffers, and the water passes keep their own data on it (`NextFluid`,
 `FluidStep`); `Chunk` is also the grid's tile shape (`ITile<ChunkPos>`).
@@ -174,7 +174,7 @@ asking finds it and asks nothing more. A request is created with the `Saved` tag
 files lack its chunk: a presence bit, so all requests share one table and keep the order they came in. A pass may
 not load or create entities (EECS041), so `ChunkReadSystem` (`With<Saved>`) and `ChunkGenerateSystem`
 (`Without<Saved>`) serve the requests in their `OnUpdate`, after the pass: each takes up to `Rules.MaxRequests` a
-tick with [`CollectIds`](/en/docs/guide/queries#collect-ids) and destroys only those; the others wait a tick. A chunk that was unloaded comes back from the region files
+tick with [`CollectIds`](/en/docs/guide/basics/queries#collect-ids) and destroys only those; the others wait a tick. A chunk that was unloaded comes back from the region files
 with `LoadEntities`, and with it the zombies and items that were in it. A chunk never seen is an instance of the chunk
 prefab, its blocks written in place through the span `SetCount` returns.
 
@@ -182,7 +182,7 @@ prefab, its blocks written in place through the span `SetCount` returns.
 
 Every chunk is an instance of one prefab with every component and tag a chunk ever has, the tags absent. So all
 chunks share one table, a chunk read back included (its save keeps the columns), and `Fresh`, `Flowing` or
-`Unloading` come and go as [presence bits](/en/docs/guide/structural-changes#during-a-pass): the chunk never moves to
+`Unloading` come and go as [presence bits](/en/docs/guide/changes/structural-changes#during-a-pass): the chunk never moves to
 another table. That matters beyond the cost of a move: a pass does not visit an entity that joined a matching table
 after it started, so a system that wakes the chunks beside the one it visits would make the pass skip some of them.
 
@@ -217,7 +217,7 @@ Who sees a chunk is counted, never searched: every player sees `Rules.PlayerVisi
 are the view centers in the square around it, and `ViewCenter` is indexed, so `world.ViewCenterIndex.Count(chunk)`
 counts the players centered on a chunk in O(1). An entity that stays in its chunk and a player who does cost nothing
 here, however many ticks go by. A player that just appeared has no `ViewCenter` yet:
-[`ReadOnlyMaybe<ViewCenter>`](/en/docs/guide/systems#read-only-maybe) reads it where it is, and, unlike `Maybe<T>`, can only read,
+[`ReadOnlyMaybe<ViewCenter>`](/en/docs/guide/basics/systems#read-only-maybe) reads it where it is, and, unlike `Maybe<T>`, can only read,
 so the indexed component is never stamped.
 
 <include lang="csharp" meta='title="Systems/Aoi.cs"'>../../../samples/VoxelServer/Systems/Aoi.cs#aoi</include>
@@ -230,7 +230,7 @@ crosses into another chunk, so the systems that react to `[Changed<InChunk>]` se
 <include lang="csharp" meta='title="Systems/Movement.cs"'>../../../samples/VoxelServer/Systems/Movement.cs#grid</include>
 
 A crossing needs the chunk the clients knew the entity in, and a destroyed entity needs it too: by then its
-components are gone. `Visible` holds it, and it is a [cleanup component](/en/docs/guide/cleanup-and-disable):
+components are gone. `Visible` holds it, and it is a [cleanup component](/en/docs/guide/changes/cleanup-and-disable):
 destroying an entity that has one retires it instead, keeping only its cleanup components, until a system removes the
 last of them. `ViewCenter` is one as well, so a player who leaves is retired until its view is released.
 
@@ -271,7 +271,7 @@ branch; `WaterWakeSystem` tags the chunk and its four neighbors `Flowing`.
 
 <include lang="csharp" meta='tab="Water/Wake.cs"'>../../../samples/VoxelServer/Systems/Water/Wake.cs</include>
 
-**The passes.** `WaterFlowSystem` is the shader. `Chunk` is a [tile](/en/docs/guide/grids) of the
+**The passes.** `WaterFlowSystem` is the shader. `Chunk` is a [tile](/en/docs/guide/performance/grids) of the
 grid (`ITile<ChunkPos>`: 16 x 16 x 32 cells, its neighbors the chunks beside it), so the method takes the chunk's water
 and blocks as `Tile<Fluid, Chunk>` and `Tile<Block, Chunk>`, and the generator finds the four neighbors once per chunk.
 The layers to shade come from the `FluidCount` of the chunk and of its neighbors (through `Beside` and a
@@ -279,9 +279,9 @@ The layers to shade come from the `FluidCount` of the chunk and of its neighbors
 each layer from the facing row or column of each neighbor, and a layer under and over, as a CUDA block loads its tile
 and halo into shared memory. The loop samples neighbors with no edge case and computes each row of 16 blocks in one
 `Vector128<byte>`. Its neighbors are read as they were before the pass and only `NextFluid` is written, so it is a
-[parallel method](/en/docs/guide/systems#parallel-methods). A few hundred chunks flow at a time, each one costing
+[parallel method](/en/docs/guide/basics/systems#parallel-methods). A few hundred chunks flow at a time, each one costing
 microseconds, far under the 4,096 rows of a default chunk of a pass that writes a tracked component, so it sets
-`ChunkSize = 64` and the threads take 64 chunks at a time ([chunk size](/en/docs/guide/threading#chunk-rows)). Byte
+`ChunkSize = 64` and the threads take 64 chunks at a time ([chunk size](/en/docs/guide/performance/threading#chunk-rows)). Byte
 lanes are integer arithmetic: the same water on every machine.
 
 Nothing is cleared that does not have to be. The stencil (`Rows(TileStencil.Layer | TileStencil.Above)`) visits only a row
@@ -306,7 +306,7 @@ the chunks beside the edges that changed.
 
 {/* TODO(water overlap): the planned push-halo design (a chunk hands its edges to its neighbors when they change,
 instead of each flowing chunk gathering them every step) and the MPI-style interior/ring overlap go here, with the
-Flow changes; then guide/grids. Copying only the changed edges was measured and dropped
+Flow changes; then guide/performance/grids. Copying only the changed edges was measured and dropped
 (decisions#d73-survey-items-not-added). */}
 
 `FloatSystem` lifts whatever stands in water, players, zombies and items, and pushes it along the slope of the water
@@ -390,7 +390,7 @@ Three shapes of data in this server suit SIMD:
   `ConditionalSelect` per layer, no branch. Its 256 bytes are rewritten 32 times, so they stay on the stack and are
   copied into the buffer once: a buffer's array read and written 32 times is an order of magnitude slower.
 - **A column of the same change**: fire damage takes one point from every burning zombie. A
-  [batch method](/en/docs/guide/systems#batch-methods) gets a run of rows as spans, and `Vector<int>` changes 8 of
+  [batch method](/en/docs/guide/basics/systems#batch-methods) gets a run of rows as spans, and `Vector<int>` changes 8 of
   them per instruction on AVX2 (4 on Arm). The JIT does not vectorize these loops by itself, so the method does it;
   integer lanes give the same result on every machine.
 
@@ -401,7 +401,7 @@ positions are `Vector3`s, three floats next to each other, not three columns.
 ## A scoreboard that stays sorted [#leaderboard]
 
 `Score` is the blocks a player dug, with an `[LookupKey]`, so `world.ScoreIndex` is an
-[ordered index](/en/docs/guide/indexes-and-relations#ordered-index) of the players by score. Its key is comparable, so
+[ordered index](/en/docs/guide/data/indexes-and-relations#ordered-index) of the players by score. Its key is comparable, so
 the index walks in order: `Descending()` starts at the best digger. The index is kept sorted as `DigSystem` writes
 the scores, so the top of the board is a walk of three entries, never a sort of every player.
 
@@ -412,15 +412,15 @@ the scores, so the top of the board is a walk of three entries, never a sort of 
 ## What is sent [#replication]
 
 Changed chunks come from
-[`[ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]`](/en/docs/guide/change-tracking#changed-any): a chunk
+[`[ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]`](/en/docs/guide/changes/change-tracking#changed-any): a chunk
 whose blocks or water changed since the system last ran, and no other, goes to the players that have it in view (its
 `Viewers`). A `Fresh` chunk went whole already; `ChunkSentSystem` then clears the tag of every chunk in one
-[bulk call](/en/docs/guide/bulk), `World.RemoveAll<Fresh>()`, whole words of presence bits at once.
+[bulk call](/en/docs/guide/changes/bulk), `World.RemoveAll<Fresh>()`, whole words of presence bits at once.
 
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#chunks</include>
 
 Moved entities come from `[Changed<Position>]`, stamped by `Mut<Position>` above. An update carries the health bar
-of the entities that have one: [`Maybe<Health>`](/en/docs/guide/systems#maybe) reads it where the entity has a
+of the entities that have one: [`Maybe<Health>`](/en/docs/guide/basics/systems#maybe) reads it where the entity has a
 `Health`, so players, zombies and items are sent by one method, and the query does not require `Health`. The clock
 is the first system of the simulation, not of the replication, so a server that replicates less often keeps game time.
 
@@ -430,8 +430,8 @@ is the first system of the simulation, not of the replication, so a server that 
 
 ## The program [#program]
 
-The world with its options: [`MeasureSystems`](/en/docs/guide/diagnostics) for the timings (`--schedule` prints
-`DescribeSchedule`), and a [buffer pool](/en/docs/guide/dynamic-buffers#what-it-costs) big enough for a chunk's
+The world with its options: [`MeasureSystems`](/en/docs/guide/production/diagnostics) for the timings (`--schedule` prints
+`DescribeSchedule`), and a [buffer pool](/en/docs/guide/data/dynamic-buffers#what-it-costs) big enough for a chunk's
 buffers, so a chunk loaded reuses the lists of one that was unloaded, and a chunk woken those of one that settled.
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#options</include>
@@ -443,7 +443,7 @@ plumbing, not the lesson.
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#players</include>
 
 On stop the world is saved without its prefabs and region files, which every start sets up
-([`SaveWithout`](/en/docs/guide/saves#restart)); a restarted world sets them up, then loads the save beside them
+([`SaveWithout`](/en/docs/guide/saves/saves#restart)); a restarted world sets them up, then loads the save beside them
 (`LoadKeeping`). The save goes into a `NinoArrayBufferWriter`, which `Save` writes in place with no copy; a server
 that saves often keeps one and reuses it.
 
@@ -518,16 +518,16 @@ Components and systems that both sides need go into a shared project, like the c
 ## Related [#related]
 
 <Cards>
-  <Card icon={<Boxes />} title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+  <Card icon={<Boxes />} title="Dynamic buffers" href="/en/docs/guide/data/dynamic-buffers">
     A list per entity, like a chunk's blocks, tracked like any component.
   </Card>
-  <Card icon={<FlaskConical />} title="Change tracking" href="/en/docs/guide/change-tracking">
+  <Card icon={<FlaskConical />} title="Change tracking" href="/en/docs/guide/changes/change-tracking">
     What counts as a write, Mut&lt;T&gt;, ChangedAny.
   </Card>
-  <Card icon={<Network />} title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+  <Card icon={<Network />} title="Migration and unload" href="/en/docs/guide/saves/migration-and-unload">
     Save a group of entities and load it back, like a chunk and what is in it.
   </Card>
-  <Card icon={<Save />} title="Saves" href="/en/docs/guide/saves">
+  <Card icon={<Save />} title="Saves" href="/en/docs/guide/saves/saves">
     Save a world, restart from it, leave out what each start sets.
   </Card>
 </Cards>

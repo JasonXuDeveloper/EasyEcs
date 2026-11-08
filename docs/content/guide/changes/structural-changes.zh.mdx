@@ -97,8 +97,8 @@ flowchart LR
 ### 跨过变更的 ref [#refs-across-a-change]
 
 - **方法自己的 `ref` 参数仍然可写**：方法体改变了当前实体所在的表时，遍历会在方法返回后把这些写入复制到实体的新行。`in` 参数看到的仍是变更前的值。
-- **其他任何 `ref`**（来自 `entity.Get<T>()`、`Query` 元素或别的实体）只保证在下一次结构变更之前有效：要么在变更之前写完，要么变更之后重新获取（同一个块里变更之后再用它，由 [EECS047](/zh/docs/guide/analyzer#eecs047) 报出）。
-- **处理单个实体的代码**（一个请求、一条消息）用 [`[EntityMethod]`](/zh/docs/guide/queries#run-on-one-entity) 方法（或用 `entity.Run` 跑的 job）得到和方法自己的 `ref` 参数同样的保证：它的 ref 跨过它自己做的结构变更仍指向这个实体的值，job 返回时，`WriteMask` 里的组件会被带到新行。
+- **其他任何 `ref`**（来自 `entity.Get<T>()`、`Query` 元素或别的实体）只保证在下一次结构变更之前有效：要么在变更之前写完，要么变更之后重新获取（同一个块里变更之后再用它，由 [EECS047](/zh/docs/guide/help/analyzer#eecs047) 报出）。
+- **处理单个实体的代码**（一个请求、一条消息）用 [`[EntityMethod]`](/zh/docs/guide/basics/queries#run-on-one-entity) 方法（或用 `entity.Run` 跑的 job）得到和方法自己的 `ref` 参数同样的保证：它的 ref 跨过它自己做的结构变更仍指向这个实体的值，job 返回时，`WriteMask` 里的组件会被带到新行。
 
 ```csharp
 [EcsSystem]
@@ -114,7 +114,7 @@ public ref struct HitSystem
 }
 ```
 
-细节，以及为什么 `ref` 永远不能跨过 `await`，见 [ref 与 await](/zh/docs/guide/refs-and-await)。
+细节，以及为什么 `ref` 永远不能跨过 `await`，见 [ref 与 await](/zh/docs/guide/changes/refs-and-await)。
 
 ### 冻结结构的遍历 [#frozen-passes]
 
@@ -122,9 +122,9 @@ public ref struct HitSystem
 
 - **批处理方法**（`Span<T>` 参数）和 `ForEachBatch` job；
 - **实现了 `INoStructuralChanges` 的 job**，包括生成器为不带 `Entity`、`World` 的方法写的 job；
-- **并行方法**、`ForEachParallel` / `ForEachEntityParallel`，以及[并行阶段](/zh/docs/guide/threading#parallel-systems)。
+- **并行方法**、`ForEachParallel` / `ForEachEntityParallel`，以及[并行阶段](/zh/docs/guide/performance/threading#parallel-systems)。
 
-分析器会报告承诺不改结构却改了的方法（[EECS013](/zh/docs/guide/analyzer#eecs013)），以及从其他线程做的结构变更（[EECS014](/zh/docs/guide/analyzer#eecs014)）。
+分析器会报告承诺不改结构却改了的方法（[EECS013](/zh/docs/guide/help/analyzer#eecs013)），以及从其他线程做的结构变更（[EECS014](/zh/docs/guide/help/analyzer#eecs014)）。
 
 ### 表保持紧凑 [#keeping-tables-dense]
 
@@ -142,7 +142,7 @@ world.CreateEntities(wave, new Position(0, 0), new Lifetime(60));
 int expired = world.DestroyAll<Lifetime>(QueryFilter.Create().With<Dead>());
 ```
 
-`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll` 对每个匹配的实体修改一个组件，每次处理一整个 64 行的字：见[批量操作](/zh/docs/guide/bulk)。
+`SetAll`、`RemoveAll`、`DisableAll`、`EnableAll` 对每个匹配的实体修改一个组件，每次处理一整个 64 行的字：见[批量操作](/zh/docs/guide/changes/bulk)。
 按过滤条件的调用以 `All` 结尾，按 id 列表的以 `Entities` 结尾。`DestroyEntities(ids)` 销毁你收集好的一组 id（失效的和重复的会跳过），
 只过一次结构闸门、只处理一次级联：
 
@@ -160,8 +160,8 @@ world.Reserve<Position, Lifetime>(100_000);
 for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lifetime(60));
 ```
 
-`CreateEntities` 自己会预留。预制体的实例用 `Reserve(prefab, count)`（见[预制体](/zh/docs/guide/prefabs)）；实体分散在很多张表里时，
-用 `EnsureEntityCapacity(n)` 只扩实体存储。被[分组](/zh/docs/guide/groups)放进别的表的实体，扩的是那张表。
+`CreateEntities` 自己会预留。预制体的实例用 `Reserve(prefab, count)`（见[预制体](/zh/docs/guide/basics/prefabs)）；实体分散在很多张表里时，
+用 `EnsureEntityCapacity(n)` 只扩实体存储。被[分组](/zh/docs/guide/data/groups)放进别的表的实体，扩的是那张表。
 
 ### 什么会搬动行 [#row-moves]
 
@@ -169,7 +169,7 @@ for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lif
 
 | 变更 | 行移动 |
 | --- | --- |
-| `Set` 实体已有的组件 | 没有：只是一次写入（[分组](/zh/docs/guide/groups)组件换了新值时，会搬到对应分组的表） |
+| `Set` 实体已有的组件 | 没有：只是一次写入（[分组](/zh/docs/guide/data/groups)组件换了新值时，会搬到对应分组的表） |
 | `SetIfChanged` 传入实体现有的值 | 没有，也不写入：不打 tick，不重新索引 |
 | `SetIfChanged` 传入不同的值 | 和 `Set` 一样 |
 | 添加表里已有列的组件（之前移除过的，或时有时无的标签） | 没有：一个存在位 |
@@ -178,12 +178,12 @@ for (int i = 0; i < 100_000; i++) world.CreateEntity(new Position(i, 0), new Lif
 | `Instantiate(prefab)`、`Instantiate(prefab, in c1, …, in cn)` | 没有：一次行复制，直接进最终的表 |
 | 先 `Instantiate(prefab)`，再 `Set` 预制体没有的组件 | 一次复制，再加一次移动 |
 
-所以从预制体生成时，把每个实例需要的值（位置、`ChildOf`）一起交给 `Instantiate`，代价就只有那次复制（见[预制体](/zh/docs/guide/prefabs#instantiate-with-values)）。
+所以从预制体生成时，把每个实例需要的值（位置、`ChildOf`）一起交给 `Instantiate`，代价就只有那次复制（见[预制体](/zh/docs/guide/basics/prefabs#instantiate-with-values)）。
 
 `SetIfChanged` 只有在添加组件时（或者像 `Set` 那样处理分组组件、已禁用的组件时）才是结构变更。分析器无法预知是哪种情况，所以和 `Set`
 一样把 `SetIfChanged` 算作可能改结构的调用：在 `[ForEach]` 方法里对实体调用它，方法要带 `Entity` 或 `World` 参数
-（[EECS013](/zh/docs/guide/analyzer#eecs013)）。只想在值变了的时候才写当前实体的追踪组件，改用 `Mut<T>` 参数
-（见[变更追踪](/zh/docs/guide/change-tracking)）。
+（[EECS013](/zh/docs/guide/help/analyzer#eecs013)）。只想在值变了的时候才写当前实体的追踪组件，改用 `Mut<T>` 参数
+（见[变更追踪](/zh/docs/guide/changes/change-tracking)）。
 
 ## 完整例子 [#full-example]
 
@@ -326,8 +326,8 @@ tick，`WearSystem` 给炮塔打上 `Dead`，紧接着运行的 `FireSystem` 就
 | 每个 tick 加一次、删一次组件 | 用字段；持续几个 tick 的状态用标签 | 表的掩码里已有的标签只翻转一个存在位 |
 | `Set(a)` 后再 `Set(b)` | `Set(a, b)` | 写法更简洁，性能相同 |
 | 先 `Instantiate(prefab)`，再 `Set` 预制体没有的组件 | `Instantiate(prefab, in c1, …, in cn)` | 一次行复制直接进最终的表，不移动 |
-| 逐个创建已知数量的实体 | `CreateEntities`，或循环前调用 `Reserve<T1, …, Tn>(count)` | 只扩容一次，不用表满一次翻一倍（[EECS031](/zh/docs/guide/analyzer#eecs031)） |
-| 按过滤条件逐个修改 | [批量操作](/zh/docs/guide/bulk)、`DestroyAll<T>(filter)` | 只过一次闸门，按整字（64 行）处理（[EECS030](/zh/docs/guide/analyzer#eecs030)） |
+| 逐个创建已知数量的实体 | `CreateEntities`，或循环前调用 `Reserve<T1, …, Tn>(count)` | 只扩容一次，不用表满一次翻一倍（[EECS031](/zh/docs/guide/help/analyzer#eecs031)） |
+| 按过滤条件逐个修改 | [批量操作](/zh/docs/guide/changes/bulk)、`DestroyAll<T>(filter)` | 只过一次闸门，按整字（64 行）处理（[EECS030](/zh/docs/guide/help/analyzer#eecs030)） |
 | 方法只读 `Entity` 参数 | 保持只读（`Id`、`Has`、`Get`） | 遍历跳过结构变更簿记 |
 
 在查询循环里对 1 万个实体移除再加回 `Health`（`ToggleComponent`），对比一次调用移出三个组件、再一次调用加回（`RemoveMany`，1,000 个实体）：
@@ -354,26 +354,26 @@ tick，`WearSystem` 给炮塔打上 `Dead`，紧接着运行的 `FireSystem` 就
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 不带 `Entity` 或 `World` 的方法通过组件里的链接改结构 | 遍历拿着指向已搬走行的 ref | [EECS013](/zh/docs/guide/analyzer#eecs013) |
-| 批处理方法里改结构 | 抛 `InvalidOperationException`：span 指向表 | [EECS013](/zh/docs/guide/analyzer#eecs013)，运行时也会抛 |
-| 并行方法里改结构 | 抛 `InvalidOperationException`：各块运行期间结构是冻结的 | [EECS010](/zh/docs/guide/analyzer#eecs010)，运行时也会抛 |
-| 从其他线程改结构 | 和所有者线程发生竞争 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 不带 `Entity` 或 `World` 的方法通过组件里的链接改结构 | 遍历拿着指向已搬走行的 ref | [EECS013](/zh/docs/guide/help/analyzer#eecs013) |
+| 批处理方法里改结构 | 抛 `InvalidOperationException`：span 指向表 | [EECS013](/zh/docs/guide/help/analyzer#eecs013)，运行时也会抛 |
+| 并行方法里改结构 | 抛 `InvalidOperationException`：各块运行期间结构是冻结的 | [EECS010](/zh/docs/guide/help/analyzer#eecs010)，运行时也会抛 |
+| 从其他线程改结构 | 和所有者线程发生竞争 | [EECS014](/zh/docs/guide/help/analyzer#eecs014) |
 | 会改结构的 job 却实现了 `INoStructuralChanges` | 变更处抛 `InvalidOperationException` | 运行时 |
-| 变更之后还在用 `Get<T>()` 拿到的 `ref` | 可能指向过期的副本或别的实体的行 | 同一个块里由 [EECS047](/zh/docs/guide/analyzer#eecs047)（警告）报出：重新获取 |
+| 变更之后还在用 `Get<T>()` 拿到的 `ref` | 可能指向过期的副本或别的实体的行 | 同一个块里由 [EECS047](/zh/docs/guide/help/analyzer#eecs047)（警告）报出：重新获取 |
 | 指望创建实体的那次遍历访问到它 | 下一次遍历才会访问 | 设计如此 |
-| 在系统里调用 `World.Update()` | 系统在自己的运行里再跑一遍，直到栈溢出 | [EECS034](/zh/docs/guide/analyzer#eecs034) |
-| 同一个 World 的查询还在遍历时调用 `Update()` | 更新把查询还没走到的行挪到它身后，循环会漏掉这些行 | [EECS051](/zh/docs/guide/analyzer#eecs051) |
+| 在系统里调用 `World.Update()` | 系统在自己的运行里再跑一遍，直到栈溢出 | [EECS034](/zh/docs/guide/help/analyzer#eecs034) |
+| 同一个 World 的查询还在遍历时调用 `Update()` | 更新把查询还没走到的行挪到它身后，循环会漏掉这些行 | [EECS051](/zh/docs/guide/help/analyzer#eecs051) |
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="ref 与 await" href="/zh/docs/guide/refs-and-await">
+  <Card title="ref 与 await" href="/zh/docs/guide/changes/refs-and-await">
     哪些 ref 能跨过变更，为什么没有 ref 能跨过 `await`。
   </Card>
-  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems">
     哪些方法能改结构，哪些在冻结状态下运行。
   </Card>
-  <Card title="批量操作" href="/zh/docs/guide/bulk">
+  <Card title="批量操作" href="/zh/docs/guide/changes/bulk">
     一次修改所有匹配实体的某个组件。
   </Card>
   <Card title="架构" href="/zh/docs/architecture">

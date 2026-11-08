@@ -13,7 +13,7 @@ icon: FolderTree
 
 <Callout type="idea" title="适合">
   会长得比[快速开始](/zh/docs/getting-started)那个程序更大的服务器或工具：游戏服务器、模拟、机器人集群。World 托管在 ASP.NET Core
-  或 Worker Service 里时同样适用，只是宿主换了（[托管](/zh/docs/guide/hosting)）。
+  或 Worker Service 里时同样适用，只是宿主换了（[托管](/zh/docs/guide/production/hosting)）。
 </Callout>
 
 <Callout type="warn" title="不适合">
@@ -92,9 +92,9 @@ public record struct Lifetime(int Ticks) : IComponent;
 dotnet new easyecs-system -n RegenSystem -o Systems
 ```
 
-系统自己不保存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)），也从不调用别的系统
-（[EECS008](/zh/docs/guide/analyzer#eecs008)）：一个系统留给另一个系统的东西，就是一个组件或一个单例。
-见[系统](/zh/docs/guide/systems)。
+系统自己不保存状态（[EECS007](/zh/docs/guide/help/analyzer#eecs007)），也从不调用别的系统
+（[EECS008](/zh/docs/guide/help/analyzer#eecs008)）：一个系统留给另一个系统的东西，就是一个组件或一个单例。
+见[系统](/zh/docs/guide/basics/systems)。
 
 </Step>
 <Step>
@@ -112,7 +112,7 @@ Singleton Spawner was not added to this world: set it before the systems that re
 ```
 
 默认值本来就对的单例，比如从零开始的计数器，在读它的地方用 `GetOrAddX()` 表明这一点。从存档里加载的单例，`Load` 之后不要再设置
-一遍（[启动时加载，停止时存档](/zh/docs/guide/hosting#persistence)）。
+一遍（[启动时加载，停止时存档](/zh/docs/guide/production/hosting#persistence)）。
 
 </Step>
 <Step>
@@ -120,7 +120,7 @@ Singleton Spawner was not added to this world: set it before the systems that re
 ### 系统顺序只写在一处 [#order]
 
 系统按添加的顺序执行。把 `AddSystem` 调用放进一个方法，让 `Program.cs` 和测试都调用它，整个 tick 的测试跑的就是服务器跑的那个
-tick（[和服务器共用初始化](/zh/docs/guide/testing#share-the-setup)）：
+tick（[和服务器共用初始化](/zh/docs/guide/production/testing#share-the-setup)）：
 
 ```csharp title="Game.cs"
 public static class Game
@@ -163,7 +163,7 @@ public ref struct ExpireSystem
 
 不是所有逻辑都每个 tick 跑。系统分组就是一种由宿主调用的节奏：标了 `[UpdateInGroup<G>]` 的系统在 `world.Update<G>()` 时执行，
 其余的在 `world.Update()` 时执行。输入一到就读，用一个分组；每隔几个 tick 同步一次状态，用一个分组；定时存盘，再用一个分组。
-分组内部，[`[UpdateInterval(N, Phase = P)]`](/zh/docs/guide/systems#update-interval) 让慢系统每 N 次更新跑一次，
+分组内部，[`[UpdateInterval(N, Phase = P)]`](/zh/docs/guide/basics/systems#update-interval) 让慢系统每 N 次更新跑一次，
 相位把间隔相同的系统错开：
 
 ```csharp
@@ -193,7 +193,7 @@ flowchart LR
 ### 输入走邮箱 [#input]
 
 网络、定时器、数据库都跑在别的线程上，而 World 只属于更新它的那一个线程。两边在一个由你持有的队列里交接：别的线程投递消息，
-World 所在线程上的一个系统取出消息，把每条变成数据。队列是宿主设置的 [`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例：
+World 所在线程上的一个系统取出消息，把每条变成数据。队列是宿主设置的 [`[NotSaved]`](/zh/docs/guide/saves/saves#not-saved) 单例：
 系统像读其他数据一样从 World 读它，存档不会写它（队列没有格式化器），读档也保留它。
 
 ```csharp
@@ -221,8 +221,8 @@ public ref struct ReceiveCommandsSystem
 
 用 `world.SetInbox(inbox)` 设置队列，用 `world.AddSystem<ReceiveCommandsSystem>()` 添加系统，同一个队列交给网络代码。
 
-队列的容量上限、满了怎么办，都由你决定。细节见[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)；
-处理请求的服务器见[托管](/zh/docs/guide/hosting#requests)。
+队列的容量上限、满了怎么办，都由你决定。细节见[来自其他线程的输入](/zh/docs/guide/performance/threading#input-from-other-threads)；
+处理请求的服务器见[托管](/zh/docs/guide/production/hosting#requests)。
 
 </Step>
 <Step>
@@ -231,7 +231,7 @@ public ref struct ReceiveCommandsSystem
 
 `MyServer.Tests` 里每个系统一个测试文件：一个独立的 World，放进这个系统需要的单例和实体，更新一次，再断言它留下的数据。
 再通过 `Game.AddSystems` 加一个测整个 tick 的测试。模板的 `MyServer.csproj` 已经把测试目录排除在服务器的编译之外
-（`<Compile Remove="MyServer.Tests\**"/>`）。见[测试系统](/zh/docs/guide/testing)。
+（`<Compile Remove="MyServer.Tests\**"/>`）。见[测试系统](/zh/docs/guide/production/testing)。
 
 </Step>
 <Step>
@@ -239,19 +239,19 @@ public ref struct ReceiveCommandsSystem
 ### 出问题时往里看 [#diagnostics]
 
 `WorldOptions.MeasureSystems` 给每个系统计时，`SystemErrors = SystemErrorPolicy.Disable` 让出错的系统停用而不是中断整个 tick，
-`world.DescribeTables()` 列出所有表。需要时把它们加进宿主的选项里，见[调试与诊断](/zh/docs/guide/diagnostics)。
+`world.DescribeTables()` 列出所有表。需要时把它们加进宿主的选项里，见[调试与诊断](/zh/docs/guide/production/diagnostics)。
 
 </Step>
 <Step>
 
 ### 存档与热重载 [#persistence-and-hot-reload]
 
-- **存档：**由宿主在第一个 tick 之前加载上一次的存档，在主循环结束后存档（[存档](/zh/docs/guide/saves)、
-  [启动时加载，停止时存档](/zh/docs/guide/hosting#persistence)）。
+- **存档：**由宿主在第一个 tick 之前加载上一次的存档，在主循环结束后存档（[存档](/zh/docs/guide/saves/saves)、
+  [启动时加载，停止时存档](/zh/docs/guide/production/hosting#persistence)）。
   [SaveLoad 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad)演示了保存整个 World、保存一组实体，
   以及在 World 之间搬移实体。
 - **热重载：**想在 World 运行时替换游戏逻辑，就把这些系统和组件挪进一个插件程序集，加载到可回收上下文里
-  （[迁移与卸载](/zh/docs/guide/migration-and-unload)）。
+  （[迁移与卸载](/zh/docs/guide/saves/migration-and-unload)）。
   [HotReload 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload)把项目拆成契约、插件和宿主三部分。
 
 </Step>
@@ -690,8 +690,8 @@ tick 才出生，所以还活着。`Program.cs` 没有一行知道子弹的存�
 | 游戏规则写在 `Program.cs` 里（每秒刷一波、胜负判定） | 没法单独测试，也没法和系统排顺序 | 代码审查：改成读单例的系统 |
 | `Program.cs` 和测试各自按不同顺序添加系统 | 测试通过的 tick 是服务器从来不跑的那个 | 共用一个 `Game.AddSystems` |
 | 第一次更新之后才设置单例，或者根本没设 | 第一个读它的系统抛 `InvalidOperationException`，并说出它的名字 | 运行时，第一次更新时 |
-| 系统用静态字段保存计数器或计时器 | 存档、快照和测试都看不到这份状态 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
-| 网络线程自己创建实体 | 结构闸门抛异常；闸门没赶上竞争时，表被写坏 | [EECS014](/zh/docs/guide/analyzer#eecs014)（能看到时）；改成投递到邮箱 |
+| 系统用静态字段保存计数器或计时器 | 存档、快照和测试都看不到这份状态 | [EECS007](/zh/docs/guide/help/analyzer#eecs007) |
+| 网络线程自己创建实体 | 结构闸门抛异常；闸门没赶上竞争时，表被写坏 | [EECS014](/zh/docs/guide/help/analyzer#eecs014)（能看到时）；改成投递到邮箱 |
 | 测试目录放在服务器项目里 | NUnit 的类型被编译进服务器 | `<Compile Remove="MyServer.Tests\**"/>`（模板已经写好） |
 
 ## 相关页面 [#related]
@@ -700,13 +700,13 @@ tick 才出生，所以还活着。`Program.cs` 没有一行知道子弹的存�
   <Card title="快速开始" href="/zh/docs/getting-started">
     这套结构所组织的概念，一步一步讲。
   </Card>
-  <Card title="测试系统" href="/zh/docs/guide/testing">
+  <Card title="测试系统" href="/zh/docs/guide/production/testing">
     每个测试一个 World、共用初始化代码、错误处理和零分配预算。
   </Card>
-  <Card title="在 .NET 服务器里托管" href="/zh/docs/guide/hosting">
+  <Card title="在 .NET 服务器里托管" href="/zh/docs/guide/production/hosting">
     同一个 World 放进 ASP.NET Core 或 Worker Service。
   </Card>
-  <Card title="多线程与并行" href="/zh/docs/guide/threading">
+  <Card title="多线程与并行" href="/zh/docs/guide/performance/threading">
     所有者线程、来自其他线程的输入和并行系统。
   </Card>
 </Cards>

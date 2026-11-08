@@ -29,7 +29,7 @@ dotnet run -c Release --project samples/MultiWorld -- --updates 50
 ## 数据 [#data]
 
 单位是一个 `Position` 加一个 `Velocity`。幽灵只有一个 `Position` 和 `Ghost` 标签：它带着邻居要读的数据，没有 `Velocity`，
-所以移动单位的系统永远不会写它。区的 `Tally` [单例](/zh/docs/guide/singletons)只统计自己 World 里的目击次数。
+所以移动单位的系统永远不会写它。区的 `Tally` [单例](/zh/docs/guide/basics/singletons)只统计自己 World 里的目击次数。
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/MultiWorld/Components.cs</include>
 
@@ -37,7 +37,7 @@ dotnet run -c Release --project samples/MultiWorld -- --updates 50
 
 `SightSystem` 为区里每个单位数出视野以内的单位。它是一个邻居对方法：`[Neighbor]` 参数让生成器按距离判断写出邻居搜索，
 邻居是所有带 `Position` 的实体，所以幽灵和区里自己的单位一样被看到。`[Without<Ghost>]` 让幽灵不去看：幽灵看到的，由拥有它的区去数。
-`MoveSystem` 和 `BounceSystem` 只读写有 `Velocity` 的单位。每个[系统](/zh/docs/guide/systems)只做一件事，不知道区的存在，
+`MoveSystem` 和 `BounceSystem` 只读写有 `Velocity` 的单位。每个[系统](/zh/docs/guide/basics/systems)只做一件事，不知道区的存在，
 所以同样三个系统用在每个区，也用在整张地图的那个 World。
 
 <include lang="csharp" meta='title="Systems.cs"'>../../../samples/MultiWorld/Systems.cs</include>
@@ -46,14 +46,14 @@ dotnet run -c Release --project samples/MultiWorld -- --updates 50
 
 `Map` 说明各区的位置和每个单位的起点。`Zone.Create` 用三个系统建一个区的 World，视野系统排在最前，读的是上次交换留下的数据；
 `Zone.Run` 更新它，每次更新后在交换处等待。两次交换之间只有它的线程碰这个 World
-（[每个线程一个 World](/zh/docs/guide/threading#recommended-one-world-per-thread)）。
+（[每个线程一个 World](/zh/docs/guide/performance/threading#recommended-one-world-per-thread)）。
 
 <include lang="csharp" meta='title="Zone.cs"'>../../../samples/MultiWorld/Zone.cs</include>
 
 ## 边界 [#border]
 
 `Border.Exchange` 在所有区都等待时运行，所以运行它的那一个线程可以碰每个 World；它是宿主代码，因为系统属于一个 World，
-而边界属于两个。它先丢掉上次的幽灵（`DestroyAll<Ghost>`），再用 [`MoveEntities`](/zh/docs/guide/migration-and-unload#move-entities)
+而边界属于两个。它先丢掉上次的幽灵（`DestroyAll<Ghost>`），再用 [`MoveEntities`](/zh/docs/guide/saves/migration-and-unload#move-entities)
 把越过边界的单位迁到它所在的区（所有组件一起走），最后把离边界在视野以内的单位作为幽灵复制进相邻的区。每次交换的幽灵都是新实体：
 可以记住幽灵的位置，不要记住它的 id。
 
@@ -86,13 +86,13 @@ the zones saw what one world sees
 ## 相关页面 [#related]
 
 <Cards>
-  <Card icon={<Cpu />} title="多线程与并行" href="/zh/docs/guide/threading">
+  <Card icon={<Cpu />} title="多线程与并行" href="/zh/docs/guide/performance/threading">
     每个线程一个 World、并行系统、并行 [ForEach] 方法。
   </Card>
-  <Card icon={<Workflow />} title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
+  <Card icon={<Workflow />} title="迁移与卸载" href="/zh/docs/guide/saves/migration-and-unload">
     MoveEntities：把实体和它拥有的东西迁到另一个 World。
   </Card>
-  <Card icon={<LayoutGrid />} title="网格瓦片" href="/zh/docs/guide/grids">
+  <Card icon={<LayoutGrid />} title="网格瓦片" href="/zh/docs/guide/performance/grids">
     一个 World 之内的光环：读取邻居边缘的格子瓦片。
   </Card>
   <Card icon={<RefreshCw />} title="HotReload 示例" href="/zh/docs/samples/hot-reload">

@@ -13,7 +13,7 @@ full, so each pattern is described once.
 ## When to use it [#when-to-use-it]
 
 <Callout type="idea" title="Use it for">
-A system that shows up in [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) as most of the tick: arithmetic
+A system that shows up in [`MeasureSystems`](/en/docs/guide/basics/systems#measuring-systems) as most of the tick: arithmetic
 over every row, a few hundred heavy rows, a grid of cells (water, light, heat, a nav field) updated from its
 neighbors.
 </Callout>
@@ -37,7 +37,7 @@ A static per-entity `[ForEach]` method, on one thread or `Parallel`, over compon
 a generated vector loop (`Vector512` where the CPU has it, `Vector<T>` otherwise), with its `if`s turned into masks
 and a scalar tail: what Burst does for a Unity job, done at compile time. The code you write stays scalar, and outside
 `FloatMode.Fast` the results are the scalar code's, bit for bit. Which methods qualify, the generated code side by
-side and how to rewrite a method that stays scalar: [vector loops](/en/docs/guide/systems#vector-loops).
+side and how to rewrite a method that stays scalar: [vector loops](/en/docs/guide/basics/systems#vector-loops).
 Under Native AOT, publish with `<IlcInstructionSet>native</IlcInstructionSet>` (or a level such as `x86-64-v4`): the
 default baseline has no `Vector512` ([FAQ](/en/docs/faq#native-aot)).
 
@@ -50,7 +50,7 @@ default baseline has no `Vector512` ([FAQ](/en/docs/faq#native-aot)).
 - **The data:** `byte` and `short` lanes (64 and 32 rows per `Vector512`), fields of `Vector2` / `Vector3` / `Vector4`,
   a `Maybe<T>` as the lane mask of the rows that have `T`, and on AVX-512 a component of up to 16 words of which the
   method uses some 4-byte fields (EECS055 names the fields to split out when the permutes cost more than the work).
-- **Totals:** a [`Reduce<T>`](/en/docs/guide/threading#reductions) whose fields combine by a sum, `Min` or `Max`
+- **Totals:** a [`Reduce<T>`](/en/docs/guide/performance/threading#reductions) whose fields combine by a sum, `Min` or `Max`
   (`[Sum]`, `[Min]`, `[Max]`, or a hand-written `Combine`) keeps one accumulator per lane, folded in lane order; a
   float sum only under `FloatMode.Fast`.
 - **The loads:** the loop loads only the columns it reads or stores, so a component taken only to select rows costs
@@ -59,9 +59,9 @@ default baseline has no `Vector512` ([FAQ](/en/docs/faq#native-aot)).
   right for them: a lookup or an append per row has no vector form.
 - **What a system got:** `world.DescribeSchedule()` prints one line per method (`SystemInfo.Loops`): the loop, its
   shape, or the reason it stayed scalar.
-- **Why not:** [EECS055](/en/docs/guide/analyzer#eecs055) names the first reason a method stayed scalar, as Burst's
+- **Why not:** [EECS055](/en/docs/guide/help/analyzer#eecs055) names the first reason a method stayed scalar, as Burst's
   inspector would; `[ForEach(SimdMode = SimdMode.Require)]` turns it into a build error
-  ([EECS056](/en/docs/guide/analyzer#eecs056)) on the hot path, and `SimdMode.Off` silences it.
+  ([EECS056](/en/docs/guide/help/analyzer#eecs056)) on the hot path, and `SimdMode.Off` silences it.
 
 </Step>
 
@@ -70,30 +70,30 @@ default baseline has no `Vector512` ([FAQ](/en/docs/faq#native-aot)).
 ### Spread rows over threads: parallel methods [#parallel]
 
 `[ForEach(Parallel = true)]` cuts the rows into chunks that the thread pool takes, like OpenMP's
-`#pragma omp parallel for`: [parallel methods](/en/docs/guide/systems#parallel-methods). Threads claim the chunks from
+`#pragma omp parallel for`: [parallel methods](/en/docs/guide/basics/systems#parallel-methods). Threads claim the chunks from
 one shared counter, like `schedule(dynamic, n)`; the default `n` suits many light rows. A few hundred heavy rows (each
-microseconds) set `ChunkSize = 64`, so every thread gets work: [chunk size](/en/docs/guide/threading#chunk-rows).
+microseconds) set `ChunkSize = 64`, so every thread gets work: [chunk size](/en/docs/guide/performance/threading#chunk-rows).
 Systems whose access does not conflict already run at once without any of this:
-[parallel systems](/en/docs/guide/threading#parallel-systems).
+[parallel systems](/en/docs/guide/performance/threading#parallel-systems).
 
 A total over the rows (a count, a sum, a bounding box) is a `Reduce<T>` parameter: each chunk adds into its own
 partial result, with no lock or atomic per row, and the partial results are combined in row order into a singleton,
 exact for integers and reproducible for floats with a fixed `ChunkSize`:
-[reductions](/en/docs/guide/threading#reductions). A static counter written by a parallel method is
-[EECS060](/en/docs/guide/analyzer#eecs060), a job field read after `ForEachParallel`
-[EECS061](/en/docs/guide/analyzer#eecs061).
+[reductions](/en/docs/guide/performance/threading#reductions). A static counter written by a parallel method is
+[EECS060](/en/docs/guide/help/analyzer#eecs060), a job field read after `ForEachParallel`
+[EECS061](/en/docs/guide/help/analyzer#eecs061).
 
 A row's working list (the candidates of a search, a frontier) is a `Scratch<T>`: one per method and thread, like
 OpenMP's `threadprivate`, allocated once per thread and cleared by the row; a small buffer with a fixed bound is a
-`stackalloc` span: [scratch](/en/docs/guide/threading#scratch). Another entity's component is read through a
+`stackalloc` span: [scratch](/en/docs/guide/performance/threading#scratch). Another entity's component is read through a
 `Lookup<T>`, MPI's one-sided `Get`: every read sees the value from before the pass, so the method stays parallel:
-[lookups](/en/docs/guide/threading#lookups). Records a pass produces for a later system (hits, packets) are an
-`Emit<T>`, appended per chunk and joined in row order: [emit](/en/docs/guide/threading#emit). Random numbers come from
+[lookups](/en/docs/guide/performance/threading#lookups). Records a pass produces for a later system (hits, packets) are an
+`Emit<T>`, appended per chunk and joined in row order: [emit](/en/docs/guide/performance/threading#emit). Random numbers come from
 `EntityRandom`, a pure function of the entity, the tick and a stream, so a parallel pass draws the same numbers on
-any thread count: [random numbers](/en/docs/guide/threading#entity-random). None of them adds an atomic per row:
-[how the runner synchronizes](/en/docs/guide/threading#runner-contract). Data that is not rows (an `Emitted<T>`'s
+any thread count: [random numbers](/en/docs/guide/performance/threading#entity-random). None of them adds an atomic per row:
+[how the runner synchronizes](/en/docs/guide/performance/threading#runner-contract). Data that is not rows (an `Emitted<T>`'s
 records, a range of indexes) runs on the same runner through
-[`world.ParallelFor`](/en/docs/guide/threading#parallel-for).
+[`world.ParallelFor`](/en/docs/guide/performance/threading#parallel-for).
 
 </Step>
 
@@ -102,7 +102,7 @@ records, a range of indexes) runs on the same runner through
 ### Write the vector yourself: batch methods [#batch]
 
 When the generator keeps a method scalar (several fields, a lookup table, integer tricks), a
-[batch method](/en/docs/guide/systems#batch-methods) gets a run of rows as spans, and the method loops over them with
+[batch method](/en/docs/guide/basics/systems#batch-methods) gets a run of rows as spans, and the method loops over them with
 `Vector<T>` or `Vector128<T>` by hand: the Unity.Mathematics `float4` of a Burst job. Fire damage in the VoxelServer
 sample is that loop: [SIMD where the data is a column](/en/docs/samples/voxel-server#simd).
 
@@ -119,14 +119,14 @@ neighbors, declares the reads and keeps the method parallel. `tile.ExchangeHalo(
 neighbors' edges into a texture of the thread (an MPI halo exchange), `tile.Rows(reads)` visits only the rows a
 stencil can change (a bit per row, found with `TrailingZeroCount`), `At(row).Load128` samples the cells around with
 vectors, and a commit system after the pass is the ping-pong. How to declare a tile, write the shader, commit and
-sleep the quiet tiles, with a full example: [grid tiles](/en/docs/guide/grids).
+sleep the quiet tiles, with a full example: [grid tiles](/en/docs/guide/performance/grids).
 
 #### Halo, neighborhood and boundary [#grid-halo]
 
 The shape's `Halo` (how far a stencil reads), `Neighborhood` (faces, edges, corners: 5-, 9- and 27-point stencils)
 and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what the ring holds:
-[wider halos, edges and corners](/en/docs/guide/grids#halo). `ChangedEdges` and `Facing` let quiet tiles sleep:
-[sleep the quiet tiles](/en/docs/guide/grids#sleep).
+[wider halos, edges and corners](/en/docs/guide/performance/grids#halo). `ChangedEdges` and `Facing` let quiet tiles sleep:
+[sleep the quiet tiles](/en/docs/guide/performance/grids#sleep).
 
 </Step>
 
@@ -136,32 +136,32 @@ and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what th
 
 | You know | In EasyEcs | Where |
 | --- | --- | --- |
-| OpenMP `parallel for` | `[ForEach(Parallel = true)]` | [Parallel methods](/en/docs/guide/systems#parallel-methods) |
-| OpenMP `schedule(dynamic, n)` | `ChunkSize = n` (the default size when unset) | [Chunk size](/en/docs/guide/threading#chunk-rows) |
-| OpenMP `reduction(+: x)`, MPI `Allreduce` | a `Reduce<T>` parameter into a singleton `T : IReduction<T>` | [Reductions](/en/docs/guide/threading#reductions) |
-| OpenMP `private` / `threadprivate` scratch | a `Scratch<T>` parameter (it starts at `default`, not as a copy: no `firstprivate`) | [Scratch](/en/docs/guide/threading#scratch) |
-| OpenMP `sections` / tasks | systems of one stage, run at once when their access does not conflict | [Parallel systems](/en/docs/guide/threading#parallel-systems) |
-| MPI rank owning a subdomain | one world per thread (a world per zone or map) | [One world per thread](/en/docs/guide/threading#recommended-one-world-per-thread) |
-| MPI send of entities to another rank | `SaveEntities` / `MoveEntities` | [Migration](/en/docs/guide/migration-and-unload#save-entities) |
-| MPI one-sided `MPI_Get`, Unity `ComponentLookup` (`[ReadOnly]`) | a `Lookup<T>` parameter: `T` of any entity, as it was before the pass | [Lookups](/en/docs/guide/threading#lookups) |
-| Unity `NativeStream`, GPU stream compaction | an `Emit<T>` parameter: records per chunk, joined in row order into `Emitted<T>` | [Emit](/en/docs/guide/threading#emit) |
-| cuRAND Philox, a counter-based generator | `EntityRandom`: a pure function of (seed, entity, tick, stream) | [Random numbers](/en/docs/guide/threading#entity-random) |
-| Kokkos `RangePolicy`, Unity `IJobParallelForBatch` | `world.ParallelFor(count, ref job)` with an `IForRange` / `IForSpan<T>` job | [ParallelFor](/en/docs/guide/threading#parallel-for) |
-| MPI halo exchange (ghost cells) | `Tile<TCell, TTile>.ExchangeHalo`: the tile with a halo of its neighbors' facing edges | [Grid tiles](/en/docs/guide/grids) |
-| Burst auto-vectorization | vector loops of `[ForEach]` methods | [Vector loops](/en/docs/guide/systems#vector-loops) |
-| Burst `float4` / Unity.Mathematics by hand | a batch method with `Vector<T>` / `Vector128<T>` | [Batch methods](/en/docs/guide/systems#batch-methods) |
-| Burst `IJobParallelFor` batch count | `ChunkSize` | [Chunk size](/en/docs/guide/threading#chunk-rows) |
-| Burst Inspector | EECS055, and `SimdMode = SimdMode.Require` (EECS056) | [Analyzer](/en/docs/guide/analyzer#eecs055) |
-| GPU fragment shader, texture sampling | a `[ForEach]` method over a `Tile<TCell, TTile>`, `Load128` of the cells around | [Grid tiles](/en/docs/guide/grids) |
-| GPU stencil | `tile.Rows(reads)`: a bit per row, visited with `TrailingZeroCount` | [Grid tiles](/en/docs/guide/grids) |
-| GPU ping-pong targets | two buffers, read one, write the other, commit | [Grid tiles](/en/docs/guide/grids#commit) |
-| Burst `FloatMode.Fast` | `[ForEach(FloatMode = FloatMode.Fast)]`: vector approximations and float sums in lane order | [Vector loops](/en/docs/guide/systems#float-mode) |
+| OpenMP `parallel for` | `[ForEach(Parallel = true)]` | [Parallel methods](/en/docs/guide/basics/systems#parallel-methods) |
+| OpenMP `schedule(dynamic, n)` | `ChunkSize = n` (the default size when unset) | [Chunk size](/en/docs/guide/performance/threading#chunk-rows) |
+| OpenMP `reduction(+: x)`, MPI `Allreduce` | a `Reduce<T>` parameter into a singleton `T : IReduction<T>` | [Reductions](/en/docs/guide/performance/threading#reductions) |
+| OpenMP `private` / `threadprivate` scratch | a `Scratch<T>` parameter (it starts at `default`, not as a copy: no `firstprivate`) | [Scratch](/en/docs/guide/performance/threading#scratch) |
+| OpenMP `sections` / tasks | systems of one stage, run at once when their access does not conflict | [Parallel systems](/en/docs/guide/performance/threading#parallel-systems) |
+| MPI rank owning a subdomain | one world per thread (a world per zone or map) | [One world per thread](/en/docs/guide/performance/threading#recommended-one-world-per-thread) |
+| MPI send of entities to another rank | `SaveEntities` / `MoveEntities` | [Migration](/en/docs/guide/saves/migration-and-unload#save-entities) |
+| MPI one-sided `MPI_Get`, Unity `ComponentLookup` (`[ReadOnly]`) | a `Lookup<T>` parameter: `T` of any entity, as it was before the pass | [Lookups](/en/docs/guide/performance/threading#lookups) |
+| Unity `NativeStream`, GPU stream compaction | an `Emit<T>` parameter: records per chunk, joined in row order into `Emitted<T>` | [Emit](/en/docs/guide/performance/threading#emit) |
+| cuRAND Philox, a counter-based generator | `EntityRandom`: a pure function of (seed, entity, tick, stream) | [Random numbers](/en/docs/guide/performance/threading#entity-random) |
+| Kokkos `RangePolicy`, Unity `IJobParallelForBatch` | `world.ParallelFor(count, ref job)` with an `IForRange` / `IForSpan<T>` job | [ParallelFor](/en/docs/guide/performance/threading#parallel-for) |
+| MPI halo exchange (ghost cells) | `Tile<TCell, TTile>.ExchangeHalo`: the tile with a halo of its neighbors' facing edges | [Grid tiles](/en/docs/guide/performance/grids) |
+| Burst auto-vectorization | vector loops of `[ForEach]` methods | [Vector loops](/en/docs/guide/basics/systems#vector-loops) |
+| Burst `float4` / Unity.Mathematics by hand | a batch method with `Vector<T>` / `Vector128<T>` | [Batch methods](/en/docs/guide/basics/systems#batch-methods) |
+| Burst `IJobParallelFor` batch count | `ChunkSize` | [Chunk size](/en/docs/guide/performance/threading#chunk-rows) |
+| Burst Inspector | EECS055, and `SimdMode = SimdMode.Require` (EECS056) | [Analyzer](/en/docs/guide/help/analyzer#eecs055) |
+| GPU fragment shader, texture sampling | a `[ForEach]` method over a `Tile<TCell, TTile>`, `Load128` of the cells around | [Grid tiles](/en/docs/guide/performance/grids) |
+| GPU stencil | `tile.Rows(reads)`: a bit per row, visited with `TrailingZeroCount` | [Grid tiles](/en/docs/guide/performance/grids) |
+| GPU ping-pong targets | two buffers, read one, write the other, commit | [Grid tiles](/en/docs/guide/performance/grids#commit) |
+| Burst `FloatMode.Fast` | `[ForEach(FloatMode = FloatMode.Fast)]`: vector approximations and float sums in lane order | [Vector loops](/en/docs/guide/basics/systems#float-mode) |
 
 {/* TODO(mapping): a row for the MPI interior/ring overlap, once it lands. */}
 
 ## How to use it fast [#how-to-use-it-fast]
 
-- Measure first: [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) names the system that costs the tick,
+- Measure first: [`MeasureSystems`](/en/docs/guide/basics/systems#measuring-systems) names the system that costs the tick,
   and a BenchmarkDotNet case proves the change; each pattern's section links its own benchmark table.
 - Make the data fit before the code: lanes of one size and at most 4 fields per component for vector loops, a byte or
   an `int` per cell for a grid (16 or 4 cells per `Vector128`), so the work is one shape over a column.
@@ -172,22 +172,22 @@ and `Boundary` (fill, clamp or mirror where there is no neighbor) decide what th
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| Optimizing a system nobody measured | Code that is harder to read and saves nothing | [`MeasureSystems`](/en/docs/guide/systems#measuring-systems) |
-| Mixing lanes of different sizes (`float` and `double`, `int` and `byte`) in a method meant to vectorize | It stays scalar | [EECS055](/en/docs/guide/analyzer#eecs055); `SimdMode = SimdMode.Require` makes it an error |
-| A shared counter written by a parallel method | Lost updates | [EECS060](/en/docs/guide/analyzer#eecs060): a [`Reduce<T>`](/en/docs/guide/threading#reductions) instead |
-| `ChunkSize` on many light rows | Many more claims for the same work | Benchmark ([chunk size](/en/docs/guide/threading#chunk-rows)) |
-| Reading another tile's cells by hand from a parallel method | A lookup per row, edge cases per cell | Review: a `Tile<TCell, TTile>` parameter pads the tile once ([grid tiles](/en/docs/guide/grids#pitfalls)) |
+| Optimizing a system nobody measured | Code that is harder to read and saves nothing | [`MeasureSystems`](/en/docs/guide/basics/systems#measuring-systems) |
+| Mixing lanes of different sizes (`float` and `double`, `int` and `byte`) in a method meant to vectorize | It stays scalar | [EECS055](/en/docs/guide/help/analyzer#eecs055); `SimdMode = SimdMode.Require` makes it an error |
+| A shared counter written by a parallel method | Lost updates | [EECS060](/en/docs/guide/help/analyzer#eecs060): a [`Reduce<T>`](/en/docs/guide/performance/threading#reductions) instead |
+| `ChunkSize` on many light rows | Many more claims for the same work | Benchmark ([chunk size](/en/docs/guide/performance/threading#chunk-rows)) |
+| Reading another tile's cells by hand from a parallel method | A lookup per row, edge cases per cell | Review: a `Tile<TCell, TTile>` parameter pads the tile once ([grid tiles](/en/docs/guide/performance/grids#pitfalls)) |
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Systems" href="/en/docs/guide/systems">
+  <Card title="Systems" href="/en/docs/guide/basics/systems">
     `[ForEach]`, batch, parallel methods and vector loops in full.
   </Card>
-  <Card title="Threading and parallel systems" href="/en/docs/guide/threading">
+  <Card title="Threading and parallel systems" href="/en/docs/guide/performance/threading">
     Owner threads, parallel stages and chunk size.
   </Card>
-  <Card title="Grid tiles" href="/en/docs/guide/grids">
+  <Card title="Grid tiles" href="/en/docs/guide/performance/grids">
     Tiles, halos, stencils and sleeping tiles, with a full example.
   </Card>
   <Card title="VoxelServer" href="/en/docs/samples/voxel-server">

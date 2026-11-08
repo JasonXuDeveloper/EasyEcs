@@ -27,7 +27,7 @@ Unity 的跑分，因为没有这样的测试。
 | Unity Entities | EasyEcs | 说明 |
 | --- | --- | --- |
 | `World`、`EntityManager` | `World` | 一个对象管实体、组件、单例和系统。每个 World 只属于一个线程。 |
-| `Entity`（index、version） | `Entity` 句柄；数据里存 `EntityId`（index、version） | 组件里存 `EntityId`，不存 `Entity`（[EECS017](/zh/docs/guide/analyzer#eecs017)）。 |
+| `Entity`（index、version） | `Entity` 句柄；数据里存 `EntityId`（index、version） | 组件里存 `EntityId`，不存 `Entity`（[EECS017](/zh/docs/guide/help/analyzer#eecs017)）。 |
 | `IComponentData` struct | `IComponent` struct | 非托管列固定在内存里，按 64 字节对齐。 |
 | 空的 `IComponentData`（标签） | 空的 `IComponent` struct | 第一次之后，加减标签只翻一个存在位。 |
 | `ISharedComponentData`（按值拆 chunk） | `IGroup` + `world.GroupBy<T>()` | 每个分组值一张表；`QueryFilter.InGroup<T>(value)` 只走其中一张。 |
@@ -35,26 +35,26 @@ Unity 的跑分，因为没有这样的测试。
 | `IEnableableComponent`、`SetComponentEnabled` | `entity.Disable<T>()` / `Enable<T>()` | 值保留，查询跳过它；第一次之后不再挪行。 |
 | `ICleanupComponentData` | `ICleanupComponent` + `Retired` 标签 | 对带清理组件的实体调用 `Destroy` 会让它退休：清理组件留着，直到某个系统把它们移除。 |
 | `SystemAPI.GetSingleton<T>()` | `ISingletonComponent`，`[ForEach]` 方法的 `ref T` 参数 | 每个 World 一份，不需要实体。 |
-| `ISystem` / `SystemBase` 的 `OnCreate` / `OnUpdate` / `OnDestroy` | `[EcsSystem]` 的 `OnCreate` / `OnUpdate` / `OnDestroy` | 系统无状态：状态放进组件或单例（[EECS007](/zh/docs/guide/analyzer#eecs007)）。 |
+| `ISystem` / `SystemBase` 的 `OnCreate` / `OnUpdate` / `OnDestroy` | `[EcsSystem]` 的 `OnCreate` / `OnUpdate` / `OnDestroy` | 系统无状态：状态放进组件或单例（[EECS007](/zh/docs/guide/help/analyzer#eecs007)）。 |
 | `SystemAPI.Query<RefRW<A>, RefRO<B>>()` | 参数为 `ref A`、`in B` 的 `[ForEach]` 方法 | job 由生成器写；`ref` 是写，`in` 是读。 |
 | `IJobEntity` | `[ForEach]` 方法（生成的 struct job） | |
-| `ScheduleParallel` | `[ForEach(Parallel = true)]` | 按行分块交给线程池；会产生竞争的方法由分析器拦下（[EECS010](/zh/docs/guide/analyzer#eecs010)）。 |
-| `IJobParallelFor` 的 batch count | `[ForEach(Parallel = true, ChunkSize = n)]` | 一个线程每次领多少行，适合行少而重（[块大小](/zh/docs/guide/threading#chunk-rows)）。 |
-| `IJobParallelFor` 累加进 `NativeReference`（配 `[NativeDisableParallelForRestriction]` 和 `Interlocked`，或每线程一个 `NativeArray`） | 并行 `[ForEach]` 方法的 `Reduce<T>` 参数 | 每块一个部分结果，每行没有原子操作，按行的顺序合并进单例（[归约](/zh/docs/guide/threading#reductions)）；共享计数器的写法由 EECS060 报告。 |
-| job 里带 `[ReadOnly]` 的 `ComponentLookup<T>` | `Lookup<T>` 参数 | 任意实体在这一遍之前的 `T`，按 id 或按键；系统算作读 `T`，所以可以并行，方法自己也写 `T` 时报 EECS059（[查找](/zh/docs/guide/threading#lookups)）。 |
-| 每个 job 分配一个 `NativeList`，或用 `[NativeSetThreadIndex]` 每线程一个列表 | `Scratch<T>` 参数 | 每个方法、每个线程一个 `T`，只分配一次，由行自己清空（[临时空间](/zh/docs/guide/threading#scratch)）。 |
+| `ScheduleParallel` | `[ForEach(Parallel = true)]` | 按行分块交给线程池；会产生竞争的方法由分析器拦下（[EECS010](/zh/docs/guide/help/analyzer#eecs010)）。 |
+| `IJobParallelFor` 的 batch count | `[ForEach(Parallel = true, ChunkSize = n)]` | 一个线程每次领多少行，适合行少而重（[块大小](/zh/docs/guide/performance/threading#chunk-rows)）。 |
+| `IJobParallelFor` 累加进 `NativeReference`（配 `[NativeDisableParallelForRestriction]` 和 `Interlocked`，或每线程一个 `NativeArray`） | 并行 `[ForEach]` 方法的 `Reduce<T>` 参数 | 每块一个部分结果，每行没有原子操作，按行的顺序合并进单例（[归约](/zh/docs/guide/performance/threading#reductions)）；共享计数器的写法由 EECS060 报告。 |
+| job 里带 `[ReadOnly]` 的 `ComponentLookup<T>` | `Lookup<T>` 参数 | 任意实体在这一遍之前的 `T`，按 id 或按键；系统算作读 `T`，所以可以并行，方法自己也写 `T` 时报 EECS059（[查找](/zh/docs/guide/performance/threading#lookups)）。 |
+| 每个 job 分配一个 `NativeList`，或用 `[NativeSetThreadIndex]` 每线程一个列表 | `Scratch<T>` 参数 | 每个方法、每个线程一个 `T`，只分配一次，由行自己清空（[临时空间](/zh/docs/guide/performance/threading#scratch)）。 |
 | `EntityQuery` 的 `WithAll` / `WithNone` / `WithAny` | `[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]`；临时调用用 `QueryFilter` | |
 | 变更过滤（`WithChangeFilter<T>`） | `ITracked` + `[Changed<T>]` | 按行而不是按 chunk，按组件类型自愿开启。 |
 | 结构变更事件 | `[Removed<T>]` | 系统上次运行以来失去了某个被追踪组件的实体。 |
 | `EntityCommandBuffer` | 不需要 | `entity.Set`、`Remove`、`Destroy` 当场生效，遍历途中也一样。 |
 | `ComponentSystemGroup`、`[UpdateInGroup]` | `ISystemGroup`、`[UpdateInGroup<T>]`、`world.Update<TGroup>()` | |
-| `[UpdateBefore]` / `[UpdateAfter]` | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | 出现环会编译报错（[EECS019](/zh/docs/guide/analyzer#eecs019)）。 |
+| `[UpdateBefore]` / `[UpdateAfter]` | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | 出现环会编译报错（[EECS019](/zh/docs/guide/help/analyzer#eecs019)）。 |
 | `RateManager`、固定步长分组 | `[UpdateInterval(N)]`，或者自己决定何时更新某个分组 | |
 | 预制体实体、`EntityManager.Instantiate(prefab, array)` | `Prefab`、`world.Instantiate(prefab, span)` | `Prefab` 不属于任何 World，也不需要烘焙。 |
 | 烘焙、authoring 组件 | 没有 | 用代码、预制体或存档来建实体。 |
 | `LinkedEntityGroup`（一起销毁） | `ChildOf(parent)`，级联销毁 | `world.Children(parent)` 列出子实体。 |
-| Burst | .NET JIT、Native AOT，以及生成器的[向量循环](/zh/docs/guide/systems#vector-loops) | struct job 按类型特化并内联；组件有 1 到 4 个同类型数值的逐行方法还会得到一个 `Vector<T>` 循环，结果和标量逐位相同。 |
-| Burst Inspector（这个 job 向量化了没有？） | [EECS055](/zh/docs/guide/analyzer#eecs055)，以及 `[ForEach(SimdMode = SimdMode.Require)]`（[EECS056](/zh/docs/guide/analyzer#eecs056)） | 构建时就说明方法为什么保持标量；`Require` 把它变成错误，不需要 Inspector。 |
+| Burst | .NET JIT、Native AOT，以及生成器的[向量循环](/zh/docs/guide/basics/systems#vector-loops) | struct job 按类型特化并内联；组件有 1 到 4 个同类型数值的逐行方法还会得到一个 `Vector<T>` 循环，结果和标量逐位相同。 |
+| Burst Inspector（这个 job 向量化了没有？） | [EECS055](/zh/docs/guide/help/analyzer#eecs055)，以及 `[ForEach(SimdMode = SimdMode.Require)]`（[EECS056](/zh/docs/guide/help/analyzer#eecs056)） | 构建时就说明方法为什么保持标量；`Require` 把它变成错误，不需要 Inspector。 |
 
 ## 同一个系统 [#same-system]
 
@@ -129,7 +129,7 @@ public ref struct DeathSystem
 Unity 的变更过滤按 chunk 算：只要有系统对某个 chunk 拿过写权限，它就算变了，所以过滤返回的是整个 chunk，不管写没写。
 EasyEcs 按行追踪，按组件自愿开启：把组件标成 `ITracked`，`[Changed<T>]` 就只访问系统上次运行以来通过 `ref`
 写过的行，没写过的表、4,096 行的区段和 64 行的字都直接跳过。`[Removed<T>]` 对失去该组件的实体做同样的事。见
-[变更追踪](/zh/docs/guide/change-tracking)。
+[变更追踪](/zh/docs/guide/changes/change-tracking)。
 
 ## EasyEcs 是 Unity 的 ECS 吗？ [#unity]
 
@@ -146,7 +146,7 @@ EasyEcs 按行追踪，按组件自愿开启：把组件标成 `ITracked`，`[Ch
   <Card title="快速开始" href="/zh/docs/getting-started">
     几分钟写出第一个 World、组件和系统。
   </Card>
-  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems">
     方法、过滤、顺序、分组和并行方法。
   </Card>
 </Cards>

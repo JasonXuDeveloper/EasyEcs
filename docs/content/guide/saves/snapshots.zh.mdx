@@ -16,7 +16,7 @@ icon: Camera
 </Callout>
 
 <Callout type="warn" title="不适合">
-  持久化：快照在内存里，并且和 World 共享托管引用。写盘、跨进程用[存档](/zh/docs/guide/saves)。每个 tick 给几百万实体拍快照：
+  持久化：快照在内存里，并且和 World 共享托管引用。写盘、跨进程用[存档](/zh/docs/guide/saves/saves)。每个 tick 给几百万实体拍快照：
   每次 capture 都要复制每一行。
 </Callout>
 
@@ -74,25 +74,25 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
 ### 快照里有什么 [#what-it-holds]
 
 - **实体和组件，按值复制。** 组件里的托管引用（`string`、数组、`List<T>`）和 World 共享，不会被克隆：组件里的集合恢复后是它
-  现在的样子，而不是当时的样子。[`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 是例外：capture 和 restore 都会复制元素。
+  现在的样子，而不是当时的样子。[`DynamicBuffer<T>`](/zh/docs/guide/data/dynamic-buffers) 是例外：capture 和 restore 都会复制元素。
   被禁用的组件保留的值也会一起恢复。
 - **单例，按值复制。** `Restore` 之后，每个单例在原来的存储里换成快照里的值，所以之前拿到的 `SingletonRef<T>` 继续有效；
   capture 之后新加的单例会被移除。
 - **句柄。** 快照里存活实体的句柄重新有效。其他句柄全部失效，包括 capture 之后创建的实体的句柄，哪怕之后有新实体复用了它们的 id。
 - **不包括系统、选项和 `GroupBy` 设置。** 系统照常按注册的样子运行，计数也是自己的：`RunCount` 接着往下数，所以
-  [分帧](/zh/docs/guide/systems#slices)的方法访问的是上次运行之后的那一片，不是拍快照时那一片。World 保留自己的
-  `GroupBy` 调用；拍快照之后新建的表保留下来，但是空的。快照保存的是每一行所在的[分组](/zh/docs/guide/groups)：每个实体都回到拍快照时所在的那张分组表。
+  [分帧](/zh/docs/guide/basics/systems#slices)的方法访问的是上次运行之后的那一片，不是拍快照时那一片。World 保留自己的
+  `GroupBy` 调用；拍快照之后新建的表保留下来，但是空的。快照保存的是每一行所在的[分组](/zh/docs/guide/data/groups)：每个实体都回到拍快照时所在的那张分组表。
 
 ### 恢复之后，其他部分会看到什么 [#after-restore]
 
 - **变更追踪：** 被追踪组件恢复出来的每一行都算作被写入，没有这个组件的每一行都算作被移除，所以
-  [同步](/zh/docs/guide/change-tracking#removal-detection)会把恢复后的状态重新发一遍。
+  [同步](/zh/docs/guide/changes/change-tracking#removal-detection)会把恢复后的状态重新发一遍。
 - **索引** 在下一次查找时从头重建。
 - **关系** 也一样重建。
-- **[销毁日志](/zh/docs/guide/change-tracking#destroy-log)** 开启时，会记下这次恢复去掉的实体（恢复前活着、快照里没有的）。日志本身不在快照里。
+- **[销毁日志](/zh/docs/guide/changes/change-tracking#destroy-log)** 开启时，会记下这次恢复去掉的实体（恢复前活着、快照里没有的）。日志本身不在快照里。
 
 两个调用都会进入结构闸门，查询遍历期间调用会抛异常：在两次更新之间调用，或者在系统的 `OnUpdate` 里、`[ForEach]` 方法之外调用。
-快照只属于拍它的那个 World（否则抛 `ArgumentException`）；[`RemoveTypes`](/zh/docs/guide/migration-and-unload#remove-types) 之前拍的
+快照只属于拍它的那个 World（否则抛 `ArgumentException`）；[`RemoveTypes`](/zh/docs/guide/saves/migration-and-unload#remove-types) 之前拍的
 快照，之后不能再恢复（抛 `InvalidOperationException`）。但可以往里重新拍：`world.Capture(snapshot)` 会替换掉所有属于被 `RemoveTypes`
 删掉的表的副本，所以跨过一次重载保留下来的快照环，每个快照重新拍过一次之后就能接着用。
 
@@ -293,24 +293,24 @@ capture 的分配就是新建的那个快照本身；`Capture(into)` 会复用�
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
 | 以为组件里的 `List<T>` 会回滚 | 它是共享的：恢复后还是现在的样子 | 改用 `DynamicBuffer<T>` |
-| 查询遍历期间 capture 或 restore | 抛 `InvalidOperationException` | [EECS041](/zh/docs/guide/analyzer#eecs041) |
+| 查询遍历期间 capture 或 restore | 抛 `InvalidOperationException` | [EECS041](/zh/docs/guide/help/analyzer#eecs041) |
 | 把快照恢复到另一个 World | 抛 `ArgumentException` | 运行时 |
-| 恢复 [`RemoveTypes`](/zh/docs/guide/migration-and-unload#remove-types) 之前拍的快照 | 抛 `InvalidOperationException`：它的表已经没了 | 运行时：`RemoveTypes` 之后往里重新拍 |
+| 恢复 [`RemoveTypes`](/zh/docs/guide/saves/migration-and-unload#remove-types) 之前拍的快照 | 抛 `InvalidOperationException`：它的表已经没了 | 运行时：`RemoveTypes` 之后往里重新拍 |
 | 每个 tick 拍一个快照，用来倒带判定命中 | 每个 tick 复制每一行，而且一恢复就全部倒回 | 只记位置的[历史环](#lag-compensation) |
 | 继续使用 capture 之后创建的实体的句柄 | 恢复后它们失效 | `IsAlive` |
-| 把快照写到磁盘 | 快照是对象图，不是字节 | 用[存档](/zh/docs/guide/saves) |
-| 在其他线程 capture 或 restore | 结构变更只属于所有者线程 | [EECS014](/zh/docs/guide/analyzer#eecs014) |
+| 把快照写到磁盘 | 快照是对象图，不是字节 | 用[存档](/zh/docs/guide/saves/saves) |
+| 在其他线程 capture 或 restore | 结构变更只属于所有者线程 | [EECS014](/zh/docs/guide/help/analyzer#eecs014) |
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="存档" href="/zh/docs/guide/saves">
+  <Card title="存档" href="/zh/docs/guide/saves/saves">
     把 World 变成字节，写盘或发给其他进程。
   </Card>
-  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+  <Card title="变更追踪" href="/zh/docs/guide/changes/change-tracking">
     恢复会把每一行都算作写入或移除。
   </Card>
-  <Card title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
+  <Card title="动态缓冲" href="/zh/docs/guide/data/dynamic-buffers">
     快照会复制元素的列表。
   </Card>
 </Cards>

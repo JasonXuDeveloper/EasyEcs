@@ -27,8 +27,8 @@ health.Value -= 10;
 hero.Health.Value -= 10;          // the same, inline
 ```
 
-Caught by [EECS038](/en/docs/guide/analyzer#eecs038) (warning, with a code fix) when nothing reads the copy afterwards.
-More in [copies and refs](/en/docs/guide/refs-and-await#copies-and-refs).
+Caught by [EECS038](/en/docs/guide/help/analyzer#eecs038) (warning, with a code fix) when nothing reads the copy afterwards.
+More in [copies and refs](/en/docs/guide/changes/refs-and-await#copies-and-refs).
 
 ### Storing an `Entity` in a component [#entity-in-component]
 
@@ -43,8 +43,8 @@ save cannot write it and a migration does not rewrite it. Store the `EntityId` a
 public record struct Follow(EntityId Leader) : IComponent;
 ```
 
-Caught by [EECS017](/en/docs/guide/analyzer#eecs017) (warning). More in
-[ids, versions and recycling](/en/docs/guide/entities-and-components#entityid).
+Caught by [EECS017](/en/docs/guide/help/analyzer#eecs017) (warning). More in
+[ids, versions and recycling](/en/docs/guide/basics/entities-and-components#entityid).
 
 ### Storing an index instead of an id [#raw-index]
 
@@ -68,7 +68,7 @@ var item = world.CreateEntity(new Owner(hero.Id));
 if (world.TryGetEntity(item.Owner.Id, out var owner)) { /* still alive */ }
 ```
 
-No rule catches it. More in [ids, versions and recycling](/en/docs/guide/entities-and-components#entityid).
+No rule catches it. More in [ids, versions and recycling](/en/docs/guide/basics/entities-and-components#entityid).
 
 ### A flag where a tag would do [#flags]
 
@@ -125,7 +125,7 @@ caster.DisableCooldown();               // stunned: the cooldown is paused
 caster.EnableCooldown();                // the stun ends: the same value
 ```
 
-No rule catches it. More in [disable a component](/en/docs/guide/cleanup-and-disable#disable-a-component).
+No rule catches it. More in [disable a component](/en/docs/guide/changes/cleanup-and-disable#disable-a-component).
 
 ### A public `Key => this` on a record struct key [#public-key]
 
@@ -144,7 +144,7 @@ which prints its `Key`: the first log line or debugger view of the value overflo
 [LookupKey] public readonly partial record struct Market(long Id) : IComponent;
 ```
 
-Caught by [EECS043](/en/docs/guide/analyzer#eecs043) (with a code fix). The [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) shows
+Caught by [EECS043](/en/docs/guide/help/analyzer#eecs043) (with a code fix). The [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) shows
 the whole pattern.
 
 ### Resetting a singleton with `AddSingleton` [#add-singleton-reset]
@@ -166,7 +166,7 @@ world.SetRound(2, 0);              // the next round, from tick 0
 ```
 
 No rule catches it; the exception names the call to write. More in
-[add, read and write](/en/docs/guide/singletons#add-read-write).
+[add, read and write](/en/docs/guide/basics/singletons#add-read-write).
 
 ## Systems [#systems]
 
@@ -195,7 +195,7 @@ public ref struct WaveSystem
 }
 ```
 
-Caught by [EECS007](/en/docs/guide/analyzer#eecs007). More in
+Caught by [EECS007](/en/docs/guide/help/analyzer#eecs007). More in
 [ECS principles, rule 2](/en/docs/ecs-principles#2-systems-are-stateless).
 
 ### A system that calls another [#system-calls-system]
@@ -230,7 +230,7 @@ public ref struct KillRewards
 }
 ```
 
-Caught by [EECS008](/en/docs/guide/analyzer#eecs008). More in
+Caught by [EECS008](/en/docs/guide/help/analyzer#eecs008). More in
 [ECS principles, rule 3](/en/docs/ecs-principles#3-systems-never-reference-systems).
 
 ### A `ref` parameter that only reads [#ref-that-reads]
@@ -266,8 +266,8 @@ public ref struct Throttle
 }
 ```
 
-Caught by [EECS025](/en/docs/guide/analyzer#eecs025) (warning, with a code fix). More in
-[parallel systems](/en/docs/guide/threading#parallel-systems).
+Caught by [EECS025](/en/docs/guide/help/analyzer#eecs025) (warning, with a code fix). More in
+[parallel systems](/en/docs/guide/performance/threading#parallel-systems).
 
 ### `[Changed<T>]` on a component that is not tracked [#changed-untracked]
 
@@ -296,7 +296,7 @@ public ref struct ShowGold
 ```
 
 Caught by the C# compiler (the attribute requires `ITracked`: CS0315). More in
-[mark the component](/en/docs/guide/change-tracking#mark-the-component).
+[mark the component](/en/docs/guide/changes/change-tracking#mark-the-component).
 
 ### Reading a tracked component through a `ref` [#read-tracked-by-ref]
 
@@ -311,8 +311,8 @@ property (it is `ref readonly` for a tracked component), `Read<T>()` in generic 
 int amount = player.Gold.Amount;             // ref readonly: no stamp
 ```
 
-Caught by [EECS025](/en/docs/guide/analyzer#eecs025) (warning, with a code fix). More in
-[what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write).
+Caught by [EECS025](/en/docs/guide/help/analyzer#eecs025) (warning, with a code fix). More in
+[what counts as a write](/en/docs/guide/changes/change-tracking#what-counts-as-a-write).
 
 ### A tracked component written only sometimes through a `ref` [#ref-writes-every-row]
 
@@ -350,8 +350,8 @@ public ref struct Face
 
 Outside systems, read through `in` parameters, `Read<T>()` or the generated property, and write with
 `entity.SetIfChanged(...)` (or the generated `SetFacingIfChanged(...)`). No rule catches the `ref` writer that writes
-sometimes; [EECS025](/en/docs/guide/analyzer#eecs025) catches the one that never writes. More in
-[what counts as a write](/en/docs/guide/change-tracking#what-counts-as-a-write).
+sometimes; [EECS025](/en/docs/guide/help/analyzer#eecs025) catches the one that never writes. More in
+[what counts as a write](/en/docs/guide/changes/change-tracking#what-counts-as-a-write).
 
 ### A `Query` loop that only reads tracked components [#query-that-reads]
 
@@ -375,8 +375,8 @@ foreach (var item in world.Read<Rating>())
     total += item.Rating.Value;
 ```
 
-Caught by [EECS046](/en/docs/guide/analyzer#eecs046) (warning, with a code fix). More in
-[a loop that only reads](/en/docs/guide/queries#read).
+Caught by [EECS046](/en/docs/guide/help/analyzer#eecs046) (warning, with a code fix). More in
+[a loop that only reads](/en/docs/guide/basics/queries#read).
 
 ### `[Removed<T>]` that takes `T` [#removed-takes-t]
 
@@ -404,8 +404,8 @@ public ref struct Extinguish
 }
 ```
 
-Caught by [EECS016](/en/docs/guide/analyzer#eecs016). More in
-[removal detection](/en/docs/guide/change-tracking#removal-detection).
+Caught by [EECS016](/en/docs/guide/help/analyzer#eecs016). More in
+[removal detection](/en/docs/guide/changes/change-tracking#removal-detection).
 
 ### Expecting `[Removed<T>]` to report destroyed entities [#removed-destroyed]
 
@@ -441,7 +441,7 @@ else
 }
 ```
 
-No rule catches it. More in [the destroy log](/en/docs/guide/change-tracking#destroy-log).
+No rule catches it. More in [the destroy log](/en/docs/guide/changes/change-tracking#destroy-log).
 
 ### Expecting `Count` or `Query` to honour a slice [#count-a-slice]
 
@@ -464,7 +464,7 @@ int npcs = world.Count<Position>(QueryFilter.Create().With<Npc>());   // all of 
 ```
 
 With `MeasureSystems`, `system.Stats.LastEntities` of a `[ForEach(Slices = N)]` method is its share. Caught by
-[EECS044](/en/docs/guide/analyzer#eecs044) when the filter is built in the same method or type, at run time otherwise. More in [slices](/en/docs/guide/systems#slices).
+[EECS044](/en/docs/guide/help/analyzer#eecs044) when the filter is built in the same method or type, at run time otherwise. More in [slices](/en/docs/guide/basics/systems#slices).
 
 ### Slicing a `[Changed<T>]` method [#slice-changed]
 
@@ -491,7 +491,7 @@ public ref struct SendGold
 }
 ```
 
-Caught by [EECS035](/en/docs/guide/analyzer#eecs035).
+Caught by [EECS035](/en/docs/guide/help/analyzer#eecs035).
 
 ### One hand-written group per actor type [#group-per-actor]
 
@@ -520,7 +520,7 @@ public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISys
 [LookupKey] public readonly partial record struct Guild(long Id) : IActor<Guild>;
 ```
 
-No rule catches it. More in [group filters](/en/docs/guide/systems#group-filters).
+No rule catches it. More in [group filters](/en/docs/guide/basics/systems#group-filters).
 
 ## Structure [#structure]
 
@@ -540,8 +540,8 @@ hero.SetStunned();
 hero.Health.Value -= 10;
 ```
 
-Caught by [EECS047](/en/docs/guide/analyzer#eecs047) (warning) when the ref, the change and the use are in one block. More in
-[refs across a change](/en/docs/guide/structural-changes#refs-across-a-change).
+Caught by [EECS047](/en/docs/guide/help/analyzer#eecs047) (warning) when the ref, the change and the use are in one block. More in
+[refs across a change](/en/docs/guide/changes/structural-changes#refs-across-a-change).
 
 ### Keeping a `ref` across an `await` [#ref-across-await]
 
@@ -559,7 +559,7 @@ await Task.Delay(100);
 if (hero.HasHealth) hero.Health.Value -= 10;
 ```
 
-Caught by the C# compiler. More in [ref and await](/en/docs/guide/refs-and-await#across-await).
+Caught by the C# compiler. More in [ref and await](/en/docs/guide/changes/refs-and-await#across-await).
 
 ### Writing an indexed key through a `ref` [#indexed-by-ref]
 
@@ -584,8 +584,8 @@ public static class Portals
 }
 ```
 
-Caught by [EECS015](/en/docs/guide/analyzer#eecs015). More in
-[value indexes](/en/docs/guide/indexes-and-relations#value-indexes).
+Caught by [EECS015](/en/docs/guide/help/analyzer#eecs015). More in
+[value indexes](/en/docs/guide/data/indexes-and-relations#value-indexes).
 
 ### Moving a unique key to its new holder first [#rekey-order]
 
@@ -612,7 +612,7 @@ carol.SetSeat(12);
 ```
 
 The refused write changes nothing: the entity keeps its old key and the world is as it was. Caught at run time. More
-in [unique keys](/en/docs/guide/indexes-and-relations#unique-keys).
+in [unique keys](/en/docs/guide/data/indexes-and-relations#unique-keys).
 
 ### Copying an entity or prefab that holds a unique key [#unique-copies]
 
@@ -634,7 +634,7 @@ for (int i = 0; i < guests.Length; i++)
 ```
 
 A null key (the default of a `string` key) is no key: a prefab may hold it and every instance gets it. Caught at run
-time. More in [prefabs](/en/docs/guide/prefabs).
+time. More in [prefabs](/en/docs/guide/basics/prefabs).
 
 ### Enabling a unique key someone else took [#disabled-unique]
 
@@ -657,7 +657,7 @@ else
     regular.EnableSeat();
 ```
 
-Caught at run time. More in [disable a component](/en/docs/guide/cleanup-and-disable#disable-a-component).
+Caught at run time. More in [disable a component](/en/docs/guide/changes/cleanup-and-disable#disable-a-component).
 
 ### Copying a `DynamicBuffer<T>` [#buffer-copy]
 
@@ -690,7 +690,7 @@ public static class Inventory
 }
 ```
 
-Caught by [EECS012](/en/docs/guide/analyzer#eecs012). More in [dynamic buffers](/en/docs/guide/dynamic-buffers).
+Caught by [EECS012](/en/docs/guide/help/analyzer#eecs012). More in [dynamic buffers](/en/docs/guide/data/dynamic-buffers).
 
 ### Destroying a parent and expecting the children to stay [#parent-destroy]
 
@@ -707,7 +707,7 @@ children once, for the world:
 world.ChildOfIndex.WhenTargetDestroyed(TargetPolicy.Remove);   // orphans become roots
 ```
 
-No rule catches it. More in [cascade policy](/en/docs/guide/hierarchy#cascade-policy).
+No rule catches it. More in [cascade policy](/en/docs/guide/data/hierarchy#cascade-policy).
 
 ### A loop of structural changes [#loop-of-changes]
 
@@ -726,8 +726,8 @@ Each call moves one row. `SetAll`, `RemoveAll`, `DisableAll` and `EnableAll` mov
 int frozen = world.SetAll(new Frozen(), QueryFilter.Create().With<Fighter>());
 ```
 
-Caught by [EECS030](/en/docs/guide/analyzer#eecs030) (warning, with a code fix). More in
-[bulk changes](/en/docs/guide/bulk).
+Caught by [EECS030](/en/docs/guide/help/analyzer#eecs030) (warning, with a code fix). More in
+[bulk changes](/en/docs/guide/changes/bulk).
 
 ### A `Set` right after `CreateEntity` [#set-after-create]
 
@@ -744,8 +744,8 @@ var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
 ```
 
 The same holds for `Instantiate(prefab)` then `Set`: pass the instance's own components to `Instantiate`. Caught by
-[EECS052](/en/docs/guide/analyzer#eecs052) (warning, with a code fix). More in
-[create entities](/en/docs/guide/entities-and-components#create-entities).
+[EECS052](/en/docs/guide/help/analyzer#eecs052) (warning, with a code fix). More in
+[create entities](/en/docs/guide/basics/entities-and-components#create-entities).
 
 ### Updating the world inside a query loop [#update-in-loop]
 
@@ -767,9 +767,9 @@ foreach (var item in world.Query<Health>())
 world.Update();
 ```
 
-Caught by [EECS051](/en/docs/guide/analyzer#eecs051); inside a system,
-[EECS034](/en/docs/guide/analyzer#eecs034). More in
-[adding and removing while iterating](/en/docs/guide/structural-changes#during-a-pass).
+Caught by [EECS051](/en/docs/guide/help/analyzer#eecs051); inside a system,
+[EECS034](/en/docs/guide/help/analyzer#eecs034). More in
+[adding and removing while iterating](/en/docs/guide/changes/structural-changes#during-a-pass).
 
 ### Collecting a subtree with `Children` alone [#children-only]
 
@@ -786,7 +786,7 @@ var group = new List<EntityId>();
 world.Descendants(hero).AddTo(group, includeRoot: true);   // the hero, then children, grandchildren, ...
 ```
 
-No rule catches it. More in [moving a hierarchy](/en/docs/guide/hierarchy#moving).
+No rule catches it. More in [moving a hierarchy](/en/docs/guide/data/hierarchy#moving).
 
 ### Restoring a record that is then saved again [#record-written-back]
 
@@ -817,7 +817,7 @@ static Entity Restore(World world, ReadOnlySpan<byte> record)
 }
 ```
 
-No rule catches it. More in [records](/en/docs/guide/migration-and-unload#records).
+No rule catches it. More in [records](/en/docs/guide/saves/migration-and-unload#records).
 
 ### Calling `TrimExcess` every tick [#trim-every-tick]
 
@@ -839,8 +839,8 @@ if (world.DefaultUpdateCount % 12_000 == 0 && world.EntityCount < 10_000)   // e
     world.TrimExcess();
 ```
 
-Caught by [EECS028](/en/docs/guide/analyzer#eecs028) (warning) in an `OnUpdate` or a `[ForEach]` method; no rule
-catches it in the host's loop. More in [give memory back after a peak](/en/docs/guide/diagnostics#trim).
+Caught by [EECS028](/en/docs/guide/help/analyzer#eecs028) (warning) in an `OnUpdate` or a `[ForEach]` method; no rule
+catches it in the host's loop. More in [give memory back after a peak](/en/docs/guide/production/diagnostics#trim).
 
 ## Threads [#threads]
 
@@ -860,8 +860,8 @@ public static class Network
 A world's structure belongs to its owner thread, and the world adds no lock to share it. Put the input in a queue
 and let a system on the owner thread turn it into entities, or give each thread its own world.
 
-Caught by [EECS014](/en/docs/guide/analyzer#eecs014). More in
-[input from other threads](/en/docs/guide/threading#input-from-other-threads).
+Caught by [EECS014](/en/docs/guide/help/analyzer#eecs014). More in
+[input from other threads](/en/docs/guide/performance/threading#input-from-other-threads).
 
 ### A structural change in a parallel method [#parallel-change]
 
@@ -886,8 +886,8 @@ public ref struct Reap
 }
 ```
 
-Caught by [EECS010](/en/docs/guide/analyzer#eecs010). More in
-parallel [`[ForEach]`](/en/docs/guide/threading#parallel-foreach-methods) methods.
+Caught by [EECS010](/en/docs/guide/help/analyzer#eecs010). More in
+parallel [`[ForEach]`](/en/docs/guide/performance/threading#parallel-foreach-methods) methods.
 
 ### `entity.Run` in a parallel method [#run-in-parallel]
 
@@ -926,8 +926,8 @@ public ref struct HealAll
 }
 ```
 
-Caught by [EECS010](/en/docs/guide/analyzer#eecs010). More in
-[`entity.Run`](/en/docs/guide/queries#run-on-one-entity).
+Caught by [EECS010](/en/docs/guide/help/analyzer#eecs010). More in
+[`entity.Run`](/en/docs/guide/basics/queries#run-on-one-entity).
 
 ### A shared counter in a parallel method [#shared-counter]
 
@@ -971,7 +971,7 @@ public ref struct Bleed
 }
 ```
 
-Caught by [EECS060](/en/docs/guide/analyzer#eecs060). More in [reductions](/en/docs/guide/threading#reductions).
+Caught by [EECS060](/en/docs/guide/help/analyzer#eecs060). More in [reductions](/en/docs/guide/performance/threading#reductions).
 
 ### Reading `Reduce<T>.Value` as the total [#reduce-value]
 
@@ -1005,7 +1005,7 @@ public ref struct BleedOut
 }
 ```
 
-No rule catches it: the method compiles and runs. More in [reductions](/en/docs/guide/threading#reductions).
+No rule catches it: the method compiles and runs. More in [reductions](/en/docs/guide/performance/threading#reductions).
 
 ### Reading a parallel job's field after the call [#job-field-after-parallel]
 
@@ -1032,10 +1032,10 @@ public static class Census
 
 `ForEachParallel` runs a copy of the job per chunk and writes none of them back: the job passed by `ref` keeps the
 values it had. Run a job whose fields hold the result on one thread (`world.ForEach`), or write a
-`[ForEach(Parallel = true)]` method with a [`Reduce<T>`](/en/docs/guide/threading#reductions) parameter, whose
+`[ForEach(Parallel = true)]` method with a [`Reduce<T>`](/en/docs/guide/performance/threading#reductions) parameter, whose
 generated job merges its chunks.
 
-Caught by [EECS061](/en/docs/guide/analyzer#eecs061), with a code fix to `ForEach`.
+Caught by [EECS061](/en/docs/guide/help/analyzer#eecs061), with a code fix to `ForEach`.
 
 ### Leaving `Emitted<T>` full [#emitted-not-cleared]
 
@@ -1082,7 +1082,7 @@ public ref struct ApplyHitsSystem
 ```
 
 No rule catches it: the analyzer cannot tell which system applies the records. More in
-[records out of a pass](/en/docs/guide/threading#emit).
+[records out of a pass](/en/docs/guide/performance/threading#emit).
 
 ### `Random.Shared` in a `[ForEach]` method [#shared-random]
 
@@ -1118,8 +1118,8 @@ public ref struct Crits
 }
 ```
 
-Caught by [EECS071](/en/docs/guide/analyzer#eecs071), with a code fix. More in
-[random numbers in a pass](/en/docs/guide/threading#entity-random).
+Caught by [EECS071](/en/docs/guide/help/analyzer#eecs071), with a code fix. More in
+[random numbers in a pass](/en/docs/guide/performance/threading#entity-random).
 
 ### Looking up what the pass writes [#lookup-written]
 
@@ -1140,7 +1140,7 @@ public ref struct Escort
 
 A `Lookup<T>` reads `T` of other entities as it was before the pass, so the pass may not write `T`: rows would read
 some leaders before their write and some after, and in parallel, rows another thread is writing. A
-[`Tile`](/en/docs/guide/grids) parameter is the same: it reads the cells of the neighbors, so the method writes its
+[`Tile`](/en/docs/guide/performance/grids) parameter is the same: it reads the cells of the neighbors, so the method writes its
 result into another buffer. Write into a component of your own and copy it in a later system (double buffering):
 
 ```csharp
@@ -1166,18 +1166,18 @@ public ref struct Steer
 }
 ```
 
-Caught by [EECS059](/en/docs/guide/analyzer#eecs059). More in [lookups](/en/docs/guide/threading#lookups).
+Caught by [EECS059](/en/docs/guide/help/analyzer#eecs059). More in [lookups](/en/docs/guide/performance/threading#lookups).
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
+  <Card title="Analyzer rules" href="/en/docs/guide/help/analyzer">
     Every rule, EECS002 to EECS089.
   </Card>
   <Card title="ECS principles" href="/en/docs/ecs-principles">
     The rules these mistakes break.
   </Card>
-  <Card title="ref and await" href="/en/docs/guide/refs-and-await">
+  <Card title="ref and await" href="/en/docs/guide/changes/refs-and-await">
     When a `ref` expires.
   </Card>
   <Card title="FAQ" href="/en/docs/faq">

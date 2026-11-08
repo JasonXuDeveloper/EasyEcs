@@ -11,7 +11,7 @@ EasyEcs 比大多数模型的训练数据都新，它的规则（无状态系统
 
 ## EasyEcs 技能 [#agent-skill]
 
-技能收录了编写 EasyEcs 代码时最要紧的规则：组件和系统、方法过滤条件和组过滤条件、结构性变更、用 `entity.Run` 处理单个实体的请求、线程与引用、性能、持久化（快照、存档、用 `LoadEntitiesInto` 写入记录）、EasyEcs 不做的事（包括留给你实现的 actor 模式）、项目结构与调试，以及一个示例。它们来自 [ECS 原则](/zh/docs/ecs-principles)、[分析器规则](/zh/docs/guide/analyzer)、[性能指南](/zh/docs/performance)、[项目结构](/zh/docs/guide/project-structure)和[诊断](/zh/docs/guide/diagnostics)。
+技能收录了编写 EasyEcs 代码时最要紧的规则：组件和系统、方法过滤条件和组过滤条件、结构性变更、用 `entity.Run` 处理单个实体的请求、线程与引用、性能、持久化（快照、存档、用 `LoadEntitiesInto` 写入记录）、EasyEcs 不做的事（包括留给你实现的 actor 模式）、项目结构与调试，以及一个示例。它们来自 [ECS 原则](/zh/docs/ecs-principles)、[分析器规则](/zh/docs/guide/help/analyzer)、[性能指南](/zh/docs/performance)、[项目结构](/zh/docs/guide/basics/project-structure)和[诊断](/zh/docs/guide/production/diagnostics)。
 
 智能体平时只读技能的描述，任务编写、审查或迁移 EasyEcs 代码时才加载规则，其他对话不占上下文。Claude Code、Cursor、Codex、GitHub Copilot、Gemini CLI 以及其他支持 [Agent Skills](https://agentskills.io) 的智能体都能加载它。
 
@@ -53,11 +53,11 @@ curl -fsSL --create-dirs -o .claude/skills/easyecs/SKILL.md \
 
 ## 每页的 Markdown 版本 [#markdown-copies]
 
-在页面地址后加 `.md` 就是它的 Markdown：`https://ecs.xgamedev.net/zh/docs/guide/queries.md`，文档首页是 `/zh/docs.md`。
+在页面地址后加 `.md` 就是它的 Markdown：`https://ecs.xgamedev.net/zh/docs/guide/basics/queries.md`，文档首页是 `/zh/docs.md`。
 请求页面本身时带上 `Accept: text/markdown`，得到的也是同一份 Markdown，优先请求 Markdown 的工具不需要特殊地址：
 
 ```bash
-curl -H "Accept: text/markdown" https://ecs.xgamedev.net/zh/docs/guide/systems
+curl -H "Accept: text/markdown" https://ecs.xgamedev.net/zh/docs/guide/basics/systems
 ```
 
 每页顶部的菜单可以复制本页 Markdown，或者带着本页在 ChatGPT、Claude、T3 Chat、Scira 中打开。

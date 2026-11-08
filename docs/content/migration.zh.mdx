@@ -19,8 +19,8 @@ icon: CircleArrowUp
 ### 系统是 `[EcsSystem]` ref struct [#v4-8-systems]
 
 `EcsSystem` 基类删掉了。系统是标了 `[EcsSystem]`、只有静态方法的 `ref struct`：World 从不创建系统，它自己保存系统的簿记（启用、错误、
-运行次数、统计），并为系统发一个 [`SystemHandle`](/zh/docs/guide/systems#lifecycle)（[D102](/zh/docs/decisions#d102-systems-are-ref-structs)）。
-为 4.7 写的代码会在基类上编译失败（CS0246），IDE 在那里提供一个[代码修复](/zh/docs/guide/analyzer#migration-fix)来改写这个类。
+运行次数、统计），并为系统发一个 [`SystemHandle`](/zh/docs/guide/basics/systems#lifecycle)（[D102](/zh/docs/decisions#d102-systems-are-ref-structs)）。
+为 4.7 写的代码会在基类上编译失败（CS0246），IDE 在那里提供一个[代码修复](/zh/docs/guide/help/analyzer#migration-fix)来改写这个类。
 
 | 4.7 | 4.8 |
 | --- | --- |
@@ -36,7 +36,7 @@ icon: CircleArrowUp
 | `system.GetType().Name` | `system.Name`（类型用 `system.Type`） |
 | 几个系统共用的基类 | 泛型系统（`Regen<T>`）或放辅助函数的静态类 |
 
-带构造函数参数的系统改为把参数放进 World，作为宿主设置的 [`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例：存档不会写它
+带构造函数参数的系统改为把参数放进 World，作为宿主设置的 [`[NotSaved]`](/zh/docs/guide/saves/saves#not-saved) 单例：存档不会写它
 （队列或服务没有格式化器），读档也保留它。
 
 ```csharp tab="4.7" doccheck=skip
@@ -83,8 +83,8 @@ world.AddSystem<ReceiveMoves>();
 ```
 
 没有构造函数参数、没有抽象基类、也没有读系统簿记的 `[ForEach]` 方法的类才会提供这个修复；其余的照上面手动改。分析器跟着新写法走：
-新增 EECS074 到 EECS077（[`[EcsSystem]` 标在不是 ref struct 的类型上](/zh/docs/guide/analyzer#eecs074)、实例成员、无效的钩子、
-需要系统的地方给了非系统类型），[EECS007](/zh/docs/guide/analyzer#eecs007) 改为针对可变静态字段的警告，EECS029（实例 `[ForEach]`
+新增 EECS074 到 EECS077（[`[EcsSystem]` 标在不是 ref struct 的类型上](/zh/docs/guide/help/analyzer#eecs074)、实例成员、无效的钩子、
+需要系统的地方给了非系统类型），[EECS007](/zh/docs/guide/help/analyzer#eecs007) 改为针对可变静态字段的警告，EECS029（实例 `[ForEach]`
 方法）和 EECS082（重写节奏属性）随它们报告的写法一起删掉了。
 
 ### 系统的节奏是特性：`[UpdateInterval(n, Phase = p)]` [#v4-8-update-interval]
@@ -110,14 +110,14 @@ public ref struct SaveSystem
 }
 ```
 
-运行时算出来的间隔没有对应的特性写法：要么定下节奏，要么把系统放进一个[系统分组](/zh/docs/guide/systems#system-groups)，到期时更新这个分组。
+运行时算出来的间隔没有对应的特性写法：要么定下节奏，要么把系统放进一个[系统分组](/zh/docs/guide/basics/systems#system-groups)，到期时更新这个分组。
 读 `system.UpdateInterval` 的代码改成读特性（`typeof(T).GetCustomAttribute<UpdateIntervalAttribute>()`）。
 
 ### 报告范围变大的分析器规则：EECS027、EECS030 和 EECS053 [#v4-8-analyzer]
 
-[EECS027](/zh/docs/guide/analyzer#eecs027) 现在也报告通过被访问的 `Entity` 逐行查带索引的组件。以前它放过这种写法，因为带索引组件的
-`Maybe<T>` 是错误（[EECS015](/zh/docs/guide/analyzer#eecs015)）。改成 `in` 参数，部分实体没有它时用
-[`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe)：
+[EECS027](/zh/docs/guide/help/analyzer#eecs027) 现在也报告通过被访问的 `Entity` 逐行查带索引的组件。以前它放过这种写法，因为带索引组件的
+`Maybe<T>` 是错误（[EECS015](/zh/docs/guide/help/analyzer#eecs015)）。改成 `in` 参数，部分实体没有它时用
+[`ReadOnlyMaybe<T>`](/zh/docs/guide/basics/systems#read-only-maybe)：
 
 ```csharp
 public partial record struct Guild([LookupKey] int Id) : IComponent;
@@ -142,7 +142,7 @@ public ref struct Rally
 }
 ```
 
-[EECS030](/zh/docs/guide/analyzer#eecs030) 现在也报告整个方法体只是对自己实体做一次结构变更、每行都一样的 `[ForEach]` 方法。把这次变更
+[EECS030](/zh/docs/guide/help/analyzer#eecs030) 现在也报告整个方法体只是对自己实体做一次结构变更、每行都一样的 `[ForEach]` 方法。把这次变更
 挪到 `OnUpdate` 里，写成一次批量调用：
 
 ```csharp tab="4.7" doccheck=expect-EECS030
@@ -162,10 +162,10 @@ public ref struct CorpseSystem
 }
 ```
 
-[EECS053](/zh/docs/guide/analyzer#eecs053) 是新规则：以 `ref` 接收被追踪的组件，却有路径不写它。代码修复会改成 `Mut<T>`。
+[EECS053](/zh/docs/guide/help/analyzer#eecs053) 是新规则：以 `ref` 接收被追踪的组件，却有路径不写它。代码修复会改成 `Mut<T>`。
 
-[EECS060](/zh/docs/guide/analyzer#eecs060) 是新规则：并行 `[ForEach]` 方法，或 `ForEachParallel` 运行的 job 的 `Execute`，写了静态字段或共享对象。
-总数改用 [`ref Reduce<T>`](/zh/docs/guide/threading#reductions) 参数：
+[EECS060](/zh/docs/guide/help/analyzer#eecs060) 是新规则：并行 `[ForEach]` 方法，或 `ForEachParallel` 运行的 job 的 `Execute`，写了静态字段或共享对象。
+总数改用 [`ref Reduce<T>`](/zh/docs/guide/performance/threading#reductions) 参数：
 
 ```csharp
 public partial struct Hits : ISingletonComponent
@@ -205,10 +205,10 @@ public ref struct TakeHits
 }
 ```
 
-[EECS061](/zh/docs/guide/analyzer#eecs061) 是新规则：`ForEachParallel` 之后读并行 job 的字段（每一块跑的是副本）。代码修复改用 `ForEach`；
+[EECS061](/zh/docs/guide/help/analyzer#eecs061) 是新规则：`ForEachParallel` 之后读并行 job 的字段（每一块跑的是副本）。代码修复改用 `ForEach`；
 要用满所有核，像上面那样用 `Reduce<T>` 参数。
 
-[EECS071](/zh/docs/guide/analyzer#eecs071) 是新规则：`[ForEach]` 方法里的 `Random.Shared` 或 `new Random(...)`，它们的数没有一次运行能重现。
+[EECS071](/zh/docs/guide/help/analyzer#eecs071) 是新规则：`[ForEach]` 方法里的 `Random.Shared` 或 `new Random(...)`，它们的数没有一次运行能重现。
 代码修复改为从单例 [`EntityRandom`](/zh/docs/reference/entityrandom) 抽取，World 需要这个单例（`world.SetEntityRandom(seed, 0)`，每一步推进它的 `Tick`）：
 
 ```csharp tab="4.7" doccheck=expect-EECS071
@@ -302,7 +302,7 @@ public record struct Bank(long Gold) : IComponent;
 private static readonly ComponentSet Record = ComponentSet.Create().With<Bank>();
 ```
 
-含单例的集合用在整个 World 的 `SaveWithout(output, in exclude)` 和 `LoadKeeping(input, in keep)` 上（[重启](/zh/docs/guide/saves#restart)）。
+含单例的集合用在整个 World 的 `SaveWithout(output, in exclude)` 和 `LoadKeeping(input, in keep)` 上（[重启](/zh/docs/guide/saves/saves#restart)）。
 
 ### 单例已存在时 `AddSingleton` 抛异常 [#v4-7-add-singleton]
 
@@ -385,7 +385,7 @@ public ref struct Spawner
 所以不会有调用悄悄换了意思。
 
 4.7 新增的重启调用一开始就是新名字：`world.SaveWithout(output, in exclude)` 和
-`world.LoadKeeping(input, in keep, markWritten)`（见[重启](/zh/docs/guide/saves#restart)）。
+`world.LoadKeeping(input, in keep, markWritten)`（见[重启](/zh/docs/guide/saves/saves#restart)）。
 
 ### 生成的类 [#v4-7-generated-classes]
 
@@ -404,15 +404,15 @@ public ref struct Spawner
 ### 新的分析器规则：EECS037 到 EECS052 [#v4-7-analyzer]
 
 在 4.6 能编译的代码，到 4.7 可能编译失败。新的错误指出的是会抛异常或根本行不通的代码：
-[EECS040](/zh/docs/guide/analyzer#eecs040) 到 [EECS045](/zh/docs/guide/analyzer#eecs045)（对无法比较的类型调用 `SetIfChanged`、
+[EECS040](/zh/docs/guide/help/analyzer#eecs040) 到 [EECS045](/zh/docs/guide/help/analyzer#eecs045)（对无法比较的类型调用 `SetIfChanged`、
 调用遍历期间会被拒绝的方法、遍历索引时往索引里加实体、会打印自身的 record struct 键、把切片过滤条件交给需要整行的调用、
-手动写 `Retired` 或 `Disabled<T>` 标签），[EECS048](/zh/docs/guide/analyzer#eecs048) 到 [EECS051](/zh/docs/guide/analyzer#eecs051)（禁用清理组件或 `ChildOf`、
+手动写 `Retired` 或 `Disabled<T>` 标签），[EECS048](/zh/docs/guide/help/analyzer#eecs048) 到 [EECS051](/zh/docs/guide/help/analyzer#eecs051)（禁用清理组件或 `ChildOf`、
 过滤条件没有实体能通过的 `[ForEach]` 方法、一个过滤条件里的第二个 `InGroup`、在查询循环里调用 `world.Update()`）；
-[EECS036](/zh/docs/guide/analyzer#eecs036) 现在也报告有两个索引键的普通组件。
-新的警告指出丢失的写入、可能指向错误行的 ref 或做了两遍的工作：[EECS037](/zh/docs/guide/analyzer#eecs037)（job 的 `WriteMask`）、
-[EECS038](/zh/docs/guide/analyzer#eecs038)（改过的副本）、[EECS046](/zh/docs/guide/analyzer#eecs046)（只读追踪变化组件的
-`Query` 循环：改用 `Read` 遍历）、[EECS047](/zh/docs/guide/analyzer#eecs047)（结构变更之后还在用的 ref：重新获取）和
-[EECS052](/zh/docs/guide/analyzer#eecs052)（`CreateEntity` 或 `Instantiate` 之后紧跟 `Set`：把组件交给创建调用）。[EECS039](/zh/docs/guide/analyzer#eecs039) 是建议。大多数规则有代码修复；把警告当错误的构建，
+[EECS036](/zh/docs/guide/help/analyzer#eecs036) 现在也报告有两个索引键的普通组件。
+新的警告指出丢失的写入、可能指向错误行的 ref 或做了两遍的工作：[EECS037](/zh/docs/guide/help/analyzer#eecs037)（job 的 `WriteMask`）、
+[EECS038](/zh/docs/guide/help/analyzer#eecs038)（改过的副本）、[EECS046](/zh/docs/guide/help/analyzer#eecs046)（只读追踪变化组件的
+`Query` 循环：改用 `Read` 遍历）、[EECS047](/zh/docs/guide/help/analyzer#eecs047)（结构变更之后还在用的 ref：重新获取）和
+[EECS052](/zh/docs/guide/help/analyzer#eecs052)（`CreateEntity` 或 `Instantiate` 之后紧跟 `Set`：把组件交给创建调用）。[EECS039](/zh/docs/guide/help/analyzer#eecs039) 是建议。大多数规则有代码修复；把警告当错误的构建，
 在代码改好之前会因这些警告失败。
 
 ### `MeasureSystems` 统计得更多 [#v4-7-measure-systems]
@@ -453,7 +453,7 @@ EasyEcs 引用 `Nino.Serialization` 4.0.0-rc.6。生成格式化器的项目，`
 ### 标了 `[NinoType]` 的非托管组件改由 Nino 写出 [#v4-4-ninotype]
 
 标了 `[NinoType]` 的非托管组件，以前和其他非托管组件一样按原始行存档；现在由它的 Nino 格式化器逐个值写出，所以它在版本之间能怎么改，
-由它的格式决定（[代码改了之后](/zh/docs/guide/saves#versioning)）。结构会变的组件保留这个特性；想要原始行（每列一个块）的，去掉它：
+由它的格式决定（[代码改了之后](/zh/docs/guide/saves/saves#versioning)）。结构会变的组件保留这个特性；想要原始行（每列一个块）的，去掉它：
 
 ```csharp tab="4.3" doccheck=skip
 [NinoType]
@@ -471,12 +471,12 @@ public partial record struct Rank(int Tier, int Points) : IComponent;   // 由�
 
 ## v4.2 → v4.3 [#v4-2-to-v4-3]
 
-分析器加了性能规则（[EECS025 到 EECS034](/zh/docs/guide/analyzer#eecs025)）。为 4.2 写的代码不用改就能编译，除非某个系统调用了
+分析器加了性能规则（[EECS025 到 EECS034](/zh/docs/guide/help/analyzer#eecs025)）。为 4.2 写的代码不用改就能编译，除非某个系统调用了
 `World.Update()`，或者构建把警告当作错误。
 
 ### 新增警告：EECS025 到 EECS032 [#v4-3-warnings]
 
-每条规则指出能跑但有额外开销的代码，修法写在[分析器规则](/zh/docs/guide/analyzer)的对应小节里；改动是机械性的，IDE 里还有代码修复。
+每条规则指出能跑但有额外开销的代码，修法写在[分析器规则](/zh/docs/guide/help/analyzer)的对应小节里；改动是机械性的，IDE 里还有代码修复。
 照着修，或者在确实有意这样写的地方抑制规则，并在旁边写明原因。比如有一个被追踪的 `Armor` 和一个计数用的 `Seen`：
 
 ```csharp
@@ -559,7 +559,7 @@ world.AddSystem<Ticker>();
 world.Update();
 ```
 
-用 `Load` 恢复的 World 已经带着存档里的单例，只需补上存档里没有的那些。见[系统里的单例](/zh/docs/guide/singletons#in-systems)。
+用 `Load` 恢复的 World 已经带着存档里的单例，只需补上存档里没有的那些。见[系统里的单例](/zh/docs/guide/basics/singletons#in-systems)。
 
 ## v4.0 → v4.1 [#v4-0-to-v4-1]
 
@@ -574,10 +574,10 @@ world.Update();
 - **`Entity.Id` 的类型从 `int` 变成 `EntityId`**（下标 + 版本号，8 字节，非托管），`Entity.Version` 字段删掉了：改读
   `entity.Id.Index` 和 `entity.Id.Version`。`world.GetEntity`、`TryGetEntity` 和 `IsAlive` 接受 `EntityId`；句柄可以隐式转换成
   `EntityId`，所以 `world.GetEntity(entity)` 照样能编译。组件里存 `EntityId`，别存 `Entity` 句柄：句柄带着它的 World，会让这一列变成托管列（GC
-  要扫描，不能整块复制，不能序列化），新的警告 [EECS017](/zh/docs/guide/analyzer#eecs017) 会指出这样的字段。
+  要扫描，不能整块复制，不能序列化），新的警告 [EECS017](/zh/docs/guide/help/analyzer#eecs017) 会指出这样的字段。
 - **`EcsSystem.Priority` 删掉了。** 系统按注册顺序运行；要按依赖排序，在类上加 `[UpdateBefore<TSystem>]` /
-  `[UpdateAfter<TSystem>]`。出现环是 [EECS019](/zh/docs/guide/analyzer#eecs019)，和别的分组里的系统排序是
-  [EECS020](/zh/docs/guide/analyzer#eecs020)。
+  `[UpdateAfter<TSystem>]`。出现环是 [EECS019](/zh/docs/guide/help/analyzer#eecs019)，和别的分组里的系统排序是
+  [EECS020](/zh/docs/guide/help/analyzer#eecs020)。
 - **`World.SystemError` 事件删掉了。** 系统抛的异常默认传出 `Update`；设了 `new WorldOptions { SystemErrors = SystemErrorPolicy.Disable }`
   时，系统被关掉，异常留在 `system.Error` 里，应用从 `world.Systems` 读取。重新启用系统就会重试。
 - **系统不再需要 `partial`。** 生成的代码放在系统类型之外，所以 EECS001 删掉了；写着 `partial` 也照样能编译。
@@ -604,18 +604,18 @@ world.Update();
   句柄现在也抛 `InvalidOperationException`。
 - **结构变更只属于 World 的所有者线程。** 4.0 用一把比较并交换（CAS）锁，把任意线程的创建、销毁、`Add` / `Set` / `Remove`
   以及单例和系统的变更串行化。4.1 改成检查一个普通的所有者标志：在另一个变更进行时、在系统的并行阶段里或在并行 `[ForEach]` 里做变更，会抛
-  `InvalidOperationException`；你自己的两个线程同时改同一个 World，不一定能被发现。结构变更放在调用 `Update` 的线程上做（其他线程把变更当作数据，放进一个由系统清空的队列交过来：见[来自其他线程的输入](/zh/docs/guide/threading#input-from-other-threads)），或者每个线程用自己的
-  World。有两条分析器错误会指出这类代码：[EECS013](/zh/docs/guide/analyzer#eecs013)，不接收 `Entity` 或 `World` 的 `[ForEach]`
-  方法里做了结构变更（比如通过组件里存的句柄；改成把 `Entity` 作为参数）；[EECS014](/zh/docs/guide/analyzer#eecs014)，交给
+  `InvalidOperationException`；你自己的两个线程同时改同一个 World，不一定能被发现。结构变更放在调用 `Update` 的线程上做（其他线程把变更当作数据，放进一个由系统清空的队列交过来：见[来自其他线程的输入](/zh/docs/guide/performance/threading#input-from-other-threads)），或者每个线程用自己的
+  World。有两条分析器错误会指出这类代码：[EECS013](/zh/docs/guide/help/analyzer#eecs013)，不接收 `Entity` 或 `World` 的 `[ForEach]`
+  方法里做了结构变更（比如通过组件里存的句柄；改成把 `Entity` 作为参数）；[EECS014](/zh/docs/guide/help/analyzer#eecs014)，交给
   `Task.Run`、`Parallel.*`、`ThreadPool` 或 `Thread` 的 lambda 里做了结构变更，会和同一个 World 的其他变更竞争。
-- **EECS007 和 EECS008 是错误。** 系统里有可变状态（[EECS007](/zh/docs/guide/analyzer#eecs007)）和系统引用系统（[EECS008](/zh/docs/guide/analyzer#eecs008)）在
+- **EECS007 和 EECS008 是错误。** 系统里有可变状态（[EECS007](/zh/docs/guide/help/analyzer#eecs007)）和系统引用系统（[EECS008](/zh/docs/guide/help/analyzer#eecs008)）在
   4.0 是警告；触发它们的代码现在编译不过。把状态移进组件或单例，系统之间通过数据通信。除了上面提到的警告 EECS017、EECS018 和
   EECS020，4.1 的规则都是错误。
 - **遍历语义更严格。** 一次遍历每个实体最多访问一次：遍历途中新建的、或移进匹配原型的实体，这次遍历不会访问（只是把被查询的组件加回来的实体保留原来的行，遍历还没走到它时会访问到）；轮到之前被销毁、或失去被查询组件的实体会被跳过。只为防止
   job 重复访问自己产出的实体而加的 `Without<T>` 过滤条件不再需要（留着也能用）。
 - **ref 失效得更频繁。** `entity.Get<T>()` 或 `Query` 条目拿到的 `ref`，现在可能因为*另一个*实体的结构变更而失效（某一行被表的最后一行填上、表扩容），不只是实体容量扩容。文档里的规则本来就是“ref
   在下一次结构变更之前有效”；依赖 ref 在变更后仍然有效的代码，必须通过 `entity.Get<T>()` 重新读取。`[ForEach]` 方法和 `ForEach` job 的
-  `ref` 参数，在方法体改变了当前实体的原型时仍然可写。见 [ref 与 await](/zh/docs/guide/refs-and-await)。
+  `ref` 参数，在方法体改变了当前实体的原型时仍然可写。见 [ref 与 await](/zh/docs/guide/changes/refs-and-await)。
 - **移除组件时实体保留原来的行。** `Has<T>()`、`Get<T>()` 和所有查询都把这个组件当作不存在；再加回来只是翻转一个存在位。
 - **`Query` 的结果是 ref struct。** `QueryEnumerator<…>` 和 `QueryItem<…>` 持有指向当前表的 ref，所以遍历查询的 `foreach`
   里不能有 `await`，条目也不能存下来。先读出需要的数据，或者留下 `item.Entity`，然后在循环外面 await。
@@ -631,27 +631,27 @@ world.Update();
 {/* search: skip */}
 
 - `[ForEach]` 方法可以接收 `Span<T>` / `ReadOnlySpan<T>` 组件（以及单例），一次拿到一段连续的行，便于 SIMD（签名混用时
-  [EECS009](/zh/docs/guide/analyzer#eecs009) 报告）。临时写法是 `world.ForEachBatch` 配一个 `IForEachBatch<T1..Tn>` job。
+  [EECS009](/zh/docs/guide/help/analyzer#eecs009) 报告）。临时写法是 `world.ForEachBatch` 配一个 `IForEachBatch<T1..Tn>` job。
 - `world.ForEachEntity` 配 `IForEachEntity<T1..Tn>` job，收到的是 `Entity` 句柄而不是 id。
 - `INoStructuralChanges` 标记不做结构变更的 job；生成器会给不可能改变结构的 `[ForEach]` 方法加上它，这些方法遍历时省掉逐个实体的簿记。
 - `QueryFilter.WithAny<T>()` 和 `[WithAny<T>]`：实体至少要有其中一个组件。
 - `world.CreateEntities(span, components…)` 和 `world.DestroyAll<T…>(filter)`：成批生成和清除，只过一次结构闸门。
 - `WorldOptions.MeasureSystems` 把每次系统运行的耗时记进 `system.Stats`（`SystemStats`）。
 - `[ForEach(Parallel = true)]`（以及 `world.ForEachParallel` / `ForEachEntityParallel`）把行按 `World.ParallelChunkRows`
-  分块，在多个线程上运行；[EECS010](/zh/docs/guide/analyzer#eecs010) 报告可能有竞争的方法。
-- `world.Capture()` / `world.Restore(snapshot)`：实体、组件和单例的内存快照（[快照](/zh/docs/guide/snapshots)）。
-- `ITrackChanges`、`[Changed<T>]`、`QueryFilter.Changed<T>(since)` / `Since(since)`、`world.ChangeTick`、`system.LastRunTick`：变更追踪（[变更追踪](/zh/docs/guide/change-tracking)）。job
+  分块，在多个线程上运行；[EECS010](/zh/docs/guide/help/analyzer#eecs010) 报告可能有竞争的方法。
+- `world.Capture()` / `world.Restore(snapshot)`：实体、组件和单例的内存快照（[快照](/zh/docs/guide/saves/snapshots)）。
+- `ITrackChanges`、`[Changed<T>]`、`QueryFilter.Changed<T>(since)` / `Since(since)`、`world.ChangeTick`、`system.LastRunTick`：变更追踪（[变更追踪](/zh/docs/guide/changes/change-tracking)）。job
   接口多了一个可选的静态成员 `Writes`（有默认值）。
 - `[Removed<T>]` 和 `QueryFilter.Removed<T>(since)`：某个 tick 以来失去了被追踪组件的实体（用来同步消失的东西），过滤条件没有任何行能通过时报
-  [EECS016](/zh/docs/guide/analyzer#eecs016)。
+  [EECS016](/zh/docs/guide/help/analyzer#eecs016)。
 - `Prefab` 和 `world.Instantiate(prefab)` / `Instantiate(prefab, span)`：按一份不属于任何 World 的组件配方创建实体，配方用 `Set` /
   `Remove` 或生成的 `prefab.SetX(…)` / `RemoveX()`（可链式调用）搭建，`DynamicBuffer<T>` 的元素用 `SetBuffer(…)` / `SetLoot(…)`；`entity.Clone()`
   复制一个存活的实体。
-- `IIndexed<TKey>`、`world.Index<T, TKey>()`、`ValueIndex<T, TKey>`：按组件的值查找实体；关系就是以 `Entity` 为键的索引（[索引与关系](/zh/docs/guide/indexes-and-relations)）。
+- `IIndexed<TKey>`、`world.Index<T, TKey>()`、`ValueIndex<T, TKey>`：按组件的值查找实体；关系就是以 `Entity` 为键的索引（[索引与关系](/zh/docs/guide/data/indexes-and-relations)）。
 - `entity.Read<T>()` 返回 `ref readonly T`，读被追踪的组件也不算写入；`entity.TryGetRef<T>(out bool found)` 返回 `ref T`（缺少时是空
   ref）：可选访问，不用复制。`entity.Has<T1..Tn>()` 一次查找判断多个组件。
-- `DynamicBuffer<T>`：每个实体一个列表，作为组件存放，只能通过 `ref` 写（每次写都是一次被追踪的变更），快照会复制它（[动态缓冲](/zh/docs/guide/dynamic-buffers)）。
-- [EECS011](/zh/docs/guide/analyzer#eecs011) 拒绝修改 `in` 参数所持有的集合或类的 `[ForEach]` 方法（这种修改既不会按写入调度，也不会被追踪）；[EECS012](/zh/docs/guide/analyzer#eecs012)
+- `DynamicBuffer<T>`：每个实体一个列表，作为组件存放，只能通过 `ref` 写（每次写都是一次被追踪的变更），快照会复制它（[动态缓冲](/zh/docs/guide/data/dynamic-buffers)）。
+- [EECS011](/zh/docs/guide/help/analyzer#eecs011) 拒绝修改 `in` 参数所持有的集合或类的 `[ForEach]` 方法（这种修改既不会按写入调度，也不会被追踪）；[EECS012](/zh/docs/guide/help/analyzer#eecs012)
   拒绝按值复制的 `DynamicBuffer<T>`。
 - 库标记了 `IsAotCompatible`：每次构建都跑裁剪和 Native AOT 分析器，可以用 Native AOT 发布和运行。
 - `entity.Disable<T>()` / `Enable<T>()`（生成的 `DisableX()` / `EnableX()` / `IsXDisabled`）：关掉一个组件并保留它的值；查询看到的是
@@ -669,7 +669,7 @@ world.Update();
 - 系统之外的静态 `[ForEach]` 方法（生成的入口接收 `World` 和方法的其他参数：给工具和测试用的一次遍历）、泛型系统、系统分组上的过滤条件（分组
   struct 上的 `[With<T>]` 作用于它的所有系统）、`UpdatePhase`（把 `UpdateInterval` 相同的系统错开到不同的更新）、单例的
   `world.GetOrAddX()`、具名查询条目（用 `item.Position` 代替 `item.Component1`）、分析器诊断的代码修复，以及针对本地函数上
-  `[ForEach]` 的 [EECS024](/zh/docs/guide/analyzer#eecs024)。
+  `[ForEach]` 的 [EECS024](/zh/docs/guide/help/analyzer#eecs024)。
 
 ## v3.x → v4.0 [#v3-to-v4-0]
 
@@ -683,7 +683,7 @@ job）由生成器写。
 ### 实体和组件 [#v4-0-entities-and-components]
 
 v3 有三种句柄类型（`Entity` 值、`EntityRef`、`ComponentRef<T>`），v4 只有一种：`Entity`，一个带版本校验的 16 字节句柄。访问组件直接返回
-`ref T`。从 4.1 起，生成器还会给每个组件写具名成员（`e.Position`、`e.SetPosition(…)`、`e.HasPosition`），现在的代码优先用它们，而不是下表里的泛型调用（[生成的成员](/zh/docs/guide/entities-and-components#generated-members)）。
+`ref T`。从 4.1 起，生成器还会给每个组件写具名成员（`e.Position`、`e.SetPosition(…)`、`e.HasPosition`），现在的代码优先用它们，而不是下表里的泛型调用（[生成的成员](/zh/docs/guide/basics/entities-and-components#generated-members)）。
 
 | v3 | v4 |
 | --- | --- |
@@ -751,14 +751,14 @@ public ref struct S
 1. **实体 id 会被回收。** `Entity.Id` 只在存活的实体之间唯一；要留住的是 `Entity` 句柄（id + 版本号）。相等判断包含版本号。
 2. **失效的句柄会被拒绝**：访问和结构变更都会抛异常；对失效句柄调用 `Destroy` 会被忽略。
 3. **移除组件或销毁实体会释放组件持有的托管引用。**
-4. **组件和单例必须是 struct**：class 会被分析器报 [EECS006](/zh/docs/guide/analyzer#eecs006)。
+4. **组件和单例必须是 struct**：class 会被分析器报 [EECS006](/zh/docs/guide/help/analyzer#eecs006)。
 5. 不要在遍历时调用 `CompactArchetypes()`（它会改写行）。4.1 已删掉它。
-6. **系统应该无状态、彼此独立**：分析器会对系统上的可变字段（[EECS007](/zh/docs/guide/analyzer#eecs007)：把状态移进组件或单例）和引用其他系统的系统（[EECS008](/zh/docs/guide/analyzer#eecs008)：通过数据通信）发出警告。见
+6. **系统应该无状态、彼此独立**：分析器会对系统上的可变字段（[EECS007](/zh/docs/guide/help/analyzer#eecs007)：把状态移进组件或单例）和引用其他系统的系统（[EECS008](/zh/docs/guide/help/analyzer#eecs008)：通过数据通信）发出警告。见
    [ECS 设计原则](/zh/docs/ecs-principles)。
 7. **`IEvent`、`IEventHandler<T>` 和 `Publish` 删掉了。** 把状态变化写成数据（一个标签或一个字段），让后面的系统去查询。
 8. **`ParallelSystems` 天生安全。** v3 把同一优先级的系统一起跑，数据竞争留给你自己处理。v4 只在生成的读写不冲突时（`ref` 是写，`in`
    是读）才把同一优先级的系统一起跑；带 `Entity` / `World` 参数、实例 `[ForEach]` 方法、重写了 `OnUpdate` 或没有 `[ForEach]`
-   方法的系统独占运行。结果和顺序更新一样。见[多线程与并行](/zh/docs/guide/threading#parallel-systems)。
+   方法的系统独占运行。结果和顺序更新一样。见[多线程与并行](/zh/docs/guide/performance/threading#parallel-systems)。
 
 ### 源生成器和分析器 [#v4-0-generator]
 
@@ -1040,7 +1040,7 @@ EasyEcs 现在的实测数据见[性能指南](/zh/docs/performance)。
   <Card title="更新日志" href="/zh/docs/changelog">
     每个版本新增、改进和修复了什么。
   </Card>
-  <Card title="分析器规则" href="/zh/docs/guide/analyzer">
+  <Card title="分析器规则" href="/zh/docs/guide/help/analyzer">
     每条 EECS 规则和它的修法，包括升级带来的新规则。
   </Card>
   <Card title="API 与复杂度" href="/zh/docs/api">

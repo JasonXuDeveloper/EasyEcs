@@ -6,7 +6,7 @@ icon: Globe
 ---
 
 有些状态属于整个 World，而不属于某个实体：tick 时钟、对局配置、比分、空间网格。单例组件是实现了 `ISingletonComponent`
-的结构体，每个 World 恰好一份。系统自己不存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)），World 级的状态就放在这里；
+的结构体，每个 World 恰好一份。系统自己不存状态（[EECS007](/zh/docs/guide/help/analyzer#eecs007)），World 级的状态就放在这里；
 它存在 World 里，两个线程上的两个 World 永远不会共享它。
 
 ## 什么时候用 [#when-to-use-it]
@@ -97,9 +97,9 @@ if (world.TryGetSingleton<Clock>(out var copy)) Console.WriteLine(copy.Tick);
 world.RemoveScore();
 ```
 
-生成成员遵循[生成成员](/zh/docs/guide/entities-and-components#generated-members)的规则：`SetX` 和 `GetOrAddX(…)` 每个公开构造函数一个重载，没有字段的单例组件不生成 `GetOrAddX`。
+生成成员遵循[生成成员](/zh/docs/guide/basics/entities-and-components#generated-members)的规则：`SetX` 和 `GetOrAddX(…)` 每个公开构造函数一个重载，没有字段的单例组件不生成 `GetOrAddX`。
 `world.GetOrAddClock(0, 0.05f)` 是不动已有值的初始化（读档后的时钟保留它的 tick）；`world.SetClock(0, 0.05f)` 会覆盖它。
-不用生成成员、写成 `GetOrAddSingleton(new Clock(…))` 报 [EECS033](/zh/docs/guide/analyzer#eecs033)，有代码修复。
+不用生成成员、写成 `GetOrAddSingleton(new Clock(…))` 报 [EECS033](/zh/docs/guide/help/analyzer#eecs033)，有代码修复。
 
 ### 稳定句柄 [#stable-handles]
 
@@ -114,7 +114,7 @@ clock.Value.Tick++;                          // 之后：直接是 ref，不用�
 - 重置就是一次写入：`world.SetClock(…)` 或 `world.Clock = default` 保留原来的存储，句柄看到的就是新值。对已存在的单例组件
   调用 `AddSingleton<T>()` 会抛异常，而不是重置它。
 - `RemoveSingleton<T>()` 会让句柄脱钩：通过旧句柄的写入再也到不了 World，即使之后又把它加回来也一样。这时要重新取句柄。
-- [快照](/zh/docs/guide/snapshots)把单例组件恢复到原来的存储里，`Restore` 之后句柄照样能用。
+- [快照](/zh/docs/guide/saves/snapshots)把单例组件恢复到原来的存储里，`Restore` 之后句柄照样能用。
 - 生成的 `[ForEach]` job 每次遍历只解析一次单例参数；并行 job 会被复制到其他线程，它们持有的是 `SingletonRef<T>`。
 
 ### 单例组件与线程 [#threads]
@@ -122,10 +122,10 @@ clock.Value.Tick++;                          // 之后：直接是 ref，不用�
 - 单例组件属于自己的 World，每个线程一个 World 时彼此什么都不共享。
 - 开启 `WorldOptions.ParallelSystems` 时，用 `ref` 接收单例组件的系统算作写它：不会和读写同一个单例组件的其他系统排进同一个阶段。
   只读时用 `in`。
-- `[ForEach(Parallel = true)]` 方法只能用 `in` 接收单例组件：用 `ref` 的话每个块都会抢着写（[EECS010](/zh/docs/guide/analyzer#eecs010)）。
+- `[ForEach(Parallel = true)]` 方法只能用 `in` 接收单例组件：用 `ref` 的话每个块都会抢着写（[EECS010](/zh/docs/guide/help/analyzer#eecs010)）。
   对所有行求总数改用 `ref Reduce<T>` 参数：每个块往自己的部分结果里加，单例字段上的 `[Sum]`、`[Min]`、`[Max]`（以及 `[Product]`、
-  `[All]`、`[Any]`）声明部分结果怎么合并（[归约](/zh/docs/guide/threading#reductions)）。
-- 单例组件里有集合（格子网格、队列），又通过 `in` 参数修改它，会被当成读来调度：[EECS011](/zh/docs/guide/analyzer#eecs011) 要求改成 `ref`。
+  `[All]`、`[Any]`）声明部分结果怎么合并（[归约](/zh/docs/guide/performance/threading#reductions)）。
+- 单例组件里有集合（格子网格、队列），又通过 `in` 参数修改它，会被当成读来调度：[EECS011](/zh/docs/guide/help/analyzer#eecs011) 要求改成 `ref`。
 
 ## 完整例子 [#full-example]
 
@@ -252,11 +252,11 @@ after tick 3: 3 dead
 
 | 别这样 | 这样做 | 原因 |
 | --- | --- | --- |
-| 循环里每个实体都调用 `GetSingleton<T>()`（或 `World.X`） | 把它作为 `[ForEach]` 方法的参数 | 每次遍历只解析一次（`[ForEach]` 方法里由 [EECS027](/zh/docs/guide/analyzer#eecs027) 报告） |
+| 循环里每个实体都调用 `GetSingleton<T>()`（或 `World.X`） | 把它作为 `[ForEach]` 方法的参数 | 每次遍历只解析一次（`[ForEach]` 方法里由 [EECS027](/zh/docs/guide/help/analyzer#eecs027) 报告） |
 | 宿主代码每次调用都查找 | 初始化时保存一个 `SingletonRef<T>` | 不用查找 |
-| 系统只读单例组件却写成 `ref` | 改成 `in` | 系统可以共享并行阶段（[EECS025](/zh/docs/guide/analyzer#eecs025)） |
+| 系统只读单例组件却写成 `ref` | 改成 `in` | 系统可以共享并行阶段（[EECS025](/zh/docs/guide/help/analyzer#eecs025)） |
 | 静态字段 | 单例组件 | 按 World 隔离，跟着 World 一起存档和快照 |
-| 存运行时状态（连接、缓存）的单例组件，只为编译通过才配 Nino 格式化器 | 类型上标 [`[NotSaved]`](/zh/docs/guide/saves#not-saved) | 存档跳过它，读档保留 World 自己的值 |
+| 存运行时状态（连接、缓存）的单例组件，只为编译通过才配 Nino 格式化器 | 类型上标 [`[NotSaved]`](/zh/docs/guide/saves/saves#not-saved) | 存档跳过它，读档保留 World 自己的值 |
 
 通过 `GetSingleton<T>()` 读写单例组件 1,000 次，旁边是通过实体句柄写组件 1,000 次（`MicroBenchmarks`）：
 
@@ -278,29 +278,29 @@ after tick 3: 3 dead
 
 | 错误 | 后果 | 谁能发现 |
 | --- | --- | --- |
-| 把状态放在系统字段里 | 其他系统看不到，移除系统就丢了，静态字段还会被所有 World 共享 | [EECS007](/zh/docs/guide/analyzer#eecs007) |
-| 用 class 实现 `ISingletonComponent` | 编译不过 | [EECS006](/zh/docs/guide/analyzer#eecs006) |
+| 把状态放在系统字段里 | 其他系统看不到，移除系统就丢了，静态字段还会被所有 World 共享 | [EECS007](/zh/docs/guide/help/analyzer#eecs007) |
+| 用 class 实现 `ISingletonComponent` | 编译不过 | [EECS006](/zh/docs/guide/help/analyzer#eecs006) |
 | 用 `AddSingleton<T>()` 重置 World 里已有的单例 | 抛 `InvalidOperationException`，值不变 | 用 `world.SetX(…)` 替换 |
 | 单例还没添加就读取（`world.X`、`GetSingleton<T>()`、`[ForEach]` 参数） | 抛 `InvalidOperationException`，信息里写明该用哪个调用添加 | 初始化时添加；默认值合适的地方用 `GetOrAddX()` |
-| 并行方法里用 `ref` 接收单例组件 | 块之间发生竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
-| 在批处理方法、并行方法或并行阶段里调用 `AddSingleton`、`RemoveSingleton` | 抛 `InvalidOperationException`：两者都要过结构闸门，而这些地方的结构是冻结的 | [EECS010](/zh/docs/guide/analyzer#eecs010)、[EECS013](/zh/docs/guide/analyzer#eecs013)，运行时也会抛 |
-| 通过 `in` 修改单例组件里的集合 | 被当成读来调度 | [EECS011](/zh/docs/guide/analyzer#eecs011) |
+| 并行方法里用 `ref` 接收单例组件 | 块之间发生竞争 | [EECS010](/zh/docs/guide/help/analyzer#eecs010) |
+| 在批处理方法、并行方法或并行阶段里调用 `AddSingleton`、`RemoveSingleton` | 抛 `InvalidOperationException`：两者都要过结构闸门，而这些地方的结构是冻结的 | [EECS010](/zh/docs/guide/help/analyzer#eecs010)、[EECS013](/zh/docs/guide/help/analyzer#eecs013)，运行时也会抛 |
+| 通过 `in` 修改单例组件里的集合 | 被当成读来调度 | [EECS011](/zh/docs/guide/help/analyzer#eecs011) |
 | `RemoveSingleton` 之后还通过旧的 `SingletonRef<T>` 写入 | 写入不会到达任何地方 | 重新添加后取新句柄 |
 | 在单例组件里放一个玩家列表 | 和实体、查询能做的事重复 | 把玩家做成带标签的实体 |
 
 ## 相关页面 [#related]
 
 <Cards>
-  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems">
     单例组件参数，每次遍历解析一次。
   </Card>
   <Card title="ECS 设计原则" href="/zh/docs/ecs-principles">
     为什么系统无状态，状态都是数据。
   </Card>
-  <Card title="多线程与并行" href="/zh/docs/guide/threading">
+  <Card title="多线程与并行" href="/zh/docs/guide/performance/threading">
     每线程一个 World，以及并行阶段。
   </Card>
-  <Card title="快照" href="/zh/docs/guide/snapshots">
+  <Card title="快照" href="/zh/docs/guide/saves/snapshots">
     单例组件随 World 一起捕获和恢复。
   </Card>
 </Cards>

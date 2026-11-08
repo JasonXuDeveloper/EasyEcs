@@ -23,8 +23,8 @@ unload and a new version can load the saved data.
 </Callout>
 
 <Callout type="warn" title="Skip it for">
-  Moving a whole world: [`Save`](/en/docs/guide/saves) / [`Load`](/en/docs/guide/saves) keeps every id. Entities that change "zone" inside one
-  world: a [group](/en/docs/guide/groups) or a component value is enough. Reloading types that are not in a collectible
+  Moving a whole world: [`Save`](/en/docs/guide/saves/saves) / [`Load`](/en/docs/guide/saves/saves) keeps every id. Entities that change "zone" inside one
+  world: a [group](/en/docs/guide/data/groups) or a component value is enough. Reloading types that are not in a collectible
   context: the default context never unloads. A record of every component of an entity that does not exist yet:
   `SaveEntities` without a set and `LoadEntities` create it.
 </Callout>
@@ -72,7 +72,7 @@ int created = otherServer.LoadEntities(bytes.WrittenSpan, arrived);   // new ids
 what hangs on it: the order `MoveEntities` wants, since it destroys the originals last first and a child then goes
 before its parent. `Children` lists one level only. A `ChildOf` cycle makes the walk throw
 `InvalidOperationException`. Find what points at the hero (pets, followers) through an index on the field, as above,
-or through a [relation](/en/docs/guide/indexes-and-relations#relations): a query that tests every `Pet` grows with the world, not with the
+or through a [relation](/en/docs/guide/data/indexes-and-relations#relations): a query that tests every `Pet` grows with the world, not with the
 party.
 
 ### Entities to another world of the thread [#move-entities]
@@ -90,7 +90,7 @@ CollectionsMarshal.SetCount(moved, party.Count);
 int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(party), CollectionsMarshal.AsSpan(moved));   // hero, sword and pet leave this world
 ```
 
-- The originals are destroyed with their children, so move a [hierarchy](/en/docs/guide/hierarchy#moving) together.
+- The originals are destroyed with their children, so move a [hierarchy](/en/docs/guide/data/hierarchy#moving) together.
 - Cleanup components do not move: they stay on the originals, now retired, for the systems of this world to release,
   and the new entities do not have them, so a resource is released once.
 - An entity retired already, kept for its cleanup components (tagged `Retired`), is skipped like a stale id: it
@@ -154,11 +154,11 @@ world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
   i-th saved entity still matches the i-th entity given.
 - `EntityId` fields are rewritten as below, onto the entities given; a `ChildOf` whose parent is not in the record is
   not set.
-- `LoadEntitiesInto` is a structural change: owner thread only ([EECS014](/en/docs/guide/analyzer#eecs014)), not while a pass iterates
-  (`InvalidOperationException`), never in a parallel method ([EECS010](/en/docs/guide/analyzer#eecs010)), and in a
-  `[ForEach]` method only when it takes `Entity` or `World` ([EECS013](/en/docs/guide/analyzer#eecs013)).
+- `LoadEntitiesInto` is a structural change: owner thread only ([EECS014](/en/docs/guide/help/analyzer#eecs014)), not while a pass iterates
+  (`InvalidOperationException`), never in a parallel method ([EECS010](/en/docs/guide/help/analyzer#eecs010)), and in a
+  `[ForEach]` method only when it takes `Entity` or `World` ([EECS013](/en/docs/guide/help/analyzer#eecs013)).
 - A set names components for a save of entities. It can also name singletons (`WithSingleton<T>()`, or `With(typeof(...))`,
-  which takes either kind) for a whole-world [restart](/en/docs/guide/saves#restart): `SaveWithout(output, in exclude)` leaves
+  which takes either kind) for a whole-world [restart](/en/docs/guide/saves/saves#restart): `SaveWithout(output, in exclude)` leaves
   its types out, `LoadKeeping(input, in keep)` keeps its singletons. A save of entities writes no singletons, so
   `SaveEntitiesWith` and `SaveEntitiesWithout` with a set that names one throw `ArgumentException`.
 - A framework that learns its types at run time builds the set by `Type`:
@@ -220,7 +220,7 @@ and their tracked components count as written.
 
 ### Unique keys on arrival [#unique-keys]
 
-A [unique key](/en/docs/guide/indexes-and-relations#unique-keys) (an account id) names one entity per world, and
+A [unique key](/en/docs/guide/data/indexes-and-relations#unique-keys) (an account id) names one entity per world, and
 entities that arrive must not bring a key the world has given already. `LoadEntities`, `LoadEntitiesInto` and
 `MoveEntities` check every unique key of the arrivals against the target world before the first row arrives:
 
@@ -233,7 +233,7 @@ entities that arrive must not bring a key the world has given already. `LoadEnti
 A player who comes back to a world that still holds an old copy of them (a stale session, a ghost left by a crash)
 is refused until that copy is destroyed or loses its key: destroy it first, then load or move the player in.
 
-The [destroy log](/en/docs/guide/change-tracking#destroy-log) records the originals `MoveEntities` destroys in the
+The [destroy log](/en/docs/guide/changes/change-tracking#destroy-log) records the originals `MoveEntities` destroys in the
 source world, so readers there see the entities leave.
 
 ### Unloading a plugin's types [#remove-types]
@@ -278,19 +278,19 @@ public static class Plugins
 The order matters: while both versions are loaded their types share ids, and a load would refuse them as ambiguous.
 Keep the components the host owns (positions, ids) in an assembly that is never reloaded, and hold no references of
 your own to the old version's types (systems, plugin objects), or the context cannot be collected. A
-[snapshot](/en/docs/guide/snapshots) taken before `RemoveTypes` cannot be restored after it.
+[snapshot](/en/docs/guide/saves/snapshots) taken before `RemoveTypes` cannot be restored after it.
 
 The [HotReload sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload) runs the whole cycle
 and checks that the old context was collected and that the plugin's data carried over.
 
 A reload leaves memory behind: the save and load buffers grown to the whole world, and tables that the entities left.
 Once the new version runs, `world.TrimExcess()` gives it back, at a quiet moment rather than in a tick
-([give memory back after a peak](/en/docs/guide/diagnostics#trim)).
+([give memory back after a peak](/en/docs/guide/production/diagnostics#trim)).
 
 A restart of the whole process goes through bytes the same way, with two differences: the old process leaves out
 what it must not bring back (runtime state, its configuration), and the new process keeps the configuration it set
 before the load. `SaveWithout(output, in exclude)` and `LoadKeeping(input, in keep, markWritten: false)` do both: see
-[Restart](/en/docs/guide/saves#restart).
+[Restart](/en/docs/guide/saves/saves#restart).
 
 ## Full example [#full-example]
 
@@ -488,14 +488,14 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 | Moving a parent without its children | The children are destroyed with the original | Collect the party with `Descendants` |
 | Collecting the party with `Children` only | Grandchildren are left out, and destroyed with their parent | `Descendants` walks every level |
 | `EntityId`s in a `List<T>` inside a component | Not rewritten: they name entities of the old world | Use fields, a buffer or a relation |
-| An `Entity` handle in a component | Not saved, not rewritten | [EECS017](/en/docs/guide/analyzer#eecs017) |
+| An `Entity` handle in a component | Not saved, not rewritten | [EECS017](/en/docs/guide/help/analyzer#eecs017) |
 | Loading the new plugin before unloading the old one | Ambiguous type ids: `InvalidDataException` | The reload order above |
 | Keeping references to the old plugin's systems | The context is never collected | Drop them after `RemoveTypes` |
-| `RemoveTypes` during an update or a pass | `InvalidOperationException` | [EECS041](/en/docs/guide/analyzer#eecs041) for a pass; at run time during an update |
+| `RemoveTypes` during an update or a pass | `InvalidOperationException` | [EECS041](/en/docs/guide/help/analyzer#eecs041) for a pass; at run time during an update |
 | Restoring a snapshot taken before `RemoveTypes` | `InvalidOperationException` | At run time |
-| Migrating from another thread | Both worlds belong to their owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
+| Migrating from another thread | Both worlds belong to their owner thread | [EECS014](/en/docs/guide/help/analyzer#eecs014) |
 | Moving or loading a player whose unique key the target holds | `InvalidOperationException`; nothing arrives, the originals stay | Destroy the stale holder first ([unique keys](#unique-keys)) |
-| A singleton in the set of `SaveEntitiesWith` or `SaveEntitiesWithout` | `ArgumentException`: a save of entities writes no singletons | Singletons go in a whole-world [restart](/en/docs/guide/saves#restart) save |
+| A singleton in the set of `SaveEntitiesWith` or `SaveEntitiesWithout` | `ArgumentException`: a save of entities writes no singletons | Singletons go in a whole-world [restart](/en/docs/guide/saves/saves#restart) save |
 | A component left out by `SaveEntitiesWithout` that nothing computes again | The loaded entity lacks it for good | A system with `[Without<T>]` that rebuilds it, or keep it in the save |
 | A component that persists left out of the record's set | Not saved: the loaded entity keeps its own value, or has none | Build the set from the persisting components, in one place |
 | A record loaded with `LoadEntities` | New entities beside the live ones | `LoadEntitiesInto` with the live entities |
@@ -506,10 +506,10 @@ singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`)
 ## Related [#related]
 
 <Cards>
-  <Card title="Saves" href="/en/docs/guide/saves">
+  <Card title="Saves" href="/en/docs/guide/saves/saves">
     The whole world as bytes, versioning and Nino.
   </Card>
-  <Card title="Hierarchy" href="/en/docs/guide/hierarchy">
+  <Card title="Hierarchy" href="/en/docs/guide/data/hierarchy">
     Collect a party with `Descendants`.
   </Card>
   <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">

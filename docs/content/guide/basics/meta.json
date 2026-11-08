@@ -1,0 +1,11 @@
+{
+  "title": "Basics",
+  "pages": [
+    "project-structure",
+    "entities-and-components",
+    "prefabs",
+    "queries",
+    "systems",
+    "singletons"
+  ]
+}

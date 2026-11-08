@@ -18,7 +18,7 @@ into a snapshot you keep reuses its arrays, so capturing every tick allocates no
 </Callout>
 
 <Callout type="warn" title="Skip it for">
-  Persistence: a snapshot lives in memory and shares managed references with the world. Use [saves](/en/docs/guide/saves)
+  Persistence: a snapshot lives in memory and shares managed references with the world. Use [saves](/en/docs/guide/saves/saves)
   for disk and other processes. Capturing millions of entities every tick: each capture copies every row.
 </Callout>
 
@@ -78,30 +78,30 @@ world.Restore(history[(100 - 3) % Rollback.Ticks]);                             
 
 - **Entities and components, copied by value.** A managed reference inside a component (a `string`, an array, a
   `List<T>`) is shared with the world, not cloned: a collection in a component comes back as it is now, not as it
-  was. A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) is the exception: its elements are copied on capture and
+  was. A [`DynamicBuffer<T>`](/en/docs/guide/data/dynamic-buffers) is the exception: its elements are copied on capture and
   on restore. Disabled components keep their kept values.
 - **Singletons, copied by value.** After `Restore` every singleton has the snapshot's value in its existing storage,
   so a `SingletonRef<T>` taken before keeps working; singletons added after the capture are removed.
 - **Handles.** Handles to entities alive in the snapshot are valid again. Every other handle is stale, including
   handles to entities created after the capture, even when a later entity reuses their id.
 - **Not systems, options or the `GroupBy` configuration.** Systems keep running as registered, with their own
-  counters: `RunCount` goes on from where it is, so a [sliced](/en/docs/guide/systems#slices) method visits the slice
+  counters: `RunCount` goes on from where it is, so a [sliced](/en/docs/guide/basics/systems#slices) method visits the slice
   after the last one it ran, not the one it ran at the capture. The world keeps its `GroupBy` calls; tables created
   after the capture stay, empty. What a snapshot does hold is each row's
-  [group](/en/docs/guide/groups): every entity comes back in the group table it was in at the capture.
+  [group](/en/docs/guide/data/groups): every entity comes back in the group table it was in at the capture.
 
 ### What a restore tells the rest of the world [#after-restore]
 
 - **Change tracking:** every restored row of a tracked component counts as written, and every restored row lacking one
-  counts as removed, so [replication](/en/docs/guide/change-tracking#removal-detection) re-sends the restored state.
+  counts as removed, so [replication](/en/docs/guide/changes/change-tracking#removal-detection) re-sends the restored state.
 - **Indexes** re-index from scratch on their next lookup.
 - **Relations** re-index too.
-- **The [destroy log](/en/docs/guide/change-tracking#destroy-log)**, when it is on, records the entities the restore
+- **The [destroy log](/en/docs/guide/changes/change-tracking#destroy-log)**, when it is on, records the entities the restore
   takes away (alive before it, not in the snapshot). The log itself is not part of a snapshot.
 
 Both calls take the structural gate and throw while a query iterates: call them between updates, or from a system's
 `OnUpdate` outside its `[ForEach]` methods. A snapshot belongs to the world it was taken from (`ArgumentException`
-otherwise), and one taken before [`RemoveTypes`](/en/docs/guide/migration-and-unload#remove-types) cannot be restored
+otherwise), and one taken before [`RemoveTypes`](/en/docs/guide/saves/migration-and-unload#remove-types) cannot be restored
 after it (`InvalidOperationException`). It can be captured into again: `world.Capture(snapshot)` replaces every copy
 that belonged to a table `RemoveTypes` dropped, so a ring of snapshots kept across a reload goes on working once each
 of them is captured anew.
@@ -311,24 +311,24 @@ The capture's allocation is the new snapshot itself; `Capture(into)` reuses one.
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
 | Expecting a `List<T>` in a component to roll back | It is shared: it comes back as it is now | Use `DynamicBuffer<T>` |
-| Capturing or restoring while a query iterates | `InvalidOperationException` | [EECS041](/en/docs/guide/analyzer#eecs041) |
+| Capturing or restoring while a query iterates | `InvalidOperationException` | [EECS041](/en/docs/guide/help/analyzer#eecs041) |
 | Restoring a snapshot into another world | `ArgumentException` | At run time |
-| Restoring a snapshot taken before [`RemoveTypes`](/en/docs/guide/migration-and-unload#remove-types) | `InvalidOperationException`: its tables are gone | At run time: capture into it again after `RemoveTypes` |
+| Restoring a snapshot taken before [`RemoveTypes`](/en/docs/guide/saves/migration-and-unload#remove-types) | `InvalidOperationException`: its tables are gone | At run time: capture into it again after `RemoveTypes` |
 | A snapshot every tick to rewind hit checks | A copy of every row each tick, and a restore rewinds everything | A [history ring](#lag-compensation) of the positions only |
 | Keeping handles of entities created after the capture | They are stale after the restore | `IsAlive` |
-| Writing snapshots to disk | They are object graphs, not bytes | Use [saves](/en/docs/guide/saves) |
-| Capturing or restoring from another thread | Structural changes belong to the owner thread | [EECS014](/en/docs/guide/analyzer#eecs014) |
+| Writing snapshots to disk | They are object graphs, not bytes | Use [saves](/en/docs/guide/saves/saves) |
+| Capturing or restoring from another thread | Structural changes belong to the owner thread | [EECS014](/en/docs/guide/help/analyzer#eecs014) |
 
 ## Related [#related]
 
 <Cards>
-  <Card title="Saves" href="/en/docs/guide/saves">
+  <Card title="Saves" href="/en/docs/guide/saves/saves">
     The world as bytes, for disk and other processes.
   </Card>
-  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+  <Card title="Change tracking" href="/en/docs/guide/changes/change-tracking">
     A restore counts every row as written or removed.
   </Card>
-  <Card title="Dynamic buffers" href="/en/docs/guide/dynamic-buffers">
+  <Card title="Dynamic buffers" href="/en/docs/guide/data/dynamic-buffers">
     Lists whose elements a snapshot copies.
   </Card>
 </Cards>

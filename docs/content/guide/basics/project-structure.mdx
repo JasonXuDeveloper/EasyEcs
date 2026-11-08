@@ -15,7 +15,7 @@ loop.
 <Callout type="idea" title="Use it for">
   Any server or tool that will grow past the [getting started](/en/docs/getting-started) program: a game server, a
   simulation, a bot farm. The layout also fits a world hosted in ASP.NET Core or a Worker Service; only the host
-  changes ([hosting](/en/docs/guide/hosting)).
+  changes ([hosting](/en/docs/guide/production/hosting)).
 </Callout>
 
 <Callout type="warn" title="Skip it for">
@@ -98,9 +98,9 @@ order you choose and can be tested one by one. Add a system with the item templa
 dotnet new easyecs-system -n RegenSystem -o Systems
 ```
 
-Systems keep no state of their own ([EECS007](/en/docs/guide/analyzer#eecs007)) and never call each other
-([EECS008](/en/docs/guide/analyzer#eecs008)): what one system leaves for another is a component or a singleton.
-See [Systems](/en/docs/guide/systems).
+Systems keep no state of their own ([EECS007](/en/docs/guide/help/analyzer#eecs007)) and never call each other
+([EECS008](/en/docs/guide/help/analyzer#eecs008)): what one system leaves for another is a component or a singleton.
+See [Systems](/en/docs/guide/basics/systems).
 
 </Step>
 <Step>
@@ -120,7 +120,7 @@ Singleton Spawner was not added to this world: set it before the systems that re
 
 Where the default value is right, such as a counter that starts at zero, `GetOrAddX()` says so in the code that
 reads it. Singletons that come from a save are not set again after `Load`
-([load at start, save at stop](/en/docs/guide/hosting#persistence)).
+([load at start, save at stop](/en/docs/guide/production/hosting#persistence)).
 
 </Step>
 <Step>
@@ -129,7 +129,7 @@ reads it. Singletons that come from a save are not set again after `Load`
 
 Systems run in the order they are added. Put the `AddSystem` calls in one method that `Program.cs` and the tests
 both call, so a test of the whole tick runs the tick the server runs
-([share the setup](/en/docs/guide/testing#share-the-setup)):
+([share the setup](/en/docs/guide/production/testing#share-the-setup)):
 
 ```csharp title="Game.cs"
 public static class Game
@@ -172,7 +172,7 @@ public ref struct ExpireSystem
 
 Not everything runs every tick. A system group is a cadence the host calls: systems marked `[UpdateInGroup<G>]` run
 on `world.Update<G>()`, the others on `world.Update()`. Use one group for input read whenever it arrives, one for
-replication every few ticks, one for autosaves. Inside a group, [`[UpdateInterval(N, Phase = P)]`](/en/docs/guide/systems#update-interval)
+replication every few ticks, one for autosaves. Inside a group, [`[UpdateInterval(N, Phase = P)]`](/en/docs/guide/basics/systems#update-interval)
 runs a slow system every N-th update, and its phase spreads systems with the same interval:
 
 ```csharp
@@ -203,7 +203,7 @@ flowchart LR
 
 The network, timers and the database run on other threads; the world belongs to the one thread that updates it.
 They meet in a queue you own: other threads post messages, and a system on the world's thread takes them and turns
-each into data. The queue is a [`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton the host sets: the system
+each into data. The queue is a [`[NotSaved]`](/en/docs/guide/saves/saves#not-saved) singleton the host sets: the system
 reads it from the world like any other data, no save writes it (a queue has no formatter), and a load keeps it.
 
 ```csharp
@@ -233,8 +233,8 @@ Set the queue with `world.SetInbox(inbox)`, add the system with `world.AddSystem
 the same queue to the network code.
 
 The queue's bound and what happens when it is full are yours to choose. The details are in
-[input from other threads](/en/docs/guide/threading#input-from-other-threads); a server that answers requests is in
-[hosting](/en/docs/guide/hosting#requests).
+[input from other threads](/en/docs/guide/performance/threading#input-from-other-threads); a server that answers requests is in
+[hosting](/en/docs/guide/production/hosting#requests).
 
 </Step>
 <Step>
@@ -244,7 +244,7 @@ The queue's bound and what happens when it is full are yours to choose. The deta
 `MyServer.Tests` has a test file per system: a world of its own with the singletons and entities the system needs,
 one update, assertions on the data it left. Add a test of the whole tick through `Game.AddSystems`. The template's
 `MyServer.csproj` leaves the test folder out of the server's build (`<Compile Remove="MyServer.Tests\**"/>`). See
-[Testing systems](/en/docs/guide/testing).
+[Testing systems](/en/docs/guide/production/testing).
 
 </Step>
 <Step>
@@ -253,7 +253,7 @@ one update, assertions on the data it left. Add a test of the whole tick through
 
 `WorldOptions.MeasureSystems` times every system, `SystemErrors = SystemErrorPolicy.Disable` turns a failing system
 off instead of stopping the tick, and `world.DescribeTables()` shows the tables. Add them to the host's options when you
-need them; see [Debugging and diagnostics](/en/docs/guide/diagnostics).
+need them; see [Debugging and diagnostics](/en/docs/guide/production/diagnostics).
 
 </Step>
 <Step>
@@ -261,12 +261,12 @@ need them; see [Debugging and diagnostics](/en/docs/guide/diagnostics).
 ### Persistence and hot reload [#persistence-and-hot-reload]
 
 - **Saves:** load the last save before the first tick and save after the loop ends, from the host
-  ([saves](/en/docs/guide/saves), [load at start, save at stop](/en/docs/guide/hosting#persistence)). The
+  ([saves](/en/docs/guide/saves/saves), [load at start, save at stop](/en/docs/guide/production/hosting#persistence)). The
   [SaveLoad sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad) saves a world, a
   group of entities, and moves entities between worlds.
 - **Hot reload:** to replace game logic while the world runs, move those systems and components into a plugin
   assembly and load it into a collectible context
-  ([migration and unloading](/en/docs/guide/migration-and-unload)). The
+  ([migration and unloading](/en/docs/guide/saves/migration-and-unload)). The
   [HotReload sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload) splits the project
   into contracts, plugin and host.
 
@@ -710,8 +710,8 @@ feature.
 | A game rule in `Program.cs` (a wave every second, a win condition) | It cannot be tested alone or ordered against the systems | Review: move it into a system that reads a singleton |
 | Program and tests adding the systems in different orders | The tests pass on a tick the server never runs | Share one `Game.AddSystems` |
 | A singleton set after the first update, or never | The first system that reads it throws `InvalidOperationException` naming it | The runtime, on the first update |
-| A system keeping a counter or a timer in a static field | State no save, snapshot or test sees | [EECS007](/en/docs/guide/analyzer#eecs007) |
-| The network thread creating entities itself | An exception from the structural gate, or torn tables when it misses the race | [EECS014](/en/docs/guide/analyzer#eecs014) when it can see it; post to the mailbox |
+| A system keeping a counter or a timer in a static field | State no save, snapshot or test sees | [EECS007](/en/docs/guide/help/analyzer#eecs007) |
+| The network thread creating entities itself | An exception from the structural gate, or torn tables when it misses the race | [EECS014](/en/docs/guide/help/analyzer#eecs014) when it can see it; post to the mailbox |
 | The test folder inside the server project | NUnit types compiled into the server | `<Compile Remove="MyServer.Tests\**"/>` (the template has it) |
 
 ## Related [#related]
@@ -720,13 +720,13 @@ feature.
   <Card title="Getting started" href="/en/docs/getting-started">
     The concepts this layout organizes, one step at a time.
   </Card>
-  <Card title="Testing systems" href="/en/docs/guide/testing">
+  <Card title="Testing systems" href="/en/docs/guide/production/testing">
     A world per test, shared setup, errors and allocation budgets.
   </Card>
-  <Card title="Hosting in a .NET server" href="/en/docs/guide/hosting">
+  <Card title="Hosting in a .NET server" href="/en/docs/guide/production/hosting">
     The same world inside ASP.NET Core or a Worker Service.
   </Card>
-  <Card title="Threading" href="/en/docs/guide/threading">
+  <Card title="Threading" href="/en/docs/guide/performance/threading">
     The owner thread, input from other threads and parallel systems.
   </Card>
 </Cards>

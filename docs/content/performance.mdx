@@ -162,7 +162,7 @@ enumerator, a structural-change check. Pick the first row that fits:
 
 | Need | Use | Measured |
 | --- | --- | --- |
-| The per-entity logic of a system | a [`[ForEach]`](/en/docs/guide/systems) method | <BenchValue k="forEach.perEntity" /> per entity, against <BenchValue k="rawArray.perEntity" /> for two plain arrays |
+| The per-entity logic of a system | a [`[ForEach]`](/en/docs/guide/basics/systems) method | <BenchValue k="forEach.perEntity" /> per entity, against <BenchValue k="rawArray.perEntity" /> for two plain arrays |
 | Arithmetic over many rows | a batch `[ForEach]` method (spans), vectorized | <BenchValue k="ops.iterate2Simd" /> instead of <BenchValue k="ops.iterate2" /> per-entity (100,000 entities) |
 | Heavy per-entity work | `[ForEach(Parallel = true)]` | <BenchValue k="parallel.forEach.on" /> instead of <BenchValue k="parallel.forEach.off" /> (100,000 entities, 4 cores) |
 | A loop outside systems, every tick | a static `[ForEach]` method run through its entry point, or a struct job (`world.ForEach`) | <BenchValue k="runner.runner" />, against <BenchValue k="runner.query" /> for a `Query` loop |
@@ -170,7 +170,7 @@ enumerator, a structural-change check. Pick the first row that fits:
 | "How many?" / "Is there any?" | `world.Count` / `world.Any` | <BenchValue k="count.tested" /> for 100,000 rows whose bits must be tested |
 | The few rows written since the last run | `ITracked` + `[Changed<T>]` | <BenchValue k="changed.10" /> instead of <BenchValue k="changed.10.scan" /> (10 of 100,000 written) |
 | The entities that lost a component | `ITracked` + `[Removed<T>]` | <BenchValue k="removed.10" /> (10 of 100,000 removed) |
-| Entities by value | a [value index](/en/docs/guide/indexes-and-relations) | see `IndexBenchmark` [below](#benchmarks) |
+| Entities by value | a [value index](/en/docs/guide/data/indexes-and-relations) | see `IndexBenchmark` [below](#benchmarks) |
 
 <BenchSource />
 
@@ -182,7 +182,7 @@ compare APIs within one world, not across them.
 ## Regular code and the fastest code [#regular-code-and-the-fastest-code]
 
 The regular way is right for most systems: short, and already a generated struct job. When a system shows up in
-`WorldOptions.MeasureSystems` timings ([measuring systems](/en/docs/guide/systems#measuring-systems)), these rewrites are what the
+`WorldOptions.MeasureSystems` timings ([measuring systems](/en/docs/guide/basics/systems#measuring-systems)), these rewrites are what the
 benchmarks measure:
 
 | Regular | Fastest | Measured |
@@ -267,7 +267,7 @@ per-entity method: write one to vectorize it.
 
 `world.Query` is the convenient loop for tools and request handlers. For a loop that runs every tick outside a
 system, write a struct job: `world.ForEach` specializes and inlines it per table. Mark it `INoStructuralChanges` and
-declare its `WriteMask` ([what a job declares](/en/docs/guide/queries)).
+declare its `WriteMask` ([what a job declares](/en/docs/guide/basics/queries)).
 
 ```csharp title="EnergyJob.cs"
 public struct EnergyJob : IForEach<Velocity>, INoStructuralChanges   // no structural change: the lean loop
@@ -435,7 +435,7 @@ int removed = world.DestroyAll<Dead>();                               // every d
 int lifted = world.RemoveAll<Stunned>();                              // every stun lifted, whole words of rows
 ```
 
-A [prefab](/en/docs/guide/prefabs) built once (`static readonly`) costs one row copy per instance; the world finds
+A [prefab](/en/docs/guide/basics/prefabs) built once (`static readonly`) costs one row copy per instance; the world finds
 its target table once and caches it. `entity.Set(a, b)` and `entity.Remove<A, B>()` change several components in one
 call: shorter to write, and the same cost as one call per component, since the second move takes a cached transition
 ([D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)).
@@ -479,17 +479,17 @@ times every system run.
 - **Don't store raw entity indexes**: ids are recycled; store an `EntityId` (index and version).
 - **Don't write lambdas that capture locals** in methods that run every update: the closure is allocated at method
   entry even when its branch is not taken. `AllocationTests` caught exactly this in `World.Update`
-  ([EECS028](/en/docs/guide/analyzer#eecs028)).
-- **Don't use LINQ, `params object[]` or string formatting** in per-update code ([EECS028](/en/docs/guide/analyzer#eecs028)).
+  ([EECS028](/en/docs/guide/help/analyzer#eecs028)).
+- **Don't use LINQ, `params object[]` or string formatting** in per-update code ([EECS028](/en/docs/guide/help/analyzer#eecs028)).
 - **Don't take an `Entity` or a singleton parameter a method does not need**: the loop loads it for every row
-  ([EECS026](/en/docs/guide/analyzer#eecs026)).
+  ([EECS026](/en/docs/guide/help/analyzer#eecs026)).
 - **Don't take a tracked component by `ref` when the method only reads it**: every visited row then counts as
-  changed ([EECS025](/en/docs/guide/analyzer#eecs025)).
+  changed ([EECS025](/en/docs/guide/help/analyzer#eecs025)).
 - **Don't look up the visited entity's components or a singleton inside a `[ForEach]` method**: a parameter resolves
-  them once per table ([EECS027](/en/docs/guide/analyzer#eecs027)).
+  them once per table ([EECS027](/en/docs/guide/help/analyzer#eecs027)).
 - **Don't loop over a query to change, count or test entities one by one**: `SetAll`, `DestroyAll`, `Count`,
-  `Any` and filters do it per table ([EECS030](/en/docs/guide/analyzer#eecs030),
-  [EECS032](/en/docs/guide/analyzer#eecs032)).
+  `Any` and filters do it per table ([EECS030](/en/docs/guide/help/analyzer#eecs030),
+  [EECS032](/en/docs/guide/help/analyzer#eecs032)).
 - **Don't use a value index, or destroy entities, from another thread**: the index follows those changes on the
   owner thread and is not synchronized.
 
@@ -497,16 +497,16 @@ times every system run.
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| A batch method that also takes a per-entity parameter | It cannot receive runs of rows | [EECS009](/en/docs/guide/analyzer#eecs009) |
-| A structural change in a static `[ForEach]` method without `Entity` or `World` | The method promises no structural change, and its lean loop relies on it | [EECS013](/en/docs/guide/analyzer#eecs013) |
-| A parallel method that writes a singleton or changes structure | Data races between the threads | [EECS010](/en/docs/guide/analyzer#eecs010) |
-| An `Entity` stored in a component | The column holds references: no longer pinned, scanned by the GC | [EECS017](/en/docs/guide/analyzer#eecs017) (warning) |
-| Writing an indexed component through a `ref` | The index cannot see the new key | [EECS015](/en/docs/guide/analyzer#eecs015) |
-| A `ref` parameter that only reads a tracked component | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) (warning, code fix: `in`) |
-| A closure or LINQ in per-update code | Garbage every tick | [EECS028](/en/docs/guide/analyzer#eecs028) (warning), and `AllocationTests`-style checks in your own tests |
-| A lookup through the visited `Entity` in a `[ForEach]` method | A search per row | [EECS027](/en/docs/guide/analyzer#eecs027) (warning) |
-| A structural change entity by entity over a query | One row moved per call | [EECS030](/en/docs/guide/analyzer#eecs030) (warning, code fix: the bulk call) |
-| Filling a fresh world one entity at a time, nothing reserved | Doubling arrays on the large object heap start a full collection ([above](#cold-create)) | [EECS031](/en/docs/guide/analyzer#eecs031) (warning, code fix: `CreateEntities` or `Reserve<T1, …, Tn>(n)`) |
+| A batch method that also takes a per-entity parameter | It cannot receive runs of rows | [EECS009](/en/docs/guide/help/analyzer#eecs009) |
+| A structural change in a static `[ForEach]` method without `Entity` or `World` | The method promises no structural change, and its lean loop relies on it | [EECS013](/en/docs/guide/help/analyzer#eecs013) |
+| A parallel method that writes a singleton or changes structure | Data races between the threads | [EECS010](/en/docs/guide/help/analyzer#eecs010) |
+| An `Entity` stored in a component | The column holds references: no longer pinned, scanned by the GC | [EECS017](/en/docs/guide/help/analyzer#eecs017) (warning) |
+| Writing an indexed component through a `ref` | The index cannot see the new key | [EECS015](/en/docs/guide/help/analyzer#eecs015) |
+| A `ref` parameter that only reads a tracked component | Every visited row counts as changed | [EECS025](/en/docs/guide/help/analyzer#eecs025) (warning, code fix: `in`) |
+| A closure or LINQ in per-update code | Garbage every tick | [EECS028](/en/docs/guide/help/analyzer#eecs028) (warning), and `AllocationTests`-style checks in your own tests |
+| A lookup through the visited `Entity` in a `[ForEach]` method | A search per row | [EECS027](/en/docs/guide/help/analyzer#eecs027) (warning) |
+| A structural change entity by entity over a query | One row moved per call | [EECS030](/en/docs/guide/help/analyzer#eecs030) (warning, code fix: the bulk call) |
+| Filling a fresh world one entity at a time, nothing reserved | Doubling arrays on the large object heap start a full collection ([above](#cold-create)) | [EECS031](/en/docs/guide/help/analyzer#eecs031) (warning, code fix: `CreateEntities` or `Reserve<T1, …, Tn>(n)`) |
 
 ## What is covered [#coverage]
 
@@ -732,10 +732,10 @@ structural changes, indexes, relations, cascades and parallel passes must alloca
   <Card title="Comparison with other ECS libraries" href="/en/docs/comparison">
     The same work in Friflo.Engine.ECS, Arch and DefaultEcs, with every result.
   </Card>
-  <Card title="Queries and filters" href="/en/docs/guide/queries">
+  <Card title="Queries and filters" href="/en/docs/guide/basics/queries">
     `Query`, struct jobs, `Count` and `Any`, and what a job declares.
   </Card>
-  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/basics/systems">
     Batch methods, parallel methods, groups, intervals and timings.
   </Card>
 </Cards>

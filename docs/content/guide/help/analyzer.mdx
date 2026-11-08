@@ -16,7 +16,7 @@ error means code that cannot work (EECS034, a world update inside a system). The
 EECS040 to EECS045, EECS047 to EECS051) find calls and declarations that compile but do not do what they say: an error where the runtime
 throws or the code cannot work, a warning where a write is lost or a ref can point at the wrong row. The vector-loop
 rules say why a method runs one row at a time (EECS055, a suggestion) and fail the build when a method that must
-vectorize does not (EECS056); EECS057 keeps a [reduction](/en/docs/guide/threading#reductions) the only write of its
+vectorize does not (EECS056); EECS057 keeps a [reduction](/en/docs/guide/performance/threading#reductions) the only write of its
 singleton, EECS058 keeps a `Scratch<T>`'s memory out of the world, and EECS059 keeps a `Lookup<T>` (or a tile) off
 what its pass writes; the thread rules (EECS060, EECS061) find writes that code on several threads races on or loses; the part
 rules (EECS062 to EECS069) check the types whose members the generator writes from attributes (`[Sum]`, `[LookupKey]`,
@@ -142,9 +142,9 @@ EECS049, not also a cost of its parameters; an instance hook of a system is EECS
 
 Every parameter must be a `ref` / `in` / `ref readonly` struct implementing `IComponent` or `ISingletonComponent`, a
 `Span<T>` / `ReadOnlySpan<T>` of an `IComponent` struct, a `Maybe<T>` or `ReadOnlyMaybe<T>` of one (an optional
-component), a `Mut<T>`, a `ref Reduce<T>` ([reductions](/en/docs/guide/threading#reductions); without `ref` its
-partial result would be a copy), a [`Scratch<T>`](/en/docs/guide/threading#scratch), a
-[`Lookup<T>`](/en/docs/guide/threading#lookups) of a component, an `Entity`, or the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/systems#foreach-outside-systems) may also take
+component), a `Mut<T>`, a `ref Reduce<T>` ([reductions](/en/docs/guide/performance/threading#reductions); without `ref` its
+partial result would be a copy), a [`Scratch<T>`](/en/docs/guide/performance/threading#scratch), a
+[`Lookup<T>`](/en/docs/guide/performance/threading#lookups) of a component, an `Entity`, or the `World`. A `[ForEach]` method [outside a system](/en/docs/guide/basics/systems#foreach-outside-systems) may also take
 values of any other type: its generated entry point takes them from the caller.
 
 ```csharp doccheck=expect-EECS002
@@ -292,7 +292,7 @@ public ref struct SpawnSystem
 }
 ```
 
-Move per-entity state into a component and per-world state into a [singleton](/en/docs/guide/singletons):
+Move per-entity state into a component and per-world state into a [singleton](/en/docs/guide/basics/singletons):
 
 ```csharp
 public record struct Spawned(int Count) : ISingletonComponent;
@@ -395,7 +395,7 @@ A parallel method runs chunks of rows on several threads at once, so it must mak
 `World`, its `Entity` used only to read: `Id`, `Has`, `Get`, ...; not `entity.Run`, which does the owner's pass
 bookkeeping and whose job may change structure), run per entity (not a batch method) and write no singleton (a `ref`
 singleton would race between chunks). To read other entities, take a
-[`Lookup<T>`](/en/docs/guide/threading#lookups) instead of the `World`; it is allowed in parallel.
+[`Lookup<T>`](/en/docs/guide/performance/threading#lookups) instead of the `World`; it is allowed in parallel.
 
 ```csharp doccheck=expect-EECS010
 [EcsSystem]
@@ -462,7 +462,7 @@ is not followed. Collections in components are allowed;
 **`DynamicBuffer<T>` held by value.** Error. Code fix: adds `in`, or `ref` together with each caller's argument when
 every caller passes a variable; none for an override or an interface's method, whose signature is shared.
 
-A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) refers to its list, so a copy of the value refers to the same
+A [`DynamicBuffer<T>`](/en/docs/guide/data/dynamic-buffers) refers to its list, so a copy of the value refers to the same
 list: writes through the copy are never stamped as changed, and storing the copy gives a second entity (or a snapshot)
 the same list. The rule reports a `DynamicBuffer<T>` field or property, a by-value parameter or return, a local that
 is not a `ref` local, an assignment of an existing buffer, and an existing buffer passed to `Set`, `CreateEntity` or
@@ -485,7 +485,7 @@ public static class Bags
 
 Reach the buffer through its entity: `ref` / `in` parameters, `ref var bag = ref entity.Get<DynamicBuffer<T>>()`,
 `entity.Read<DynamicBuffer<T>>()`. A new component value is `new DynamicBuffer<T>()` (or `default`), which holds no
-list; a [prefab](/en/docs/guide/prefabs) gets its elements with `SetBuffer(…)` or the generated `SetLoot(…)`:
+list; a [prefab](/en/docs/guide/basics/prefabs) gets its elements with `SetBuffer(…)` or the generated `SetLoot(…)`:
 
 ```csharp
 public static class Bags
@@ -508,7 +508,7 @@ public static class Bags
 
 A `[ForEach]` method that is static and takes no `Entity` or `World` (or uses its `Entity` only to read) cannot change
 structure as far as the generator can see, so it walks the rows without re-checking storage after each call, and the
-system shares a [parallel stage](/en/docs/guide/threading#parallel-systems) with other systems. A structural change
+system shares a [parallel stage](/en/docs/guide/performance/threading#parallel-systems) with other systems. A structural change
 made anyway, through a handle or a world kept elsewhere, breaks both: the pass keeps refs into rows that moved, and a
 change inside a parallel stage throws.
 
@@ -550,7 +550,7 @@ public ref struct MarkTargets
 
 The rule sees the method's own body: a change made in a helper method it calls is not followed. Inside a parallel
 stage or a parallel `[ForEach]` the runtime still throws for it
-([what the world synchronizes](/en/docs/guide/threading#what-the-world-synchronizes)).
+([what the world synchronizes](/en/docs/guide/performance/threading#what-the-world-synchronizes)).
 
 ## EECS014 [#eecs014]
 
@@ -583,7 +583,7 @@ public static class Spawner
 A world handed to a thread that then owns it (a world per thread, a world created inside the delegate) is not
 reported, and neither is a hand-off the caller waits for at once (`await`, `Wait()`, `Result`,
 `GetAwaiter().GetResult()`): nothing runs beside it. Hand the change to the owner thread as data, through a queue its
-system drains ([input from other threads](/en/docs/guide/threading#input-from-other-threads)), or give the other
+system drains ([input from other threads](/en/docs/guide/performance/threading#input-from-other-threads)), or give the other
 thread its own world:
 
 ```csharp
@@ -613,9 +613,9 @@ cannot follow (a method's result) is not reported.
 **Indexed component written through a ref.** Error. Code fix, where the code only reads: `Read<T>()` for
 `Get<T>()`, `ref readonly` for a `ref` local, `in` / `ReadOnlySpan<T>` for a `[ForEach]` parameter.
 
-A [value index](/en/docs/guide/indexes-and-relations#value-indexes) follows `Set`, `CreateEntity` and
+A [value index](/en/docs/guide/data/indexes-and-relations#value-indexes) follows `Set`, `CreateEntity` and
 `CreateEntities`; a write through a `ref` changes the key behind its back. For a component implementing
-`IIndexed<TKey>` (or `IGroup`, whose [group](/en/docs/guide/groups) is a key too), the rule reports:
+`IIndexed<TKey>` (or `IGroup`, whose [group](/en/docs/guide/data/groups) is a key too), the rule reports:
 
 - `Get<T>()`, `GetOrAdd<T>()` or `TryGetRef<T>()` on an entity;
 - a `ref` local bound to it, or an assignment to it (or a field of it) through a query item;
@@ -635,7 +635,7 @@ public ref struct TakePortals
 }
 ```
 
-Read it with `in`, `ReadOnlySpan<T>`, [`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe) (when some entities
+Read it with `in`, `ReadOnlySpan<T>`, [`ReadOnlyMaybe<T>`](/en/docs/guide/basics/systems#read-only-maybe) (when some entities
 lack it), `Read<T>()` or the generated property, and write it with `Set` (or the generated `SetX`):
 
 ```csharp
@@ -695,7 +695,7 @@ still compiles (`.Id`, a comparison, an assignment).
 An `Entity` holds a reference to its world, so a component or singleton with an `Entity` field (or a field of a struct
 that holds one, from this assembly or another), and a `DynamicBuffer<T>` whose elements hold one, are managed: the column
 is scanned by the garbage collector, every store pays a write barrier, rows are not copied as blocks,
-[saves](/en/docs/guide/saves) cannot write it and [migration](/en/docs/guide/migration-and-unload#entityid-rewriting)
+[saves](/en/docs/guide/saves/saves) cannot write it and [migration](/en/docs/guide/saves/migration-and-unload#entityid-rewriting)
 does not rewrite it.
 
 ```csharp doccheck=expect-EECS017
@@ -876,8 +876,8 @@ public static class Report
 span, `Read<T>()` for `Get<T>()`, `.X` for `WriteX()`, `in T` for a `Mut<T>` the method never writes.
 
 A `ref` parameter (a `Span<T>` in a batch method) puts its type in the system's write set: no
-[parallel stage](/en/docs/guide/threading#parallel-systems) runs the system beside one that reads the type. On a
-[tracked component](/en/docs/guide/change-tracking) it also stamps every row the method visits, so `[Changed<T>]`
+[parallel stage](/en/docs/guide/performance/threading#parallel-systems) runs the system beside one that reads the type. On a
+[tracked component](/en/docs/guide/changes/change-tracking) it also stamps every row the method visits, so `[Changed<T>]`
 systems visit rows nobody changed. `entity.Get<T>()` and the generated `entity.WriteX()` stamp the row the same way.
 The rule looks at every use: an assignment, `++`, a `ref` or `out` argument, a method that is not `readonly`, a `ref`
 local or a `this ref` extension (`DynamicBuffer<T>.Add`) is a write, and keeps the access. A `Mut<T>` parameter used
@@ -915,7 +915,7 @@ goes, when a `[With<T>]` or `[Changed<T>]` already requires it); an `Entity`, `W
 
 Each parameter costs something on every row or every pass: a component's column is loaded and advanced, a singleton is
 resolved and scheduled as an access, an `Entity` builds a handle for every row and, like the `World`, makes the system
-[run alone](/en/docs/guide/threading#parallel-systems). A component the method only requires is a filter. An unused
+[run alone](/en/docs/guide/performance/threading#parallel-systems). A component the method only requires is a filter. An unused
 `ref` of a tracked component is reported without a fix: it stamps every row it visits, and `[With<T>]` would not. An
 unused `Mut<T>` stamps nothing until it is written, so it gets the `[With<T>]` fix like an `in` parameter.
 A method with an empty body is left alone while it is being written.
@@ -957,7 +957,7 @@ singleton a `ref` taken before the loop. The same data looked up through the vis
 `entity.Has<T>()`, `entity.TryGet<T>(...)`) or through the `World` (`World.Clock`) repeats the search on every row:
 the entity's record, its table, the column. The rule reports only lookups that run on every row (not in a branch,
 a loop or after an early `return`), of components the method does not add or remove itself. Indexed components count
-too: an `in` parameter or a [`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe) reads them without the
+too: an `in` parameter or a [`ReadOnlyMaybe<T>`](/en/docs/guide/basics/systems#read-only-maybe) reads them without the
 lookup and without the write EECS015 forbids.
 
 ```csharp doccheck=expect-EECS027,expect-EECS055
@@ -1015,7 +1015,7 @@ public ref struct Steer
 ```
 
 Keep values in structs, spans and `stackalloc`; a list that a row fills is a
-[`Scratch<T>`](/en/docs/guide/threading#scratch) parameter, one per thread and cleared before use, which the message
+[`Scratch<T>`](/en/docs/guide/performance/threading#scratch) parameter, one per thread and cleared before use, which the message
 of a `[ForEach]` method names; pass numbers, not strings:
 
 ```csharp
@@ -1038,7 +1038,7 @@ public ref struct Steer
 
 A structural change through each entity of a query moves (or flips) one row per call, through the structural gate each
 time. `SetAll`, `RemoveAll`, `DisableAll`, `EnableAll` and `DestroyAll` change every matching row of a table
-together, whole words of rows at once ([bulk changes](/en/docs/guide/bulk)). The rule
+together, whole words of rows at once ([bulk changes](/en/docs/guide/changes/bulk)). The rule
 reports a `foreach` over `world.Query<...>()` whose body is one such call on the item's entity with the same value for
 every row. A `Set` of a component the query already requires writes a value instead of moving a row, and is left alone.
 
@@ -1129,7 +1129,7 @@ foreach (var item in world.Query<Health>(QueryFilter.Create().With<Burning>())) 
 
 **A generic call with a generated member of the same meaning.** Info. Code fix: the generated member.
 
-The generator writes [named members](/en/docs/guide/entities-and-components#generated-members) for every component, singleton,
+The generator writes [named members](/en/docs/guide/basics/entities-and-components#generated-members) for every component, singleton,
 buffer element and query shape, each calling the generic API: the same call at the same cost, which is why this rule
 is a suggestion and not a warning. The rule offers the member only where it is generated in
 that compilation and does the same thing, including the kind of reference it returns: `Get<T>()` of a tracked
@@ -1208,7 +1208,7 @@ public ref struct SendFire
 }
 ```
 
-[Slices](/en/docs/guide/systems#slices) describes the cut and the cadence.
+[Slices](/en/docs/guide/basics/systems#slices) describes the cut and the cadence.
 
 ## EECS036 [#eecs036]
 
@@ -1235,7 +1235,7 @@ Index a relation with `[LookupKey]` (`IIndexed<EntityId>`), and give a second ke
 public partial record struct Mount([LookupKey] EntityId Rider) : IComponent;
 ```
 
-[Unique keys](/en/docs/guide/indexes-and-relations#unique-keys) explains what a unique index checks.
+[Unique keys](/en/docs/guide/data/indexes-and-relations#unique-keys) explains what a unique index checks.
 
 ## EECS037 [#eecs037]
 
@@ -1243,7 +1243,7 @@ public partial record struct Mount([LookupKey] EntityId Rider) : IComponent;
 
 A hand-written job (`IForEach<...>`, `IForEachEntity<...>`, `IForEachBatch<...>`) says which components it writes with
 `static int WriteMask` (bit `k - 1` for component `k`, `-1` for all of them, the default). The loop stamps the
-[tracked](/en/docs/guide/change-tracking) components it names on every row it visits, and carries the others over
+[tracked](/en/docs/guide/changes/change-tracking) components it names on every row it visits, and carries the others over
 when `Execute` moves the entity. A tracked component that `Execute` writes and `WriteMask` leaves out is never stamped,
 so `[Changed<T>]` systems miss the change; one that `Execute` only reads is stamped on every row anyway, so they visit
 rows nobody changed. The rule compares a constant `WriteMask` (or the default) with the writes it sees in `Execute`, by
@@ -1304,7 +1304,7 @@ mana.Value -= 10;
 
 **A `Mut<T>` of a component that is not tracked.** Suggestion (Info). Code fix: `ref T`.
 
-[`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed) stamps only the rows a `[ForEach]` method writes, which only means
+[`Mut<T>`](/en/docs/guide/changes/change-tracking#set-if-changed) stamps only the rows a `[ForEach]` method writes, which only means
 something for a component with `ITracked`. For any other component it is the same write as a `ref` parameter,
 written longer (`.Value`, `.Write()`). The rule reports a `Mut<T>` of an untracked `T` used only through `.Value`
 and `.Write()`; one that calls `SetIfChanged` keeps its comparison.
@@ -1448,7 +1448,7 @@ public readonly record struct Market(long Id) : IComponent, IIndexed<Market> { M
 
 **A sliced filter where every row is needed.** Error. No code fix.
 
-[`QueryFilter.Slice(index, of)`](/en/docs/guide/systems#slices) cuts each table into `of` parts, and only
+[`QueryFilter.Slice(index, of)`](/en/docs/guide/basics/systems#slices) cuts each table into `of` parts, and only
 passes (`ForEach`, `ForEachEntity`, `ForEachBatch` and their parallel forms) take one. `Query`, `Read`, `Count`, `Any`,
 `DestroyAll`, `entity.Run` and the bulk calls need every matching row, so they throw `ArgumentException` for a
 sliced filter. The rule follows the filter through locals and `static readonly` fields, and also reports a constant
@@ -1470,8 +1470,8 @@ int count = world.Count<Health>();
 
 **A tag the world keeps, written by hand.** Error. No code fix.
 
-`Retired` marks an entity kept for its [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components), and `Disabled<T>` marks a
-component [hidden from queries](/en/docs/guide/cleanup-and-disable#disable-a-component). The world adds and removes them in `Destroy`,
+`Retired` marks an entity kept for its [cleanup components](/en/docs/guide/changes/cleanup-and-disable#cleanup-components), and `Disabled<T>` marks a
+component [hidden from queries](/en/docs/guide/changes/cleanup-and-disable#disable-a-component). The world adds and removes them in `Destroy`,
 `Disable<T>()` and `Enable<T>()`, together with what they stand for: `Retired` with the destroy hooks and the
 destroy log, `Disabled<T>` with the hidden value. Written directly (`Set`, `GetOrAdd`, `Remove`, `SetIfChanged`,
 `Disable` and `Enable` of the tag itself, `CreateEntity`, `CreateEntities`, `Instantiate`, `SetAll`, `RemoveAll`,
@@ -1493,10 +1493,10 @@ hero.EnableHealth();
 **A query loop that only reads tracked components.** Warning. Code fix: `Read<T1..Tn>`.
 
 A `Query` item hands out its components by `ref` and stamps every row it visits of a
-[tracked component](/en/docs/guide/change-tracking), because it cannot tell a read from a write. A loop that only
+[tracked component](/en/docs/guide/changes/change-tracking), because it cannot tell a read from a write. A loop that only
 reads (a total, a replication send, a search) then makes every `[Changed<T>]` system visit rows nobody changed.
 `world.Read<T1..Tn>()` walks the same rows with `ref readonly` components and stamps nothing
-([Read](/en/docs/guide/queries#read)). The rule reports a `foreach` over `world.Query<...>()` of at least one tracked
+([Read](/en/docs/guide/basics/queries#read)). The rule reports a `foreach` over `world.Query<...>()` of at least one tracked
 component whose body uses the item only through `Entity` and component reads; a write, a `ref` taken to a component
 or the item passed on keeps the `Query`.
 
@@ -1549,10 +1549,10 @@ health.Value -= 5;
 
 **A component that cannot be disabled.** Error. No code fix.
 
-[`Disable<T>()`](/en/docs/guide/cleanup-and-disable#disable-a-component) hides a component and keeps its value. A
-[cleanup component](/en/docs/guide/cleanup-and-disable#cleanup-components) is what keeps a retired entity alive until
+[`Disable<T>()`](/en/docs/guide/changes/cleanup-and-disable#disable-a-component) hides a component and keeps its value. A
+[cleanup component](/en/docs/guide/changes/cleanup-and-disable#cleanup-components) is what keeps a retired entity alive until
 its resources are released, and `ChildOf` is what a parent's destruction follows to find its
-[children](/en/docs/guide/hierarchy): hidden, either would be forgotten. `Disable<T>()` and `DisableAll<T>()` throw
+[children](/en/docs/guide/data/hierarchy): hidden, either would be forgotten. `Disable<T>()` and `DisableAll<T>()` throw
 `InvalidOperationException` for them, and the generator writes no `DisableX` for them. The rule reports both calls.
 
 ```csharp doccheck=expect-EECS048
@@ -1570,7 +1570,7 @@ unit.RemoveChildOf();
 **Filters no entity passes.** Error. No code fix.
 
 A `[ForEach]` method visits the entities that pass all of its filters and those of its
-[group](/en/docs/guide/systems#system-groups): its component parameters, `[With<T>]`, `[Changed<T>]`, the group's
+[group](/en/docs/guide/basics/systems#system-groups): its component parameters, `[With<T>]`, `[Changed<T>]`, the group's
 `[With<T>]` and `ISystemGroupWith<T>` require a component; `[Without<T>]` and `ISystemGroupWithout<T>` exclude it. A component
 both required and excluded leaves no entity to visit, so the method never runs and nothing says so. The rule
 reports the excluding filter.
@@ -1600,7 +1600,7 @@ public ref struct ReviveSystem
 **A second group in one filter.** Error. No code fix.
 
 `QueryFilter.InGroup<T>(group)` (and the generated `InX(group)`) keeps the one
-[group](/en/docs/guide/groups) a filter walks the tables of. Naming another one, of another component or another
+[group](/en/docs/guide/data/groups) a filter walks the tables of. Naming another one, of another component or another
 constant value, throws `ArgumentException` when the filter is built. The rule reports the second call of a chain.
 
 ```csharp
@@ -1655,7 +1655,7 @@ use. Given to the creation, the component lands in the final table with the othe
 a local and followed directly by `local.Set(value)` or a generated `local.SetX(...)` of a component it was not given,
 when the value does not depend on the entity or on a call; the fix moves the value into the creation. A grouped
 component, the world's own tags, a creation that already has nine components and an `Instantiate` of a prefab that
-declares the column with [`SetAbsent<T>()`](/en/docs/guide/prefabs#set-absent) (the Set flips a presence bit and moves
+declares the column with [`SetAbsent<T>()`](/en/docs/guide/basics/prefabs#set-absent) (the Set flips a presence bit and moves
 no row) are left alone.
 
 ```csharp doccheck=expect-EECS052
@@ -1673,10 +1673,10 @@ var bullet = world.CreateEntity(new Position(0, 0), new Velocity(1, 0));
 
 **A tracked component written by `ref` on only some rows.** Warning. Code fix: `Mut<T>`.
 
-A `ref` parameter of a [tracked component](/en/docs/guide/change-tracking) (`ITracked`, every `DynamicBuffer<T>`)
+A `ref` parameter of a [tracked component](/en/docs/guide/changes/change-tracking) (`ITracked`, every `DynamicBuffer<T>`)
 stamps every row the method visits, written or not. A method that writes it on some rows only (an early `return`, a
 write inside an `if`, a loop that may not run) stamps the rows it left alone too, so every `[Changed<T>]` system
-visits them again: a replication sends them, a save writes them. A [`Mut<T>`](/en/docs/guide/change-tracking#set-if-changed)
+visits them again: a replication sends them, a save writes them. A [`Mut<T>`](/en/docs/guide/changes/change-tracking#set-if-changed)
 parameter stamps only the rows it writes, through `Write()` or a `SetIfChanged` that changed the value
 ([D66](/en/docs/decisions#d66-a-ref-written-on-some-rows)).
 
@@ -1729,7 +1729,7 @@ cheaper write: suppress the warning there.
 **Invalid `[ForEach(ChunkSize = N)]`.** Error. Code fix: removes `ChunkSize`; the generator, which skipped the method,
 writes it again.
 
-`ChunkSize` is the rows a thread of a [parallel method](/en/docs/guide/threading#chunk-rows) takes at a time: 0 lets
+`ChunkSize` is the rows a thread of a [parallel method](/en/docs/guide/performance/threading#chunk-rows) takes at a time: 0 lets
 the runtime choose from the rows' measured cost, more sets it (rounded up to 64). A method without `Parallel = true`
 runs on one thread and has no chunks, and a negative count means nothing.
 
@@ -1766,19 +1766,19 @@ public ref struct PlanRoutes
 ```
 
 Run it in parallel (as here, for a few hundred heavy rows), or drop `ChunkSize`. Light rows need neither: keep the
-default chunks ([when to set it](/en/docs/guide/threading#chunk-rows)).
+default chunks ([when to set it](/en/docs/guide/performance/threading#chunk-rows)).
 
 ## EECS055 [#eecs055]
 
 **A `[ForEach]` method that runs one row at a time.** Suggestion (Info). No code fix.
 
-The generator turns a [`[ForEach]` method into a vector loop](/en/docs/guide/systems#vector-loops) when it qualifies.
+The generator turns a [`[ForEach]` method into a vector loop](/en/docs/guide/basics/systems#vector-loops) when it qualifies.
 A method that looks meant for one (static, taking only components of plain values, singletons and values) but misses
 a condition gets this message, which names the first reason: a component too wide for the work the method does on
 it, a `bool` field, a call the loop has no vector form of, a write to something that is not a lane. When the method
 uses few fields of a wide component, the message ends with them: split them into a component of their own. It is the
 counterpart of Burst's inspector: the build says which method stayed scalar and why, and
-[`DescribeSchedule()`](/en/docs/guide/systems#vector-loops) lists the loop of every method. The method still runs
+[`DescribeSchedule()`](/en/docs/guide/basics/systems#vector-loops) lists the loop of every method. The method still runs
 correctly, row by row.
 
 ```csharp tab="Reported" doccheck=expect-EECS055
@@ -1852,7 +1852,7 @@ Change what the message names, or set `SimdMode.Auto` (the default) to accept th
 
 **A reduction whose result another write replaces.** Error. No code fix.
 
-A [`Reduce<T>` parameter](/en/docs/guide/threading#reductions) gives each chunk of rows a partial result and replaces
+A [`Reduce<T>` parameter](/en/docs/guide/performance/threading#reductions) gives each chunk of rows a partial result and replaces
 singleton `T` with the combined result when the pass ends. A second `Reduce<T>` of the same method or system, or a
 `ref T` parameter of the same method, writes `T` in the same pass: one result would silently replace the other.
 
@@ -1901,7 +1901,7 @@ Reduce each result into a singleton of its own, and read the last result with `i
 
 **Scratch memory stored into the world.** Error. No code fix.
 
-A [`Scratch<T>`](/en/docs/guide/threading#scratch) value belongs to the thread running the method, and the next row
+A [`Scratch<T>`](/en/docs/guide/performance/threading#scratch) value belongs to the thread running the method, and the next row
 that thread runs, of any pass, reuses it. A reference to what it holds (a list, an array, a span, a struct holding
 one) stored into a component, a singleton, a `Maybe`, a `Mut` or a `Reduce` hands that memory to the entity: later
 rows change it under the entity, on another thread in a parallel pass.
@@ -1942,13 +1942,13 @@ public ref struct ChartRoutes
 ```
 
 Copy what the row produced into the component's own storage (values, or a
-[dynamic buffer](/en/docs/guide/dynamic-buffers)), or keep the data in a component from the start.
+[dynamic buffer](/en/docs/guide/data/dynamic-buffers)), or keep the data in a component from the start.
 
 ## EECS059 [#eecs059]
 
 **A lookup of a component the pass writes.** Error. No code fix.
 
-A [`Lookup<T>`](/en/docs/guide/threading#lookups) reads `T` of any entity as it was before the pass, so nothing may
+A [`Lookup<T>`](/en/docs/guide/performance/threading#lookups) reads `T` of any entity as it was before the pass, so nothing may
 write `T` while the pass runs. A method that writes `T` itself (a `ref`, `Mut`, writable `Maybe` or span parameter)
 would read some rows before their write and some after, and in parallel, rows another thread is writing.
 
@@ -2040,7 +2040,7 @@ public ref struct TakeHits
 }
 ```
 
-A total goes into a [`Reduce<T>`](/en/docs/guide/threading#reductions) singleton; a result per entity goes into a
+A total goes into a [`Reduce<T>`](/en/docs/guide/performance/threading#reductions) singleton; a result per entity goes into a
 component of its row, which a system after the pass reads. An `Interlocked` call per row also silences the rule,
 at the cost of a contended cache line on every row.
 
@@ -2100,7 +2100,7 @@ public static class Reports
 ```
 
 For a total over many rows on all cores, write a `[ForEach(Parallel = true)]` method with a
-[`Reduce<T>`](/en/docs/guide/threading#reductions) parameter instead: each chunk keeps a partial result and the pass
+[`Reduce<T>`](/en/docs/guide/performance/threading#reductions) parameter instead: each chunk keeps a partial result and the pass
 combines them.
 
 ## EECS062 [#eecs062]
@@ -2301,7 +2301,7 @@ public partial struct Squad : IComponent
 **A managed component or singleton without a Nino formatter.** Warning when the code saves what holds the type,
 suggestion (Info) otherwise. Code fix: marks it `[NinoType]` and partial, or marks it `[NotSaved]`.
 
-A [save](/en/docs/guide/saves) writes unmanaged components as raw rows. It writes every other component and singleton
+A [save](/en/docs/guide/saves/saves) writes unmanaged components as raw rows. It writes every other component and singleton
 with Nino, which needs the formatter that `[NinoType]` generates, so a save that holds the type throws. The rule is a
 warning for a component when the code calls `Save`, `SaveWithout` or `SaveEntities`. For a singleton it is a warning
 only for `Save` or `SaveWithout`, since entity saves write no singletons. Runtime state that a restart rebuilds (a
@@ -2408,7 +2408,7 @@ advances its `Tick`, so each step draws new numbers. Two draws for the same enti
 
 **An invalid tile shape.** Error. No code fix.
 
-A [tile](/en/docs/guide/grids#halo) (`ITileShape`) is Width x Depth x Height cells, Depth 1 to 64 (the
+A [tile](/en/docs/guide/performance/grids#halo) (`ITileShape`) is Width x Depth x Height cells, Depth 1 to 64 (the
 active rows of a layer are one 64-bit word), with a halo of one cell or more. The halo is copied from the facing cells
 of the tile beside, so it is at most the tile's extent along every axis that has neighbors (its `Faces`), and along
 every axis when the boundary mirrors: like an MPI ghost width, never wider than the subdomain. The rule reads the
@@ -2520,9 +2520,9 @@ public ref struct HealSystem
 that does not use `this`.
 
 The world never creates a system: its code is static and its bookkeeping (enabled, error, run count, stats) is the
-world's, read through its [`SystemHandle`](/en/docs/guide/systems#lifecycle). An instance field, property, event,
+world's, read through its [`SystemHandle`](/en/docs/guide/basics/systems#lifecycle). An instance field, property, event,
 constructor or method could never be reached. State belongs in components and singletons, configuration in a
-singleton (a [`[NotSaved]`](/en/docs/guide/saves#not-saved) one for a queue or a service).
+singleton (a [`[NotSaved]`](/en/docs/guide/saves/saves#not-saved) one for a queue or a service).
 
 ```csharp tab="Reported" doccheck=expect-EECS075
 [EcsSystem]
@@ -2590,7 +2590,7 @@ Mark the type `[EcsSystem]` and make it a `ref struct` of static members, or nam
 each call.
 
 A struct implementing `IForEachEntity<T1..Tn>`, created and handed to `entity.Run` right away, is what
-[`[EntityMethod]`](/en/docs/guide/queries#run-on-one-entity) generates from a static method: its `ref` parameters make the
+[`[EntityMethod]`](/en/docs/guide/basics/queries#run-on-one-entity) generates from a static method: its `ref` parameters make the
 `WriteMask`, its filter attributes the `QueryFilter`, its other parameters the values the entry point takes, and
 `INoStructuralChanges` follows from what the method calls. The rule reports the struct when every use of it is such a
 call: `var job = new J { ... };` followed by `entity.Run<.., J>(ref job)`, with no filter or with one held in a
@@ -2688,7 +2688,7 @@ public ref struct Regeneration
 `Destroy()` removed (and the `Entity` parameter, when nothing else used it).
 
 A method that handles event or command entities and ends with `entity.Destroy()` on every path is a consuming pass.
-[`[Consume]`](/en/docs/guide/systems#consume) destroys exactly the rows the pass visited when it ends; a method that
+[`[Consume]`](/en/docs/guide/basics/systems#consume) destroys exactly the rows the pass visited when it ends; a method that
 makes no structural change has them destroyed at once (a `DestroyAll` of its filter, whole tables freed at a time)
 instead of one destroy and one hole per row. A destroy behind a condition or after a `return` is left alone.
 
@@ -2759,7 +2759,7 @@ public ref struct CountDamage
 
 Every row of the pass writes a `ref` singleton parameter. Two things follow. The method cannot run in parallel, since
 each chunk would race on the singleton ([EECS010](#eecs010)). And its vector loop has no lane to keep the singleton in.
-A [`ref Reduce<T>`](/en/docs/guide/threading#reductions) parameter gives each chunk a partial result of its own,
+A [`ref Reduce<T>`](/en/docs/guide/performance/threading#reductions) parameter gives each chunk a partial result of its own,
 starting at `T`'s identity, and combines the partial results into `T` when the pass ends. The sums, minimums and
 maximums are the same, but `Parallel = true` and the vector loop are open to the method.
 
@@ -2822,7 +2822,7 @@ only, at the end of a full analysis, since the reset can be in any file.
 A `[ForEach]` method that takes the `World` could change structure. So its system runs alone in its stage, and its
 rows are walked with the checks that a structural change needs. Suppose the method uses the `World` only to find other
 entities (`TryGetEntity`, `GetEntity`) and reads components from them that it does not write. Then a
-[`Lookup<T>`](/en/docs/guide/threading#lookups) parameter per component does the same without the `World`:
+[`Lookup<T>`](/en/docs/guide/performance/threading#lookups) parameter per component does the same without the `World`:
 `lookup[id]` is a `ReadOnlyMaybe<T>`, `Read(id)` a `ref readonly` and `Has(id)` a presence test. The system is
 scheduled as a reader of those components, it shares a stage with systems that do not write them, and the method may
 run in parallel.
@@ -2977,7 +2977,7 @@ internal ref struct WaveSystem
 ```
 
 The fix is offered only when nothing outside the class has to change with it: no constructor arguments (they become
-a [`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton the host sets), no abstract base class (shared code goes
+a [`[NotSaved]`](/en/docs/guide/saves/saves#not-saved) singleton the host sets), no abstract base class (shared code goes
 into a static class or a generic system), and no `[ForEach]` method that reads the system's bookkeeping.
 
 ## Unused-member warnings [#never-used]
@@ -2992,16 +2992,16 @@ that no method calls is still reported.
 ## Related [#related]
 
 <Cards>
-  <Card title="Common mistakes" href="/en/docs/guide/common-mistakes">
+  <Card title="Common mistakes" href="/en/docs/guide/help/common-mistakes">
     The mistakes these rules catch, and the ones no rule can.
   </Card>
-  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/basics/systems">
     What a `[ForEach]` method may take and how it is scheduled.
   </Card>
   <Card title="ECS principles" href="/en/docs/ecs-principles">
     The rules behind the analyzer.
   </Card>
-  <Card title="Threading" href="/en/docs/guide/threading">
+  <Card title="Threading" href="/en/docs/guide/performance/threading">
     Parallel stages, parallel methods and the owner thread.
   </Card>
 </Cards>

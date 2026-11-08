@@ -24,12 +24,12 @@ dotnet run --project samples/Actors
 ## The data [#data]
 
 An actor kind is one type that does three jobs through one interface: `Shop` and `Bank` implement `IActor<TSelf>`, and
-so are at once the actor's key component ([value index](/en/docs/guide/indexes-and-relations#value-indexes)), the
-[system group](/en/docs/guide/systems#system-groups) of the kind and that group's
-[filter](/en/docs/guide/systems#group-filters) (`ISystemGroupWith<In<Shop>>`): an attribute cannot name a type
+so are at once the actor's key component ([value index](/en/docs/guide/data/indexes-and-relations#value-indexes)), the
+[system group](/en/docs/guide/basics/systems#system-groups) of the kind and that group's
+[filter](/en/docs/guide/basics/systems#group-filters) (`ISystemGroupWith<In<Shop>>`): an attribute cannot name a type
 parameter, so the interface declares the filter once for every kind. The key is the actor itself: `[LookupKey]` on the
 type, and the generator writes an explicit `Key`, which the record's `ToString()` does not print (a public
-`Key => this` property would print `Key` forever, EECS043). `Stock` and `Balance` persist and are `ITracked` ([change tracking](/en/docs/guide/change-tracking)); `Sales` and
+`Key => this` property would print `Key` forever, EECS043). `Stock` and `Balance` persist and are `ITracked` ([change tracking](/en/docs/guide/changes/change-tracking)); `Sales` and
 `Closed` live only in memory.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/Actors/Components.cs</include>
@@ -37,7 +37,7 @@ type, and the generator writes an explicit `Key`, which the record's `ToString()
 ## Messages [#messages]
 
 A message is a method run on one entity: `Buy` and `Deposit` are
-[`[EntityMethod]` methods](/en/docs/guide/queries#run-on-one-entity), and `Mailman` finds the actor by key in its index
+[`[EntityMethod]` methods](/en/docs/guide/basics/queries#run-on-one-entity), and `Mailman` finds the actor by key in its index
 and calls the generated entry point, `Messages.Buy(shop, quantity)`. It runs the method through `entity.Run`, which
 gives it its components in one lookup, and `[Without<Closed>]` refuses a closed shop. A `Buy` that sells the last
 item adds `Closed` in the middle of the method: a structural change, and its refs still point at the shop's values.
@@ -49,7 +49,7 @@ order that ran it would make the next save store an unchanged shop.
 ## The systems of each kind [#systems]
 
 Each system belongs to the group of its kind, so `world.Update<Shop>()` runs the shop systems over the shops only.
-`InterestSystem` writes through [`Mut<Balance>`](/en/docs/guide/change-tracking#set-if-changed): `SetIfChanged`
+`InterestSystem` writes through [`Mut<Balance>`](/en/docs/guide/changes/change-tracking#set-if-changed): `SetIfChanged`
 stamps only a balance that grew.
 
 <include lang="csharp" meta='tab="Systems/ShopSystems.cs"'>../../../samples/Actors/Systems/ShopSystems.cs</include>
@@ -60,7 +60,7 @@ stamps only a balance that grew.
 
 The save group has one system, over every kind of actor. Its `[Changed<T>]` methods select the rows written since it
 last ran, so each run lists the actors written since the previous save, and its own run is the mark. Saving a record
-rewrites tables, which a pass refuses ([EECS041](/en/docs/guide/analyzer#eecs041)), so the system lists the actors in
+rewrites tables, which a pass refuses ([EECS041](/en/docs/guide/help/analyzer#eecs041)), so the system lists the actors in
 the `Unsaved` singleton and the host saves them after `world.Update<Saving>()`.
 
 <include lang="csharp" meta='title="Systems/SaveSystems.cs"'>../../../samples/Actors/Systems/SaveSystems.cs</include>
@@ -68,7 +68,7 @@ the `Unsaved` singleton and the host saves them after `world.Update<Saving>()`.
 ## Activation [#activation]
 
 `Activate` returns the active actor, or makes one from the kind's prefab and loads its
-[record](/en/docs/guide/migration-and-unload#records) (a `ComponentSet` of the persistent components) onto it with
+[record](/en/docs/guide/saves/migration-and-unload#records) (a `ComponentSet` of the persistent components) onto it with
 `LoadEntitiesInto(..., markWritten: false)`, so loading is not a change. A new actor has no
 record: its defaults are its first state, and the next save writes them.
 
@@ -106,16 +106,16 @@ not. After the restart the shop has its saved stock but no sales: `Sales` lives 
 ## Related [#related]
 
 <Cards>
-  <Card icon={<ListTree />} title="Indexes and relations" href="/en/docs/guide/indexes-and-relations">
+  <Card icon={<ListTree />} title="Indexes and relations" href="/en/docs/guide/data/indexes-and-relations">
     The index that finds an actor by its key.
   </Card>
-  <Card icon={<Layers />} title="Systems" href="/en/docs/guide/systems#system-groups">
+  <Card icon={<Layers />} title="Systems" href="/en/docs/guide/basics/systems#system-groups">
     System groups and their filters, one per kind of actor.
   </Card>
-  <Card icon={<Workflow />} title="Queries" href="/en/docs/guide/queries#run-on-one-entity">
+  <Card icon={<Workflow />} title="Queries" href="/en/docs/guide/basics/queries#run-on-one-entity">
     `[EntityMethod]` methods: work on one entity, the shape of a message.
   </Card>
-  <Card icon={<Database />} title="Migration and records" href="/en/docs/guide/migration-and-unload#records">
+  <Card icon={<Database />} title="Migration and records" href="/en/docs/guide/saves/migration-and-unload#records">
     A record of what persists, loaded onto an actor.
   </Card>
 </Cards>
