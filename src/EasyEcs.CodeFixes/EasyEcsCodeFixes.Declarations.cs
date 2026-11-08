@@ -9,17 +9,12 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace EasyEcs.CodeFixes;
 
 /// <summary>
-/// The migrations of declarations that changed shape, each from the compiler's error on the old form (the old form no
+/// The migrations from the forms of released versions, each from the compiler's error on the old form (the old form no
 /// longer binds, so these are syntax only, offered in a project that references EasyEcs): single-type
 /// <c>[WithAny&lt;T&gt;]</c> attributes and <c>.WithAny&lt;T&gt;()</c> calls (CS0305) merged into one
-/// <c>WithAny&lt;T1, T2, ...&gt;</c> (a lone one is <c>With&lt;T&gt;</c>), and the removed hook attributes (CS0246:
-/// the name makes a method a hook), <c>[GroupBy]</c> on a struct (CS0592: it goes on the grouped member), and
-/// <c>EntityRandom</c>'s tick written by hand (CS0200, or CS0272 in source, on <c>Tick++</c> or <c>Tick = ...</c>:
-/// the statement goes; CS1729, CS1501, CS1739 on <c>new EntityRandom(seed, tick)</c> or
-/// <c>SetEntityRandom(seed, tick)</c>: the tick goes; the world advances it on every update), and renamed attributes
-/// (CS0246, or CS0234 when qualified: <c>[IndexKey]</c> is <c>[LookupKey]</c>) and renamed named arguments (CS0246
-/// or CS1739: <c>ChunkRows</c> is <c>ChunkSize</c>). EECS090's rename of a method named
-/// almost like a hook lives here too.
+/// <c>WithAny&lt;T1, T2, ...&gt;</c> (a lone one is <c>With&lt;T&gt;</c>), and a renamed member of an EasyEcs type
+/// (CS0117: <c>World.ParallelChunkRows</c> is <c>World.MaxChunkSize</c>). A form that never shipped has no fix (D141).
+/// EECS090's rename of a method named almost like a hook lives here too.
 /// </summary>
 public sealed partial class EasyEcsCodeFixes
 {
@@ -82,140 +77,6 @@ public sealed partial class EasyEcsCodeFixes
         static string Title(GenericNameSyntax name) => $"Write it as {name.Identifier.ValueText}<{name.TypeArgumentList.Arguments}>";
     }
 
-    /// <summary>
-    /// CS0246 on a removed hook attribute (<c>[OnCreate]</c>, <c>[OnUpdate]</c>, <c>[OnDestroy]</c>) of a method of a
-    /// system: the attribute goes (its list too when it was alone) and the method takes the hook's name, the name alone
-    /// making it the hook; the system's uses of the old name follow. Null outside an [EcsSystem] struct.
-    /// </summary>
-    private static (string Title, SyntaxNode Old, SyntaxNode New)? FromHookAttribute(AttributeSyntax attribute)
-    {
-        if (LastName(attribute.Name) is not IdentifierNameSyntax { Identifier.ValueText: var spelled }
-            || HookNames.FirstOrDefault(h => spelled == h || spelled == h + "Attribute") is not { } hook
-            || attribute.Parent is not AttributeListSyntax { Parent: MethodDeclarationSyntax method } list
-            || method.Parent is not StructDeclarationSyntax system
-            || !system.AttributeLists.SelectMany(l => l.Attributes).Any(a => LastName(a.Name)?.Identifier.ValueText is "EcsSystem" or "EcsSystemAttribute"))
-            return null;
-
-        string old = method.Identifier.ValueText;
-        var updated = system.ReplaceNodes(system.DescendantNodes().Where(n => n == list || n == method
-                || n is IdentifierNameSyntax id && id.Identifier.ValueText == old && old != hook),
-            (original, current) => original switch
-            {
-                AttributeListSyntax => current, // removed below, once the method is rewritten
-                MethodDeclarationSyntax m => Unmarked((MethodDeclarationSyntax)current, list, old == hook ? null : hook),
-                _ => SyntaxFactory.IdentifierName(hook).WithTriviaFrom(current),
-            });
-        return (old == hook ? $"Remove [{hook}]: the name makes it the hook" : $"Rename it to {hook}: the name makes it the hook", system, updated);
-
-        static MethodDeclarationSyntax Unmarked(MethodDeclarationSyntax method, AttributeListSyntax list, string? rename)
-        {
-            var current = method.AttributeLists.First(l => l.IsEquivalentTo(list));
-            var attribute = current.Attributes.First(a => LastName(a.Name)?.Identifier.ValueText is { } n && HookNames.Any(h => n == h || n == h + "Attribute"));
-            if (current.Attributes.Count > 1)
-                method = method.ReplaceNode(current, current.WithAttributes(current.Attributes.Remove(attribute)));
-            else
-            {
-                // The list's leading trivia (the method's indentation) moves to what now comes first.
-                var leading = current.GetLeadingTrivia();
-                method = method.RemoveNode(current, SyntaxRemoveOptions.KeepNoTrivia)!;
-                method = method.WithLeadingTrivia(leading);
-            }
-
-            return rename == null ? method : method.WithIdentifier(SyntaxFactory.Identifier(rename).WithTriviaFrom(method.Identifier));
-        }
-    }
-
-    /// <summary>
-    /// CS0592 on <c>[GroupBy]</c> on a struct (it now goes on the grouped member): the member marked <c>[Group]</c> becomes
-    /// <c>[GroupBy]</c>, or, for a hand-written <c>IGroup</c>, its <c>Group</c> property takes <c>[GroupBy]</c>; the
-    /// struct's attribute goes. Null when the struct has neither.
-    /// </summary>
-    private static (string Title, SyntaxNode Old, SyntaxNode New)? GroupByOnMember(AttributeSyntax attribute)
-    {
-        if (LastName(attribute.Name) is not IdentifierNameSyntax { Identifier.ValueText: "GroupBy" or "GroupByAttribute" } name
-            || attribute.Parent is not AttributeListSyntax { Parent: TypeDeclarationSyntax type } list)
-            return null;
-
-        var marked = type.DescendantNodes().OfType<AttributeSyntax>().FirstOrDefault(a =>
-            a.Parent?.Parent is ParameterSyntax or PropertyDeclarationSyntax or FieldDeclarationSyntax
-            && a.Parent.Parent.Parent is ParameterListSyntax { Parent: TypeDeclarationSyntax } or TypeDeclarationSyntax
-            && a.FirstAncestorOrSelf<TypeDeclarationSyntax>() == type
-            && LastName(a.Name)?.Identifier.ValueText is "Group" or "GroupAttribute");
-        var own = type.Members.OfType<PropertyDeclarationSyntax>().FirstOrDefault(p => p.Identifier.ValueText == "Group");
-        if (marked == null && own == null) return null;
-
-        var tracked = type.TrackNodes(new SyntaxNode?[] { list, attribute, marked, own }.Where(n => n != null)!);
-        if (marked != null)
-        {
-            var current = tracked.GetCurrentNode(marked)!;
-            var markedName = LastName(current.Name)!;
-            tracked = tracked.ReplaceNode(markedName, SyntaxFactory.IdentifierName("GroupBy").WithTriviaFrom(markedName));
-        }
-        else
-        {
-            var property = tracked.GetCurrentNode(own!)!;
-            var mark = SyntaxFactory.AttributeList(SyntaxFactory.SingletonSeparatedList(SyntaxFactory.Attribute(name.WithoutTrivia())))
-                .WithTrailingTrivia(SyntaxFactory.Space);
-            tracked = tracked.ReplaceNode(property, property.WithoutLeadingTrivia().WithAttributeLists(property.AttributeLists.Insert(0, mark))
-                .WithLeadingTrivia(property.GetLeadingTrivia()));
-        }
-
-        var currentList = tracked.GetCurrentNode(list)!;
-        if (currentList.Attributes.Count > 1)
-            tracked = tracked.ReplaceNode(currentList, currentList.WithAttributes(currentList.Attributes.Remove(tracked.GetCurrentNode(attribute)!)));
-        else
-        {
-            var leading = currentList.GetLeadingTrivia();
-            bool first = tracked.AttributeLists.IndexOf(currentList) == 0;
-            tracked = tracked.RemoveNode(currentList, SyntaxRemoveOptions.KeepNoTrivia)!;
-            if (first) tracked = tracked.WithLeadingTrivia(leading);
-        }
-
-        return (marked != null ? "Move [GroupBy] onto the [Group] member" : "Move [GroupBy] onto the Group property", type, tracked);
-    }
-
-    /// <summary>The attributes renamed before 1.0, old name to new: the old name no longer binds.</summary>
-    private static readonly (string Old, string New)[] RenamedAttributes = [("IndexKey", "LookupKey")];
-
-    /// <summary>
-    /// CS0246 / CS0234 on an attribute of a renamed name (<see cref="RenamedAttributes"/>, spelled with or without the
-    /// <c>Attribute</c> suffix, qualified or not): the name takes the new one, its arguments and qualification kept.
-    /// Null for any other name.
-    /// </summary>
-    private static (string Title, SyntaxNode Old, SyntaxNode New)? RenamedAttribute(AttributeSyntax attribute)
-    {
-        if (LastName(attribute.Name) is not IdentifierNameSyntax { Identifier.ValueText: var spelled } name) return null;
-        foreach (var (old, renamed) in RenamedAttributes)
-        {
-            if (spelled != old && spelled != old + "Attribute") continue;
-            string now = spelled == old ? renamed : renamed + "Attribute";
-            return ($"Rename it to [{renamed}]", name, SyntaxFactory.IdentifierName(now).WithTriviaFrom(name));
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The named arguments renamed before 1.0, old name to new: <c>[ForEach(ChunkRows = n)]</c> and the parallel calls'
-    /// <c>chunkRows:</c> took OpenMP's chunk size.
-    /// </summary>
-    private static readonly (string Old, string New)[] RenamedArguments = [("ChunkRows", "ChunkSize"), ("chunkRows", "chunkSize")];
-
-    /// <summary>
-    /// CS0246 on an attribute's named argument (<c>ChunkRows = n</c>) or CS1739 on a call's (<c>chunkRows: n</c>) of a
-    /// renamed name (<see cref="RenamedArguments"/>): the name takes the new one, its value kept. Null for any other name.
-    /// </summary>
-    private static (string Title, SyntaxNode Old, SyntaxNode New)? RenamedArgument(SyntaxNode node)
-    {
-        var name = node.FirstAncestorOrSelf<AttributeArgumentSyntax>() is { NameEquals.Name: { } equals } ? equals
-            : node.FirstAncestorOrSelf<ArgumentSyntax>() is { NameColon.Name: { } colon } ? colon : null;
-        if (name == null) return null;
-        foreach (var (old, renamed) in RenamedArguments)
-            if (name.Identifier.ValueText == old)
-                return ($"Rename it to {renamed}", name, SyntaxFactory.IdentifierName(renamed).WithTriviaFrom(name));
-        return null;
-    }
-
     /// <summary>The members of EasyEcs types that shipped under another name, (type, old name, new name): the old name no longer binds.</summary>
     private static readonly (string Type, string Old, string New)[] RenamedMembers = [("World", "ParallelChunkRows", "MaxChunkSize")];
 
@@ -242,60 +103,6 @@ public sealed partial class EasyEcsCodeFixes
     /// <summary>EECS090: a method named almost like a hook takes the hook's name (the analyzer checked it has no caller).</summary>
     private static MethodDeclarationSyntax RenamedHook(MethodDeclarationSyntax method, string hook) =>
         method.WithIdentifier(SyntaxFactory.Identifier(hook).WithTriviaFrom(method.Identifier));
-
-    /// <summary>Whether the statement writes a <c>.Tick</c> (<c>++</c>, <c>--</c>, an assignment).</summary>
-    private static bool IsTickWrite(ExpressionSyntax expression) => expression switch
-    {
-        PostfixUnaryExpressionSyntax { Operand: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Tick" } } => true,
-        PrefixUnaryExpressionSyntax { Operand: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Tick" } } => true,
-        AssignmentExpressionSyntax { Left: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "Tick" } } => true,
-        _ => false,
-    };
-
-    /// <summary>Whether the <c>.Tick</c> the statement writes is <c>EasyEcs.EntityRandom.Tick</c> (CS0200 / CS0272 bind it).</summary>
-    private static async Task<bool> IsEntityRandomTick(Document document, ExpressionStatementSyntax statement, CancellationToken token)
-    {
-        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
-        var access = statement.DescendantNodes().OfType<MemberAccessExpressionSyntax>().First(m => m.Name.Identifier.ValueText == "Tick");
-        return model?.GetSymbolInfo(access, token) is { } info
-               && (info.Symbol ?? info.CandidateSymbols.FirstOrDefault()) is IPropertySymbol
-               {
-                   ContainingType: { Name: "EntityRandom", ContainingNamespace: { Name: "EasyEcs", ContainingNamespace.IsGlobalNamespace: true } }
-               };
-    }
-
-    /// <summary>The argument list an error on a call or a creation points into (its name, its type or an argument).</summary>
-    private static ArgumentListSyntax? ArgumentsAt(SyntaxNode node)
-    {
-        foreach (var at in node.AncestorsAndSelf())
-            switch (at)
-            {
-                case ArgumentListSyntax list: return list;
-                case BaseObjectCreationExpressionSyntax creation: return creation.ArgumentList;
-                case InvocationExpressionSyntax call: return call.ArgumentList;
-            }
-
-        return null;
-    }
-
-    /// <summary>
-    /// The tick of <c>new EntityRandom(seed, tick)</c> or <c>world.SetEntityRandom(seed, tick)</c> (the second argument,
-    /// or the one named <c>Tick:</c>), the form whose tick the world now moves; null for any other argument list.
-    /// </summary>
-    private static ArgumentSyntax? TickArgument(ArgumentListSyntax arguments)
-    {
-        bool random = arguments.Parent switch
-        {
-            ObjectCreationExpressionSyntax { Type: var type } => type is NameSyntax name && LastName(name) is { Identifier.ValueText: "EntityRandom" },
-            InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: "SetEntityRandom" } } => true,
-            InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.ValueText: "SetEntityRandom" } } => true,
-            _ => false,
-        };
-        if (!random || arguments.Arguments.Count != 2) return null;
-        foreach (var argument in arguments.Arguments)
-            if (argument.NameColon?.Name.Identifier.ValueText == "Tick") return argument;
-        return arguments.Arguments.Any(a => a.NameColon != null) ? null : arguments.Arguments[1];
-    }
 
     /// <summary>The type arguments of the merged names in order, each once.</summary>
     private static List<TypeSyntax> Merged(IEnumerable<GenericNameSyntax> names)

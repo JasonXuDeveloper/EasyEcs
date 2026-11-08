@@ -58,9 +58,8 @@ src/EasyEcs.CodeFixes/         EasyEcsCodeFixes.cs: fixes for the analyzer's dia
                                EECS084 ([Consume]), EECS116 (the tile's step by ref, writing Write(row), or a cell method's out of its own cell type: CellStepped; the commit, its system and AddSystem statements, and the buffer's type deleted when nothing else names them), EECS117 ([GaussSeidel]), EECS119 ([ForEach(MaxRows = N)] from an OnUpdate's CollectIds and loop), EECS103 (a hand-written vector loop as the method for one row), EECS107 (a hand-written neighbor search as the pair method); EasyEcsCodeFixes.Systems.cs: EECS074 (a ref struct), EECS075
                                (static), and the migration of a class deriving from the removed EcsSystem (the
                                compiler's CS0246) into an [EcsSystem] ref struct; EasyEcsCodeFixes.Declarations.cs:
-                               the migrations of declarations that changed shape, from the compiler's error on the old
-                               form (WithAny<T> merged, the hook attributes, [GroupBy] onto the member, EntityRandom's
-                               tick written by hand, renamed attributes: RenamedAttributes) and EECS090's rename; EasyEcsCodeFixes.Views.cs: EECS101 (a hand-built view
+                               the migrations from the forms of released versions, from the compiler's error on the old
+                               form (WithAny<T> merged, a renamed member: RenamedMembers) and EECS090's rename; EasyEcsCodeFixes.Views.cs: EECS101 (a hand-built view
                                as the method's parameter); EasyEcsCodeFixes.Split.cs: EECS055 /
                                EECS091 (a component split, solution-wide, offered only when every use can follow it);
                                EasyEcsCodeFixes.Lambdas.cs: EECS095 (pass captured values before a static lambda),

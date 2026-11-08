@@ -856,8 +856,9 @@ public class CodeFixTests
         return actions;
     }
 
-    // Declarations whose old form no longer compiles, migrated from the compiler's error: single-type WithAny
-    // attributes and calls (CS0305) merged into one WithAny of several types (a lone one is With).
+    // Forms of released versions that no longer compile, migrated from the compiler's error: single-type WithAny
+    // attributes and calls (CS0305) merged into one WithAny of several types (a lone one is With), and
+    // World.ParallelChunkRows (CS0117) renamed.
     [TestCase("CS0305", "[EcsSystem] public ref struct S { [ForEach, WithAny<P>, WithAny<Q>] static void A(ref T t) => t.V++; }",
         "[ForEach, WithAny<P, Q>] static void A", "Write it as WithAny<P, Q>")]
     [TestCase("CS0305", "[EcsSystem] public ref struct S { [ForEach, With<T>]\n  [WithAny<P>]\n  [WithAny<Q>]\n  static void A(ref T t) => t.V++; }",
@@ -869,40 +870,10 @@ public class CodeFixTests
         "QueryFilter.Create().WithAny<P, Q>().Without<T>();", "Write it as WithAny<P, Q>")]
     [TestCase("CS0305", "public static class U { public static int N(World w) => w.Count<T>(QueryFilter.Create().WithAny<P>()); }",
         "QueryFilter.Create().With<P>()", "Write it as With<P>")]
-    [TestCase("CS0246", "[EcsSystem] public ref struct S { [OnUpdate] static void OnUpdate(World world) { } }",
-        "{ static void OnUpdate(World world) { } }", "Remove [OnUpdate]: the name makes it the hook")]
-    [TestCase("CS0246", "[EcsSystem]\npublic ref struct S\n{\n    /// <summary>Spawns.</summary>\n    [OnCreate]\n    static void Spawn(World world) => world.CreateEntity(new P());\n    static void Again(World w) => Spawn(w);\n}",
-        "    /// <summary>Spawns.</summary>\n    static void OnCreate(World world) => world.CreateEntity(new P());\n    static void Again(World w) => OnCreate(w);", "Rename it to OnCreate: the name makes it the hook")]
-    [TestCase("CS0246", "[EcsSystem] public ref struct S { [OnDestroy, System.Obsolete] static void Bye() { } }",
-        "{ [System.Obsolete] static void OnDestroy() { } }", "Rename it to OnDestroy: the name makes it the hook")]
-    [TestCase("CS0246", "public partial record struct Owner([IndexKey] EntityId Of) : IComponent;",
-        "public partial record struct Owner([LookupKey] EntityId Of) : IComponent;", "Rename it to [LookupKey]")]
-    [TestCase("CS0246", "[IndexKeyAttribute, System.Serializable] public readonly partial struct K : IComponent, System.IEquatable<K> { public readonly int X; public bool Equals(K o) => X == o.X; }",
-        "[LookupKeyAttribute, System.Serializable] public readonly partial struct K", "Rename it to [LookupKey]")]
-    [TestCase("CS0234", "public partial struct Seat : IComponent { [EasyEcs.IndexKey] public int Row; }",
-        "{ [EasyEcs.LookupKey] public int Row; }", "Rename it to [LookupKey]")]
-    [TestCase("CS0592", "/// <summary>Zones.</summary>\n[GroupBy]\npublic partial record struct Zone([Group] int Id) : IComponent;",
-        "/// <summary>Zones.</summary>\npublic partial record struct Zone([GroupBy] int Id) : IComponent;", "Move [GroupBy] onto the [Group] member")]
-    [TestCase("CS0592", "[GroupBy, System.Serializable] public partial struct Hall : IComponent { [Group] public int Floor; }",
-        "[System.Serializable] public partial struct Hall : IComponent { [GroupBy] public int Floor; }", "Move [GroupBy] onto the [Group] member")]
-    [TestCase("CS0592", "[GroupBy] public record struct Room(int Id) : IComponent, IGroup { public int Group => Id; }",
-        "public record struct Room(int Id) : IComponent, IGroup { [GroupBy] public int Group => Id; }", "Move [GroupBy] onto the Group property")]
-    [TestCase("CS0200", "public static class C { public static void Step(World w) { w.GetSingleton<EntityRandom>().Tick++; w.Update(); } }",
-        "Step(World w) { w.Update(); }", "Remove it: the world advances EntityRandom's tick on every update")]
-    [TestCase("CS0200", "public static class C { public static void Step(World w) { w.GetSingleton<EntityRandom>().Tick = 3; } }",
-        "Step(World w) { }", "Remove it: the world advances EntityRandom's tick on every update")]
-    [TestCase("CS1729", "public static class C { public static EntityRandom R() => new EntityRandom(1, 2); }",
-        "=> new EntityRandom(1);", "Drop the tick: the world advances it on every update")]
-    [TestCase("CS1739", "public static class C { public static EntityRandom R() => new EntityRandom(Seed: 1, Tick: 2); }",
-        "=> new EntityRandom(Seed: 1);", "Drop the tick: the world advances it on every update")]
     [TestCase("CS0117", "public static class C { public static int Cap() => World.ParallelChunkRows * 2; }",
         "World.MaxChunkSize * 2", "Rename it to MaxChunkSize")]
     [TestCase("CS0117", "public static class C { public static int Cap() => EasyEcs.World.ParallelChunkRows; }",
         "EasyEcs.World.MaxChunkSize;", "Rename it to MaxChunkSize")]
-    [TestCase("CS0246", "[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkRows = 64)] static void M(ref P p) { } }",
-        "[ForEach(Parallel = true, ChunkSize = 64)]", "Rename it to ChunkSize")]
-    [TestCase("CS1739", "public struct J : IForRange { public void Execute(int start, int end) { } } public static class C { public static void Go(World w) { var j = new J(); w.ParallelFor(10, ref j, chunkRows: 64); } }",
-        "w.ParallelFor(10, ref j, chunkSize: 64);", "Rename it to chunkSize")]
     public async Task MigratesADeclarationOfTheOldForm(string id, string source, string expected, string title)
     {
         var document = Document(Data + source);
@@ -918,23 +889,6 @@ public class CodeFixTests
         var errors = (await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error);
         Assert.That(errors, Is.Empty, text); // the error the fix was offered for is gone: it is not offered again
         Assert.That((await Analyze(fixedDocument)).Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, text);
-    }
-
-    // The generated SetEntityRandom(seed) given the old tick too (CS1501, with the generators: the member is generated).
-    [Test]
-    public async Task MigratesAGeneratedSetterGivenATick()
-    {
-        var document = Document(Data + "public static class C { public static void Seed(World w) => w.SetEntityRandom(1, 2); }", generate: true);
-        var compiled = (await document.Project.GetCompilationAsync())!.GetDiagnostics();
-        var actions = new List<CodeAction>();
-        foreach (var diagnostic in compiled.Where(d => d.Id == "CS1501"))
-            await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
-        Assert.That(actions.Select(a => a.Title), Is.EqualTo(new[] { "Drop the tick: the world advances it on every update" }), string.Join("\n", compiled));
-        var operation = (await actions[0].GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
-        var fixedDocument = operation.ChangedSolution.GetDocument(document.Id)!;
-        var text = (await fixedDocument.GetTextAsync()).ToString();
-        Assert.That(text, Does.Contain("w.SetEntityRandom(1);"));
-        Assert.That((await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, text);
     }
 
     // A [ForEach] method called by its bare name inside its own type binds to the method itself (CS7036 with two
@@ -974,16 +928,6 @@ public class CodeFixTests
         var text = (await document.GetTextAsync()).ToString();
         Assert.That(text, Does.Contain("[Nino.Core.NinoType]\npublic partial struct Name").And.Contain("[Nino.Core.NinoType]\npublic partial struct Tag"));
         Assert.That((await Analyze(document)).Where(d => d.Id == "EECS069" && d.Location.SourceSpan.Start >= Data.Length), Is.Empty, text);
-    }
-
-    [Test]
-    public async Task AnUnknownAttributeIsNoRenamedOne()
-    {
-        var document = Document(Data + "public partial struct Seat : IComponent { [Indexed] public int Row; }");
-        var diagnostic = (await document.Project.GetCompilationAsync())!.GetDiagnostics().First(d => d.Id == "CS0246");
-        var actions = new List<CodeAction>();
-        await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
-        Assert.That(actions, Is.Empty, "only the names RenamedAttributes lists are migrated");
     }
 
     // CS0117 on a member of the same name of another type is no renamed EasyEcs member.
