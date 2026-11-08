@@ -130,18 +130,18 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
     [TestCase("[ForEach, Changed<DynamicBuffer<int>>] static void A(in DynamicBuffer<int> b, ref P p) { }", ".Changed<global::EasyEcs.DynamicBuffer<int>>(0)", "access.Read<global::EasyEcs.DynamicBuffer<int>>();")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "Since(system.LastRunTick + 1)", "WriteMask => 1;")]
-    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Write<global::Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref global::System.Runtime.CompilerServices.Unsafe.Add(")]
+    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Write<global::Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref __Unsafe.Add(")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value.V++; }", "access.Write<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]  // untracked: no stamp
     [TestCase("[ForEach] static void A(ref P p, ReadOnlyMaybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]
     [TestCase("[ForEach] static void A(ref P p, Maybe<T> t) { if (t.HasValue) t.Value = default; }", "access.Write<global::T>();", "MaybeColumn<global::T>(in entities, true)")]  // tracked: stamped
     [TestCase("[ForEach] static void A(Mut<T> t, in P p) => t.SetIfChanged(new T { V = p.V });", "access.Write<global::T>();", "access.Read<global::P>();",
-        "IForEachBatch<global::T, global::P>", "new global::EasyEcs.Mut<global::T>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r1, i), in u0, (int)i)", "var u0 = global::EasyEcs.MutColumn.Of<global::T>(in entities);",
+        "IForEachBatch<global::T, global::P>", "new global::EasyEcs.Mut<global::T>(ref __Unsafe.Add(ref r1, i), in u0, (int)i)", "var u0 = global::EasyEcs.MutColumn.Of<global::T>(in entities);",
         "WriteMask => 1;", "SelfStamped => 1;")]                                                                          // stamped by row
     [TestCase("[ForEach] static void A(Entity e, Mut<T> t) { t.Write().V = 1; e.Destroy(); }", "IForEachEntity<global::T>",
         "new global::EasyEcs.Mut<global::T>(ref c1, entity)", "SelfStamped => 1;", "access.RunAlone();")]                 // moves: by entity
     [TestCase("[ForEach] static void A(in P p, Mut<Q> q) { if (p.V > 0) q.Write().V = p.V; }", "access.Write<global::Q>();", "WriteMask => 2;", "SelfStamped => 2;")]  // untracked: a plain ref
     [TestCase("[ForEach] static void A(Mut<T> t, Maybe<Q> q) { if (q.HasValue) t.Write().V = q.Value.V; }", "IForEachBatch<global::T>",
-        "new global::EasyEcs.Mut<global::T>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r1, i), in u0, (int)i)", "var u0 = global::EasyEcs.MutColumn.Of<global::T>(in entities);", "SelfStamped => 1;")]
+        "new global::EasyEcs.Mut<global::T>(ref __Unsafe.Add(ref r1, i), in u0, (int)i)", "var u0 = global::EasyEcs.MutColumn.Of<global::T>(in entities);", "SelfStamped => 1;")]
     [TestCase("[ForEach(Parallel = true)] static void A(Mut<T> t) => t.SetIfChanged(default);", "ForEachEntityParallel<global::T,", "SelfStamped => 1;")]
     [TestCase("[ForEach, ChangedAny<T, T2>, ChangedAny<T2, T>] static void A(ref P p) { } public struct T2 : IComponent, ITracked { public int V; }",
         ".ChangedAny<global::T, global::S.T2>(0)", "access.Read<global::T>();", "access.Read<global::S.T2>();", "Since(system.LastRunTick + 1)")]
@@ -281,7 +281,17 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(in F f, Emit<Score> s) { if (f.V > 1) s.Add(new Score(f.V * 2)); } public record struct Score(float V);", true)]
     [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V <= 0) e.SetH(f.V); }", false)]      // a value per row
     [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V < 0) e.Set(new H()); else e.Remove<D>(); }", false)] // two changes
-    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V < 0) e.RemoveF(); }", false)]        // the component it takes
+    [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V < 0) e.RemoveF(); }", true)]         // the component it takes, last
+    [TestCase("[ForEach] static void A(Entity e, ref F f) { if (--f.V <= 0) e.RemoveF(); }", true)]     // a timer: -- as a value
+    [TestCase("[ForEach] static void A(Entity e, ref F f) { if (f.V < 0) e.RemoveF(); f.V++; }", false)] // ... used after the change
+    [TestCase("[ForEach] static void A(ref F f, in H h) { if (h.V > 0 && f.V++ > 3) f.V = 0; }", true)]  // ++ as a value under &&
+    [TestCase("[ForEach] static void A(ref F f, in H h) => f.V = h.V > 0 ? f.V++ : --f.V;", true)]       // ... in the branches of ?:
+    [TestCase("[ForEach] static void A(ref B8 b) { if (b.V-- == 0) b.V = 9; }", true)]                   // ... in byte lanes
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V / 4 + c.V % 8);", true)]  // byte lanes: a shift, a mask
+    [TestCase("public struct Tg : IComponent { } [ForEach] static void A(ref F f, in Tg z) => f.V *= 2;", true)] // a tag as a filter
+    [TestCase("public struct Tg : IComponent { } [ForEach] static void A(ref F f, ReadOnlyMaybe<Tg> z) => f.V = z.HasValue ? 0 : f.V;", true)] // its presence
+    [TestCase("public struct Tg : IComponent { } [ForEach] static void A(in Tg z) => System.Console.WriteLine();", false)] // tags only
+    [TestCase("public struct Census : ISingletonComponent { public int N; public long Sum; public float Low; } [ForEach] static void A(in P p, ref Census c) { if (p.V > 0) c.N++; c.Sum += p.V; c.Low = System.Math.Min(c.Low, p.V); }", true)] // running totals of a singleton
     [TestCase("[ForEach] static void A(Entity e, in F f, Emit<Hit> h) { if (f.V < 0) { e.Destroy(); h.Add(new Hit(e.Id)); } } public record struct Hit(EntityId Who);", false)]
     [TestCase("[ForEach] static void A(Entity e, in F f) { if (f.V < 0) e.SetH(1); if (f.V > 5) System.Console.WriteLine(); }", false)] // a cold branch
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) { c.Value.N++; c.Value.Low = System.Math.Min(c.Value.Low, p.V); }", true)] // reductions
@@ -313,6 +323,10 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = c.V switch { 0 => 1, < 10 => (byte)(b.V + 1), _ => b.V };", true)] // narrow lanes
     [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V = Pick(q.V); static int Pick(int v) { switch (v) { case 0: return 1; case > 5: return 2; } return 3; }", true)] // helpers
     [TestCase("[ForEach] static void A(ref F f) => f.V = Sign(f.V); static float Sign(float v) => v switch { < 0 => -1, > 0 => 1, _ => 0 };", true)]
+    // [StructLayout(LayoutKind.Sequential)] with no Pack or Size is C#'s own layout; Explicit, Pack and Size are not.
+    [TestCase("[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] public struct Seq : IComponent { public float X, Y; } [ForEach] static void A(ref Seq s, in F f) => s.X += s.Y * f.V;", true)]
+    [TestCase("[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 0)] public struct Seq : IComponent { public float V; } [ForEach] static void A(ref Seq s) => s.V++;", true)]
+    [TestCase("[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Pack = 2)] public struct Seq : IComponent { public float V; } [ForEach] static void A(ref Seq s) => s.V++;", false)]
     // A helper whose value is target-typed (new(...)): inlined where 'var' gives no type, it keeps its return type.
     [TestCase("public record struct Cell2(int X, int Z); static Cell2 At(float v) => new((int)v, (int)v); [ForEach] static void A(ref F f) { var c = At(f.V); f.V = c.X + c.Z; }", true)]
     public void QualifyingMethodsGetAVectorLoop(string members, bool vectorized)
@@ -321,13 +335,13 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("S.ForEach.g.cs") || t.FilePath.Contains("/S.") && IsCode(t)).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.EqualTo(vectorized), generated);
+        Assert.That(generated.Contains("for (nint last = rows - __Vec_"), Is.EqualTo(vectorized), generated);
         // Vector512 first where the hardware runs it, then Vector<T> for the rows left.
-        Assert.That(generated.Contains("for (nint last = rows - global::System.Runtime.Intrinsics.Vector512<"), Is.EqualTo(vectorized), generated);
+        Assert.That(generated.Contains("for (nint last = rows - __V512_"), Is.EqualTo(vectorized), generated);
         // (In the job's Execute: a job that marks rows also names Vector.IsHardwareAccelerated in its Vectorizes.)
         int execute = System.Math.Max(0, generated.IndexOf("public void Execute(global::EasyEcs.EntitySpan", System.StringComparison.Ordinal));
         Assert.That(generated.IndexOf("Vector512.IsHardwareAccelerated", execute, System.StringComparison.Ordinal)
-            < generated.IndexOf("global::System.Numerics.Vector.IsHardwareAccelerated", execute, System.StringComparison.Ordinal), Is.EqualTo(vectorized), generated);
+            < generated.IndexOf("__Vec.IsHardwareAccelerated", execute, System.StringComparison.Ordinal), Is.EqualTo(vectorized), generated);
         // A vector loop also takes words of rows of which some pass, as a lane mask (IForEachMasked); a parallel one
         // runs each chunk's runs of rows (ForEachBatchParallel).
         bool parallel = members.Contains("Parallel = true");
@@ -352,6 +366,8 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Round(f.V, 2);", "MathF.Round is not supported")]
     [TestCase("[ForEach] static void A(ref F f) => f.V %= 2;", "'%' of floats is not supported (no vector remainder)")]
     [TestCase("[ForEach] static void A(ref Split s) => s.A++;", "component Split declares fields in several parts, so the order of its fields is not defined: declare them in one part", true)]
+    [TestCase("[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Explicit)] public struct Ex : IComponent { [System.Runtime.InteropServices.FieldOffset(0)] public float V; } [ForEach] static void A(ref Ex e) => e.V++;", "component Ex sets its layout ([StructLayout] with Explicit, Pack or Size)")]
+    [TestCase("[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential, Size = 8)] public struct Sz : IComponent { public float V; } [ForEach] static void A(ref Sz e) => e.V++;", "component Sz sets its layout ([StructLayout] with Explicit, Pack or Size)")]
     [TestCase("[ForEach] static void A(ref L64 l) => l.V %= 10;", "'%' of long lanes by 10, not a power of two, is not supported (no exact vector form for lanes of 8 bytes)")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) => x > 0 ? M(x - 1) : x;", "it calls S.M, which is recursive")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = M(f.V); static float M(float x) { for (int i = 0; i < 2; i++) x++; return x; }", "it calls S.M, which has a loop")]
@@ -403,7 +419,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)System.Math.Min(b.V - c.V, 10);", "'(byte)System.Math.Min(b.V - c.V, 10)' keeps the low bits of an int the vector loop cannot compute in 8-bit lanes (it may leave [0, 255] and [-128, 127])")]
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)((b.V * c.V) >> 8);", "the shift '(b.V * c.V) >> 8' needs bits of an int that 8-bit lanes do not hold")]
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V << c.V);", "the shift 'b.V << c.V' is by a count that is not a constant")]
-    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V / (c.V + 1));", "integer division is not supported (it throws on 0)")]
+    [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V / (c.V + 1));", "integer division ('b.V / (c.V + 1)') by a value that differs per row is not supported in 8-bit lanes (it throws on 0)")]
     [TestCase("[ForEach] static void A(ref B8 b, in S8 s) { if (b.V > s.V) b.V = 0; }", "'b.V > s.V' compares ints that 8-bit lanes do not hold")]
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) { if (b.V + c.V > 255) b.V = 0; }", "'b.V + c.V > 255' compares ints that 8-bit lanes do not hold")]
     [TestCase("[ForEach] static void A(ref Sixteen r, in G g) { r.F0 += r.F2 * g.Pull; r.F1 += r.F3 * g.Pull; }", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 4 fields it uses takes 42 permutes per 16 rows, more than its 4 vector operations gain; it uses 4 of Sixteen's 16 fields (F0, F1, F2, F3): split them into a component of their own (a component of 4 fields gets a vector loop)", true)]
@@ -423,8 +439,12 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Odd o) => o = new Odd(o.Y, o.X);", "Odd's constructor does more than set fields from its parameters ('Y = x + y;')")]
     [TestCase("[ForEach] static void A(ref F f, in H h) { ref var v = ref f.V; v += h.V; }", "ref local 'v' is not supported: name the parameter's fields instead", true)]
     [TestCase("[ForEach] static void A(ref F f, in H h) { float v; v = h.V; f.V = v; }", "local 'v' has no initializer: give it its value where it is declared", true)]
-    [TestCase("public partial struct Low : ISingletonComponent { public EntityId Id; [MinBy] public float V; } [ForEach] static void A(Entity e, in F f, ref Reduce<Low> l) { if (f.V < l.Value.V) l.Value = new Low { Id = e.Id, V = f.V }; }",
-        "it reduces into Low, which keeps the row with the lowest V ([MinBy]): a vector loop does not keep a row by its key yet, so the method runs row by row")]
+    [TestCase("public partial struct Low : ISingletonComponent { public EntityId Id; [MinBy] public float V; } [ForEach] static void A(Entity e, in F f, ref Reduce<Low> l) { if (f.V <= l.Value.V) l.Value = new Low { Id = e.Id, V = f.V }; }",
+        "it keeps a row of Low in a form a vector loop does not read: write 'if (key < r.Value.V) r.Value = new Low { V = key, Id = entity.Id };' with nothing else in the branch", true)] // <= keeps the later row of a tie
+    [TestCase("public partial struct Low : ISingletonComponent { public EntityId Id; public int N; [MinBy] public float V; } [ForEach] static void A(Entity e, in F f, ref Reduce<Low> l) { if (f.V < l.Value.V) l.Value = new Low { Id = e.Id, V = f.V }; }",
+        "it reduces into Low, which keeps the row with the lowest V: a vector loop keeps the key and the row's entity, and Low holds Id, N besides its key")]
+    [TestCase("public partial struct Low : ISingletonComponent { public EntityId Id; [MinBy] public long V; } [ForEach] static void A(Entity e, in L64 f, ref Reduce<Low> l) { if (f.V < l.Value.V) l.Value = new Low { Id = e.Id, V = f.V }; }",
+        "it reduces into Low, which keeps the row with the lowest V, a long: a vector loop keeps a key of 4 bytes (int, uint, float) beside the row's index")]
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V = e.Id.Index;", "it uses the Entity in 'e.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)", true)]
     [TestCase("public record struct Wide2(int A, long B); static Wide2 At(float v) => new((int)v, 1); [ForEach] static void A(ref F f) { var c = At(f.V); f.V = c.A; }", "local 'c' is a S.Wide2, not a lane type of 4 or 8 bytes")] // the helper's new(...) keeps its type in 'var c'
     [TestCase("[System.Runtime.CompilerServices.InlineArray(4)] public struct Quad { private float _q; } public struct Held : IComponent { public float V; public Quad Q; } [ForEach] static void A(ref Held h) => h.V += 1;", "component Held holds an inline array and has 5 lanes: a vector loop splits up to 4 fields of a row, and takes more only when the method does the same to each lane (a flat loop); it uses 1 of Held's fields (V) and not the array: move it into a component of its own (a component of one field gets a vector loop)", true)] // as many values as its length, never one lane
@@ -448,7 +468,9 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Holder h) { }")]                                             // not numeric fields
     [TestCase("[ForEach] static void A(System.Span<F> f) { }")]                                          // a batch method
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;")] // vectorized
-    [TestCase("[EntityMethod] static void A(ref F f, in H h) => f.V = h.V.GetHashCode();")]                // one entity: no loop
+    [TestCase("[EntityMethod] static void A(ref F f, in H h) => f.V = h.V.GetHashCode();")]
+    [TestCase("public partial struct Low : ISingletonComponent { public EntityId Id; [MinBy] public float V; } [ForEach] static void A(Entity e, in F f, ref Reduce<Low> l) { if (f.V < l.Value.V) l.Value = new Low { Id = e.Id, V = f.V }; }")] // a kept row: vectorized
+    [TestCase("public partial record struct Hi(EntityId Who, [MaxBy] int V) : ISingletonComponent; [ForEach(Parallel = true)] static void A(Entity e, in P p, ref Reduce<Hi> h) { if (h.Value.V < p.V) h.Value = new Hi(e.Id, p.V); }")]                // one entity: no loop
     [TestCase("public struct Acc : ISingletonComponent { public float Sum; } [ForEach] static void A(in F f, ref Acc a) => a.Sum += f.V;")] // accumulated by hand: EECS086 when a system resets it, a running total otherwise
     public void MethodsNotMeantForAVectorLoopGetNoMessage(string members)
     {
@@ -459,7 +481,14 @@ public class GeneratorTests
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, ref F f) => f.V = e.Id.Index;", "it uses the Entity in 'e.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V <= 0) e.SetH(f.V); }", "'e.SetH(f.V)' sets H to a value that differs per row: a vector loop gives the rows it marks one value; set the tag here and the value in a [ForEach] method over the tag")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.Set(new H()); else e.Remove<D>(); }", "it makes two structural changes ('e.Set(new H())' and 'e.Remove<D>()'): a vector loop applies one; split the method into one [ForEach] method per change")]
-    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.RemoveF(); }", "it changes F, which it also takes as 'f': the change would be seen at once by the method and after the pass by a vector loop; change it in a [ForEach] method of its own")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, ref F f) => f.V += e.Read<H>().V;", "it uses the Entity in 'e.Read<H>()': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, ref F f) { if (e.Has<H>()) f.V++; }", "it uses the Entity in 'e.Has<H>()': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, ref F f) { if (f.V < 0) e.RemoveF(); f.V++; }", "it changes F, which it also takes as 'f', and uses 'f' after the change ('f.V'): the change would be seen at once by the method and after the pass by a vector loop; change it last, or in a [ForEach] method of its own")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, ref F f) { for (int i = 0; i < 2; i++) { if (f.V < 0) e.RemoveF(); } }", "it changes F, which it also takes as 'f', and uses 'f' after the change ('f.V'): the change would be seen at once by the method and after the pass by a vector loop; change it last, or in a [ForEach] method of its own")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in H h) => f.V = h.V switch { > 0 => f.V++, _ => 0 };", "'f.V++' changes 'f.V' inside '> 0 => f.V++', which runs it for some rows only: write the change in a statement of its own")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f) => f.V = f.V + f.V++;", "it reads 'f.V' before 'f.V++' changes it in one statement: write the change in a statement of its own")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V / 3);", "'/' by 3 is not supported in 8-bit lanes: there a division is a shift (or a mask) only by a power of two and of a value that is never negative; 4-byte lanes divide by any constant (an int field)")]
+    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in DynamicBuffer<int> items) => f.V = items.Count;", "it takes a DynamicBuffer<Int32> ('items'), a list per row, which no lane holds: the method runs row by row, and its loops over the buffer's elements get vector forms of their own")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.Clone(); }", "it calls 'e.Clone()': a vector loop applies one Set, Remove, Disable, Enable or Destroy of one component to the rows it marks")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.SetH(1); if (f.V > 5) System.Console.WriteLine(); }", "it calls Console.WriteLine, which is defined in another assembly, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, which cannot change structure during the pass; move that branch into a [ForEach] method of its own")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require, Parallel = true)] static void A(ref F f, in B8 b) => f.V++;", "lane types byte and float differ in size: a vector loop takes lanes of one size and of twice that size, not 4 times; widen the byte to 2-byte lanes, or split the method so each takes lanes of one size")]
@@ -485,7 +514,7 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated, Does.Contain("internal ref struct AJob0 : global::EasyEcs.IForEach<"), generated);  // per row
         Assert.That(generated, Does.Contain("internal ref struct BJob1 : global::EasyEcs.IForEachMasked<"), generated);
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "Vector.LoadUnsafe").Count, Is.EqualTo(2), generated); // B only: its batch and masked forms (and their Vector512.LoadUnsafe)
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "__Vec.LoadUnsafe").Count, Is.EqualTo(2), generated); // B only: its batch and masked forms (and their Vector512.LoadUnsafe)
     }
 
     [Test]
@@ -497,7 +526,7 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t)).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("var __c1_0 = global::System.Numerics.Vector.LoadUnsafe(ref e1, (nuint)i);"), generated);
+        Assert.That(generated, Does.Contain("var __c1_0 = __Vec.LoadUnsafe(ref e1, (nuint)i);"), generated);
         Assert.That(generated, Does.Not.Contain("__c2_0"), generated);
     }
 
@@ -522,7 +551,7 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated.Contains("lanes = rows * 2;"), Is.EqualTo(flat), generated);
-        Assert.That(generated.Contains("for (nint last = rows - global::System.Numerics.Vector<"), Is.True, generated); // masked words, or the loop
+        Assert.That(generated.Contains("for (nint last = rows - __Vec_"), Is.True, generated); // masked words, or the loop
         if (flat) Assert.That(generated, Does.Contain("i /= 2;").And.Contain("Interleaved.Load2("), generated);   // the masked Execute deinterleaves
     }
 
@@ -539,7 +568,7 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("internal struct AJob0 : global::EasyEcs.IForEachMasked<global::F>, global::EasyEcs.INoStructuralChanges")
             .And.Contain("ref readonly global::G __p1 = ref s1.Value;")
             .And.Contain("var l2 = a2;")
-            .And.Contain("l2.Value.N = unchecked((int)(l2.Value.N + global::System.Numerics.Vector.Sum(__a2_0)));")
+            .And.Contain("l2.Value.N = unchecked((int)(l2.Value.N + __Vec.Sum(__a2_0)));")
             .And.Contain("static bool global::EasyEcs.IForEachBatch<global::F>.Merges => true;")
             .And.Contain("world.ForEachMaskedParallel<global::F, __ForEach.AJob0>(ref job0, in __ForEach.AFilter0);")
             .And.Contain("ulong pass"), generated); // each chunk's masked words
@@ -559,7 +588,7 @@ public class GeneratorTests
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
-        Assert.That(generated, Does.Contain("ForEachMaskedParallel<").And.Contain("Vector.LoadUnsafe"));
+        Assert.That(generated, Does.Contain("ForEachMaskedParallel<").And.Contain("__Vec.LoadUnsafe"));
     }
 
     // Maybe<T>: HasValue is a lane mask of the presence bits, Value's fields are lanes of the run's optional column; a
@@ -573,14 +602,14 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("ref float __r1 = ref global::System.Runtime.CompilerServices.Unsafe.As<global::H, float>(ref m1.Lanes);")
-            .And.Contain("var __has1 = global::EasyEcs.Interleaved.Lanes32(m1.Present(i), 0);")
-            .And.Contain("var __has1 = global::EasyEcs.Interleaved.Lanes32In512(m1.Present(i), 0);")
-            .And.Contain("var __q1_0 = global::System.Numerics.Vector.LoadUnsafe(ref __r1, (nuint)i & __z1);")
+        Assert.That(generated, Does.Contain("ref float __r1 = ref __Unsafe.As<global::H, float>(ref m1.Lanes);")
+            .And.Contain("var __has1 = __Interleaved.Lanes32(m1.Present(i), 0);")
+            .And.Contain("var __has1 = __Interleaved.Lanes32In512(m1.Present(i), 0);")
+            .And.Contain("var __q1_0 = __Vec.LoadUnsafe(ref __r1, (nuint)i & __z1);")
             .And.Not.Contain("__live"), generated);
         // One check, for the read outside the branch; none for the one under h.HasValue.
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(global::System.Numerics.Vector<int>.AllBitsSet & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(1), generated);
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__pass & ~__has1\) != global::System.Numerics.Vector<int>.Zero;").Count, Is.EqualTo(1), generated);
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__Vec_int.AllBitsSet & ~__has1\) != __Vec_int.Zero;").Count, Is.EqualTo(1), generated);
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__pass & ~__has1\) != __Vec_int.Zero;").Count, Is.EqualTo(1), generated);
         Assert.That(generated, Does.Not.Contain("__bail |= (__pass & __m"), generated);
     }
 
@@ -609,8 +638,8 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("__bail |= __m1 != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
-            .And.Contain("__bail |= (__pass & __m1) != global::System.Numerics.Vector<int>.Zero; // a cold branch: the method runs these rows")
+        Assert.That(generated, Does.Contain("__bail |= __m1 != __Vec_int.Zero; // a cold branch: the method runs these rows")
+            .And.Contain("__bail |= (__pass & __m1) != __Vec_int.Zero; // a cold branch: the method runs these rows")
             .And.Not.Contain("Log("), generated);
     }
 
@@ -641,12 +670,12 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("private static readonly bool __layout1 = __Layout1();")
             .And.Contain("t = t with { Speed = global::System.BitConverter.Int32BitsToSingle(1) };")
             .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported && __layout1 && rows - i >=")
-            .And.Contain("global::System.Runtime.Intrinsics.Vector512.LoadUnsafe(ref e1, (nuint)i * 3 + 32);")
+            .And.Contain("__V512.LoadUnsafe(ref e1, (nuint)i * 3 + 32);")
             .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2(")
-            .And.Contain("global::System.Numerics.Vector.IsHardwareAccelerated && global::EasyEcs.Interleaved.IsWideAccelerated && __layout1 && rows - i >=")
-            .And.Contain("var __c1_0 = global::EasyEcs.Interleaved.Pick(__v1_0, __v1_1, __v1_2, __y0);")
-            .And.Contain("__v1_1 = global::EasyEcs.Interleaved.PickInto(__v1_1, __c1_0, __y2);")
-            .And.Contain("global::System.Runtime.Intrinsics.Vector128.Create((byte)0, 1, 2, 3, 12, 13, 14, 15, 24, 25, 26, 27, 36, 37, 38, 39);")
+            .And.Contain("__Vec.IsHardwareAccelerated && __Interleaved.IsWideAccelerated && __layout1 && rows - i >=")
+            .And.Contain("var __c1_0 = __Interleaved.Pick(__v1_0, __v1_1, __v1_2, __y0);")
+            .And.Contain("__v1_1 = __Interleaved.PickInto(__v1_1, __c1_0, __y2);")
+            .And.Contain("__V128.Create((byte)0, 1, 2, 3, 12, 13, 14, 15, 24, 25, 26, 27, 36, 37, 38, 39);")
             .And.Contain("A: vector (Vector512 or Vector<float> of 128 bits), wide component (permutes, table lookups), masked words scalar"), generated);
     }
 
@@ -676,8 +705,8 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("global::System.Numerics.Vector.SubtractSaturate(__c1_0, __c2_0)")
-            .And.Contain("global::System.Runtime.Intrinsics.Vector512.AddSaturate(")
+        Assert.That(generated, Does.Contain("__Vec.SubtractSaturate(__c1_0, __c2_0)")
+            .And.Contain("__V512.AddSaturate(")
             .And.Contain("(__c1_0 + __c2_0)")
             .And.Contain("Interleaved.Lanes8"), generated); // masked words of byte lanes: a word's bits as lanes
         // the masked Execute: the vector loop over the word, its passing rows as lanes
@@ -723,7 +752,7 @@ public class GeneratorTests
         // Wet counts the lanes of a condition: a scalar counter of their popcounts, no vector of 0 / 1 (Kernel.Counts).
         int start = generated.IndexOf("var __a3q_0c = 0;", System.StringComparison.Ordinal);
         int fold = generated.IndexOf("x3.Value.Wet = unchecked((ushort)(x3.Value.Wet + __a3q_0c));", System.StringComparison.Ordinal);
-        Assert.That(generated, Does.Contain("__a3q_0c += global::System.Runtime.Intrinsics.Vector128.CountWhereAllBitsSet(").And.Not.Contain("__a3q_0_0"), generated);
+        Assert.That(generated, Does.Contain("__a3q_0c += __V128.CountWhereAllBitsSet(").And.Not.Contain("__a3q_0_0"), generated);
         Assert.That(walk, Is.GreaterThan(0), generated);
         Assert.That(start, Is.GreaterThan(0).And.LessThan(walk), generated);  // started once, before the walk
         Assert.That(fold, Is.GreaterThan(walk).And.LessThan(result), generated); // folded once, after it
@@ -742,9 +771,9 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("global::System.Numerics.Vector.Sin(__c1_0)").And.Contain("global::System.Runtime.Intrinsics.Vector512.Sin(__c1_0)")
-            .And.Contain("global::System.Numerics.Vector.Create<float>(global::System.MathF.Cos(__p1.Pull))")
-            .And.Contain("Vector.Create<float>(float.Pi)").And.Contain("Vector.Create<float>(180f)"), generated);
+        Assert.That(generated, Does.Contain("__Vec.Sin(__c1_0)").And.Contain("__V512.Sin(__c1_0)")
+            .And.Contain("__Vec.Create<float>(global::System.MathF.Cos(__p1.Pull))")
+            .And.Contain("__Vec.Create<float>(float.Pi)").And.Contain("__Vec.Create<float>(180f)"), generated);
     }
 
     // The Vector512 loop is the Vector<T> loop's text with the vector type's token replaced: user types named
@@ -757,7 +786,7 @@ public class GeneratorTests
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, source), out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => IsCode(t)).Select(t => t.ToString()));
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("for (nint last = rows - global::System.Runtime.Intrinsics.Vector512<float>.Count;"), generated);
+        Assert.That(generated, Does.Contain("for (nint last = rows - __V512_float.Count;"), generated);
         Assert.That(generated, Does.Not.Contain("Vector5123").And.Not.Contain("Intrinsics.Vector512<float> __p").And.Not.Contain("Intrinsics.Vector512<float> x"), generated);
         Assert.That(generated.IndexOf('\u0001'), Is.EqualTo(-1), "a token left in the loop"); // ordinal: culture comparison ignores U+0001
     }
@@ -765,17 +794,17 @@ public class GeneratorTests
     // Kernel.Switches.cs: a switch expression as selects from the last arm up, each arm's mask (its guard and-ed in, read
     // under the lanes no arm above took) held once; a switch statement's sections as masked writes.
     [TestCase("[ForEach] static void A(ref F f, in H h) => f.V = h.V switch { < 0 => 0, > 10 when f.V > 1 => 1, _ => f.V };",
-        "var __m1 = global::System.Numerics.Vector.As<float, int>(global::System.Numerics.Vector.LessThan<float>(__c2_0, global::System.Numerics.Vector.Create<float>(0f)));",
-        "var __t4 = global::System.Numerics.Vector.As<float, int>(global::System.Numerics.Vector.GreaterThan<float>(__c1_0, global::System.Numerics.Vector.Create<float>(1f)));",
-        "var __m5 = (global::System.Numerics.Vector.As<float, int>(global::System.Numerics.Vector.GreaterThan<float>(__c2_0, global::System.Numerics.Vector.Create<float>(10f))) & __t4);",
-        "__c1_0 = global::System.Numerics.Vector.ConditionalSelect(global::System.Numerics.Vector.As<int, float>(__m1), global::System.Numerics.Vector.Create<float>(0f), global::System.Numerics.Vector.ConditionalSelect(global::System.Numerics.Vector.As<int, float>(__m5), global::System.Numerics.Vector.Create<float>(1f), __c1_0));")]
+        "var __m1 = __Vec.As<float, int>(__Vec.LessThan<float>(__c2_0, __Vec.Create<float>(0f)));",
+        "var __t4 = __Vec.As<float, int>(__Vec.GreaterThan<float>(__c1_0, __Vec.Create<float>(1f)));",
+        "var __m5 = (__Vec.As<float, int>(__Vec.GreaterThan<float>(__c2_0, __Vec.Create<float>(10f))) & __t4);",
+        "__c1_0 = __Vec.ConditionalSelect(__Vec.As<int, float>(__m1), __Vec.Create<float>(0f), __Vec.ConditionalSelect(__Vec.As<int, float>(__m5), __Vec.Create<float>(1f), __c1_0));")]
     [TestCase("[ForEach] static void A(ref P p, in Q q) { switch (q.V) { default: p.V++; break; case 1: case 2: p.V = 0; break; } }",
-        "var __m1 = global::System.Numerics.Vector.Equals<int>(__c2_0, global::System.Numerics.Vector.Create<int>((1)));",
-        "var __m3 = global::System.Numerics.Vector.Equals<int>(__c2_0, global::System.Numerics.Vector.Create<int>((2)));",
+        "var __m1 = __Vec.Equals<int>(__c2_0, __Vec.Create<int>(1));",
+        "var __m3 = __Vec.Equals<int>(__c2_0, __Vec.Create<int>(2));",
         "var __m4 = (__m1 | __m3);",
-        "__c1_0 = global::System.Numerics.Vector.ConditionalSelect(~__m4, (__c1_0 + global::System.Numerics.Vector<int>.One), __c1_0);",                 // the default, first
-        "__c1_0 = global::System.Numerics.Vector.ConditionalSelect(__m4, global::System.Numerics.Vector.Create<int>((0)), __c1_0);",
-        "__c1_0 = global::System.Numerics.Vector.ConditionalSelect((~__m4 & __pass), (__c1_0 + global::System.Numerics.Vector<int>.One), __c1_0);")]      // in a masked word
+        "__c1_0 = __Vec.ConditionalSelect(~__m4, (__c1_0 + __Vec_int.One), __c1_0);",                 // the default, first
+        "__c1_0 = __Vec.ConditionalSelect(__m4, __Vec.Create<int>(0), __c1_0);",
+        "__c1_0 = __Vec.ConditionalSelect((~__m4 & __pass), (__c1_0 + __Vec_int.One), __c1_0);")]      // in a masked word
     public void ASwitchIsMasksOfItsArms(string method, params string[] lines)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"[EcsSystem] public ref struct S {{ {method} }}"), out var output, out _);
@@ -796,16 +825,16 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated, Does.Contain("var __id1 = global::Count.Identity;")
-            .And.Contain("var __a1_0 = global::System.Numerics.Vector.Create<int>(__id1.N);")
-            .And.Contain("var __a1_1 = global::System.Numerics.Vector.Create<int>(__id1.Low);")
-            .And.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect(__m0, (__a1_0 + __c1_0), __a1_0);")
-            .And.Contain("__a1_1 = global::System.Numerics.Vector.Min(__a1_1, __c1_0);")
-            .And.Contain("l1.Value.N = unchecked((int)(l1.Value.N + global::System.Numerics.Vector.Sum(__a1_0)));")
-            .And.Contain("for (int __j = 0; __j < global::System.Numerics.Vector<int>.Count; __j++) l1.Value.Low = global::System.Math.Min(l1.Value.Low, __a1_1[__j]);")
+            .And.Contain("var __a1_0 = __Vec.Create<int>(__id1.N);")
+            .And.Contain("var __a1_1 = __Vec.Create<int>(__id1.Low);")
+            .And.Contain("__a1_0 = __Vec.ConditionalSelect(__m0, (__a1_0 + __c1_0), __a1_0);")
+            .And.Contain("__a1_1 = __Vec.Min(__a1_1, __c1_0);")
+            .And.Contain("l1.Value.N = unchecked((int)(l1.Value.N + __Vec.Sum(__a1_0)));")
+            .And.Contain("for (int __j = 0; __j < __Vec_int.Count; __j++) l1.Value.Low = global::System.Math.Min(l1.Value.Low, __a1_1[__j]);")
             .And.Not.Contain("Combine(__v)"), generated);
         // In a masked word each write of an accumulator leaves the lanes that do not pass as they were: no select after.
-        Assert.That(generated, Does.Contain("__a1_0 = global::System.Numerics.Vector.ConditionalSelect((__m0 & __pass), (__a1_0 + __c1_0), __a1_0);")
-            .And.Contain("__a1_1 = global::System.Numerics.Vector.ConditionalSelect(__pass, global::System.Numerics.Vector.Min(__a1_1, __c1_0), __a1_1);")
+        Assert.That(generated, Does.Contain("__a1_0 = __Vec.ConditionalSelect((__m0 & __pass), (__a1_0 + __c1_0), __a1_0);")
+            .And.Contain("__a1_1 = __Vec.ConditionalSelect(__pass, __Vec.Min(__a1_1, __c1_0), __a1_1);")
             .And.Not.Contain("var __h1_0 = __a1_0;"), generated);
     }
 
@@ -813,7 +842,7 @@ public class GeneratorTests
     // vectors per iteration into two sets of those accumulators, folded after it; the loop after it takes the vector
     // left. Integer accumulators (a 1-cycle chain) and masked words keep one set.
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(in F f, ref Reduce<Total> t) => t.Value.V += f.V;", "__a1_0 = __a1_0 + __a1_0b;", true)]
-    [TestCase("[ForEach] static void A(in F f, ref Reduce<Low> l) => l.Value.V = System.MathF.Min(l.Value.V, f.V);", "__a1_0 = global::System.Numerics.Vector.Min(__a1_0, __a1_0b);", true)]
+    [TestCase("[ForEach] static void A(in F f, ref Reduce<Low> l) => l.Value.V = System.MathF.Min(l.Value.V, f.V);", "__a1_0 = __Vec.Min(__a1_0, __a1_0b);", true)]
     [TestCase("[ForEach] static void A(in P p, ref Reduce<Count> c) { c.Value.N++; c.Value.Low = System.Math.Min(c.Value.Low, p.V); }", null, false)]
     public void AFloatReductionRunsTwoVectorsPerIteration(string method, string fold, bool paired)
     {
@@ -828,8 +857,8 @@ public class GeneratorTests
             return;
         }
         Assert.That(generated, Does.Contain("var __a1_0b = __a1_0;")
-            .And.Contain("for (nint last = rows - 2 * global::System.Numerics.Vector<float>.Count; i <= last; i += global::System.Numerics.Vector<float>.Count)")
-            .And.Contain("for (nint last = rows - 2 * global::System.Runtime.Intrinsics.Vector512<float>.Count;")
+            .And.Contain("for (nint last = rows - 2 * __Vec_float.Count; i <= last; i += __Vec_float.Count)")
+            .And.Contain("for (nint last = rows - 2 * __V512_float.Count;")
             .And.Contain(fold), generated);
         // the masked words' loop keeps one set
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "var __a1_0b").Count, Is.EqualTo(2), generated);
@@ -845,11 +874,11 @@ public class GeneratorTests
         var compilation = Compile().AddSyntaxTrees(reduction, systems);
         var driver = Driver().RunGenerators(compilation);
         string Generated() => driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
-        Assert.That(Generated(), Does.Contain("l1.Value.N = unchecked((int)(l1.Value.N + global::System.Numerics.Vector.Sum(__a1_0)));"));
+        Assert.That(Generated(), Does.Contain("l1.Value.N = unchecked((int)(l1.Value.N + __Vec.Sum(__a1_0)));"));
         driver = driver.RunGenerators(compilation.ReplaceSyntaxTree(reduction, CSharpSyntaxTree.ParseText(
             reduction.ToString().Replace("N = a.N + b.N", "N = a.N"), Parse)));
         Assert.That(Steps(driver)["SystemCode"].SelectMany(s => s.Outputs).Select(o => o.Reason), Has.Some.EqualTo(IncrementalStepRunReason.Modified));
-        Assert.That(Generated(), Does.Not.Contain("Vector.Sum(__a1_0)").And.Not.Contain("Vector.IsHardwareAccelerated"));
+        Assert.That(Generated(), Does.Not.Contain("__Vec.Sum(__a1_0)").And.Not.Contain("__Vec.IsHardwareAccelerated"));
     }
 
     [Test]
@@ -887,7 +916,7 @@ public class GeneratorTests
         // Not the walk of O and S (.Fusion.g.cs): two trees without a path read as one file, S declared after O.
         string generated = driver.GetRunResult().GeneratedTrees.Where(t => !t.FilePath.EndsWith(".Fusion.g.cs"))
             .Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
-        Assert.That(generated, Does.Not.Contain("Vector.LoadUnsafe"));
+        Assert.That(generated, Does.Not.Contain("__Vec.LoadUnsafe"));
     }
 
     [TestCase("[EcsSystem] public ref struct G<T> where T : struct, IComponent { [ForEach] static void A(ref T t, in P p) { } } "
@@ -1697,7 +1726,7 @@ public class GeneratorTests
         string foreign = Run(Compile(ForeignMethods).AddReferences(ForeignLibrary()));
         Assert.That(foreign, Is.EqualTo(local));
         Assert.That(foreign, Does.Contain("internal ref struct ChaseJob0 : global::EasyEcs.IForEach<"), foreign); // a call that adds lanes: rows
-        Assert.That(foreign, Does.Contain("for (nint last = rows - global::System.Numerics.Vector<"), foreign);
+        Assert.That(foreign, Does.Contain("for (nint last = rows - __Vec_"), foreign);
     }
 
     [TestCase(false)]
@@ -1851,7 +1880,7 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, code);
         var reasons = (await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync()).Where(d => d.Id is "EECS055" or "EECS056").Select(d => d.GetMessage());
         Assert.That(reasons, Is.Empty, code);
-        const string loop = "for (nint last = rows - global::System.Numerics.Vector<";
+        const string loop = "for (nint last = rows - __Vec_";
         Assert.That((code.Length - code.Replace(loop, "").Length) / loop.Length, Is.GreaterThanOrEqualTo(3), code); // a loop per method
     }
 
@@ -2108,7 +2137,7 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t)).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        const string noInlining = "global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]";
+        const string noInlining = "__MethodImpl(__MethodImplOptions.NoInlining)]";
         Assert.That(generated, Does.Contain($"Name = \"Loops\"), {noInlining}"), generated);
         Assert.That(generated, Does.Contain($"Name = \"Calls\"), {noInlining}"), generated);   // a run of rows calls it too
         Assert.That(generated, Does.Contain("internal ref struct CallsJob1 : global::EasyEcs.IForEachBatch<"), generated);

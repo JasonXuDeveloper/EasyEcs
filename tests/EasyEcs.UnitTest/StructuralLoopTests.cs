@@ -94,6 +94,28 @@ public ref struct VectorRules
     {
         if (v.Value < -80) e.Destroy();
     }
+
+    // ++ / -- as a value (a timer), then a change of the method's own component that nothing reads after it: the writes
+    // before the change are stored, the change applied after the pass (Kernel.Step, Kernel.UsedAfter).
+    [ForEach(SimdMode = SimdMode.Require)]
+    static void Wear(Entity e, ref Daze d)
+    {
+        if (--d.Ticks <= 0) e.RemoveDaze();
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    static void Renew(Entity e, in Stamina v, ref Daze d)
+    {
+        if (v.Value < -50) return;
+        if (v.Value > 40 && d.Ticks++ == 1) e.Set(new Daze(3));
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    static void Thin(Entity e, ref Aegis a)
+    {
+        a.Layers -= 1000; // every row below 0 within a few rounds: the tables it disables in exist before a measure
+        if (a.Layers < 0) e.Disable<Aegis>();
+    }
 }
 
 /// <summary><see cref="VectorRules"/> one row at a time.</summary>
@@ -156,6 +178,28 @@ public ref struct ScalarRules
     {
         if (v.Value < -80) e.Destroy();
     }
+
+    // ++ / -- as a value (a timer), then a change of the method's own component that nothing reads after it: the writes
+    // before the change are stored, the change applied after the pass (Kernel.Step, Kernel.UsedAfter).
+    [ForEach(SimdMode = SimdMode.Off)]
+    static void Wear(Entity e, ref Daze d)
+    {
+        if (--d.Ticks <= 0) e.RemoveDaze();
+    }
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    static void Renew(Entity e, in Stamina v, ref Daze d)
+    {
+        if (v.Value < -50) return;
+        if (v.Value > 40 && d.Ticks++ == 1) e.Set(new Daze(3));
+    }
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    static void Thin(Entity e, ref Aegis a)
+    {
+        a.Layers -= 1000; // every row below 0 within a few rounds: the tables it disables in exist before a measure
+        if (a.Layers < 0) e.Disable<Aegis>();
+    }
 }
 
 public record struct Grit(byte Value) : IComponent;
@@ -176,6 +220,54 @@ public static class NarrowMarks
     {
         if (g.Value > 200 && f.Value < 60 || g.Value == 7) e.Set(new Shaken());
     }
+
+    // A byte timer: -- as a value in byte lanes (it wraps from 0 to 255 as C# does).
+    [ForEach(SimdMode = SimdMode.Require), Without<Shaken>]
+    internal static void Fizzle(Entity e, ref Grit g)
+    {
+        if (--g.Value == 0 || g.Value++ == 100) e.Set(new Shaken());
+    }
+
+    [ForEach(SimdMode = SimdMode.Off), Without<Shaken>]
+    internal static void FizzleScalar(Entity e, ref Grit g)
+    {
+        if (--g.Value == 0 || g.Value++ == 100) e.Set(new Shaken());
+    }
+}
+
+/// <summary>
+/// Methods over a table with presence holes (masked words between runs of whole words): the marked rows close their
+/// holes and the records come out in the method's row order only if the pass hands its job the rows in table order.
+/// </summary>
+public static class MaskedOrder
+{
+    [ForEach(SimdMode = SimdMode.Require), With<Aegis>]
+    internal static void Hide(Entity e, in Stamina v)
+    {
+        if ((v.Value & 15) == 0) e.Disable<Aegis>();
+    }
+
+    [ForEach(SimdMode = SimdMode.Off), With<Aegis>]
+    internal static void HideRows(Entity e, in Stamina v)
+    {
+        if ((v.Value & 15) == 0) e.Disable<Aegis>();
+    }
+
+    [ForEach(SimdMode = SimdMode.Require), With<Aegis>]
+    internal static void Peaks(in Stamina v, Emit<Peak> peaks)
+    {
+        if (v.Value > 90) peaks.Add(new Peak(v.Value));
+    }
+
+    [ForEach(SimdMode = SimdMode.Off), With<Aegis>]
+    internal static void PeaksRows(in Stamina v, Emit<Peak> peaks)
+    {
+        if (v.Value > 90) peaks.Add(new Peak(v.Value));
+    }
+
+    // Every row's id in table order (the order later passes visit and emit in).
+    [ForEach(SimdMode = SimdMode.Off), With<Stamina>]
+    internal static void Visit(Entity e, Emit<Fallen> seen) => seen.Add(new Fallen(e.Id));
 }
 
 /// <summary>A unique key given to the rows a condition passes: one value for many rows, so the method stays scalar.</summary>
@@ -251,9 +343,42 @@ public class StructuralLoopTests
     }
 
     /// <summary>
-    /// A lambda pass that changes structure under a condition gets the vector loop a [ForEach] method does (its marked
-    /// rows changed after the pass): it ends where the method row by row does.
+    /// A table with presence holes: runs of whole words with words of some passing rows between them. The pass hands the
+    /// vector job each run before the word after it (MaskedRuns), so the rows it marks close their holes as the method's
+    /// moves do and its records come out in the method's order; the job handed the word first moved rows out of order.
     /// </summary>
+    [TestCase(1000)]
+    [TestCase(10000 + 3)]
+    public void AMaskedWordAfterARunKeepsTheRowOrder(int count)
+    {
+        using var vector = new World();
+        using var scalar = new World();
+        var a = new Entity[count];
+        var b = new Entity[count];
+        var random = new Random(count);
+        for (int i = 0; i < count; i++)
+        {
+            var (v, aegis) = (new Stamina(random.Next(-100, 101)), new Aegis(i));
+            a[i] = vector.CreateEntity(v, aegis);
+            b[i] = scalar.CreateEntity(v, aegis);
+            if ((i >> 6) % 3 == 2 && i % 7 == 0) // every third word has holes: runs of two whole words, then a masked one
+            {
+                a[i].RemoveAegis();
+                b[i].RemoveAegis();
+            }
+        }
+
+        MaskedOrder.Peaks(vector);
+        MaskedOrder.PeaksRows(scalar);
+        Assert.That(Peaks(vector.GetSingleton<Emitted<Peak>>().Items), Is.EqualTo(Peaks(scalar.GetSingleton<Emitted<Peak>>().Items)));
+
+        MaskedOrder.Hide(vector);
+        MaskedOrder.HideRows(scalar);
+        MaskedOrder.Visit(vector);
+        MaskedOrder.Visit(scalar);
+        Assert.That(Ids(vector.GetSingleton<Emitted<Fallen>>().Items), Is.EqualTo(Ids(scalar.GetSingleton<Emitted<Fallen>>().Items)));
+    }
+
     /// <summary>
     /// A structural change under a condition of byte lanes, in tables with presence holes (masked words of 64 byte lanes)
     /// and a tail: the marked rows are the rows the method changes, row for row.
@@ -286,8 +411,22 @@ public class StructuralLoopTests
         NarrowMarks.Quake(vector);
         NarrowMarks.QuakeScalar(scalar);
         for (int i = 0; i < count; i++) Assert.That(a[i].Has<Shaken>(), Is.EqualTo(b[i].Has<Shaken>()), $"row {i}");
+        for (int round = 0; round < 3; round++)
+        {
+            NarrowMarks.Fizzle(vector);
+            NarrowMarks.FizzleScalar(scalar);
+            for (int i = 0; i < count; i++)
+            {
+                Assert.That(a[i].Has<Shaken>(), Is.EqualTo(b[i].Has<Shaken>()), $"row {i}, round {round}");
+                Assert.That(a[i].Read<Grit>(), Is.EqualTo(b[i].Read<Grit>()), $"row {i}, round {round}");
+            }
+        }
     }
 
+    /// <summary>
+    /// A lambda pass that changes structure under a condition gets the vector loop a [ForEach] method does (its marked
+    /// rows changed after the pass): it ends where the method row by row does.
+    /// </summary>
     [TestCase(1000, 1)]
     [TestCase(77, 2)]
     [TestCase(3, 3)]
@@ -412,6 +551,7 @@ public class StructuralLoopTests
             Assert.That(a[i].Has<Daze>() ? a[i].Read<Daze>().Ticks : -1, Is.EqualTo(b[i].Has<Daze>() ? b[i].Read<Daze>().Ticks : -1), at);
             Assert.That(a[i].Has<Aegis>(), Is.EqualTo(b[i].Has<Aegis>()), at);
             Assert.That(a[i].IsDisabled<Aegis>(), Is.EqualTo(b[i].IsDisabled<Aegis>()), at);
+            if (b[i].Has<Aegis>() && !b[i].IsDisabled<Aegis>()) Assert.That(a[i].Read<Aegis>().Layers, Is.EqualTo(b[i].Read<Aegis>().Layers), at);
             Assert.That(a[i].Has<Banner>(), Is.EqualTo(b[i].Has<Banner>()), at);
         }
 
