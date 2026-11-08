@@ -3580,6 +3580,53 @@ Wide rows of 8-byte words and the AVX2 form (#160; commits c078128 + 042e8a5, te
   settles them, a record each.
 - [ ] **zh XML** (`tools/docs/ApiDocs/zh`): none (no public API changed).
 
+## feat-lane4-rest (backlog Lane 4: G5, G7, G8, G15, G17, G18, G11 9c)
+
+- [ ] **guide/vector-loops material (what becomes a vector loop: high-performance, troubleshooting, the analyzer's
+  EECS055 section, guide/parameters' EntityRandom page; en + zh): EntityRandom draws.** `random.Bits` / `Float` /
+  `Chance` / `Range` of the row's own entity (`entity.Id`) with a constant stream, and the static
+  `EntityRandom.X(seed, entity.Id, tick, stream, ...)` with a seed and tick the same for every row, keep the vector
+  loop, bit for bit with the scalar draw (`RandomLanes`). `Bits` takes 8-byte lanes, the others 4-byte ones (a method
+  mixing a `bool` with `int` lanes still stays scalar: lanes of 4 bytes and 1 byte). A draw for another entity or with
+  a stream that varies by row gets a fixable reason ("give each call site a constant stream"). The loop runs where
+  vectors hold 256 bits or more (AVX2, AVX-512); at 128 bits (SSE alone, ARM64's NEON) the rows run the method, which
+  is faster there (the schedule line says "EntityRandom draws (vectors of 256 bits and up)" and "rows on this
+  hardware"). Remove any sentence that says EntityRandom keeps a method scalar.
+- [ ] **Same pages: a table read at an index of the row.** A uniform `[InlineArray]` of at most 16 elements of 4-byte
+  lanes (a singleton's or a value's: `waypoints.Points[goal.Waypoint]`, its elements a lane type or a struct of them)
+  read at an `int` of the row keeps the vector loop: one permute per field and vector of the table; rows whose index is
+  outside the table run the method (which throws, as written). More than 16 elements or 8-byte lanes keep the reason.
+- [ ] **example.mdx + zh (the battle server walkthrough):** `Steer` is now a plain `[ForEach(Parallel = true)]` with a
+  vector loop (its comment: "the waypoint table is a singleton of 8 points, so a vector of goals picks its points with
+  one permute per field"); `Afflict` is `SimdMode.Off` (a roll applies one of three structural changes: a vector loop
+  applies one change after the pass). Update the walkthrough's sentences about which systems are vector loops.
+- [ ] **D127 + zh (math lowerings) and guide pages on FloatMode: math called once per lane.** `Atan2`, `Asin`, `Acos`,
+  `Atan`, `Cbrt`, the hyperbolic functions of doubles, `Pow` by a value, and without `FloatMode.Fast` also `Sin`,
+  `Cos`, `Tan`, `Exp`, `Log`, `Log2`, `Log10` and the hyperbolic functions of floats, run once per lane inside the
+  vector loop (`LaneMath.PerLane`, the scalar function's bits) when the rest of the body does at least
+  `Kernel.PerLaneWork` vector operations per call; a lighter body stays as written with the reason "MathF.Atan2 has no
+  vector form in .NET 10, and the rest of the body is too light for a vector loop calling it once per lane to pay (N
+  vector operations, 8 per call needed): set SimdMode = SimdMode.Require ..." (or "... bit for bit ...: set FloatMode =
+  FloatMode.Fast ..."). D127's "Not lowered" bullet and its Considered entry change: the functions are still not
+  polynomials of ours, they are the scalar calls per lane. A decision record for the gate (the number from
+  KernelBenchmark's Aim / Bearing / Sway pairs: see the backlog item G7).
+- [ ] **guide/analyzer (EECS055's reasons) + zh:** the old texts "MathF.Sin is not bit-exact in vector form: set
+  FloatMode = FloatMode.Fast", "MathF.Atan2 has no vector form in .NET 10", "Math.Pow of doubles has no vector form in
+  .NET 10 but by a constant ...", "MathF.Pow is not bit-exact in vector form except by 0 and 1: ..." are replaced by
+  the gate's text above for a light body (a heavy body now gets its loop). "it reads 'x[i]' at an index that is not a
+  constant" holds only for a table that is not uniform, longer than 16, or of 8-byte lanes.
+- [ ] **decisions + zh: fused systems run the systems' jobs.** A non-generic system's jobs, accessors and filters are
+  in an internal `__{System}_Jobs` class (EditorBrowsable never), named `__ForEach` in its file by an alias; a fusion
+  of two systems references them instead of copying them (the generated text of a fusion file falls by its copies).
+  Users see no API change; Rider / VS may list `__X_Jobs` in a debugger's call stack where they saw `__ForEach`.
+- [ ] **guide/views + zh:** `entity.TryGetX(out x)` looks each component up once (no change of behavior). The
+  generated members' files use the alias block (shorter text, no change).
+- [ ] **Changelog, Performance (+ zh):** EntityRandom draws, tables read at a row's index and math with no vector form
+  get vector loops; a fusion file no longer copies its systems' jobs. **Changelog, Fixes:** the masked walk of a
+  parallel pass over a job with two widths of masked loops no longer runs past the inliner's budget (a call per word).
+- [ ] **zh XML** (`tools/docs/ApiDocs/zh`): none (`RandomLanes`, `TableLanes`, `LaneMath.PerLane` and
+  `Entity.RefOrNull` are EditorBrowsable never, which ApiDocs leaves out).
+
 ## The site build's lint:seo (found 2026-11-08 by move-guide-folders)
 
 - `bun run build` fails in `lint:seo` on `llms-full.txt`: 3,187,322 characters against the script's 3,000,000 cap
