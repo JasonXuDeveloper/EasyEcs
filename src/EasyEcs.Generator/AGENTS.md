@@ -117,7 +117,7 @@ Analyzer/EasyEcsAnalyzer.Pairs.cs        EECS105-107: a pair method that cannot 
                                          generator cannot read (every pair runs), a neighbor search written by hand (a Warning
                                          with PairRewrite's fix when mechanical, else Info: the grid's upkeep goes with it)
 Analyzer/EasyEcsAnalyzer.Tiles.cs        EECS115-117, EECS120-121: a tile step the generator cannot write (Symbols.StepProblem, Write on a tile
-                                         taken by value, Sweep read on one, Restart outside a [GaussSeidel] step's ref tile: Error), a second buffer and its plain commit written by hand where the
+                                         taken by value, Sweep read on one, ColdStart outside a [GaussSeidel] step's ref tile: Error), a second buffer and its plain commit written by hand where the
                                          tile could step itself (compilation end, Warning; StepRewrite: the step method's rewrite
                                          to a ref tile writing Write(row), the fix's properties), a Min / Max relaxation stepped by Jacobi
                                          that [GaussSeidel] would settle (Info, fix: [GaussSeidel] when the key colors the tiles),

@@ -95,9 +95,9 @@ Grids/TileInPlaceBenchmark.cs   the hand-written Laplacian with its halo copied 
                                 in registers (InPlaceShift), and the four neighbor lookups alone
 Grids/TileLayersBenchmark.cs    a seven-point cell method over tall tiles whose warmth sits in a band of layers:
                                 every layer against the band an ITileLayers component gives
-Grids/TileRestartBenchmark.cs   a scent whose springs move, read once settled: [GaussSeidel] settled from nothing
-                                each step (Restart), the same in sweeps of turning direction (Turn: tile.Sweep) and
-                                from its last values (Linger), Restart walked by c.Columns(1) (RestartColumns),
+Grids/TileColdStartBenchmark.cs a scent whose springs move, read once settled: [GaussSeidel] settled from nothing
+                                each step (ColdStart), the same in sweeps of turning direction (Turn: tile.Sweep) and
+                                from its last values (Linger), ColdStart walked by c.Columns(1) (ColdStartColumns),
                                 springs stepping or hopping, against the sample's sweep by hand from a cleared copy,
                                 a step and a commit per color
 Grids/TileSettleBenchmark.cs    a field read once settled, sources moving: [GaussSeidel] against the in-place sweep

@@ -106,12 +106,12 @@
     <summary>
       瓦片的 <see cref="T:EasyEcs.GaussSeidelAttribute">[GaussSeidel]</see> 推进正在第几次扫描：第一次为 0，之后每次扫描加一
       （Jacobi 推进只扫描一次，为 0）。用于一次推进只做一次的事（第一次扫描时把地面的掩码读进 <see cref="T:EasyEcs.Scratch`1" />，
-      格子的起点：<see cref="M:EasyEcs.Tile`2.Restart(`0)" />），以及交替方向的扫描（奇数次扫描从最后一行往回走到第一行：
+      格子的起点：<see cref="M:EasyEcs.Tile`2.ColdStart(`0)" />），以及交替方向的扫描（奇数次扫描从最后一行往回走到第一行：
       两次扫描就让场在两个方向上穿过瓦片，即距离场的快速扫描法）。按推进计数：用完
       <see cref="P:EasyEcs.GaussSeidelAttribute.MaxSweeps" /> 的瓦片在下一次推进里从 0 开始。O(1)；方法不推进的瓦片（按值接收）抛出异常。
     </summary>
   </member>
-  <member name="M:EasyEcs.Tile`2.Restart(`0)" source="fd116a75ccd9">
+  <member name="M:EasyEcs.Tile`2.ColdStart(`0)" source="fd116a75ccd9">
     <summary>
       让 <see cref="T:EasyEcs.GaussSeidelAttribute">[GaussSeidel]</see> 推进从 <paramref name="value" /> 开始收敛瓦片，而不是从它的格子开始：
       纹理里交换过的层的格子都是 <paramref name="value" />（光环仍是邻居的），扫描一直进行到从这里得到的场收敛。

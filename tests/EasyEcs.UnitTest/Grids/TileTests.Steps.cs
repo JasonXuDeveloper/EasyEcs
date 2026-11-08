@@ -1028,7 +1028,7 @@ public partial class TileTests
         }
     }
 
-    // ---------------- Restart ----------------
+    // ---------------- ColdStart ----------------
 
     /// <summary>A scent: <see cref="Strength"/> on a spring, one less per cell away, 0 past its reach.</summary>
     public record struct Smell(int V)
@@ -1053,7 +1053,7 @@ public partial class TileTests
         {
             springs.ExchangeHalo(0, 0, mask: false);
             smell.ExchangeHalo();
-            smell.Restart();
+            smell.ColdStart();
             for (int z = 0; z < 16; z++) // a source term: every row
             {
                 var row = new TileRow<DistPlate>(0, z);
@@ -1085,7 +1085,7 @@ public partial class TileTests
         }
     }
 
-    private static (World World, Dictionary<TilePos, Entity> Plates) SmellWorld(int threads, int size, bool restart)
+    private static (World World, Dictionary<TilePos, Entity> Plates) SmellWorld(int threads, int size, bool coldStart)
     {
         var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         var plates = new Dictionary<TilePos, Entity>();
@@ -1096,7 +1096,7 @@ public partial class TileTests
             plate.GetOrAdd<DynamicBuffer<Spring>>().SetCount(256);
             plates.Add(place, plate);
         }
-        if (restart) world.AddSystem<SmellSystem>();
+        if (coldStart) world.AddSystem<SmellSystem>();
         else world.AddSystem<LingerSystem>();
         return (world, plates);
     }
@@ -1147,15 +1147,15 @@ public partial class TileTests
         return int.MaxValue;
     }
 
-    // Both forms settle on the same field in as many updates (a tile sweeps until it settles either way); the restarted
-    // one takes fewer sweeps per step where a spring dried up (TileRestartBenchmark).
+    // Both forms settle on the same field in as many updates (a tile sweeps until it settles either way); the cold-started
+    // one takes fewer sweeps per step where a spring dried up (TileColdStartBenchmark).
     [TestCase(true)]
     [TestCase(false)]
-    public void AFieldWhoseSourcesMoveSettlesTheSameOnAnyNumberOfThreads(bool restart)
+    public void AFieldWhoseSourcesMoveSettlesTheSameOnAnyNumberOfThreads(bool coldStart)
     {
         const int size = 6;
-        var (one, onePlates) = SmellWorld(1, size, restart);
-        var (four, fourPlates) = SmellWorld(4, size, restart);
+        var (one, onePlates) = SmellWorld(1, size, coldStart);
+        var (four, fourPlates) = SmellWorld(4, size, coldStart);
         using var a = one;
         using var b = four;
         for (int round = 0; round < 6; round++) // the springs move: most of the old scent must go
@@ -1167,7 +1167,7 @@ public partial class TileTests
         }
     }
 
-    /// <summary>Steps to the nearest spring, <see cref="int.MaxValue"/> where none is reached: a minimum restarts from far.</summary>
+    /// <summary>Steps to the nearest spring, <see cref="int.MaxValue"/> where none is reached: a minimum cold-starts from far.</summary>
     public record struct Steps(int V);
 
     [EcsSystem]
@@ -1178,7 +1178,7 @@ public partial class TileTests
         {
             springs.ExchangeHalo(0, 0, mask: false);
             steps.ExchangeHalo(0, 0, new Steps(int.MaxValue)); // the edge of the world is as far as unreached
-            steps.Restart(new Steps(int.MaxValue));
+            steps.ColdStart(new Steps(int.MaxValue));
             foreach (var row in steps.Rows(TileStencil.Layer))
             {
                 var c = steps.At(row);
@@ -1195,7 +1195,7 @@ public partial class TileTests
 
     [TestCase(1)]
     [TestCase(4)]
-    public void AMinimumRestartsFromItsFarValue(int threads)
+    public void AMinimumColdStartsFromItsFarValue(int threads)
     {
         const int size = 4;
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
@@ -1298,27 +1298,27 @@ public partial class TileTests
     }
 
     [Test]
-    public void ARestartIsForTheTileAStepSweeps()
+    public void AColdStartIsForTheTileAStepSweeps()
     {
         using var world = new World();
         var plates = Grid(world, Box(2, 1, 1), s => new DistPlate(s));
         foreach (var plate in plates) plate.GetOrAdd<DynamicBuffer<Smell>>().SetCount(256);
-        Assert.Throws<InvalidOperationException>(() => Restart(plates[0], exchange: false), "before its halo is exchanged");
-        var notSwept = Assert.Throws<InvalidOperationException>(() => Restart(plates[0], exchange: true));
+        Assert.Throws<InvalidOperationException>(() => ColdStart(plates[0], exchange: false), "before its halo is exchanged");
+        var notSwept = Assert.Throws<InvalidOperationException>(() => ColdStart(plates[0], exchange: true));
         Assert.That(notSwept.Message, Does.Contain("[GaussSeidel]"));
 
-        static void Restart(Entity e, bool exchange)
+        static void ColdStart(Entity e, bool exchange)
         {
             var tile = TileOf<Smell, DistPlate>(e, out _);
             if (exchange) tile.ExchangeHalo();
-            tile.Restart();
+            tile.ColdStart();
         }
     }
 
     [Test]
-    public void RestartedStepsDoNotAllocate()
+    public void ColdStartedStepsDoNotAllocate()
     {
-        var (world, plates) = SmellWorld(4, 6, restart: true);
+        var (world, plates) = SmellWorld(4, 6, coldStart: true);
         using var w = world;
         var springs = plates[new TilePos(3, 0, 3)];
         int tick = 0;
@@ -1333,23 +1333,23 @@ public partial class TileTests
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) Step(); }), Is.Zero);
     }
 
-    // A spring wandering into plates its scent never reached (TileRestartBenchmark's Linger) allocates nothing: a tile
+    // A spring wandering into plates its scent never reached (TileColdStartBenchmark's Linger) allocates nothing: a tile
     // changing for the first time long after it joined finds the ids of the tiles around it set up (Entry.Around), and
     // more tiles of a color waking at once than ever before find the queue and the walk sized for the grid. Measured in
     // a world of its own: the state that must not grow belongs to each world (its TileSteps). Whole walks, each in a new
     // world, run first until the JIT has settled: what runs once per world (setting up, a tile joining) stays at Tier0
     // after one walk. This thread's bytes, as every allocation check: on 4 threads it steps tiles too (before the fix
-    // the cases measured 1016 B, and 696 B on 4 threads without restarts), and the process's count also takes the test
+    // the cases measured 1016 B, and 696 B on 4 threads without cold starts), and the process's count also takes the test
     // host's own threads (168 B now and then at 1 thread, with every method of the walk compiled).
     [TestCase(1, true)]
     [TestCase(4, true)]
     [TestCase(1, false)]
     [TestCase(4, false)]
-    public void ATileThatChangesLateDoesNotAllocate(int threads, bool restart)
+    public void ATileThatChangesLateDoesNotAllocate(int threads, bool coldStart)
     {
-        Allocations.WarmUp(() => Walk(threads, restart, null), 2);
+        Allocations.WarmUp(() => Walk(threads, coldStart, null), 2);
         long bytes = -1;
-        Walk(threads, restart, away => bytes = Allocations.Of(away));
+        Walk(threads, coldStart, away => bytes = Allocations.Of(away));
         Assert.That(bytes, Is.Zero, "into plates the scent never reached");
     }
 
@@ -1357,9 +1357,9 @@ public partial class TileTests
     /// A spring wandering along the first row of plates of a new world: back and forth in the first until its scent
     /// settled there, then to the last (<paramref name="measure"/> runs that part, or null: it runs unmeasured).
     /// </summary>
-    private static void Walk(int threads, bool restart, Action<Action> measure)
+    private static void Walk(int threads, bool coldStart, Action<Action> measure)
     {
-        var (world, plates) = SmellWorld(threads, 8, restart);
+        var (world, plates) = SmellWorld(threads, 8, coldStart);
         using var w = world;
         int x = 4;
         void Put(int to) // the spring moved from cell x to cell to

@@ -87,8 +87,8 @@ Grids/Tile.cs               grid tiles: ITileShape / ITile<TKey> (a shape, halo,
                             up to 26 neighbors found by generated code, TileNeighbors; TileCells.Pool: the pool of a
                             tile's cell buffers sized from its shape when the assembly loads), ExchangeHalo into the thread's
                             TileFrame (a texture padded with the halo, a row mask per layer, the state of the tile it
-                            steps), Rows (TZCNT walk; First / Last / LayerOf / RowsOf: the same walk as plain loops for generated code), At / the indexer, Write (a stepped tile's row; JacobiNext: its checks once per tile for generated code), Sweep / Restart (a [GaussSeidel]
-                            step's sweep count, its cells started from a value: TileFrame.Restart), TileCursor.Load128 / 256 / 512,
+                            steps), Rows (TZCNT walk; First / Last / LayerOf / RowsOf: the same walk as plain loops for generated code), At / the indexer, Write (a stepped tile's row; JacobiNext: its checks once per tile for generated code), Sweep / ColdStart (a [GaussSeidel]
+                            step's sweep count, its cells started from a value: TileFrame.ColdStart), TileCursor.Load128 / 256 / 512,
                             TileCursor.Columns (TileColumnWalk and its Cursor: a row's columns, loads at constant
                             offsets of the column and Store into the row the step writes, checked once for the walk),
                             ChangedEdges / Facing (sleeping tiles written by hand); Plane (a 2D cell pass's halo read

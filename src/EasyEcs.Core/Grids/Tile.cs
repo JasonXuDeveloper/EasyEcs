@@ -812,7 +812,7 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
     /// <summary>
     /// The sweep a <see cref="GaussSeidelAttribute">[GaussSeidel]</see> step of the tile is in: 0 in its first, one more
     /// in each sweep after it (0 in a Jacobi step, which is one sweep). For what a step does once (a mask of the ground
-    /// read in its first sweep into a <see cref="Scratch{T}"/>, the cells it starts from: <see cref="Restart"/>) and for
+    /// read in its first sweep into a <see cref="Scratch{T}"/>, the cells it starts from: <see cref="ColdStart"/>) and for
     /// sweeps in turns of direction (odd sweeps from the last row back to the first: a field crosses the tile both ways
     /// in two sweeps, the fast sweeping method of distance fields). Counted per step: a tile that runs out of
     /// <see cref="GaussSeidelAttribute.MaxSweeps"/> starts at 0 in its next. O(1); throws for a tile the method does not
@@ -837,18 +837,18 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
     /// after it keep what they wrote. For a field whose sources come and go (a distance field, a scent): relaxed in place
     /// from its last values, a value whose source left lingers and only fades a step per sweep (distance-vector routing's
     /// count to infinity); from nothing, the tile settles in as many sweeps as the paths through it turn. The pass compares
-    /// the settled rows with the cells, so a tile whose field came out the same sleeps as before. A restarted tile that
+    /// the settled rows with the cells, so a tile whose field came out the same sleeps as before. A cold-started tile that
     /// runs out of <see cref="GaussSeidelAttribute.MaxSweeps"/> starts again in its next step: give it the sweeps to
     /// settle. O(cells of the layers exchanged); throws for a tile that is not the one a [GaussSeidel] step sweeps, or
     /// before its halo is exchanged.
     /// </summary>
     /// <param name="value">What the tile's cells start from: <c>default</c> (no scent, unreached), or the far value of a
     /// minimum (<c>int.MaxValue</c>).</param>
-    public readonly void Restart(TCell value = default)
+    public readonly void ColdStart(TCell value = default)
     {
         var frame = Exchanged();
         if (frame.Stepping != _entity.Id || frame.Next != null) TileFrame<TCell, TTile>.ThrowNotSweeping();
-        if (frame.Sweep == 0) frame.Restart(value);
+        if (frame.Sweep == 0) frame.ColdStart(value);
     }
 
     /// <summary>The frame, once this tile's halo is in it.</summary>
@@ -1558,14 +1558,14 @@ internal sealed class TileFrame<TCell, TTile> where TCell : unmanaged where TTil
     }
 
     /// <summary>
-    /// The first sweep of a Gauss-Seidel step from <paramref name="value"/> (<see cref="Tile{TCell, TTile}.Restart"/>): the
+    /// The first sweep of a Gauss-Seidel step from <paramref name="value"/> (<see cref="Tile{TCell, TTile}.ColdStart"/>): the
     /// tile's cells in the layers exchanged set to it, and the sweep compared with it, not with the cells: every row
     /// counts as written (this sweep and the step: <see cref="Before"/> holds the value, the pass compares every row with
     /// the cells when the step ends). The row masks keep the rows the cells had for the value default (more rows than
     /// hold a value now, which is safe, and the rows the field is likely to reach again in this sweep: a mask of none would
     /// let the field into the tile one row per sweep), every row for another value.
     /// </summary>
-    public void Restart(TCell value)
+    public void ColdStart(TCell value)
     {
         int width = TTile.Width, depth = TTile.Depth, hy = TTile.Height > 1 ? TTile.Halo : 0;
         bool zero = TileLayout.IsZero(value);
@@ -1585,7 +1585,7 @@ internal sealed class TileFrame<TCell, TTile> where TCell : unmanaged where TTil
 
     [DoesNotReturn, StackTraceHidden] // a call that never returns: see TileLayout.ThrowOffset
     public static void ThrowNotSweeping() => throw new InvalidOperationException(
-        $"Restart is for the tile a [GaussSeidel] step sweeps: take Tile<{typeof(TCell).Name}, {typeof(TTile).Name}> by ref in a [GaussSeidel] method");
+        $"ColdStart is for the tile a [GaussSeidel] step sweeps: take Tile<{typeof(TCell).Name}, {typeof(TTile).Name}> by ref in a [GaussSeidel] method");
 
     [DoesNotReturn, StackTraceHidden] // a call that never returns: see TileLayout.ThrowOffset
     public static void ThrowNotStepping() => throw new InvalidOperationException(

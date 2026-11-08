@@ -24,7 +24,7 @@ public static partial class EasyEcsAnalyzer
         "buffer, which the pass swaps with its cells once every tile stepped; a [GaussSeidel] step writes the cells in " +
         "place, color by color, sweep after sweep until the tile settles. So the pass steps one tile per entity over the " +
         "whole grid ([EntityMethod], Slices and [Consume] cannot), [GaussSeidel] needs that tile and a key of integer fields " +
-        "to color the tiles by, Write is for the tile the method steps (a tile taken by value throws), and Restart for " +
+        "to color the tiles by, Write is for the tile the method steps (a tile taken by value throws), and ColdStart for " +
         "the tile a [GaussSeidel] method sweeps.",
         helpLinkUri: Help("EECS115"));
 
@@ -130,7 +130,7 @@ public static partial class EasyEcsAnalyzer
             }
         });
 
-        // EECS115: Write on a tile the method takes by value (no step of it runs: it throws), Restart on a tile no
+        // EECS115: Write on a tile the method takes by value (no step of it runs: it throws), ColdStart on a tile no
         // [GaussSeidel] step sweeps (a Jacobi step writes every row anyway: it throws too).
         // EECS121: a write of a buffer's elements through the buffer's extensions (sizing it alone is no write).
         start.RegisterOperationAction(context =>
@@ -144,15 +144,15 @@ public static partial class EasyEcsAnalyzer
         start.RegisterOperationAction(context =>
         {
             var invocation = (IInvocationOperation)context.Operation;
-            if (invocation.TargetMethod is not { Name: "Write" or "Restart" } call || !Symbols.Named(call.ContainingType.OriginalDefinition, "EasyEcs.Tile<TCell, TTile>")) return;
+            if (invocation.TargetMethod is not { Name: "Write" or "ColdStart" } call || !Symbols.Named(call.ContainingType.OriginalDefinition, "EasyEcs.Tile<TCell, TTile>")) return;
             if (invocation.Instance is not IParameterReferenceOperation { Parameter: var tile }
                 || tile.ContainingSymbol is not IMethodSymbol method || !Symbols.IsForEach(method)) return;
             if (call.Name == "Write" && tile.RefKind != RefKind.Ref)
                 context.ReportDiagnostic(Diagnostic.Create(BadStep, invocation.Syntax.GetLocation(), Symbols.Describe(method),
                     $"writes '{tile.Name}', a tile it takes by value: Write is for the tile the method steps (ref Tile<...>), and throws for another"));
-            else if (call.Name == "Restart" && (tile.RefKind != RefKind.Ref || !Symbols.IsGaussSeidel(method)))
+            else if (call.Name == "ColdStart" && (tile.RefKind != RefKind.Ref || !Symbols.IsGaussSeidel(method)))
                 context.ReportDiagnostic(Diagnostic.Create(BadStep, invocation.Syntax.GetLocation(), Symbols.Describe(method),
-                    $"restarts '{tile.Name}', which no [GaussSeidel] sweep steps: Restart is for the tile a [GaussSeidel] method takes by ref, and throws for another"));
+                    $"cold-starts '{tile.Name}', which no [GaussSeidel] sweep steps: ColdStart is for the tile a [GaussSeidel] method takes by ref, and throws for another"));
         }, OperationKind.Invocation);
 
         // EECS115: Sweep of a tile the method takes by value (it has no sweeps: it throws).
