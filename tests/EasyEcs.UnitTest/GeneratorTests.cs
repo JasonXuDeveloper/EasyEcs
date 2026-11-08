@@ -104,7 +104,7 @@ public class GeneratorTests
             [EcsSystem] public ref struct Reparent
             {
                 [ForEach] static void B(Entity e, in Owned o) => e.Set(new Owned { Owner = o.Owner });
-                [ForEach] static void C(ref P p, ReadOnlyMaybe<Owned> o) { if (o.HasValue) p.V = o.Value.Owner.Index; } // reads an optional indexed component
+                [ForEach] static void C(ref P p, ReadOnlyMaybe<Owned> o) { if (o.HasValue) p.V += o.Value.Owner.Index; } // reads an optional indexed component
             }
             public static class Threads
             {
