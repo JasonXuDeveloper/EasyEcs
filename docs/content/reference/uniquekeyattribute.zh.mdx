@@ -10,7 +10,7 @@ description: "一个键只对应一个实体时用的 LookupKeyAttribute（IUniq
 public sealed class UniqueKeyAttribute : Attribute
 ```
 
-一个键只对应一个实体时用的 [`LookupKeyAttribute`](/zh/docs/reference/lookupkeyattribute)（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）：生成器加上 `IUniqueIndexed<TKey>` 和显式的 `Key`。声明了 [`IDirectMapped`](/zh/docs/reference/idirectmapped) 的 struct 保留自己写的 `Slots` 和 `SlotOf`，只生成 `Key`。
+一个键只对应一个实体时用的 [`LookupKeyAttribute`](/zh/docs/reference/lookupkeyattribute)（[`IUniqueIndexed`](/zh/docs/reference/iuniqueindexed)）：生成器加上 `IUniqueIndexed<TKey>` 和显式的 `Key`。设了 [`UniqueKeyAttribute.SlotsPerAxis`](/zh/docs/reference/uniquekeyattribute#slotsperaxis) 时，索引在键坐标的一个窗口上直接映射（[`IDirectMapped`](/zh/docs/reference/idirectmapped)）；没设它而自己声明了 [`IDirectMapped`](/zh/docs/reference/idirectmapped) 的 struct 保留自己写的 `Slots` 和 `SlotOf`。
 
 ## 构造函数 [#constructors]
 
@@ -19,3 +19,13 @@ public sealed class UniqueKeyAttribute : Attribute
 ```csharp
 public UniqueKeyAttribute();
 ```
+
+## 属性 [#properties]
+
+### `SlotsPerAxis` [#slotsperaxis]
+
+```csharp
+public int SlotsPerAxis { get; set; }
+```
+
+索引直接映射到槽位的键窗口的边长，2 的幂（默认 0：只用哈希索引）。生成器加上 [`IDirectMapped`](/zh/docs/reference/idirectmapped)：`Slots` 是边长的 “键的轴数”次方，`SlotOf` 把每个坐标和边长 − 1 按位与，按行优先排列（x 最快，然后 z，然后 y），所以任何一个这样大小的窗口里的键，包括负坐标，都落在不同的槽位。键是 `int`（一条轴）、带整数成员 `X` 和 `Z`（以及 `Y`）的 struct，或者元组（`Item1` 最快）：`public partial record struct Chunk([UniqueKey(SlotsPerAxis = 64)] ChunkPos Pos) : IComponent;` 生成 `Slots => 4096` 和 `SlotOf(pos) => (pos.Z & 63) * 64 + (pos.X & 63)`。

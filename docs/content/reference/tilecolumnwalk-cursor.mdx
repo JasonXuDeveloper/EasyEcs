@@ -52,6 +52,14 @@ public Vector256<TLane> Load256<TLane>(int dx = 0, int dy = 0, int dz = 0);
 
 The 256 bits of cells from (dx, dy, dz) of the column as lanes of `TLane`. O(1).
 
+### `Load512` [#load512]
+
+```csharp
+public Vector512<TLane> Load512<TLane>(int dx = 0, int dy = 0, int dz = 0);
+```
+
+The 512 bits of cells from (dx, dy, dz) of the column as lanes of `TLane`, as [`TileCursor.Load512`](/en/docs/reference/tilecursor#load512) loads them. O(1).
+
 ### `LoadVector` [#loadvector]
 
 ```csharp
@@ -77,6 +85,14 @@ public void Store<TLane>(Vector256<TLane> value, Span<TCell> into);
 Stores 256 bits of `value` into the row `into` from the column's cell, as [`TileColumnWalk.Cursor.Store`](/en/docs/reference/tilecolumnwalk-cursor#store) does. O(1).
 
 ### `Store` [#store-3]
+
+```csharp
+public void Store<TLane>(Vector512<TLane> value, Span<TCell> into);
+```
+
+Stores 512 bits of `value` into the row `into` from the column's cell, as [`TileColumnWalk.Cursor.Store`](/en/docs/reference/tilecolumnwalk-cursor#store) does. O(1).
+
+### `Store` [#store-4]
 
 ```csharp
 public void Store<TLane>(Vector<TLane> value, Span<TCell> into);

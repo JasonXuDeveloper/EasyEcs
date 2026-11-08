@@ -10,7 +10,7 @@ description: "LookupKeyAttribute for a key that names one entity (IUniqueIndexed
 public sealed class UniqueKeyAttribute : Attribute
 ```
 
-[`LookupKeyAttribute`](/en/docs/reference/lookupkeyattribute) for a key that names one entity ([`IUniqueIndexed`](/en/docs/reference/iuniqueindexed)): the generator adds `IUniqueIndexed<TKey>` with the explicit `Key`. A struct that declares [`IDirectMapped`](/en/docs/reference/idirectmapped) keeps its own `Slots` and `SlotOf`; only `Key` is generated.
+[`LookupKeyAttribute`](/en/docs/reference/lookupkeyattribute) for a key that names one entity ([`IUniqueIndexed`](/en/docs/reference/iuniqueindexed)): the generator adds `IUniqueIndexed<TKey>` with the explicit `Key`. With [`UniqueKeyAttribute.SlotsPerAxis`](/en/docs/reference/uniquekeyattribute#slotsperaxis), the index is direct-mapped over a window of the key's coordinates ([`IDirectMapped`](/en/docs/reference/idirectmapped)); a struct that declares [`IDirectMapped`](/en/docs/reference/idirectmapped) without it keeps its own `Slots` and `SlotOf`.
 
 ## Constructors
 
@@ -19,3 +19,13 @@ public sealed class UniqueKeyAttribute : Attribute
 ```csharp
 public UniqueKeyAttribute();
 ```
+
+## Properties
+
+### `SlotsPerAxis` [#slotsperaxis]
+
+```csharp
+public int SlotsPerAxis { get; set; }
+```
+
+The side of the window of keys the index maps to slots directly, a power of two (0, the default: a hashed index only). The generator adds [`IDirectMapped`](/en/docs/reference/idirectmapped): `Slots` is the side to the power of the key's axes, `SlotOf` each coordinate masked by side − 1, row-major (x fastest, then z, then y), so the keys of any window of that side get distinct slots, negative coordinates included. The key is an `int` (one axis), a struct with integer members `X` and `Z` (and `Y`), or a tuple (`Item1` fastest): `public partial record struct Chunk([UniqueKey(SlotsPerAxis = 64)] ChunkPos Pos) : IComponent;` writes `Slots => 4096` and `SlotOf(pos) => (pos.Z & 63) * 64 + (pos.X & 63)`.

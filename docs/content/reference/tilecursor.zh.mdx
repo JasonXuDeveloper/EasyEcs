@@ -57,6 +57,14 @@ public Vector256<TLane> Load256<TLane>(int dx = 0, int dy = 0, int dz = 0);
 
 **复杂度**（[API 表](/zh/docs/api)）：O(1)：一次非对齐加载
 
+### `Load512` [#load512]
+
+```csharp
+public Vector512<TLane> Load512<TLane>(int dx = 0, int dy = 0, int dz = 0);
+```
+
+从 (dx, dy, dz) 开始的 512 位格子，按 `TLane` 分道：`Vector512.IsHardwareAccelerated` 时一次加载一行 16 个 float，其他机器上是两次 256 位加载。O(1)。
+
 ### `LoadVector` [#loadvector]
 
 ```csharp

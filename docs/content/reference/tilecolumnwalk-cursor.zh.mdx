@@ -52,6 +52,14 @@ public Vector256<TLane> Load256<TLane>(int dx = 0, int dy = 0, int dz = 0);
 
 从这一列偏移 (dx, dy, dz) 开始的 256 位格子，按 `TLane` 分道。O(1)。
 
+### `Load512` [#load512]
+
+```csharp
+public Vector512<TLane> Load512<TLane>(int dx = 0, int dy = 0, int dz = 0);
+```
+
+从这一列偏移 (dx, dy, dz) 开始的 512 位格子，按 `TLane` 分道，加载方式同 [`TileCursor.Load512`](/zh/docs/reference/tilecursor#load512)。O(1)。
+
 ### `LoadVector` [#loadvector]
 
 ```csharp
@@ -77,6 +85,14 @@ public void Store<TLane>(Vector256<TLane> value, Span<TCell> into);
 把 `value` 的 256 位从这一列的格子起存进行 `into`，同 [`TileColumnWalk.Cursor.Store`](/zh/docs/reference/tilecolumnwalk-cursor#store)。O(1)。
 
 ### `Store` [#store-3]
+
+```csharp
+public void Store<TLane>(Vector512<TLane> value, Span<TCell> into);
+```
+
+把 `value` 的 512 位从这一列的格子起存进行 `into`，同 [`TileColumnWalk.Cursor.Store`](/zh/docs/reference/tilecolumnwalk-cursor#store)。O(1)。
+
+### `Store` [#store-4]
 
 ```csharp
 public void Store<TLane>(Vector<TLane> value, Span<TCell> into);

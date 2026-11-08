@@ -57,6 +57,14 @@ The 256 bits of cells from (dx, dy, dz) as lanes of `TLane`. O(1).
 
 **Complexity** ([API table](/en/docs/api)): O(1): one unaligned load
 
+### `Load512` [#load512]
+
+```csharp
+public Vector512<TLane> Load512<TLane>(int dx = 0, int dy = 0, int dz = 0);
+```
+
+The 512 bits of cells from (dx, dy, dz) as lanes of `TLane`: a row of 16 floats in one load where `Vector512.IsHardwareAccelerated`, two 256-bit loads elsewhere. O(1).
+
 ### `LoadVector` [#loadvector]
 
 ```csharp
