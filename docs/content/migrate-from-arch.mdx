@@ -110,7 +110,7 @@ public struct Lifetime : IComponent { public int Ticks; }
 public struct Burning : IComponent { public int Ticks, DamagePerTick; }
 public struct Player : IComponent { public long AccountId; }
 public struct Npc : IComponent { public int TemplateId; }
-public struct Projectile : IComponent { public int OwnerId; }
+public struct Projectile : IComponent { public EntityId Owner; }
 public struct Stunned : IComponent { public int Ticks; }
 public struct Dead : IComponent;
 
@@ -238,7 +238,7 @@ public ref struct ShootingSystem
         if ((stats.Tick + shooter.Id.Index) % 20 != 0) return;
         stats.Spawns++;
         world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
-            new Projectile { OwnerId = shooter.Id.Index });
+            new Projectile { Owner = shooter.Id });
     }
 }
 

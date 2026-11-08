@@ -52,7 +52,7 @@ Caught by [EECS017](/en/docs/guide/analyzer#eecs017) (warning). More in
 public record struct OwnerSlot(int Index) : IComponent;
 ```
 
-```csharp
+```csharp doccheck=expect-EECS130
 var owned = world.CreateEntity(new OwnerSlot(hero.Id.Index));   // names whichever entity reuses that index
 ```
 
@@ -153,7 +153,7 @@ the whole pattern.
 public record struct Round(int Number, int Tick) : ISingletonComponent;
 ```
 
-```csharp
+```csharp doccheck=expect-EECS129
 world.SetRound(1, 0);
 world.AddSingleton<Round>();       // throws: the world has Round already
 ```
@@ -975,7 +975,7 @@ Caught by [EECS060](/en/docs/guide/analyzer#eecs060). More in [reductions](/en/d
 
 ### Reading `Reduce<T>.Value` as the total [#reduce-value]
 
-```csharp
+```csharp doccheck=expect-EECS128
 [EcsSystem]
 public ref struct Bleed
 {

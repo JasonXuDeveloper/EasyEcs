@@ -48,7 +48,7 @@ public record struct Follow(EntityId Leader) : IComponent;
 public record struct OwnerSlot(int Index) : IComponent;
 ```
 
-```csharp
+```csharp doccheck=expect-EECS130
 var owned = world.CreateEntity(new OwnerSlot(hero.Id.Index));   // 指向之后复用这个下标的随便哪个实体
 ```
 
@@ -143,7 +143,7 @@ record struct 的 `ToString()` 会打印所有公开属性。`Key` 返回 record
 public record struct Round(int Number, int Tick) : ISingletonComponent;
 ```
 
-```csharp
+```csharp doccheck=expect-EECS129
 world.SetRound(1, 0);
 world.AddSingleton<Round>();       // 抛异常：World 里已经有 Round
 ```
@@ -923,7 +923,7 @@ public ref struct Bleed
 
 ### 把 `Reduce<T>.Value` 当成总数 [#reduce-value]
 
-```csharp
+```csharp doccheck=expect-EECS128
 [EcsSystem]
 public ref struct Bleed
 {
