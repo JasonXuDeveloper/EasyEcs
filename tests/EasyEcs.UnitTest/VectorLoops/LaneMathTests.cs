@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Numerics;
 using System.Runtime.Intrinsics;
 using System.Threading;
@@ -27,6 +28,31 @@ public record struct Real8x4 : IComponent { public double A, B, C, D; }
 /// </summary>
 public static class LoweredKernels
 {
+    // Math with no vector form called once per lane (LaneMath.PerLane): each lane the scalar function's bits.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Angles(ref Real4 o, in Real x)
+    {
+        float a = x.Value * 0.5f - 0.25f, b = x.Value * x.Value - a, c = MathF.Abs(a - b) * 0.125f + MathF.Min(a, b);
+        o.A = MathF.Atan2(a, b) + c * c - MathF.Max(a, c);
+        o.B = MathF.Asin(MathF.Min(MathF.Max(a, -1), 1)) * b - c * 0.5f + a * b;
+        o.C = MathF.Sin(a) * c + MathF.Cbrt(b) - a * a * 0.5f + b * c;
+        o.D = MathF.Pow(MathF.Abs(a) + 0.5f, b) - c * a + MathF.Max(b, c) * 0.25f - a;
+    }
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void DoubleAngles(ref Real8x4 o, in Real8 x)
+    {
+        double a = x.Value * 0.5 - 0.25, b = x.Value * x.Value - a, c = Math.Abs(a - b) * 0.125 + Math.Min(a, b);
+        o.A = Math.Atan2(a, b) + c * c - Math.Max(a, c) + a * b - b * c + a * c;
+        o.B = Math.Tanh(a) * b - c * 0.5 + a * b - Math.Min(a, c) * 0.25 + b * b;
+        o.C = Math.Exp(Math.Min(a, 50)) * c - a * a * 0.5 + b * c - Math.Abs(b) * 0.125 + c;
+        o.D = Math.Pow(Math.Abs(a) + 0.5, Math.Min(b, 8)) - c * a + Math.Max(b, c) * 0.25 - a * b + c;
+    }
+
+    // The call alone: below the gate, so Require opens it (the bits are the same either way).
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Bearing(ref Real4 o, in Real x) => o.A = MathF.Atan2(x.Value, 1.5f);
+
     [ForEach(SimdMode = SimdMode.Require)]
     internal static void Halve(ref Real4 o, in Real x)
     {
@@ -459,6 +485,57 @@ public class LaneMathTests
         }
     }
 
+    /// <summary>
+    /// Math called once per lane inside the vector loop (Atan2, Asin, Sin without FloatMode.Fast, Cbrt, Pow by a value;
+    /// Tanh, Exp, Atan2 and Pow of doubles): the scalar bits for random bit patterns and edges, and the call alone under
+    /// SimdMode.Require.
+    /// </summary>
+    [Test]
+    public void MathCalledPerLaneIsTheScalarBits()
+    {
+        const int count = 100_003;
+        using var world = new World();
+        var random = new Random(9);
+        var xs = new Real[count];
+        var ds = new Real8[count];
+        var entities = new Entity[count];
+        uint[] specials = [0, 0x80000000, 1, 0x7F800000, 0xFF800000, 0x7FC00000, 0x3F800000, 0xBF800000, 0x00800000, 0x7F7FFFFF];
+        world.Reserve<Real4, Real, Real8x4, Real8>(count);
+        for (int i = 0; i < count; i++)
+        {
+            uint bits = random.Next(4) == 0 ? specials[random.Next(specials.Length)] : random.Next(3) == 0 ? (uint)random.Next() : BitConverter.SingleToUInt32Bits((float)(random.NextDouble() * 8 - 4));
+            xs[i] = new Real { Value = BitConverter.UInt32BitsToSingle(bits) };
+            ds[i] = new Real8 { Value = random.Next(4) == 0 ? BitConverter.UInt32BitsToSingle(bits) : random.NextDouble() * 8 - 4 };
+            entities[i] = world.CreateEntity(new Real4(), xs[i], new Real8x4(), ds[i]);
+        }
+        LoweredKernels.Angles(world);
+        LoweredKernels.DoubleAngles(world);
+        for (int i = 0; i < count; i++)
+        {
+            var want = new Real4();
+            LoweredKernels.Angles(ref want, in xs[i]);
+            var got = entities[i].Get<Real4>();
+            Assert.That(Bits(got.A, want.A) && Bits(got.B, want.B) && Bits(got.C, want.C) && Bits(got.D, want.D), $"{BitConverter.SingleToUInt32Bits(xs[i].Value):X8}: {got} instead of {want}");
+            var wanted = new Real8x4();
+            LoweredKernels.DoubleAngles(ref wanted, in ds[i]);
+            var gotten = entities[i].Get<Real8x4>();
+            Assert.That(Bits(gotten.A, wanted.A) && Bits(gotten.B, wanted.B) && Bits(gotten.C, wanted.C) && Bits(gotten.D, wanted.D), $"{ds[i].Value}: {gotten} instead of {wanted}");
+        }
+        LoweredKernels.Bearing(world);
+        for (int i = 0; i < count; i++)
+            Assert.That(Bits(entities[i].Get<Real4>().A, MathF.Atan2(xs[i].Value, 1.5f)), $"{xs[i].Value}");
+    }
+
+    /// <summary>The per-lane bodies get their vector loops (the gate opens them); the call alone stays as written.</summary>
+    [Test]
+    public void ThePerLaneGateOpensHeavyBodiesOnly()
+    {
+        using var world = new World();
+        world.AddSystem<PerLaneLoops>();
+        Assert.That(world.DescribeSchedule().Groups[0].Stages.SelectMany(s => s.Systems).SelectMany(s => s.Loops).Select(l => l.Split(' ')[0] + (l.Contains(": vector") ? " vector" : " scalar")),
+            Is.EquivalentTo(new[] { "Angles: vector", "Alone: scalar" }));
+    }
+
     /// <summary>A parallel loop with a divisor per row at 1 and 4 threads: the same results as the method row by row.</summary>
     [TestCase(1)]
     [TestCase(4)]
@@ -581,4 +658,21 @@ public class LaneMathTests
                 Assert.That(Ulps(LaneMath.Pow(Vector128.Create(b), Vector128.Create(e))[0], MathF.Pow(b, e)), Is.LessThanOrEqualTo(1), $"Pow {b} {e}");
         }
     }
+}
+
+/// <summary>A heavy per-lane body and the call alone, in a system: the schedule names the loops they get.</summary>
+[EcsSystem]
+public ref struct PerLaneLoops
+{
+    [ForEach]
+    static void Angles(ref Real4 o, in Real x)
+    {
+        float a = x.Value * 0.5f - 0.25f, b = x.Value * x.Value - a, c = MathF.Abs(a - b) * 0.125f + MathF.Min(a, b);
+        o.A = MathF.Atan2(a, b) + c * c - MathF.Max(a, c) + a * b - b * c;
+    }
+
+#pragma warning disable EECS055 // the call alone stays as written: what this checks
+    [ForEach]
+    static void Alone(ref Real4 o, in Real x) => o.B = MathF.Atan2(x.Value, 1.5f);
+#pragma warning restore EECS055
 }
