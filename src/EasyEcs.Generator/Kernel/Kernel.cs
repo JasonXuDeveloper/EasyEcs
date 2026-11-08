@@ -2435,6 +2435,7 @@ internal sealed partial class Kernel
             return Broadcast(scalar, op.Type!);
         }
         if (PairExpr(op) is { } pair) return pair;
+        if (op is IInvocationOperation invocation && RandomDraw(invocation) is { } draw) return draw; // Kernel.Random.cs
         if (UsesEntity(op)) throw EntityUse(op);
 
         switch (op)
