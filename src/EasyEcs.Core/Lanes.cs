@@ -398,4 +398,30 @@ public static class Lanes
     /// <inheritdoc cref="Ballot(Vector{int})"/>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ulong Ballot(Vector512<long> mask) => mask.ExtractMostSignificantBits();
+
+    /// <inheritdoc cref="Ballot(Vector{int})"/>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ulong Ballot(Vector<short> mask) => Vector<byte>.Count switch
+    {
+        64 => mask.AsVector512().ExtractMostSignificantBits(),
+        32 => mask.AsVector256().ExtractMostSignificantBits(),
+        _ => mask.AsVector128().ExtractMostSignificantBits(),
+    };
+
+    /// <inheritdoc cref="Ballot(Vector{int})"/>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ulong Ballot(Vector<sbyte> mask) => Vector<byte>.Count switch
+    {
+        64 => mask.AsVector512().ExtractMostSignificantBits(),
+        32 => mask.AsVector256().ExtractMostSignificantBits(),
+        _ => mask.AsVector128().ExtractMostSignificantBits(),
+    };
+
+    /// <inheritdoc cref="Ballot(Vector{int})"/>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ulong Ballot(Vector512<short> mask) => mask.ExtractMostSignificantBits();
+
+    /// <inheritdoc cref="Ballot(Vector{int})"/>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ulong Ballot(Vector512<sbyte> mask) => mask.ExtractMostSignificantBits();
 }

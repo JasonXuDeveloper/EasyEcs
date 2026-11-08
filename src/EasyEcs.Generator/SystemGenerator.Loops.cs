@@ -77,7 +77,8 @@ public sealed partial class SystemGenerator
             inline.Append($"{indent}}}\n");
         }
         Indented(inline, indent, after);
-        if (Locals(sb.ToString(start, sb.Length - start) + inline) <= InlinedLocals)
+        // + the call of the rows left, which Execute appends after the loops (its default owner is a temporary)
+        if (Locals(sb.ToString(start, sb.Length - start) + inline + call) <= InlinedLocals)
         {
             sb.Append(inline);
             return;

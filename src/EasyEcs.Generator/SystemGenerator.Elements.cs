@@ -146,7 +146,7 @@ public sealed partial class SystemGenerator
                 + $"    nint d = {Unsafe}.ByteOffset(ref {Unsafe}.As<A, byte>(ref {Unsafe}.AsRef(in {Marshal}.GetReference(a))), ref {Unsafe}.As<B, byte>(ref {Unsafe}.AsRef(in {Marshal}.GetReference(b))));\n"
                 + $"    return d == 0 && {Unsafe}.SizeOf<A>() == {Unsafe}.SizeOf<B>() || d >= (nint)a.Length * {Unsafe}.SizeOf<A>() || -d >= (nint)b.Length * {Unsafe}.SizeOf<B>();\n}}\n");
         int close = body.LastIndexOf('}');
-        body = body.Substring(0, close) + hidden + helpers + body.Substring(close);
+        body = body.Substring(0, close) + "\n" + hidden + helpers + body.Substring(close); // a line of its own: the body may end on the line of a statement
         return (lines ? Line(block) : "") + body.TrimStart(' ', '\t') + (lines ? "\n#line default" : "");
     }
 

@@ -14,8 +14,9 @@ namespace EasyEcs;
 /// a column holds rows as <c>x0 y0 z0 x1 y1 z1 ...</c>, and the loop computes on one vector per field
 /// (<c>x0 x1 x2 ...</c>). <c>Load2</c> / <c>Load3</c> / <c>Load4</c> split the rows of one vector into one vector per
 /// field with shuffles, <c>Store2</c> / <c>Store3</c> / <c>Store4</c> put them back. The generator calls them; a
-/// [ForEach] method never does. Lanes of 4 bytes (float, int, uint) or 8 bytes (double, long, ulong). <c>Lanes32</c> /
-/// <c>Lanes64</c> turn the passing rows of a word (IForEachMasked) into the lane mask of one vector.
+/// [ForEach] method never does. Lanes of 4 bytes (float, int, uint) or 8 bytes (double, long, ulong). <c>Lanes8</c> /
+/// <c>Lanes16</c> / <c>Lanes32</c> / <c>Lanes64</c> turn the passing rows of a word (IForEachMasked) or an optional
+/// column's presence bits into the lane mask of one vector.
 /// </summary>
 /// <remarks>
 /// Each call reads or writes exactly the rows of one vector (<c>Vector&lt;T&gt;.Count</c> or
@@ -83,6 +84,77 @@ public static partial class Interleaved
         var bits = Masks.Bits64x8;
         return Vector512.Equals(Vector512.Create((long)(rows >> first)) & bits, bits);
     }
+
+    /// <summary>
+    /// <see cref="Lanes32"/> for lanes of 2 bytes: <c>Vector&lt;short&gt;.Count</c> rows. Each ulong of the vector holds
+    /// 4 lanes: 4 bits of the word spread into its 16-bit lanes (one multiply), tested against lane j's bit.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<short> Lanes16(ulong rows, int first)
+    {
+        ulong x = rows >> first;
+        Vector<ulong> spread = Vector<byte>.Count switch
+        {
+            16 => Vector128.Create(Spread16(x, 0), Spread16(x, 1)).AsVector(),
+            32 => Vector256.Create(Spread16(x, 0), Spread16(x, 1), Spread16(x, 2), Spread16(x, 3)).AsVector(),
+            _ => Spread16In512(x).AsVector(),
+        };
+        var bits = new Vector<ulong>(Bits16).As<ulong, short>();
+        return Vector.Equals(spread.As<ulong, short>() & bits, bits);
+    }
+
+    /// <summary>
+    /// <see cref="Lanes32"/> for lanes of 1 byte: <c>Vector&lt;byte&gt;.Count</c> rows. Each ulong of the vector holds
+    /// 8 lanes: a byte of the word spread into its bytes (one multiply), tested against lane j's bit.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<sbyte> Lanes8(ulong rows, int first)
+    {
+        ulong x = rows >> first;
+        Vector<ulong> spread = Vector<byte>.Count switch
+        {
+            16 => Vector128.Create(Spread8(x, 0), Spread8(x, 1)).AsVector(),
+            32 => Vector256.Create(Spread8(x, 0), Spread8(x, 1), Spread8(x, 2), Spread8(x, 3)).AsVector(),
+            _ => Spread8In512(x).AsVector(),
+        };
+        var bits = new Vector<ulong>(Bits8).As<ulong, sbyte>();
+        return Vector.Equals(spread.As<ulong, sbyte>() & bits, bits);
+    }
+
+    /// <summary><see cref="Lanes16"/> for <c>Vector512&lt;short&gt;</c>: 32 rows.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector512<short> Lanes16In512(ulong rows, int first)
+    {
+        var bits = Vector512.Create(Bits16).AsInt16();
+        return Vector512.Equals(Spread16In512(rows >> first).AsInt16() & bits, bits);
+    }
+
+    /// <summary><see cref="Lanes8"/> for <c>Vector512&lt;sbyte&gt;</c>: 64 rows, the whole word.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector512<sbyte> Lanes8In512(ulong rows, int first)
+    {
+        var bits = Vector512.Create(Bits8).AsSByte();
+        return Vector512.Equals(Spread8In512(rows >> first).AsSByte() & bits, bits);
+    }
+
+    // Lane j of a ulong's 16-bit lanes holds bit j; of its bytes, bit j.
+    private const ulong Bits16 = 0x0008_0004_0002_0001UL, Bits8 = 0x8040_2010_0804_0201UL;
+
+    /// <summary>Bits [4k, 4k + 4) of <paramref name="x"/> copied into each 16-bit lane of a ulong.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong Spread16(ulong x, int k) => ((x >> (4 * k)) & 0xF) * 0x0001_0001_0001_0001UL;
+
+    /// <summary>Byte <paramref name="k"/> of <paramref name="x"/> copied into each byte of a ulong.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static ulong Spread8(ulong x, int k) => ((x >> (8 * k)) & 0xFF) * 0x0101_0101_0101_0101UL;
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector512<ulong> Spread16In512(ulong x) => Vector512.Create(Spread16(x, 0), Spread16(x, 1), Spread16(x, 2),
+        Spread16(x, 3), Spread16(x, 4), Spread16(x, 5), Spread16(x, 6), Spread16(x, 7));
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Vector512<ulong> Spread8In512(ulong x) => Vector512.Create(Spread8(x, 0), Spread8(x, 1), Spread8(x, 2),
+        Spread8(x, 3), Spread8(x, 4), Spread8(x, 5), Spread8(x, 6), Spread8(x, 7));
 
     /// <summary>
     /// The last <paramref name="count"/> rows of a run (fewer than a vector's) copied from <paramref name="rows"/> into

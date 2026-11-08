@@ -695,66 +695,83 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             var (first, count) = filter.Rows(ai, archetype.Count);
                             int mode = rows.Mode(archetype);
                             if (archetype.AliveCount == 0 || mode == RowFilter.None || first >= count) continue;
-                            ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
-                {{Lines(n, i => $"            ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
-                            if (mode == RowFilter.Test)
-                            {
-                                // Word by word: whole words make runs, the others go to the job with their passing rows.
-                                bool tombstones = archetype.Count != archetype.AliveCount;
-                                int words = (count + 63) >> 6, start = first, end = first; // the pending run: start .. end
-                                for (int w = first >> 6; w < words; w++)
-                                {
-                                    int next = rows.NextWord(archetype, w, words); // words no Changed column reaches
-                                    if (next != w)
-                                    {
-                                        w = next - 1;
-                                        continue;
-                                    }
-
-                                    int at = Math.Max(w << 6, first);
-                                    ulong range = RowFilter.RowMask(w, count) & (ulong.MaxValue << at); // shift is mod 64
-                                    ulong bits = rows.Word(archetype, w) & range;
-                                    if (tombstones && bits != 0) bits &= AliveRows(ref Unsafe.Add(ref slots, w << 6), Math.Min(64, count - (w << 6)));
-                                    if (bits == range)
-                                    {
-                                        if (end != at)
-                                        {
-                                            if (end > start)
-                                            {
-                {{BatchRun(n, "                            ", "start", "end - start")}}
-                                            }
-
-                                            start = at;
-                                        }
-
-                                        end = Math.Min((w + 1) << 6, count);
-                                        continue;
-                                    }
-
-                                    if (bits == 0)
-                                    {
-                                        w = rows.NextPassing(archetype, w + 1, words) - 1; // words without a passing row
-                                        continue;
-                                    }
-
-                                    int low = (w << 6) + BitOperations.TrailingZeroCount(bits), high = (w << 6) + 64 - BitOperations.LeadingZeroCount(bits);
-                                    ulong passing = bits >> (low & 63);
-                {{StampWord(n, "                    ", "w", "bits")}}
-                                    job.Execute(new EntitySpan(this, archetype, low, ref Unsafe.Add(ref slots, low), high - low), passing, {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, low), high - low)")}});
-                                }
-
-                                if (end > start)
-                                {
-                {{BatchRun(n, "                    ", "start", "end - start")}}
-                                }
-
-                                continue;
-                            }
-
-                            ForEachBatchRuns<{{tps}}, TJob>(ref job, archetype, rows, false, first, count, {{bits}}); // every row passes: runs
+                            if (mode == RowFilter.Test) MaskedRuns<{{tps}}, TJob>(ref job, archetype, rows, first, count, {{bits}});
+                            else ForEachBatchRuns<{{tps}}, TJob>(ref job, archetype, rows, false, first, count, {{bits}}); // every row passes: runs
                         }
                     }
 
+                    /// <summary>
+                    /// The rows [<paramref name="first"/>, <paramref name="count"/>) of a table whose rows must be tested, word by
+                    /// word: whole words make runs, the others go to the job with their passing rows (a table of <c>Masked</c>,
+                    /// or a chunk of a parallel masked pass, which ends on a word or at the table's end).
+                    /// </summary>
+                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                    private void MaskedRuns<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int first, int count, {{List(n, i => $"ushort b{i}")}})
+                {{cons}}
+                        where TJob : struct, IForEachMasked<{{tps}}>, allows ref struct
+                    {
+                        ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
+                {{Lines(n, i => $"        ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
+                        // Word by word: whole words make runs, the others go to the job with their passing rows.
+                        bool tombstones = archetype.Count != archetype.AliveCount;
+                        int words = (count + 63) >> 6, start = first, end = first; // the pending run: start .. end
+                        for (int w = first >> 6; w < words; w++)
+                        {
+                            int next = rows.NextWord(archetype, w, words); // words no Changed column reaches
+                            if (next != w)
+                            {
+                                w = next - 1;
+                                continue;
+                            }
+
+                            int at = Math.Max(w << 6, first);
+                            ulong range = RowFilter.RowMask(w, count) & (ulong.MaxValue << at); // shift is mod 64
+                            ulong bits = rows.Word(archetype, w) & range;
+                            if (tombstones && bits != 0) bits &= AliveRows(ref Unsafe.Add(ref slots, w << 6), Math.Min(64, count - (w << 6)));
+                            if (bits == range)
+                            {
+                                if (end != at)
+                                {
+                                    if (end > start)
+                                    {
+                {{BatchRun(n, "                    ", "start", "end - start")}}
+                                    }
+
+                                    start = at;
+                                }
+
+                                end = Math.Min((w + 1) << 6, count);
+                                continue;
+                            }
+
+                            if (bits == 0)
+                            {
+                                w = rows.NextPassing(archetype, w + 1, words) - 1; // words without a passing row
+                                continue;
+                            }
+
+                            int low = (w << 6) + BitOperations.TrailingZeroCount(bits), high = (w << 6) + 64 - BitOperations.LeadingZeroCount(bits);
+                            ulong passing = bits >> (low & 63);
+                {{StampWord(n, "            ", "w", "bits")}}
+                            job.Execute(new EntitySpan(this, archetype, low, ref Unsafe.Add(ref slots, low), high - low), passing, {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, low), high - low)")}});
+                        }
+
+                        if (end > start)
+                        {
+                {{BatchRun(n, "            ", "start", "end - start")}}
+                        }
+                    }
+
+                    /// <summary>A chunk of a parallel masked pass: <c>MaskedRuns</c> in a table whose rows must be tested, else its runs.</summary>
+                    private void ForEachMaskedChunk<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int start, int end, {{List(n, i => $"ushort b{i}")}})
+                {{cons}}
+                        where TJob : struct, IForEachMasked<{{tps}}>, allows ref struct
+                    {
+                        if (rows.Mode(archetype) == RowFilter.Test) MaskedRuns<{{tps}}, TJob>(ref job, archetype, rows, start, end, {{bits}});
+                        else ForEachBatchRuns<{{tps}}, TJob>(ref job, archetype, rows, false, start, end, {{bits}});
+                    }
+
+                {{ParallelLoop(n, "ForEachMasked", "IForEachMasked")}}
                 {{ParallelLoop(n, "ForEachBatch", "IForEachBatch")}}
                     /// <summary>
                     /// The runs of rows [<paramref name="start"/>, <paramref name="end"/>) of a table, a nonempty range of a table
