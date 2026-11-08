@@ -13,6 +13,7 @@
         <PackageReference Include="BenchmarkDotNet" Version="0.15.2"/>
         <ProjectReference Include="..\VoxelServer.csproj"/>
         <ProjectReference Include="..\..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <Compile Include="..\..\..\benchmarks\EasyEcs.Benchmark\BenchmarkConfig.cs" Link="BenchmarkConfig.cs"/>
     </ItemGroup>
 
 </Project>

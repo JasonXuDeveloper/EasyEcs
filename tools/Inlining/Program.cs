@@ -2,8 +2,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics.Tracing;
 using System.Reflection;
 
-// Runs each [Benchmark] method of the classes named (all of the default set) once, with every value of its non-numeric
-// [Params] and the smallest numeric ones, while an EventListener reads the JIT's inlining decisions (JitTracing keyword
+// Runs each [Benchmark] method of the classes named (all of the default set; KernelBenchmark or Kernel) once, with
+// every value of its non-numeric [Params] / [ParamsSource] and the smallest numeric ones (tools/Shared/BenchmarkRunner.cs), while an EventListener reads the JIT's inlining decisions (JitTracing keyword
 // 0x1000). Run without tiered compilation (tools/inlining.sh sets DOTNET_TieredCompilation=0): every method is compiled
 // optimized at its first call, with the inliner's decisions of Tier1, so one call of each runner decides what it
 // inlines, masked words and the last rows of a run included. Prints each job member (a type of a generated __ForEach
@@ -14,59 +14,21 @@ using var listener = new Inlining();
 var assembly = typeof(EasyEcs.Benchmark.KernelBenchmark).Assembly;
 foreach (var name in classes)
 {
-    var type = assembly.GetTypes().Single(t => t.Name == name);
-    var benchmarks = type.GetMethods().Where(m => Has(m, "BenchmarkAttribute") && m.GetParameters().Length == 0).ToArray();
-    foreach (var values in Combinations(type))
+    var type = BenchmarkRunner.Find(assembly, name);
+    var benchmarks = BenchmarkRunner.Benchmarks(type, []);
+    foreach (var values in BenchmarkRunner.Combinations(type, BenchmarkRunner.Smallest))
     {
-        var instance = Activator.CreateInstance(type)!;
-        foreach (var (member, value) in values) Set(instance, member, value);
-        foreach (var setup in type.GetMethods().Where(m => Has(m, "GlobalSetupAttribute"))) setup.Invoke(instance, null);
+        var instance = BenchmarkRunner.Create(type, values);
         foreach (var benchmark in benchmarks) benchmark.Invoke(instance, null);
-        foreach (var cleanup in type.GetMethods().Where(m => Has(m, "GlobalCleanupAttribute"))) cleanup.Invoke(instance, null);
+        BenchmarkRunner.Cleanup(instance);
     }
-    Console.WriteLine($"{name}: {benchmarks.Length} benchmarks run");
+    Console.WriteLine($"{type.Name}: {benchmarks.Length} benchmarks run");
 }
 Thread.Sleep(2000); // the listener receives the runtime's events on a thread of its own
 var failed = listener.Failed.Keys.Order().ToArray();
 foreach (var line in failed) Console.WriteLine(line);
 Console.WriteLine(failed.Length == 0 ? "every generated job inlined" : $"{failed.Length} failed inlines of generated jobs");
 return failed.Length == 0 ? 0 : 1;
-
-static bool Has(MemberInfo member, string attribute) => member.GetCustomAttributes().Any(a => a.GetType().Name == attribute);
-
-// Every value of the non-numeric [Params] (each case of a benchmark), the smallest of the numeric ones.
-static IEnumerable<List<(MemberInfo Member, object? Value)>> Combinations(Type type)
-{
-    IEnumerable<List<(MemberInfo, object?)>> all = [[]];
-    foreach (var member in type.GetMembers().Where(m => Has(m, "ParamsAttribute") || Has(m, "ParamsSourceAttribute")))
-    {
-        var attribute = member.GetCustomAttributes().First(a => a.GetType().Name is "ParamsAttribute" or "ParamsSourceAttribute");
-        var values = attribute.GetType().Name == "ParamsAttribute"
-            ? (object?[])attribute.GetType().GetProperty("Values")!.GetValue(attribute)!
-            : Source(type, attribute);
-        object?[] chosen = values.All(v => v is IConvertible and not string and not Enum and not bool)
-            ? [values.MinBy(v => Convert.ToDouble(v))]
-            : values;
-        all = all.SelectMany(list => chosen.Select(v => new List<(MemberInfo, object?)>(list) { (member, v) })).ToList();
-    }
-    return all;
-}
-
-// A [ParamsSource]'s values: the static property or method it names, on its own type or the benchmark's.
-static object?[] Source(Type benchmark, Attribute attribute)
-{
-    var owner = (Type?)attribute.GetType().GetProperty("Type")?.GetValue(attribute) ?? benchmark;
-    var name = (string)attribute.GetType().GetProperty("Name")!.GetValue(attribute)!;
-    const BindingFlags all = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
-    object? values = owner.GetProperty(name, all)?.GetValue(null) ?? owner.GetMethod(name, all, Type.EmptyTypes)?.Invoke(null, null);
-    return ((System.Collections.IEnumerable)values!).Cast<object?>().ToArray();
-}
-
-static void Set(object instance, MemberInfo member, object? value)
-{
-    if (member is PropertyInfo property) property.SetValue(instance, value);
-    else ((FieldInfo)member).SetValue(instance, value);
-}
 
 /// <summary>The inlining failures whose inlinee is a member of a generated job.</summary>
 sealed class Inlining : EventListener
@@ -88,11 +50,10 @@ sealed class Inlining : EventListener
         if (!owner.Contains("__ForEach+") || owner.EndsWith(']') || name != "Execute" && !name.StartsWith("__", StringComparison.Ordinal)
             || Get("InlinerName") == ".cctor") return; // a static constructor's checks run once (SteerJob18.__Layout1)
         // A cold loop marked NoInlining is meant to be called.
-        var type = typeof(EasyEcs.Benchmark.KernelBenchmark).Assembly.GetType(owner);
-        if (type?.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
-                .Where(m => m.Name == name).All(m => m.MethodImplementationFlags.HasFlag(MethodImplAttributes.NoInlining)) == true
-            && type.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic).Any(m => m.Name == name)) return;
-        string job = owner[(owner.LastIndexOf('+') + 1)..];
-        Failed.TryAdd($"{Get("InlinerName")} <- {job}::{name}{Get("InlineeNameSignature")[(Get("InlineeNameSignature").IndexOf('('))..]}: {Get("FailReason")}", true);
+        var named = typeof(EasyEcs.Benchmark.KernelBenchmark).Assembly.GetType(owner)
+            ?.GetMethods(BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic).Where(m => m.Name == name).ToArray();
+        if (named is { Length: > 0 } && named.All(m => m.MethodImplementationFlags.HasFlag(MethodImplAttributes.NoInlining))) return;
+        string job = owner[(owner.LastIndexOf('+') + 1)..], signature = Get("InlineeNameSignature");
+        Failed.TryAdd($"{Get("InlinerName")} <- {job}::{name}{signature[signature.IndexOf('(')..]}: {Get("FailReason")}", true);
     }
 }

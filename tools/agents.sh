@@ -3,7 +3,7 @@
 #  - the root AGENTS.md lists every directory AGENTS.md (its "> Read when:" line) and every skill (its description's
 #    "Use when ..." part), between the agents-index / skills-index markers;
 #  - each directory AGENTS.md has a CLAUDE.md next to it that is the one line @AGENTS.md (Claude Code imports it);
-#  - every source file of src/ is named in its directory's file map.
+#  - every source file of src/, tests/ and benchmarks/ is named in its directory's file map, by its path in its project.
 # tools/agents.sh writes the indexes; tools/agents.sh --check fails when anything is stale or missing (CI, verify).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -54,13 +54,19 @@ if new != root:
     if check: problems.append("AGENTS.md indexes are stale: run tools/agents.sh")
     else: open("AGENTS.md", "w").write(new)
 
+# A project's file map names each of its source files by its path in the project (Locality/Chase.cs), at any depth:
+# the tracked and untracked files, so obj/ and bin/ never count, and a file moved into a folder must be named there.
 maps = {"src/EasyEcs.Core": "src/EasyEcs.Core/AGENTS.md", "src/EasyEcs.Generator": "src/EasyEcs.Generator/AGENTS.md",
         "src/EasyEcs.CodeFixes": "AGENTS.md"}
+for parent in ("tests", "benchmarks"):
+    for project in sorted({os.path.dirname(f) for f in files if f.startswith(parent + "/") and f.endswith(".csproj")}):
+        maps[project] = f"{parent}/AGENTS.md"
 for d, m in maps.items():
     text = open(m).read()
-    for f in sorted(glob.glob(f"{d}/*.cs")):
-        if os.path.basename(f) not in text:
-            problems.append(f"{f} is not in the file map {m}")
+    for f in sorted(f for f in files if f.startswith(d + "/") and f.endswith(".cs") and os.path.isfile(f)):
+        name = os.path.relpath(f, d)
+        if not re.search(rf"(?<![\w./-]){re.escape(name)}(?![\w])", text):
+            problems.append(f"{f} is not in the file map {m} (as {name})")
 
 for p in problems: print(p)
 print(f"agents: {len(problems)} problems")

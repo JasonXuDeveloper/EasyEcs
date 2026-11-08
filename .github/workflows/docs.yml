@@ -1,0 +1,30 @@
+name: Docs
+
+# The docs site's own checks. Cloudflare Pages builds and serves the site (bun run build) but does not run these.
+on:
+  push:
+    branches: [ "master" ]
+    paths: [ "docs/**", "tools/ApiDocs/zh/README.md", ".github/workflows/docs.yml" ]
+  pull_request:
+    branches: [ "master" ]
+    paths: [ "docs/**", "tools/ApiDocs/zh/README.md", ".github/workflows/docs.yml" ]
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-26.04
+    defaults:
+      run:
+        working-directory: docs
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: docs/.node-version
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install (the pinned versions of bun.lock)
+        run: bun install --frozen-lockfile
+      - name: tsc, Biome, links + anchors + icons, the Chinese pages' terms (bun run check)
+        run: bun run check

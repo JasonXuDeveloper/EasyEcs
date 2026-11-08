@@ -964,7 +964,7 @@ public class CodeFixTests
         var project = workspace.AddProject(ProjectInfo.Create(ProjectId.CreateNewId(), VersionStamp.Default, "Test", "Test", LanguageNames.CSharp,
             compilationOptions: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
             parseOptions: GeneratorTests.Parse, // the interceptors of lambda passes too
-            metadataReferences: GeneratorTests.Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location))
+            metadataReferences: GeneratorHost.References
                 .Concat(reference != null ? [reference] : []),
             analyzerReferences: generate ? [new Generators()] : []));
         return workspace.AddDocument(project.Id, "Test.cs", SourceText.From(source));

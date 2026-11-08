@@ -766,8 +766,8 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
   bare name binds to the user's method (CS7036). Say so where the generated entry points are documented.
 - A `[LookupKey]` member named `Key` gives EECS036 / CS0315 (the generated explicit `Key` collides): the message or
   the docs should name the fix.
-- When L1 / L2 ship, the prototypes under `benchmarks/EasyEcs.Benchmark/Locality/` and their link into the unit tests
-  go (nothing stale); their benchmarks keep only the plain baselines against the shipped forms.
+- The files under `benchmarks/EasyEcs.Benchmark/Locality/` stay, each for the reason locality.md's status gives (backlog
+  T14); only `Timers.cs` and TimerWheelBenchmark go, once the timer wheel's "Not added" record is written.
 
 ## Calls in vector loops (owner question 2026-10-26)
 
@@ -3341,3 +3341,26 @@ declares `ITile<TKey>` and writes no `Beside` now gets one inferred (it was CS05
   `FireReplica(bool Burning)` (the name change-tracking.mdx already uses): `SendFire` / `SendFireOut` read only the bool, which EECS055 now reports as a Warning
   (a bool among a component's fields, used alone). example.mdx + zh name neither type, but the replication walkthrough
   (en :165) should say the fire sends write a component of their own, and the regions it includes changed.
+
+## fix-tooling-lane3 (backlog Lane 3: T1-T14, T19)
+
+- `samples/VoxelServer/README.md` lists `Benchmark/` (TickBenchmark, now on BenchmarkConfig's job, built by the
+  solution): the voxel-server page's file list (en + zh) gains the line.
+- The README heading of each sample's output ("## Expected output") and the page's ("## ... [#output]") are two
+  conventions for one block; `check-sample.sh` reads both through one `block` function. Unify the README heading on
+  the page's form if the docs pass touches the sample READMEs.
+- The GameLoop page's output block (en + zh) is now compared by CI with its numbers masked (`SAMPLE_MASK`): its system
+  lines must keep LeaveSystem ... ReplicationSystem in that order. Say on the page that the times and message counts
+  vary.
+- The docs site's checks run in CI (`.github/workflows/docs.yml`: `bun run check` on `docs/**`); verify's list can say
+  CI runs it too. The public skills list (`npx skills add . --list`) and the live demo's staleness
+  (`docs/public/demo/source.sha256` against `docs/scripts/demo-source.sh`) are checked by the `doc-snippets` job:
+  the next demo rebuild (`bun run demo:build`) writes the hash; until then CI reports the bundle stale (it was built
+  at 8082b4c).
+- DocCheck now runs every generator of the package (View and Prefab too) with the interceptors feature
+  (tools/Shared/GeneratorHost.cs): fences with `[View]`, `[Prefab]` and lambda passes compile.
+- `global.json` asks for SDK 10.0.403 (NU1903 on 10.0.402's ILCompiler): getting-started's requirements line can say
+  ".NET 10 SDK" still; a contributor note belongs in the README's build section if it names a version.
+- `bun run check` (now in CI) fails at the branch point on three Chinese reference entries that write 区块
+  (`tools/ApiDocs/zh/columns.xml`, `foreachattribute.xml`; lint-terms: 地形 or 区段); fix the zh entries and
+  regenerate the reference in the docs pass. (lint-terms.ts' Biome format error from 5ac9b37 is fixed here.)

@@ -30,6 +30,8 @@
         <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="true"/>
         <!-- the battle server's source: part of the code GeneratorBenchmark compiles -->
         <EmbeddedResource Include="BattleServer.cs" LogicalName="BattleServer.cs"/>
+        <!-- the generators, parse options and references every Roslyn host of the generators shares -->
+        <Compile Include="..\..\tools\Shared\GeneratorHost.cs" Link="GeneratorHost.cs"/>
     </ItemGroup>
 
 </Project>

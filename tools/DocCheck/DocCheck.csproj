@@ -17,8 +17,10 @@
     <ItemGroup>
         <!-- the assembly the snippets compile against (its path is the metadata reference) -->
         <ProjectReference Include="..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
-        <!-- referenced, not an analyzer: the checker drives SystemGenerator, ComponentGenerator and EasyEcsAnalyzer -->
+        <!-- referenced, not an analyzer: the checker drives the package's generators (GeneratorHost) and EasyEcsAnalyzer -->
         <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj"/>
+        <!-- the generators, parse options and references every Roslyn host of the generators shares -->
+        <Compile Include="..\Shared\GeneratorHost.cs" Link="GeneratorHost.cs"/>
     </ItemGroup>
 
 </Project>

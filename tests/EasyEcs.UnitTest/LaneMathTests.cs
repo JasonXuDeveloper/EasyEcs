@@ -481,16 +481,15 @@ public class LaneMathTests
     {
         using var world = new World();
         for (int i = 0; i < 1000; i++) world.CreateEntity(new Whole4(), new Whole { Value = i * 37 - 999 }, new Divisor { Value = i % 13 + 1 }, new Real { Value = i * 0.37f }, new Real4());
-        LoweredKernels.Divide(world);
-        LoweredKernels.Constants(world);
-        LoweredKernels.Halve(world);
-        LoweredKernels.Hyperbolic(world);
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        LoweredKernels.Divide(world);
-        LoweredKernels.Constants(world);
-        LoweredKernels.Halve(world);
-        LoweredKernels.Hyperbolic(world);
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        void Step()
+        {
+            LoweredKernels.Divide(world);
+            LoweredKernels.Constants(world);
+            LoweredKernels.Halve(world);
+            LoweredKernels.Hyperbolic(world);
+        }
+        Allocations.WarmUp(Step, 3);
+        Assert.That(Allocations.Of(Step), Is.Zero);
     }
 
     private static long Ulps(float a, float b)

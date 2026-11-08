@@ -9,9 +9,21 @@ pair interactions on SIMD architectures"; the GROMACS pair-list docs) and Polych
 > and symmetric pair methods: D139 / D140 drafts) and L3 (compress: D138 draft) are built and merged; the owner's M4
 > run of PairListsBenchmark was done on 2026-10-28 (backlog history: Auto within the error of the best choice in all 24
 > cases, clusters kept on ARM64). Left: L4, the examples (ZombieTargetSystem's ChunkRing, BattleServer's NearestPlayer,
-> AOI), in the exemplar pass (backlog Finish 2), and the decision records in the docs pass. The prototypes under
-> `benchmarks/EasyEcs.Benchmark/Locality/` are decided in the backlog's tooling lane. The text below is the plan as
-> it was built.
+> AOI), in the exemplar pass (backlog Finish 2), and the decision records in the docs pass. The files under
+> `benchmarks/EasyEcs.Benchmark/Locality/` stay (backlog T14, 2026-11-07): none is a dead prototype. Each is a world the
+> shipped forms are tested and measured on, a plain baseline, or the evidence of a decision the owner reruns on ARM64:
+> `Chase.cs` (the chase world of LookupTests, PrefetchTests, FusionTests, GeneratorTests, VoxelServerTests and the
+> PageFault / PrefetchForms / LookupOrder benchmarks; its hand-prefetched jobs are LookupChaseBenchmark's ceiling for the
+> generated chase twins and LoadAhead the ARM64-without-prefetch case), `Crowd.cs` (the crowd world of NeighborTests,
+> UnloadTests and the Pairs / PairLists / PairHalves benchmarks), `CrowdPairs.cs` (the generated pair methods: the
+> shipped form, not a prototype), `CoreClusters.cs` (PairsBenchmark's hand cluster-pair ceiling, 6.1 / 6.1a),
+> `Nearest.cs` + `SortedClusters.cs` (the samples' nearest searches against sorted clusters: decided with L4, when
+> ZombieTargetSystem and NearestPlayer are rewritten), `Operators.cs` (Selection: CompressBenchmark's alternatives to
+> Lanes.Compact, used by LanesTests; ProbeTable: the batch probe whose bar was not met, 6.3), `Streams.cs` (the plain
+> and non-temporal baselines of StreamingStore / StreamingCopy, used by StreamingStoreTests), `Timers.cs` (the timer
+> wheel, dropped on 2026-10-26: deleted with TimerWheelBenchmark once its "Not added" record is written in the docs
+> pass) and `Isa.cs` (benchmark harness: the lane width and ISA of 13 benchmarks). The text below is the plan as it was
+> built.
 
 ## 1. What the sources say, in our terms
 

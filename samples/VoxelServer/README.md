@@ -30,6 +30,7 @@ What each file teaches, with its code, is on the docs site:
 | [Systems/Replication.cs](Systems/Replication.cs) | `SendChunksSystem`, `ChunkSentSystem`, `SendEntitiesSystem`, `ClockSystem` (the first system of the simulation) |
 | [Program.cs](Program.cs) | the world and its options, the prefabs, the systems in tick order, the players, the top diggers, the save on stop |
 | [Host/](Host) | plumbing that is not the ECS lesson: the bots that stand in for clients, the region files in memory, the tick loop and its report, options |
+| [Benchmark/](Benchmark) | `TickBenchmark`: a hundred ticks of the server under BenchmarkDotNet, from the same saved state each iteration (`dotnet run -c Release --project samples/VoxelServer/Benchmark -- --filter '*'`) |
 
 ## Run it
 

@@ -11,6 +11,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\..\benchmarks\EasyEcs.Benchmark\EasyEcs.Benchmark.csproj"/>
+        <Compile Include="..\Shared\BenchmarkRunner.cs" Link="BenchmarkRunner.cs"/>
     </ItemGroup>
 
 </Project>

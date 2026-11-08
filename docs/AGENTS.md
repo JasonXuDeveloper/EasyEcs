@@ -24,6 +24,7 @@ bun run favicons         # favicons from public/icon.svg
 ```
 
 Node 22 (`.node-version`), Bun 1.4.2. Dependency versions are pinned; `patches/` holds the patched packages.
+CI runs `bun run check` on every change under `docs/` (`.github/workflows/docs.yml`); Cloudflare runs only the build.
 
 ## Structure
 
@@ -47,8 +48,12 @@ src/data/bench.json      every benchmark number the site shows (generated, commi
 functions/               Cloudflare Pages Functions: [[path]].ts (locale redirect, markdown negotiation),
                          api/feedback.ts (GitHub Discussions)
 public/                  _redirects, _headers, _routes.json, icons, manifest, demo/ (the live demo's .NET runtime)
-scripts/                 generate-static.ts, og.ts, lint-links.ts, lint-seo.ts, lint-search.ts (+ search-expectations.json),
-                         sync-benchmarks.ts, git-history.ts, generate-favicons.ts, build-demo.sh
+scripts/                 chromium.ts (a headless Chromium for mermaid), git-history.ts, sync-benchmarks.ts,
+                         after-build.ts (the build's afterBuild entry: cards, then generate-static.ts and lint-seo.ts),
+                         generate-static.ts, og.ts, first-commit-dates.mjs (each page's first commit, for
+                         src/lib/git-dates.server.ts), lint-links.ts, lint-terms.ts, lint-seo.ts, lint-search.ts
+                         (+ search-expectations.json), generate-favicons.ts, build-demo.sh (+ demo-source.sh: the hash
+                         of the demo's sources, public/demo/source.sha256, which CI compares)
 ```
 
 ## Conventions
@@ -151,7 +156,9 @@ scripts/                 generate-static.ts, og.ts, lint-links.ts, lint-seo.ts, 
 - Cloudflare builds with Bun only, so the published runtime is committed in `public/demo/_framework`. After changing
   the demo or EasyEcs.Core: `bun run demo:build` (`scripts/build-demo.sh`: installs the `wasm-tools` workload when
   missing, then `dotnet publish` with Mono AOT, the IL compiled ahead of time to WebAssembly with 128-bit SIMD,
-  trimmed, invariant globalization), check the page, commit `public/demo`. Browsers do not run CoreCLR yet (CoreCLR
+  trimmed, invariant globalization), check the page, commit `public/demo` (with `public/demo/source.sha256`, the hash
+  of the sources it was built from: CI fails when `scripts/demo-source.sh` gives another, after any change to
+  EasyEcs.Core, the generator, the demo or `Directory.Build.props`). Browsers do not run CoreCLR yet (CoreCLR
   on WebAssembly is a preview in .NET 11, interpreter only), so Mono AOT is the fastest .NET runtime there.
 - The page draws with WebGL 2 (`src/components/demo/renderer.ts`): one `bufferSubData` of the frame array per frame,
   additive soft points into a half-float light buffer that fades instead of clearing (the trails), tone-mapped over

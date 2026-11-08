@@ -24,8 +24,9 @@ public static class GeneratorCorpus
     /// <summary>The number of generated modules.</summary>
     public const int Modules = 40;
 
-    /// <summary>The language version the corpus and the generated code parse with.</summary>
-    public static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview);
+    /// <summary>The language version the corpus and the generated code parse with (GeneratorHost.cs: a project
+    /// referencing the package).</summary>
+    public static readonly CSharpParseOptions Parse = GeneratorHost.Parse;
 
     /// <summary>The corpus's files: the battle server, the modules, then the file with no EasyEcs code.</summary>
     /// <param name="oneNamespace">Every module in one namespace (a game's <c>Game</c>), as many projects lay out their
@@ -38,24 +39,16 @@ public static class GeneratorCorpus
     }
 
     /// <summary>The framework's assemblies and EasyEcs.Core.</summary>
-    public static ImmutableArray<MetadataReference> References() =>
-    [
-        .. ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Split(Path.PathSeparator)
-            .Where(p => Path.GetFileName(p).StartsWith("System.") || Path.GetFileName(p) is "netstandard.dll" or "mscorlib.dll")
-            .Append(typeof(World).Assembly.Location)
-            .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
-    ];
+    public static ImmutableArray<MetadataReference> References() => GeneratorHost.References;
 
     /// <summary>A compilation of <paramref name="trees"/> as a game's project builds it.</summary>
     public static CSharpCompilation Compilation(ImmutableArray<SyntaxTree> trees, ImmutableArray<MetadataReference> references) =>
         CSharpCompilation.Create("Game", trees, references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true, nullableContextOptions: NullableContextOptions.Enable));
 
-    /// <summary>The five generators in one driver, with <paramref name="disabled"/> outputs skipped (an IDE's driver skips implementation outputs).</summary>
-    public static GeneratorDriver Driver(IncrementalGeneratorOutputKind disabled = IncrementalGeneratorOutputKind.None) => CSharpGeneratorDriver.Create(
-        [new ArityGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new SystemGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator(),
-            new ViewGenerator().AsSourceGenerator()], parseOptions: Parse,
-        driverOptions: new GeneratorDriverOptions(disabled));
+    /// <summary>The package's generators in one driver, with <paramref name="disabled"/> outputs skipped (an IDE's driver skips implementation outputs).</summary>
+    public static GeneratorDriver Driver(IncrementalGeneratorOutputKind disabled = IncrementalGeneratorOutputKind.None) =>
+        CSharpGeneratorDriver.Create(GeneratorHost.Generators(), parseOptions: Parse, driverOptions: new GeneratorDriverOptions(disabled));
 
     /// <summary>
     /// The analyzer's diagnostics of the generated compilation that the corpus must not have (none: it is written as users

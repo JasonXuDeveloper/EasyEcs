@@ -39,7 +39,10 @@ const rules: Rule[] = [
     wrong: /分片/g,
     right: '分帧 (Slices, a pass over 1/N of the rows; 分片 reads as sharding)',
   },
-  { wrong: /成对方法|粒子对方法|配对方法/g, right: '邻居对方法 (a pair method)' },
+  {
+    wrong: /成对方法|粒子对方法|配对方法/g,
+    right: '邻居对方法 (a pair method)',
+  },
   { wrong: /(?<!按)块对/g, right: '簇对 (a block pair of an ordered table)' },
   // A link to a page is labelled with the page's title, as its sidebar entry is.
   {
@@ -51,10 +54,6 @@ const rules: Rule[] = [
     right: 'title="多线程与并行"',
   },
 ];
-
-// Pages still being brought in line, with the rules they may break until then. Remove an entry once its page is
-// fixed: the script then holds it to every rule.
-const pending: Record<string, RegExp[]> = {};
 
 function* pages(dir: string): Generator<string> {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -74,15 +73,10 @@ function prose(text: string) {
 let problems = 0;
 for (const path of pages(content)) {
   const file = relative(content, path).replaceAll('\\', '/');
-  const allowed = pending[file] ?? [];
   const lines = prose(readFileSync(path, 'utf8')).split('\n');
   lines.forEach((line, index) => {
     for (const rule of rules) {
       for (const match of line.matchAll(rule.wrong)) {
-        if (
-          allowed.some((pattern) => new RegExp(pattern.source).test(match[0]))
-        )
-          continue;
         console.error(
           `content/${file}:${index + 1}: "${match[0]}": the glossary writes ${rule.right}`,
         );

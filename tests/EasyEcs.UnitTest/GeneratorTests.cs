@@ -21,17 +21,14 @@ public class GeneratorTests
     internal static bool IsEntryPoints(SyntaxTree tree) => tree.FilePath.EndsWith(".EntryPoints.g.cs");
 
     // The interceptors of lambda passes are taken from EasyEcs.Generated, as the package's build files set it (EasyEcs.props).
-    internal static readonly CSharpParseOptions Parse = CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.Preview)
-        .WithFeatures([new("InterceptorsNamespaces", "EasyEcs.Generated")]);
+    internal static readonly CSharpParseOptions Parse = GeneratorHost.Parse;
 
     internal static CSharpCompilation Compile(params string[] sources) => CSharpCompilation.Create("Test",
         sources.Select(s => CSharpSyntaxTree.ParseText("using EasyEcs;\n" + s, Parse)),
-        Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+        GeneratorHost.References,
         new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true));
 
-    internal static GeneratorDriver Driver() => CSharpGeneratorDriver.Create(
-        [new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(), new PartGenerator().AsSourceGenerator(),
-            new ViewGenerator().AsSourceGenerator(), new PrefabGenerator().AsSourceGenerator()], parseOptions: Parse,
+    internal static GeneratorDriver Driver() => CSharpGeneratorDriver.Create(GeneratorHost.Generators(), parseOptions: Parse,
         driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
 
     internal static async Task<ImmutableArray<Diagnostic>> Analyze(string[] sources) => await Analyze(sources, []);
@@ -942,7 +939,7 @@ public class GeneratorTests
                 public interface IActor<TSelf> : IComponent, IIndexed<TSelf>, ISystemGroup, ISystemGroupWith<In<TSelf>>
                     where TSelf : struct, IActor<TSelf>, System.IEquatable<TSelf>;
                 """, Parse)],
-            Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+            GeneratorHost.References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         Driver().RunGeneratorsAndUpdateCompilation(framework, out var built, out _);
         using var image = new System.IO.MemoryStream();
@@ -1005,7 +1002,7 @@ public class GeneratorTests
                 [UpdateInterval(2)]
                 [EcsSystem] public ref struct Regen<T> where T : struct, ILife { [ForEach] static void Heal(ref T t) => t.Value++; }
                 """, Parse)],
-            Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+            GeneratorHost.References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         Driver().RunGeneratorsAndUpdateCompilation(library, out var built, out _);
         Assert.That(built.GetDiagnostics().Where(d => d.Severity >= DiagnosticSeverity.Warning), Is.Empty);
@@ -1215,6 +1212,7 @@ public class GeneratorTests
         "GroupBy", "TargetPolicies", "NotSaved", "EntityMethods", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
         "SystemPlaces", "SystemFusions", "SetFusions", "ForEachBodies", "RecordBodies", "EntityMethodBodies", "SystemCode", "ForEachCode", "RecordCode",
         "EntityMethodCode", "RecordedTypes", "TileParts",
+        "IsEasyEcsCore", // ArityGenerator's one stage: the package ships it, idle outside EasyEcs.Core
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
@@ -1672,7 +1670,7 @@ public class GeneratorTests
     internal static MetadataReference ForeignLibrary(bool recorded = true, bool reference = false, string source = ForeignComponents)
     {
         var library = CSharpCompilation.Create("Shared", [CSharpSyntaxTree.ParseText("using EasyEcs;\n" + source, Parse)],
-            Basic.References.Append(MetadataReference.CreateFromFile(typeof(World).Assembly.Location)),
+            GeneratorHost.References,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         var driver = recorded ? Driver() : CSharpGeneratorDriver.Create([new ComponentGenerator().AsSourceGenerator()], parseOptions: Parse);
         driver.RunGeneratorsAndUpdateCompilation(library, out var built, out _);
@@ -2257,7 +2255,7 @@ public class GeneratorTests
     public void TheArityGeneratorIsCachedBetweenEdits()
     {
         var other = CSharpSyntaxTree.ParseText("public class Unrelated { }", Parse);
-        var compilation = CSharpCompilation.Create("EasyEcs.Core", [other], Basic.References, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        var compilation = CSharpCompilation.Create("EasyEcs.Core", [other], GeneratorHost.Framework, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
         GeneratorDriver driver = CSharpGeneratorDriver.Create([new ArityGenerator().AsSourceGenerator()], parseOptions: Parse,
             driverOptions: new GeneratorDriverOptions(IncrementalGeneratorOutputKind.None, trackIncrementalGeneratorSteps: true));
         driver = driver.RunGenerators(compilation);
@@ -2590,16 +2588,6 @@ public class GeneratorTests
         var reasons = Steps(driver)["QueryShapes"].SelectMany(s => s.Outputs).Select(o => o.Reason).ToArray();
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(2));
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.New), Is.EqualTo(1));
-    }
-
-    /// <summary>Framework references of the running test host (enough for the generated code to compile).</summary>
-    internal static class Basic
-    {
-        public static readonly ImmutableArray<MetadataReference> References = ((string)System.AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
-            .Split(System.IO.Path.PathSeparator)
-            .Where(p => System.IO.Path.GetFileName(p).StartsWith("System.") || System.IO.Path.GetFileName(p) is "netstandard.dll" or "mscorlib.dll")
-            .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p))
-            .ToImmutableArray();
     }
 
     // The JIT inlines no method of more than 32 IL locals (MAX_INL_LCLS, "too many locals"), AggressiveInlining or not:

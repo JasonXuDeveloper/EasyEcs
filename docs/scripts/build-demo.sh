@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Publishes demo/EasyEcs.Demo (.NET in WebAssembly) into public/demo/_framework, the files the demo page loads.
 # Cloudflare Pages builds the site with Bun only, so the bundle is committed: run this after changing the demo or
-# EasyEcs.Core, then commit public/demo. Needs the .NET 10 SDK; the wasm-tools workload (Mono AOT: the IL compiled
+# EasyEcs.Core, then commit public/demo (with source.sha256: the hash of the sources it was built from, which CI
+# compares with demo-source.sh). Needs the .NET 10 SDK; the wasm-tools workload (Mono AOT: the IL compiled
 # ahead of time to WebAssembly) is installed when missing.
 set -euo pipefail
 
@@ -23,6 +24,7 @@ mkdir -p "$target"
 cp "$out"/wwwroot/_framework/* "$target"/
 # The runtime pack ships some files executable: the site serves them as data
 chmod 644 "$target"/*
+"$docs/scripts/demo-source.sh" > "$docs/public/demo/source.sha256"
 
 bytes=$(cat "$target"/* | wc -c)
 echo "public/demo/_framework: $(ls "$target" | wc -l) files, $((bytes / 1024)) KiB (Cloudflare serves it compressed)"
