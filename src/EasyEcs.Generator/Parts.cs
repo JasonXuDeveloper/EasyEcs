@@ -342,8 +342,10 @@ internal sealed class Parts
             return;
         }
 
+        // A key member that is itself named Key (a positional record's 'Key', a property 'Key') is the key, not a Key
+        // written by hand: the part's explicit IIndexed<K>.Key returns it.
         foreach (var own in Type.GetMembers())
-            if (own is IPropertySymbol property && (property.Name == "Key" || property.ExplicitInterfaceImplementations.Any(i => i.Name == "Key" && Symbols.Named(i.ContainingType.OriginalDefinition, Symbols.Indexed)))
+            if (own is IPropertySymbol property && (property.Name == "Key" && key.Member != "Key" ||property.ExplicitInterfaceImplementations.Any(i => i.Name == "Key" && Symbols.Named(i.ContainingType.OriginalDefinition, Symbols.Indexed)))
                 && !IsGeneratedPart(own))
             {
                 Problems.Add(new Problem(own, Rule.BadKey, $"writes Key itself and declares it with {Of(key)}: remove one"));

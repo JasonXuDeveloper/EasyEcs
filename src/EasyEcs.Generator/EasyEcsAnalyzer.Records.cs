@@ -33,6 +33,7 @@ public static partial class EasyEcsAnalyzer
 
     private static void AnalyzeRecords(CompilationStartAnalysisContext start)
     {
+        if (Core.Create(start.Compilation) == null) return; // no EasyEcs: no action at all
         var emitted = new ConcurrentQueue<(ITypeSymbol Record, IParameterSymbol Parameter, IMethodSymbol Method)>();
         var cleared = new ConcurrentDictionary<ITypeSymbol, byte>(SymbolEqualityComparer.Default);
         start.RegisterSymbolAction(context =>

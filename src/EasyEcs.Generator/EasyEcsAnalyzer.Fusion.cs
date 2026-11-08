@@ -33,8 +33,10 @@ public static partial class EasyEcsAnalyzer
         "before it in its system. The generator fuses them only when one walk gives the results of separate passes; the " +
         "message names what keeps them apart.", helpLinkUri: Help("EECS094"));
 
-    internal static void InitializeFusion(AnalysisContext context) =>
-        context.RegisterSyntaxNodeAction(AnalyzeFusion, SyntaxKind.StructDeclaration);
+    internal static void InitializeFusion(AnalysisContext context) => context.RegisterCompilationStartAction(start =>
+    {
+        if (Core.Create(start.Compilation) != null) start.RegisterSyntaxNodeAction(AnalyzeFusion, SyntaxKind.StructDeclaration); // no EasyEcs: no action
+    });
 
     /// <summary>EECS093 and EECS094 over the [ForEach] methods of a system, in the groups the generator fuses them into.</summary>
     private static void AnalyzeFusion(SyntaxNodeAnalysisContext context)
