@@ -146,13 +146,22 @@ public sealed partial class SystemGenerator
     /// The twin of a walk that chases other entities (<paramref name="chases"/>, <c>{name}Chases</c>, with the walk's
     /// filter) holds the twin jobs of its chasing methods and runs per block.
     /// </summary>
+    /// <summary>
+    /// The job of method <paramref name="index"/> of a fused walk: its own system's file's, by name (<c>{Name}Job{i}</c>
+    /// in the same class), or for a pair of systems (<paramref name="second"/> > 0: the second's first method) the
+    /// system's shared job (<see cref="JobsOf"/>), numbered in its system.
+    /// </summary>
+    private static string JobOf(ForEachModel method, int index, int second) => second == 0
+        ? $"{method.Name}Job{index}"
+        : $"{JobsOf(method.Owner)}.{method.Name}Job{(index < second ? index : index - second)}";
+
     private static void EmitFusedJob(StringBuilder sb, UpdateModel model, int start, int count, int second = 0, bool chases = false)
     {
         const string unsafeType = "global::System.Runtime.CompilerServices.Unsafe", marshal = "global::System.Runtime.InteropServices.MemoryMarshal";
         var owner = model.Owner;
         var methods = Enumerable.Range(start, count).Select(i => chases && model.Methods[i].HasChaseTwin ? model.Methods[i] with { IsChaseTwin = true } : model.Methods[i]).ToArray();
         var first = methods[0];
-        string name = FusedName(model, start, count), forEach = "__ForEach" + owner.TypeParameters;
+        string name = FusedName(model, start, count);
         string walk = chases ? name + "Chases" : name;
         var query = FusedQuery(model, start, count);
         string types = string.Join(", ", query);
@@ -163,7 +172,7 @@ public sealed partial class SystemGenerator
         bool perRow = iface is "IForEach" or "IForEachEntity", masked = iface == "IForEachMasked", parallel = first.Parallel;
         string marker = perRow || parallel ? ", global::EasyEcs.INoStructuralChanges" : "";
         sb.Append($"    internal {(parallel ? "struct" : "ref struct")} {walk} : global::EasyEcs.{iface}<{types}>{marker}\n    {{\n");
-        for (int k = 0; k < count; k++) sb.Append($"        public {methods[k].Name}Job{start + k}{(methods[k].IsChaseTwin ? "Chases" : "")} j{k};\n");
+        for (int k = 0; k < count; k++) sb.Append($"        public {JobOf(methods[k], start + k, second)}{(methods[k].IsChaseTwin ? "Chases" : "")} j{k};\n");
         if (second > 0) sb.Append("        public ulong Tick; // the second system's stage's\n");
         sb.Append('\n');
 
@@ -508,13 +517,9 @@ public sealed partial class SystemGenerator
         var first = pair.First.Owner;
         var sb = new StringBuilder(Header).Append('\n');
         if (first.Namespace.Length > 0) sb.Append("namespace ").Append(first.Namespace).Append(";\n\n");
+        // The fused job holds the systems' own jobs (each system's file emits them in its JobsName class): this file adds
+        // only the walk over both.
         sb.Append("file static class __ForEach\n{\n");
-        for (int i = 0; i < both.Methods.Length; i++)
-        {
-            EmitAccessor(sb, both.Methods[i].Owner, both.Methods[i], i);
-            EmitJob(sb, both.Methods[i].Owner, both.Methods[i], i);
-        }
-
         int second = pair.First.Methods.Length;
         EmitFusedJob(sb, both, 0, both.Methods.Length, second);
         bool chases = FusedChases(both, 0, both.Methods.Length);
@@ -532,7 +537,7 @@ public sealed partial class SystemGenerator
         {
             string walk = twin ? name + "Chases" : name, local = twin ? "chases" : "fused"; // one name per scope (CS0136)
             var members = Enumerable.Range(0, both.Methods.Length).Select(k =>
-                $"j{k} = new __ForEach.{both.Methods[k].Name}Job{k}{(twin && both.Methods[k].HasChaseTwin ? "Chases" : "")}{Fields(both.Methods[k], "world")}");
+                $"j{k} = new {JobOf(both.Methods[k], k, second)}{(twin && both.Methods[k].HasChaseTwin ? "Chases" : "")}{Fields(both.Methods[k], "world")}");
             sb.Append($"{indent}var {local} = new __ForEach.{walk} {{ {string.Join(", ", members)}, Tick = tick }};\n");
             string loop = FusedInterface(both, 0, both.Methods.Length, second).Substring(1);
             sb.Append($"{indent}world.{loop}<{query}, __ForEach.{walk}>(ref {local}, in __ForEach.{name}Filter);\n");
