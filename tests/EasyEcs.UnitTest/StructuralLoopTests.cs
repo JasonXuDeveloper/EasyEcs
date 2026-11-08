@@ -158,6 +158,26 @@ public ref struct ScalarRules
     }
 }
 
+public record struct Grit(byte Value) : IComponent;
+public record struct Fuse(byte Value) : IComponent;
+public struct Shaken : IComponent;
+
+/// <summary>A tag set under a condition of byte lanes: rows marked in every word (Interleaved.Lanes8, Lanes.Ballot).</summary>
+public static class NarrowMarks
+{
+    [ForEach(SimdMode = SimdMode.Require), Without<Shaken>]
+    internal static void Quake(Entity e, in Grit g, in Fuse f)
+    {
+        if (g.Value > 200 && f.Value < 60 || g.Value == 7) e.Set(new Shaken());
+    }
+
+    [ForEach(SimdMode = SimdMode.Off), Without<Shaken>]
+    internal static void QuakeScalar(Entity e, in Grit g, in Fuse f)
+    {
+        if (g.Value > 200 && f.Value < 60 || g.Value == 7) e.Set(new Shaken());
+    }
+}
+
 /// <summary>A unique key given to the rows a condition passes: one value for many rows, so the method stays scalar.</summary>
 [EcsSystem]
 public ref struct CrownRule
@@ -234,6 +254,40 @@ public class StructuralLoopTests
     /// A lambda pass that changes structure under a condition gets the vector loop a [ForEach] method does (its marked
     /// rows changed after the pass): it ends where the method row by row does.
     /// </summary>
+    /// <summary>
+    /// A structural change under a condition of byte lanes, in tables with presence holes (masked words of 64 byte lanes)
+    /// and a tail: the marked rows are the rows the method changes, row for row.
+    /// </summary>
+    [TestCase(5, 1)]
+    [TestCase(200, 2)]
+    [TestCase(5000 + 7, 3)]
+    public void ByteLanesMarkTheRowsTheMethodChanges(int count, int seed)
+    {
+        var a = new Entity[count];
+        var b = new Entity[count];
+        using var vector = new World();
+        using var scalar = new World();
+        var random = new Random(seed);
+        vector.Reserve<Grit, Fuse>(count);
+        scalar.Reserve<Grit, Fuse>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var (g, f) = (new Grit((byte)random.Next(256)), new Fuse((byte)random.Next(256)));
+            a[i] = vector.CreateEntity(g, f);
+            b[i] = scalar.CreateEntity(g, f);
+        }
+        for (int i = 0; i < count; i++)
+            if (i % 5 == 2) // presence holes: masked words
+            {
+                a[i].Remove<Fuse>();
+                b[i].Remove<Fuse>();
+            }
+
+        NarrowMarks.Quake(vector);
+        NarrowMarks.QuakeScalar(scalar);
+        for (int i = 0; i < count; i++) Assert.That(a[i].Has<Shaken>(), Is.EqualTo(b[i].Has<Shaken>()), $"row {i}");
+    }
+
     [TestCase(1000, 1)]
     [TestCase(77, 2)]
     [TestCase(3, 3)]

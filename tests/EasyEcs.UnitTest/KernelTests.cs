@@ -682,6 +682,33 @@ public static class OptionalKernels
     internal static void Careless(ref Level level, ReadOnlyMaybe<Boost> boost) => level.Value = boost.Value.Value + 1;
 }
 
+/// <summary>
+/// <see cref="OptionalKernels"/> in parallel: a Maybe&lt;T&gt;'s presence bits per chunk's run, and the words of 64 rows of
+/// which some pass (ForEachMaskedParallel) as a lane mask in each chunk.
+/// </summary>
+public static class ParallelOptionalKernels
+{
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkSize = 64)]
+    internal static void Push(ref Heat heat, ReadOnlyMaybe<Boost> boost)
+    {
+        if (boost.HasValue) heat.Value += boost.Value.Value * 2;
+        else heat.Value -= 1;
+    }
+
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require, ChunkSize = 128)]
+    internal static void Blow(ref Spot2 p, Maybe<Wind2> wind)
+    {
+        if (!wind.HasValue) return;
+        wind.Value.X *= 0.5f;
+        p.X += wind.Value.X;
+        p.Y += wind.Value.Y;
+    }
+
+    [ForEach(Parallel = true, SimdMode = SimdMode.Require)]
+    internal static void Peek(ref Level level, in Heat heat, ReadOnlyMaybe<Boost> boost) =>
+        level.Value = boost.HasValue && boost.Value.Value > 0 ? boost.Value.Value : heat.Value;
+}
+
 // Struct fields as lanes: Vector2 / Vector3 inside components, whole components assigned, component-wise operators.
 public record struct Place2(Vector2 Value) : IComponent;
 public record struct Pace2(Vector2 Value) : IComponent;
@@ -960,6 +987,16 @@ public static class FlagKernels
 /// <summary>Kernels of narrow lanes: wrap-around arithmetic, saturating Min / Max idioms, comparisons, shifts, locals.</summary>
 public static class NarrowKernels
 {
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Tint(ref Ink o, in Shade a, ReadOnlyMaybe<Tone> b) =>
+        o.V = b.HasValue ? (byte)(a.V + b.Value.V) : (byte)(o.V ^ a.V); // a Maybe<T> of byte lanes: Interleaved.Lanes8 of its presence bits
+
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Swell(ref Wave16 o, in Gain16 a, ReadOnlyMaybe<Mix16> b)
+    {
+        if (b.HasValue) o.V = (short)(o.V + a.V * b.Value.V); // of short lanes: Lanes16
+    }
+
     [ForEach(SimdMode = SimdMode.Require)]
     internal static void Wrap(ref Ink o, in Shade a, in Tone b) => o.V = (byte)(a.V + b.V * 3 - 7);
 
@@ -1345,6 +1382,87 @@ public class KernelTests
     /// Min / Max / Clamp idioms, comparisons (a saturated sum compared with a value inside the range), shifts, bitwise
     /// operators, Min / Max of bytes, compound assignments and an int local: the method's result, lane by lane.
     /// </summary>
+    /// <summary>
+    /// Maybe&lt;T&gt; of byte and short lanes (presence bits as Lanes8 / Lanes16 masks), in tables whose rows also lack a
+    /// queried component (masked words of narrow lanes): every row ends as the method leaves it, across the vector loop,
+    /// its masked words and the rows after the last whole vector.
+    /// </summary>
+    [TestCase(70)]
+    [TestCase(1000)]
+    public void OptionalComponentsOfNarrowLanesAreLaneMasks(int count)
+    {
+        using var world = new World();
+        var entities = new Entity[count];
+        var ink = new byte[count];
+        var shade = new byte[count];
+        var tone = new byte?[count];
+        var wave = new short[count];
+        var gain = new short[count];
+        var mix = new short?[count];
+        world.Reserve<Ink, Shade, Tone, Wave16, Gain16, Mix16>(count);
+        for (int i = 0; i < count; i++)
+        {
+            (ink[i], shade[i], tone[i]) = ((byte)(i * 37), (byte)(i * 11 + 3), (byte)(i * 5));
+            (wave[i], gain[i], mix[i]) = ((short)(i * 977), (short)(i * 31 - 500), (short)(i * 7 - 300));
+            var e = entities[i] = world.CreateEntity(new Ink { V = ink[i] }, new Shade { V = shade[i] }, new Tone { V = tone[i]!.Value },
+                new Wave16 { V = wave[i] }, new Gain16 { V = gain[i] }, new Mix16 { V = mix[i]!.Value });
+            if (i % 3 == 1) { e.Remove<Tone>(); tone[i] = null; }   // presence holes of the optional columns
+            if (i % 4 == 2) { e.Remove<Mix16>(); mix[i] = null; }
+        }
+        var noShade = new bool[count];
+        var noGain = new bool[count];
+        for (int i = 0; i < count; i++)
+        {
+            if (i % 7 == 3) { entities[i].Remove<Shade>(); noShade[i] = true; } // masked words: rows the query leaves out
+            if (i % 6 == 5) { entities[i].Remove<Gain16>(); noGain[i] = true; }
+        }
+
+        for (int round = 0; round < 2; round++)
+        {
+            NarrowKernels.Tint(world);
+            NarrowKernels.Swell(world);
+            for (int i = 0; i < count; i++)
+            {
+                if (!noShade[i]) ink[i] = tone[i] is { } t ? (byte)(shade[i] + t) : (byte)(ink[i] ^ shade[i]);
+                if (!noGain[i] && mix[i] is { } m) wave[i] = (short)(wave[i] + gain[i] * m);
+            }
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            Assert.That(entities[i].Read<Ink>().V, Is.EqualTo(ink[i]), $"Ink of row {i}");
+            Assert.That(entities[i].Read<Wave16>().V, Is.EqualTo(wave[i]), $"Wave16 of row {i}");
+        }
+    }
+
+    /// <summary>The narrow lane masks against the word's bits at every first row a vector of them starts at.</summary>
+    [Test]
+    public void NarrowLaneMasksAreTheWordsBits()
+    {
+        var random = new Random(9);
+        for (int round = 0; round < 200; round++)
+        {
+            ulong rows = (ulong)random.NextInt64() ^ ((ulong)random.NextInt64() << 1);
+            for (int first = 0; first + Vector<sbyte>.Count <= 64; first += Vector<sbyte>.Count)
+            {
+                var m = Interleaved.Lanes8(rows, first);
+                for (int j = 0; j < Vector<sbyte>.Count; j++) Assert.That(m[j], Is.EqualTo(((rows >> (first + j)) & 1) != 0 ? -1 : 0), $"Lanes8 {first} {j}");
+            }
+            for (int first = 0; first + Vector<short>.Count <= 64; first += Vector<short>.Count)
+            {
+                var m = Interleaved.Lanes16(rows, first);
+                for (int j = 0; j < Vector<short>.Count; j++) Assert.That(m[j], Is.EqualTo(((rows >> (first + j)) & 1) != 0 ? -1 : 0), $"Lanes16 {first} {j}");
+            }
+            var b = Interleaved.Lanes8In512(rows, 0);
+            for (int j = 0; j < 64; j++) Assert.That(b[j], Is.EqualTo(((rows >> j) & 1) != 0 ? -1 : 0), $"Lanes8In512 {j}");
+            for (int first = 0; first < 64; first += 32)
+            {
+                var h = Interleaved.Lanes16In512(rows, first);
+                for (int j = 0; j < 32; j++) Assert.That(h[j], Is.EqualTo(((rows >> (first + j)) & 1) != 0 ? -1 : 0), $"Lanes16In512 {first} {j}");
+            }
+        }
+    }
+
     [TestCase(false), TestCase(true)]
     public void ByteLanesMatchTheMethodForEveryPairOfOperands(bool holes)
     {
@@ -2367,6 +2485,71 @@ public class KernelTests
             if (hasSpot[i]) Assert.That(Same(entities[i].Get<Spot2>(), spots[i]), $"Spot2 of row {i}");
             if (hasBoost[i]) Assert.That(Same(entities[i].Get<Boost>(), boosts[i]), $"Boost of row {i}");
             if (hasWind[i]) Assert.That(Same(entities[i].Read<Wind2>(), winds[i]), $"Wind2 of row {i}: {Bits(entities[i].Read<Wind2>())} instead of {Bits(winds[i])}");
+        }
+    }
+
+    /// <summary>The world of <see cref="OptionalComponentsInParallelChunksAreTheSerialLoops"/>: optional columns with holes, rows lacking a queried component.</summary>
+    private static (World World, Entity[] Entities) OptionalWorld(int count, int threads)
+    {
+        var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var random = new Random(count);
+        var entities = new Entity[count];
+        world.Reserve<Heat, Level, Spot2, Boost, Wind2>(count);
+        for (int i = 0; i < count; i++)
+        {
+            var e = entities[i] = world.CreateEntity(new Heat { Value = NextFloat(random, i) }, NextLevel(random, i + 1),
+                new Spot2 { X = NextFloat(random, i), Y = NextFloat(random, i + 2) });
+            if (i % 5 != 4) // the fifth table has neither optional column
+            {
+                e.Set(new Boost { Value = NextFloat(random, i + 3) });
+                e.Set(new Wind2 { X = NextFloat(random, i + 1), Y = NextFloat(random, i + 4) });
+                if (i % 5 == 3) e.Set(new Frozen());
+            }
+        }
+        for (int i = 0; i < count; i++)
+        {
+            if (i % 5 == 1 && i % 3 == 0) entities[i].Remove<Boost>(); // presence holes
+            if (i % 5 == 1 && i % 7 == 0) entities[i].Remove<Wind2>();
+            if (i % 5 == 2 && i % 4 == 0) entities[i].Remove<Heat>();  // masked words
+            if (i % 5 == 2 && i % 6 == 0) entities[i].Remove<Spot2>();
+        }
+
+        world.Update();
+        return (world, entities);
+    }
+
+    /// <summary>
+    /// Maybe&lt;T&gt; and masked words in parallel chunks: the same rows, bits and stamps as the vector loops on one thread
+    /// (proven against the method by <see cref="OptionalComponentsAreLaneMasks"/>), at 1 and 4 threads.
+    /// </summary>
+    [TestCase(300, 1)]
+    [TestCase(20_000, 1)]
+    [TestCase(20_000, 4)]
+    public void OptionalComponentsInParallelChunksAreTheSerialLoops(int count, int threads)
+    {
+        var (serial, a) = OptionalWorld(count, 1);
+        var (parallel, b) = OptionalWorld(count, threads);
+        using var _ = serial;
+        using var __ = parallel;
+        // SimdMode.Require: each method has its vector loop (GeneratorTests: the parallel job walks masked words).
+        ulong mark = parallel.ChangeTick;
+        for (int round = 0; round < 2; round++)
+        {
+            OptionalKernels.Push(serial);
+            OptionalKernels.Blow(serial);
+            OptionalKernels.Peek(serial);
+            ParallelOptionalKernels.Push(parallel);
+            ParallelOptionalKernels.Blow(parallel);
+            ParallelOptionalKernels.Peek(parallel);
+        }
+
+        Assert.That(parallel.Count<Wind2>(QueryFilter.Create().Changed<Wind2>(mark)), Is.EqualTo(serial.Count<Wind2>(QueryFilter.Create().Changed<Wind2>(mark))));
+        for (int i = 0; i < count; i++)
+        {
+            if (a[i].Has<Heat>()) Assert.That(Same(b[i].Read<Heat>(), a[i].Read<Heat>()), $"Heat of row {i}");
+            Assert.That(Same(b[i].Read<Level>(), a[i].Read<Level>()), $"Level of row {i}");
+            if (a[i].Has<Spot2>()) Assert.That(Same(b[i].Read<Spot2>(), a[i].Read<Spot2>()), $"Spot2 of row {i}");
+            if (a[i].Has<Wind2>()) Assert.That(Same(b[i].Read<Wind2>(), a[i].Read<Wind2>()), $"Wind2 of row {i}");
         }
     }
 

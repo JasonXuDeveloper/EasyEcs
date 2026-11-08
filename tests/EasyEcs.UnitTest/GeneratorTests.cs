@@ -154,8 +154,8 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p) { }", "internal static readonly global::EasyEcs.QueryFilter AFilter0 = default;",
         "world.Count<global::P>(in __ForEach.AFilter0)", "(ref job0, in __ForEach.AFilter0);")]                          // no filter: no zeroed temporary
     [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "(ref job0, __ForEach.AFilter0.Slice((int)(system.RunCount % 3), 3));")]
-    [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachBatchParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
-    [TestCase("[ForEach(Parallel = true, ChunkSize = 100)] static void A(ref P p) { }", "ForEachBatchParallel<", "(ref job0, in __ForEach.AFilter0, chunkSize: 100);")]
+    [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachMaskedParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
+    [TestCase("[ForEach(Parallel = true, ChunkSize = 100)] static void A(ref P p) { }", "ForEachMaskedParallel<", "(ref job0, in __ForEach.AFilter0, chunkSize: 100);")]
     [TestCase("[ForEach(Slices = 4)] static void A(System.Span<P> p) { }", "ForEachBatch<", "Slice((int)(system.RunCount % 4), 4)")]
     public void AccessIsDeclaredFromParameters(string members, params string[] expected)
         => AccessOf("", members, expected);
@@ -302,7 +302,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, ReadOnlyMaybe<Two> t) => f.V = t.HasValue && t.Value.A > 0 ? t.Value.B : f.V;", true)]
     [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { if (!h.HasValue) return; h.Value.V = f.V; }", true)]   // written through
     [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", false)]                    // another lane size
-    [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", false)]   // in parallel
+    [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", true)]   // in parallel
     // Switches and patterns as lane masks (Kernel.Switches.cs).
     [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V = q.V switch { 1 => 2, > 5 => 4, _ => 3 };", true)]
     [TestCase("[ForEach] static void A(ref P p, in Q q) => p.V = q.V switch { 0 => 1, > 0 => 2 };", true)]                    // not exhaustive: the rows left go to the method
@@ -334,8 +334,8 @@ public class GeneratorTests
         // A vector loop also takes words of rows of which some pass, as a lane mask (IForEachMasked); a parallel one
         // runs each chunk's runs of rows (ForEachBatchParallel).
         bool parallel = members.Contains("Parallel = true");
-        Assert.That(generated.Contains("global::EasyEcs.IForEachMasked<") && generated.Contains("ulong pass, "), Is.EqualTo(vectorized && !parallel), generated);
-        if (parallel && vectorized) Assert.That(generated, Does.Contain("world.ForEachBatchParallel<"), generated);
+        Assert.That(generated.Contains("global::EasyEcs.IForEachMasked<") && generated.Contains("ulong pass, "), Is.EqualTo(vectorized), generated); // a parallel method walks masked words too (ForEachMaskedParallel)
+        if (parallel && vectorized) Assert.That(generated, Does.Contain("world.ForEachMaskedParallel<"), generated);
 
         // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop.
         string required = members.Replace("[ForEach]", "[ForEach(SimdMode = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(SimdMode = SimdMode.Require, Parallel").Replace("[ForEach(FloatMode", "[ForEach(SimdMode = SimdMode.Require, FloatMode");
@@ -395,11 +395,11 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p, ref Reduce<Count> c) { c.Value.N += p.V; p.V = c.Value.N; }", "it reads 'c.Value.N', a partial result the lanes of a vector loop hold in parts")]
     [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 2 fields it uses takes 11 permutes per 16 rows, for no vector operation; it uses 2 of Five's 5 fields (A, B): split them into a component of their own (a component of 2 fields gets a vector loop)", true)] // parallel too
     [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", "lane types float and double differ in size")]
-    [TestCase("[ForEach(Parallel = true)] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V++; }", "it takes a Maybe<H> and runs in parallel: an optional column has a vector loop on one thread")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Sin(f.V);", "MathF.Sin is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach] static void A(ref D d) => d.V = double.Hypot(d.V, 1);", "Double.Hypot is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", "MathF.Atan2 has no vector form in .NET 10")]
-    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 5);", "MathF.Pow has no vector form in .NET 10 but by a constant 0, 1, 2, 3, 4, -1, -2 or 0.5")]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref D d) => d.V = System.Math.Pow(d.V, 5);", "Math.Pow of doubles has no vector form in .NET 10 but by a constant 0, 1, 2, 3, 4, -1, -2 or 0.5")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 5);", "MathF.Pow is not bit-exact in vector form except by 0 and 1: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 2);", "MathF.Pow is not bit-exact in vector form except by 0 and 1: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Tanh(f.V);", "MathF.Tanh is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref D d) => d.V = System.Math.Tanh(d.V);", "Math.Tanh has no vector form in .NET 10")]
@@ -409,7 +409,6 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V / (c.V + 1));", "integer division is not supported (it throws on 0)")]
     [TestCase("[ForEach] static void A(ref B8 b, in S8 s) { if (b.V > s.V) b.V = 0; }", "'b.V > s.V' compares ints that 8-bit lanes do not hold")]
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) { if (b.V + c.V > 255) b.V = 0; }", "'b.V + c.V > 255' compares ints that 8-bit lanes do not hold")]
-    [TestCase("[ForEach] static void A(ref B8 b, Maybe<C8> c) { if (c.HasValue) b.V++; }", "it takes a Maybe<C8> of byte lanes: optional columns have vector loops of 4- and 8-byte lanes")]
     [TestCase("[ForEach] static void A(ref Sixteen r, in G g) { r.F0 += r.F2 * g.Pull; r.F1 += r.F3 * g.Pull; }", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 4 fields it uses takes 42 permutes per 16 rows, more than its 4 vector operations gain; it uses 4 of Sixteen's 16 fields (F0, F1, F2, F3): split them into a component of their own (a component of 4 fields gets a vector loop)", true)]
     // Three or five fields of a 16-word row: AVX-512's permutes pay, but its loop would keep 16 loaded vectors and a level
     // of merges, past the IL locals a runner inlines (D135), and ARM64's table lookups do not pay.
@@ -418,7 +417,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Unit u) { if (u.Alive) u.Hp--; }", "field Unit.Alive is a bool among 4 fields: a vector loop takes a bool in a component of its own (one byte per row)")]
     // A bool the method uses alone (VoxelServer's Body and Exposure): moving it out is the rewrite, which the split fix makes.
     [TestCase("public record struct Body(bool OnGround, bool Blocked) : IComponent; [ForEach] static void A(ref F f, in Body b) { if (b.OnGround) f.V = 0; }", "field Body.OnGround is a bool among 2 fields: a vector loop takes a bool in a component of its own (one byte per row); it uses 1 of Body's 2 fields (OnGround): move it into a component of its own (a component of one field gets a vector loop)", true)]
-    [TestCase("public record struct Body(bool OnGround, bool Blocked) : IComponent; [ForEach(Parallel = true)] static void A(ref F f, in Body b, Maybe<H> h) { if (b.OnGround && h.HasValue) f.V = 0; }", "it takes a Maybe<H> and runs in parallel: an optional column has a vector loop on one thread", false)]   // a later parameter's reason wins over the split
+    [TestCase("public record struct Body(bool OnGround, bool Blocked) : IComponent; [ForEach] static void A(ref F f, in Body b, ref int k) { if (b.OnGround) k++; }", "it takes 'k' by ref: a vector loop reduces only into a Reduce<T>", false)]   // a later parameter's reason wins over the split
     [TestCase("public record struct Body(bool OnGround, bool Blocked) : IComponent; [ForEach] static void A(ref F f, in Body b) { if (b.OnGround && b.Blocked) f.V = 0; }", "field Body.OnGround is a bool among 2 fields: a vector loop takes a bool in a component of its own (one byte per row)", false)]   // two bools: still a bool among fields
     [TestCase("[ForEach] static void A(ref Px p, in B8 b) => p.R = (byte)(p.R + b.V);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field; it uses 1 of Px's 2 fields (R): move it into a component of its own (a component of one field gets a vector loop)", true)]
     [TestCase("[ForEach] static void A(ref Px p) => p.R = (byte)(p.R + p.G);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field")]
@@ -538,13 +537,13 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("internal struct AJob0 : global::EasyEcs.IForEachBatch<global::F>, global::EasyEcs.INoStructuralChanges")
+        Assert.That(generated, Does.Contain("internal struct AJob0 : global::EasyEcs.IForEachMasked<global::F>, global::EasyEcs.INoStructuralChanges")
             .And.Contain("ref readonly global::G __p1 = ref s1.Value;")
             .And.Contain("var l2 = a2;")
             .And.Contain("l2.Value.N = unchecked((int)(l2.Value.N + global::System.Numerics.Vector.Sum(__a2_0)));")
             .And.Contain("static bool global::EasyEcs.IForEachBatch<global::F>.Merges => true;")
-            .And.Contain("world.ForEachBatchParallel<global::F, __ForEach.AJob0>(ref job0, in __ForEach.AFilter0);")
-            .And.Not.Contain("ulong pass"), generated);
+            .And.Contain("world.ForEachMaskedParallel<global::F, __ForEach.AJob0>(ref job0, in __ForEach.AFilter0);")
+            .And.Contain("ulong pass"), generated); // each chunk's masked words
     }
 
     [Test]
@@ -561,7 +560,7 @@ public class GeneratorTests
         Assert.That(reasons.Count(r => r is IncrementalStepRunReason.Cached or IncrementalStepRunReason.Unchanged), Is.EqualTo(1)); // O
         Assert.That(reasons.Count(r => r == IncrementalStepRunReason.Modified), Is.EqualTo(1));                                      // S
         string generated = driver.GetRunResult().GeneratedTrees.Select(t => t.ToString()).Single(t => t.Contains("Name = \"A\""));
-        Assert.That(generated, Does.Contain("ForEachBatchParallel<").And.Contain("Vector.LoadUnsafe"));
+        Assert.That(generated, Does.Contain("ForEachMaskedParallel<").And.Contain("Vector.LoadUnsafe"));
     }
 
     // Maybe<T>: HasValue is a lane mask of the presence bits, Value's fields are lanes of the run's optional column; a
@@ -681,10 +680,10 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("global::System.Numerics.Vector.SubtractSaturate(__c1_0, __c2_0)")
             .And.Contain("global::System.Runtime.Intrinsics.Vector512.AddSaturate(")
             .And.Contain("(__c1_0 + __c2_0)")
-            .And.Not.Contain("Interleaved.Lanes8"), generated);
-        // the masked Execute: no vector loop, the passing rows run the method
+            .And.Contain("Interleaved.Lanes8"), generated); // masked words of byte lanes: a word's bits as lanes
+        // the masked Execute: the vector loop over the word, its passing rows as lanes
         string masked = generated.Substring(generated.IndexOf("ulong pass,", System.StringComparison.Ordinal));
-        Assert.That(masked.Substring(0, masked.IndexOf("WriteMask", System.StringComparison.Ordinal)), Does.Not.Contain("Vector"), generated);
+        Assert.That(masked, Does.Contain("Lanes8"), generated);
     }
 
     // A count of byte neighbors compared with constants (the Game of Life) is a chain of saturating adds: the wrapping
@@ -1047,7 +1046,7 @@ public class GeneratorTests
         "public static void A(global::EasyEcs.World world, ref int n, in int floor, int add)", "x1 = ref n, x2 = ref floor, x3 = add")]
     [TestCase("[ForEach, Changed<T>] static void A(ref P p, ref Clock c, int world) { }",
         "public static void A(global::EasyEcs.World _world, ulong since, int world)", "__ForEach.AFilter0.Since(since)", "s1 = ref _world.SingletonRef")]
-    [TestCase("[ForEach(Parallel = true)] static void A(ref P p, in int k) { }", "public int x1;", "x1 = k }", "ForEachBatchParallel<")]
+    [TestCase("[ForEach(Parallel = true)] static void A(ref P p, in int k) { }", "public int x1;", "x1 = k }", "ForEachMaskedParallel<")]
     [TestCase("[ForEach(Slices = 3), Without<Q>] static void A(ref P p, int slice) { }",
         "public static void A(global::EasyEcs.World world, int _slice, int slice)", "__ForEach.AFilter0.Slice(_slice, 3)")]
     public void RunnersGetAnEntryPoint(string members, params string[] expected)
