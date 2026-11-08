@@ -600,8 +600,10 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                     $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world}), p{i} = {StepsType(method, i)}.Of({world}, {(p.Sleeps ? "true" : "false")}, {p.Sweeps})");
             case Symbols.ParamKind.Tile when p.RefKind == "ref":
                 return ($"public {StepsType(method, i)} p{i};", $"p{i} = {StepsType(method, i)}.Of({world}, {(p.Sleeps ? "true" : "false")}, {p.Sweeps})");
+            // A tile taken by value: the neighbors its pass keeps (TileNeighborCache), begun before the pass.
             case Symbols.ParamKind.Tile when method.FirstOfGrid(i):
-                return ($"public object k{i};\npublic global::EasyEcs.TileNeighbors n{i};", $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world})");
+                return ($"public object k{i};\npublic global::EasyEcs.TileNeighbors n{i};\npublic {NeighborsType(method, i)} h{i};",
+                    $"k{i} = global::EasyEcs.LookupExtensions.Prepared<{p.Grid}, {p.Key}>({world}), h{i} = {NeighborsType(method, i)}.Of({world})");
             case Symbols.ParamKind.Emit: // on one thread the singleton's list itself; in parallel the target of the chunks' lists (from the pool)
                 return method.Parallel
                     ? ($"public global::EasyEcs.SingletonRef<global::EasyEcs.Emitted<{p.Type}>> o{i};\npublic global::EasyEcs.DynamicBuffer<{p.Type}> e{i};",
@@ -620,6 +622,21 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     {
         var p = method.Parameters[i];
         return $"global::EasyEcs.TileSteps<{p.Cell}, {p.Shape}, {p.Grid}, {p.Key}, {ColorsType(method)}>";
+    }
+
+    /// <summary>The kept neighbors of tile parameter <paramref name="i"/> (by value), keyed by the method's <see cref="EmitNeighbors"/> type.</summary>
+    private static string NeighborsType(ForEachModel method, int i)
+    {
+        var p = method.Parameters[i];
+        return $"global::EasyEcs.TileNeighborCache<{p.Shape}, {p.Grid}, {p.Key}, __ForEach{method.Owner.TypeParameters}.{method.Name}Neighbors{method.Order}>";
+    }
+
+    /// <summary>The type that keys the neighbors the passes of a method taking a tile by value keep in each world.</summary>
+    private static void EmitNeighbors(StringBuilder sb, ForEachModel method)
+    {
+        if (!Enumerable.Range(0, method.Parameters.Length).Any(i => method.Parameters[i] is { Kind: Symbols.ParamKind.Tile, RefKind: not "ref" } && method.FirstOfGrid(i))) return;
+        sb.Append($"    /// <summary>Keys the neighbors <c>{method.Name}</c>'s passes keep.</summary>\n");
+        sb.Append($"    internal readonly struct {method.Name}Neighbors{method.Order};\n\n");
     }
 
     /// <summary>
@@ -883,7 +900,11 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         if (suffix.Length == 0 && method.Simd is { VectorTail: true }) EmitJob(sb, owner, method with { Simd = null }, number, "Rows");
         // A method chasing other entities has a twin prefetching them, for the passes past the cache of its form.
         if (suffix.Length == 0 && method.HasChaseTwin) EmitJob(sb, owner, method with { IsChaseTwin = true }, number, "Chases");
-        if (suffix.Length == 0) EmitColors(sb, method);
+        if (suffix.Length == 0)
+        {
+            EmitColors(sb, method);
+            EmitNeighbors(sb, method);
+        }
         string job = $"{method.Name}Job{number}{suffix}{method.TypeParameters}";
         var components = method.Query.ToArray();
         int index = 0;
@@ -967,8 +988,14 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         string each = method.IsBatch ? "global::System.Span<{0}> c{1}" : "ref {0} c{1}";
         // A grid's neighbors, found once per entity for every Tile of the grid the method takes.
         string tileEntity = runs ? "entities[(int)i]" : "entity";
-        string grids = string.Concat(Enumerable.Range(0, method.Parameters.Length).Where(method.FirstOfGrid).Select(i =>
-            $"global::EasyEcs.TileNeighbors.Of<{method.Parameters[i].Shape}, {method.Parameters[i].Grid}, {method.Parameters[i].Key}>(k{i}, {tileEntity}, out n{i}); "));
+        // A tile taken by value reads them from the neighbors its pass keeps (searched when not kept, D73).
+        string grids = string.Concat(Enumerable.Range(0, method.Parameters.Length).Select(i => method.Parameters[i] switch
+        {
+            { Kind: Symbols.ParamKind.Tile, RefKind: "ref" } p when method.FirstOfGrid(i) =>
+                $"global::EasyEcs.TileNeighbors.Of<{p.Shape}, {p.Grid}, {p.Key}>(k{i}, {tileEntity}, out n{i}); ",
+            { Kind: Symbols.ParamKind.Tile } when method.FirstOfGrid(i) => $"h{i}.Around(k{i}, {tileEntity}, out n{i}); ",
+            _ => "",
+        }));
         if (method.Steps is >= 0 and var steps)
         {
             // A stepping tile: the tiles of the color running that may change step (Enter), each sweep of a Gauss-Seidel
@@ -1437,8 +1464,14 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             else if (simd.Interleaves) parts.Add("interleaved fields");
             if (simd.Wide != null)
             {
-                parts[0] = simd.Wide512 && simd.Wide128 ? $"vector (Vector512 or Vector<{simd.Lane}> of 128 bits)" : simd.Wide512 ? "vector (Vector512 only)" : $"vector (Vector<{simd.Lane}> of 128 bits only)";
-                parts.Add(simd.Wide512 && simd.Wide128 ? "wide component (permutes, table lookups)" : simd.Wide512 ? "wide component (permutes)" : "wide component (table lookups)");
+                var bits = new List<string>();
+                if (simd.Wide256) bits.Add("256");
+                if (simd.Wide128) bits.Add("128");
+                var widths = new List<string>();
+                if (simd.Wide512) widths.Add("Vector512");
+                if (bits.Count > 0) widths.Add($"Vector<{simd.Lane}> of {string.Join(" or ", bits)} bits");
+                parts[0] = $"vector ({string.Join(" or ", widths)}{(widths.Count == 1 && bits.Count < 2 ? " only" : "")})";
+                parts.Add(simd.Wide512 || simd.Wide256 ? simd.Wide128 ? "wide component (permutes, table lookups)" : "wide component (permutes)" : "wide component (table lookups)");
             }
             if (simd.Gathers) parts.Add("gathers (Lookup<T>)");
             if (simd.Prefetched.Length > 0) parts.Add("lookups prefetched past the last-level cache");

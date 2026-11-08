@@ -36,7 +36,9 @@ namespace EasyEcs.Benchmark;
 /// cold branch (a call when a health reaches 0) that no row / one row in a hundred takes. <c>MoveVector</c> is the Godot sample's move (a
 /// component of one Vector2 assigned whole: a flat loop). <c>Steer</c> uses 3 of the 12 fields of a wide component (permutes
 /// gather them into lanes and back on AVX-512, NEON table lookups on ARM64, the other 9 kept as loaded); <c>Glide</c> the
-/// float of a component of mixed types (3 words a row). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
+/// float of a component of mixed types (3 words a row); <c>Dive</c> (heavy math: a square root, a division) and <c>Ledger</c>
+/// (light) 3 and 2 of a wide component's 8 eight-byte words (doubles, longs). Dive takes AVX2's permutes too; Steer, Glide
+/// and Ledger run rows there, and Ledger on AVX-512 as well. <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
@@ -101,6 +103,9 @@ public partial class KernelBenchmark
         _craft.Reserve<Walker>(Entities);
         for (int i = 0; i < Entities; i++)
             _craft.CreateEntity(new Walker { Speed = (float)random.NextDouble() * 4, Alive = true, Team = (byte)i, Rank = (short)i, Hp = i });
+        _craft.Reserve<Probe>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _craft.CreateEntity(new Probe { X = random.NextDouble(), Id = i, P = random.NextDouble() - 0.5, Tag = i * 7, Q = random.NextDouble() * 4 });
 
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
@@ -594,6 +599,26 @@ public partial class KernelBenchmark
     public void GlideGenerated() => Kernels.Glide(_craft);
 
     [Benchmark]
+    public void DiveScalar()
+    {
+        var job = new DiveRows();
+        _craft.ForEach<Probe, DiveRows>(ref job);
+    }
+
+    [Benchmark]
+    public void DiveGenerated() => Kernels.Dive(_craft);
+
+    [Benchmark]
+    public void LedgerScalar()
+    {
+        var job = new LedgerRows();
+        _craft.ForEach<Probe, LedgerRows>(ref job);
+    }
+
+    [Benchmark]
+    public void LedgerGenerated() => Kernels.Ledger(_craft);
+
+    [Benchmark]
     public void BrightenScalar()
     {
         var job = new BrightenRows();
@@ -844,6 +869,16 @@ public partial class KernelBenchmark
         public short Rank;
         public int Hp;
     }
+
+    /// <summary>A wide component of 8 eight-byte words a row (doubles and longs), of which Dive uses 3 and Ledger 2.</summary>
+    public struct Probe : IComponent
+    {
+        public double X;
+        public long Id;
+        public double Y, P;
+        public long Tag;
+        public double Heat, Spin, Q;
+    }
 #pragma warning restore EECS091
 
     private struct SteerRows : IForEach<Craft>, INoStructuralChanges
@@ -858,6 +893,18 @@ public partial class KernelBenchmark
         public Pull Pull;
         public void Execute(ref Walker walker) => Kernels.Glide(ref walker, in Pull);
         static int IForEach<Walker>.WriteMask => 1;
+    }
+
+    private struct DiveRows : IForEach<Probe>, INoStructuralChanges
+    {
+        public void Execute(ref Probe probe) => Kernels.Dive(ref probe);
+        static int IForEach<Probe>.WriteMask => 1;
+    }
+
+    private struct LedgerRows : IForEach<Probe>, INoStructuralChanges
+    {
+        public void Execute(ref Probe probe) => Kernels.Ledger(ref probe);
+        static int IForEach<Probe>.WriteMask => 1;
     }
 
     public struct Lum : IComponent { public byte V; }
@@ -1122,6 +1169,25 @@ public partial class KernelBenchmark
         [ForEach(SimdMode = SimdMode.Require)]
         internal static void Glide(ref Walker walker, in Pull pull) =>
             walker.Speed = MathF.Max(walker.Speed * 0.75f - pull.Value, 0) + pull.Value * pull.Value;
+
+        // 3 of a wide component's 8 eight-byte words, heavy math (a square root, a division): permutes on AVX-512 and AVX2.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void Dive(ref Probe probe)
+        {
+            probe.X = probe.X - probe.P * 0.25 + Math.Sqrt(Math.Abs(probe.Q));
+            probe.Q = Math.Min(probe.Q + probe.X * probe.P, 10) * 0.5 - probe.Q / 3;
+        }
+
+        // 2 of its longs, light math: 8 rows a vector gain too little for the permutes, so x64 runs its rows (the wide
+        // gate, which EECS055 names); the case that keeps the gate honest.
+#pragma warning disable EECS055
+        [ForEach]
+        internal static void Ledger(ref Probe probe)
+        {
+            probe.Id = (probe.Id + probe.Tag * 3) ^ (probe.Tag >> 2);
+            probe.Tag = (probe.Tag ^ 0x55) + probe.Id - 7;
+        }
+#pragma warning restore EECS055
 
         // Narrow lanes: a saturating byte sum (AddSaturate), then a wrapping one past a threshold: 64 rows per Vector512.
         [ForEach(SimdMode = SimdMode.Require)]
