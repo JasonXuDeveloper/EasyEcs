@@ -750,6 +750,14 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 continue;
                             }
 
+                            // The pending run first: the job sees the rows in table order (the rows it marks, the
+                            // records it emits and its partial results follow that order, as the method's own would).
+                            if (end > start)
+                            {
+                {{BatchRun(n, "                ", "start", "end - start")}}
+                                start = end;
+                            }
+
                             int low = (w << 6) + BitOperations.TrailingZeroCount(bits), high = (w << 6) + 64 - BitOperations.LeadingZeroCount(bits);
                             ulong passing = bits >> (low & 63);
                 {{StampWord(n, "            ", "w", "bits")}}
