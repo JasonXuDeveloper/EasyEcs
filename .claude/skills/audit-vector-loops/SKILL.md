@@ -91,7 +91,9 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   passes emit in the scalar method's order, ids are freed in its order: D122). `Emit<T>` records of a lane or the
   entity's id are appended compacted (`Lanes.Compact`). Every row takes the vector form (the last rows through
   `Interleaved.LoadTail`), and hardware without the loop's vectors runs the method's own job. One change of one
-  uniform value per method; the method must not take the component it changes; a method that changes structure has
+  uniform value per method; a method may change a component it takes only when nothing uses that parameter after the
+  change (`Kernel.UsedAfter`: a later reference in the body, or any reference in a loop holding the change; a Maybe of
+  it is refused), since the method sees the change at once and a vector loop after the pass; a method that changes structure has
   no cold branch (its rows cannot run the method during the pass). The generic form keeps its EECS033 Warning (a
   better generated member exists), never an Error.
 - **Wide and mixed rows** (`Kernel.Wide`): a component of more fields than the loop splits, or of mixed types, where
@@ -178,10 +180,25 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
 - **Hand-written SIMD where the plain form vectorizes** is reported (`audit-analyzer`, written by hand where the
   generator writes it): `Vector128` / `Vector<T>` code in a batch or tile method whose plain form becomes the same loop.
 - **Per-chunk parameters**: `Reduce<T>` (lane partials combined in chunk order), `Emit<T>` (records of the passing
-  rows compacted, in row order), `EntityRandom` (a pure function per lane).
+  rows compacted, in row order); a singleton taken by `ref` and written only as running sums, counts, Mins or Maxes
+  (`Kernel.RunningTotals`: identity accumulators folded into its fields once per run, single thread; a float sum needs
+  FloatMode.Fast); a `[MinBy]` / `[MaxBy]` kept row of a 4-byte key and one Entity / EntityId field, written
+  `if (key < r.Value.Key) r.Value = new T { Key = key, Holder = e.Id };` (`Kernel.KeptReduction` / `KeptRowWrite`: the
+  best key and its row per lane, a tie to the lower row, as the method's strict compare keeps the first). Row order is
+  part of every per-chunk result and of the marked rows: a pass hands its job the rows in table order (the masked walk
+  hands a run of whole words to the job before the word after it, `MaskedRuns`), and a test of a vector form with a
+  structural change or a record compares the order of the rows against its scalar twin, in tables with presence holes
+  (StructuralLoopTests.AMaskedWordAfterARunKeepsTheRowOrder). `EntityRandom` has no vector form yet (64-bit Mix lanes: `docs/plans/backlog.md` G5): its draws keep
+  the method scalar.
 - **Conditions**: `if` / `else` chains, nested ifs, early `return` (a mask of rows still running), ternaries, `&&`,
   `||`, `!`, comparisons across fields of several components and singletons, `Math.Min` / `Max` / `Abs` / `Clamp`,
-  the saturating and narrow-lane idioms.
+  the saturating and narrow-lane idioms. `++` / `--` used as a value (`if (--t.Ticks <= 0)`, a timer; `Kernel.Step`):
+  written in the lanes that evaluate it (masked under `&&`, `||` and a branch of `?:`), the postfix value held first;
+  inside a switch arm, `??` or `?.`, or after a read of the same place in the statement, it keeps a fixable reason
+  (write the change in a statement of its own). A tag taken as a parameter (`in Boss`) is a filter with no lanes, a
+  `ReadOnlyMaybe<Boss>` its presence; a method taking only tags stays scalar. `[StructLayout(LayoutKind.Sequential)]`
+  without Pack or Size is C#'s own layout and keeps the loop (`Kernel.SequentialLayout`); Explicit, Pack or Size keep
+  the inherent reason.
 
 ## Side effects keep a method scalar (or need care)
 

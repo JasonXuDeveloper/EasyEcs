@@ -3406,3 +3406,56 @@ declares `ITile<TKey>` and writes no `Beside` now gets one inferred (it was CS05
   hand-written stencils the page shows before the cell method: mark the fences `doccheck=expect-EECS103` or show the
   cell method first). The bool splits were applied to both languages on this branch and reverted, to keep guide
   pages to the docs pass.
+
+## feat-lane4-generator (backlog Lane 4: the vector-loop generator)
+
+- **decisions D122 + zh ("What stays scalar"), guide/structural-changes + zh: a change of the method's own
+  component.** The first bullet ("The method takes the component it changes") now holds only when the method uses that
+  parameter after the change: a later reference in the body, or any reference inside a loop holding the change
+  (`Kernel.UsedAfter`). `if (--burning.Ticks == 0) unit.RemoveBurning();` (BattleServer `Burn`) and
+  `if (f.V < 0) e.RemoveF();` get vector loops. A `Maybe<T>` of the changed component keeps the old reason. The reason
+  text is now "it changes F, which it also takes as 'f', and uses 'f' after the change ('f.V'): ... change it last, or
+  in a [ForEach] method of its own". guide/structural-changes.mdx:59 (`if (weapon.Cooldown-- > 0) return;`): check the
+  fence's text and any `doccheck=expect-EECS055` still match (it may vectorize now).
+- **guide/vector-loops material (the "what becomes a vector loop" lists in high-performance / troubleshooting / the
+  analyzer's EECS055 section, en + zh): `++` / `--` used as a value.** `if (--t.Ticks <= 0)`, `x = y++`, `f.V++ > 3`
+  under `&&` / `||` / `?:`, in byte lanes too: the write happens in the lanes that evaluate it. Still refused, with a
+  fixable reason: inside a switch arm, `??` or `?.` ("write the change in a statement of its own"), and after a read of
+  the same place in one statement (`f.V + f.V++`).
+- **Same pages: a tag taken as a parameter.** `in Boss` (a filter, no column read) and `ReadOnlyMaybe<Boss>` (its
+  presence as the lanes' mask) keep the vector loop; the old reason "component Boss has no fields" is gone. A method
+  taking only tags stays scalar ("it takes only tags, which have no lanes"). EECS026 (prefer `[With<T>]`) is unchanged.
+  AccessBenchmark's TagParameter / MaybeParameter rows: see the backlog item G3 for the numbers.
+- **Same pages + guide/singletons + zh: running totals of a singleton taken by `ref`.** A singleton whose written
+  fields are only sums (`+=`, `-=`, `++`, `--`), counts or `Math.Min` / `Math.Max` of itself is folded once per run
+  from identity accumulators (single-threaded methods; a float sum needs `FloatMode.Fast`, else the reason "it adds to
+  'c.Sum', a float sum ..."). Parallel methods still use `Reduce<T>`. EECS086 / EECS089 advice unchanged.
+- **guide/analyzer (EECS055's reasons) + zh: reason texts.** `e.Read<T>()` / `e.Has<T>()` now give the Entity reason
+  ("it uses the Entity in 'e.Read<H>()': ... read components as parameters") instead of "defined in another
+  assembly"; a `DynamicBuffer<T>` parameter: "it takes a DynamicBuffer<Item> ('items'), a list per row, which no lane
+  holds: the method runs row by row, and its loops over the buffer's elements get vector forms of their own"; a
+  `Tile<,>` parameter: "... write the step as a cell method"; byte / short lanes divide by a power of two (a shift, a
+  mask), other divisors: "'/' by 3 is not supported in 8-bit lanes ..." and "integer division ('b / c') by a value that
+  differs per row is not supported in 8-bit lanes (it throws on 0)".
+- **Same pages: `[StructLayout(LayoutKind.Sequential)]`** without Pack or Size keeps the vector loop (C#'s own
+  layout); `Explicit`, `Pack` or `Size` keep "component X sets its layout ([StructLayout] with Explicit, Pack or Size)".
+- **example.mdx:131 + example.zh.mdx:117 (the battle server walkthrough): `Thaw`** is now `[ForEach(SimdMode =
+  SimdMode.Off)]` with the comment "three changes of a row: row by row (a vector loop applies one change per method)":
+  its `--frozen.Ticks` no longer stops the loop, so its three changes are the reason left. `Burn` gets a vector loop
+  (the timer and the change of its own component). Mention both where the walkthrough explains StatusSystem.
+- **Generated text (no page; README/changelog if it lists generator output): the alias block.** Generated system,
+  fusion and lambda files start with `using __V512_float = global::System.Runtime.Intrinsics.Vector512<float>;` and
+  the like, and name those types by alias; int and long literals lose their parentheses unless negative; systems
+  without OnCreate / OnDestroy no longer get empty hooks (`ISystemCode.Create` / `Destroy` are `static virtual` with
+  empty defaults). api.mdx's ISystemCode line (if it lists members) follows.
+- **guide/reductions + zh (MinBy / MaxBy), the vector-loop pages: a kept row in a vector loop.** A `[MinBy]` /
+  `[MaxBy]` reduction of a 4-byte key and one `Entity` / `EntityId` field, written
+  `if (key < r.Value.Key) r.Value = new T { Key = key, Holder = e.Id };` (or the positional constructor, `>` for
+  MaxBy), gets a vector loop: per lane the best key and its row, folded after the run (a tie goes to the lower row, as
+  the method's strict compare keeps the first). Any other form of the write gives the fixable reason "it keeps a row of
+  T in a form a vector loop does not read: write 'if (key < r.Value.Key) r.Value = new T { Key = key, Holder =
+  entity.Id };' with nothing else in the branch". ReduceBenchmark's LowestVector row: see backlog G9.
+- **changelog (fix): vector passes over tables with presence holes kept the row order wrong.** A run of whole words
+  followed by a word with some passing rows reached the vector job after that word (`MaskedRuns` in ArityGenerator), so
+  `Emit<T>` records came out of row order and the rows a vector loop marked for a structural change closed their holes
+  differently from the method's own moves (D122's row order). The run is now handed to the job first.
