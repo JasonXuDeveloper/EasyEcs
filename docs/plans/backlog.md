@@ -98,8 +98,8 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       864 ns, then 845 vs 650 ns; 1M: 301 vs 314 us, then 253 vs 311 us; 100k: generated behind both times, 32.6 vs
       27.9 and 32.2 vs 24.6 us, errors 5-7 us), 0 B. Researched: the two forms are the same code. The generated
       Identity / Combine are the hand-written text, the two structs have the same fields in the same order, and the
-      jobs the generator writes differ only in their names (diffed with the names normalized). `tools/inlining.sh
-      ReduceBenchmark`: every job inlined. The optimized listings (DOTNET_JitDisasm under tools/Inlining, FullOpts) of
+      jobs the generator writes differ only in their names (diffed with the names normalized). `tools/perf/inlining.sh
+      ReduceBenchmark`: every job inlined. The optimized listings (DOTNET_JitDisasm under tools/perf/Inlining, FullOpts) of
       the benchmark method, `ForEachBatchParallel` and `ForEachBatchRuns` for each job: 0 lines differ once names and
       addresses are normalized (227, 1191 and 710 bytes each). A run under the exclusive lock with `--launchCount 3`:
       1k 631 vs 717 ns, 10k 6.12 vs 5.45 us, 100k 35.3 +- 5.7 vs 32.6 +- 6.6 us, 1M 282 vs 346 us, every pair within
@@ -129,7 +129,7 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
 
 - [ ] **C0. Re-measure the stale bench.json rows before any A/B** (`perf.md` §0 and §2): SparseBenchmark
       PassOverTheFew (fixed by fa2770f the same day), TileStencil Blur9 / Laplacian, ParallelFor Light, Reduce
-      Sum / Mass, Emit 10k, ParallelQueryComparison (then `tools/inlining.sh` and jitdisasm of `Waypoints.Steer`'s
+      Sum / Mass, Emit 10k, ParallelQueryComparison (then `tools/perf/inlining.sh` and jitdisasm of `Waypoints.Steer`'s
       job if still behind Arch / Friflo), OperationBenchmark EntityBatch (batch form slower than its own per-row form:
       count runs per pass, read the batch job), SingleEntityBenchmark Structural + Filtered (`--launchCount 6`).
       Proof: the numbers; a case still losing becomes its own item here.
@@ -322,19 +322,19 @@ Starts now. T1 comes before Finish 1b (the move).
 - [x] **T9. Tool scripts: one build helper** (`code.md` 3.4): errors printed, `TargetPath` read, `trap rm` in
       `loopbound.sh`; `inlining.sh --no-build` in CI (`code.md` 2.8).
       Built: `tools/build.sh` (errors, exit 2, TargetPath, --no-build) for inlining.sh / jitdisasm.sh /
-      loopbound.sh, `trap rm` of the listing, CI `tools/inlining.sh --no-build`.
-- [x] **T10. One reflective BenchmarkDotNet runner for tools/Inlining and tools/LoopBound** (`code.md` 3.3): short
+      loopbound.sh, `trap rm` of the listing, CI `tools/perf/inlining.sh --no-build`.
+- [x] **T10. One reflective BenchmarkDotNet runner for tools/perf/Inlining and tools/perf/LoopBound** (`code.md` 3.3): short
       or full class names, every `[Params]` / `[ParamsSource]` type.
       Built: tools/Shared/BenchmarkRunner.cs (Find: X, XBenchmark or the full name; [Params] / [ParamsSource] of
       any type; Create / Cleanup).
-- [x] **T11. `tools/bench.sh` resolves a class's project by listing** (`code.md` 3.6), and fails on "No benchmarks
+- [x] **T11. `tools/perf/bench.sh` resolves a class's project by listing** (`code.md` 3.6), and fails on "No benchmarks
       to choose from" instead of marking it done.
       Built: each project lists its benchmarks once; a class runs where it is declared, a name neither declares
       fails, "No benchmarks to choose from" is a failure.
 - [x] **T12. `check-sample.sh`'s two copies of the block extraction** (`code.md` 3.7): one function; the README
       heading convention unified with the page's in the docs pass.
       Built: one `block` function (the heading regex through the environment); the heading convention is in docs-todos.
-- [x] **T13. Stale comments and maps** (`code.md` 3.5, 5): `tools/inlining.sh:4`'s class names; `docs/AGENTS.md`'s
+- [x] **T13. Stale comments and maps** (`code.md` 3.5, 5): `tools/perf/inlining.sh:4`'s class names; `docs/AGENTS.md`'s
       scripts line (`lint-terms.ts`, `chromium.ts`, `after-build.ts`, `first-commit-dates.mjs`,
       `search-expectations.json`); `lint-terms.ts`'s empty `pending` (delete or say why); `benchmarks/AGENTS.md`: a
       benchmark nests its components, only the headline worlds declare at namespace level.
@@ -392,7 +392,7 @@ Starts now. T1 comes before Finish 1b (the move).
       Not started in feat-lane4-generator.
 - [ ] **G8. P2: a uniform table read at a lane index** (`perf.md` P2): a permute (`vpermps`, AVX2 `PermuteVar8x32`,
       NEON TBL) for N <= 16, a gather past it; BattleServer's Steer back to `SimdMode.Auto`. Proof: KernelBenchmark
-      SteerTable pair, BattleServerBenchmark, tools/loopbound.sh; ARM64 "owner, after code".
+      SteerTable pair, BattleServerBenchmark, tools/perf/loopbound.sh; ARM64 "owner, after code".
       Not started in feat-lane4-generator.
 - [x] **G9. `[MinBy]` / `[MaxBy]`'s vector form** (`finish-scan.md` item 5), after feat-generated-members: proved with
       ReduceBenchmark (FindWeakest), ties keep the earlier row.
@@ -547,7 +547,7 @@ numbers are written once about the final code).
 - [ ] **5.** "Owner, after code": the runs of `owner-m4.md` (1-5; the x86 prefetch run is not made, owner 2026-11-07: the gates' decision
       record says they were proven on this VM's 260 MiB LLC only and that a 32 MiB-LLC x86 run is what would move them), each result
       recorded where the file says.
-- [ ] **6.** `tools/bench.sh --site --sync` on the final code (perf's stale rows re-read, the classes missing from
+- [ ] **6.** `tools/perf/bench.sh --site --sync` on the final code (perf's stale rows re-read, the classes missing from
       bench.json), README numbers, `verify`, master; then the owner deletes `research-copy-asm` and every finished
       branch. The owner cuts the release.
 

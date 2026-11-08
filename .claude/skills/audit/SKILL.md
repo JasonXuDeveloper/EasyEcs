@@ -33,7 +33,7 @@ merge; then the exemplar pass (`audit-code`, "Exemplar pass") rewrites every sam
 demo, the templates, the battle server and the other headline benchmarks, the tests that model usage and every docs
 fence in the newest recommended forms, once no code change that could change a recommendation is still running;
 agents do not edit docs pages but report their docs to-dos (what each page must now say), which are collected in one
-list; `audit-docs` then runs once over everything, with `tools/bench.sh --site --sync` on the final code. Every agent also reports
+list; `audit-docs` then runs once over everything, with `tools/perf/bench.sh --site --sync` on the final code. Every agent also reports
 what it left undone, which goes on the same list (nothing is dropped silently).
 
 ## Starting an agent

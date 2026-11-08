@@ -53,12 +53,12 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
    analyzer messages) are rewritten. Verify a claim with a throwaway test when unsure.
 5. **Numbers**: no typed benchmark numbers outside `decisions.mdx` (the site reads `bench.json`).
 6. **Changelog**: user-facing items only, no numbers.
-7. **zh**: says the same as en; glossary in `tools/ApiDocs/zh/README.md` (stamp = 打 tick, filter = 过滤条件,
+7. **zh**: says the same as en; glossary in `tools/docs/ApiDocs/zh/README.md` (stamp = 打 tick, filter = 过滤条件,
    tracking = 追踪, parent = 父实体, World stays World); `bun run check` runs `lint:terms`.
    **A `.zh.mdx` page never holds English prose.** The generated reference (`docs/content/reference/*.zh.mdx`) once
    showed English on 23 pages: an agent regenerated it while ApiDocs reported stale zh entries and committed the
    English it fell back to (96a50ba). ApiDocs now leaves such a page unwritten (it keeps its Chinese) and exits 1. So a regenerated reference is committed only when ApiDocs
-   reports 0 problems, after the stale entries were rewritten (`tools/ApiDocs/zh/README.md`), and the diff of every
+   reports 0 problems, after the stale entries were rewritten (`tools/docs/ApiDocs/zh/README.md`), and the diff of every
    regenerated page is read before the commit, in both languages: a removed Chinese line comes back as Chinese; an
    English page loses nothing it should keep, says what the code does now, holds no Chinese and no `/zh/` link; each
    en/zh pair keeps the same members and sections.
@@ -94,6 +94,6 @@ Read `docs/WRITING.md` (page anatomy, tone, numbers) and `docs/AGENTS.md` first.
   glossary, which holds an entry for each; an advanced page (grids, vector loops, fusion, parallel data) has its
   "Before you start" section with mermaid diagrams. A bare term is a finding.
 - **Docs come last**: while code still changes, agents collect docs to-dos instead of editing pages; one full pass
-  at the end, with `tools/bench.sh --site --sync` on the final code (numbers come from `bench.json` only).
+  at the end, with `tools/perf/bench.sh --site --sync` on the final code (numbers come from `bench.json` only).
 
 Finish with DocCheck, ApiDocs and `bun run check`; `verify` runs `bun run build` (SEO, search expectations).

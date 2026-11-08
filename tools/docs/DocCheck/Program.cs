@@ -1,8 +1,8 @@
 using DocCheck;
 
-// dotnet run --project tools/DocCheck [-- [--dump dir] page.md ...]
+// dotnet run --project tools/docs/DocCheck [-- [--dump dir] page.md ...]
 // Compiles the C# fences of README.md and docs/content/**/*.md(x) (or of the pages given) except the generated API
-// reference (docs/content/reference: signatures from tools/ApiDocs, not snippets); prints page:line for each
+// reference (docs/content/reference: signatures from tools/docs/ApiDocs, not snippets); prints page:line for each
 // problem and exits 1 if there is one. --dump writes the generated sources of each compilation into dir.
 // README.md describes the conventions.
 var root = Root();

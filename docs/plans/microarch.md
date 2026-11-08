@@ -9,7 +9,7 @@ what it does not, how to find where a kernel is bound, and the work packages. Th
 
 - **No hardware counters here**: the VM exposes no `cpu` PMU (`/sys/bus/event_source/devices` has none), so no
   `perf stat` for IPC, branch misses or cache misses, and BenchmarkDotNet's hardware counters do not work on Linux.
-- **Static: `llvm-mca` (installed, LLVM 18)** on the Tier1 listing of a job's loop (`tools/jitdisasm.sh`, the loop
+- **Static: `llvm-mca` (installed, LLVM 18)** on the Tier1 listing of a job's loop (`tools/perf/jitdisasm.sh`, the loop
   body between its label and its back edge, AT&T or Intel syntax with `-x86-asm-syntax=intel`), `-mcpu=icelake-server`
   (and `znver4` for the other vendor): it reports the bound of a loop (throughput per iteration, the critical
   dependency chain, port pressure). A loop whose bound is the chain (latency) gains from independent accumulators or
@@ -70,7 +70,7 @@ what it does not, how to find where a kernel is bound, and the work packages. Th
 
 ### M0: where each kernel shape is bound (llvm-mca 18, 2026-10-27)
 
-Method: `tools/loopbound.sh <class> [rows]` runs a benchmark class's methods past Tier1 (`DOTNET_TC_CallCountingDelayMs=0`, 300
+Method: `tools/perf/loopbound.sh <class> [rows]` runs a benchmark class's methods past Tier1 (`DOTNET_TC_CallCountingDelayMs=0`, 300
 calls each) with `DOTNET_JitDisasm` on the runners, takes every innermost loop of each Tier1 listing that uses zmm
 registers (a back edge to an earlier label, no back edge inside), drops duplicate copies (the runner inlines a job's
 `Execute` at three sites: whole runs, runs between masked words, masked words), and runs `llvm-mca -iterations=200

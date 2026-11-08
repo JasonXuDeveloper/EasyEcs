@@ -4,10 +4,10 @@ using ApiDocs;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 
-// dotnet run --project tools/ApiDocs [-- [--zh-scaffold] [output-dir]]
+// dotnet run --project tools/docs/ApiDocs [-- [--zh-scaffold] [output-dir]]
 // Writes one MDX page per public type of EasyEcs.Core (a T1..T9 family is one page) into docs/content/reference/,
 // with an index and meta.json, from the built assembly and its XML documentation, in English (<page>.mdx) and in
-// Chinese (<page>.zh.mdx, from the translations in tools/ApiDocs/zh/). Complexity comes from the API tables
+// Chinese (<page>.zh.mdx, from the translations in tools/docs/ApiDocs/zh/). Complexity comes from the API tables
 // (docs/content/api.mdx, api.zh.mdx). Deterministic: CI regenerates the pages and fails if they differ from the
 // commit; the tool exits with 1 when a translation is missing, stale or orphaned, and never writes a Chinese page
 // that would show English text for want of one.
@@ -26,7 +26,7 @@ var references = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!).Sp
 var compilation = CSharpCompilation.Create("ApiDocs", [], [.. references, reference]);
 var assembly = (IAssemblySymbol)compilation.GetAssemblyOrModuleSymbol(reference)!;
 
-var zh = new Translations(Path.Combine(root, "tools", "ApiDocs", "zh"));
+var zh = new Translations(Path.Combine(root, "tools", "docs", "ApiDocs", "zh"));
 var pages = new Reference(compilation, assembly, Language.English, Complexity.Load(root, "api.mdx", "Complexity", "en"), null).Pages();
 var costs = Complexity.Load(root, "api.zh.mdx", "复杂度", "zh");
 if (costs.Count == 0) costs = Complexity.Load(root, "api.mdx", "Complexity", "zh"); // no Chinese API page: the English table
@@ -48,7 +48,7 @@ foreach (var (file, text) in pages)
 Console.WriteLine($"{pages.Count} files in {Path.GetRelativePath(root, output)}");
 foreach (var file in kept)
     Console.Error.WriteLine($"{file}: not written, a member on it has no usable Chinese entry (the page keeps its previous text)");
-if (scaffold) Console.WriteLine($"{zh.Scaffold()} members added to tools/ApiDocs/zh/ to translate");
+if (scaffold) Console.WriteLine($"{zh.Scaffold()} members added to tools/docs/ApiDocs/zh/ to translate");
 var problems = zh.Problems();
 foreach (var problem in problems) Console.Error.WriteLine(problem);
 Console.WriteLine($"{problems.Count} problem(s) in the Chinese reference");

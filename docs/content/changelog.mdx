@@ -86,7 +86,7 @@ major or minor version that needs code changes? The
   `FloatMode.Fast`, `Sin`, `Cos`, `Exp`, `Log`, `Log2` and `Hypot` take .NET's vector approximations; `FloatMode.Exact`
   (the default) keeps every result the method's, the same on every machine.
 - `SystemInfo.Loops` (in `world.DescribeSchedule()`) names the loop each `[ForEach]` method of a system got, or why it
-  runs one row at a time; `tools/jitdisasm.sh` prints a loop's machine code. EECS055 ends a reason about a component too
+  runs one row at a time; `tools/perf/jitdisasm.sh` prints a loop's machine code. EECS055 ends a reason about a component too
   wide or too mixed with the fields the method uses, to split into a component of their own.
 - `Reduce<T>`, a `[ForEach]` parameter taken by `ref` for a total over the rows (OpenMP's `reduction`), as in
   `static void Count(in Health h, ref Reduce<Census> census) => census.Value.Alive++;`: `T` is a singleton that

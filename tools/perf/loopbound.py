@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Where each vector loop of a Tier1 listing is bound: the ports, the front end or a loop-carried chain (llvm-mca).
 
-    tools/loopbound.py <listing.asm> [--reg zmm] [--cpus icelake-server,znver4] [--keep DIR] [--all] [file.s ...]
+    tools/perf/loopbound.py <listing.asm> [--reg zmm] [--cpus icelake-server,znver4] [--keep DIR] [--all] [file.s ...]
 
-Reads a DOTNET_JitStdOutFile listing (tools/loopbound.sh writes one), keeps the Tier1 / FullOpts methods, finds every
+Reads a DOTNET_JitStdOutFile listing (tools/perf/loopbound.sh writes one), keeps the Tier1 / FullOpts methods, finds every
 innermost loop (a back edge to an earlier label with no back edge inside) that uses the register class --reg, drops
 copies of a loop already seen in the same job (a runner inlines a job's Execute at several sites), and runs llvm-mca
 on each body. Prints a markdown row per job and loop kind ("whole": over whole vectors; "masked": a 64-row word's

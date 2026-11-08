@@ -6,7 +6,7 @@ namespace DocCheck;
 /// </summary>
 public static class Prelude
 {
-    public const string Path = "tools/DocCheck/Prelude.cs";
+    public const string Path = "tools/docs/DocCheck/Prelude.cs";
 
     public const string Source = """
         public record struct Position(float X, float Y) : IComponent;

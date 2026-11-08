@@ -185,7 +185,7 @@ know. L7 is applied in the dashboard, but the file that documents the dashboard'
 |---|---|---|---|---|---|
 | L1 | 2026-10-26 | Restructure the whole repository's directories ("调整整个项目的目录结构") | yes, after every code branch merges; tests and benchmarks too | c2e9e90, layout.md, Finish 1 | rule: Finish 1 (maps in AGENTS.md) |
 | L2 | 2026-10-27 | Tiles' names: shader or HPC terms | HPC terms in names and headings (stencil, tile, halo); the shader analogy in prose only | grids page, docs-todos "Owner answers 2026-10-27" | due (grids page) |
-| L3 | 2026-10-27 | Chinese for Slice | 分帧 (not 分片, which reads as sharding) | tools/ApiDocs/zh/README.md glossary | due (glossary) |
+| L3 | 2026-10-27 | Chinese for Slice | 分帧 (not 分片, which reads as sharding) | tools/docs/ApiDocs/zh/README.md glossary | due (glossary) |
 | L4 | 2026-10-29 | Unify the tile exception texts with the current terms | yes ("Outside the tile and its halo") | ee5ef76 | none (applied) |
 | L5 | 2026-11-07 | The folder layout (338 flat files) | all as recommended: Generator keeps `Kernel/`, pair methods in `OrderedTables/`, prefetch files in `Lookups/`, the either-way files as in finish-scan.md 2.2 | f9faa23, Finish 1 | rule: Finish 1 |
 | L6 | 2026-11-07 | `tools/` subfolders | add `tools/perf/` for the performance scripts and projects | f9faa23, Finish 1 | rule: Finish 1 |

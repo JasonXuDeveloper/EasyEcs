@@ -4,9 +4,9 @@ Generates the API reference of the website (`docs/content/reference/`) from Easy
 documentation comments (`GenerateDocumentationFile` in `EasyEcs.Core.csproj`), in English and in Chinese.
 
 ```bash
-dotnet run --project tools/ApiDocs                    # writes docs/content/reference/
-dotnet run --project tools/ApiDocs -- /tmp/ref        # or another directory
-dotnet run --project tools/ApiDocs -- --zh-scaffold   # adds the members without a translation to tools/ApiDocs/zh/
+dotnet run --project tools/docs/ApiDocs                    # writes docs/content/reference/
+dotnet run --project tools/docs/ApiDocs -- /tmp/ref        # or another directory
+dotnet run --project tools/docs/ApiDocs -- --zh-scaffold   # adds the members without a translation to tools/docs/ApiDocs/zh/
 ```
 
 One MDX page per public type (a `T1..T9` family is one page), plus `index.mdx` (types by kind) and `meta.json`, each

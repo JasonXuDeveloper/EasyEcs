@@ -3,7 +3,8 @@
 #  - the root AGENTS.md lists every directory AGENTS.md (its "> Read when:" line) and every skill (its description's
 #    "Use when ..." part), between the agents-index / skills-index markers;
 #  - each directory AGENTS.md has a CLAUDE.md next to it that is the one line @AGENTS.md (Claude Code imports it);
-#  - every source file of src/, tests/ and benchmarks/ is named in its directory's file map, by its path in its project.
+#  - every source file of src/, tests/ and benchmarks/ is named in its directory's file map, by its path in its project,
+#    and a map line naming a file that does not exist fails too.
 # tools/agents.sh writes the indexes; tools/agents.sh --check fails when anything is stale or missing (CI, verify).
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -67,6 +68,22 @@ for d, m in maps.items():
         name = os.path.relpath(f, d)
         if not re.search(rf"(?<![\w./-]){re.escape(name)}(?![\w])", text):
             problems.append(f"{f} is not in the file map {m} (as {name})")
+
+# The other direction: a map line that names a file of the project (Folder/File.cs, or an entry at the start of a line)
+# must name one that exists, so a rename or a delete cannot leave a stale line behind.
+known = {}
+for d, m in maps.items():
+    known.setdefault(m, []).append(d)
+for m, projects in known.items():
+    text = open(m).read()
+    have = {os.path.relpath(f, d) for d in projects for f in files if f.startswith(d + "/") and f.endswith(".cs")}
+    names = set()
+    for token in re.findall(r"(?<![\w./-])((?:[A-Z]\w*/)+[\w.]+\.cs)(?![\w])", text):
+        # only paths that start in a folder of one of this map's projects (others name another project's file)
+        if any(os.path.isdir(os.path.join(d, token.split("/")[0])) for d in projects): names.add(token)
+    for token in re.findall(r"^ {2}([\w.]+(?:/[\w.]+)*\.cs)(?=\s|$)", text, re.M): names.add(token)
+    for name in sorted(names - have):
+        problems.append(f"{m} names {name}, which is not a file of its projects")
 
 for p in problems: print(p)
 print(f"agents: {len(problems)} problems")

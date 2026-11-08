@@ -139,7 +139,7 @@ instruction per use:
 Tier1 listings of a benchmark method: `--inProcess` with `DOTNET_TC_CallCountingDelayMs=0`.
 
 How to see the bound without hardware counters (the VM has none): `llvm-mca` on the Tier1 loop
-(`tools/jitdisasm.sh`), then BenchmarkDotNet with controlled data (sorted against shuffled, 1k / 100k / 1M rows).
+(`tools/perf/jitdisasm.sh`), then BenchmarkDotNet with controlled data (sorted against shuffled, 1k / 100k / 1M rows).
 The open work is `docs/plans/microarch.md`.
 
 - **An out-of-line method of the job** (a `NoInlining` loop such as the streaming loop) that takes a ref struct of
@@ -167,7 +167,7 @@ Write it like hand-written code:
   "The JIT never inlines a method that declares more than 32 IL locals"); the loads' `out __s` -> `__c` copy alone
   took Move3's masked `Execute` from 24 to 36 locals and out of the runner. Every generated method a runner inlines
   stays at 32 IL locals or fewer: the generator counts what it declares and splits before the limit, one method per
-  width (`__Loop512`, `__Loop`, `__MaskedLoop512`, ...; D135); `tools/inlining.sh` proves it on the benchmarks.
+  width (`__Loop512`, `__Loop`, `__MaskedLoop512`, ...; D135); `tools/perf/inlining.sh` proves it on the benchmarks.
 - **Say a value once**: a constant is `.Zero` / `.One` / a literal in place, not a local made per width
   (`var __u1 = Create<int>((0))`); setup that does not depend on the width (singleton refs, `Identity`,
   `this.v0 = default`) is written once above the width blocks; a mark written once is assigned, not zeroed then OR-ed
@@ -189,7 +189,7 @@ Prove a text change by what it changes:
   diff the IL of the benchmark assembly); no benchmark needed.
 - **IL changes** (a copy, a local's order, a hoisted value, anything near the inliner's budget): Tier1 listings with
   `DOTNET_TieredPGO=0` of the Move3, Cycle, CycleHoles, WorldSimulation, BattleServer and MultiWorld runners
-  identical (`tools/jitdisasm.sh`, `audit-vector-loops`), else BenchmarkDotNet decides; no `call ...Execute` appears.
+  identical (`tools/perf/jitdisasm.sh`, `audit-vector-loops`), else BenchmarkDotNet decides; no `call ...Execute` appears.
 - `GeneratedTextTests` (to build first, `docs/plans/backlog.md`) runs the generators over the Kernel, Fusion and LambdaPass corpora and fails on unused locals
   and identity copies (Roslyn data flow; D126's copy allow-listed), constant broadcasts, a Zero OR-ed once, doubled
   or redundant parentheses, duplicate tables, empty methods and `global::` outside the alias block. A new form adds
@@ -221,7 +221,7 @@ touches (`--filter '*GeneratorBenchmark.Edit*'`); `Compile` and `CompileAndAnaly
 of a full run.
 
 ```bash
-tools/bench.sh GeneratorBenchmark
+tools/perf/bench.sh GeneratorBenchmark
 ```
 
 - `Cold`: a first run (a build, the IDE opening the project), mostly emitting files.

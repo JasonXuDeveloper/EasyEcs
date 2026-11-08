@@ -6,7 +6,7 @@ using System.Xml.Linq;
 namespace ApiDocs;
 
 /// <summary>
-/// The Chinese text of the XML documentation (<c>tools/ApiDocs/zh/&lt;page&gt;.xml</c>): one <c>member</c> per
+/// The Chinese text of the XML documentation (<c>tools/docs/ApiDocs/zh/&lt;page&gt;.xml</c>): one <c>member</c> per
 /// documentation id, with the same elements as the English one and a hash of the English text it translates
 /// (<c>source</c>). Lookups record what the pages show, so <see cref="Problems"/> can report what is missing, stale,
 /// untranslated or no longer documented.
@@ -80,7 +80,7 @@ public sealed partial class Translations
             if (!_members.TryGetValue(id, out var entry))
             {
                 if (Same(id, hash) != null) continue;
-                problems.Add($"{page}.xml: {id} has English docs but no translation (`dotnet run --project tools/ApiDocs -- --zh-scaffold` adds it)");
+                problems.Add($"{page}.xml: {id} has English docs but no translation (`dotnet run --project tools/docs/ApiDocs -- --zh-scaffold` adds it)");
                 continue;
             }
 

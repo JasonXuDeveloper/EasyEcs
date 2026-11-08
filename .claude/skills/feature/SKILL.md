@@ -118,7 +118,7 @@ cases (`audit-analyzer`, "Tests: every rule, every edge").
 ## 6. Benchmarks (`audit-perf` has the method)
 
 BenchmarkDotNet only: before and after, two rounds, A/B copies outside the repo tree, under `flock /tmp/bench.lock`
-on a quiet machine; Tier1 asm of new hot loops (`tools/jitdisasm.sh`). Ships only as a net win at 0 B with no
+on a quiet machine; Tier1 asm of new hot loops (`tools/perf/jitdisasm.sh`). Ships only as a net win at 0 B with no
 regression in WorldSimulation, BattleServer and the feature's neighbors. A benchmark for anything not covered yet.
 A change meant to make a pass faster states the pass's bytes and operations per row and where it sits on the
 machine's roofline (`audit-perf`, "Roofline"): more SIMD for a pass already at the bandwidth roof is not the change
@@ -140,7 +140,7 @@ Per `docs/WRITING.md`, en and zh structurally identical:
   pitfalls with their EECS rule; related Cards;
 - every term borrowed from another field (OpenMP, MPI, stencil, halo, shader, lanes) explained where first used or
   in the page's "Before you start" section, with a glossary entry (WRITING.md);
-- complexity rows in `docs/content/api.mdx` + `.zh.mdx`; XML docs with zh entries in `tools/ApiDocs/zh`, the
+- complexity rows in `docs/content/api.mdx` + `.zh.mdx`; XML docs with zh entries in `tools/docs/ApiDocs/zh`, the
   reference regenerated only at 0 ApiDocs problems and its diff read in both languages (`audit-docs`);
 - numbers only through `docs/src/data/bench.json` (BenchTable), never typed on a page (decision records may quote);
 - a decision record for every non-obvious choice and dropped idea; the roadmap;

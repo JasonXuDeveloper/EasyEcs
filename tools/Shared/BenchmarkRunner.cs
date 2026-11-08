@@ -2,7 +2,7 @@ using System.Reflection;
 
 /// <summary>
 /// Runs BenchmarkDotNet classes without BenchmarkDotNet, for the tools that read what the JIT does with them
-/// (tools/Inlining, tools/LoopBound; linked into both): finds a class, sets its <c>[Params]</c> and
+/// (tools/perf/Inlining, tools/perf/LoopBound; linked into both): finds a class, sets its <c>[Params]</c> and
 /// <c>[ParamsSource]</c> members, calls its <c>[GlobalSetup]</c>, <c>[Benchmark]</c> and <c>[GlobalCleanup]</c> methods.
 /// Attributes are matched by name, so the tools need no reference to BenchmarkDotNet's types.
 /// </summary>

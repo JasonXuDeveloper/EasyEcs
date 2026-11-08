@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <!-- Runs benchmark methods past Tier1 so tools/loopbound.sh can read their loops' machine code. -->
+    <!-- Runs benchmark methods past Tier1 so tools/perf/loopbound.sh can read their loops' machine code. -->
     <PropertyGroup>
         <OutputType>Exe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
@@ -10,8 +10,8 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\..\benchmarks\EasyEcs.Benchmark\EasyEcs.Benchmark.csproj"/>
-        <Compile Include="..\Shared\BenchmarkRunner.cs" Link="BenchmarkRunner.cs"/>
+        <ProjectReference Include="..\..\..\benchmarks\EasyEcs.Benchmark\EasyEcs.Benchmark.csproj"/>
+        <Compile Include="..\..\Shared\BenchmarkRunner.cs" Link="BenchmarkRunner.cs"/>
     </ItemGroup>
 
 </Project>

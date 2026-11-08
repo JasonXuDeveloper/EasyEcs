@@ -19,7 +19,7 @@ A name is the first doc a reader sees. This audit covers every name, not only th
 | Examples | samples, templates, the demo, `BattleServer.cs`, `WorldSimulation.cs`, docs fences: components, systems, entities, locals read as the game or server they model, one name per concept across examples |
 | Docs | page titles, headings, anchors, file names, glossary terms, prose naming an API exactly as the code does |
 | Skills | skill names and descriptions (agents choose a skill by them), the public skill's terms matching the API |
-| Chinese | one term per concept (`tools/ApiDocs/zh/README.md` glossary), the same term in pages, ApiDocs and the public skill |
+| Chinese | one term per concept (`tools/docs/ApiDocs/zh/README.md` glossary), the same term in pages, ApiDocs and the public skill |
 
 1. **Read what is settled**: AGENTS.md, `docs/content/glossary.mdx`, `ecs-principles.mdx`, `decisions.mdx` (naming
    records and "Not added" records) and the renames in `migration.mdx`. Never re-propose a settled name without a
@@ -27,7 +27,7 @@ A name is the first doc a reader sees. This audit covers every name, not only th
 2. **See the generated names**: `dotnet build tests/EasyEcs.UnitTest -p:EmitCompilerGeneratedFiles=true`, then read
    `obj/**/generated/EasyEcs.Generator/` for each kind of component (tracked, tag, singleton, indexed, unique,
    grouped, buffer, relation). ArityGenerator families are under `src/EasyEcs.Core/obj`.
-3. **Dump the public surface**: `grep -n "^\s*public " src/EasyEcs.Core/*.cs`, keep members of public types, and
+3. **Dump the public surface**: `grep -rn --include='*.cs' --exclude-dir=obj --exclude-dir=bin "^\s*public " src/EasyEcs.Core`, keep members of public types, and
    cross-check `docs/content/api.mdx`.
 4. **For every name, ask**:
    - **Ambiguity**: is one word used for two things (group, index, pass, slice, tick, since, run, restore, forget,
@@ -55,7 +55,7 @@ A name is the first doc a reader sees. This audit covers every name, not only th
 6. **Analyzer**: every DiagnosticDescriptor (field name, title, message) in `EasyEcsAnalyzer*.cs` matches its rule.
 7. **New since the last round**: every public name the changelog adds (attributes, parameters, generated members,
    options) gets the questions above first; it is cheapest to change before a release.
-8. **zh**: the Chinese term of each name follows the glossary in `tools/ApiDocs/zh/README.md` (one term per concept).
+8. **zh**: the Chinese term of each name follows the glossary in `tools/docs/ApiDocs/zh/README.md` (one term per concept).
 9. **Internals**: private and internal names that reuse a public term for something else (Runner, Passes, Groups,
    Forget, Rows, ChangeTick); abbreviations a reader must decode; a name that no longer matches what the code does
    after a refactor; files whose name is not the type or concern inside.
@@ -73,11 +73,11 @@ A name is the first doc a reader sees. This audit covers every name, not only th
 
 - **Owner's approval**: public renames need it first. Pre-1.0 there are no `[Obsolete]` aliases.
 - **Generated members**: some analyzer checks match them by name prefix, so update those first:
-  `grep -n 'StartsWith("\|EndsWith("' src/EasyEcs.Generator src/EasyEcs.CodeFixes`
+  `grep -rn --include='*.cs' --exclude-dir=obj --exclude-dir=bin 'StartsWith("\|EndsWith("' src/EasyEcs.Generator src/EasyEcs.CodeFixes`
   (covers `Symbols.IsGeneratedWriter` and the EECS033/038/047 paths).
 - **Every public rename then needs**:
   - migration, changelog, README "What's new";
-  - `api.mdx`, and `tools/ApiDocs` zh entries;
+  - `api.mdx`, and `tools/docs/ApiDocs` zh entries;
   - a decision record;
   - analyzer and code-fix strings, samples, templates, the demo.
 - **Released or not**: grep the last release tag's `src` for the old name. A name that never shipped needs no

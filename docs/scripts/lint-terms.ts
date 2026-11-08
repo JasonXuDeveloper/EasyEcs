@@ -1,5 +1,5 @@
 /**
- * Checks the terms of the Chinese pages against the glossary (tools/ApiDocs/zh/README.md, glossary.zh.mdx): a
+ * Checks the terms of the Chinese pages against the glossary (tools/docs/ApiDocs/zh/README.md, glossary.zh.mdx): a
  * word the glossary replaced, or a link to a page labelled with another name than the page's title, fails. Code
  * (fences and inline) is skipped: identifiers stay as they are.
  *
@@ -90,7 +90,7 @@ for (const path of pages(content)) {
 
 if (problems > 0) {
   console.error(
-    `${problems} term problem(s): see the glossary in tools/ApiDocs/zh/README.md`,
+    `${problems} term problem(s): see the glossary in tools/docs/ApiDocs/zh/README.md`,
   );
   process.exit(1);
 }

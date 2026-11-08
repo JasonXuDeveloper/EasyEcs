@@ -147,8 +147,8 @@ function docsVersion() {
 function analyzerRules() {
   const dir = path.join(root, '../src/EasyEcs.Generator');
   const ids = new Set<string>();
-  for (const file of readdirSync(dir)) {
-    if (!file.endsWith('.cs')) continue;
+  for (const file of readdirSync(dir, { recursive: true }) as string[]) {
+    if (!file.endsWith('.cs') || /(^|[\\/])(bin|obj)[\\/]/.test(file)) continue;
     const source = readFileSync(path.join(dir, file), 'utf8');
     for (const match of source.matchAll(/"(EECS\d{3})"/g)) ids.add(match[1]);
   }

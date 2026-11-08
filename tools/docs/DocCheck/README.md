@@ -4,9 +4,9 @@ Compiles every C# code block of the docs, so a snippet that no longer matches th
 flag, fails CI with the page and line.
 
 ```bash
-dotnet run --project tools/DocCheck                              # README.md and docs/content/**/*.md(x)
-dotnet run --project tools/DocCheck -- docs/content/faq.md        # some pages
-dotnet run --project tools/DocCheck -- --dump /tmp/dc docs/content/faq.md   # also write the generated sources
+dotnet run --project tools/docs/DocCheck                              # README.md and docs/content/**/*.md(x)
+dotnet run --project tools/docs/DocCheck -- docs/content/faq.md        # some pages
+dotnet run --project tools/docs/DocCheck -- --dump /tmp/dc docs/content/faq.md   # also write the generated sources
 ```
 
 Output: a summary per page, then one line per problem, `docs/content/faq.md:42: error CS0103: The name 'x' does not

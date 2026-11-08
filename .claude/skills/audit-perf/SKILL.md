@@ -98,7 +98,7 @@ its own worktree.
    - `--dev` screens of parallel benchmarks on this VM put cases 1.1-1.5x apart in both rounds on byte-identical code:
      before calling a parallel regression, read the screen against a class whose code did not change;
    - check `df` before a long run: a full disk crashes a publish or a round with IOException (exit 134);
-   - never wrap a script that takes the bench lock itself (`tools/bench.sh`) in another `flock`: it deadlocks against
+   - never wrap a script that takes the bench lock itself (`tools/perf/bench.sh`) in another `flock`: it deadlocks against
      another agent's exclusive request;
    - A/B copies as git worktrees or `git archive` snapshots outside the repo tree (scratchpad), frozen while they run:
      BenchmarkDotNet rebuilds from source, so a tree someone edits changes under the run; two rounds, interleaved; a
@@ -138,7 +138,7 @@ its own worktree.
    - a runtime choice between two flavors (micro-adaptivity) never trusts the first timed run (Tier0 code): it times
      several runs of each flavor, keeps the minimum, and re-measures when the winner's cost halves or doubles; one
      exploratory run after a long stretch of the other flavor is biased against it;
-   - one lock for the machine, `/tmp/bench.lock` (`tools/bench.sh` takes it too), always with `flock -o` so no build
+   - one lock for the machine, `/tmp/bench.lock` (`tools/perf/bench.sh` takes it too), always with `flock -o` so no build
      server or test host it starts inherits the descriptor and holds the lock after the command ends. Benchmarks take it
      exclusively behind a gate they hold while waiting and running, `flock -o /tmp/bench.lock.gate flock -o -x
      /tmp/bench.lock <cmd>`; builds and tests pass the gate first, `flock -o /tmp/bench.lock.gate true && flock -o -s
@@ -211,8 +211,8 @@ its own worktree.
    - the feature's benchmark plus WorldSimulation, BattleServer, MultiWorld and the neighbors; 0 B in steady state;
    - a runtime change (threads, memory, intrinsics) also works on every platform (`audit-core`, Platforms): measure on
      x64, check arm64, AOT and the single-threaded WebAssembly demo still run;
-   - new hot loops: Tier1 asm with `tools/jitdisasm.sh` (no call in the loop body, no unexpected range check);
-   - `tools/bench.sh <classes> --sync` runs classes one process each (resumable, under the lock) and merges them into
+   - new hot loops: Tier1 asm with `tools/perf/jitdisasm.sh` (no call in the loop body, no unexpected range check);
+   - `tools/perf/bench.sh <classes> --sync` runs classes one process each (resumable, under the lock) and merges them into
      the site's numbers, listing rows that moved 15 % or allocate differently; `--site` runs every class the site
      shows, `--all` adds the A/B-only classes. A full run takes hours: run what the change touches.
    - a large copy is measured against the C runtime's memmove, which streams by itself past its own per-call
@@ -284,7 +284,7 @@ its own worktree.
      from fewer bytes only, a compute-bound one from the loop and the math;
 4. **Ship only a net win** (time and allocations, no regression elsewhere). A loss, a wash or an allocation is first
    explained, not reverted on sight (AGENTS.md, "Try it now; research a problem"): diff the Tier1 listings of base
-   and head (`tools/jitdisasm.sh`: spills, calls, range checks, a longer loop), read the generated source and the
+   and head (`tools/perf/jitdisasm.sh`: spills, calls, range checks, a longer loop), read the generated source and the
    allocation trace, and build and measure the fix the cause points to. Only what still loses after that is
    reverted and gets a decision record (what was tried, the cause found, the numbers); the roadmap's "Dropped" list
    names it.
@@ -340,7 +340,7 @@ pay. A measuring method, not a feature (borrowed-ideas.md item 6).
    extra when streamed, `StreamingStores`), presence bits and change ticks it touches (a bit and 8 bytes per row,
    usually amortized per 64-row word). Operations: the arithmetic of one row as the vector loop runs it, a lane each
    (a fused multiply-add counts 2, a compare, min, max, select or blend 1). A call with no cheap count (`Sin`, `Exp`,
-   a gather) is counted from the Tier1 loop: `tools/loopbound.sh` gives the instructions per vector.
+   a gather) is counted from the Tier1 loop: `tools/perf/loopbound.sh` gives the instructions per vector.
 2. **Arithmetic intensity** I = operations / bytes.
 3. **The roofs, measured on the machine and session that measures the pass** (BenchmarkDotNet, one thread):
    `RooflineBenchmark` (`Read`: 4 bytes a float, `Update` (`a += b * k`): 12 bytes a float, at 256 KiB a column (the
@@ -362,7 +362,7 @@ pay. A measuring method, not a feature (borrowed-ideas.md item 6).
      constant), fewer operations per row, threads.
    - Far below both roofs: **neither**. Latency (a chase: prefetch, `Lookup<T>` gathers), overhead (per run, chunk,
      table or system: few rows per run, `SystemDispatchBenchmark`), a scalar loop (EECS055), or a dependency chain
-     (`tools/loopbound.sh`, `audit-vector-loops`). Fix that first; the roofline is not the bound yet.
+     (`tools/perf/loopbound.sh`, `audit-vector-loops`). Fix that first; the roofline is not the bound yet.
 
 Roofs of the reference VM (Xeon 2.10 GHz, AVX-512, L2 2 MiB per core, LLC 260 MiB, .NET 10.0.13, 2026-10-30,
 default job, two runs: r1 / r2):
@@ -384,7 +384,7 @@ Worked examples (`KernelBenchmark`, generated vector loops, 100,000 rows: 400 KB
 |---|---|---|---|---|---|
 | `Integrate` (`heat += speed * Dt`) | 12 B (read 2 columns, write 1 of them) / 2 | 0.17 | 10.1 / 10.8 us | 111-119 GB/s, 19 Gflop/s | at the L2 update roof (95-100 %): memory-bound. Unrolling or 512-bit lanes cannot help; fusing it with the next pass over `Heat`, or a narrower column, can |
 | `Count` (`ticks.Value++`) | 8 B / 1 | 0.13 | 7.95 / 8.09 us | 99-101 GB/s | 85 % of the update roof: memory-bound |
-| `Step` (a clamp, a branch as a blend) | 20 B (read 3, write 2) / about 11 | 0.55 | 23.5 / 22.3 us | 85-90 GB/s, 47-49 Gop/s | below the ridge, attainable 64 Gop/s: 75 % of it. Near the roof; the rest is the blend's chain (`tools/loopbound.sh`), not bandwidth |
+| `Step` (a clamp, a branch as a blend) | 20 B (read 3, write 2) / about 11 | 0.55 | 23.5 / 22.3 us | 85-90 GB/s, 47-49 Gop/s | below the ridge, attainable 64 Gop/s: 75 % of it. Near the roof; the rest is the blend's chain (`tools/perf/loopbound.sh`), not bandwidth |
 | `Wave` (`Sin` and `Exp` per row) | 12 B / not countable by hand | high | 193 / 175 us | 6.2-6.9 GB/s, 5-6 % of the L2 roof | compute-bound: at the `Vector<float>` peak the row costs as much as 180-200 flops (.NET's vector `Sin` / `Exp` of floats work in doubles). The levers are the math and the width, never the memory |
 
 What it said here: the cheap generated loops are already at the L2's bandwidth, so the next step for them is fewer

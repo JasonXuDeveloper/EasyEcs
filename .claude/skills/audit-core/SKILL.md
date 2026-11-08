@@ -98,5 +98,5 @@ AGENTS.md's engineering principles and rules apply (performance first, zero allo
 - A hot-path change ships only with BenchmarkDotNet numbers before and after (`audit-perf` has the method); revert it
   if anything regresses. Never stopwatches.
 - A non-obvious choice or a rejected idea gets a decision record.
-- A changed public API: its XML doc with the zh entry (`tools/ApiDocs/zh`, rerun ApiDocs) and its `api.mdx`
+- A changed public API: its XML doc with the zh entry (`tools/docs/ApiDocs/zh`, rerun ApiDocs) and its `api.mdx`
   complexity row; changelog, migration and the pages are docs to-dos for the final docs pass.

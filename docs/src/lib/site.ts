@@ -55,7 +55,7 @@ export const siteVerification = {
 
 /**
  * One-paragraph definition of EasyEcs, quoted by llms.txt and the JSON-LD.
- * Keep it true to the EasyEcs repository (README, src/EasyEcs.Core.csproj,
+ * Keep it true to the EasyEcs repository (README, src/EasyEcs.Core/EasyEcs.Core.csproj,
  * Directory.Build.props) and to the docs.
  */
 export const productSummary: Record<Locale, string> = {

@@ -270,7 +270,7 @@ The kernel the generator writes is held to the hand-written one:
 - every width the hardware has (512/256/128), constant-folded for the tile's row width;
 - each neighbor offset one unaligned load, identical loads shared (common subexpressions) across the terms of a
   stencil; rows in a sliding window where it measures faster;
-- no `call` and no range check in the row loop (Tier1 checked with `tools/jitdisasm.sh`), the routine its own JIT
+- no `call` and no range check in the row loop (Tier1 checked with `tools/perf/jitdisasm.sh`), the routine its own JIT
   root;
 - quiet rows skipped as the hand version skips them, with the exact f0 fill below.
 
@@ -394,11 +394,11 @@ a `Lane` whose streams are the desugared function's parameters, and `SystemGener
 through the same `Wide` / `Narrow` / `Constants` / `FlatLoops`.
 - Tests: all `KernelTests`, `LambdaPassTests`, `GeneratorTests` (the generated text for `WorldSimulation.cs`, `BattleServer.cs` and samples identical), caching assertions.
 - Benchmarks: `GeneratorBenchmark.EditMethodBody`, level.
-- Risk: drift in the text the JIT sees (D126 lesson: even a text cleanup changed inlining). Gate: identical generated text, or identical Tier1 for `World:Masked` runners (`tools/jitdisasm.sh`, `DOTNET_TieredPGO=0`).
+- Risk: drift in the text the JIT sees (D126 lesson: even a text cleanup changed inlining). Gate: identical generated text, or identical Tier1 for `World:Masked` runners (`tools/perf/jitdisasm.sh`, `DOTNET_TieredPGO=0`).
 
 **WP0b: generated bodies sized for the JIT inliner: shipped (D135).** Every later form keeps to it: a job's methods
 the runner inlines declare at most 32 IL locals (`SystemGenerator.InlinedLocals`, counted by `SystemGenerator.Locals`;
-`GeneratorTests.*StayWithinTheInlinersLocals`, `tools/inlining.sh` for the runners). A larger form adds its loops
+`GeneratorTests.*StayWithinTheInlinersLocals`, `tools/perf/inlining.sh` for the runners). A larger form adds its loops
 through `EmitLoops`, which splits them into methods when the count says so.
 
 **WP1: `[InlineArray]` lanes and constant-trip unrolling in the per-row loop.**
@@ -426,7 +426,7 @@ unchanged.
 - Tests: `KernelTests.InlineArrayElementsMatchTheMethodBitForBit` (Lengths; 4/8/16 elements; flat, interleaved, wide); `UnrolledLoopsKeepLoopCarriedLocals` (argmin, running sum); uniform inline arrays (Waypoints); a regression test for the single-lane `Paths` bug; EECS055 reasons (N > 16, variable bound); 0 B.
 - Benchmarks: `KernelBenchmark` new `SpectrumScalar/Generated/HandWritten` (component of 8 floats, 1k/100k) and `NearestScalar/Generated` (8 waypoints, argmin).
 - Regression: `CycleHolesGenerated`, `WorldSimulationBenchmark`, `BattleServerBenchmark`.
-- Risk: **inlining budget** (D135): an unrolled body ×8 declares locals per element; past 32 IL locals `EmitLoops` moves each width's loop into a method, and a single loop past 32 is not split further, so `World.Masked` would call it per run or per 64-row word. Count the translated body's locals (`SystemGenerator.Locals`), cap N and fall back with a reason rather than lose; `tools/inlining.sh` checks the runners.
+- Risk: **inlining budget** (D135): an unrolled body ×8 declares locals per element; past 32 IL locals `EmitLoops` moves each width's loop into a method, and a single loop past 32 is not split further, so `World.Masked` would call it per run or per 64-row word. Count the translated body's locals (`SystemGenerator.Locals`), cap N and fall back with a reason rather than lose; `tools/perf/inlining.sh` checks the runners.
 
 **WP2: element loops in `[ForEach]` methods (per-row with buffers, batch-method loops, lambda passes), through the body copy.**
 Shipped (feat-inner-loops): per-row methods, `for` and `foreach` over Span / ReadOnlySpan / DynamicBuffer

@@ -59,7 +59,7 @@ icon: RotateCcwClock
   以及这些向量的运算符；条件下的调用（有通道走进它的向量由方法本身运行）；在 AVX-512 上，最多 16 个字的组件里的 4 字节字段，只要收集它们的置换划算。
   在 `FloatMode.Fast` 下，`Sin`、`Cos`、`Exp`、`Log`、`Log2` 和 `Hypot` 采用 .NET 的向量近似；`FloatMode.Exact`（默认）让每个结果都与方法本身相同，
   每台机器上都一样。
-- `SystemInfo.Loops`（在 `world.DescribeSchedule()` 里）列出系统每个 `[ForEach]` 方法得到的循环，或者它为什么一次一行；`tools/jitdisasm.sh` 打印循环的机器码。
+- `SystemInfo.Loops`（在 `world.DescribeSchedule()` 里）列出系统每个 `[ForEach]` 方法得到的循环，或者它为什么一次一行；`tools/perf/jitdisasm.sh` 打印循环的机器码。
   关于组件太宽或太杂的 EECS055 原因，会在末尾列出方法用到的字段，建议拆成自己的组件。
 - `Reduce<T>`：对所有行求总数的 `[ForEach]` 参数，按 `ref` 传入（OpenMP 的 `reduction`），例如
   `static void Count(in Health h, ref Reduce<Census> census) => census.Value.Alive++;`。`T` 是实现了 `IReduction<T>`（`Identity`、`Combine`）的单例。

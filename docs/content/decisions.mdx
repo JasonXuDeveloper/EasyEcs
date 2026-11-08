@@ -2288,7 +2288,7 @@ write, and each method's loop is listed:
   each used lane set through `with` and found in its word), so a layout the generator did not predict runs the method.
 - **An inspector.** `DescribeSchedule()` lists each method's loop (`SystemInfo.Loops`: "Move: vector (Vector512 or
   Vector&lt;float&gt;), flat", "Steer: vector (Vector512 only), wide component (permutes), masked words scalar",
-  "Spawn: scalar (it takes the Entity)"); `tools/jitdisasm.sh` prints the Tier-1 code of a loop
+  "Spawn: scalar (it takes the Entity)"); `tools/perf/jitdisasm.sh` prints the Tier-1 code of a loop
   (`DOTNET_JitDisasm`, `DOTNET_TC_CallCountingDelayMs=0`).
 - **The advice to split.** When a component is too wide or too mixed for the loop and the method uses at most half its
   fields (at most 4, of one size), EECS055 ends with them: "it uses 3 of Body's 12 fields (X, VX, Y): split them into a
@@ -2936,7 +2936,7 @@ entities, the [ForEach] method, the lambda pass and the hand-written job, 0 B ev
   208.3 µs; hand-written job 2,094, 2,107 ns / 211.1, 210.2 µs. One speed, within the error.
 - **Vector body** (a multiply-add): method 68.4, 71.6 ns / 11.7, 11.5 µs; lambda 72.0, 69.9 ns / 11.7, 11.2 µs; the
   hand-written job, one row at a time, 787, 759 ns / 74.7, 77.7 µs.
-- **The machine code** of the lambda's job at Tier1 (`tools/jitdisasm.sh`) is the method's: the same vector loop,
+- **The machine code** of the lambda's job at Tier1 (`tools/perf/jitdisasm.sh`) is the method's: the same vector loop,
   no call in it.
 - **The generator** (`GeneratorBenchmark`, base against this change, two rounds, interleaved): `EditMethodBody`
   207.5, 211.3 -> 226.3, 224.3 ms and 195.7, 201.5 -> 241.9, 190.8 ms (one namespace), all within the error of
@@ -3638,13 +3638,13 @@ calls instead of inlining pays a call per run and loses the runner's hoisted sta
   keeps only the dispatch.
 
 The count is an estimate from above: release Roslyn keeps a slot per declared local (same-typed locals of disjoint
-scopes do not share one) and drops some locals used once, so the real count is equal or lower. `tools/inlining.sh`
+scopes do not share one) and drops some locals used once, so the real count is equal or lower. `tools/perf/inlining.sh`
 reads the JIT's inlining events of the benchmarks and reports every generated job a runner does not inline.
 
 **Locals, before and after** (`Execute`, copy fix only → this change). Steer 40/44, Gate 40/42, Seek 40/42,
 SeekParallel 40, ParallelSteer 40, Share 34/36, Step 32/34, Cycle 31/33 → every `Execute` at 30 or fewer; the split
 methods hold 13 to 21 (the masked loops of Gate, Seek, Share, Step, Cycle and UpdateCell, Steer's loops), the widest
-27 (SteerJob18's `__Loop512`). `tools/inlining.sh`: every generated job inlined, in the benchmarks, samples and test
+27 (SteerJob18's `__Loop512`). `tools/perf/inlining.sh`: every generated job inlined, in the benchmarks, samples and test
 corpora; the generator test `LargeJobsStayWithinTheInlinersLocals` asserts it and the split of a 16-field job.
 
 **Machine code** (Tier1, `DOTNET_JitDisasm`, PGO off; instructions of the runner and calls to the job). Gate masked

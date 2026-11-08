@@ -424,7 +424,7 @@ function llmsList(locale: Locale) {
   return `${lines.join('\n')}\n`;
 }
 
-/** A page of the generated API reference (docs/content/reference, written by tools/ApiDocs). */
+/** A page of the generated API reference (docs/content/reference, written by tools/docs/ApiDocs). */
 function isReference(page: Page) {
   return page.slugs[0] === 'reference';
 }

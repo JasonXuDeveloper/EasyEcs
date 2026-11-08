@@ -57,7 +57,7 @@ bench --filter '*KernelBenchmark.GradeScalar' '*KernelBenchmark.GradeGenerated'
 
 What it compares: the generated loop of a switch expression / statement against the method row by row (x64: 0.022-0.133
 of scalar). Generated faster at 100k -> done. Slower -> the select chain is gated off on ARM64 (the agent reads the
-loop with `tools/jitdisasm.sh`).
+loop with `tools/perf/jitdisasm.sh`).
 
 ## 4. The ARM gate's rejected shape `Brake` (8 words, 3 fields), forced open
 

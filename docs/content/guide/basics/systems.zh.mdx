@@ -823,7 +823,7 @@ public ref struct SteeringSystem
 ```
 
 系统的生成文件（`<System>.….System.g.cs`，在项目的生成源码下；开启 `<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>`
-后在 `obj/` 下）里就是循环本身。想看 JIT 把它编成了什么，`tools/jitdisasm.sh <project> 'EasyEcs.World:Masked'` 会用 Release 构建项目、
+后在 `obj/` 下）里就是循环本身。想看 JIT 把它编成了什么，`tools/perf/jitdisasm.sh <project> 'EasyEcs.World:Masked'` 会用 Release 构建项目、
 带上 `DOTNET_JitDisasm` 运行，打印每个单线程向量方法优化后的代码（job 的 `Execute` 内联进了运行它的 World 循环；并行方法在
 `ForEachBatch*` 运行器里）。程序只跑这个方法几次时加 `FULLOPTS=1`，直接编译优化代码。好的循环体里是向量指令，没有 `call`。
 

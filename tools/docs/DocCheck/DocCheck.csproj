@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <!-- Compiles the C# fences of the docs (docs/content and README.md) against EasyEcs.Core with the generator and
-         the analyzer: dotnet run, project tools/DocCheck (README.md has the conventions). -->
+         the analyzer: dotnet run, project tools/docs/DocCheck (README.md has the conventions). -->
     <PropertyGroup>
         <OutputType>Exe</OutputType>
         <TargetFramework>net10.0</TargetFramework>
@@ -16,11 +16,11 @@
 
     <ItemGroup>
         <!-- the assembly the snippets compile against (its path is the metadata reference) -->
-        <ProjectReference Include="..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
+        <ProjectReference Include="..\..\..\src\EasyEcs.Core\EasyEcs.Core.csproj"/>
         <!-- referenced, not an analyzer: the checker drives the package's generators (GeneratorHost) and EasyEcsAnalyzer -->
-        <ProjectReference Include="..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj"/>
+        <ProjectReference Include="..\..\..\src\EasyEcs.Generator\EasyEcs.Generator.csproj"/>
         <!-- the generators, parse options and references every Roslyn host of the generators shares -->
-        <Compile Include="..\Shared\GeneratorHost.cs" Link="GeneratorHost.cs"/>
+        <Compile Include="..\..\Shared\GeneratorHost.cs" Link="GeneratorHost.cs"/>
     </ItemGroup>
 
 </Project>

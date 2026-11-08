@@ -51,7 +51,7 @@ against the code at f9faa23. What changed in the file itself:
 - [ ] **S7. The prefetch gates' decision record** (en + zh): proven only on this VM's 260 MiB LLC; a run on an x86 box
       with a 32 MiB LLC (`owner-m4.md` 6) is what would move a gate. Owner, 2026-11-07: that run is not made.
 - [x] **S4. Stale ApiDocs zh entries** (was 133, 170): done in c24847b.
-- [ ] **S5. Glossary (glossary.mdx + zh, and tools/ApiDocs/zh/README.md for zh terms), one pass** (was 430 ordered
+- [ ] **S5. Glossary (glossary.mdx + zh, and tools/docs/ApiDocs/zh/README.md for zh terms), one pass** (was 430 ordered
       table / cluster / box / margin / cadence, 1037-1041 source fields, 1209 ghost row / halo exchange, 1360 Jacobi /
       Gauss-Seidel / red-black / multicolor (glossary.mdx entries, not only the ApiDocs glossary), 1975 column walk,
       the tile layers line of WP5b). Add: shader (grids, high-performance, samples/voxel-server), Dirichlet (grids),
@@ -60,8 +60,8 @@ against the code at f9faa23. What changed in the file itself:
       `[Accumulate]`, `MaxRows` (budget). zh rows the pages already use (naming sweep A2): cell 格子, layer 层, step 推进
       (never 步进: rewrite `guide/performance/grids.zh.mdx` 342, 419, 452-453, 479, 677, 687), sweep 扫描, settle 收敛, texture 纹理,
       budget 预算, accumulate 累计 (adding per row stays 累加), `[MinBy]` / `[MaxBy]` 取最小者 / 取最大者 (MPI's
-      MINLOC). Move the paragraph "A sample's domain words ..." (tools/ApiDocs/zh/README.md 63-64) below the table:
-      every row after it no longer renders as a table. A terrain chunk is 地形, never 区块: `tools/ApiDocs/zh/columns.xml`
+      MINLOC). Move the paragraph "A sample's domain words ..." (tools/docs/ApiDocs/zh/README.md 63-64) below the table:
+      every row after it no longer renders as a table. A terrain chunk is 地形, never 区块: `tools/docs/ApiDocs/zh/columns.xml`
       5-6 (是区块的地面 -> 是一片地形的地面; 和区块方块的 -> 和这片地形方块的), `foreachattribute.xml` 82
       (要加载或保存的区块 -> 要加载或保存的地形), `itilelayers.xml` 7 (一个区块的水能到的层 -> 一片地形里水能到的层);
       regenerate the reference (lint:terms rejects 区块). After the renames lane: `Columns<TTile>` is `Ground<TTile>`
@@ -103,7 +103,7 @@ Breaking changes since v4.7.0 (highest priority):
 - [ ] `skills/easyecs/SKILL.md` never names EECS021 (an entry point colliding with a member).
 
 `api.mdx` + zh and the reference:
-- [ ] Run `tools/ApiDocs` first and read its problem list: 384 reference members show no "Complexity" line though
+- [ ] Run `tools/docs/ApiDocs` first and read its problem list: 384 reference members show no "Complexity" line though
       `api.mdx` has rows for many (Emit Add / AddRange 228, Lookup Has / Read 244, EntityRandom 236, DynamicBuffer
       FillPool 168, RowClusters 66 / 332, EntitySpan Clusters 335, World Query / Read 191-192): the reference is older
       than the rows, or the rows do not match ApiDocs' lookup.
@@ -166,7 +166,7 @@ Decisions and records the reports found missing:
       for every target (x64, ARM64, ReadyToRun, Native AOT) and counts IL locals, which no vector width changes; Mono
       (the WebAssembly demo) has no locals limit, an IL size limit of 20 bytes (30 LLVM AOT, 100 LLVM JIT) that
       `AggressiveInlining` lifts, an inline depth of 10, no inlining of methods with exception clauses: every helper a
-      loop inlines keeps `AggressiveInlining`. CI runs `tools/inlining.sh` on x64 and arm64 (turned off split: 22 failed
+      loop inlines keeps `AggressiveInlining`. CI runs `tools/perf/inlining.sh` on x64 and arm64 (turned off split: 22 failed
       inlines, exit 1).
 - [ ] **The reference-design renames of 2026-10-27** (naming sweep A1): one record like D141 naming each old -> new and
       its source term: `ChunkSize` (OpenMP's chunk size), `MaxChunkSize` (was `ParallelChunkRows`, then
@@ -539,7 +539,7 @@ suggestions, EECS033 and EECS039" goes).
       for Consume / EntityMethod / SystemDispatch; search-expectations.json (EntityMethod, Consume, entity.Run);
       high-performance "What it costs" section; grids "generator writes" tabs against real output; VoxelServer TODOs;
       example.mdx walkthrough vs BattleServer.cs regions; changelog / README What's new / migration complete.
-- [ ] `tools/bench.sh --site --sync` on the final code (classes missing from bench.json: Consume, EntityMethod,
+- [ ] `tools/perf/bench.sh --site --sync` on the final code (classes missing from bench.json: Consume, EntityMethod,
       SystemDispatch, Access, Kernel, ChangeTrackingWrite, DestroyLog, Slices, Trim); check the moved list.
 - [ ] README numbers: headline (1.72 ms -> about 1.5 ms), the 4-row table, the comparison table; tell the owner to
       update the GitHub description.
@@ -641,7 +641,7 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - D22 "No spinning, no dedicated threads" is stale (Workers spin 100 µs): rewrite.
 - Changelog / README What's new / migration: float Reduce<T> without ChunkSize on a world whose MaxDegreeOfParallelism != 4 now gets different (thread-independent) bits.
 - guide threading/reductions: determinism without ChunkSize (16 chunks for merging passes).
-- [x] (done: reference regenerated in c24847b, no hook-attribute or `WithAny<T>` page left) ApiDocs: 38 problems from the declarations merge (oncreate/ondestroy/onupdate attrs, QueryFilter.WithAny<T> entries to delete); rerun tools/ApiDocs and regenerate docs/content/reference.
+- [x] (done: reference regenerated in c24847b, no hook-attribute or `WithAny<T>` page left) ApiDocs: 38 problems from the declarations merge (oncreate/ondestroy/onupdate attrs, QueryFilter.WithAny<T> entries to delete); rerun tools/docs/ApiDocs and regenerate docs/content/reference.
 - Flaky allocation tests (ScratchTests.AParallelPassWithScratchDoesNotAllocateAfterWarmUp, ParallelEmits*): more frequent with the 400k-row Reduce test in the same run; investigate the measurement race (task #166).
 
 ## feat-cow-buffers merged — docs to-dos (D124)
@@ -722,7 +722,7 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 ## fix-zh-reference (merged af585ed; done, its src XML items checked 2026-11-07)
 - `migrate-from-arch.zh.mdx:58`: English "`entity.IsDead` for a tag" -> Chinese.
 - `lint:terms` fails on decisions.zh.mdx: lines ~2305, 2337, 2578 跟踪 -> 追踪 (D118); ~2570 结构门 -> 结构闸门 (D128).
-- `api.zh.mdx` complexity rows keep English words (e.g. "O(count × c)"): Chinese names per tools/ApiDocs/zh/README.md.
+- `api.zh.mdx` complexity rows keep English words (e.g. "O(count × c)"): Chinese names per tools/docs/ApiDocs/zh/README.md.
 - src XML docs: World `ForEachParallel(Delegate)` example shows `world.ForEach(since, ...)` (should it be ForEachParallel?);
   ForEachAttributes.cs / SystemGroups.cs write `<c>[WithAny<T1, T2>]</c>` where a `<see cref="WithAnyAttribute{T1,T2}"/>`
   would link again (then refresh the zh entries).
@@ -744,7 +744,7 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
   the layout advice: a lookup is cheapest when the entities it reads share components and group value (`[Group]`,
   `GroupBy`), so a vector's targets share a table.
 - guide/performance/high-performance.mdx (+zh): the same advice next to the gather line.
-- benchmark pages that show LookupGather numbers: resync bench.json after a `tools/bench.sh LookupGatherBenchmark --sync`
+- benchmark pages that show LookupGather numbers: resync bench.json after a `tools/perf/bench.sh LookupGatherBenchmark --sync`
   run (the benchmark gained 1,000 tables, dead and removed targets and three bodies).
 
 ## feat-lookup-gather (D131, merged)
@@ -824,7 +824,7 @@ Decision records for the docs pass (en + zh, "Not added" unless the owner's re-m
   "gathers (Lookup<T>)" and the runtime suffix "; rows on this hardware" (en + zh).
 - performance page: the ARM64 numbers of `KernelBenchmark.Steer*` / `Glide*` (owner's M4, 2026-10-26: Steer 2.07x /
   1.55x, Glide 1.87x / 1.63x faster than rows at 1k / 100k, 0 B) once the site can show them
-  (bench.json through `tools/bench.sh KernelBenchmark --sync` on that machine is a separate machine: keep it out of the
+  (bench.json through `tools/perf/bench.sh KernelBenchmark --sync` on that machine is a separate machine: keep it out of the
   reference numbers unless the site gains an ARM64 column).
 - performance / why-fast pages: compress on ARM64 (owner's M4 CompressBenchmark, `locality.md` 6.3: the NEON TBL
   table 1.7-12x over branchy) once L3's core helper is measured there; the same separate-machine caveat.
@@ -865,7 +865,7 @@ Docs to-dos (docs pass):
   sentence; en + zh.
 - introspection page: DescribeSchedule's new part "lookups prefetched past the last-level cache" (scalar and vector
   lines); en + zh.
-- performance / why-fast pages: the 16M chase numbers through bench.json (`tools/bench.sh LookupChaseGateBenchmark
+- performance / why-fast pages: the 16M chase numbers through bench.json (`tools/perf/bench.sh LookupChaseGateBenchmark
   --sync`, a BenchTable: Off / Auto / On), and the owner's runs on other machines if the site shows them.
 - vector loops guide (EECS055 reasons list): the new wide-component reason "declares M locals per 16 rows, past the 32
   a job's loop may declare to be inlined".
@@ -893,7 +893,7 @@ multiple of the L2 (no form needed one: each that pays, pays from the first size
 Docs to-dos (docs pass, en + zh):
 - guide page of `Lookup<T>` (the prefetch section written for feat-prefetch-all): "past the L2 for chases of other
   entities, past the last-level cache for keyed lookups and vector loops"; the "What it costs" line of each.
-- performance / why-fast: the per-form BenchTable gains the 262,144 size (`tools/bench.sh ProbePrefetchBenchmark
+- performance / why-fast: the per-form BenchTable gains the 262,144 size (`tools/perf/bench.sh ProbePrefetchBenchmark
   ChaseFormsPrefetchBenchmark IdListPrefetchBenchmark LookupChaseGateBenchmark --sync`; the classes' default sizes are
   now 1k / 262,144 / 1M / 16M).
 - introspection page: DescribeSchedule's scalar line reads "lookups prefetched past the cache" (the form decides which).
@@ -912,7 +912,7 @@ Docs to-dos (docs pass, en + zh):
   internal") / Info split; EECS055 applies only to [ForEach] methods.
 - Views page: views are inlined through the same path; drop any mention of a compilation copy.
 - performance / why-fast: KernelBenchmark.StepHelpers (equal to StepGenerated) and the Slices' Think (4.5-4.8x
-  faster) through bench.json (`tools/bench.sh KernelBenchmark Slices --sync`); the generator's IDE keystroke about
+  faster) through bench.json (`tools/perf/bench.sh KernelBenchmark Slices --sync`); the generator's IDE keystroke about
   half (GeneratorBenchmark EditMethodBodyIde 417 → 214 ms, 57 → 28 MB; build-mode keystroke +18%).
 - changelog + README "What's new": helpers inlined into vector loops; IDE keystroke cost halved.
 - the public skill: helpers are fine in [ForEach] methods; keep the members they name internal, not private; no
@@ -939,7 +939,7 @@ Docs to-dos (docs pass, en + zh):
   64-table gathers 4.6x at 1M); `Lanes.Selection` for a row list from a mask; Compact on every ISA (NEON, SSSE3).
 - architecture.mdx + zh: RowOrder in the table diagram (Archetype.Order, Permute), the cluster side array.
 - (merged: "Sweep 2026-11-07", item S5) glossary + zh: ordered table (有序表), cluster (簇, the unit of an ordered table; 块 is the parallel chunk), box (包围盒), margin (余量), cadence (节奏);
-  tools/ApiDocs/zh/README.md glossary gets the same rows.
+  tools/docs/ApiDocs/zh/README.md glossary gets the same rows.
 - changelog / README What's new: ordered tables (the read path), Lanes.Selection, Compact on ARM64.
 - Benchmarks into bench.json: RowOrder, LookupOrder, Pairs (Core*), Compress (CoreCompact) after the reference run.
 - skills/easyecs/SKILL.md (public skill): ordered tables (the order is inferred; `[OrderBy]` only for orders no pair
@@ -950,7 +950,7 @@ Docs to-dos (docs pass, en + zh):
 ### Decision record drafts (D137, D138)
 
 The records for decisions.mdx / .zh.mdx, written in the docs pass (index rows after the last record; renumber if
-D137 / D138 are taken by then, and fix the numbers in `Declarations.cs`, `RowOrder.cs`, `tools/ApiDocs/zh/orderbyattribute.xml`,
+D137 / D138 are taken by then, and fix the numbers in `Declarations.cs`, `RowOrder.cs`, `tools/docs/ApiDocs/zh/orderbyattribute.xml`,
 roadmap). The zh drafts carry the decision and what was considered; their **数据** sections are still to translate
 from the English. Raw reports: BenchmarkDotNet's markdown, quoted below; the snapshots were frozen copies of the
 branch (A = 0e206d8 + the NEON prototypes, B/F = this branch).
@@ -1411,7 +1411,7 @@ Docs to-dos (docs pass):
   en + zh.
 - introspection page: DescribeSchedule's "lookups prefetched past the last-level cache" now appears on probing,
   buffer-chasing, parallel and fused methods; en + zh.
-- performance / why-fast pages: the 16M numbers through bench.json (`tools/bench.sh ProbePrefetchBenchmark
+- performance / why-fast pages: the 16M numbers through bench.json (`tools/perf/bench.sh ProbePrefetchBenchmark
   ChaseFormsPrefetchBenchmark LookupChaseGateBenchmark --sync`), a BenchTable of Auto / Off / On per form.
 - ARM64 notes (performance, faq): SVE machines prefetch, Apple silicon does not (loads ahead pending the M4).
 - public skill: "keys and ids a pass reads other entities by belong in `in` components or `in` buffers: they are
@@ -1491,7 +1491,7 @@ Decision-record drafts (for decisions.mdx + .zh.mdx):
 What shipped (code): two accumulator sets for floating-point reductions in the loop over whole vectors
 (`SystemGenerator.Paired`, `Kernel.Code.Chains`); the loops'
 tables initialized by a module initializer (`Interleaved.InitializeTables`, internal) so a runner compiled at Tier1
-before its table had holes reads them as constants. Tools: `tools/loopbound.sh` (llvm-mca over the Tier1 loops). No new public name.
+before its table had holes reads them as constants. Tools: `tools/perf/loopbound.sh` (llvm-mca over the Tier1 loops). No new public name.
 
 Decision drafts (numbers in microarch.md, "Numbers"):
 - **Floating-point reductions run two vectors per iteration into two sets of accumulators.** Why: a float `+`, `Min`
@@ -1512,12 +1512,12 @@ Decision drafts (numbers in microarch.md, "Numbers"):
 
 Docs pass:
 - performance / why-fast pages: "a floating-point reduction keeps two chains in flight" next to the reductions'
-  lanes; the LateHoles and Spread / Energy numbers through bench.json (`tools/bench.sh KernelBenchmark
+  lanes; the LateHoles and Spread / Energy numbers through bench.json (`tools/perf/bench.sh KernelBenchmark
   LateHolesBenchmark --sync`).
 - reductions guide page (`Reduce<T>`): FloatMode.Fast's sum order now also depends on whether a run has two whole
   vectors (still fixed by the code and the table's layout, never the thread count); Min / Max unchanged and exact;
   en + zh.
-- `audit-vector-loops` skill: `tools/loopbound.sh` as the way to read a loop's bound
+- `audit-vector-loops` skill: `tools/perf/loopbound.sh` as the way to read a loop's bound
   (the coordinator edits skills).
 
 ## Decided by the owner (2026-10-27): decision records for the docs pass
@@ -1542,7 +1542,7 @@ names the field each term comes from (audit-naming, "The reference design's voca
   (a Dirichlet boundary; Clamp and Mirror unchanged).
 - `Lanes.Bits` -> `Lanes.Ballot` (CUDA's `__ballot_sync`: the lane mask as bits).
 - Hidden, no migration: `Lookup<T>.Prefetches` -> `PrefetchesPastLastLevel` (beside `PrefetchesPastL2`).
-- zh: Slice is 分帧 everywhere (was 分片, which reads as sharding); glossary row in `tools/ApiDocs/zh/README.md`.
+- zh: Slice is 分帧 everywhere (was 分片, which reads as sharding); glossary row in `tools/docs/ApiDocs/zh/README.md`.
 - Still to come: block -> cluster and `Pairs(reach)` -> `Pairs(cutoff)` (feat-pairs-2), `[RedBlack]` ->
   `[GaussSeidel]` (feat-zombie-field), `Pad()` -> `ExchangeHalo()` with backlog item 12a.
 
@@ -1704,7 +1704,7 @@ chunk lookup per zombie).
 - Behaviour notes (changelog): `Items.Capacity` can be below `Count` until joined; a `[Drain]` job removing
   records of the same `Emitted<T>` stops at the new count; EmitPool keeps chunks' lists until joined or cleared (at most
   64 segments per `Emitted<T>`); `BufferStore<T>` unsealed (internal).
-- Glossary: segment = 分段 (added to tools/ApiDocs/zh/README.md).
+- Glossary: segment = 分段 (added to tools/docs/ApiDocs/zh/README.md).
 - Decision record (agent's text): **Emitted<T> keeps the chunks' lists as segments.** The singleton's list
   (`EmitStore<T>`) takes each chunk's list, in chunk order, as a segment at O(1); Count, Clear, `[Drain]` and
   `World.ParallelFor` use them in place; a span read, a write, `World.SingletonRef`, capture, save and load join first,
@@ -1722,7 +1722,7 @@ chunk lookup per zombie).
 - Samples index (`samples/README.md`, `docs/content/samples/index.mdx` + `.zh.mdx`, `docs/content/README.md`): the
   MultiWorld row mentions ghost rows and `MoveEntities` at the borders.
 - (merged: "Sweep 2026-11-07", item S5) Glossary (`glossary.mdx` + `.zh.mdx`): "ghost row" (幽灵行) and "halo exchange" (光环交换) beside "Tile and halo";
-  `tools/ApiDocs/zh/README.md` halo row gains ghost rows = 幽灵行.
+  `tools/docs/ApiDocs/zh/README.md` halo row gains ghost rows = 幽灵行.
 - Threading guide: a world may pass between threads through a `Barrier` post-phase action (the sample's exchange);
   `MoveEntities`' "both worlds owned by the calling thread" says the same.
 - Plans: `borrowed-ideas.md` item 4 notes the MultiWorld part is done and the verdict is in owner-review.
@@ -1771,7 +1771,7 @@ threads; float sums differ from the serial pass's in the last bits (another orde
     runs once, one at a time". EECS053 is not reported for these refs (both are written).
 - api.mdx + zh: `IPairJob.Symmetric` (static virtual, generated; complexity row: half the pairs of ForPairs), the
   PairRun.Same doc (a symmetric run of a table against itself starts after the row). Chinese entry for the new XML doc
-  in tools/ApiDocs/zh.
+  in tools/docs/ApiDocs/zh.
 - decisions.mdx + zh, next free D: "A pair method writing both sides runs each unordered pair once".
   - Inferred, no attribute: `ref` of the row plus `[Neighbor] ref` of the same component already says it; a method
     that writes the neighbor's component it reads of its row was refused before, so no method changes meaning.
@@ -1871,7 +1871,7 @@ threads; float sums differ from the serial pass's in the last bits (another orde
 ## feat-tiles-pingpong (items 11, 12a, 12b, GA10, GA3, GA12, 8c) — docs to-dos
 
 Terms (zh): tile 瓦片, halo 光环, ghost cells 幽灵格子, stencil 模板, ping-pong 乒乓缓冲, slice 分帧; Jacobi 雅可比,
-Gauss-Seidel 高斯-赛德尔, red-black 红黑, multicolor 多色 (add the last four to tools/ApiDocs/zh/README.md's glossary
+Gauss-Seidel 高斯-赛德尔, red-black 红黑, multicolor 多色 (add the last four to tools/docs/ApiDocs/zh/README.md's glossary
 and lint-terms if they are not there). Each explained in one plain sentence where first used (WRITING.md).
 
 - guide/performance/grids.mdx + zh (the tile page):
@@ -1903,7 +1903,7 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
   - Costs: Jacobi O(cells) per stepped tile plus O(1) swap; zeroed rows a few vector stores; Gauss-Seidel
     O(cells x sweeps) per tile per color pass, one walk per color even when a color is empty.
 - api.mdx + zh: complexity rows for `Tile<TCell, TTile>.ExchangeHalo`, `Write(row)`, `GaussSeidelAttribute`,
-  `Columns<TTile>`; remove `PaddedTile`, `Pad`. Then tools/ApiDocs: zh entries for the new XML docs (GaussSeidelAttribute,
+  `Columns<TTile>`; remove `PaddedTile`, `Pad`. Then tools/docs/ApiDocs: zh entries for the new XML docs (GaussSeidelAttribute,
   MaxSweeps, ITileColors<TKey>, TileColoring, TileSteps<...> members, Tile.ExchangeHalo / Write / Rows / At / indexer,
   Columns<TTile>, TileNeighbors.Of / KeyAt / Facing) and regenerate docs/content/reference.
 - guide/help/analyzer.mdx + zh: EECS115 (Error: a step the generator cannot write: [GaussSeidel] without a ref tile, two
@@ -1943,7 +1943,7 @@ and lint-terms if they are not there). Each explained in one plain sentence wher
   - Changed filters built once per type (ChangedSince<T>): a filter built per pass interns its bits past 255 and
     allocates (FilterOverflow.With), found by the 0 B test after ComponentTests registered 300 types.
 - Numbers (BenchmarkDotNet on the shared VM, sd 10-40 %, so differences under ~15 % are not resolved; base 5ac9b37,
-  head e016a59; rerun on the reference machine with `tools/bench.sh TileStencilBenchmark TileActiveBenchmark
+  head e016a59; rerun on the reference machine with `tools/perf/bench.sh TileStencilBenchmark TileActiveBenchmark
   TileHaloBenchmark --sync` before the pages quote any):
   - TileStencil (us, 1 / 4 threads): Blur9 by value 751 -> 781 / 397 -> 373, Laplacian by value 742 -> 762 / 397 ->
     400; the ping-pong step (new) Blur9 788 / 431, Laplacian 760 / 489 against step + commit by hand ~ the by-value
@@ -2226,9 +2226,9 @@ Names provisional (`docs/owner-review.md`, "Restart and Sweep"): rename everywhe
   - When to pick which: the table "Jacobi vs [GaussSeidel]" gets a row "sources that move or vanish: [GaussSeidel] +
     Restart".
   - Glossary (en + zh): "count to infinity" (计数到无穷), "fast sweeping" (快速扫描法), with sources (distance-vector
-    routing; Zhao 2005); check `tools/ApiDocs/zh/README.md` and lint-terms.
+    routing; Zhao 2005); check `tools/docs/ApiDocs/zh/README.md` and lint-terms.
 - api.mdx + zh: complexity rows `Tile<TCell, TTile>.Restart(TCell)` O(cells of the layers exchanged) in the first sweep,
-  O(1) after; `Tile<TCell, TTile>.Sweep` O(1). Then regenerate the reference (the zh entries are in tools/ApiDocs/zh/tile.xml).
+  O(1) after; `Tile<TCell, TTile>.Sweep` O(1). Then regenerate the reference (the zh entries are in tools/docs/ApiDocs/zh/tile.xml).
 - guide/help/analyzer.mdx + zh: EECS115's list gains "Restart on a tile no [GaussSeidel] sweep steps (taken by value, or a
   Jacobi step)" and "Sweep of a tile taken by value"; the message examples.
 - samples/voxel-server page (with the rewrite, voxel-rewrite.md step 6): the scent as one `[GaussSeidel]` step over
@@ -2660,7 +2660,7 @@ helpers).
   hides the page walks there) nor to Windows / macOS (macOS arm64 has 16 KiB pages and no user superpages).
 - **Pages.** performance.mdx + zh ("What it costs" or the memory section): large worlds' random lookups on 2 MiB
   pages on Linux, link the decision, the 16M numbers from bench.json once LookupChaseHugePagesBenchmark is synced
-  (add the class to `tools/bench.sh --site`). architecture.mdx + zh, the memory section: which arrays are advised
+  (add the class to `tools/perf/bench.sh --site`). architecture.mdx + zh, the memory section: which arrays are advised
   (reserved / copied, not doubling steps), arrays the GC frees. faq.mdx + zh: "Does EasyEcs use huge pages?" (Linux
   THP `madvise` or `always`; nothing to configure; `never` turns it off). guide page on reservations (`Reserve` /
   `InitialEntityCapacity`) + zh: one sentence that a reserved large world gets huge pages on Linux, a world grown row
@@ -2812,7 +2812,7 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   inside another expression of an index (`s[i * 2]`).
 - **api.mdx + zh:** no public API change (no complexity row).
 - **performance.mdx + zh:** ElementLoopBenchmark (Decay / Widen, 4 / 64 / 1,024 elements) once synced; add the class to
-  `tools/bench.sh --site`.
+  `tools/perf/bench.sh --site`.
 - **Changelog (New):** "Loops over spans and buffers inside [ForEach] methods run as vector loops"; link systems.mdx.
 - **Roadmap:** element loops (inner-loops.md WP2, WP3) shipped: sums, the index, offsets, batch methods, lambda
   passes, private helpers; the Cell form (WP5) next.
@@ -3044,7 +3044,7 @@ method as `in T` of a component of the tile's entity.
   The example: TileLayersBenchmark's Band (the voxel water stays as written: inner-loops.md WP5b). The "Costs" table
   row "ExchangeHalo() of every layer" gains the cell form's answer. The schedule line says "layers of 'x'".
 - (merged: "Sweep 2026-11-07", item S5) **glossary.mdx + zh:** "Tile layers (ITileLayers)": the layers a cell pass covers; zh 瓦片的层范围 (`ITileLayers`), the
-  glossary of tools/ApiDocs/zh/README.md gains it too.
+  glossary of tools/docs/ApiDocs/zh/README.md gains it too.
 - **decisions.mdx + zh:** a record "A cell pass bounded by a component's layers": why a component and not an attribute
   or a callback (the range is per tile and comes from the user's summary, often its neighbors' too: a system computes
   it with the tools it already has, Lookup and Beside; the pass reads two ints), why only where rows may be skipped
@@ -3055,7 +3055,7 @@ method as `in T` of a component of the tile's entity.
   place, takes several cells or has a result per tile, and what it computes on a blank row is not proved): every layer
   runs; the reasons as the message gives them. EECS026 does not report the layers' parameter (the pass reads it).
 - **api.mdx + zh:** ITileLayers (From, To: O(1), read once per tile by the pass); the reference page regenerates
-  (tools/ApiDocs/zh/itilelayers.xml).
+  (tools/docs/ApiDocs/zh/itilelayers.xml).
 - **Changelog (New) + README "What's new":** "A cell method bounds its pass to the layers a component gives
   (`ITileLayers`): the halo and the walk cover those layers only." Link grids#layers.
 - **performance page:** TileLayersBenchmark and TileTallyBenchmark join the tiles' table once synced.
@@ -3216,7 +3216,7 @@ declares `ITile<TKey>` and writes no `Beside` now gets one inferred (it was CS05
   refused rather than guessed); a kept row's tie rule (left = earlier rows) and why it ships scalar first.
 - skills/easyecs/SKILL.md (public skill): declare tiles with `[Tile]`, windows with `SlotsPerAxis`, kept rows with
   `[MinBy]` / `[MaxBy]`.
-- reference/ regenerated by tools/ApiDocs (the zh entries are committed with the code).
+- reference/ regenerated by tools/docs/ApiDocs (the zh entries are committed with the code).
 
 ## fix-core-lane1 (backlog Lane 1, C1-C10: correctness fixes in the core)
 
@@ -3242,7 +3242,7 @@ declares `ITile<TKey>` and writes no `Beside` now gets one inferred (it was CS05
   - Reloading a plugin many times no longer grows the per-thread setup steps every helper thread walks.
 - [ ] **api.mdx + zh**: `Reserve(prefab, count)` row: the exception (negative, past the world's capacity).
   `World.Entities`: "destroyed entities are skipped, also after the records grew" (XML doc changed; its zh entry in
-  `tools/ApiDocs/zh` for `World.EntityEnumerator` and `World.Reserve(Prefab, int)`).
+  `tools/docs/ApiDocs/zh` for `World.EntityEnumerator` and `World.Reserve(Prefab, int)`).
 - [ ] **guide/saves/migration-and-unload (hot reload section) + zh**: a plugin with pair methods or ordered components
   unloads after `RemoveTypes` like any other (no caveat needed); mention that tables a plugin's order reached lose it.
 - [ ] **guide/saves/snapshots (incremental capture) + zh**: bulk writes of values (`SetAll` over rows holding the component)
@@ -3364,7 +3364,7 @@ declares `ITile<TKey>` and writes no `Beside` now gets one inferred (it was CS05
 - `global.json` asks for SDK 10.0.403 (NU1903 on 10.0.402's ILCompiler): getting-started's requirements line can say
   ".NET 10 SDK" still; a contributor note belongs in the README's build section if it names a version.
 - `bun run check` (now in CI) fails at the branch point on three Chinese reference entries that write 区块
-  (`tools/ApiDocs/zh/columns.xml`, `foreachattribute.xml`; lint-terms: 地形 or 区段); fix the zh entries and
+  (`tools/docs/ApiDocs/zh/columns.xml`, `foreachattribute.xml`; lint-terms: 地形 or 区段); fix the zh entries and
   regenerate the reference in the docs pass. (lint-terms.ts' Biome format error from 5ac9b37 is fixed here.)
 
 ## feat-inner-loops-rest (what feat-inner-loops left open)
@@ -3578,7 +3578,7 @@ Wide rows of 8-byte words and the AVX2 form (#160; commits c078128 + 042e8a5, te
   the method's own type no longer throws (the generator now prepares the index for it).
 - [ ] **decisions.mdx + zh**: A14's two candidates and the IForSpan rule are in `docs/owner-review.md`; once the owner
   settles them, a record each.
-- [ ] **zh XML** (`tools/ApiDocs/zh`): none (no public API changed).
+- [ ] **zh XML** (`tools/docs/ApiDocs/zh`): none (no public API changed).
 
 ## The site build's lint:seo (found 2026-11-08 by move-guide-folders)
 

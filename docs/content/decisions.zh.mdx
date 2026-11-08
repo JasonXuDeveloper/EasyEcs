@@ -1802,7 +1802,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
   所以生成器没有预料到的布局由方法本身运行。
 - **检查器。** `DescribeSchedule()` 列出每个方法的循环（`SystemInfo.Loops`："Move: vector (Vector512 or Vector&lt;float&gt;), flat"、
   "Steer: vector (Vector512 only), wide component (permutes), masked words scalar"、"Spawn: scalar (it takes the Entity)"）；
-  `tools/jitdisasm.sh` 打印循环的 Tier-1 代码（`DOTNET_JitDisasm`、`DOTNET_TC_CallCountingDelayMs=0`）。
+  `tools/perf/jitdisasm.sh` 打印循环的 Tier-1 代码（`DOTNET_JitDisasm`、`DOTNET_TC_CallCountingDelayMs=0`）。
 - **拆分建议。** 当组件对循环来说太宽或太杂，而方法最多只用它一半的字段（最多 4 个、大小相同）时，EECS055 在末尾列出它们："it uses 3 of Body's
   12 fields (X, VX, Y): split them into a component of their own"。
 
@@ -2288,7 +2288,7 @@ lambda 遍历和手写 job，三种写法都是 0 B（`LambdaPassBenchmark`）�
   手写 job 2,094、2,107 ns / 211.1、210.2 µs。速度相同，差异在误差内。
 - **向量方法体**（乘加）：方法 68.4、71.6 ns / 11.7、11.5 µs；lambda 72.0、69.9 ns / 11.7、11.2 µs；逐行执行的手写 job
   787、759 ns / 74.7、77.7 µs。
-- **机器码**：lambda 的 job 在 Tier1 的机器码（`tools/jitdisasm.sh`）和方法的一样：同一个向量循环，循环里没有调用。
+- **机器码**：lambda 的 job 在 Tier1 的机器码（`tools/perf/jitdisasm.sh`）和方法的一样：同一个向量循环，循环里没有调用。
 - **生成器**（`GeneratorBenchmark`，基线对比本改动，两轮交替）：`EditMethodBody` 207.5、211.3 -> 226.3、224.3 ms，
   单命名空间 195.7、201.5 -> 241.9、190.8 ms，都在 25 到 52 ms 的误差内，每次编辑多分配 0.1 到 0.3 MB；
   `CompileAndAnalyze` 在误差内，单命名空间多分配 2 %（993 -> 1,012 MB）。
@@ -2833,12 +2833,12 @@ lane 类型是 float、double、int、uint、long、ulong（byte 和 short 的�
   `Execute` 只保留分派。
 
 这个计数是上界估计：release 的 Roslyn 给每个声明的局部变量一个槽位（作用域不相交的同类型局部变量不共用），只用一次的局部变量
-有些会被去掉，所以实际数量相等或更少。`tools/inlining.sh` 读取基准运行时 JIT 的内联事件，报告运行器没有内联的每个生成作业。
+有些会被去掉，所以实际数量相等或更少。`tools/perf/inlining.sh` 读取基准运行时 JIT 的内联事件，报告运行器没有内联的每个生成作业。
 
 **局部变量，之前与之后**（`Execute`，只有复制修复 → 本改动）。Steer 40/44、Gate 40/42、Seek 40/42、SeekParallel 40、
 ParallelSteer 40、Share 34/36、Step 32/34、Cycle 31/33 → 每个 `Execute` 不超过 30；拆出的方法 13 到 21 个（Gate、Seek、
 Share、Step、Cycle、UpdateCell 的掩码循环，Steer 的循环），最多的是 27 个（SteerJob18 的 `__Loop512`）。
-`tools/inlining.sh`：基准、示例和测试语料里每个生成的作业都被内联；生成器测试 `LargeJobsStayWithinTheInlinersLocals`
+`tools/perf/inlining.sh`：基准、示例和测试语料里每个生成的作业都被内联；生成器测试 `LargeJobsStayWithinTheInlinersLocals`
 断言这一点，并断言 16 个字段的作业被拆分。
 
 **机器码**（Tier1，`DOTNET_JitDisasm`，关闭 PGO；运行器的指令数和对作业的调用）。Gate 掩码 765 条、3 次 `Execute` 调用 →

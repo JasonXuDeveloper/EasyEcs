@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Runs benchmark classes one BenchmarkDotNet process per class, resumable, and merges them into the site's numbers.
 #
-#   tools/bench.sh --site [--sync]          the classes the site shows (the classes of docs/src/data/bench.json)
-#   tools/bench.sh Class... [--sync]        the given classes (short names: BulkBenchmark, Features.RemovalComparison)
-#   tools/bench.sh --all [--sync]           every class of both projects
+#   tools/perf/bench.sh --site [--sync]          the classes the site shows (the classes of docs/src/data/bench.json)
+#   tools/perf/bench.sh Class... [--sync]        the given classes (short names: BulkBenchmark, Features.RemovalComparison)
+#   tools/perf/bench.sh --all [--sync]           every class of both projects
 #
 # A class that finished is marked in BenchmarkDotNet.Artifacts/done/ and skipped by the next run, so a run cut short
 # (a container restart) goes on where it stopped; --fresh clears the marks. Each project is built and lists its
@@ -11,7 +11,7 @@
 # runs share a lock (BENCH_LOCK, flock -o, so a build server left behind does not keep it). --sync merges the reports into docs/src/data/bench.json (sync-benchmarks --merge):
 # the classes run replace theirs, the others stay, and the rows that moved (15 %, or their allocation) are listed.
 set -euo pipefail
-root=$(cd "$(dirname "$0")/.." && pwd)
+root=$(cd "$(dirname "$0")/../.." && pwd)
 art=$root/BenchmarkDotNet.Artifacts
 lock=${BENCH_LOCK:-/tmp/bench.lock}
 # The whole run holds the lock exclusively; -o keeps its descriptor out of the commands, so nothing they leave behind

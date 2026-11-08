@@ -4,7 +4,7 @@ using System.Reflection;
 
 // Runs each [Benchmark] method of the classes named (all of the default set; KernelBenchmark or Kernel) once, with
 // every value of its non-numeric [Params] / [ParamsSource] and the smallest numeric ones (tools/Shared/BenchmarkRunner.cs), while an EventListener reads the JIT's inlining decisions (JitTracing keyword
-// 0x1000). Run without tiered compilation (tools/inlining.sh sets DOTNET_TieredCompilation=0): every method is compiled
+// 0x1000). Run without tiered compilation (tools/perf/inlining.sh sets DOTNET_TieredCompilation=0): every method is compiled
 // optimized at its first call, with the inliner's decisions of Tier1, so one call of each runner decides what it
 // inlines, masked words and the last rows of a run included. Prints each job member (a type of a generated __ForEach
 // class) a method failed to inline and why; exit code 1 if there is one.

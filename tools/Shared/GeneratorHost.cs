@@ -10,7 +10,7 @@ using Microsoft.CodeAnalysis.CSharp;
 /// <summary>
 /// What every host that drives the EasyEcs generators through Roslyn shares, so each compiles user code as a project
 /// referencing the package does: the unit tests (GeneratorTests and the analyzer and code fix tests), the docs' fence
-/// checker (tools/DocCheck) and GeneratorBenchmark's corpus (linked into all three). A generator added to the package
+/// checker (tools/docs/DocCheck) and GeneratorBenchmark's corpus (linked into all three). A generator added to the package
 /// is added here once.
 /// </summary>
 internal static class GeneratorHost

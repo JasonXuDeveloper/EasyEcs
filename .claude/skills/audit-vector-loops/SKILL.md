@@ -293,7 +293,7 @@ form to support.
   passes, an empty table, a structural change by another system in the same tick); bit-identical at 1 and 4 threads.
 - The 0 B allocation test; a `KernelBenchmark` case against the scalar method and the hand-written fast form (bulk
   call, hand-written SIMD) at several pass rates (1 %, 10 %, 50 %) and sizes (10k, 100k).
-- Tier1 asm (`tools/jitdisasm.sh`): no call in the loop body, no unexpected range check.
+- Tier1 asm (`tools/perf/jitdisasm.sh`): no call in the loop body, no unexpected range check.
 - A change to `Kernel` leaves the code generated for `WorldSimulation.cs` and `BattleServer.cs` identical, or ships
   with their BenchmarkDotNet numbers.
 - The docs show `You write` / `The generator writes` from real output wherever the form appears (`audit-docs`).
@@ -302,7 +302,7 @@ form to support.
 
 Every loop is also checked against `audit-generator`, "Tuned for the machine" (chains, branches, caches, front end):
 run `llvm-mca -mcpu=icelake-server` (and `znver4`) on the Tier1 loop body to see whether it is bound by a dependency
-chain, by ports or by memory before choosing a change (`tools/loopbound.sh <class>` does it for every loop of a
+chain, by ports or by memory before choosing a change (`tools/perf/loopbound.sh <class>` does it for every loop of a
 benchmark class). First place the pass on the roofline (`audit-perf`, "Roofline"): a loop whose bytes per row already
 run at the L2's or memory's bandwidth (KernelBenchmark's Integrate and Count at 100k rows) gains nothing from fewer
 uops, only from fewer bytes. A uop the model saves is not a win until BenchmarkDotNet shows one on the worlds: the masked skip
@@ -315,7 +315,7 @@ a static readonly table read before its class is initialized costs a class-initi
 the life of the process (`Interleaved.InitializeTables` initializes the loops' tables when the module loads; a new
 table class goes there).
 
-Every round reads the Tier1 code of the samples' loops (`tools/jitdisasm.sh samples/MultiWorld 'EasyEcs.World:Masked'`)
+Every round reads the Tier1 code of the samples' loops (`tools/perf/jitdisasm.sh samples/MultiWorld 'EasyEcs.World:Masked'`)
 next to the generated text, and asks per loop: how many instructions per vector, which of them move data instead of
 computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
 
@@ -367,7 +367,7 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   grows the body past the JIT's inlining budget turns it into a call per run (per 64-row word in a masked table) and
   costs far more than it saves. A masked AVX-512 tail for the last rows (D126) won 0.5-0.66x on a world of 1,000 tiny
   tables for a one-float body and lost up to 3.7x on `CycleHoles` for this reason: check the Tier1 listing of the
-  runner (`tools/jitdisasm.sh`, `EasyEcs.World:Masked`) for `call ...Execute` after any change that adds text to the
+  runner (`tools/perf/jitdisasm.sh`, `EasyEcs.World:Masked`) for `call ...Execute` after any change that adds text to the
   body. The answer is in the generator, not in less code (the owner's rule): it shapes what it writes so the hot
   loop stays inlined (cold parts in `NoInlining` helpers called once per run, each width in its own method, or a
   generated entry that runs the word loop itself), and a test pins `call ...Execute`-free runners. The plan and its
@@ -381,7 +381,7 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   local is never written again, and every `out` argument, `var`, pattern and compiler temporary is one. The generator
   counts the locals it declares per method and splits (WP0b) before 32; a test pins the count for each form's corpus.
   Count declarations, not live ranges: release Roslyn gives every declared local its own slot, even in disjoint
-  scopes; a `default` struct argument adds a temp and so does every `out _`. Check a change with `tools/inlining.sh`
+  scopes; a `default` struct argument adds a temp and so does every `out _`. Check a change with `tools/perf/inlining.sh`
   (it lists every generated job a runner does not inline).
 - **The JIT does not hoist a constant out of a block that a `continue` skips**: in masked and gather loops keep the
   broadcast in a setup local; a literal in place pays only in loops over whole vectors (D135).

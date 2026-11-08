@@ -2,14 +2,14 @@
 
 The Chinese text of `docs/content/reference/*.zh.mdx`: one file per reference page (`world.xml` for `world.zh.mdx`),
 one `<member name="<doc id>" source="<hash>">` per documented member, with the elements of the English XML doc.
-`tools/ApiDocs` checks every entry against the English (see `../README.md`).
+`tools/docs/ApiDocs` checks every entry against the English (see `../README.md`).
 
 ## Changing a doc comment
 
 1. Change the XML doc comment in `src/EasyEcs.Core`.
-2. `dotnet run --project tools/ApiDocs`: it names each entry whose English changed and prints the new English.
+2. `dotnet run --project tools/docs/ApiDocs`: it names each entry whose English changed and prints the new English.
 3. Rewrite the Chinese entry to match it and set `source` to the hash the message gives. A new member:
-   `dotnet run --project tools/ApiDocs -- --zh-scaffold` adds it with the English text to translate.
+   `dotnet run --project tools/docs/ApiDocs -- --zh-scaffold` adds it with the English text to translate.
 4. Run the tool again (0 problems) and commit the XML with the regenerated pages.
 
 ## Markup

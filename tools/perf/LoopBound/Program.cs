@@ -1,6 +1,6 @@
 // Runs the [Benchmark] methods of one benchmark class (all, or those named) often enough for tiered compilation to
 // promote their runners to Tier1, with the class's integer [Params] set to the size given and every case of the others
-// (tools/Shared/BenchmarkRunner.cs; the class as KernelBenchmark or Kernel). tools/loopbound.sh runs it with
+// (tools/Shared/BenchmarkRunner.cs; the class as KernelBenchmark or Kernel). tools/perf/loopbound.sh runs it with
 // DOTNET_JitDisasm and reads the loops of the Tier1 listings.
 //
 //   LoopBound <class> <rows> <calls> [method,method,...]

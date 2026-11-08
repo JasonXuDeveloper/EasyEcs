@@ -11,8 +11,8 @@ metadata:
 export PATH=$PATH:/root/.dotnet:/root/.dotnet/tools:/root/.bun/bin DOTNET_ROOT=/root/.dotnet   # cloud sessions
 dotnet build -c Release                          # 0 warnings (warnings are treated as real problems)
 dotnet test                                      # all NUnit tests, generator caching and allocation tests included
-dotnet run -c Release --project tools/DocCheck   # every C# fence of the docs compiles: "0 problems"
-dotnet run --project tools/ApiDocs               # reference pages + Chinese entries: "0 problem(s)"
+dotnet run -c Release --project tools/docs/DocCheck   # every C# fence of the docs compiles: "0 problems"
+dotnet run --project tools/docs/ApiDocs               # reference pages + Chinese entries: "0 problem(s)"
 (cd docs && bun run check && bun run build)      # links, anchors, icons, zh terms; SEO and search expectations
 .github/scripts/check-sample.sh samples/HelloWorld   # and SaveLoad, MultiWorld, HotReload, Actors, VoxelServer (output == README + docs page)
 dotnet run --no-build -c Release --project samples/GameLoop -- --ticks 30
@@ -27,12 +27,12 @@ dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o <scratch>/aot && <sc
 
 - Changed `src/EasyEcs.Core`, the generator or `demo/`? Rebuild the live demo: `bash docs/scripts/build-demo.sh`
   and commit `docs/public/demo` (Cloudflare has no .NET).
-- Changed a public XML doc comment? ApiDocs reports the stale Chinese entry in `tools/ApiDocs/zh/`; fix its text and hash.
+- Changed a public XML doc comment? ApiDocs reports the stale Chinese entry in `tools/docs/ApiDocs/zh/`; fix its text and hash.
   Never commit the reference while ApiDocs reports problems: a stale entry once turned 23 Chinese pages English
   (`audit-docs`, zh). Before a merge, read `git diff <base> -- docs/content`: no Chinese line replaced by English, no
   English page losing content or gaining Chinese or `/zh/` links, en and zh still saying the same.
 - Renamed a heading anchor? `bun run build` runs `lint:search`: update `docs/scripts/search-expectations.json`.
-- Changed a hot path? `tools/bench.sh <classes> --sync` (its classes and WorldSimulation, BattleServer, the
+- Changed a hot path? `tools/perf/bench.sh <classes> --sync` (its classes and WorldSimulation, BattleServer, the
   neighbors): `--sync` lists the rows that moved 15 % or allocate differently. Each slower row or new allocation is
   run against `origin/master` (two rounds, the copy outside the repo) and fixed or explained before the numbers ship. Every BenchmarkDotNet run goes through `flock /tmp/bench.lock`;
   numbers taken while builds, tests or samples run outside the lock are noise (parallel rows swing by 2x): rerun them
@@ -41,7 +41,7 @@ dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o <scratch>/aot && <sc
 - A failure that comes and goes: reproduce it first (a steady-state check 10 or more times) before bisecting, or the
   bisect blames an innocent commit; a generator merge is proven innocent by diffing its generated code against the
   parent's (VoxelServer's allocation, 2026-10-27, blamed feat-views; the cause was copy-on-write lists after a restore).
-- Before a release: `tools/bench.sh --site --sync` on the final code (every class the site shows), the README
+- Before a release: `tools/perf/bench.sh --site --sync` on the final code (every class the site shows), the README
   numbers (headline, tables) from the new `bench.json`, changelog / README "What's new" / migration complete, the
   roadmap updated; the GitHub description's numbers are the owner's to change (say so).
 

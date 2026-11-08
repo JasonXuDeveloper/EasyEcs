@@ -896,7 +896,7 @@ last bits nobody compares (steering noise, particles, visual decay).
 
 The system's generated file (`<System>.….System.g.cs`, under the project's generated sources, or with
 `<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>` under `obj/`) holds the loop itself. To see what the
-JIT makes of it, `tools/jitdisasm.sh <project> 'EasyEcs.World:Masked'` builds the project in Release, runs it with
+JIT makes of it, `tools/perf/jitdisasm.sh <project> 'EasyEcs.World:Masked'` builds the project in Release, runs it with
 `DOTNET_JitDisasm` and prints the optimized code of every vector method on one thread (the job's `Execute` is inlined
 into the world's loop that runs it; a parallel one is inside a `ForEachBatch*` runner). `FULLOPTS=1` compiles optimized
 code at once, for a program that runs the method only a few times. In a good loop the body holds vector instructions
