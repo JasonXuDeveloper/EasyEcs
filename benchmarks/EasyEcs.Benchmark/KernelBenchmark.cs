@@ -37,8 +37,8 @@ namespace EasyEcs.Benchmark;
 /// component of one Vector2 assigned whole: a flat loop). <c>Steer</c> uses 3 of the 12 fields of a wide component (permutes
 /// gather them into lanes and back on AVX-512, NEON table lookups on ARM64, the other 9 kept as loaded); <c>Glide</c> the
 /// float of a component of mixed types (3 words a row); <c>Dive</c> (heavy math: a square root, a division) and <c>Ledger</c>
-/// (light) 3 and 2 of a wide component's 8 eight-byte words (doubles, longs). Steer and Dive take AVX2's permutes too,
-/// Glide and Ledger run rows there. <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
+/// (light) 3 and 2 of a wide component's 8 eight-byte words (doubles, longs). Dive takes AVX2's permutes too; Steer, Glide
+/// and Ledger run rows there, and Ledger on AVX-512 as well. <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
@@ -1157,13 +1157,16 @@ public partial class KernelBenchmark
             probe.Q = Math.Min(probe.Q + probe.X * probe.P, 10) * 0.5 - probe.Q / 3;
         }
 
-        // 2 of its longs, light math: AVX-512's permutes pay where they cost less than its operations gain, AVX2's do not.
+        // 2 of its longs, light math: 8 rows a vector gain too little for the permutes, so x64 runs its rows (the wide
+        // gate, which EECS055 names); the case that keeps the gate honest.
+#pragma warning disable EECS055
         [ForEach]
         internal static void Ledger(ref Probe probe)
         {
             probe.Id = (probe.Id + probe.Tag * 3) ^ (probe.Tag >> 2);
             probe.Tag = (probe.Tag ^ 0x55) + probe.Id - 7;
         }
+#pragma warning restore EECS055
 
         // Narrow lanes: a saturating byte sum (AddSaturate), then a wrapping one past a threshold: 64 rows per Vector512.
         [ForEach(SimdMode = SimdMode.Require)]
