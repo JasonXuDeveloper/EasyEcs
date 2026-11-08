@@ -45,7 +45,9 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       over the inliner budget after the wide masked words), then G5, G7, G8, G11 9c, G15, G17, G18.
 - [ ] **`feat-lane1-core`** (from 3315196): C0, C11, C15-C18, then C12-C14 (ArityGenerator's enumerator templates
       only), C19 last.
-- [ ] **`feat-lane5-renames`** (from 3315196): R1-R6.
+- [x] **`feat-lane5-renames`** merged 2026-11-08: R1-R6 (tests 4237 + 1 skipped: R4 deleted 17, R3 added 3; DocCheck 28 at
+      base and head). Left: the internal `World.ChunkRows(...)` and `PairHalves.ChunkRows` follow `MaxChunkSize` as
+      `ChunkSize`, after feat-lane1-core merges (it edits World.Parallel.cs).
 - [x] **`feat-restructure`** merged 2026-11-08 (Finish 1b, D142): the four projects in concern folders, `tools/perf/`,
       `tools/docs/`, `docs/plans/designs/` and `owner/`; tests 4251 passed, 1 skipped, as the base.
 - [x] **`feat-lane4-generator`** merged 2026-11-08 (2025276): G1-G4, G6, G9, G10, G12-G14, G16, G19, wide masked words,
