@@ -526,11 +526,15 @@ public class LaneMathTests
         for (int i = 0; i < count; i++)
             Assert.That(Bits(entities[i].Get<Real4>().A, MathF.Atan2(xs[i].Value, 1.5f)), $"{xs[i].Value}");
 
-        // The bits, but any NaN for a NaN: these bodies add and multiply NaNs of both signs (an infinite x makes
-        // b = x * x - a the negative default NaN and Abs(a - b) a positive one), and x86 keeps the first operand's
-        // NaN, an order the JIT may swap in a commutative operation (at an infinite x, DoubleAngles' C is the positive
-        // NaN from the method and the Vector512 loop, the negative one from the Vector256 loop under
-        // DOTNET_EnableAVX512=0). Per-lane calls themselves are checked bit for bit by the Bearing loop above.
+        // The bits, but any NaN for a NaN. At an infinite x, b = x * x - a is the negative default NaN and
+        // Abs(a - b) * 0.125 a positive one, and c = Abs(a - b) * 0.125 + Math.Min(a, b) adds the two: x86 keeps the
+        // first source's NaN, and which operand the JIT puts first is its own choice, not the C# text's (the generated
+        // loop keeps the method's order, Abs(...) * 0.125 + Min(...)). DOTNET_JitDisasm under DOTNET_EnableAVX512=0:
+        //   the method at Tier0:       vaddsd xmm0, xmm0, xmm1   (xmm0 the Min, xmm1 the Abs term: c negative)
+        //   the method at Tier1 (OSR): vaddsd xmm9, xmm7, xmm9   (xmm7 the Abs term, xmm9 the Min: c positive)
+        //   the Vector256 loop:        vaddpd ymm2, ymm2, ymm3   (ymm2 the Min's vblendvpd, ymm3 the Abs term: negative)
+        // The method itself changes the sign of c between its tiers, so no order the generator writes matches it bit for
+        // bit. Per-lane calls themselves are checked bit for bit by the Bearing loop above.
         static bool Same(double a, double b) => Bits(a, b) || double.IsNaN(a) && double.IsNaN(b);
     }
 
