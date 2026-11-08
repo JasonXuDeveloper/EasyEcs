@@ -1198,6 +1198,7 @@ public class GeneratorTests
         "GroupBy", "TargetPolicies", "NotSaved", "EntityMethods", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
         "SystemPlaces", "SystemFusions", "SetFusions", "ForEachBodies", "RecordBodies", "EntityMethodBodies", "SystemCode", "ForEachCode", "RecordCode",
         "EntityMethodCode", "RecordedTypes", "TileParts",
+        "IsEasyEcsCore", // ArityGenerator's one stage: the package ships it, idle outside EasyEcs.Core
     ];
 
     // An edit that changes no model, as the IDE sees one per keystroke: every stage's outputs come from the cache (or
