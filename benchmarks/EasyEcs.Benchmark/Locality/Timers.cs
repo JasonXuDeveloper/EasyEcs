@@ -3,7 +3,7 @@ using System;
 namespace EasyEcs.Benchmark.Locality;
 
 /// <summary>
-/// Item 2 of docs/plans/borrowed-ideas.md: entities that wait (cooldowns, respawns, buffs that end) and do some work when
+/// Item 2 of docs/plans/designs/borrowed-ideas.md: entities that wait (cooldowns, respawns, buffs that end) and do some work when
 /// their wait is over. Each entity has a period of 50 to 150 ticks (1 % of them wake per tick on average) and wakes at
 /// <see cref="Cooldown.Until"/>, then waits one period more. Four ways per tick: a [ForEach] over every entity comparing
 /// its wake tick with the clock (the generator's vector loop, and the method row by row); a [ForEach] counting each

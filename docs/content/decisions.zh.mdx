@@ -134,6 +134,7 @@ EasyEcs 为什么是现在这个样子：每条记录写明决定了什么、为
 | [D134](#d134-eecs103) | EECS103：批处理方法里手写的向量循环，报告并给出单行方法 |
 | [D135](#d135-inlined-locals) | 生成的作业不超过内联器的 32 个 IL 局部变量；超出的循环按宽度放进方法 |
 | [D141](#d141-drain-entity-method-parallel-for) | `[Drain]`、`[EntityMethod]` 和 `world.ParallelFor` |
+| [D142](#d142-folders-by-concern) | 源码文件按关注点放进文件夹，名字沿用指南 |
 
 D85 到 D89、D91 到 D93 和 D96 这几个编号没有用过：编号事先分给进行中的工作，用不上也不再复用。
 
@@ -2906,6 +2907,31 @@ gather 和按位的列映射只服务于复制。
 - **`[Handle]`：** 太笼统，任何方法都在处理点什么。
 - **保留 `[ForEntity]`**（第一轮命名时保留了它：单个实体上的调用，不是遍历）：`For` 前缀仍然把它归进 `ForEach` 一族，而它不是。
 - **为旧名字保留 `[Obsolete]` 别名或代码修复：** 旧名字都没有发布过（4.7 里一个也没有），没有要迁移的代码。
+
+## D142. 源码文件按关注点放进文件夹，名字沿用指南 [#d142-folders-by-concern]
+
+**决策。** 原先把文件平铺的四个项目（`EasyEcs.Core` 90 个、`EasyEcs.Generator` 69 个、`EasyEcs.UnitTest` 89 个、
+`EasyEcs.Benchmark` 99 个）改为按关注点放进文件夹。Core、测试和基准用同一套名字（`Components/`、`Entities/`、
+`Grids/`、`Indexes/`、`Lookups/`、`OrderedTables/`、`Parallel/`、`Parameters/`、`Queries/`、`Relations/`、`Saves/`、
+`Storage/`、`Systems/`、`VectorLoops/` 等）；生成器是 `Arity/`、`Declarations/`、`Systems/`、`Kernel/`、`Analyzer/`
+和 `Shared/`；测试和基准另有 `Generator/`（测试还有 `Analyzer/`）。命名空间不变：类型仍是 `EasyEcs.Tile`，不是
+`EasyEcs.Grids.Tile`；每个项目的 `.DotSettings` 关掉 Rider 的“文件夹与命名空间不一致”提示。工具分为 `tools/perf/`
+（基准脚本及其项目）和 `tools/docs/`（ApiDocs、DocCheck）；`docs/plans/` 分为 `designs/`（设计计划）、`owner/`
+（负责人自己要做的步骤），根目录只留待办清单、文档待办和负责人决定的台账。
+
+**原因。**
+- **一个特性的文件放在指南页用的名字下**：`Tile.cs`、`TileSteps.cs`、`Cell.cs`、tile 测试和九个 tile 基准各在同一个
+  文件夹里，读者按文档里的词就能找到代码、测试和数字。此前 338 个平铺文件只有各项目 `AGENTS.md` 的文件表当索引。
+- **不改命名空间，移动就只是重命名**：历史跟着走，公开名字不变，不需要迁移条目，包里的文件相同（ApiDocs 重新生成后没有差异）。
+- **被其他项目或页面按路径引用的文件留在项目根目录**（`BattleServer.cs`、`GeneratorCorpus.cs`、
+  `WorldSimulation.cs`、`BenchmarkConfig.cs`、`Locality/`、基准的公共设施）。
+- **文件表不会悄悄过期**：`tools/agents.sh --check` 读取任意深度的每个源文件，按项目内路径逐个查找，
+  文件表里写了不存在的文件也会失败。
+
+**考虑过。**
+- **命名空间跟着文件夹走：** 会让所有用户的 `using` 和生成代码里的名字失效，读者得不到任何好处。
+- **把 Core 拆成多个程序集：** 那是包的改动，不是目录的改动，而且 `InternalsVisibleTo` 和生成器记录的信息都假定只有一个。
+- **计划放到根目录 `plans/` 或 `.plans/`：** 要改 78 处引用和 CI 过滤；`docs/plans/` 保持原位，由 Cloudflare 的构建监视路径排除。
 
 ## 相关页面 [#related]
 

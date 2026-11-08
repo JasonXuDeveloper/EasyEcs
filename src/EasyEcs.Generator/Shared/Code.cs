@@ -28,7 +28,7 @@ internal static class Code
     /// The long names generated code repeats most (vector types and their static classes, Unsafe, MemoryMarshal, the
     /// inlining attribute, Interleaved), each written once in a file-level alias block (<c>using __V512_float =
     /// global::System.Runtime.Intrinsics.Vector512&lt;float&gt;;</c>) and by its alias everywhere else: an alias names the
-    /// same type, so the IL is the same and only the text shrinks (docs/plans/generated-text.md kind 2). The aliases start
+    /// same type, so the IL is the same and only the text shrinks (docs/plans/designs/generated-text.md kind 2). The aliases start
     /// with <c>__</c>, names no user type takes (one named so in an enclosing namespace would win over the alias).
     /// </summary>
     private static readonly Regex Long = new(

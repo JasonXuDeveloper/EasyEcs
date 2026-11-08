@@ -5,7 +5,7 @@ using EasyEcs.Benchmark.Locality;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// docs/plans/locality.md 4.4, phase 0: a condition over a column turned into a row list (<see cref="Selection"/>) at
+/// docs/plans/designs/locality.md 4.4, phase 0: a condition over a column turned into a row list (<see cref="Selection"/>) at
 /// 10 / 50 / 90 % selectivity: a branch per row (the baseline), a store per row without a branch, a permutation table
 /// (AVX2, else 128-bit byte shuffles: NEON's TBL on ARM64), an AVX-512 compressing store (the permutation table
 /// without AVX-512), and the core's Lanes.Compact over 64-row masks. Setup checks every form writes the same list and

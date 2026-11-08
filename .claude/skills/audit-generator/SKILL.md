@@ -7,9 +7,10 @@ metadata:
 
 # Generator audit
 
-Files: `src/EasyEcs.Generator` (netstandard2.0, loaded by every Roslyn host): `ArityGenerator`, `ComponentGenerator`,
-`SystemGenerator`, `PartGenerator` (+ `Parts.cs`), `Code.cs`, `EquatableArray.cs`; `Symbols.cs` is
-shared with the analyzer (`audit-analyzer`).
+Files: `src/EasyEcs.Generator` (netstandard2.0, loaded by every Roslyn host): `Arity/ArityGenerator.cs`,
+`Declarations/` (`ComponentGenerator`, `PartGenerator` + `Parts.cs`, the prefab and view generators), `Systems/`
+(`SystemGenerator` and the models it shares with the analyzer), `Shared/Code.cs`, `Shared/EquatableArray.cs`;
+`Shared/Symbols.cs` is shared with the analyzer (`audit-analyzer`); the vector loops (`Kernel/`) are `audit-vector-loops`.
 
 ## The three jobs
 
@@ -140,7 +141,7 @@ Tier1 listings of a benchmark method: `--inProcess` with `DOTNET_TC_CallCounting
 
 How to see the bound without hardware counters (the VM has none): `llvm-mca` on the Tier1 loop
 (`tools/perf/jitdisasm.sh`), then BenchmarkDotNet with controlled data (sorted against shuffled, 1k / 100k / 1M rows).
-The open work is `docs/plans/microarch.md`.
+The open work is `docs/plans/designs/microarch.md`.
 
 - **An out-of-line method of the job** (a `NoInlining` loop such as the streaming loop) that takes a ref struct of
   the run (`in MaybeColumn<T>`) together with `ref` column arguments fails CS8350 (ref safety): exclude `Maybe<T>`
@@ -151,7 +152,7 @@ The open work is `docs/plans/microarch.md`.
 Generated code is code users read: Go To Definition opens it, the docs' "The generator writes" tabs show it, and its
 size is build time. These rules hold when a template is **written** (a new form, a new parameter, a fix), not only
 when it is audited; `feature` part 2 points here. The survey that found each kind, with counts and template
-locations: `docs/plans/generated-text.md`.
+locations: `docs/plans/designs/generated-text.md`.
 
 Write it like hand-written code:
 

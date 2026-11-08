@@ -13,16 +13,16 @@ One round = parallel audits, each in its own worktree and branch, then triage an
 
 | Skill | Owns | Looks for |
 |---|---|---|
-| `audit-core` | `src/EasyEcs.Core`, its tests and benchmarks | redundancy, non-DRY code, coupling, bugs, hot-path cost |
-| `audit-generator` | `src/EasyEcs.Generator` generators: Arity, Component, System, Part (+ `Parts.cs`), `Code.cs`, `EquatableArray.cs` | what users still write twice, plain forms to emit fast, generator speed |
-| `audit-vector-loops` | `Kernel*.cs`, the vector-loop emission, `Interleaved.cs` / `Lanes.cs` | methods left scalar, conditions, side effects, structural writes as bulk ops, fixable reasons |
-| `audit-analyzer` | `EasyEcsAnalyzer*.cs`, `UnusedSuppressor.cs`, `Symbols.cs`, `Uses.cs`, `Threads.cs`, `src/EasyEcs.CodeFixes` | missing rules (wrong, costly, hand-written code), code fixes, overlaps, false positives |
+| `audit-core` | `src/EasyEcs.Core/**` (every folder), its tests and benchmarks | redundancy, non-DRY code, coupling, bugs, hot-path cost |
+| `audit-generator` | `src/EasyEcs.Generator/{Arity,Declarations,Systems,Shared}/`: the generators Arity, Component, System, Part (+ `Declarations/Parts.cs`), `Shared/Code.cs`, `Shared/EquatableArray.cs` | what users still write twice, plain forms to emit fast, generator speed |
+| `audit-vector-loops` | `src/EasyEcs.Generator/Kernel/` (`Kernel*.cs`), the vector-loop emission, `src/EasyEcs.Core/VectorLoops/` (`Interleaved.cs` / `Lanes.cs`) and `src/EasyEcs.Core/Lookups/` | methods left scalar, conditions, side effects, structural writes as bulk ops, fixable reasons |
+| `audit-analyzer` | `src/EasyEcs.Generator/Analyzer/` (`EasyEcsAnalyzer*.cs`, `UnusedSuppressor.cs`, `Uses.cs`, `Threads.cs`), `Shared/Symbols.cs`, `src/EasyEcs.CodeFixes` | missing rules (wrong, costly, hand-written code), code fixes, overlaps, false positives |
 | `audit-code` | `tools/`, `tests/` structure, `benchmarks/` harness, `samples/`, `templates/`, `demo/`, `.github/` and `docs/scripts/`, the seams between projects | coupling, non-DRY code, dead code, god files, layering, unclear names and comments |
 | `audit-docs` | `docs/content`, README, `skills/easyecs/SKILL.md` (the public skill), samples READMEs | every part of each feature page, stale names, examples, duplication, en/zh |
 | `audit-perf` | no files: research, prototypes in its own worktree | the next performance win (Burst, CUDA, stencil, OpenMP, MPI, OS, databases, HPC runtimes, vLLM, .NET 10), proven with BenchmarkDotNet |
 | `audit-naming` | every name: a report; internal, test, example and docs renames applied in their own commit | ambiguous, wrong or inconsistent names in code, examples and docs; public renames wait for the owner |
 
-`audit-generator`, `audit-vector-loops` and `audit-analyzer` share `Symbols.cs`, and the analyzer reports the reasons
+`audit-generator`, `audit-vector-loops` and `audit-analyzer` share `Shared/Symbols.cs`, and the analyzer reports the reasons
 `Kernel.Vectorize` returns (EECS055 / EECS056): run them in different rounds or give the shared files to one. `audit-naming` reports only, so it runs beside
 any of them.
 

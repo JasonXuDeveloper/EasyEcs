@@ -16,7 +16,7 @@ public enum Density
 }
 
 /// <summary>
-/// The pair question of docs/plans/locality.md 4.1: every entity sums a push from each neighbor within
+/// The pair question of docs/plans/designs/locality.md 4.1: every entity sums a push from each neighbor within
 /// <see cref="Range"/> (separation plus a share of the velocity difference, as boids and crowd steering do). The same
 /// sum four ways: (a) the row loop over a hand-written uniform grid (ids per cell, neighbors read through lookups), (a2)
 /// the same grid holding copies of the positions and velocities, (b) per-entity neighbor lists rebuilt on a cadence, and

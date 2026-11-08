@@ -19,7 +19,7 @@ public enum ListPick
 }
 
 /// <summary>
-/// docs/plans/locality.md 6.6, the neighbor-list form: the generated pair method over a moving crowd (<see cref="Crowd"/>,
+/// docs/plans/designs/locality.md 6.6, the neighbor-list form: the generated pair method over a moving crowd (<see cref="Crowd"/>,
 /// every row stepping 0.02 cutoffs per tick at full speed, forth then back), the lists of each row's neighbors picked by
 /// their cost (Auto), never (Off: the clusters' ranges) or always (On). The vector loop (Generated: a cluster of rows
 /// per step, 8 or 4 lanes) and one pair at a time (GeneratedRows: a row per step, as a method the vector loop cannot

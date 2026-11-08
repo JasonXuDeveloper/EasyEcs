@@ -505,13 +505,13 @@ runs beside any lane once those two merged.
 Starts when every lane above has merged (owner, 2026-10-27: the refactor before docs and benchmarks, so docs and
 numbers are written once about the final code).
 
-- [ ] **1. Directory restructure** (owner, 2026-11-08, L9 / L10: runs as soon as halos, analyzer lane 2 and lane 4
-      merge, before lanes 1, 5 and 6 start; besides the four projects and `tools/perf/` it also groups the
-      `docs/content/guide` pages (folders + meta.json sections + `_redirects` for the old URLs, en and zh), the rest of
-      `tools/`, and `docs/plans/`, as chosen in L11 / L12) (layout approved 2026-11-07: `finish-scan.md` Report 2 plus `tools/perf/`; it
-      supersedes `layout.md`): `git mv` only, alone, after every branch merged and after lane 3's T1; its six commits,
-      `docs/vite.config.ts` recursive, `site.ts:58`, skills' paths, `.DotSettings`, the 107 `tools/perf/` references;
-      `inner-loops.md`'s `CellTests.cs` reference dropped.
+- [x] **1. Directory restructure** (owner, 2026-11-08, L5, L6, L9-L12; D142; branch `feat-restructure`): the four
+      projects in folders by concern (Core, Generator, the unit tests, the benchmarks; namespaces unchanged, a
+      `.DotSettings` each), `tools/perf/` and `tools/docs/`, `docs/plans/designs/` and `docs/plans/owner/`, the guide
+      in folders, `tools/agents.sh` reading every depth and failing on a map line naming a missing file,
+      `docs/vite.config.ts` recursive. Left for the owner: `docs/scripts/build-demo.sh` (the bundle's
+      `source.sha256` hashes the sources' paths, so it changed with the move and was stale before it) and the
+      Cloudflare build-watch exclude of `docs/plans/*`.
 - [ ] **2. The exemplar pass** (#169, `audit-code`; owner, 2026-10-27): every piece of code users read or copy in the
       most fitting form, new features included. Proof: outputs and README / page output blocks match, 0 B steady
       state, tests three ways, A/B no slower.

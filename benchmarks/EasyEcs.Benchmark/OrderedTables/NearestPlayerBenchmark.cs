@@ -5,7 +5,7 @@ using EasyEcs.Benchmark.Locality;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// docs/plans/locality.md 4.2, phase 0: BattleServer's NearestPlayer (<see cref="PlayerSearch"/>) over its 100,000 units
+/// docs/plans/designs/locality.md 4.2, phase 0: BattleServer's NearestPlayer (<see cref="PlayerSearch"/>) over its 100,000 units
 /// (33,333 players), per query: the sample's scan of the players (the baseline) against a search of their sorted
 /// clusters, sorted once in setup, and with the sort paid by 64 queries. Setup checks every query finds a player at the
 /// same distance.

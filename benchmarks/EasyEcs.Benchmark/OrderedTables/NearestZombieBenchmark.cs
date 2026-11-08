@@ -5,7 +5,7 @@ using EasyEcs.Benchmark.Locality;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// docs/plans/locality.md 4.2, phase 0: samples/VoxelServer's ZombieTargetSystem.Pick (<see cref="ZombieHunt"/>), every
+/// docs/plans/designs/locality.md 4.2, phase 0: samples/VoxelServer's ZombieTargetSystem.Pick (<see cref="ZombieHunt"/>), every
 /// zombie once (a full look: the sample spreads it over 10 ticks with Slices). The ring walk through the players' chunk
 /// index and position lookups (the sample's form, the baseline) against a search of the players' sorted clusters, with the
 /// sort once per look and with it 10 times per look (the players move every tick and the sample looks every tick).

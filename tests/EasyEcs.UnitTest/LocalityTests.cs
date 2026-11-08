@@ -5,7 +5,7 @@ using NUnit.Framework;
 namespace EasyEcs.UnitTest;
 
 /// <summary>
-/// The phase 0 prototypes of docs/plans/locality.md and borrowed-ideas.md item 2 (benchmarks/EasyEcs.Benchmark/Locality,
+/// The phase 0 prototypes of docs/plans/designs/locality.md and borrowed-ideas.md item 2 (benchmarks/EasyEcs.Benchmark/Locality,
 /// linked here): every version computes what the plain form computes, and a tick allocates nothing once warm.
 /// </summary>
 public class LocalityTests

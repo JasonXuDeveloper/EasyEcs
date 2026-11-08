@@ -5,7 +5,7 @@ using EasyEcs.Benchmark.Locality;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// docs/plans/borrowed-ideas.md item 2, phase 0: 100,000 waiting entities, 1 % waking per tick (<see cref="Timers"/>),
+/// docs/plans/designs/borrowed-ideas.md item 2, phase 0: 100,000 waiting entities, 1 % waking per tick (<see cref="Timers"/>),
 /// per tick: a [ForEach] comparing every wake tick with the clock (the baseline; the generator's vector loop), the same
 /// row by row, a [ForEach] counting countdowns down, and a timer wheel visiting only this tick's bucket (the work run
 /// through the ids, or a tag set for a [ForEach] over it). Each invocation runs 10 ticks. Setup checks every version did

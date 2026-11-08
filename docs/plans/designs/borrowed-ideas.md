@@ -130,7 +130,7 @@ on `LookupChaseBenchmark` (1k, 1M, 16M) on two machines.
 
 The owner's rule (a faster case ships, a slower one never) with a gate that keeps a world in the cache on today's code:
 
-- **The gate**: `CacheSizes.LastLevel` (src/EasyEcs.Core/CacheSizes.cs; a gate per form since, below), read once per process as the GC reads it for
+- **The gate**: `CacheSizes.LastLevel` (src/EasyEcs.Core/Lookups/CacheSizes.cs; a gate per form since, below), read once per process as the GC reads it for
   its gen0 budget: Windows `GetLogicalProcessorInformationEx(RelationCache)` (the largest cache record), Linux the largest
   `/sys/devices/system/cpu/cpu0/cache/index*/size`, then `sysconf(_SC_LEVEL3_CACHE_SIZE)`, macOS `hw.l3cachesize`, else
   `hw.perflevel0.l2cachesize`. Only where `Prefetching.IsSupported` (x86, ARM64 with SVE); any failure or 0 is
@@ -146,7 +146,7 @@ The owner's rule (a faster case ships, a slower one never) with a gate that keep
   records of the vector's rows 32 past it and the rows of T 16 past it; `f{i}` is set once per pass by the job's
   initializer. Only ids of an `in` component's lanes (not a wide component).
 - What a chase is: `lookup[x.F]`, `Read(x.F)`, `Has(x.F)` (records only) at an EntityId reached through fields or
-  auto-properties of an `in` component (src/EasyEcs.Generator/Chases.cs); a keyed lookup is not one.
+  auto-properties of an `in` component (src/EasyEcs.Generator/Systems/Chases.cs); a keyed lookup is not one.
 
 Proof (frozen snapshots: base = claude/relaxed-ramanujan-j4j9k4 at 8fc246f, head = feat-prefetch-gate at e080b98; default
 job, two rounds in alternating order; ms, 1k in us; the generated code ignores Distance, so each value is the mean of
@@ -201,7 +201,7 @@ The same gate and the same rule, extended to every chase the generated code and 
 
 - **Index probes** (`lookup.TryFind(x.F, ...)`, `Find`, `Count` at a key of an `in` component): the row form's twin
   prefetches the index's own lines, 16 rows ahead and 8 rows ahead (`ValueIndex.Prefetch(key, stage)`,
-  src/EasyEcs.Core/IndexPrefetch.cs): a direct key's slot (stage 1); an `EntityId` key's slot, then its id list; a
+  src/EasyEcs.Core/Indexes/IndexPrefetch.cs): a direct key's slot (stage 1); an `EntityId` key's slot, then its id list; a
   hashed key's bucket (stage 1), then the entry the bucket points at (stage 2; `Dictionary`'s `_buckets` /
   `_comparer` through `UnsafeAccessor`, `_entries` through a `FieldInfo` cached per thread against the buckets array).
   The gate (`LookupExtensions.Probes<T, TKey>`) is the index's own memory past the cache: slots, the target map, the
@@ -414,7 +414,7 @@ checked against the code (at 49c8d6f), `decisions.mdx`, the roadmap's "Dropped" 
 ### New here, each with where it applies and its proof
 
 1. **False sharing between the chunks' `Emit<T>` lists** (low latency, LMAX "mechanical sympathy"). `Emit<T>.Add`
-   (src/EasyEcs.Core/Emit.cs) writes `store.Count` of its chunk's `EmitStore<T>` on every record. The pool
+   (src/EasyEcs.Core/Parameters/Emit.cs) writes `store.Count` of its chunk's `EmitStore<T>` on every record. The pool
    (`EmitPool<T>`) allocates its lists one after another, each followed by its first 16-element array; once a
    collection compacts away those arrays, lists can sit side by side and two chunks' counts share a cache line.
    Built: a cache line of padding after `EmitStore<T>`'s fields (a 64-byte `CacheLinePad` struct). **Reverted: a

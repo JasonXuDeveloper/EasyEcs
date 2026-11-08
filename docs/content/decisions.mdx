@@ -137,6 +137,7 @@ after the change on the machine of the time; they are history, not the current r
 | [D134](#d134-eecs103) | EECS103: a batch method's hand-written vector loop is reported with the method for one row |
 | [D135](#d135-inlined-locals) | Generated jobs stay within the inliner's 32 IL locals; loops past it run as methods per width |
 | [D141](#d141-drain-entity-method-parallel-for) | `[Drain]`, `[EntityMethod]` and `world.ParallelFor` |
+| [D142](#d142-folders-by-concern) | Source folders by concern, in the name the guide uses |
 
 The numbers D85 to D89, D91 to D93 and D96 were never used: numbers are given to work in progress in advance and are not
 reused.
@@ -3729,6 +3730,37 @@ migration entry and no code fix: they were never in a package.
   still put it in the `ForEach` family, which it is not.
 - **An `[Obsolete]` alias or a code fix for the old names:** none of them shipped (4.7 has none), so there is no code
   to migrate.
+
+## D142. Source folders by concern, in the name the guide uses [#d142-folders-by-concern]
+
+**Decision.** The four projects that held their files flat (`EasyEcs.Core` 90, `EasyEcs.Generator` 69,
+`EasyEcs.UnitTest` 89, `EasyEcs.Benchmark` 99) keep them in folders by concern. Core, the tests and the benchmarks use
+the same names (`Components/`, `Entities/`, `Grids/`, `Indexes/`, `Lookups/`, `OrderedTables/`, `Parallel/`,
+`Parameters/`, `Queries/`, `Relations/`, `Saves/`, `Storage/`, `Systems/`, `VectorLoops/`, ...); the generator has
+`Arity/`, `Declarations/`, `Systems/`, `Kernel/`, `Analyzer/` and `Shared/`, and the tests and benchmarks add
+`Generator/` (and `Analyzer/` for the tests). Namespaces do not change: a type is `EasyEcs.Tile`, not
+`EasyEcs.Grids.Tile`, and a `.DotSettings` per project turns Rider's folder-vs-namespace hint off. The tools group as
+`tools/perf/` (the benchmark scripts and their projects) and `tools/docs/` (ApiDocs, DocCheck), and the plans in
+`docs/plans/` as `designs/` (the design plans), `owner/` (the owner's own steps) and, at the root, the backlog, the
+docs to-dos and the owner's ledger.
+
+**Why.**
+- **A feature's files sit together under the name its guide page uses**: `Tile.cs`, `TileSteps.cs`, `Cell.cs`, the
+  tile tests and the nine tile benchmarks are one folder each, so a reader finds the code, its tests and its
+  numbers by the word the docs use. 338 flat files had only each project's `AGENTS.md` map as an index.
+- **No namespace change makes the move a pure rename**: history follows, no public name changes, no migration entry,
+  and the package holds the same files (ApiDocs regenerates with no diff).
+- **What another project or a page reaches by path stays at its project's root** (`BattleServer.cs`,
+  `GeneratorCorpus.cs`, `WorldSimulation.cs`, `BenchmarkConfig.cs`, `Locality/`, the harness).
+- **The map cannot rot silently**: `tools/agents.sh --check` reads every source file at any depth, names each by its
+  path in its project, and fails on a map line naming a file that does not exist.
+
+**Considered.**
+- **Namespaces following the folders:** breaks every user's `using` and the generated code's names for no reader's gain.
+- **Splitting Core into several assemblies:** a change of the package, not of the layout, and `InternalsVisibleTo` and
+  the generator's recorded facts assume one.
+- **Plans under a root `plans/` or `.plans/`:** 78 references and the CI filters change; `docs/plans/` stays and
+  Cloudflare's build watch excludes it.
 
 ## Related [#related]
 

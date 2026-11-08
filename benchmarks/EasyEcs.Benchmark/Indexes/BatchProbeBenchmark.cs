@@ -5,7 +5,7 @@ using EasyEcs.Benchmark.Locality;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// docs/plans/locality.md 4.4, phase 0, and borrowed-ideas.md item 1: 4,096 lookups in an open-addressing int to int
+/// docs/plans/designs/locality.md 4.4, phase 0, and borrowed-ideas.md item 1: 4,096 lookups in an open-addressing int to int
 /// table of 1k, 100k or 16M keys (<see cref="ProbeTable"/>; 90 % of the keys present), per lookup: one key at a time
 /// (the baseline), one at a time with the slots of the key <c>distance</c> queries ahead prefetched (group prefetching),
 /// vertically 8 keys per AVX2 vector, and vertically with refill (Polychroniou). At 16M keys (256 MiB of slots, past the

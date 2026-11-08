@@ -9,7 +9,7 @@ using System.Runtime.Intrinsics.X86;
 namespace EasyEcs.Benchmark.Locality;
 
 /// <summary>
-/// The selective store of docs/plans/locality.md 3.3 / 4.4 (Polychroniou, Raghavan and Ross, SIGMOD 2015): the rows of
+/// The selective store of docs/plans/designs/locality.md 3.3 / 4.4 (Polychroniou, Raghavan and Ross, SIGMOD 2015): the rows of
 /// a column whose value passes a condition, written side by side as a row list. A branch per row; a store per row with
 /// the count advanced by the condition (no branch); a permutation table: 8 rows per AVX2 compare (256 entries of 8
 /// lanes, one per mask byte), or without AVX2 4 rows per 128-bit compare and one byte shuffle (16 entries of 16
@@ -200,7 +200,7 @@ public static class Selection
 }
 
 /// <summary>
-/// The batch probe of docs/plans/locality.md 3.3 / 4.4: an open-addressing int to int table (linear probing, a
+/// The batch probe of docs/plans/designs/locality.md 3.3 / 4.4: an open-addressing int to int table (linear probing, a
 /// power-of-two capacity at most half full, keys > 0, 0 an empty slot) probed for a batch of keys. One key at a time;
 /// vertically, 8 keys per AVX2 vector, the vector kept until all its lanes finished; and vertically with refill
 /// (Polychroniou: a finished lane takes the next key at once, AVX-512VL expanding loads, the finished lanes'

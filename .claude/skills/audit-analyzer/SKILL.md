@@ -7,13 +7,13 @@ metadata:
 
 # Analyzer audit
 
-Files in `src/EasyEcs.Generator`: `EasyEcsAnalyzer.cs` (declarations and [ForEach] rules), `.Performance.cs` (code
+Files in `src/EasyEcs.Generator/Analyzer/`: `EasyEcsAnalyzer.cs` (declarations and [ForEach] rules), `.Performance.cs` (code
 that works but costs), `.Usage.cs` (code that compiles but does not do what it says), `.Systems.cs` (systems as
 declarations), `.Parallel.cs` (code on several threads), `.Parts.cs` (generated parts), `.Forms.cs` (what the
 generator declares for code written by hand), `.Parameters.cs` ([ForEach] parameters done by hand), `.Members.cs`
 (EECS033, an analyzer of its own), `.Layout.cs` (cold fields), `.Lambdas.cs` (lambda passes), `.Views.cs` ([View]),
 `.Records.cs` (Emit<T> records nobody clears), `.Pairs.cs` (pair methods), `.Tiles.cs` (tiles and cell methods),
-`.Fusion.cs` (passes that almost share a walk); `UnusedSuppressor.cs`, `Symbols.cs` (shared with the generators),
+`.Fusion.cs` (passes that almost share a walk); `UnusedSuppressor.cs`, `Shared/Symbols.cs` (shared with the generators),
 `Uses.cs`, `Threads.cs`; fixes in `src/EasyEcs.CodeFixes`. The file map with each file's ids is
 `src/EasyEcs.Generator/AGENTS.md`. Rule list: `docs/content/guide/help/analyzer.mdx` and the range in AGENTS.md
 (EECS002-EECS133).

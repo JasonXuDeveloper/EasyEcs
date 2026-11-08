@@ -39,7 +39,7 @@
         <EmbeddedResource Include="..\..\benchmarks\EasyEcs.Benchmark\BattleServer.cs" LogicalName="BattleServer.cs"/>
         <!-- the VoxelServer sample's world, its zombies and their scent (VoxelServerTests) -->
         <ProjectReference Include="..\..\samples\VoxelServer\VoxelServer.csproj"/>
-        <!-- the phase 0 prototypes of docs/plans/locality.md, checked against their plain forms (LocalityTests) -->
+        <!-- the phase 0 prototypes of docs/plans/designs/locality.md, checked against their plain forms (LocalityTests) -->
         <Compile Include="..\..\benchmarks\EasyEcs.Benchmark\Locality\*.cs" LinkBase="Locality"/>
         <!-- the generators, parse options and references every Roslyn host of the generators shares -->
         <Compile Include="..\..\tools\Shared\GeneratorHost.cs" Link="GeneratorHost.cs"/>

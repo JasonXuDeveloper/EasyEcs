@@ -371,7 +371,7 @@ the right class; a scalar method that a small change vectorizes and that gets no
 ### EECS103: SIMD written by hand that the generator writes from the plain form
 v1 (batch `[ForEach]` methods, their casts, loads and stores) shipped: what qualifies, the guards, the code fix and
 where this plan was wrong (no lambda passes: they take no spans; no accumulators; a span only read becomes `in`) are
-D134, the detection `src/EasyEcs.Generator/HandSimd.cs`. v2 and v3 extend `HandSimd` and keep its rule: report only a
+D134, the detection `src/EasyEcs.Generator/Analyzer/HandSimd.cs`. v2 and v3 extend `HandSimd` and keep its rule: report only a
 rewrite bound in a copy of the compilation that gets the generator's loop.
 
 **v2 (after WP5):** a Tile method whose body is `Pad()` (whole tile), a `Rows(reads)` loop, an `x += Count` loop of `Load128/256/LoadVector` at constant offsets, and `.CopyTo(into.Slice(row.Index + x))` into `Mut<DynamicBuffer<TOut>>`. Report it with the Cell form (`TileBenchmark` Blur/Wave/Life fire; VoxelServer `Flow` does not: `Pad(from,to)` and summaries).
@@ -437,10 +437,10 @@ Kernel.Summed), the index as a value (WideIndex), batch methods' loops over thei
 (BodyCopy.Accessors), VoxelServer's height map as a plain loop; ElementLoopTests, ElementLoopBenchmark (+ SumInts,
 SumFloats), HeightMapLoopBenchmark, BatchLoopBenchmark. The rest of this entry is the plan as written.
 - Tests:
-  - new `tests/EasyEcs.UnitTest/ElementLoopTests.cs`: equivalence (Lengths, edges, empty buffer, a buffer shared copy-on-write written in the loop, `Mut.Write` stamps once); integer, Min/Max and float-Fast reductions; bounds failure throws at the same element; private helper reached through a generated accessor; 0 B; 1 vs 4 threads.
+  - new `tests/EasyEcs.UnitTest/VectorLoops/ElementLoopTests.cs`: equivalence (Lengths, edges, empty buffer, a buffer shared copy-on-write written in the loop, `Mut.Write` stamps once); integer, Min/Max and float-Fast reductions; bounds failure throws at the same element; private helper reached through a generated accessor; 0 B; 1 vs 4 threads.
   - `GeneratorTests`: the copy, `#line`, caching.
   - `AnalyzerTests.Performance`: EECS055 at loops (fixable vs inherent), EECS056 for `Require`.
-- Benchmarks: new `benchmarks/EasyEcs.Benchmark/ElementLoopBenchmark.cs`, at 10k/100k entities and Elements 4/64/1,024, each case Scalar (`SimdMode.Off`) vs Generated vs HandWritten:
+- Benchmarks: new `benchmarks/EasyEcs.Benchmark/VectorLoops/ElementLoopBenchmark.cs`, at 10k/100k entities and Elements 4/64/1,024, each case Scalar (`SimdMode.Off`) vs Generated vs HandWritten:
   - `Decay` (element-wise buffer float);
   - `HeightMap` (the VoxelServer shape: the hand Vector128 version vs plain);
   - `SumInts` (reduction);
@@ -696,8 +696,8 @@ WP5b design (decided 2026-11-01, from what Flow.cs needs):
 - **One body for both widths (`ISimdVector`), our own polynomials:** stay out (D126/D127).
 
 ### Critical Files for Implementation
-- /workspace/EasyEcs/src/EasyEcs.Generator/Kernel.cs (`Translate`, `Statement`, `IsUniform`/`Scalar`, `Paths`; plus new `Kernel.Loops.cs` / `Kernel.Cells.cs`)
-- /workspace/EasyEcs/src/EasyEcs.Generator/SystemGenerator.cs (`EmitAccessor`, `EmitVectorLoop`, `EmitFlatLoop`, `ForEachModel.Simd`/`OutOfLine`, `TileModel`)
-- /workspace/EasyEcs/src/EasyEcs.Generator/LambdaPass.cs and /workspace/EasyEcs/src/EasyEcs.Generator/SystemGenerator.Lambdas.cs (Copy/Qualifier → `BodyCopy.cs`; the ParallelFor lambda)
-- /workspace/EasyEcs/src/EasyEcs.Core/Tile.cs (new `Cell<,>`, `PaddedTile` row access) and /workspace/EasyEcs/src/EasyEcs.Core/World.For.cs
-- /workspace/EasyEcs/src/EasyEcs.Generator/EasyEcsAnalyzer.Forms.cs (EECS103) with /workspace/EasyEcs/src/EasyEcs.CodeFixes/EasyEcsCodeFixes.Forms.cs
+- /workspace/EasyEcs/src/EasyEcs.Generator/Kernel/Kernel.cs (`Translate`, `Statement`, `IsUniform`/`Scalar`, `Paths`; plus new `Kernel.Loops.cs` / `Kernel.Cells.cs`)
+- /workspace/EasyEcs/src/EasyEcs.Generator/Systems/SystemGenerator.cs (`EmitAccessor`, `EmitVectorLoop`, `EmitFlatLoop`, `ForEachModel.Simd`/`OutOfLine`, `TileModel`)
+- /workspace/EasyEcs/src/EasyEcs.Generator/Systems/LambdaPass.cs and /workspace/EasyEcs/src/EasyEcs.Generator/Systems/SystemGenerator.Lambdas.cs (Copy/Qualifier → `BodyCopy.cs`; the ParallelFor lambda)
+- /workspace/EasyEcs/src/EasyEcs.Core/Grids/Tile.cs (new `Cell<,>`, `PaddedTile` row access) and /workspace/EasyEcs/src/EasyEcs.Core/Parallel/World.For.cs
+- /workspace/EasyEcs/src/EasyEcs.Generator/Analyzer/EasyEcsAnalyzer.Forms.cs (EECS103) with /workspace/EasyEcs/src/EasyEcs.CodeFixes/EasyEcsCodeFixes.Forms.cs

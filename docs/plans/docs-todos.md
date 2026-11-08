@@ -276,7 +276,7 @@ already hands a freed large array's memory back resident. (d) **The GC's setting
 and InstantiateEach 1.2-1.6x slower; the segments GC tripled the faults of a load and an InstantiateEach and made
 Capture 1.5x and InstantiateEach 1.2x slower. What would change it: (a) a host that does not report free pages (bare
 metal, most cloud VMs), where nothing is left to cut; (c) a workload that disposes and recreates worlds of one shape
-faster than the GC collects (now the native-columns work item, `docs/plans/native-columns.md`).
+faster than the GC collects (now the native-columns work item, `docs/plans/designs/native-columns.md`).
 
 zh: *保留：用户预留的数组在预留时预先缺页（`MADV_POPULATE_WRITE`）。不保留：*（a）**用预先缺页减少大页缺页的开销**：
 用 2 MiB 页时一次调用的开销等于第一次触碰（4 秒前释放的 128 MiB：触碰 536 ms，预先缺页 572 ms，波动 41-50 ms）；时间
@@ -289,7 +289,7 @@ zh: *保留：用户预留的数组在预留时预先缺页（`MADV_POPULATE_WRI
 （d）**GC 的设置**由宿主程序决定：16M 时 `GCRetainVM` 和 `GCgen0size` 不改变计数；`GCConserveMemory=5` 多出 20-65 %
 缺页，Grow、Load、Capture、InstantiateEach 慢 1.2-1.6 倍；分段 GC 让加载和 InstantiateEach 的缺页变成三倍，Capture 慢
 1.5 倍，InstantiateEach 慢 1.2 倍。什么会改变结论：（a）不上报空闲页的宿主（裸机、多数云虚拟机），那里已无可省；（c）
-比 GC 回收更快地释放、重建同样形状世界的工作负载（现在是原生列的工作项，`docs/plans/native-columns.md`）。
+比 GC 回收更快地释放、重建同样形状世界的工作负载（现在是原生列的工作项，`docs/plans/designs/native-columns.md`）。
 
 **5. `[Accumulate]` users sharing a stage (voxel-rewrite.md GA2, feat-later-accumulate, 2026-11-02).**
 
@@ -711,7 +711,7 @@ Note: orphan MSBuild node (nodeReuse) held /tmp/bench.lock; agents must keep MSB
 - Follow-up (analyzer): EECS049 could also report a [WithAny<Q,T>] whose every type is in [Without<>] (matches nothing). New detection; do with the analyzer follow-ups.
 - analyzer.mdx + zh: EECS025/053 cover lambda passes; EECS025 unwritten view ref fields (compilation end, 'ref readonly' fix, public library views excluded); EECS049 new cases (WithAny all excluded, lambdas, AsX/TryGetX on visited entity), new message; EECS049 on a lambda suppresses EECS095-097. Changelog.
 - Decision record (small): EECS025 for view fields is compilation-wide, reported on the field (a per-method report would break methods that write it).
-- roadmap.mdx + zh: one Planned item for docs/plans/inner-loops.md's goal (plain loops over buffers / inline arrays / ParallelFor lambdas become vector loops; Cell<TCell,TTile> shaders; EECS103), linking D77/D90. Rewrite the stale "Vector loops: the forms left for later" item (Pow and kin partly done by D127; masked tail D126).
+- roadmap.mdx + zh: one Planned item for docs/plans/designs/inner-loops.md's goal (plain loops over buffers / inline arrays / ParallelFor lambdas become vector loops; Cell<TCell,TTile> shaders; EECS103), linking D77/D90. Rewrite the stale "Vector loops: the forms left for later" item (Pow and kin partly done by D127; masked tail D126).
 
 ## feat-lookupkey-chunkrows (D129, D130, merged)
 - Changelog / README What's new: `[LookupKey]` under its final name only (never released as `[IndexKey]`, no migration (merged: "Sweep 2026-11-07", item S3)), measured chunk sizes (ChunkSize only overrides).
@@ -1184,7 +1184,7 @@ lanes keep the scalar walk). All 0 B. ARM64 (NEON `TBL`) runs the 128-bit form; 
 
 ## feat-locality-pairs (L2: the generated pair form)
 
-What shipped (code): `[Neighbor]` parameters (`src/EasyEcs.Core/Pairs.cs`), the pair pass (`World.ForPairs`, hidden;
+What shipped (code): `[Neighbor]` parameters (`src/EasyEcs.Core/OrderedTables/Pairs.cs`), the pair pass (`World.ForPairs`, hidden;
 `IPairJob` / `PairRun`, hidden), the generated order, job and vector loop (`SystemGenerator.Pairs.cs`, `PairForm.cs`,
 `Kernel.Neighbors.cs`), EECS105-107 (`EasyEcsAnalyzer.Pairs.cs`). Numbers: the final report of the branch (PairsBenchmark
 `Generated` / `GeneratedRows` against `GridLookups` and `CoreClusters`).
@@ -1486,7 +1486,7 @@ Decision-record drafts (for decisions.mdx + .zh.mdx):
   every instance can cost count x 4 KB per buffer type by default; Reserve stays cheap and the caller opts in.
 - **G7 not built** (owner-review): a keyed read needs both lookups anyway.
 
-## feat-microarch (M0-M3, `docs/plans/microarch.md` section 5)
+## feat-microarch (M0-M3, `docs/plans/designs/microarch.md` section 5)
 
 What shipped (code): two accumulator sets for floating-point reductions in the loop over whole vectors
 (`SystemGenerator.Paired`, `Kernel.Code.Chains`); the loops'
@@ -1835,7 +1835,7 @@ threads; float sums differ from the serial pass's in the last bits (another orde
 
 - Decision record (en + zh): text in the agent's final report, kept in the scratchpad
   (`feat-streaming-stores/decision.md`); gate counts every column the pass moves, not only the written one.
-- `docs/plans/microarch.md`: candidate 8 from "Dropped" to "Shipped" with the numbers; `owner-review.md`: nothing (no streaming entry was left there; microarch.md fixed 2026-11-07); roadmap item; changelog + README "What's new" (Performance).
+- `docs/plans/designs/microarch.md`: candidate 8 from "Dropped" to "Shipped" with the numbers; `owner-review.md`: nothing (no streaming entry was left there; microarch.md fixed 2026-11-07); roadmap item; changelog + README "What's new" (Performance).
 - Guide page on vector loops (en + zh): what streams and when (write-only column, no blocks, past the LLC, >= 1,024
   rows), the schedule line "write-only columns streamed past the last-level cache", pitfall: `+=` or a conditional
   write keeps plain stores.
@@ -2955,7 +2955,7 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   128-bit walk otherwise (TileStencilBenchmark.Blur9_Columns512). Verdict and numbers: the backlog's #157 row.
 - **decisions.mdx + zh (the halo read in place):** a 2D cell pass of a cross stencil (every shift along x on the cell's
   own row) reads its halo from the neighbors' buffers, shifting the vectors that cross a row's ends in registers; box
-  stencils copy it into the texture. Why, considered and numbers: docs/plans/inner-loops.md WP5 ("The halo read in
+  stencils copy it into the texture. Why, considered and numbers: docs/plans/designs/inner-loops.md WP5 ("The halo read in
   place"). why-fast / guide/performance/grids pages: one sentence where the exchange is described; the schedule line says "its halo
   read in place where the shape allows".
 - **performance page:** TileStencil's Laplacian_Cell moves with it (bench sync); Blur9_Columns512 joins the stencil
@@ -3016,7 +3016,7 @@ its memory at once on Linux (RSS grows at the reservation, not as rows are writt
   the hand-written shader.
 - **Changelog (New):** "Cell methods take several cells and out cells, a result per tile (`ref Reduce<T>` of the
   tile's component), and skip rows proved blank; X vectorizes in byte rows."
-- **Numbers:** the port did not ship (docs/plans/inner-loops.md WP5b (5) verdict): C after the per-field fold equals B
+- **Numbers:** the port did not ship (docs/plans/designs/inner-loops.md WP5b (5) verdict): C after the per-field fold equals B
   (Flow as written exchanging every layer of every chunk), 2.6-3.6x A in the steady state. decisions.mdx + zh: a record
   "The voxel water stays hand-written" with that table and its cause (the sampled cells exchanged over every layer; the
   range from the user's summary is the open question for the owner); roadmap: the range under "Planned" if the owner
@@ -3050,7 +3050,7 @@ method as `in T` of a component of the tile's entity.
   it with the tools it already has, Lookup and Beside; the pass reads two ints), why only where rows may be skipped
   (the rows outside are filled as skipped rows), the name (extends `ExchangeHalo(from, to)`; MPI's subarray and
   Halide's bounds name boxes, not layers; ITileRange vaguer, IActiveLayers clashes with the active rows), and the
-  numbers: TileLayersBenchmark (Whole against Layers) and the voxel water (docs/plans/inner-loops.md WP5b).
+  numbers: TileLayersBenchmark (Whole against Layers) and the voxel water (docs/plans/designs/inner-loops.md WP5b).
 - **guide/help/analyzer.mdx + zh:** EECS123 (Warning): a cell method's ITileLayers that cannot bound its pass (it reads its
   place, takes several cells or has a result per tile, and what it computes on a blank row is not proved): every layer
   runs; the reasons as the message gives them. EECS026 does not report the layers' parameter (the pass reads it).

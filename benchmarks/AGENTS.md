@@ -19,7 +19,7 @@ A benchmark nests its components in its class (or a static class of its file), s
 benchmarks; only the headline worlds (WorldSimulation.cs, MicroBenchmarks.cs) declare theirs at namespace level.
 
 `benchmarks/EasyEcs.Benchmark/` BenchmarkDotNet: the headline worlds, one benchmark per feature, the phase 0
-prototypes of docs/plans/locality.md (Locality/). Always measure with
+prototypes of docs/plans/designs/locality.md (Locality/). Always measure with
 BenchmarkDotNet.
 
 ## Root
@@ -121,7 +121,7 @@ Indexes/OrderedIndexBenchmark.cs  a leaderboard through the ordered index
 ## Locality/
 
 ```
-Locality/                   phase 0 of docs/plans/locality.md: hand-written prototypes that decided what got
+Locality/                   phase 0 of docs/plans/designs/locality.md: hand-written prototypes that decided what got
                             built, and the worlds the shipped forms are measured on (linked into the unit tests
                             by LocalityTests; why each file stays: locality.md's status). Every kernel picks 8
                             lanes when Vector256.IsHardwareAccelerated, else 4 (ARM64's NEON), and guards each

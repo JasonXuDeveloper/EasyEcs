@@ -48,7 +48,7 @@ What would change the verdict: users' code showing many timers that only destroy
 ## Machine-bound items of #159: thread pinning, the helpers' queue line (feat-later-research, 2026-11-03)
 
 **Not built: this shared 4-core VM cannot show them.** Owner (2026-11-07): the entry stays here; it needs a quiet
-machine with 8 or more cores, so it is not part of the owner's M4 run list (`docs/plans/owner-m4.md`). Two low-latency ideas of `borrowed-ideas.md` "#159 remainder":
+machine with 8 or more cores, so it is not part of the owner's M4 run list (`docs/plans/owner/owner-m4.md`). Two low-latency ideas of `borrowed-ideas.md` "#159 remainder":
 
 - **The helpers' queue counter apart from its gate** (`Workers`: `_queued`, which spinning helpers read, shares a
   cache line with the `SpinGate` every `Post` and `Take` compare-and-swaps). The bound is one or two cache-line

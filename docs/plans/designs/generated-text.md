@@ -193,7 +193,7 @@ Class (a), IL identical (local names live in the PDB only; job field renames cha
 
 ## Guards against regressions
 
-Existing harness: `GeneratorTests.Compile(...)` + `GeneratorTests.Driver()` (`tests/EasyEcs.UnitTest/GeneratorTests.cs:23-31`)
+Existing harness: `GeneratorTests.Compile(...)` + `GeneratorTests.Driver()` (`tests/EasyEcs.UnitTest/Generator/GeneratorTests.cs:23-31`)
 run all generators over sources; `IsCode(tree)` picks `.System.g.cs` / `.ForEach.g.cs`; `KernelTests` and
 `FusionTests`/`LambdaPassTests` already hold a corpus of every vector form. A guard test can collect the generated
 trees of those corpora (one helper: run `Driver().RunGeneratorsAndUpdateCompilation` over the sources each test class

@@ -36,7 +36,7 @@ AllocationTests.cs    the 0 B budget of steady-state ticks, structural changes, 
 BattleServerTests.cs  the world of docs/content/example.mdx as a whole (BattleServer.cs linked from
                       EasyEcs.Benchmark)
 Fixtures.cs           the shared test components; Allocations (Of, Baseline, WarmUp, PoolRents)
-LocalityTests.cs      the phase 0 prototypes of docs/plans/locality.md and borrowed-ideas.md
+LocalityTests.cs      the phase 0 prototypes of docs/plans/designs/locality.md and borrowed-ideas.md
                       (benchmarks/EasyEcs.Benchmark/Locality linked): each against its plain form, 0 B per
                       tick
 VoxelServerTests.cs   the sample's zombies: around a wall and a pit by the scent, stuck walking the straight

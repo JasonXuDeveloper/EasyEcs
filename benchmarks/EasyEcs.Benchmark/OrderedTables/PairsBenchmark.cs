@@ -5,7 +5,7 @@ using EasyEcs.Benchmark.Locality;
 namespace EasyEcs.Benchmark;
 
 /// <summary>
-/// docs/plans/locality.md 4.1, phase 0: the sum over neighbors within a cutoff (<see cref="Crowd"/>), per tick, four
+/// docs/plans/designs/locality.md 4.1, phase 0: the sum over neighbors within a cutoff (<see cref="Crowd"/>), per tick, four
 /// ways: the row loop over a hand-written grid reading neighbors through lookups (what users write today, the
 /// baseline), the grid with copies of the positions and velocities, per-entity neighbor lists rebuilt every 10 ticks,
 /// and a hand-written cluster-pair kernel over Morton-sorted rows in clusters of 8 (kernel only, the side arrays standing

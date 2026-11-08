@@ -7,7 +7,7 @@ using System.Runtime.Intrinsics;
 namespace EasyEcs.Benchmark.Locality;
 
 /// <summary>
-/// Phase 0 of docs/plans/locality.md: 2D points ordered along a Morton curve, cut into clusters of 8 (one 256-bit float
+/// Phase 0 of docs/plans/designs/locality.md: 2D points ordered along a Morton curve, cut into clusters of 8 (one 256-bit float
 /// vector) with an axis-aligned box each, and a tree of boxes over consecutive clusters (fan-out 8: the Morton order makes
 /// consecutive clusters neighbors, so the tree is a linear BVH for free). The prototype keeps the sorted points in side
 /// arrays; the core version (L1) would permute the table's columns in place and keep only the boxes.

@@ -371,7 +371,7 @@ computing. Lessons so far (MultiWorld, .NET 10, AVX-512):
   body. The answer is in the generator, not in less code (the owner's rule): it shapes what it writes so the hot
   loop stays inlined (cold parts in `NoInlining` helpers called once per run, each width in its own method, or a
   generated entry that runs the word loop itself), and a test pins `call ...Execute`-free runners. The plan and its
-  measurements: `docs/plans/inner-loops.md`, WP0b.
+  measurements: `docs/plans/designs/inner-loops.md`, WP0b.
 - **The JIT never inlines a method that declares more than 32 IL locals**, `AggressiveInlining` or not (RyuJIT's
   `MAX_INL_LCLS`, observation `CALLEE_TOO_MANY_LOCALS`, reported "too many locals"; the callee is then marked
   noinline for every later call site, "noinline per IL/cached result"). It is exact on every job measured: 32 locals

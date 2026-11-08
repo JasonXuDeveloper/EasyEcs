@@ -9,7 +9,7 @@ namespace EasyEcs.Benchmark;
 
 /// <summary>
 /// Lookups whose targets are in random order against the same rows ordered by their target (L1's side effect,
-/// docs/plans/locality.md 3.1): the readers' table sorted once by the target's id (<see cref="World.OrderRows{T, TOrder}"/>
+/// docs/plans/designs/locality.md 3.1): the readers' table sorted once by the target's id (<see cref="World.OrderRows{T, TOrder}"/>
 /// with the id as the key). <c>Chase</c> is <see cref="LookupChaseBenchmark"/>'s plain method (<c>Chase.Hunt</c>: every
 /// hunter reads a random hunter; ordered, the records are read in order but the rows they point to are not, since the
 /// sort moved the targets too). <c>Gather</c> / <c>GatherPerRow</c> are <see cref="LookupGatherBenchmark"/>'s bearing

@@ -172,7 +172,7 @@ loops that were already inlined (LSRA's one interval per local); not visible in 
 
 Before landing on master: rerun WorldSimulation 100,000 and BattleServer on a quiet machine (`audit-perf`'s method),
 since their means sit 2-4 % above base's on a busy one. Remove the allow-list entry `GeneratedTextTests` was to have
-for this copy (`audit-generator` "The generated text" and `docs/plans/generated-text.md` section 3 both say the copy
+for this copy (`audit-generator` "The generated text" and `docs/plans/designs/generated-text.md` section 3 both say the copy
 stays; they should now say it is gone and why), and correct `audit-vector-loops`' two lessons (below).
 
 ## 6. Text for D126 (replaces the bullet "Not changed: the text of the loads" and the paragraph "Naming the loads
