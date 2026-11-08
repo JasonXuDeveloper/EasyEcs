@@ -2667,33 +2667,47 @@ No user-visible change (the one core change was reverted), so no changelog, migr
 
 ## feat-later-halos (D73's push halos; #160 wide rows on AVX2)
 
-Kept halos (TileHalos.cs; commits d98f0c4, 43236c3):
+Kept neighbors, the halo still pulled (TileNeighborCache.cs; commits d98f0c4 + 3e86ecf, tests 43236c3 + cc8bbcc):
 
-- decisions.mdx + .zh: a new record for kept halos (a pass taking a tile by value keeps each tile's neighbor ids
-  until the index or its membership changes, and its halo ring while no tile around it changed; the news comes from
-  the change ticks of the cell buffers and the removed log, pushed to the neighbors before the pass; a pass where
-  more than a quarter of the tiles changed keeps no rings; the kept path out of line so a stencil's root keeps its
-  inlining budget: the first build with it inline made Blur9_Tile 2-4x slower, the cursor loads became calls), with
-  the numbers of the A/B (BENCH-HALOS below). D73's "superseded by the planned push-halo design" points to it; D77
-  (tiles) says that a by-value pass no longer searches the index every pass.
-- roadmap.mdx + .zh: "Push halos for grid neighbors" moves to done (or names what is left: a ref Tile step keeps
-  its pull; rings are kept per (from, to) layers exchanged, so a pass whose layer range moves every step pulls).
-- guide/grids (tiles) + zh: "What it costs": a by-value pass reads a still tile's halo from what it kept (one copy
-  of its own cells and ring), a moving field pulls as before; TileNeighborBenchmark.Search now measures the kept
-  ids (the search runs once per change of the grid).
-- tools/ApiDocs zh entries for the hidden public members if ApiDocs asks (TileHaloCache, TileHalos.Of, Around,
-  Adopt, the Tile constructor taking the halos).
-- Names to confirm with the owner (hidden, generated code only): TileHaloCache<TCell, TTile>, TileHalos<TCell, TTile,
-  TGrid, TKey, TJob>, Around, Adopt, the Tile constructor's halos parameter.
+- decisions.mdx + .zh: a new record. Push halos were built (each tile's halo ring kept after its exchange, loaded back
+  while no tile around it changed, the news pushed to the neighbors before the pass from the cell buffers' change
+  ticks and the removed log, no ring kept in a pass where more than a quarter of the tiles changed) and measured
+  against pull: dense stencils 1.09-1.31x slower (Laplacian_Tile 1 thread side 32 1.31), Sparse 4 threads side 32
+  1.17. Cause, found with variants of the same build (--dev): a kept ring holds the same bytes the exchange copies from
+  the neighbors' buffers, so loading it saves no copy and adds memory of its own; the scans of the changed and removed
+  tiles before every pass cost 5 us at 1,024 tiles and 1 ms at 262k (without them: Sparse 0.43-0.88 of pull); and
+  with rings off but the neighbor ids kept the same passes ran 0.63-1.02 of pull. The cost pull paid was the search
+  of the grid's index for each neighbor, every pass. What ships: TileNeighborCache keeps each tile's neighbor ids per
+  method and world until a tile joins, leaves or moves (the index's Membership; Begin O(1) otherwise), and the halo is
+  pulled every pass as before. Numbers (default job, two interleaved rounds, head / base): TileExchange Halo1 / Halo2
+  0.62-0.78; TileActive AlwaysOn 0.76-0.85, Sparse 0.61-0.78, Cell and PingPong (ref tiles, unchanged code)
+  0.88-1.03; TileStencil Blur9_Tile 0.87-0.89, Laplacian_Tile 0.85-0.93; TileLayers (cell methods) 1 thread
+  0.91-0.98, 4 threads within the noise of six rounds (medians: Layers 0.99, Whole 1.05; per-round ratios 0.84-1.28
+  of Whole, no mechanism: the pass reads the same kept ids at any thread count); TileNeighborBenchmark Search 0.23 / 0.36 (1 / 4 threads), SearchDirect 0.40 / 0.56, Cached 0.94-0.98.
+  All 0 B. D73's "superseded by the planned push-halo design" points to the new record; D77 (tiles) says a by-value
+  pass (and a cell method) no longer searches the index every pass.
+- roadmap.mdx + .zh: "Push halos for grid neighbors" moves to Dropped with the reason above (what was kept: the
+  neighbor ids); a ref Tile step keeps its own search (TileSteps).
+- guide/grids (tiles) + zh, "What it costs": a by-value pass and a cell method find a tile's neighbors once per change
+  of the grid (a tile joining, leaving or moving), then read them from what the pass kept; the halo is copied every
+  pass. TileNeighborBenchmark.Search now measures the kept ids, not the search (its page text, if it says "search").
+- Name to confirm with the owner (hidden, generated code only): TileNeighborCache<TTile, TGrid, TKey, TJob> with Of
+  and Around. ApiDocs asks for no zh entry (0 problems).
 
-Wide rows of 8-byte words and the AVX2 form (#160; commits c078128, 6411578, 848aee1):
+Wide rows of 8-byte words and the AVX2 form (#160; commits c078128 + 042e8a5, tests 6411578 + 0a68d8e, benchmarks
+848aee1 + 8d42b3a):
 
-- guide/systems (vector loops: wide components) + zh, guide/analyzer EECS055's wide reason + zh: a wide component's
-  used lanes may be all 8-byte words (doubles, longs) as well as all 4-byte ones; AVX2 has a form for heavy math
-  (a square root, a division, a transcendental) behind Interleaved.IsWide256, the rows elsewhere on AVX2; the schedule
-  line reads "Vector<T> of 256 bits" for it.
+- guide/systems (vector loops: wide components) + zh, guide/analyzer EECS055's wide reasons + zh: a wide component's
+  used lanes may be all 8-byte words (doubles, longs) as well as all 4-byte ones; 8-byte words take AVX-512's permutes
+  only with heavy math (a square root, a division, a transcendental), and EECS055 says so for light math ("takes 8-byte
+  words without heavy math ..."); AVX2 has a form for heavy math behind Interleaved.IsWide256, the rows elsewhere on
+  AVX2; the schedule line reads "Vector512 or Vector<T> of 256 bits" for it.
 - decisions.mdx + .zh: D90's (or the wide-rows record's) AVX2 sentence ("a 256-bit two-source permute moves half the
-  words for the same cost, so AVX2 runs the rows") replaced by the gate and its calibration (BENCH-WIDE below), and
-  the 8-byte gate (2 permutes < 7 operations).
-- api.mdx + .zh: Interleaved.IsWide256 / Permute256 / Merge256 if it lists Interleaved's generated-code helpers;
-  ApiDocs zh entries for them.
+  words for the same cost, so AVX2 runs the rows") replaced by the gate and its calibration, and the 8-byte gates.
+  Numbers (KernelBenchmark, default job, two interleaved rounds, head / base): DOTNET_EnableAVX512=0: DiveGenerated
+  0.85 at 1k and 100k rows; Steer, Glide and Ledger unchanged (rows, as before). AVX-512: DiveGenerated 0.48 at 1k,
+  0.64 at 100k; Steer, Glide and Ledger generate the same code as before (checked: their jobs are identical but for
+  local names), their ratios 0.99-1.18 are the run's drift (the unchanged scalar baselines moved 0.96-1.15 in the
+  same runs). Ledger's 512 form, before the heavy-math gate: 1.01-1.14 of its rows, so light 8-byte math keeps
+  its rows.
+- api.mdx + .zh: Interleaved.IsWide256 / Permute256 / Merge256 if it lists Interleaved's generated-code helpers.

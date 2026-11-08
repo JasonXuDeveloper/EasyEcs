@@ -551,12 +551,14 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       three levels, constant product, churn negative, code fix.
 - [ ] Follow-ups: lambda passes do not fuse; lambda + structural change and lambda + view stay scalar.
 - [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
-      push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with
-      WP5 / WP5b, `feature` + `audit-vector-loops`); the vector-loop forms left for later (masked words in parallel
+      push halos for grid neighbors: built and measured on `feat-later-halos`, the rings dropped (a kept ring copies the
+      same bytes the exchange does, and finding what changed costs a scan per pass), the neighbor ids kept per pass
+      (TileNeighborCache: by-value tiles and cell methods 0.61-0.93 of pull; docs-todos "feat-later-halos"); the vector-loop forms left for later (masked words in parallel
       methods, `Maybe<T>` in parallel methods and with narrow lanes, masked words of narrow lanes and wide rows,
       `Atan2` / `Asin` / `Pow` lowerings; each ships only where it measures faster, `audit-vector-loops`). Not
       actionable here: Unity support waits for a Unity release on .NET 10; the toolchain item is a standing rule.
-- [ ] #160 wide rows on AVX2 (heavy math only, per the widelanes numbers); #164 2 MiB columns done on `feat-later-memory` (pinned arrays
+- [ ] #160 wide rows on AVX2: done on `feat-later-halos` (8-byte words on AVX-512 and AVX2, AVX2 for heavy math only:
+      Dive 0.85 under AVX512=0, 0.48-0.64 on AVX-512; light 8-byte math keeps its rows; docs-todos "feat-later-halos"); #164 2 MiB columns done on `feat-later-memory` (pinned arrays
       advised before first touch, reserved and copied ones only; 16M chases 1.28-1.67x, Create / Grow equal; docs-todos
       "feat-later-memory"); #157 the #138 recommendations: done on feat-later-accumulate (table below); #159 remaining research: done on
       feat-later-research (borrowed-ideas.md "#159 remainder": the ideas already in EasyEcs listed with their records;
