@@ -16,11 +16,11 @@ public interface ISystemCode
     /// <summary>Runs the system: its OnUpdate method, then its [ForEach] methods in declaration order.</summary>
     static abstract void Update(World world, SystemHandle system);
 
-    /// <summary>Runs its OnCreate method, if it has one.</summary>
-    static abstract void Create(World world, SystemHandle system);
+    /// <summary>Runs its OnCreate method; a system without one keeps this default, which does nothing.</summary>
+    static virtual void Create(World world, SystemHandle system) { }
 
-    /// <summary>Runs its OnDestroy method, if it has one.</summary>
-    static abstract void Destroy(World world, SystemHandle system);
+    /// <summary>Runs its OnDestroy method; a system without one keeps this default, which does nothing.</summary>
+    static virtual void Destroy(World world, SystemHandle system) { }
 
     /// <summary>Declares what the system reads and writes (parallel stages).</summary>
     static abstract void Access(ref SystemAccess access);

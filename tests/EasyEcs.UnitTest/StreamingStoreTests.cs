@@ -129,7 +129,7 @@ public class StreamingStoreTests
 
         string set = Job("SetJob0");
         Assert.That(set, Does.Contain("if (global::EasyEcs.StreamingStores.Pays(in entities, rows, ").And.Contain("i = __Stream("));
-        Assert.That(set, Does.Contain("var __c2_0 = default(global::System.Runtime.Intrinsics.Vector512<float>);")
+        Assert.That(set, Does.Contain("var __c2_0 = default(__V512_float);")
             .And.Contain("global::EasyEcs.StreamingStores.Store(__c2_0, ref e2, (nuint)i);")
             .And.Contain("global::EasyEcs.StreamingStores.Head(ref e2, i, 1, ").And.Contain("global::EasyEcs.StreamingStores.Fence();"));
         Assert.That(set.Split("public void Execute(").Last(), Does.Not.Contain("StreamingStores.Pays"), "masked words keep plain stores");

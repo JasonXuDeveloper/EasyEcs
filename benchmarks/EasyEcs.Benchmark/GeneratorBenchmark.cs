@@ -1,8 +1,13 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Reports;
+using BenchmarkDotNet.Running;
 using EasyEcs.Generator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -21,7 +26,7 @@ namespace EasyEcs.Benchmark;
 /// components, instead of one namespace per module. That the corpus compiles and the analyzer has nothing to say about
 /// it is checked once by GeneratorTests.TheBenchmarkCorpusIsClean, not in every process here.
 /// </summary>
-[MemoryDiagnoser]
+[MemoryDiagnoser, GeneratedBytesColumn]
 public class GeneratorBenchmark
 {
     [Params(false, true)] public bool OneNamespace;
@@ -91,3 +96,39 @@ public class GeneratorBenchmark
 
     private Compilation Fresh() => _generated.RemoveAllSyntaxTrees().AddSyntaxTrees(_generated.SyntaxTrees);
 }
+
+/// <summary>
+/// The generated text of <see cref="GeneratorBenchmark"/>'s corpus as a column: the bytes and files every output of one
+/// run holds (what a build compiles; GeneratedTextTests counts its dead lines). Computed once per corpus layout in the
+/// process that prints the summary.
+/// </summary>
+public sealed class GeneratedBytesColumn : IColumn
+{
+    private static readonly Dictionary<bool, string> Values = [];
+
+    public string Id => "GeneratedBytes";
+    public string ColumnName => "Output";
+    public bool AlwaysShow => true;
+    public ColumnCategory Category => ColumnCategory.Custom;
+    public int PriorityInCategory => 0;
+    public bool IsNumeric => false;
+    public UnitType UnitType => UnitType.Dimensionless;
+    public string Legend => "The generated text of one run: bytes in files";
+    public bool IsAvailable(Summary summary) => true;
+    public bool IsDefault(Summary summary, BenchmarkCase benchmarkCase) => false;
+    public string GetValue(Summary summary, BenchmarkCase benchmarkCase) => Of(benchmarkCase.Parameters["OneNamespace"] is true);
+    public string GetValue(Summary summary, BenchmarkCase benchmarkCase, SummaryStyle style) => GetValue(summary, benchmarkCase);
+
+    private static string Of(bool oneNamespace)
+    {
+        if (Values.TryGetValue(oneNamespace, out var value)) return value;
+        var trees = GeneratorCorpus.Sources(oneNamespace).Select((s, i) => CSharpSyntaxTree.ParseText(s, GeneratorCorpus.Parse, path: $"File{i}.cs"));
+        var generated = GeneratorCorpus.Driver().RunGenerators(GeneratorCorpus.Compilation([.. trees], GeneratorCorpus.References()))
+            .GetRunResult().GeneratedTrees;
+        long bytes = 0;
+        foreach (var tree in generated) bytes += Encoding.UTF8.GetByteCount(tree.GetText().ToString());
+        return Values[oneNamespace] = $"{bytes / 1024.0:N0} KiB in {generated.Length}";
+    }
+}
+
+public sealed class GeneratedBytesColumnAttribute() : ColumnConfigBaseAttribute(new GeneratedBytesColumn());

@@ -897,6 +897,14 @@ public static class WideKernels
         r.Q = MathF.Min(r.Q + r.X, 10) * 0.5f + l.Value * l.Value;
     }
 
+    // Brake with every wide form opened where the gate refuses some (ARM64's table lookups): SimdMode.Require.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void BrakeForced(ref Rig8 r, in Level l)
+    {
+        r.X = r.X - r.P * l.Value;
+        r.Q = MathF.Min(r.Q + r.X, 10) * 0.5f + l.Value * l.Value;
+    }
+
     [ForEach]
     internal static void Haul(ref Rig16 r, in Level l)
     {
@@ -949,6 +957,85 @@ public ref struct LoopsSystem
     [ForEach]
     static void Mark(Entity entity, ref Heat health) => health.Value = entity.Id.Index;
 #pragma warning restore EECS055, EECS130
+}
+
+/// <summary>
+/// ++ / -- used as values (timers, counters), a tag taken as a parameter (a filter, and a Maybe of one: its presence),
+/// running totals of a singleton taken by ref: each method has its twin with SimdMode.Off.
+/// </summary>
+public record struct Census4 : ISingletonComponent { public int Count; public long Sum; public int Low; public int High; }
+
+public static class StepKernels
+{
+    // Prefix and postfix, under && and ||, in a branch of ?:, after an early return.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Tick(ref Bits bits, in Mask mask) => TickRow(ref bits, in mask);
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    internal static void TickScalar(ref Bits bits, in Mask mask) => TickRow(ref bits, in mask);
+
+    internal static void TickRow(ref Bits bits, in Mask mask)
+    {
+        if (mask.Value == int.MinValue) return;
+        if ((mask.Value & 1) == 0 && --bits.Value < 0) bits.Value += 100;
+        int before = bits.Value++;
+        bits.Value = (mask.Value & 2) != 0 ? ++bits.Value * 3 : before - mask.Value;
+        if (bits.Value-- > 50 || ++bits.Value == 7) bits.Value ^= mask.Value;
+    }
+
+    // A tag as a parameter: a filter (no column read). EECS026 would have it be [With<Frozen>]; the parameter is the form tested.
+#pragma warning disable EECS026
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Chill(ref Heat heat, in Speed speed, in Frozen frozen) => heat.Value = heat.Value * 0.5f + speed.Value;
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    internal static void ChillScalar(ref Heat heat, in Speed speed, in Frozen frozen) => heat.Value = heat.Value * 0.5f + speed.Value;
+#pragma warning restore EECS026
+
+    // A Maybe of a tag: its presence as the lanes' mask.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Thaw(ref Heat heat, in Speed speed, ReadOnlyMaybe<Frozen> frozen) => heat.Value = frozen.HasValue ? heat.Value - 1 : heat.Value + speed.Value;
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    internal static void ThawScalar(ref Heat heat, in Speed speed, ReadOnlyMaybe<Frozen> frozen) => heat.Value = frozen.HasValue ? heat.Value - 1 : heat.Value + speed.Value;
+
+    // Running totals of a singleton taken by ref: a masked count, a long sum, a Min and a Max.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Survey(in Bits bits, ref Census4 census) => SurveyRow(in bits, ref census);
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    internal static void SurveyScalar(in Bits bits, ref Census4 census) => SurveyRow(in bits, ref census);
+
+    internal static void SurveyRow(in Bits bits, ref Census4 census)
+    {
+        if (bits.Value > 0) census.Count++;
+        census.Sum += Math.Abs(bits.Value);
+        census.Low = Math.Min(census.Low, bits.Value);
+        census.High = Math.Max(bits.Value, census.High);
+    }
+}
+
+// The interop habit: [StructLayout(LayoutKind.Sequential)] is the layout C# gives a struct anyway, so the loop keeps it.
+[StructLayout(LayoutKind.Sequential)]
+public struct Laid2 : IComponent { public float X, Y; }
+
+/// <summary>A method over a component declared [StructLayout(LayoutKind.Sequential)]: a vector loop like any other.</summary>
+public static class LaidKernels
+{
+    [ForEach]
+    internal static void Lay(ref Laid2 l, in Level s)
+    {
+        l.X = l.X * 0.5f + s.Value;
+        l.Y -= l.X * s.Value;
+    }
+}
+
+/// <summary>The same method in a system, for its schedule line.</summary>
+[EcsSystem]
+public ref struct LaidSystem
+{
+    [ForEach]
+    static void Lay(ref Laid2 l, in Level s) => LaidKernels.Lay(ref l, in s);
 }
 
 // Narrow lanes: C# computes on bytes and shorts in int; the vector loop follows the int's low bits and its range.
@@ -1282,6 +1369,10 @@ public class KernelTests
             WideKernels.Coast, (ref Slim s, ref Level l) => WideKernels.Coast(ref s, in l));
         Check(count, (r, i) => new Rig8(NextFloat(r, i), 1, 2, NextFloat(r, i + 1), 4, 5, 6, NextFloat(r, i + 2)), NextLevel,
             WideKernels.Brake, (ref Rig8 g, ref Level l) => WideKernels.Brake(ref g, in l));
+        Check(count, (r, i) => new Rig8(NextFloat(r, i), 1, 2, NextFloat(r, i + 1), 4, 5, 6, NextFloat(r, i + 2)), NextLevel,
+            WideKernels.BrakeForced, (ref Rig8 g, ref Level l) => WideKernels.BrakeForced(ref g, in l));
+        CheckHoles(count, i => i % 3 == 1, (r, i) => new Rig8(NextFloat(r, i), 1, 2, NextFloat(r, i + 1), 4, 5, 6, NextFloat(r, i + 2)), NextLevel,
+            WideKernels.BrakeForced, (ref Rig8 g, ref Level l) => WideKernels.BrakeForced(ref g, in l));
         Check(count, (r, i) => new Rig16(NextFloat(r, i), 1, 2, 3, 4, NextFloat(r, i + 1), 6, 7, 8, 9, 10, 11, 12, 13, 14, NextFloat(r, i + 2)), NextLevel,
             WideKernels.Haul, (ref Rig16 g, ref Level l) => WideKernels.Haul(ref g, in l));
         CheckHoles(count, i => i % 5 == 3, (r, i) => new Rig16(NextFloat(r, i), 1, 2, 3, 4, NextFloat(r, i + 1), 6, 7, 8, 9, 10, 11, 12, 13, 14, NextFloat(r, i + 2)), NextLevel,
@@ -1392,6 +1483,101 @@ public class KernelTests
             "Mark: scalar (it uses the Entity in 'entity.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>))",
         }));
         Assert.That(world.DescribeSchedule().ToString(), Does.Contain("      loop Mark: scalar (it uses the Entity in 'entity.Id.Index'"));
+    }
+
+    /// <summary>
+    /// ++ / -- as values: written in the lanes that evaluate them (under &amp;&amp;, ||, a branch of ?:, past an early
+    /// return), the value before or after the write: every row ends as the method leaves it, edge values included.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void StepsAsValuesMatchTheMethod(int count)
+    {
+        static Bits NextBits(Random r, int i) => new(i % 5 == 0 ? new[] { int.MinValue, int.MaxValue, 0, 7, 51, -1 }[r.Next(6)] : r.Next(-200, 200));
+        static Mask NextMask(Random r, int i) => new(i % 7 == 0 ? new[] { int.MinValue, int.MaxValue, 0, 3 }[r.Next(4)] : r.Next(-100, 100));
+        Check(count, NextBits, NextMask, StepKernels.Tick, (ref Bits b, ref Mask m) => StepKernels.TickRow(ref b, in m));
+    }
+
+    /// <summary>
+    /// A tag taken as a parameter is a filter (the rows with it, no column read); a Maybe of a tag is its presence: both
+    /// end as their twins row by row leave the rows.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void TagsAsParametersMatchTheMethod(int count)
+    {
+        foreach (var (vector, scalar) in new (Action<World>, Action<World>)[] { (StepKernels.Chill, StepKernels.ChillScalar), (StepKernels.Thaw, StepKernels.ThawScalar) })
+        {
+            using var a = new World();
+            using var b = new World();
+            var random = new Random(count);
+            var xs = new Entity[count];
+            var ys = new Entity[count];
+            for (int i = 0; i < count; i++)
+            {
+                var (heat, speed) = (new Heat { Value = NextFloat(random, i) }, new Speed { Value = NextFloat(random, i + 1) });
+                xs[i] = a.CreateEntity(heat, speed);
+                ys[i] = b.CreateEntity(heat, speed);
+                if (i % 3 != 1)
+                {
+                    xs[i].Set(new Frozen());
+                    ys[i].Set(new Frozen());
+                }
+            }
+            for (int round = 0; round < 3; round++)
+            {
+                vector(a);
+                scalar(b);
+            }
+            for (int i = 0; i < count; i++)
+                Assert.That(Same(xs[i].Read<Heat>(), ys[i].Read<Heat>()), $"row {i} of {count}: {xs[i].Read<Heat>()} instead of {ys[i].Read<Heat>()}");
+        }
+    }
+
+    /// <summary>
+    /// Running totals of a singleton taken by ref (a masked count, a long sum of absolute values, a Min, a Max) from a
+    /// total that is not the identity, rows at int.MaxValue among them: the singleton ends where the method leaves it.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void RunningTotalsOfASingletonMatchTheMethod(int count)
+    {
+        using var a = new World();
+        using var b = new World();
+        var random = new Random(count);
+        for (int i = 0; i < count; i++)
+        {
+            var bits = new Bits(i % 97 == 5 ? int.MaxValue : random.Next(-1000, 1000));
+            a.CreateEntity(bits, new Mask(i));
+            b.CreateEntity(bits, new Mask(i));
+            if (i % 3 == 0) // two tables
+            {
+                a.CreateEntity(bits);
+                b.CreateEntity(bits);
+            }
+        }
+        var start = new Census4 { Count = 5, Sum = -7, Low = 3, High = -3 };
+        a.GetOrAddSingleton(start);
+        b.GetOrAddSingleton(start);
+        for (int round = 0; round < 2; round++)
+        {
+            StepKernels.Survey(a);
+            StepKernels.SurveyScalar(b);
+            Assert.That(a.GetSingleton<Census4>(), Is.EqualTo(b.GetSingleton<Census4>()), $"round {round}");
+        }
+    }
+
+    /// <summary>
+    /// A component declared <c>[StructLayout(LayoutKind.Sequential)]</c> with no Pack or Size lies as C# lays out any
+    /// struct: its method gets the vector loop, bit for bit the method's.
+    /// </summary>
+    [TestCaseSource(nameof(Lengths))]
+    public void ASequentialLayoutKeepsTheVectorLoop(int count)
+    {
+        using (var world = new World())
+        {
+            world.AddSystem<LaidSystem>();
+            Assert.That(world.DescribeSchedule().Groups[0].Stages[0].Systems[0].Loops.Single(), Does.StartWith("Lay: vector"));
+        }
+        Check(count, (r, i) => new Laid2 { X = NextFloat(r, i), Y = NextFloat(r, i + 1) }, NextLevel, LaidKernels.Lay,
+            (ref Laid2 l, ref Level s) => LaidKernels.Lay(ref l, in s));
     }
 
     private delegate void NarrowRow<TO, TA, TB>(ref TO o, in TA a, in TB b);

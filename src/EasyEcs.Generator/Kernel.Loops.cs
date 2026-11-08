@@ -183,6 +183,15 @@ internal sealed partial class Kernel
                     }
                     // An index of its own (s[i - 1], a[i] of an array): the expression using it, not the bare argument list.
                     var use = name.Ancestors().OfType<ExpressionSyntax>().FirstOrDefault() ?? name;
+                    // A tile's cells at the counter (c[x, 0, 0] of a cursor, a tile's or a column walk's indexer): each
+                    // read a checked offset, no span. The forms that give such a stencil its vector loop are the cell
+                    // method and the cursor's whole-vector loads.
+                    if (name.Ancestors().OfType<ElementAccessExpressionSyntax>().FirstOrDefault() is { } cells
+                        && model.GetTypeInfo(cells.Expression, ct).Type is INamedTypeSymbol { ContainingNamespace.Name: "EasyEcs", Name: "TileCursor" or "Tile" or "Cursor" })
+                    {
+                        reason = Why($"it reads a tile's cells at its index '{variable.Name}' ('{cells}'), each a checked offset, not a span: write the step as a cell method (Cell<TCell, TTile>), whose rows get vector loops, or load whole vectors in the loop (c.Load256(x + dx, dy, dz))");
+                        return null;
+                    }
                     reason = Why($"it reads its index '{variable.Name}' as a value ('{use}'), not only as the index of a span (s[{variable.Name}])");
                     return null;
                 }

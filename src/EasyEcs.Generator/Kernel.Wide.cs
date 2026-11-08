@@ -646,9 +646,19 @@ internal sealed partial class Kernel
     /// them). It pays when the lookups cost less than the rest saves. A model, not yet measured on ARM64: KernelBenchmark's
     /// wide cases decide.
     /// </para>
+    /// <para>
+    /// <paramref name="forced"/> (<c>SimdMode.Require</c>) opens every form whatever the model says, as Require asks for a
+    /// Lookup's gathers (D131): the method's author asks for the vector loop, and KernelBenchmark's Brake pair measures a
+    /// shape the model refuses. <see cref="FitLocals"/> still drops a form a runner would not inline.
+    /// </para>
     /// </summary>
-    private void Gate()
+    private void Gate(bool forced)
     {
+        if (forced)
+        {
+            _wide512 = _wide256 = _wide128 = true;
+            return;
+        }
         int ops = 0, heavy = 0;
         string body = _body.ToString();
         foreach (var token in new[] { " + ", " - ", " * ", " / ", " & ", " | ", " ^ ", ".Min(", ".Max(", ".ConditionalSelect(", ".Sqrt(", ".SquareRoot(",

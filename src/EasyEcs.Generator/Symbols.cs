@@ -1799,10 +1799,11 @@ internal static class Symbols
 
     /// <summary>
     /// The semantic model of <paramref name="tree"/>: <paramref name="model"/> when it is that tree's, else the
-    /// compilation's (a body in another file: a partial method's part, a job's Execute).
+    /// compilation's one model of that tree (<see cref="Kernel.ModelOf"/>: a body in another file, a partial method's
+    /// part, a job's Execute, bound once per compilation however many stages ask).
     /// </summary>
     public static SemanticModel ModelOf(SyntaxTree tree, SemanticModel model) =>
-        tree == model.SyntaxTree ? model : model.Compilation.GetSemanticModel(tree);
+        tree == model.SyntaxTree ? model : Kernel.ModelOf(model.Compilation, tree);
 
     /// <summary>The <c>Parallel</c> named argument of the method's [ForEach] attribute.</summary>
     public static bool IsParallel(IMethodSymbol method) => method.GetAttributes()

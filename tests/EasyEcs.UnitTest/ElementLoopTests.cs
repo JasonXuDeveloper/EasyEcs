@@ -503,9 +503,9 @@ public class ElementLoopTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Where(GeneratorTests.IsCode).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("#nullable restore\n    internal static void A_0(")                // the copy, under the accessor's name, inlined as the method is
-            .And.Contain("int __at0 = (__span0.Length) >= global::System.Numerics.Vector<float>.Count ? (int)__Elements0(") // short spans skip the call
+            .And.Contain("int __at0 = (__span0.Length) >= __Vec_float.Count ? (int)__Elements0(") // short spans skip the call
             .And.Contain("static nint __Elements0(ref float r1, nint i, nint rows, int at, float x1)")         // the vector form, k as its value
-            .And.Contain("__Elements0(ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(__span0), 0, __span0.Length, 0, k)")
+            .And.Contain("__Elements0(ref __MemoryMarshal.GetReference(__span0), 0, __span0.Length, 0, k)")
             .And.Contain("__span0.Slice(__at0)")                                                        // the loop as written runs the rest
             .And.Contain("#line 8 \"/src/Loops.cs\"").And.Contain("#line hidden").And.Contain("#line default")
             .And.Not.Contain("static extern void A_0("), generated);
@@ -525,6 +525,22 @@ public class ElementLoopTests
         Assert.That(diagnostics.Select(d => d.GetMessage()), Is.EqualTo(new[] { $"This loop of [ForEach] method 'A' runs one element at a time, without a vector loop: {reason}" }));
         Assert.That(diagnostics[0].Severity, Is.EqualTo(DiagnosticSeverity.Info));
         Assert.That(diagnostics[0].Location.SourceTree!.ToString().Substring(diagnostics[0].Location.SourceSpan.Start, 3), Does.StartWith("for")); // at the loop's keyword
+    }
+
+    // A tile's cells read at the counter through the cursor's indexer: the reason names the forms that vectorize such a
+    // stencil (a cell method, the cursor's whole-vector loads).
+    [Test]
+    public void ALoopOverATilesCellsNamesTheCellMethod()
+    {
+        const string source = "public record struct Tp(int X, int Z); public struct Warm : IComponent { public float T; }" +
+            "[Tile(Width = 16, Depth = 4)] public partial record struct Pl([UniqueKey(SlotsPerAxis = 8)] Tp Pos) : IComponent;" +
+            "public static class R { [ForEach] static void A(ref Tile<Warm, Pl> t, ref DynamicBuffer<float> b) { t.ExchangeHalo(); var s = b.AsSpan();" +
+            " foreach (var row in t.Rows()) { var c = t.At(row); for (int x = 0; x < s.Length; x++) s[x] = c[x, 0, 0].T + c[x - 1, 0, 0].T; } } }";
+        var messages = GeneratorTests.Analyze([GeneratorTests.Components, source]).Result
+            .Where(d => d.Id == "EECS055" && d.GetMessage().StartsWith("This loop", StringComparison.Ordinal)).Select(d => d.GetMessage());
+        Assert.That(messages, Is.EqualTo(new[] { "This loop of [ForEach] method 'A' runs one element at a time, without a vector loop: it reads a tile's cells at " +
+            "its index 'x' ('c[x, 0, 0]'), each a checked offset, not a span: write the step as a cell method (Cell<TCell, TTile>), whose rows get vector " +
+            "loops, or load whole vectors in the loop (c.Load256(x + dx, dy, dz))" }));
     }
 
     [TestCase("[ForEach] static void A(ref DynamicBuffer<float> b) { foreach (ref float x in b.AsSpan()) x *= 2; }")]                         // vectorized

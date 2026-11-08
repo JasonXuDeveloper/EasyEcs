@@ -105,7 +105,7 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       1k 631 vs 717 ns, 10k 6.12 vs 5.45 us, 100k 35.3 +- 5.7 vs 32.6 +- 6.6 us, 1M 282 vs 346 us, every pair within
       its error, the lead swapping. What was left was the 4-thread pass's spread on a machine whose other cores ran
       other agents' work (the lock orders only the processes that take it).
-      - [ ] **MinBy vector form** (the Kernel owner's next item; `finish-scan.md` 5): per lane a compare and a select
+      - [x] **MinBy vector form** (done in feat-lane4-generator, Lane 4 G9; the kept row's pre-check is gone, 064ebf8; `finish-scan.md` 5): per lane a compare and a select
         of every carried field, the lanes folded left to right so a tie keeps the earlier row (bit for bit on any
         thread count), then BattleServer's `FindWeakest` drops `SimdMode.Off`. Until then `Parts.KeptRowReason` gives
         EECS055 its reason before `Kernel.Vectorize` runs (SystemGenerator.ForEachModel.VectorLoop and
@@ -361,57 +361,89 @@ Starts now. T1 comes before Finish 1b (the move).
 
 ### Lane 4: vector-loop generator (after feat-inner-loops merges; Kernel*.cs, SystemGenerator*.cs, Recorder.cs, LaneMath.cs, ArityGenerator.cs text) — 18 items
 
-- [ ] **G1. `++` / `--` as a value** (`generator.md` 1): `Expr` lowers it, masked by `_active`; Struct and Pairs paths
+- [x] **G1. `++` / `--` as a value** (`generator.md` 1): `Expr` lowers it, masked by `_active`; Struct and Pairs paths
       too. Proof: StructuralLoop / Kernel tests (prefix, postfix, `&&` / `||`, early return, narrow lanes), a
       KernelBenchmark Expire case, BattleServer and WorldSimulation (their Burn / Thaw / Expire / Fight / Recover).
-- [ ] **G2. A structural change of the method's own component, nothing reading it after** (`generator.md` 2):
+      Done (feat-lane4-generator 7101f0d, tests 9a933ed, benchmarks 8e8e51c + 5a40981): KernelBenchmark Expire 668 -> 160 ns at 1k rows, 73.5 -> 19.7 us at 100k; Cool (a step beside a square root) 4.0x its scalar method; 0 B.
+- [x] **G2. A structural change of the method's own component, nothing reading it after** (`generator.md` 2):
       allowed; the `audit-vector-loops` rule narrowed. Proof: Remove / Disable / Set against the scalar twin, D122's
       order, the two headline worlds.
-- [ ] **G3. A tag as a parameter** (`generator.md` 3): `in Tag` is a filter with no lanes, `Maybe<Tag>.HasValue` the
+      Done (7101f0d, 9a933ed): UsedAfter; BattleServer `Burn` gets its loop, `Thaw` is `SimdMode.Off` (three changes). Worlds, head / base: WorldSimulation 10k 108.6 / 113.7 us, 100k 1,195 / 1,338 us; BattleServer 3.85 / 4.22 ms; 0 B.
+- [x] **G3. A tag as a parameter** (`generator.md` 3): `in Tag` is a filter with no lanes, `Maybe<Tag>.HasValue` the
       presence mask. Proof: KernelTests, AccessBenchmark's two cases.
-- [ ] **G4. A `ref` singleton written only as a running sum, count, Min or Max** (`generator.md` 4): the element
+      Done (7101f0d, 9a933ed, 8e8e51c): AccessBenchmark TagParameterRow 39.0 -> 10.5 us (= WithTagAttribute 10.1), MaybeParameterRow 83.3 -> 10.3 us at 100k; 0 B.
+- [x] **G4. A `ref` singleton written only as a running sum, count, Min or Max** (`generator.md` 4): the element
       loops' reduction core, folded into the singleton's field. Proof: KernelTests (non-zero start, bail), a
       KernelBenchmark sum case.
+      Done (7101f0d, 9a933ed, 8e8e51c): KernelBenchmark Survey 5,512 -> 258 ns at 1k, 712 -> 11.6 us at 100k; 0 B.
 - [ ] **G5. `EntityRandom` draws as lanes** (`generator.md` 5): `Bits` / `Float` / `Chance` / `Range(float)` as 8-byte
       lanes, gated per width; the reason text fixed now and the `audit-vector-loops` line corrected. Proof:
       EntityRandomTests bit for bit, EntityRandomBenchmark at three widths; ARM64 "owner, after code".
-- [ ] **G6. Reason texts** (`generator.md` 6): an `Entity` receiver call, `DynamicBuffer<T>` parameters, narrow
+      Not started in feat-lane4-generator (the lane went to G1-G4, G6, G9-G14, G16, G19 and the two items added 2026-11-08).
+- [x] **G6. Reason texts** (`generator.md` 6): an `Entity` receiver call, `DynamicBuffer<T>` parameters, narrow
       division by a constant (build the power-of-two form), a `Tile<,>` parameter ("write it as a cell method"), the
       tile cursor's indexer read at the loop's counter (Settle's loops, `generator.md` "In areas owned"; after
       feat-later-halos: the reason now, then the element-loop form for tile cursors built or recorded). Proof: reason
       pins, ElementLoopTests for the cursor form.
+      Done (7101f0d reasons; 43132be + 87160d0 the tile loop): a loop reading a tile's cells at its index names the cell method and the whole-vector loads. The element-loop form for tile cursors is not built: docs/owner-review.md "An element-loop form for a tile cursor's indexer" (cell methods and EECS103 v2 cover it).
 - [ ] **G7. Math with no vector form called per lane inside the loop** (`generator.md` 7): `LaneMath.PerLane.*`,
       gated by operations against calls; D127's Considered. Coordinate with feat-inner-loops' item g (Atan2 / Asin /
       Pow lowerings). Proof: KernelBenchmark Atan2 / Sin bodies, a light body that must not gate on.
+      Not started in feat-lane4-generator.
 - [ ] **G8. P2: a uniform table read at a lane index** (`perf.md` P2): a permute (`vpermps`, AVX2 `PermuteVar8x32`,
       NEON TBL) for N <= 16, a gather past it; BattleServer's Steer back to `SimdMode.Auto`. Proof: KernelBenchmark
       SteerTable pair, BattleServerBenchmark, tools/loopbound.sh; ARM64 "owner, after code".
-- [ ] **G9. `[MinBy]` / `[MaxBy]`'s vector form** (`finish-scan.md` item 5), after feat-generated-members: proved with
+      Not started in feat-lane4-generator.
+- [x] **G9. `[MinBy]` / `[MaxBy]`'s vector form** (`finish-scan.md` item 5), after feat-generated-members: proved with
       ReduceBenchmark (FindWeakest), ties keep the earlier row.
-- [ ] **G10. The ARM gate's rejected `Brake` shape: a benchmark pair forced open** (backlog history, ARM64 parity),
+      Done (7101f0d, ReduceTests 9a933ed, ReduceBenchmark 8e8e51c): LowestVector 507 -> 282 ns at 1k, 5.87 -> 2.87 us at 10k, 38.3 -> 8.3 us at 100k, 353 -> 59.5 us at 1M; 0 B. Parts.KeptRowReason deleted (064ebf8).
+- [x] **G10. The ARM gate's rejected `Brake` shape: a benchmark pair forced open** (backlog history, ARM64 parity),
       then "owner, after code" (`owner-m4.md` 4). Files: KernelBenchmark.cs, Kernel.Wide.cs's gate.
+      Done (43132be: SimdMode.Require opens every wide form; 87160d0; 8d4a9d3: BrakeScalar / BrakeGenerated / BrakeForced). On x64 BrakeForced = BrakeGenerated (AVX-512 opens it anyway); the ARM64 run is owner-m4.md 4, "owner, after code".
 - [ ] **G11. Incremental rules** (`generator.md` 9): Recorder's SemanticModel per member (9a, use the transform's
       model), `Symbols.ModelOf` cached (9b), `ClosedSystems` measured before any change (9c). Proof: GeneratorBenchmark
       EditMethodBody / Ide.
-- [ ] **G12. Dead code** (`generator.md` 11): `PairForm.WritesNeighbor`.
-- [ ] **G13. Generated text cleanup, step 1: the `GeneratedTextTests` guard and output bytes in GeneratorBenchmark**
+      9a and 9b done (7101f0d: Recorder and Symbols reuse the transform's SemanticModel); 9c (`ClosedSystems` measured) not run.
+- [x] **G12. Dead code** (`generator.md` 11): `PairForm.WritesNeighbor`.
+      Done (7101f0d).
+- [x] **G13. Generated text cleanup, step 1: the `GeneratedTextTests` guard and output bytes in GeneratorBenchmark**
       (`generated-text.md` 8; `generator.md` 10).
-- [ ] **G14. Step 2: the file-level alias block** (38,597 `global::`; IL identical).
+      Done (GeneratedTextTests 9a933ed, the bytes column 8e8e51c).
+- [x] **G14. Step 2: the file-level alias block** (38,597 `global::`; IL identical).
+      Done (7101f0d; budgets in GeneratedTextTests).
 - [ ] **G15. Step 3: fusion files reference the systems' jobs** (-76 % fusion text) — after feat-inner-loops' lambda
       fusion.
-- [ ] **G16. Step 4: printer fixes** (404 `((0))`, names, Arity indentation; IL identical) **and empty hooks as
+      Not started in feat-lane4-generator.
+- [x] **G16. Step 4: printer fixes** (404 `((0))`, names, Arity indentation; IL identical) **and empty hooks as
       `ISystemCode` defaults** (about 400 `{ }`; SystemCode.cs).
+      Done (7101f0d: literals parenthesized only when negative, ISystemCode Create / Destroy as static virtual defaults).
 - [ ] **G17. Step 5: one Tier1-gated round of IL-changing cleanups** (`__d0 = Zero` marks, hoisted scalar setup,
       `this.v0`, pair broadcasts, struct-local aliases, dead narrow temps, unused masks, `ids, 0`, discards for unused
       fields, 50 identity copies) with #172's rest (one body per width where Tier1 is equal) and the WP0b follow-ups
       (GeneratorBenchmark A/B, a locals check over the samples, `.Zero` / `.One` text); the D126 `__s -> __c` copy
       stays, commented. Proof: Tier1 of the six runners, PGO off, else BenchmarkDotNet.
+      Not started in feat-lane4-generator.
 - [ ] **G18. Generated members' text** (`generated-text.md`, small): ComponentGenerator's AggressiveInlining text,
       doc comments per arity (`inheritdoc`), the view's `TryGetX` double lookup.
-- [ ] **G19. A bare `[StructLayout(LayoutKind.Sequential)]` keeps the vector loop** (`interop.md` 1, finding): today
+      Not started in feat-lane4-generator.
+- [x] **G19. A bare `[StructLayout(LayoutKind.Sequential)]` keeps the vector loop** (`interop.md` 1, finding): today
       any `[StructLayout]` makes a component's method scalar ("sets its layout"); `Sequential` with no `Pack` and no
       `Size` is the default layout of a C# struct, so treat it as none. Proof: a GeneratorTests case and the
       vector-loop test for it; `Explicit`, `Pack` and `Size` keep the current reason.
+      Done (7101f0d, 9a933ed).
+- [x] **L4-M. A masked pass's row order** (found by feat-lane4-generator): a run of whole words reached the job
+      after the masked word that followed it (MaskedRuns), so Emit<T> records and marked rows left table order. Fixed
+      in 64f61ff, the run out of line in f3e8118 (LateHolesBenchmark Step level with base, KernelBenchmark Holes /
+      Halves level or faster); StructuralLoopTests.AMaskedWordAfterARunKeepsTheRowOrder fails without it.
+- [x] **L4-W. Masked words of wide rows** (owner-review, unblocked 2026-11-08 by feat-later-halos): c86d827, tests
+      767317a, benchmark 6327459. KernelBenchmark.RigHoles (every third row without Mass), four rounds, head / base: 0.61 / 0.54 / 0.69 /
+      0.63 at 1k rows, 0.93 / 0.92 / 0.84 / 0.90 at 100k; 0 B. Steer, Glide, Dive, Brake (no holes) within noise
+      (0.94-1.09 both ways): their whole-word Execute is the same IL (the diff of the generated file only adds the
+      masked loops and their calls). WorldSimulation 1.06 / 0.97 / 0.95 / 0.96 (10k, 100k, two rounds); BattleServer
+      1.03 / 1.08 with its generated code and the core identical on both sides (the second side's drift).
+- [x] **L4-A15. EECS133: an IForSpan job that is one element loop** (owner-review, backlog A15, unblocked
+      2026-11-08): LambdaPass.FromJob (the rewrite checked in a copy of the compilation), the Warning and its fix,
+      083f368; tests 767317a. Docs: docs-todos "feat-lane4-generator".
 
 ### Lane 5: renames (after feat-later-halos and feat-generated-members merge; owner, 2026-11-07) — 6 items
 

@@ -472,7 +472,7 @@ public class ViewRuleTests
         string generated = string.Concat(output.SyntaxTrees.Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("global::EasyEcs.MutColumn.Of<global::T>(in entities)"));              // a run's change-tick column
         Assert.That(generated, Does.Contain("T = new global::EasyEcs.Mut<global::T>(ref c1, entity)"));            // one entity
-        Assert.That(generated, Does.Contain("T = new global::EasyEcs.Mut<global::T>(ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r1, i), in v0_0, (int)i)"));
+        Assert.That(generated, Does.Contain("T = new global::EasyEcs.Mut<global::T>(ref __Unsafe.Add(ref r1, i), in v0_0, (int)i)"));
         Assert.That(generated, Does.Contain("T = new global::EasyEcs.Mut<global::T>(ref global::System.Runtime.CompilerServices.Unsafe.AsRef(in @this.Read<global::T>()), @this)")); // AsVM
     }
 
@@ -498,7 +498,7 @@ public class ViewRuleTests
             "public static class Run { public static void F(World world) => world.ForEach(static (PQ v) => v.Add()); }"), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Lambdas.g.cs")).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("internal ref struct LambdaJob0").And.Contain("Vector512.LoadUnsafe(ref e1, (nuint)i)")
+        Assert.That(generated, Does.Contain("internal ref struct LambdaJob0").And.Contain("__V512.LoadUnsafe(ref e1, (nuint)i)")
             .And.Contain("(__c1_0 + __c2_0)"), generated);
     }
 
@@ -543,7 +543,7 @@ public class ViewRuleTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("new global::PQ { P = ref c2, Q = ref c3 }"));                          // one entity: after the component parameter
-        Assert.That(generated, Does.Contain("new global::PQ { P = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r1, i), Q = ref global::System.Runtime.CompilerServices.Unsafe.Add(ref r2, i) }")); // a run of rows: the vector loop's scalar tail
+        Assert.That(generated, Does.Contain("new global::PQ { P = ref __Unsafe.Add(ref r1, i), Q = ref __Unsafe.Add(ref r2, i) }")); // a run of rows: the vector loop's scalar tail
         Assert.That(generated, Does.Contain("Write<global::P>()").And.Contain("Read<global::Q>()"));
     }
 }

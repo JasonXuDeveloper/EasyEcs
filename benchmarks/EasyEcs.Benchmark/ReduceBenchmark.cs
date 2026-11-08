@@ -19,7 +19,8 @@ namespace EasyEcs.Benchmark;
 /// <c>Generated</c> cases reduce into singletons declared with field attributes ([Sum], [Min], [Max]), against the same
 /// reductions written by hand (<c>HandWritten</c>): the generated Identity and Combine cost what hand-written ones do.
 /// <c>LowestGenerated</c> keeps the row with the lowest score ([MinBy], MPI's MINLOC) against the same reduction written
-/// by hand (<c>LowestHandWritten</c>), both row by row: a reduction that keeps a row has no vector form yet.
+/// by hand (<c>LowestHandWritten</c>), both row by row, and as the vector loop the generator writes for it
+/// (<c>LowestVector</c>: the key and the row per lane).
 /// </summary>
 [MemoryDiagnoser]
 public partial class ReduceBenchmark
@@ -242,6 +243,13 @@ public partial class ReduceBenchmark
     }
 
     [Benchmark]
+    public EntityId LowestVector()
+    {
+        Totals.LowestVector(_world);
+        return _world.Lowest.Holder;
+    }
+
+    [Benchmark]
     public EntityId LowestHandWritten()
     {
         Totals.LowestHandWritten(_world);
@@ -370,6 +378,13 @@ public partial class ReduceBenchmark
 
         [ForEach(Parallel = true, SimdMode = SimdMode.Off)]
         public static void LowestGenerated(Entity entity, in Score score, ref Reduce<Lowest> lowest)
+        {
+            if (score.Value < lowest.Value.Score) lowest.Value = new Lowest { Holder = entity.Id, Score = score.Value };
+        }
+
+        // The same method as a vector loop: the key and the row per lane, the lanes folded per chunk (Kernel.KeptRowWrite).
+        [ForEach(Parallel = true)]
+        public static void LowestVector(Entity entity, in Score score, ref Reduce<Lowest> lowest)
         {
             if (score.Value < lowest.Value.Score) lowest.Value = new Lowest { Holder = entity.Id, Score = score.Value };
         }

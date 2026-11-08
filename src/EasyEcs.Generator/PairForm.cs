@@ -156,10 +156,6 @@ internal static class PairForm
         return null;
     }
 
-    /// <summary>The method writes a component of the neighbor (<c>[Neighbor] ref T</c>): its pairs run one at a time.</summary>
-    public static bool WritesNeighbor(IMethodSymbol method) =>
-        method.Parameters.Any(p => p.RefKind == RefKind.Ref && Symbols.Classify(p, Symbols.IsRunner(method)) == Symbols.ParamKind.Neighbor);
-
     /// <summary>
     /// The cutoff test of a pair method's body, or null with the reason none was found (EECS106: the pass then runs
     /// every pair). The test is the first statement after the method's local declarations, <c>if (d2 &gt;= r2 || ...)

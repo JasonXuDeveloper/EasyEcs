@@ -157,6 +157,16 @@ internal sealed partial class Kernel
             case IInvocationOperation { Instance: null } call when IsMath(call.TargetMethod) && IsInt(call.TargetMethod.ReturnType)
                 && call.TargetMethod.Parameters.All(p => IsInt(p.Type)):
                 return WideCall(call);
+            case IIncrementOrDecrementOperation { IsChecked: false, OperatorMethod: null } a when IsInt(a.Type) && _half < 0:
+            {
+                // ++i / i-- of an int local as a value: written in the lanes evaluated (a local's values are snapshots, so
+                // the value held before stays what it was)
+                StepPlace(a);
+                var before = WideOf(a.Target);
+                var after = WideBinary(a.Kind == OperationKind.Increment ? BinaryOperatorKind.Add : BinaryOperatorKind.Subtract, before, Constant(1), a);
+                WriteWide(a.Target, after, _active);
+                return a.IsPostfix ? before : after;
+            }
             default:
                 if (IsLane(op.Type) && !IsFloat(op.Type) || PairLane(op)) return FromLane(op);
                 throw Not(op);
@@ -228,7 +238,26 @@ internal sealed partial class Kernel
                 throw new Unsupported($"the shift '{Text(op)}' needs bits of an int that {Bits}-bit lanes do not hold");
             }
             case BinaryOperatorKind.Divide or BinaryOperatorKind.Remainder:
-                throw new Unsupported("integer division is not supported (it throws on 0)");
+            {
+                bool divide = kind == BinaryOperatorKind.Divide;
+                string sign = divide ? "/" : "%";
+                if (r.Lo != r.Hi) throw new Unsupported($"integer division ('{Text(op)}') by a value that differs per row is not supported in {Bits}-bit lanes (it throws on 0)");
+                long d = r.Lo;
+                // By a power of two, of a value that is never negative (C# truncates toward zero, so a negative one would
+                // need its sign's correction): x / 2^k is a right shift of the exact value, x % 2^k its low k bits.
+                if (d > 0 && (d & (d - 1)) == 0 && l.Lo >= 0 && l.Low != null)
+                {
+                    int k = 0;
+                    while (1L << k < d) k++;
+                    if (divide && Fits(l, false))
+                        return Of(k == 0 ? l.Low : k >= Bits ? $"{Vec(Unsigned)}.Zero" : Held($"{V}.ShiftRightLogical({l.Low}, {k})"), l.Lo >> k, l.Hi >> k);
+                    if (!divide && k < Bits)
+                        return Of(k == 0 ? $"{Vec(Unsigned)}.Zero" : Held($"({l.Low} & {Constant(d - 1).Low})"), 0, System.Math.Min(d - 1, l.Hi));
+                    if (!divide && Fits(l, false)) return l; // every value below the divisor
+                }
+                throw new Unsupported($"'{sign}' by {d} is not supported in {Bits}-bit lanes: there a division is a shift (or a mask) only by a power of two "
+                    + "and of a value that is never negative; 4-byte lanes divide by any constant (an int field)");
+            }
             default:
                 throw Not(op);
         }

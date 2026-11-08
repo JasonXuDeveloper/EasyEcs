@@ -14,7 +14,9 @@ namespace EasyEcs.Benchmark;
 /// (<c>HandWritten512</c>, the widest the hardware may have), and as the generator's vector loop of the same per-row
 /// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data; <c>StepHelpers</c> is the
 /// same method written through helpers it calls, inlined into its vector loop: Kernel.Inlining.cs); <c>Integrate</c> and
-/// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
+/// <c>Count</c> stream memory (one float multiply-add, one int increment per row); <c>Expire</c> is a timer (<c>--</c> as the
+/// value tested) and <c>Survey</c> running totals kept in a singleton taken by ref, each against its twin with
+/// SimdMode.Off. <c>Move2</c> / <c>Move3</c> /
 /// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity: each field alike, a flat loop over the columns' lanes;
 /// <c>Move2HandCast</c> is the same by hand, the columns cast to floats; <c>Push</c> is Move2 assigned whole, <c>Move2Gaps</c>
 /// Move2 over a table whose every third row lacks the velocity: masked words, which split the fields; <c>Move3Gaps</c> the
@@ -38,10 +40,13 @@ namespace EasyEcs.Benchmark;
 /// gather them into lanes and back on AVX-512, NEON table lookups on ARM64, the other 9 kept as loaded); <c>Glide</c> the
 /// float of a component of mixed types (3 words a row); <c>Dive</c> (heavy math: a square root, a division) and <c>Ledger</c>
 /// (light) 3 and 2 of a wide component's 8 eight-byte words (doubles, longs). Dive takes AVX2's permutes too; Steer, Glide
-/// and Ledger run rows there, and Ledger on AVX-512 as well. <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
+/// and Ledger run rows there, and Ledger on AVX-512 as well. <c>Brake</c> uses 2 of the 8 floats of a wide component under
+/// light math, a shape ARM64's gate refuses (table lookups against too few operations at 4 rows a vector):
+/// <c>BrakeForced</c> is the same method with SimdMode.Require, every form forced open (owner-m4.md 4). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
-/// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
+/// a table where every third row / a random half of the rows lacks <c>Mass</c> (<c>RigHoles</c>: Brake's math over a wide
+/// component's rows, every third without <c>Mass</c>) (removed in place): rows the vector loop
 /// leaves out (a lane mask per word of 64 rows). 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser, IsaColumn]
@@ -49,7 +54,7 @@ public partial class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _ratios, _fields, _fragments, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
+    private World _world, _ratios, _fields, _fragments, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger, _rigs;
 
     [GlobalSetup]
     public void Setup()
@@ -57,6 +62,7 @@ public partial class KernelBenchmark
         _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _world.SetPull(0.75f);
         _world.SetWindow(-40f, 120f);
+        _world.AddSingleton<Census>();
         _world.Reserve<Heat, Speed, Mass, Ticks>(Entities);
         var random = new Random(1);
         for (int i = 0; i < Entities; i++)
@@ -79,6 +85,15 @@ public partial class KernelBenchmark
         _fragments = Fragments();
         _gaps = Gaps(Entities);
         _halves = Holes(Entities, i => random.Next(2) == 0);
+
+        _rigs = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _rigs.Reserve<Rig, Mass>(Entities);
+        for (int i = 0; i < Entities; i++)
+        {
+            var rig = _rigs.CreateEntity(new Rig { X = (float)random.NextDouble(), P = (float)random.NextDouble() - 0.5f, Q = (float)random.NextDouble() * 4, A1 = i },
+                new Mass { Value = (float)random.NextDouble() * 5 });
+            if (i % 3 == 0) rig.Remove<Mass>();
+        }
 
         _pixels = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _pixels.Reserve<Lum, Glow>(Entities);
@@ -106,6 +121,9 @@ public partial class KernelBenchmark
         _craft.Reserve<Probe>(Entities);
         for (int i = 0; i < Entities; i++)
             _craft.CreateEntity(new Probe { X = random.NextDouble(), Id = i, P = random.NextDouble() - 0.5, Tag = i * 7, Q = random.NextDouble() * 4 });
+        _craft.Reserve<Rig>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _craft.CreateEntity(new Rig { X = (float)random.NextDouble(), P = (float)random.NextDouble() - 0.5f, Q = (float)random.NextDouble() * 4, A1 = i });
 
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
@@ -214,6 +232,7 @@ public partial class KernelBenchmark
         _gaps.Dispose();
         _holes.Dispose();
         _halves.Dispose();
+        _rigs.Dispose();
         _pixels.Dispose();
         _vectors.Dispose();
         _craft.Dispose();
@@ -283,6 +302,16 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void HolesGenerated() => Kernels.Step(_holes);
+
+    [Benchmark]
+    public void RigHolesScalar()
+    {
+        var job = new RigHolesRows();
+        _rigs.ForEach<Rig, Mass, RigHolesRows>(ref job);
+    }
+
+    [Benchmark]
+    public void RigHolesGenerated() => Kernels.RigHoles(_rigs);
 
     [Benchmark]
     public void HalvesScalar()
@@ -619,6 +648,19 @@ public partial class KernelBenchmark
     public void LedgerGenerated() => Kernels.Ledger(_craft);
 
     [Benchmark]
+    public void BrakeScalar()
+    {
+        var job = new BrakeRows { Pull = _craft.Pull };
+        _craft.ForEach<Rig, BrakeRows>(ref job);
+    }
+
+    [Benchmark]
+    public void BrakeGenerated() => Kernels.Brake(_craft);
+
+    [Benchmark]
+    public void BrakeForced() => Kernels.BrakeForced(_craft);
+
+    [Benchmark]
     public void BrightenScalar()
     {
         var job = new BrightenRows();
@@ -648,7 +690,28 @@ public partial class KernelBenchmark
     [Benchmark]
     public void SeekParallelGenerated() => Kernels.SeekParallel(_fields);
 
+    [Benchmark]
+    public void ExpireScalar() => Kernels.ExpireRows(_world);
+
+    [Benchmark]
+    public void ExpireGenerated() => Kernels.Expire(_world);
+
+    [Benchmark]
+    public void CoolScalar() => Kernels.CoolRows(_world);
+
+    [Benchmark]
+    public void CoolGenerated() => Kernels.Cool(_world);
+
+    [Benchmark]
+    public void SurveyScalar() => Kernels.SurveyRows(_world);
+
+    [Benchmark]
+    public void SurveyGenerated() => Kernels.Survey(_world);
+
     public record struct Window(float Min, float Max) : ISingletonComponent;
+
+    /// <summary>Running totals a [ForEach] method keeps in a singleton taken by ref: a count, a long sum, a maximum.</summary>
+    public struct Census : ISingletonComponent { public int Hot; public long Sum; public int Peak; }
 
     /// <summary>A count, a sum, a minimum and a maximum of ints: exact in any order of the rows.</summary>
     public partial struct Tally : ISingletonComponent
@@ -879,7 +942,25 @@ public partial class KernelBenchmark
         public long Tag;
         public double Heat, Spin, Q;
     }
+    /// <summary>A wide component of 8 floats a row, of which Brake uses 2.</summary>
+    public struct Rig : IComponent
+    {
+        public float X, A1, A2, P, A4, A5, A6, Q;
+    }
 #pragma warning restore EECS091
+
+    private struct RigHolesRows : IForEach<Rig, Mass>, INoStructuralChanges
+    {
+        public void Execute(ref Rig rig, ref Mass mass) => Kernels.RigHoles(ref rig, in mass);
+        static int IForEach<Rig, Mass>.WriteMask => 1;
+    }
+
+    private struct BrakeRows : IForEach<Rig>, INoStructuralChanges
+    {
+        public Pull Pull;
+        public void Execute(ref Rig rig) => Kernels.Brake(ref rig, in Pull);
+        static int IForEach<Rig>.WriteMask => 1;
+    }
 
     private struct SteerRows : IForEach<Craft>, INoStructuralChanges
     {
@@ -1029,6 +1110,67 @@ public partial class KernelBenchmark
 
         [ForEach]
         internal static void Count(ref Ticks ticks) => ticks.Value++;
+
+        // A timer: -- as the value tested, the row reset when it runs out (a third of the rows each pass at 1k). Written in
+        // the method, as users write it: through a helper the inliner already hoists the step out of the condition.
+        [ForEach]
+        internal static void Expire(ref Ticks ticks, ref Heat heat)
+        {
+            if (--ticks.Value <= 0)
+            {
+                ticks.Value = 3;
+                heat.Value *= 0.5f;
+            }
+        }
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void ExpireRows(ref Ticks ticks, ref Heat heat) => ExpireRow(ref ticks, ref heat);
+
+        // The timer beside math a row's lanes do faster than the row (a square root): what the step's vector loop buys
+        // where the light timer above is bound by memory either way.
+        [ForEach]
+        internal static void Cool(ref Ticks ticks, ref Heat heat)
+        {
+            if (--ticks.Value <= 0) ticks.Value = 3;
+            heat.Value = MathF.Sqrt(heat.Value * heat.Value + 1f) * 0.5f;
+        }
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void CoolRows(ref Ticks ticks, ref Heat heat) => CoolRow(ref ticks, ref heat);
+
+        private static void CoolRow(ref Ticks ticks, ref Heat heat)
+        {
+            if (--ticks.Value <= 0) ticks.Value = 3;
+            heat.Value = MathF.Sqrt(heat.Value * heat.Value + 1f) * 0.5f;
+        }
+
+        private static void ExpireRow(ref Ticks ticks, ref Heat heat)
+        {
+            if (--ticks.Value <= 0)
+            {
+                ticks.Value = 3;
+                heat.Value *= 0.5f;
+            }
+        }
+
+        // Running totals of a singleton taken by ref: the lanes fold into it once per run (written in the method, as above).
+        [ForEach]
+        internal static void Survey(in Heat heat, in Ticks ticks, ref Census census)
+        {
+            if (heat.Value > 50f) census.Hot++;
+            census.Sum += ticks.Value;
+            census.Peak = Math.Max(census.Peak, ticks.Value);
+        }
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void SurveyRows(in Heat heat, in Ticks ticks, ref Census census) => SurveyRow(in heat, in ticks, ref census);
+
+        private static void SurveyRow(in Heat heat, in Ticks ticks, ref Census census)
+        {
+            if (heat.Value > 50f) census.Hot++;
+            census.Sum += ticks.Value;
+            census.Peak = Math.Max(census.Peak, ticks.Value);
+        }
 
         // By constants: the quotient and remainder of 8 are shifts, of 7 a division of doubles; a float halved is a product.
         [ForEach]
@@ -1188,6 +1330,31 @@ public partial class KernelBenchmark
             probe.Tag = (probe.Tag ^ 0x55) + probe.Id - 7;
         }
 #pragma warning restore EECS055
+
+        // 2 of a wide component's 8 floats, light math: AVX-512's permutes pay, ARM64's table lookups do not (its gate).
+        [ForEach]
+        internal static void Brake(ref Rig rig, in Pull pull)
+        {
+            rig.X = rig.X - rig.P * pull.Value;
+            rig.Q = MathF.Min(rig.Q + rig.X, 10) * 0.5f + pull.Value * pull.Value;
+        }
+
+        // Brake's math over rows of which every third lacks Mass: every word of the table masked, a wide component's lanes
+        // under the passing rows' mask.
+        [ForEach]
+        internal static void RigHoles(ref Rig rig, in Mass mass)
+        {
+            rig.X = rig.X - rig.P * mass.Value;
+            rig.Q = MathF.Min(rig.Q + rig.X, 10) * 0.5f + mass.Value * mass.Value;
+        }
+
+        // Brake with every wide form forced open: what ARM64's refused table lookups would cost.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void BrakeForced(ref Rig rig, in Pull pull)
+        {
+            rig.X = rig.X - rig.P * pull.Value;
+            rig.Q = MathF.Min(rig.Q + rig.X, 10) * 0.5f + pull.Value * pull.Value;
+        }
 
         // Narrow lanes: a saturating byte sum (AddSaturate), then a wrapping one past a threshold: 64 rows per Vector512.
         [ForEach(SimdMode = SimdMode.Require)]

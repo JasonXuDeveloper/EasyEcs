@@ -71,6 +71,10 @@ tests/EasyEcs.UnitTest/          NUnit, one file per feature
                                  recorded, against their twins row by row, 0 B
   FormTests.cs                   EECS080 / EECS084
   FusionTests.cs                 fused walks against FusionMode.Off twins, the exclusions
+  GeneratedTextTests.cs          the generated text's dead lines counted per kind over the corpora of every vector form
+                                 (global:: outside the alias block, needless parentheses, identity copies, unread locals,
+                                 marks zeroed then OR-ed once, empty methods, constants made in a method), each against a
+                                 budget that may only fall (audit-generator, "The generated text")
   GeneratorTests.cs              generated code, the vector loops and EECS055 / EECS056's reasons, caching;
                                  GeneratorBenchmark's corpus clean (GeneratorCorpus.cs, linked); the samples, the
                                  template and the demo clean (SamplesAreClean, with its tracked exceptions); the harness: Compile,

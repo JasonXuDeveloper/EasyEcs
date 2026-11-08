@@ -85,7 +85,9 @@ public ref struct AoiSystem
 [EcsSystem]
 public ref struct CombatSystem
 {
-    [ForEach, Without<Dead>, Without<Stunned>]
+    // Two changes of a row (Burning or Stunned) drawn from a seed of the entity's id: row by row (a vector loop applies
+    // one change per method).
+    [ForEach(SimdMode = SimdMode.Off), Without<Dead>, Without<Stunned>]
     private static void Fight(Entity entity, ref Attack attack, ref Health health, ref WorldStats stats)
     {
         if (--attack.Cooldown > 0) return;
@@ -124,7 +126,9 @@ public ref struct StatusSystem
 [EcsSystem]
 public ref struct DeathSystem
 {
-    [ForEach, Without<Dead>]
+    // Row by row: the Npc check runs only on the rare dead row, where a ReadOnlyMaybe<Npc> parameter would read its
+    // column on every row (1.2-1.3x slower world ticks) and still leave the method scalar beside SetDead.
+    [ForEach(SimdMode = SimdMode.Off), Without<Dead>]
     private static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
     {
         if (health.Value > 0) return;

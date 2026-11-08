@@ -104,6 +104,10 @@ its own worktree.
      BenchmarkDotNet rebuilds from source, so a tree someone edits changes under the run; two rounds, interleaved; a
      run past about 2 h is split into one background job per round; gated forms (a prefetch on and off, a switch
      forced) are compared inside one binary, since edits made while a head run builds enter its binaries;
+   - run each side from its own root (`cd` into the copy before `dotnet run --project`): BenchmarkDotNet's generated
+     project references the benchmark csproj it finds from the working directory, not the one `--project` built, so a
+     base copy run from the worktree measures the worktree's code on both sides (feat-lane4-generator: every base row
+     equal to head; the kept child build, `--keepFiles`, names the csproj it referenced);
    - an estimate the runtime makes on every pass or draw (a cost model, a count) is measured itself: counting every
      cluster at every draw cost 27% of a pair pass, sampling 64 clusters every 16th draw removed it;
    - GeneratorBenchmark's corpus holds gameplay code (structural calls, generated writers, buffers), or the

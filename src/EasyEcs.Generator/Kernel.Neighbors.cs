@@ -81,7 +81,7 @@ internal sealed partial class Kernel
         var each = new StringBuilder();
         foreach (var line in _setup.ToString().Split('\n'))
             if (line.Length > 0) (line.Contains(NeighborPrefix) ? each : setup).Append(line).Append('\n');
-        return new Code(new EquatableArray<string>(_components.Values.OrderBy(c => c.Index).Select(c => Elem(c.Fields[0].Type)).ToArray()),
+        return new Code(new EquatableArray<string>(_components.Values.OrderBy(c => c.Index).Select(c => c.Fields.Length == 0 ? "byte" : Elem(c.Fields[0].Type)).ToArray()),
             setup.ToString(), loads, "", each + _body.Masked, stores, "", "", _size, _mask, lane,
             _components.Any(c => c.Value.Fields.Length > 1), false, null)
         {

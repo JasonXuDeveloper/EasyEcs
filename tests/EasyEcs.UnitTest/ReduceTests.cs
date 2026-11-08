@@ -735,6 +735,84 @@ public partial class ReduceTests
         }
     }
 
+    public static class KeptRows
+    {
+        // The vector loop (the key and the row per lane, Kernel.KeptRowWrite) against the method row by row.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void Least(Entity entity, in Points points, ref Reduce<Least> least)
+        {
+            if (points.Value < least.Value.Score) least.Value = new Least(entity.Id, points.Value);
+        }
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void LeastRows(Entity entity, in Points points, ref Reduce<Least> least)
+        {
+            if (points.Value < least.Value.Score) least.Value = new Least(entity.Id, points.Value);
+        }
+
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void Heaviest(Entity entity, in Weight weight, ref Reduce<Heaviest> heaviest)
+        {
+            if (heaviest.Value.Weight < weight.Value) heaviest.Value = new Heaviest { Weight = weight.Value, Holder = entity.Id };
+        }
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void HeaviestRows(Entity entity, in Weight weight, ref Reduce<Heaviest> heaviest)
+        {
+            if (heaviest.Value.Weight < weight.Value) heaviest.Value = new Heaviest { Weight = weight.Value, Holder = entity.Id };
+        }
+    }
+
+    /// <summary>
+    /// A kept row through the vector loop is the row the method keeps row by row: many ties (the earliest row wins,
+    /// across lanes and vectors), NaN and -0 / +0 keys, rows in several tables, rows without the key's component,
+    /// every length around the vector's width.
+    /// </summary>
+    [TestCase(1), TestCase(7), TestCase(16), TestCase(33), TestCase(100), TestCase(1000), TestCase(5000)]
+    public void AKeptRowOfTheVectorLoopIsTheMethods(int rows)
+    {
+        using var a = new World();
+        using var b = new World();
+        var random = new Random(rows);
+        var xs = new Entity[rows];
+        var ys = new Entity[rows];
+        for (int i = 0; i < rows; i++)
+        {
+            var (points, weight) = (new Points(random.Next(-5, 5)), new Weight(random.Next(6) switch { 0 => float.NaN, 1 => -0f, 2 => 0f, _ => random.Next(-3, 3) }));
+            xs[i] = a.CreateEntity(points, weight);
+            ys[i] = b.CreateEntity(points, weight);
+            if (i % 5 == 2) // a second table
+            {
+                xs[i].Set(new Spot(1, 2));
+                ys[i].Set(new Spot(1, 2));
+            }
+            if (i % 7 == 3) // a row without the key's component: in neither pass
+            {
+                xs[i].Remove<Points>();
+                ys[i].Remove<Points>();
+            }
+        }
+        for (int round = 0; round < 2; round++)
+        {
+            KeptRows.Least(a);
+            KeptRows.LeastRows(b);
+            KeptRows.Heaviest(a);
+            KeptRows.HeaviestRows(b);
+            int at = a.Least.Holder.Index, bt = b.Least.Holder.Index;
+            Assert.That(a.Least.Score, Is.EqualTo(b.Least.Score), $"round {round}");
+            Assert.That(a.Least.Holder, Is.EqualTo(b.Least.Holder), $"round {round}: row {at} instead of {bt}");
+            Assert.That(a.Heaviest.Holder, Is.EqualTo(b.Heaviest.Holder), $"round {round}");
+            Assert.That(BitConverter.SingleToInt32Bits(a.Heaviest.Weight), Is.EqualTo(BitConverter.SingleToInt32Bits(b.Heaviest.Weight)), $"round {round}");
+            if (round == 0) // a later tie must not win; an earlier, lower one must
+                for (int i = rows - 1; i >= 0; i -= 3)
+                    if (xs[i].Has<Points>())
+                    {
+                        xs[i].Points = new Points(-5);
+                        ys[i].Points = new Points(-5);
+                    }
+        }
+    }
+
     [Test]
     public void AKeptRowSkipsNaNAndAnEmptyPassKeepsTheIdentity()
     {

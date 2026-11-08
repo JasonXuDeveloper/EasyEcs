@@ -328,7 +328,7 @@ public class PrefetchTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error || d.Id == "CS0649"), Is.Empty);
         string text = string.Concat(output.SyntaxTrees.Where(GeneratorTests.IsCode).Select(t => t.ToString()));
         string Job(string name) => text.Split("internal ref struct ").Single(j => j.StartsWith(name + " "));
-        const string add = "global::System.Runtime.CompilerServices.Unsafe.Add";
+        const string add = "__Unsafe.Add";
 
         // The row form: the call site picks the twin past the L2 (its form's gate), today's job otherwise.
         Assert.That(text, Does.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastL2(world))")

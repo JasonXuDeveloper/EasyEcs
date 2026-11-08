@@ -537,23 +537,6 @@ internal sealed class Parts
             Bad(own, $"writes {own.Name.Substring(own.Name.LastIndexOf('.') + 1)} itself and declares it with [OrderBy]: remove one");
     }
 
-    /// <summary>
-    /// Why a <c>[ForEach]</c> method that reduces into a <c>[MinBy]</c> / <c>[MaxBy]</c> singleton runs row by row, or null:
-    /// a vector loop would compare each lane's key and carry the other fields with it, a form the vector loops do not
-    /// have yet (docs/plans/backlog.md, "MinBy vector form"). Read before <c>Kernel.Vectorize</c> by the generator and
-    /// EECS055 / EECS056 alike, so both give this reason instead of one about the generated Combine.
-    /// </summary>
-    public static Kernel.ScalarReason? KeptRowReason(IMethodSymbol method)
-    {
-        foreach (var p in method.Parameters)
-            if (Symbols.ReduceElement(p.Type) is INamedTypeSymbol reduced
-                && (Declares(reduced, MinBy) || Declares(reduced, MaxBy)) && Of(reduced) is { KeptOf: { } kept })
-                return new Kernel.ScalarReason(
-                    $"it reduces into {reduced.Name}, which keeps the row with the {(kept.Lowest ? "lowest" : "highest")} {kept.Key} ([{(kept.Lowest ? "MinBy" : "MaxBy")}]): "
-                    + "a vector loop does not keep a row by its key yet, so the method runs row by row", false, null);
-        return null;
-    }
-
     /// <summary>Whether a radix sort orders <paramref name="type"/>: an integer, char, bool, float, double or an enum of an integer.</summary>
     public static bool Orderable(ITypeSymbol type) =>
         (type is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType: { } underlying } ? underlying : type).SpecialType
