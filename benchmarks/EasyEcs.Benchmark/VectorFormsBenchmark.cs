@@ -63,7 +63,7 @@ public class VectorFormsBenchmark
         world.Reserve<Charge, Drain, Boost, Dye, Tint, Gloss>(Rows);
         var entities = new Entity[Rows];
         for (int i = 0; i < Rows; i++)
-            entities[i] = world.CreateEntity(new Charge(i % 101 * 0.5f + 1), new Drain(i % 7 * 0.25f), new Boost(i % 5),
+            entities[i] = world.CreateEntity(new Charge(i % 101 * 0.5f + 1), new Drain(i % 7 * 0.25f), new Boost(i % 5 + 1),
                 new Dye((byte)(i * 37)), new Tint((byte)(i * 11)), new Gloss((byte)i));
         bool holes = Case != "Pow";
         for (int i = 0; i < Rows; i++)
@@ -126,8 +126,8 @@ public class VectorFormsBenchmark
         [ForEach(Parallel = true, SimdMode = SimdMode.Off)]
         internal static void MaskedParallelScalar(ref Charge charge, in Drain drain) => charge = new Charge(charge.Value * 0.999f - drain.Value + 0.25f);
 
-        // The rows without Boost settle at 250 instead of decaying: a value decaying by 0.999 per call reaches the
-        // subnormal floats, which slow every lane and row alike and measure nothing of the loop.
+        // Every row settles (at 250 without Boost, Boost is 1 to 5) instead of decaying: a value decaying by 0.999 per
+        // call reaches the subnormal floats, which slow every lane and row alike and measure nothing of the loop.
         [ForEach(Parallel = true)]
         internal static void MaybeParallel(ref Charge charge, ReadOnlyMaybe<Boost> boost) =>
             charge = new Charge(boost.HasValue ? charge.Value * 0.999f + boost.Value.Value : charge.Value * 0.999f + 0.25f);
