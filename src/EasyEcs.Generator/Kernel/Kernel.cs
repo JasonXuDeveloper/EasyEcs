@@ -1259,6 +1259,7 @@ internal sealed partial class Kernel
         var flat = Flat(kernel, root, () => Make(false));
         if (flatOnly != null && flat == null) throw FlatOnly();
         kernel.FitUnrolled(kernel._setup.ToString() + prologue + read + hold + kernel._body + stores, kernel._components.Count);
+        kernel.GatePerLane(kernel._body.ToString(), Symbols.Simd(lane.Declaration ?? lane.Method) == Symbols.SimdRequire); // Kernel.PerLane.cs
         // Narrow lanes have no shuffles: a component of several fields takes the flat loop or none.
         if (kernel._narrow && flat == null && kernel._components.FirstOrDefault(c => c.Value.Fields.Length > 1 && !kernel._doubled.Contains(c.Value.Index)) is { Key: { } narrow, Value.Fields: { } several })
         {
@@ -2815,6 +2816,7 @@ internal sealed partial class Kernel
         }
         if (!IsLane(type) || !m.Parameters.All(p => IsLane(p.Type))) throw Not(call);
         string Arg(int i) => Expr(call.Arguments.First(a => a.Parameter?.Ordinal == i).Value);
+        if (PerLaneCall(call) is { } perLane) return perLane; // Kernel.PerLane.cs
         bool single = m.Parameters.Length == 1, isFloat = IsFloat(type);
         switch (m.Name)
         {
