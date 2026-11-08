@@ -79,7 +79,7 @@
 
   <member name="P:EasyEcs.ForEachAttribute.MaxRows" source="5c044e1e10f4">
     <summary>
-      方法每次运行最多处理的行数：给一次处理所有行代价太高的工作一个预算（这个 tick 要加载或保存的区块、服务器每个 tick
+      方法每次运行最多处理的行数：给一次处理所有行代价太高的工作一个预算（这个 tick 要加载或保存的地形、服务器每个 tick
       处理的请求）。遍历开始时按 <c>Query</c> 访问的顺序收集前 N 个匹配的行，然后在遍历之外对每一行运行方法
       （<see cref="M:EasyEcs.World.ForEachCollected``2(``1@,System.Int32,EasyEcs.QueryFilter@)" />），所以方法可以做任何变更：
       可以调用 <c>LoadEntities</c>、<c>SaveEntities</c> 和遍历中不允许的其他调用。超出预算的行等下一次运行；配合

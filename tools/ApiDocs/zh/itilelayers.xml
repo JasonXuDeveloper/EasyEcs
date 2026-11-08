@@ -4,7 +4,7 @@
       高瓦片里一个格子方法的遍历覆盖的层，来自方法所取的、瓦片实体上的一个组件（<c>in TLayers</c>）：遍历只交换
       <see cref="P:EasyEcs.ITileLayers.From" /> 到 <see cref="P:EasyEcs.ITileLayers.To" /> 这些层的光环（连同它们的光环层，和
       <see cref="M:EasyEcs.Tile`2.ExchangeHalo(System.Int32,System.Int32,`0,System.Boolean)" /> 一样），也只走这些层，
-      适合数据只在少数几层、而用户自己的统计知道是哪几层的模板（一个区块的水能到的层）：
+      适合数据只在少数几层、而用户自己的统计知道是哪几层的模板（一片地形的水能到的层）：
       <code>
       public record struct FlowLayers(int From, int To) : IComponent, ITileLayers;
 

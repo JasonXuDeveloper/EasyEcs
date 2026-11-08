@@ -10,7 +10,7 @@ description: "一个瓦片的列：TTile 的网格（多层的瓦片）上一层
 public readonly struct Columns<TTile> : ITileShape where TTile : struct, ITileShape
 ```
 
-一个瓦片的列：`TTile` 的网格（多层的瓦片）上一层的瓦片，Width × Depth，以它的侧面为面，光环、邻域和边界与它相同。同一批实体和键上的第二个场：`Tile<Scent, Columns<Chunk>>` 是区块的地面，和区块方块的 `Tile<Water, Chunk>` 并列，格子是一个 Width × Depth 的 `DynamicBuffer<Scent>`。
+一个瓦片的列：`TTile` 的网格（多层的瓦片）上一层的瓦片，Width × Depth，以它的侧面为面，光环、邻域和边界与它相同。同一批实体和键上的第二个场：`Tile<Scent, Columns<Chunk>>` 是地形的地面，和地形方块的 `Tile<Water, Chunk>` 并列，格子是一个 Width × Depth 的 `DynamicBuffer<Scent>`。
 
 #### 类型参数 [#type-parameters]
 
