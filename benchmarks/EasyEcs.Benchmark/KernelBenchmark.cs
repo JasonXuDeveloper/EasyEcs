@@ -40,7 +40,9 @@ namespace EasyEcs.Benchmark;
 /// gather them into lanes and back on AVX-512, NEON table lookups on ARM64, the other 9 kept as loaded); <c>Glide</c> the
 /// float of a component of mixed types (3 words a row); <c>Dive</c> (heavy math: a square root, a division) and <c>Ledger</c>
 /// (light) 3 and 2 of a wide component's 8 eight-byte words (doubles, longs). Dive takes AVX2's permutes too; Steer, Glide
-/// and Ledger run rows there, and Ledger on AVX-512 as well. <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
+/// and Ledger run rows there, and Ledger on AVX-512 as well. <c>Brake</c> uses 2 of the 8 floats of a wide component under
+/// light math, a shape ARM64's gate refuses (table lookups against too few operations at 4 rows a vector):
+/// <c>BrakeForced</c> is the same method with SimdMode.Require, every form forced open (owner-m4.md 4). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
 /// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
@@ -109,6 +111,9 @@ public partial class KernelBenchmark
         _craft.Reserve<Probe>(Entities);
         for (int i = 0; i < Entities; i++)
             _craft.CreateEntity(new Probe { X = random.NextDouble(), Id = i, P = random.NextDouble() - 0.5, Tag = i * 7, Q = random.NextDouble() * 4 });
+        _craft.Reserve<Rig>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _craft.CreateEntity(new Rig { X = (float)random.NextDouble(), P = (float)random.NextDouble() - 0.5f, Q = (float)random.NextDouble() * 4, A1 = i });
 
         _fields = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _fields.Reserve<P2, V2, P3, V3, P4, V4, D3>(Entities);
@@ -622,6 +627,19 @@ public partial class KernelBenchmark
     public void LedgerGenerated() => Kernels.Ledger(_craft);
 
     [Benchmark]
+    public void BrakeScalar()
+    {
+        var job = new BrakeRows { Pull = _craft.Pull };
+        _craft.ForEach<Rig, BrakeRows>(ref job);
+    }
+
+    [Benchmark]
+    public void BrakeGenerated() => Kernels.Brake(_craft);
+
+    [Benchmark]
+    public void BrakeForced() => Kernels.BrakeForced(_craft);
+
+    [Benchmark]
     public void BrightenScalar()
     {
         var job = new BrightenRows();
@@ -903,7 +921,19 @@ public partial class KernelBenchmark
         public long Tag;
         public double Heat, Spin, Q;
     }
+    /// <summary>A wide component of 8 floats a row, of which Brake uses 2.</summary>
+    public struct Rig : IComponent
+    {
+        public float X, A1, A2, P, A4, A5, A6, Q;
+    }
 #pragma warning restore EECS091
+
+    private struct BrakeRows : IForEach<Rig>, INoStructuralChanges
+    {
+        public Pull Pull;
+        public void Execute(ref Rig rig) => Kernels.Brake(ref rig, in Pull);
+        static int IForEach<Rig>.WriteMask => 1;
+    }
 
     private struct SteerRows : IForEach<Craft>, INoStructuralChanges
     {
@@ -1273,6 +1303,22 @@ public partial class KernelBenchmark
             probe.Tag = (probe.Tag ^ 0x55) + probe.Id - 7;
         }
 #pragma warning restore EECS055
+
+        // 2 of a wide component's 8 floats, light math: AVX-512's permutes pay, ARM64's table lookups do not (its gate).
+        [ForEach]
+        internal static void Brake(ref Rig rig, in Pull pull)
+        {
+            rig.X = rig.X - rig.P * pull.Value;
+            rig.Q = MathF.Min(rig.Q + rig.X, 10) * 0.5f + pull.Value * pull.Value;
+        }
+
+        // Brake with every wide form forced open: what ARM64's refused table lookups would cost.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void BrakeForced(ref Rig rig, in Pull pull)
+        {
+            rig.X = rig.X - rig.P * pull.Value;
+            rig.Q = MathF.Min(rig.Q + rig.X, 10) * 0.5f + pull.Value * pull.Value;
+        }
 
         // Narrow lanes: a saturating byte sum (AddSaturate), then a wrapping one past a threshold: 64 rows per Vector512.
         [ForEach(SimdMode = SimdMode.Require)]
