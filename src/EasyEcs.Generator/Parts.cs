@@ -537,14 +537,6 @@ internal sealed class Parts
             Bad(own, $"writes {own.Name.Substring(own.Name.LastIndexOf('.') + 1)} itself and declares it with [OrderBy]: remove one");
     }
 
-    /// <summary>
-    /// Null: a <c>[ForEach]</c> method reducing into a <c>[MinBy]</c> / <c>[MaxBy]</c> singleton gets its vector loop, or
-    /// its reason, from <c>Kernel.Vectorize</c> (Kernel.KeptReduction, KeptRowWrite) like any other method. EECS055 still
-    /// calls it before Kernel (EasyEcsAnalyzer.Performance.cs, the analyzer lane's file: docs/plans/backlog.md G9 note),
-    /// so it stays until that call goes.
-    /// </summary>
-    public static Kernel.ScalarReason? KeptRowReason(IMethodSymbol method) => null;
-
     /// <summary>Whether a radix sort orders <paramref name="type"/>: an integer, char, bool, float, double or an enum of an integer.</summary>
     public static bool Orderable(ITypeSymbol type) =>
         (type is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType: { } underlying } ? underlying : type).SpecialType
