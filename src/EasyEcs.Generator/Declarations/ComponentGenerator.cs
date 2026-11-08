@@ -57,7 +57,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
 
         context.RegisterSourceOutput(components.Combine(supported), static (spc, pair) =>
         {
-            if (pair.Right) spc.AddSource($"{pair.Left!.HintName}.Component.g.cs", SourceText.From(Emit(pair.Left!), Encoding.UTF8));
+            if (pair.Right) spc.AddSource($"{pair.Left!.HintName}.Component.g.cs", SourceText.From(Code.Aliased(Emit(pair.Left!)), Encoding.UTF8));
         });
 
         // DynamicBuffer<T> names, bound once: the buffer's named members (one file per element type of this compilation,
@@ -77,7 +77,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .WithTrackingName("BufferElements");
         context.RegisterSourceOutput(elements.Combine(supported), static (spc, pair) =>
         {
-            if (pair.Right) spc.AddSource($"{pair.Left.HintName}.Buffer.g.cs", SourceText.From(EmitBuffer(pair.Left), Encoding.UTF8));
+            if (pair.Right) spc.AddSource($"{pair.Left.HintName}.Buffer.g.cs", SourceText.From(Code.Aliased(EmitBuffer(pair.Left)), Encoding.UTF8));
         });
 
         // Query<T1..Tn> and Read<T1..Tn> calls: each shape's items get named refs (item.Position for item.Component1),
@@ -93,7 +93,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .WithTrackingName("QueryShapes");
         context.RegisterSourceOutput(shapes.Combine(supported), static (spc, pair) =>
         {
-            if (pair.Right) spc.AddSource($"EasyEcs.QueryItem.{pair.Left.Hash}.g.cs", SourceText.From(EmitQueryItem(pair.Left), Encoding.UTF8));
+            if (pair.Right) spc.AddSource($"EasyEcs.QueryItem.{pair.Left.Hash}.g.cs", SourceText.From(Code.Aliased(EmitQueryItem(pair.Left)), Encoding.UTF8));
         });
 
         // Saves name types: every component, singleton and DynamicBuffer<T> of the compilation is registered when the
@@ -269,6 +269,7 @@ public sealed class ComponentGenerator : IIncrementalGenerator
 
     internal static readonly string Version = typeof(ComponentGenerator).Assembly.GetName().Version?.ToString() ?? "";
 
+    // Written qualified and shortened by the file's alias block (Code.Aliased): one attribute per member.
     private const string Inline =
         "        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n";
 

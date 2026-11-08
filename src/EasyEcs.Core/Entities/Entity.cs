@@ -1,4 +1,5 @@
 using System;
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -120,6 +121,13 @@ public readonly partial struct Entity : IEquatable<Entity>
         if (default(T) is ITracked && found) Stamp<T>(_world, Index);
         return ref value;
     }
+
+    /// <summary>
+    /// Ref to component <typeparamref name="T"/>, or a null ref when the entity does not have it or is not alive. Not a
+    /// write: nothing is stamped. O(1). Generated code calls it (a view's <c>TryGetX</c> finds each component once).
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public ref T RefOrNull<T>() where T : struct, IComponent => ref Find<T>(false);
 
     /// <summary>
     /// Copy of component <typeparamref name="T"/> if the entity has it; false when it does not or is not alive. Not a
