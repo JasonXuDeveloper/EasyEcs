@@ -5,6 +5,45 @@ by whom or which round, why it was not done, and what would change the verdict. 
 roadmap (do it), to `docs/content/decisions.mdx` (settled, with the reason), or deletes it. Done or decided entries
 leave this file; it is not published on the site.
 
+## Two analyzer rules: a component removed to pause it, a flag where a tag would do (feat-analyzer-lane2, backlog A14)
+
+**Proposed by** the analyzer sweep (2026-11-07, `analyzer.md` 3): (a) `entity.Remove<T>()` in one system and a
+`Set<T>` / `Add<T>` of the same T on that entity in another, to pause what T drives, where `Disable<T>` hides
+the component, keeps its value and moves no row; (b) `if (!c.Flag) return;` as a `[ForEach]` method's first
+statement, where a tag and `[With<T>]` skip the rows without reading them.
+
+**Why not.** (a) No signal in the code tells a pause from an end and a new start: a status effect removed when it
+expires and set again by the next hit is the same pair of calls, and finding the pair needs the flow of one entity
+across systems, which the analyzer does not follow (one entity per call is not a fact of the syntax). Every report it
+could make would be a guess; the cleanup-and-disable page teaches `Disable<T>`. (b) One mistake, one fix: since e45aac7
+EECS055 reports a bool the method uses alone among its component's fields as a Warning with the split (a one-bool
+component is a byte column the vector loop reads as a mask), so that code already gets a fix that keeps every row in
+place. A tag is faster only when the flag rarely flips (each flip is a structural change, a row moving between
+archetypes), and how often it flips is not in the code. A second rule would contradict the first on the same line.
+
+What would change the verdict: (a) a runtime count of Remove-then-Set of one type on one entity within a few ticks
+(introspection could report it, the analyzer cannot); (b) the same kind of runtime count of how often a bool field
+flips per row, which would let a profile-guided hint choose between the split and the tag.
+
+## A rule for an IForSpan job that is one element loop (inner-loops.md section 6, backlog A15; not built in feat-analyzer-lane2)
+
+**Proposed by** inner-loops.md (section 6, after WP4 shipped the lambda form of `ParallelFor`): an `IForSpan<T>` job
+whose `Execute(int start, Span<T> items)` is one plain loop over `items` would get a vector loop as a lambda pass,
+`world.ParallelFor(ref items, values..., static (ref T item, ...) => ...)`, so a rule could say "write it as a lambda
+pass".
+
+**Why not in this lane.** The analyzer's rule for SIMD written by hand reports a form only when its rewrite, put in
+place in a copy of the compilation, gets the generator's loop (`HandSimd.Rewritten`), and a rule without that check
+would advise rewrites that stay scalar (`ParallelForBenchmark.Heavy`'s inner `k < 8` loop is one). Here the rewrite is
+not of a method but of the call site: the job is built where `ParallelFor(ref items, ref job)` is called, its fields
+set there become the lambda's values, and the loop's body becomes the lambda's. Checking that rewrite needs
+`LambdaPass.Read` and `Kernel.Vectorize` over a call rewritten in a copy of the compilation, a new entry in
+`LambdaPass.cs`, which the vector-loop lane owns while it edits the lambda passes. The cause is the missing call-site
+form of the check, not the rule.
+
+What would change the verdict: the vector-loop lane adding a `LambdaPass` reader over a rewritten call (the job's
+fields as values, its loop's body as the lambda); the rule is then a `HandSimd`-style form with its fix.
+
 ## Countdown timers as a generated form (Finish 1a scan, finish-scan.md item 2; owner, 2026-11-07: not built)
 
 **Proposed by** the generated-members scan: a component that counts down every tick, the entity or the component

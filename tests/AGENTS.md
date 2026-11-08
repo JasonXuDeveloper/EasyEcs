@@ -72,7 +72,8 @@ tests/EasyEcs.UnitTest/          NUnit, one file per feature
   FormTests.cs                   EECS080 / EECS084
   FusionTests.cs                 fused walks against FusionMode.Off twins, the exclusions
   GeneratorTests.cs              generated code, the vector loops and EECS055 / EECS056's reasons, caching;
-                                 GeneratorBenchmark's corpus clean (GeneratorCorpus.cs, linked); the harness: Compile,
+                                 GeneratorBenchmark's corpus clean (GeneratorCorpus.cs, linked); the samples, the
+                                 template and the demo clean (SamplesAreClean, with its tracked exceptions); the harness: Compile,
                                  Driver, Analyze, Components (over tools/Shared/GeneratorHost.cs, linked)
   GenericTests.cs                generic components and systems
   GroupTests.cs                  [GroupBy] groups

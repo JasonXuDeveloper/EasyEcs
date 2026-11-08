@@ -5,6 +5,10 @@ using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
 
+// The pair methods store a neighbor's index as the tie-break the reference walks compare within one pass, not as a
+// reference to the entity (EECS130).
+#pragma warning disable EECS130
+
 public partial record struct PairSpot(float X, float Y) : IComponent;
 public partial record struct PairDrift(float X, float Y) : IComponent;
 public partial record struct PairShove(float X, float Y) : IComponent;

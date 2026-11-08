@@ -57,11 +57,12 @@ public static partial class EasyEcsAnalyzer
         "statements after it) are reported as a suggestion, to rewrite by hand.",
         helpLinkUri: Help("EECS107"));
 
-    internal static void InitializePairs(AnalysisContext context)
+    internal static void InitializePairs(AnalysisContext context) => context.RegisterCompilationStartAction(start =>
     {
-        context.RegisterSymbolAction(AnalyzePairDeclaration, SymbolKind.Method);
-        context.RegisterSyntaxNodeAction(AnalyzePairBody, SyntaxKind.MethodDeclaration);
-    }
+        if (Core.Create(start.Compilation) == null) return; // no EasyEcs: no action at all
+        start.RegisterSymbolAction(AnalyzePairDeclaration, SymbolKind.Method);
+        start.RegisterSyntaxNodeAction(AnalyzePairBody, SyntaxKind.MethodDeclaration);
+    });
 
     private static void AnalyzePairDeclaration(SymbolAnalysisContext context)
     {

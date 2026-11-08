@@ -3453,3 +3453,49 @@ Wide rows of 8-byte words and the AVX2 form (#160; commits c078128 + 042e8a5, te
   same runs). Ledger's 512 form, before the heavy-math gate: 1.01-1.14 of its rows, so light 8-byte math keeps
   its rows.
 - api.mdx + .zh: Interleaved.IsWide256 / Permute256 / Merge256 if it lists Interleaved's generated-code helpers.
+
+## feat-analyzer-lane2 (backlog Lane 2: A1, A3-A15)
+
+- [ ] **analyzer.mdx + zh: five new rules** (section, table row, fix line each; ids provisional until merge):
+  - EECS128 (Warning) "A Reduce<T>'s partial result read as the total": a read of `r.Value` that flows anywhere but
+    back into the same field or the value holding it (a condition guarding other writes, a call, another field, a
+    component). Not reported: `+=`, `-=`, `++`, `--`, `*=`, `|=`, `&=`, `r.Value.F = Math.Max(r.Value.F, x)`,
+    `r.Value = new T { N = r.Value.N + 1 }`, a kept row `if (x < r.Value.F) r.Value = new T(id, x);`, Combine. No fix:
+    read T after the pass in a later system.
+  - EECS129 (Error; Warning in OnUpdate or a [ForEach] method) "AddSingleton of a singleton the world has": a second
+    `AddSingleton<T>()` after a statement of its block that always runs and leaves the world with T (`SetX`,
+    `AddSingleton`, `GetOrAdd`), or one in an OnUpdate / [ForEach] body with no check or removal before it (it throws
+    from the second run on). Fix: the generated `world.GetOrAddX()` (`GetOrAddSingleton<T>()` where none binds).
+  - EECS130 (Warning) "A component stores an entity's index": `EntityId.Index` assigned to a component's or
+    singleton's member, passed to its constructor or to a generated `SetX` / `GetOrAddX`. No fix (the field's type
+    changes): store the `EntityId`.
+  - EECS131 (Warning) "Scratch memory added to and never cleared": a `Scratch<T>` collection (or a local taken from it)
+    that the method adds to and never clears or assigns anew. Fix: `x.Clear();` (`x?.Clear();` when it may be null)
+    before the statement that holds the first add.
+  - EECS132 (Error) "A Lookup<T> found by key in a method of another type": the pass prepares a value index for key
+    probes in its own body and in helpers of its own type (followed three calls deep); a probe in another type's
+    method throws "index not prepared". No fix.
+- [ ] **analyzer.mdx + zh, changed rules**: EECS024 gains a fix (move a local function that captures nothing into the
+  type as a static method); EECS035 and EECS118 gain fixes (remove `Slices` / `MaxRows`), and their messages end with
+  "drop X or Y"; EECS021 no longer reports a private runner method against its own entry point; EECS036 no longer
+  reports a `[LookupKey]` / `[UniqueKey]` member that is itself named `Key` (a positional record's `Key`); EECS086 no
+  longer reports a method that can change structure (it runs on one thread anyway: EECS055 says why); CS7036 / CS1501
+  / CS1503 / CS1620 on a bare call of a generated entry point inside its type get a fix that qualifies it
+  (`Crowd.Separate(w)`); IDE0060 is suppressed on the [ForEach] / [EntityMethod] parameters EECS026 checks (EECSS03).
+- [ ] **guide/indexes + zh**: a key probe through a helper of another type throws "index not prepared" (EECS132);
+  helpers of the method's own type are followed (Symbols.FindsByKey, three calls deep).
+- [ ] **guide/common-mistakes + zh**: `#reduce-value` (EECS128), `#add-singleton-reset` (EECS129) and `#raw-index`
+  (EECS130) replace "No rule catches it" with the rule's link; a Scratch<T> list never cleared names EECS131.
+- [ ] **guide/threading + zh** (the pitfalls table, around line 1064): "Reading `Reduce<T>.Value` as the total" ->
+  EECS128; "A `Scratch<T>` list used without clearing it" -> EECS131; "A value index reached through a helper" ->
+  EECS132.
+- [ ] **guide/project-structure + zh** (the template's `Spawner`, line 332 / zh 315): the template now declares it
+  `[NotSaved]` with the comment "Set up at startup (Program.cs), so a save leaves it out." (EECS069 found it).
+- [ ] **guide/generated-members (entry points) + zh**: the bare call inside the type gets a code fix now.
+- [ ] **Changelog, New** (+ zh): EECS128-EECS132 with one line each; the code fixes for EECS024, EECS035, EECS118 and
+  the bare entry-point call. **Fixes**: EECS021 on a private runner method, EECS036 on a key named `Key` (the type got
+  no index and `Lookup.Find` failed with CS0315), EECS086 on methods that change structure; a key probe in a helper of
+  the method's own type no longer throws (the generator now prepares the index for it).
+- [ ] **decisions.mdx + zh**: A14's two candidates and the IForSpan rule are in `docs/owner-review.md`; once the owner
+  settles them, a record each.
+- [ ] **zh XML** (`tools/ApiDocs/zh`): none (no public API changed).

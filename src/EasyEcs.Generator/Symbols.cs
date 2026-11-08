@@ -1044,9 +1044,13 @@ internal static class Symbols
         var expected = EntryPoint(method);
         var members = new List<IMethodSymbol>(); // the type's and its base types' (an inherited one wins over an extension)
         for (var t = method.ContainingType; t != null; t = t.BaseType) members.AddRange(t.GetMembers(method.Name).OfType<IMethodSymbol>());
+        // The method itself, when its own parameters are its entry point's (components given by filters only), hides
+        // the entry point only where it is accessible: a private one is invisible to every caller outside its type, where
+        // the entry point (an extension member) binds.
         return members.Any(m =>
             !m.GetAttributes().Any(IsGeneratorMark) // not the entry point itself
-            && (m.Parameters.Select(p => (p.Type.ToDisplayString(), p.RefKind)).SequenceEqual(expected)
+            && (!(SymbolEqualityComparer.Default.Equals(m, method) && method.DeclaredAccessibility == Accessibility.Private)
+                    && m.Parameters.Select(p => (p.Type.ToDisplayString(), p.RefKind)).SequenceEqual(expected)
                 || !SymbolEqualityComparer.Default.Equals(m, method) && (IsGeneratedJob(m) || IsDrain(m)) && EntryPoint(m).SequenceEqual(expected)));
     }
 
@@ -1179,15 +1183,15 @@ internal static class Symbols
     public static string? MaxRowsProblem(IMethodSymbol method)
     {
         int rows = MaxRows(method);
-        if (rows < 0) return $"MaxRows = {rows} must be 0 (every row) or more";
+        if (rows < 0) return $"MaxRows = {rows} must be 0 (every row) or more: drop it, or give the rows per run";
         if (rows == 0) return null;
-        if (IsParallel(method)) return "it runs in parallel (Parallel = true), and the collected rows run one after another on one thread";
-        if (Slices(method) > 1) return "it visits a slice of its rows per run (Slices): a budget already spreads the rows over runs";
+        if (IsParallel(method)) return "it runs in parallel (Parallel = true), and the collected rows run one after another on one thread: drop MaxRows or Parallel";
+        if (Slices(method) > 1) return "it visits a slice of its rows per run (Slices): a budget already spreads the rows over runs: drop MaxRows or Slices";
         if (TracksSince(method))
-            return "it selects rows by change tick ([Changed<T>] / [Removed<T>]), and each run moves the system's last run past the changes of the rows over the budget";
-        if (IsEntityMethod(method)) return "it is an [EntityMethod], which runs on the one entity it is given";
-        if (Simd(method) == SimdRequire) return "SimdMode.Require: the collected rows run one at a time, never as a vector loop";
-        if (Fusion(method) == 1) return "FusionMode.Require: the collected rows run apart from any walk";
+            return "it selects rows by change tick ([Changed<T>] / [Removed<T>]), and each run moves the system's last run past the changes of the rows over the budget: drop MaxRows or the change filter";
+        if (IsEntityMethod(method)) return "it is an [EntityMethod], which runs on the one entity it is given: drop MaxRows";
+        if (Simd(method) == SimdRequire) return "SimdMode.Require: the collected rows run one at a time, never as a vector loop: drop MaxRows or SimdMode.Require";
+        if (Fusion(method) == 1) return "FusionMode.Require: the collected rows run apart from any walk: drop MaxRows or FusionMode.Require";
         foreach (var p in method.Parameters)
         {
             string? what = Classify(p) switch
@@ -1309,9 +1313,9 @@ internal static class Symbols
     public static string? SlicesProblem(IMethodSymbol method)
     {
         int slices = Slices(method);
-        if (slices < 1) return $"Slices = {slices} must be 1 or more";
+        if (slices < 1) return $"Slices = {slices} must be 1 or more: drop it, or give the runs that share the rows";
         if (slices > 1 && TracksSince(method))
-            return "it selects rows by change tick ([Changed<T>] / [Removed<T>]), and a slice's run would move the system's last run past the changes of the other slices' rows";
+            return "it selects rows by change tick ([Changed<T>] / [Removed<T>]), and a slice's run would move the system's last run past the changes of the other slices' rows: drop Slices or the change filter";
         return null;
     }
 
@@ -1644,17 +1648,50 @@ internal static class Symbols
     /// The key type of indexed component <paramref name="type"/> (<c>IIndexed&lt;TKey&gt;</c>) when a
     /// <c>Lookup&lt;T&gt;</c> parameter of it must have its index built before the pass, else null: always for a unique
     /// index (it exists already: free), and for another when <paramref name="body"/> (a method's or a lambda pass's) finds
-    /// it by key itself (<c>lookup.TryFind</c> / <c>Find</c> / <c>Count</c> on the parameter), since building it costs memory
-    /// and upkeep on every write from then on.
+    /// it by key (<see cref="FindsByKey"/>: on the parameter, or through a helper of its own type it hands the parameter
+    /// to), since building it costs memory and upkeep on every write from then on.
     /// </summary>
     public static ITypeSymbol? LookupKey(IParameterSymbol lookup, SyntaxNode? body)
     {
         if (LookupElement(lookup.Type) is not INamedTypeSymbol component || IndexedKey(component, out bool unique) is not { } key) return null;
         if (unique) return key;
-        bool byKey = body != null && body.DescendantNodes().OfType<InvocationExpressionSyntax>().Any(call =>
-            call.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "TryFind" or "Count" or "Find", Expression: IdentifierNameSyntax target }
-            && target.Identifier.ValueText == lookup.Name);
-        return byKey ? key : null;
+        return body != null && FindsByKey(body, lookup.Name, lookup.ContainingSymbol?.ContainingType, 0) ? key : null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="body"/> finds by key through the <c>Lookup&lt;T&gt;</c> named <paramref name="lookup"/>:
+    /// <c>TryFind</c> / <c>Find</c> / <c>Count</c> called on it, or it handed (by position) to a method of
+    /// <paramref name="type"/> (called by its name, or qualified by the type's) whose body finds by key through that
+    /// parameter, followed three calls deep. Read off the syntax, as the generator reads it (a helper of another type is
+    /// not followed: EECS132 reports the lookup handed to one).
+    /// </summary>
+    public static bool FindsByKey(SyntaxNode body, string lookup, INamedTypeSymbol? type, int depth)
+    {
+        foreach (var call in body.DescendantNodes().OfType<InvocationExpressionSyntax>())
+        {
+            if (call.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: "TryFind" or "Count" or "Find", Expression: IdentifierNameSyntax target }
+                && target.Identifier.ValueText == lookup) return true;
+            if (depth >= 3 || type == null) continue;
+            string? callee = call.Expression switch
+            {
+                IdentifierNameSyntax name => name.Identifier.ValueText,
+                MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax owner, Name: IdentifierNameSyntax name } when owner.Identifier.ValueText == type.Name => name.Identifier.ValueText,
+                _ => null,
+            };
+            if (callee == null) continue;
+            var arguments = call.ArgumentList.Arguments;
+            for (int a = 0; a < arguments.Count; a++)
+            {
+                if (arguments[a] is not { NameColon: null, Expression: IdentifierNameSyntax passed } || passed.Identifier.ValueText != lookup) continue;
+                foreach (var member in type.GetMembers(callee))
+                    if (member is IMethodSymbol { Parameters.Length: var count } helper && count > a && LookupElement(helper.Parameters[a].Type) != null
+                        && helper.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is MethodDeclarationSyntax declaration
+                        && ((SyntaxNode?)declaration.Body ?? declaration.ExpressionBody) is { } inner
+                        && FindsByKey(inner, helper.Parameters[a].Name, type, depth + 1)) return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>The queried component of a parameter: a <c>ref</c> / <c>in</c> component, a span's element or a <c>Mut</c>'s; else null.</summary>

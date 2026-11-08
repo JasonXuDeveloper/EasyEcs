@@ -67,6 +67,18 @@ public static partial class EasyEcsAnalyzer
         "row order, on one thread or several. Systems after the pass read world.GetSingleton<Emitted<T>>().Items and clear it.",
         helpLinkUri: Help("EECS089"));
 
+    public static readonly DiagnosticDescriptor PartialRead = new("EECS128", "A Reduce<T>'s partial result read as the total",
+        "'{0}' reads the partial result of Reduce<{1}> parameter '{2}' in {3}: it holds this chunk's {1} from its Identity on, split again by the vector loop's lanes, not the total, so what it reads changes with the thread count and the vector width; only add into '{2}.Value' here and read {1} in a system after the pass",
+        Category, DiagnosticSeverity.Warning, true,
+        "A Reduce<T> parameter is a partial result: each chunk of rows (the whole pass on one thread) starts it at T's " +
+        "Identity, a vector loop keeps one per lane, and the pass combines them into T when it ends. Inside the method its " +
+        "Value is neither T's value before the pass nor the pass's total, so a condition, a call or an assignment that reads " +
+        "it computes something the chunking decides. A read that goes back into the same field or the value holding it is " +
+        "the accumulation itself and is not reported (+=, -=, ++, --, *=, |=, &=, 'x.Value.F = Math.Max(x.Value.F, e)', " +
+        "'x.Value = new T { N = x.Value.N + 1 }', a kept row 'if (e < x.Value.F) x.Value = new T(id, e);', Combine); read the " +
+        "total from the singleton in a system that runs after the pass.",
+        helpLinkUri: Help("EECS128"));
+
     /// <summary>
     /// EECS086, EECS087 and EECS089 in a [ForEach] method's body (from AnalyzeBody, with the rules of its parameters).
     /// EECS086 waits for the end of the compilation in <paramref name="resets"/>: only a singleton that system code
@@ -75,6 +87,10 @@ public static partial class EasyEcsAnalyzer
     private static void AnalyzeHandWritten(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body, Core core, Resets resets)
     {
         if (!Symbols.IsForEach(method) || Symbols.IsEntityMethod(method)) return; // one entity per call: nothing to split into chunks
+        foreach (var p in method.Parameters)
+            if (p.RefKind == RefKind.Ref && Symbols.ReduceElement(p.Type) is { } reduced && PartialReads(body, p) is { Count: > 0 } found)
+                context.ReportDiagnostic(Diagnostic.Create(PartialRead, found[0].Syntax.GetLocation(), found.Skip(1).Select(r => r.Syntax.GetLocation()),
+                    Shorten(found[0].Syntax), reduced.Name, p.Name, Symbols.Describe(method)));
         foreach (var (p, fields, covers) in Accumulations(method, body))
         {
             var singleton = (INamedTypeSymbol)p.Type;
@@ -233,12 +249,13 @@ public static partial class EasyEcsAnalyzer
     /// <c>if (x &gt; s.F) s.F = x;</c>, with <c>x</c> free of <c>s</c>, one way per field. A singleton that combines with
     /// itself is reported when the ways match its attributes (any way for a hand-written Combine); one that does not
     /// when every field is accumulated, so the attributes can declare all of them. The vector-loop message (EECS055)
-    /// leaves the method to this rule.
+    /// leaves the method to this rule. A method that can change structure stays on one thread whatever it takes
+    /// (ParallelProblem's first reason), so the singleton is not what keeps it there: EECS055 gives that reason instead.
     /// </summary>
     private static IEnumerable<(IParameterSymbol Parameter, List<Accumulated> Fields, bool Covers)> Accumulations(IMethodSymbol method, IOperation body)
     {
         if (!Symbols.IsForEach(method) || Symbols.IsEntityMethod(method) || Symbols.IsBatch(method) || Symbols.IsParallel(method)
-            || Symbols.Slices(method) != 1) yield break;
+            || Symbols.Slices(method) != 1 || body.SemanticModel is not { } model || !BodyFacts.IsStable(method, model)) yield break;
         foreach (var p in method.Parameters)
         {
             if (p.RefKind != RefKind.Ref || Symbols.Classify(p) != Symbols.ParamKind.Singleton || p.Type is not INamedTypeSymbol singleton
@@ -312,6 +329,112 @@ public static partial class EasyEcsAnalyzer
         }
 
         return references.All(covered.Contains) ? fields.Select(f => new Accumulated(f.Key, f.Value)).ToList() : null;
+    }
+
+    /// <summary>
+    /// EECS128: the uses of <paramref name="p"/>'s partial result (<c>p.Value</c>, or a member or element under it) that
+    /// read it into something else. A read that flows only back into the partial result is the accumulation itself:
+    /// the target of a write (<c>+=</c>, <c>++</c>, <c>=</c>, an element of an array it holds), a read on the right of a
+    /// write of it (<c>p.Value.F = Math.Max(p.Value.F, x)</c>, <c>p.Value = new T { N = p.Value.N + 1 }</c>), the
+    /// condition of an <c>if</c> whose branches only write it (<c>if (x &lt; p.Value.F) p.Value = new T(id, x);</c>,
+    /// a kept row), a <c>ref</c> / <c>out</c> argument, the instance of a call (a method of the value), and a
+    /// <c>ref</c> local of it (its uses are not followed).
+    /// </summary>
+    private static List<IOperation> PartialReads(IOperation body, IParameterSymbol p)
+    {
+        var reads = new List<IOperation>();
+        foreach (var operation in body.Descendants())
+        {
+            if (operation is not IFieldReferenceOperation { Field.Name: "Value", Instance: IParameterReferenceOperation reference } value
+                || !SymbolEqualityComparer.Default.Equals(reference.Parameter, p)) continue;
+            IOperation use = value;
+            while (use.Parent is IMemberReferenceOperation member && member.Instance == use
+                   || use.Parent is IArrayElementReferenceOperation element && element.ArrayReference == use
+                   || use.Parent is IInlineArrayAccessOperation inline && inline.Instance == use) use = use.Parent;
+            switch (use.Parent)
+            {
+                case ICompoundAssignmentOperation compound when compound.Target == use:
+                case IIncrementOrDecrementOperation step when step.Target == use:
+                case ISimpleAssignmentOperation assignment when assignment.Target == use:
+                case IArgumentOperation { Parameter.RefKind: RefKind.Ref or RefKind.Out }:
+                case IInvocationOperation call when call.Instance == use:
+                case IVariableInitializerOperation { Parent: IVariableDeclaratorOperation { Symbol.IsRef: true } }:
+                    continue;
+            }
+            if (!IntoPartial(use, p)) reads.Add(use);
+        }
+        return reads;
+    }
+
+    /// <summary>
+    /// Whether the read <paramref name="use"/> flows only back into <paramref name="p"/>'s partial result: it sits on
+    /// the right of a write of it, or in the condition of an <c>if</c> whose branches only write it.
+    /// </summary>
+    private static bool IntoPartial(IOperation use, IParameterSymbol p)
+    {
+        for (var (child, at) = (use, use.Parent); at != null; (child, at) = (at, at.Parent))
+            switch (at)
+            {
+                case IAssignmentOperation { Target: IMemberReferenceOperation { Instance: IInstanceReferenceOperation { ReferenceKind: InstanceReferenceKind.ImplicitReceiver } } }:
+                    break; // a member of an object initializer: the object is what is assigned
+                case IAssignmentOperation assignment when assignment.Value == child:
+                    // Into itself or the value holding it (p.Value.N = p.Value.N + x, p.Value = new T { N = p.Value.N + 1 }),
+                    // not into another field: a peak of the running total depends on where the chunks begin.
+                    return OfPartial(assignment.Target, p) && Under(use, assignment.Target);
+                case IConditionalOperation { IsRef: false } guard when guard.Condition == child:
+                    return guard.Type == null && WritesOnlyPartial(guard.WhenTrue, p) && (guard.WhenFalse == null || WritesOnlyPartial(guard.WhenFalse, p));
+                case IBlockOperation or IExpressionStatementOperation or IAnonymousFunctionOperation or ILocalFunctionOperation:
+                    return false;
+            }
+        return false;
+    }
+
+    /// <summary>Whether <paramref name="branch"/> is writes of <paramref name="p"/>'s partial result and nothing else.</summary>
+    private static bool WritesOnlyPartial(IOperation branch, IParameterSymbol p) => branch switch
+    {
+        IBlockOperation block => block.Operations.Length > 0 && block.Operations.All(o => WritesOnlyPartial(o, p)),
+        IExpressionStatementOperation { Operation: IAssignmentOperation assignment } => OfPartial(assignment.Target, p) && !OtherReads(assignment.Value, p),
+        IExpressionStatementOperation { Operation: IIncrementOrDecrementOperation step } => OfPartial(step.Target, p),
+        _ => false,
+    };
+
+    /// <summary>Whether <paramref name="value"/> calls something (a call may have effects beyond the partial result).</summary>
+    private static bool OtherReads(IOperation value, IParameterSymbol p) =>
+        value.DescendantsAndSelf().Any(o => o is IInvocationOperation { TargetMethod.IsStatic: false } call && !OfPartial(call.Instance, p));
+
+    /// <summary>Whether <paramref name="read"/> is <paramref name="target"/> or a member or element under it, by their text.</summary>
+    private static bool Under(IOperation read, IOperation target)
+    {
+        string r = Compact(read.Syntax), t = Compact(target.Syntax);
+        return r == t || r.StartsWith(t + ".", System.StringComparison.Ordinal) || r.StartsWith(t + "[", System.StringComparison.Ordinal);
+
+        static string Compact(SyntaxNode node) => string.Concat(node.DescendantTokens().Select(token => token.Text));
+    }
+
+    /// <summary>Whether <paramref name="target"/> is <paramref name="p"/>'s <c>Value</c>, or a member or element under it.</summary>
+    private static bool OfPartial(IOperation? target, IParameterSymbol p)
+    {
+        while (true)
+            switch (target)
+            {
+                case IFieldReferenceOperation { Field.Name: "Value", Instance: IParameterReferenceOperation reference }
+                    when SymbolEqualityComparer.Default.Equals(reference.Parameter, p):
+                    return true;
+                case IMemberReferenceOperation member:
+                    target = member.Instance;
+                    break;
+                case IArrayElementReferenceOperation element:
+                    target = element.ArrayReference;
+                    break;
+                case IInlineArrayAccessOperation inline:
+                    target = inline.Instance;
+                    break;
+                case IConversionOperation conversion:
+                    target = conversion.Operand;
+                    break;
+                default:
+                    return false;
+            }
     }
 
     /// <summary>

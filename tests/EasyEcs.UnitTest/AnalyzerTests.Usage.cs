@@ -376,6 +376,60 @@ public partial class AnalyzerTests
     [TestCase("EECS051", DiagnosticSeverity.Error)]
     [TestCase("EECS052", DiagnosticSeverity.Warning)]
     [TestCase("EECS053", DiagnosticSeverity.Warning)]
+    [TestCase("EECS129", DiagnosticSeverity.Error)]
+    [TestCase("EECS130", DiagnosticSeverity.Warning)]
     public void UsageRulesHaveTheirSeverity(string id, DiagnosticSeverity severity) =>
         Assert.That(EasyEcsAnalyzer.All.SelectMany(a => a.SupportedDiagnostics).Where(d => d.Id == id).Select(d => d.DefaultSeverity), Is.Not.Empty.And.All.EqualTo(severity)); // every descriptor of the id (EECS025 has a compilation-end one)
+
+    private const string Round = "public record struct Round(int Number, int Tick) : ISingletonComponent; ";
+
+    // EECS129: AddSingleton of a singleton the world has: an Error after a call that leaves the world with it, a Warning
+    // in code that runs again.
+    [TestCase("public static class U { public static void F(World w) { w.SetRound(1, 0); w.AddSingleton<Round>(); } }", DiagnosticSeverity.Error)]
+    [TestCase("public static class U { public static void F(World w) { w.AddSingleton<Round>(); w.AddSingleton<Round>(); } }", DiagnosticSeverity.Error)]
+    [TestCase("public static class U { public static void F(World w) { w.GetOrAddRound(1, 0); int n = 2; w.AddSingleton<Round>().Number = n; } }", DiagnosticSeverity.Error)]
+    [TestCase("public static class U { public static void F(World w) { _ = w.GetSingleton<Round>().Tick; w.AddSingleton<Round>(); } }", DiagnosticSeverity.Error)]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) { world.AddSingleton<Round>(); } }", DiagnosticSeverity.Warning)]
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) => world.AddSingleton<Round>().Tick = 1; }", DiagnosticSeverity.Warning)]
+    public async Task ASingletonAddedTwiceIsReported(string source, DiagnosticSeverity severity)
+    {
+        await AssertReports("EECS129", Components, Round + source);
+        var found = (await GeneratorTests.Analyze([Components, Round + source])).Single(d => d.Id == "EECS129");
+        Assert.That(found.Severity, Is.EqualTo(severity));
+        Assert.That(found.GetMessage(), Does.Contain("GetOrAddSingleton<Round>()"));
+    }
+
+    [TestCase("public static class U { public static void F(World w) { w.AddSingleton<Round>(); } }")]                                         // the first add
+    [TestCase("public static class U { public static void F(World w, World o) { w.SetRound(1, 0); o.AddSingleton<Round>(); } }")]               // another world
+    [TestCase("public static class U { public static void F(World w) { w.SetRound(1, 0); w.RemoveSingleton<Round>(); w.AddSingleton<Round>(); } }")] // removed first
+    [TestCase("public static class U { public static void F(World w) { w.SetRound(1, 0); w.RemoveRound(); w.AddSingleton<Round>(); } }")]       // removed by the generated member
+    [TestCase("public static class U { public static void F(World w, bool b) { if (b) w.SetRound(1, 0); w.AddSingleton<Round>(); } }")]         // not always set
+    [TestCase("public static class U { public static void F(World w) { w.AddSingleton<Clock>(); w.AddSingleton<Round>(); } }")]                // another singleton
+    [TestCase("[EcsSystem] public ref struct S { static void OnCreate(World world) => world.AddSingleton<Round>(); }")]                          // once
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) { if (!world.HasSingleton<Round>()) world.AddSingleton<Round>(); } }")] // checked
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) { if (!world.HasRound) world.AddSingleton<Round>(); } }")]    // checked by the generated member
+    [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World world) { world.RemoveSingleton<Round>(); world.AddSingleton<Round>(); } }")] // removed every update
+    [TestCase("public static class Setup { public static void OnUpdate(World world) => world.AddSingleton<Round>(); }")]                        // not a system's hook
+    public async Task ASingletonAddedOnceIsNotReported(string source) =>
+        Assert.That(await Count("EECS129", Components, Round + source), Is.Zero);
+
+    private const string Slots = "public struct Target : IComponent { public int Index; } public record struct OwnerSlot(int Index) : IComponent; "
+        + "public struct Last : ISingletonComponent { public int Hit { get; set; } } ";
+
+    // EECS130: an entity's index stored in a component, which outlives the entity.
+    [TestCase("public static class U { public static void F(Entity e, Entity enemy) => e.Get<Target>().Index = enemy.Id.Index; }")]
+    [TestCase("public static class U { public static void F(World w, Entity hero) => w.CreateEntity(new OwnerSlot(hero.Id.Index)); }")]   // a record's constructor
+    [TestCase("public static class U { public static void F(World w, EntityId id) => w.CreateEntity(new Target { Index = id.Index }); }")]  // an initializer
+    [TestCase("public static class U { public static void F(World w, EntityId id) => w.GetSingleton<Last>().Hit = (id.Index); }")]       // a singleton's property
+    [TestCase("public static class U { public static void F(Entity e, EntityId id) => e.SetOwnerSlot(id.Index); }")]                    // the generated SetX
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref Target t, in Link l) => t.Index = l.Target.Index; }")]       // in a pass
+    public async Task AnIndexStoredInAComponentIsReported(string source) => await AssertReports("EECS130", Components, Slots + source);
+
+    [TestCase("public static class U { public static int F(Entity e) { int i = e.Id.Index; return i; } }")]                               // a local
+    [TestCase("public struct Cell { public int Index; } public static class U { public static Cell F(EntityId id) => new Cell { Index = id.Index }; }")] // not a component
+    [TestCase("public static class U { public static void F(Entity e, EntityId id) => e.Set(new Link { Target = id }); }")]             // the id
+    [TestCase("public static class U { public static void F(Entity e, int[] slots) => e.Get<Target>().Index = slots[e.Id.Index]; }")] // an index into an array
+    [TestCase("public static class U { public static void F(Entity e, int i) => e.Get<Target>().Index = i; }")]                         // not an id's
+    public async Task OtherIndexesAreNotReported(string source) =>
+        Assert.That(await Count("EECS130", Components, Slots + source), Is.Zero);
 }

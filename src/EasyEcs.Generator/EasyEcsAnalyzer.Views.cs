@@ -54,14 +54,15 @@ public static partial class EasyEcsAnalyzer
     /// <summary>EECS101's view parameter fix: the parameters the view replaces (<c>name=Field;...</c>), the new parameter's name and type.</summary>
     public const string ViewFields = "ViewFields", ViewName = "ViewName", ViewType = "ViewType";
 
-    internal static void InitializeViews(AnalysisContext context)
+    internal static void InitializeViews(AnalysisContext context) => context.RegisterCompilationStartAction(start =>
     {
-        context.RegisterSymbolAction(AnalyzeViewDeclarations, SymbolKind.NamedType);
-        context.RegisterSymbolAction(AnalyzeViewOverlap, SymbolKind.Method);
-        context.RegisterOperationAction(AnalyzeHandWrittenView, OperationKind.ObjectCreation);
-        context.RegisterOperationBlockAction(AnalyzeViewMemberBody);
-        context.RegisterCompilationStartAction(AnalyzeUnwrittenViewFields);
-    }
+        if (Core.Create(start.Compilation) == null) return; // no EasyEcs: no action at all
+        start.RegisterSymbolAction(AnalyzeViewDeclarations, SymbolKind.NamedType);
+        start.RegisterSymbolAction(AnalyzeViewOverlap, SymbolKind.Method);
+        start.RegisterOperationAction(AnalyzeHandWrittenView, OperationKind.ObjectCreation);
+        start.RegisterOperationBlockAction(AnalyzeViewMemberBody);
+        AnalyzeUnwrittenViewFields(start);
+    });
 
     // ---------------- EECS025 through views: a 'ref' field nothing writes ----------------
 
