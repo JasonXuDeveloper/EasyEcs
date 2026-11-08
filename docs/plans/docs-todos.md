@@ -3341,6 +3341,8 @@ declares `ITile<TKey>` and writes no `Beside` now gets one inferred (it was CS05
   `FireReplica(bool Burning)` (the name change-tracking.mdx already uses): `SendFire` / `SendFireOut` read only the bool, which EECS055 now reports as a Warning
   (a bool among a component's fields, used alone). example.mdx + zh name neither type, but the replication walkthrough
   (en :165) should say the fire sends write a component of their own, and the regions it includes changed.
+  BattleServerBenchmark Tick, head f43e5b7 against the same tree with the old `Replica`, two rounds: 3.49 / 3.68 ms
+  against 3.90 / 3.77 ms, 0 B both (kept).
 
 ## fix-tooling-lane3 (backlog Lane 3: T1-T14, T19)
 
