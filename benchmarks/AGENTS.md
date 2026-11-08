@@ -88,7 +88,7 @@ benchmarks/EasyEcs.Benchmark/          BenchmarkDotNet: the headline worlds, one
   LambdaFusionBenchmark.cs             two lambda passes written one after the other as one walk, against the same calls
                                        apart, on one thread and in parallel
   LambdaPassBenchmark.cs               a lambda pass against the [ForEach] method and the hand-written job, scalar and
-                                       vector bodies
+                                       vector bodies, plus the EECS096 delegate fallback (a body naming a private member)
   LateHolesBenchmark.cs                vector loops whose runner reached Tier1 before their table had holes: the masked
                                        words' tables and lane masks
   LookupBenchmark.cs                   Lookup<T> in parallel and on one thread against a World parameter's reads
