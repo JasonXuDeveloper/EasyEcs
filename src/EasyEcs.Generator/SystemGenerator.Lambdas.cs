@@ -46,8 +46,9 @@ public sealed partial class SystemGenerator
     /// <param name="Returns">The return type of the lambda's delegate: void, or the type of an expression body's value
     /// (<c>h.Value += f.Value</c> is a float), which the pass drops.</param>
     /// <param name="Element">A ParallelFor over a buffer's elements: the element's type, else null.</param>
+    /// <param name="Fuses">Where the call stands for pass fusion with the calls next to it, or null when it shares no walk.</param>
     private sealed record LambdaModel(string File, int Position, int Version, string Data, string Where, ForEachModel Method,
-        string? Body, EquatableArray<string> Usings, string Returns, string? Element = null)
+        string? Body, EquatableArray<string> Usings, string Returns, string? Element = null, LambdaPlace? Fuses = null)
     {
         public static LambdaModel? Create(SemanticModel model, InvocationExpressionSyntax invocation, System.Threading.CancellationToken ct)
         {
@@ -135,10 +136,16 @@ public sealed partial class SystemGenerator
                 Chases = ForEachModel.Usable(Generator.Chases.Of(function, out _), parameters),
                 OutOfLine = parameters.Any(p => p.Kind == Symbols.ParamKind.Scratch) && LambdaPass.LoopsOrCalls(call.Syntax!),
             };
+            var place = body == null || method.Since || method.HasChaseTwin || method.Simd is { VectorTail: true } ? null : LambdaPlace.Of(call, model, ct);
+            if (place != null)
+                method = method with
+                {
+                    Fusion = FusionSide.Of(lambda, stable, !lambda.Parameters.Any(p => Symbols.Named(p.Type, Symbols.Entity)), call.Parallel),
+                };
             return new LambdaModel(invocation.SyntaxTree.FilePath, invocation.SpanStart, location.Version, location.Data,
                 LambdaPass.Where(invocation.GetLocation()), method, body,
                 new EquatableArray<string>(body == null ? [] : BodyCopy.Usings(invocation).Distinct().OrderBy(u => u, System.StringComparer.Ordinal).ToArray()),
-                lambda.ReturnsVoid ? "void" : lambda.ReturnType.ToDisplayString(Symbols.Fqn));
+                lambda.ReturnsVoid ? "void" : lambda.ReturnType.ToDisplayString(Symbols.Fqn), Fuses: place);
         }
 
         /// <summary>
@@ -174,6 +181,92 @@ public sealed partial class SystemGenerator
     }
 
     /// <summary>
+    /// Where a lambda pass stands for pass fusion (<see cref="Fusion"/>): a call that is a statement of its own in a block
+    /// (no label), on a World that is a local or a parameter (<see cref="World"/>), passing values that are locals and
+    /// parameters by name (<see cref="Values"/>, null for one that is not). Two calls share a walk when the second is the
+    /// next statement of the same block on the same World and every value it passes is one the first passes too: the
+    /// first call's interceptor runs both lambdas in one walk, with the values it was given, and the second's does
+    /// nothing. Evaluating the second call's arguments after the walk instead of between the passes changes nothing:
+    /// they are a static lambda (a cached delegate) and names of locals no static lambda can write.
+    /// </summary>
+    /// <param name="Block">The block's position in the file.</param>
+    /// <param name="Statement">The statement's index in its block.</param>
+    /// <param name="Names">The lambda's value parameters, in order.</param>
+    private sealed record LambdaPlace(int Block, int Statement, string World, EquatableArray<string?> Values, EquatableArray<string> Names)
+    {
+        public static LambdaPlace? Of(LambdaPass.Call call, SemanticModel model, System.Threading.CancellationToken ct)
+        {
+            var invocation = call.Invocation;
+            if (invocation.Parent is not ExpressionStatementSyntax statement || statement.Parent is not BlockSyntax block
+                || ((MemberAccessExpressionSyntax)invocation.Expression).Expression is not IdentifierNameSyntax receiver || Plain(receiver) is not { } world)
+                return null;
+            var arguments = call.Operation.Arguments.Where(a => a.Parameter is { } p && p.Ordinal < call.Operation.TargetMethod.Parameters.Length - 1)
+                .OrderBy(a => a.Parameter!.Ordinal).Select(a => a.Syntax is ArgumentSyntax { Expression: IdentifierNameSyntax name } ? Plain(name) : null).ToArray();
+            var names = call.Lambda!.Parameters.Where(p => Symbols.Classify(p, true) == Symbols.ParamKind.Context).Select(p => p.Name).ToArray();
+            if (arguments.Length != names.Length) return null;
+            return new LambdaPlace(block.SpanStart, block.Statements.IndexOf(statement), world, new EquatableArray<string?>(arguments), new EquatableArray<string>(names));
+
+            // A local or a parameter held by value: nothing a pass does changes what its name reads.
+            string? Plain(IdentifierNameSyntax name) => model.GetSymbolInfo(name, ct).Symbol switch
+            {
+                ILocalSymbol { RefKind: RefKind.None, IsConst: false } local => local.Name,
+                IParameterSymbol { RefKind: RefKind.None, IsThis: false } parameter => parameter.Name,
+                _ => null,
+            };
+        }
+
+        /// <summary>
+        /// The names the first call's interceptor gives this call's values (the first lambda's parameter names), or null
+        /// when this call does not follow <paramref name="first"/>'s group (<paramref name="previous"/> its last call)
+        /// or passes a value the first call does not.
+        /// </summary>
+        public string[]? Follows(LambdaPlace first, LambdaPlace previous)
+        {
+            if (Block != previous.Block || Statement != previous.Statement + 1 || World != first.World) return null;
+            var renamed = new string[Values.Length];
+            for (int i = 0; i < Values.Length; i++)
+            {
+                int j = Values[i] is { } value ? System.Array.IndexOf(first.Values.ToArray(), value) : -1;
+                if (j < 0) return null;
+                renamed[i] = first.Names[j];
+            }
+
+            return renamed;
+        }
+    }
+
+    /// <summary>
+    /// The file's lambda passes cut into walks (as <see cref="FusionGroups"/> cuts a system's methods): per call, the
+    /// number of calls of the walk it starts (1: alone), 0 for a call inside a walk; and per call, the names its values
+    /// take in the interceptor of its walk's first call (null for a first call).
+    /// </summary>
+    private static (int[] Groups, string[]?[] Names) LambdaGroups(LambdaFile file)
+    {
+        var groups = new int[file.Calls.Length];
+        var names = new string[]?[file.Calls.Length];
+        var group = new List<FusionSide>();
+        for (int i = 0, start = 0; i < file.Calls.Length; i++)
+        {
+            var call = file.Calls[i];
+            if (i > 0 && group.Count > 0 && call.Fuses is { } place && call.Method.Fusion is { } side && file.Calls[start].Method.Parallel == call.Method.Parallel
+                && place.Follows(file.Calls[start].Fuses!, file.Calls[i - 1].Fuses!) is { } renamed && Fusion.Problem(group, side) == null)
+            {
+                group.Add(side);
+                groups[start]++;
+                names[i] = renamed;
+                continue;
+            }
+
+            start = i;
+            groups[i] = 1;
+            group.Clear();
+            if (call.Fuses != null && call.Method.Fusion is { } first) group.Add(first);
+        }
+
+        return (groups, names);
+    }
+
+    /// <summary>
     /// The file of one source file's lambda passes: per call, its interceptor (the call's own signature, the World as
     /// <c>this</c>), the method its job calls (the lambda's body, or a call of its delegate) and its job and filter, as a
     /// [ForEach] method's. Numbered in file order: <c>Lambda3</c>, <c>LambdaJob3</c>, <c>LambdaFilter3</c>.
@@ -184,6 +277,9 @@ public sealed partial class SystemGenerator
         foreach (var u in file.Calls.SelectMany(c => c.Usings).Distinct().OrderBy(u => u, System.StringComparer.Ordinal)) sb.Append(u).Append('\n');
         var type = new StringBuilder();
         type.Append("file static class __ForEach\n{\n");
+        var (groups, renamed) = LambdaGroups(file);
+        // The file's calls as a system's methods, numbered as their jobs (LambdaJob{k}): what the fused walks are made of.
+        var walks = new UpdateModel(file.Calls[0].Method.Owner, new EquatableArray<ForEachModel>(file.Calls.Select(c => c.Method).ToArray()));
         for (int k = 0; k < file.Calls.Length; k++)
         {
             var call = file.Calls[k];
@@ -199,7 +295,14 @@ public sealed partial class SystemGenerator
             string items = call.Element != null ? $", ref global::EasyEcs.DynamicBuffer<{call.Element}> __items" : "";
             type.Append($"    internal static void {method.Name}{k}(this global::EasyEcs.World {world}{items}{tick}{string.Concat(values.Select(v => ", " + v))}, global::System.Delegate {body})\n    {{\n");
             if (call.Body == null) type.Append($"        {method.Name}{k}Delegate = global::System.Runtime.CompilerServices.Unsafe.As<{method.Name}{k}Body>({body});\n");
-            if (call.Element != null)
+            if (groups[k] == 0)
+            {
+                int first = k;
+                while (groups[first] == 0) first--;
+                type.Append($"        // the walk of the lambda pass before it ({method.Name}{first}) ran this one\n");
+            }
+            else if (groups[k] > 1) EmitLambdaWalk(type, walks, k, groups[k], renamed, world);
+            else if (call.Element != null)
             {
                 // The values into the job's fields, the chunks over the buffer's elements (World.ParallelFor's runner).
                 string fields = string.Join(", ", method.Parameters.Select((p, i) => (p, i)).Where(x => x.p.Kind == Symbols.ParamKind.Context).Select(x => $"x{x.i} = {Escape(x.p.Name)}"));
@@ -229,6 +332,7 @@ public sealed partial class SystemGenerator
 
             if (call.Element != null) EmitBufferJob(type, method, call.Element, k);
             else EmitJob(type, method.Owner, method, k);
+            if (groups[k] > 1) EmitFusedJob(type, walks, k, groups[k]);
         }
 
         type.Append("}\n");
@@ -240,6 +344,46 @@ public sealed partial class SystemGenerator
         sb.Append("    file sealed class InterceptsLocationAttribute : global::System.Attribute\n    {\n");
         sb.Append("        public InterceptsLocationAttribute(int version, string data) { }\n    }\n}\n");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// The interceptor's body of the first of <paramref name="count"/> lambda passes that share one walk
+    /// (<see cref="LambdaGroups"/>): each pass on its own while the rows fit in cache (<see cref="Sized"/>, as a system's
+    /// walk), else the fused job (<see cref="EmitFusedJob"/>) made of each call's job, the later calls' values under the
+    /// names this interceptor has them (<paramref name="renamed"/>), then each call's reductions.
+    /// </summary>
+    private static void EmitLambdaWalk(StringBuilder sb, UpdateModel walks, int start, int count, string[]?[] renamed, string world)
+    {
+        var methods = Enumerable.Range(start, count).Select(i => Renamed(walks.Methods[i], renamed[i])).ToArray();
+        string name = FusedName(walks, start, count), types = string.Join(", ", FusedQuery(walks, start, count)), indent = "        ";
+        bool sized = Sized(walks, start, count);
+        if (sized)
+        {
+            sb.Append($"{indent}if ({world}.Count<{types}>(in {name}Filter) < global::EasyEcs.SystemCode.FusedRows) // in cache: each pass on its own\n{indent}{{\n");
+            for (int j = 0; j < count; j++)
+                EmitPass(sb, methods[j], "__ForEach", start + j, world, $"job{j}", $", in {methods[j].Name}Filter{start + j}", "", indent + "    ");
+            sb.Append($"{indent}}}\n{indent}else\n{indent}{{\n");
+            indent += "    ";
+        }
+
+        string local = $"fused{start}";
+        var members = methods.Select((m, j) => $"j{j} = new {m.Name}Job{start + j}{Fields(m, world)}");
+        sb.Append($"{indent}var {local} = new {name} {{ {string.Join(", ", members)} }};\n");
+        string loop = FusedInterface(walks, start, count).Substring(1) + (methods[0].Parallel ? "Parallel" : "");
+        sb.Append($"{indent}{world}.{loop}<{types}, {name}>(ref {local}, in {name}Filter{methods[0].Chunks}); // one walk: {count} lambda passes per {(FusedPerRow(walks, start, count) ? "row" : "block of rows")}\n");
+        for (int j = 0; j < count; j++) EmitReductions(sb, methods[j], world, $"{local}.j{j}", indent);
+        if (sized) sb.Append("        }\n");
+    }
+
+    /// <summary>A call's model with its values named as the walk's interceptor has them (<paramref name="names"/>, in order; null: its own).</summary>
+    private static ForEachModel Renamed(ForEachModel method, string[]? names)
+    {
+        if (names == null) return method;
+        var parameters = method.Parameters.ToArray();
+        for (int i = 0, v = 0; i < parameters.Length; i++)
+            if (parameters[i].Kind == Symbols.ParamKind.Context)
+                parameters[i] = parameters[i] with { Name = names[v++] };
+        return method with { Parameters = new EquatableArray<ParamModel>(parameters) };
     }
 
     /// <summary>
