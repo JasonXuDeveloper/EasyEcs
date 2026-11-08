@@ -141,6 +141,8 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       `ReserveBuffers`, compute in `long`. Files: World.cs. Proof: `Assert.Throws`; changelog Fixes line (docs pass).
 - [x] **C7. `World.Entities` yields dead handles after the records grow** (`core.md` §7): read `_world.Meta` in
       `MoveNext`. Files: World.cs. Proof: a test creating past capacity in the loop, then destroying ahead.
+      The first fix cost a range check per id (Introspection.Entities 18.6 -> 19.6 and 18.9 -> 20.4 us); 7177680 walks
+      the records unchecked (they only grow): base 19.94 / 19.35 us, head 18.96 / 18.76 us, 0 B.
 - [x] **C8. `Dispose` does not return buffer lists to their pools** (`core.md` §8): `ReleaseBuffers` per table.
       Files: World.Systems.cs, World.Archetypes.cs. Proof: 0 B first writes in the next world.
 - [x] **C9. ThreadSetup's step list never shrinks** (`core.md` §9): compact in `Forget`. Files: Workers.cs. Proof:
