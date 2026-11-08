@@ -215,7 +215,10 @@ internal sealed partial class Kernel
             throw FixableReason($"it reads other entities through a Lookup<T> and applies {what} after the pass: a vector whose entities live in several tables runs the method, and every row must take the vector loop; emit in a [ForEach] method of its own");
         if (_bails) throw FixableReason($"it has a branch the loop cannot express ({_cold ?? "a bound that may throw"}) and applies {what} after the pass: every row must take the vector loop; move that branch into a [ForEach] method of its own");
         if (_optionals.Count > 0) throw new Unsupported($"it takes a Maybe<T> and applies {what} after the pass: the last rows of a run take the vector loop through a copy, which an optional column has not");
-        if (_wideOf.Count > 0 || _size < 4) throw new Unsupported($"it applies {what} after the pass with {(_size < 4 ? $"lanes of {_size} byte{(_size == 1 ? "" : "s")}" : "a wide component")}, whose words of passing rows run the method itself");
+        // Narrow lanes mark rows in every word (Interleaved.Lanes8 / Lanes16, Lanes.Ballot); their records have no
+        // compaction of 1- or 2-byte lanes (Emit.AddLanes), and a wide component's masked words run the method.
+        if (_wideOf.Count > 0 || _size < 4 && _emits.Values.Any(e => e.Added))
+            throw new Unsupported($"it applies {what} after the pass with {(_wideOf.Count == 0 ? $"lanes of {_size} byte{(_size == 1 ? "" : "s")}, whose records a vector loop does not compact" : "a wide component, whose words of passing rows run the method itself")}");
         if (Symbols.IsConsume(method)) throw new Unsupported("it is [Consume] and changes structure itself: the pass destroys each row after it");
         if (_change?.Kind == "Destroy" && (_reductions.Count > 0 || _emits.Count > 0))
             throw FixableReason($"it destroys its entity and reduces or emits: a destroy that takes a child with it (a hierarchy) skips the child's row, which a vector loop applies after the pass; emit or reduce in a [ForEach] method of its own");

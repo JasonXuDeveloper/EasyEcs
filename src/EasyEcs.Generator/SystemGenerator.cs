@@ -987,10 +987,10 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             && method.Parameters.All(p => p.Kind is not (Symbols.ParamKind.Optional or Symbols.ParamKind.Mutable or Symbols.ParamKind.View))
             ? $"__Rows(entities, {{0}}, {List(components.Length, k => $"ref r{k}")}, i, __end);" : null;
         // A vector loop also takes the words of 64 rows of which some pass (IForEachMasked): their passing rows as a
-        // lane mask, the other lanes stored back as loaded.
-        // A parallel one runs as a batch job over each chunk's runs of rows (ForEachBatchParallel): no masked form.
+        // lane mask, the other lanes stored back as loaded; on one thread (ForEachMasked) or in each chunk of a parallel
+        // pass (ForEachMaskedParallel).
         var loops = new StringBuilder(); // the loops Execute calls when it is split (EmitLoops)
-        for (int pass = 0; pass < (method.Simd != null && !method.Parallel ? 2 : 1); pass++)
+        for (int pass = 0; pass < (method.Simd != null ? 2 : 1); pass++)
         {
         bool masked = pass == 1;
         if (masked) sb.Append('\n');
@@ -1040,10 +1040,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 for (int k = 1; k <= components.Length; k++)
                     sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
                 sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
-                // Narrow lanes have no lane masks of their own (a Vector512<byte> is a whole word): the passing rows of a
-                // masked word run the method.
-                // So do a wide component's (its write-back stores whole vectors of rows), and one only a flat loop takes.
-                if (method.Simd is { Size: < 4 } or { Wide: not null } or { FlatOnly: true } or { MaskedScalar: true } && masked) sb.Append($"{indent}nint i = 0;\n");
+                // A wide component's masked words run the method (its write-back stores whole vectors of rows), and so do
+                // those of one only a flat loop takes. Narrow lanes take their lane masks from Interleaved.Lanes8 / Lanes16.
+                if (method.Simd is { Wide: not null } or { FlatOnly: true } or { MaskedScalar: true } && masked) sb.Append($"{indent}nint i = 0;\n");
                 else if (method.Simd is { } simd) EmitLoops(sb, loops, simd, components, indent, call, masked, rows, scope, start);
                 if (method.Simd is { VectorTail: true }) { } // the tail took the last rows
                 else if (method.IsChaseTwin) EmitChases(sb, method, indent, call);
@@ -1104,8 +1103,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         {
             // The chunks' partial results and records, combined in chunk order (TSelf is this job: the runtime passes its own TJob).
             const string unsafeType = "global::System.Runtime.CompilerServices.Unsafe";
-            sb.Append($"        static bool global::EasyEcs.{iface}<{method.ComponentTypes}>.Merges => true;\n\n");
-            sb.Append($"        static void global::EasyEcs.{iface}<{method.ComponentTypes}>.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {{\n");
+            sb.Append($"        static bool global::EasyEcs.{declaring}<{method.ComponentTypes}>.Merges => true;\n\n");
+            sb.Append($"        static void global::EasyEcs.{declaring}<{method.ComponentTypes}>.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {{\n");
             sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {job}>(ref job);\n");
             sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {job}>(ref {unsafeType}.AsRef(in chunk));\n");
             MergeLines(sb, method, "into", "part");
@@ -1360,7 +1359,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public bool NeedsWorld => Parameters.Any(p => p.Kind is Symbols.ParamKind.World or Symbols.ParamKind.Lookup);
 
         /// <summary>The World loop (and, with an I, the job interface) the method runs as.</summary>
-        public string Loop => Simd != null && !Parallel ? "ForEachMasked" : IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
+        public string Loop => Simd != null ? "ForEachMasked" : IsBatch ? "ForEachBatch" : TakesEntity ? "ForEachEntity" : "ForEach";
 
         /// <summary>Takes component spans, or runs per row inside runs of rows: World.ForEachBatch.</summary>
         public bool IsBatch => Parameters.Any(p => p.Kind == Symbols.ParamKind.ComponentSpan) || Runs || Simd != null;
@@ -1445,7 +1444,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             if (simd.Prefetched.Length > 0) parts.Add("lookups prefetched past the last-level cache");
             if (simd.Streams) parts.Add("write-only columns streamed past the last-level cache");
             if (Parallel) parts.Add("in parallel chunks");
-            else parts.Add(simd.Size < 4 || simd.Wide != null || simd.FlatOnly || simd.MaskedScalar ? "masked words scalar" : "masked words vector");
+            parts.Add(simd.Wide != null || simd.FlatOnly || simd.MaskedScalar ? "masked words scalar" : "masked words vector");
             if (simd.Cold != null) parts.Add($"cold branch ({simd.Cold})");
             foreach (var write in simd.StructuralChanges) parts.Add($"{write.Replace("global::", "")} after the pass, on the rows it marks");
             if (simd.VectorTail) parts.Add("last rows through a copy");

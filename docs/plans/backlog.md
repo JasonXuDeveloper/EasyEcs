@@ -46,7 +46,14 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       4.1-5.6x, 0 B; gate: 0 warnings, tests in three modes, DocCheck, ApiDocs, agents, VoxelServer; ViewBenchmark Lambda
       90.6 -> 24.5 us at 100k, the other rows equal). What is left runs on **`feat-inner-loops-rest`** (from fda40ab):
       (d)'s measurement, lambda fusion, (b), (g) without Clamp, WP8's rest (Dig, Gone, Play), the demo's batch Move,
-      then (a). The original item follows. (`inner-loops.md`; Kernel*.cs, SystemGenerator.Loops/Elements/Cells/Lambdas.cs,
+      then (a). **feat-inner-loops-rest merged 2026-11-08**: (d) the blank fill kept (TileLayers 1 thread 701 vs
+      764 µs, 4 threads 292 vs 351); lambda fusion (LambdaFusion Fused / Apart 0.51 at 1M, 0.48 at 1M parallel, 0.58 at
+      8M parallel, equal at 10k); (g) masked words in parallel chunks, Maybe<T> in parallel and of byte / short lanes,
+      masked words of narrow lanes, narrow structural marks, Pow under FloatMode.Fast (VectorForms, head against base,
+      µs: MaskedParallel 16.5 vs 85, MaybeParallel 14.6 vs 107, MaskedNarrow 18.8 vs 106, MaybeNarrow 9.4 vs 188,
+      MarkNarrow 19.0 vs 204, Pow 265 vs 673); the demo's batch Move. Dropped with causes in owner-review.md: (b) masked
+      AVX-512 tails (the helper's call), Atan2 / Asin (D127), wide rows' masked words (halos files); Dig / Gone
+      inherent. Left: (a) a `Columns<TTile>` cell after the halos merge; the demo bundle rebuild. The original item follows. (`inner-loops.md`; Kernel*.cs, SystemGenerator.Loops/Elements/Cells/Lambdas.cs,
       LambdaPass.cs, HandSimd.cs, the analyzer's Lambdas / Views / Forms areas). 25 commits past f9faa23: WP1 lanes and
       unrolling, EECS099 for two parameters, counted sums as popcount, lambda + structural, lambda + view, WP4's
       `ParallelFor` lambda over a buffer (aef32bb, LightLambda / HeavyLambda). Left on it: WP4's rest (then the

@@ -45,6 +45,7 @@ form to it):
 |---|---|---|---|
 | Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`), `Lanes.Bits`, `Emit.AddLanes` | vector | vector (`Vector<T>` is 128-bit) | none needed |
 | Components of several fields, `Vector2/3/4` (`Interleaved`: AVX2 / AVX-512 shuffles, NEON LD2-4 / ST2-4) | vector | vector | none needed |
+| Narrow lanes' masks of a word (`Interleaved.Lanes8` / `Lanes16`: the word's bits spread by a multiply per ulong) | vector | vector (`Vector<T>` of 128 bits: 2 ulongs) | none needed |
 | Wide components (`Kernel.Wide`: AVX-512 two-source permutes; ARM64 NEON TBL / TBX, `Interleaved.Pick` / `PickInto`) | vector on AVX-512 | vector where its own gate pays ("(Vector512 only)" otherwise) | M4 numbers to check the gate's cost model |
 | Mask to rows (`Lanes.Compact`: AVX-512 CompressStore; AVX2 table + VPMOVZXBD; 128-bit PSHUFB / TBL table) | every ISA (8-byte lanes: AVX-512 or the bit walk) | TBL table | owner's M4 rerun of `CompressBenchmark` |
 | `Lookup` gathers (`LookupLanes`, on request) | AVX2 | rows (D131) | none in .NET 10 |

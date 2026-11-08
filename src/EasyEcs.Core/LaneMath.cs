@@ -233,6 +233,41 @@ public static class LaneMath
         return Vector128.Narrow(Vector128.Log(lower) * scale, Vector128.Log(upper) * scale);
     }
 
+    /// <summary>
+    /// MathF.Pow per lane, within an ulp (FloatMode.Fast): e^(y ln x) in doubles, rounded once to a float. The caller
+    /// passes only finite x &gt; 0 and finite y (pow's special cases run the method). The double's relative error is a
+    /// few times 2^-52 even where |y ln x| reaches the float range's 88 (2^-52 * 88 is far below a float's 2^-24), so
+    /// the float result is the rounded true value or its neighbor; results past the float range round to infinity or
+    /// to a subnormal (or 0) as pow's.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<float> Pow(Vector<float> x, Vector<float> y)
+    {
+        Vector.Widen(x, out var xl, out var xu);
+        Vector.Widen(y, out var yl, out var yu);
+        return Vector.Narrow(Vector.Exp(yl * Vector.Log(xl)), Vector.Exp(yu * Vector.Log(xu)));
+    }
+
+    /// <inheritdoc cref="Pow(Vector{float}, Vector{float})"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector512<float> Pow(Vector512<float> x, Vector512<float> y)
+    {
+        var (xl, xu) = Vector512.Widen(x);
+        var (yl, yu) = Vector512.Widen(y);
+        return Vector512.Narrow(Vector512.Exp(yl * Vector512.Log(xl)), Vector512.Exp(yu * Vector512.Log(xu)));
+    }
+
+    /// <inheritdoc cref="Pow(Vector{float}, Vector{float})"/>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector128<float> Pow(Vector128<float> x, Vector128<float> y)
+    {
+        if (Avx.IsSupported)
+            return Avx.ConvertToVector128Single(Vector256.Exp(Avx.ConvertToVector256Double(y) * Vector256.Log(Avx.ConvertToVector256Double(x))));
+        var (xl, xu) = Vector128.Widen(x);
+        var (yl, yu) = Vector128.Widen(y);
+        return Vector128.Narrow(Vector128.Exp(yl * Vector128.Log(xl)), Vector128.Exp(yu * Vector128.Log(xu)));
+    }
+
     private const float Tiny = 1f / 4096;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

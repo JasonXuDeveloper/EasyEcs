@@ -700,20 +700,20 @@ internal sealed partial class Kernel
         if (!method.ReturnsVoid) return new Unsupported("it returns a value");
         if (method.IsGenericMethod) return new Unsupported("it is generic");
         if (Symbols.WithBody(method, syntax, model).Item1 is { Body: null, ExpressionBody: null }) return null; // Vectorize: "it has no body"
-        return Declined(method, Symbols.IsRunner(method), Symbols.IsParallel(method));
+        return Declined(method, Symbols.IsRunner(method));
     }
 
     /// <summary><see cref="Declined(IMethodSymbol, MethodDeclarationSyntax, SemanticModel)"/> for a lambda.</summary>
     private static Unsupported? Declined(Lane lane) =>
         lane.Method.IsGenericMethod ? new Unsupported("it is generic") // a lambda's value is dropped: LambdaPass.Discards
-            : Declined(lane.Method, lane.Outside, lane.Parallel);
+            : Declined(lane.Method, lane.Outside);
 
-    private static Unsupported? Declined(IMethodSymbol method, bool outside, bool parallel)
+    private static Unsupported? Declined(IMethodSymbol method, bool outside)
     {
         foreach (var p in method.Parameters)
         {
             var kind = Symbols.Classify(p, outside);
-            if (Refused(p, kind, parallel) is { } refused) return new Unsupported(refused);
+            if (Refused(p, kind) is { } refused) return new Unsupported(refused);
             if (kind is Symbols.ParamKind.Component or Symbols.ParamKind.Optional) return null; // its lanes decide
         }
 
@@ -725,13 +725,11 @@ internal sealed partial class Kernel
     /// None is fixable: each parameter does what the method needs (a value taken by ref may be a running index rather
     /// than a sum, so a Reduce&lt;T&gt; is not always the same method).
     /// </summary>
-    private static string? Refused(IParameterSymbol p, Symbols.ParamKind kind, bool parallel) => kind switch
+    private static string? Refused(IParameterSymbol p, Symbols.ParamKind kind) => kind switch
     {
         Symbols.ParamKind.Component or Symbols.ParamKind.Singleton or Symbols.ParamKind.Reduction or Symbols.ParamKind.View => null,
         Symbols.ParamKind.Context => p.RefKind == RefKind.Ref ? $"it takes '{p.Name}' by ref: a vector loop reduces only into a Reduce<T>" : null,
-        Symbols.ParamKind.Optional => parallel
-            ? $"it takes a Maybe<{Symbols.MaybeElement(p.Type)?.Name}> and runs in parallel: an optional column has a vector loop on one thread"
-            : null,
+        Symbols.ParamKind.Optional => null, // its presence bits per run (MaybeColumn), on one thread or in a parallel chunk
         Symbols.ParamKind.Entity or Symbols.ParamKind.Emit => null, // its uses decide (Kernel.Structural.cs)
         Symbols.ParamKind.Entities => "it takes the EntitySpan",
         Symbols.ParamKind.World => "it takes the World",
@@ -825,14 +823,14 @@ internal sealed partial class Kernel
                     componentTypes.Add(p.Type);
                     wides.Add(wide);
                     break;
-                case Symbols.ParamKind.Optional when !lane.Parallel:
+                case Symbols.ParamKind.Optional:
                     optionals.Add(Lanes(Symbols.MaybeElement(p.Type)!));
                     break;
                 case Symbols.ParamKind.Neighbor when lane.Pairs: // a value per neighbor, broadcast in its j loop
                     if (NeighborRefused(p) is { } refusedNeighbor) throw new Unsupported(refusedNeighbor);
                     break;
                 default:
-                    if (Refused(p, kind, lane.Parallel) is { } refused) throw new Unsupported(refused);
+                    if (Refused(p, kind) is { } refused) throw new Unsupported(refused);
                     break;
             }
         }
@@ -856,8 +854,6 @@ internal sealed partial class Kernel
         foreach (var field in optionals.SelectMany(f => f))
             if (SizeOf(first) != SizeOf(field.Type))
                 throw new Unsupported($"lane types {first.ToDisplayString()} and {field.Type.ToDisplayString()} differ in size");
-        if (SizeOf(first) < 4 && optionals.Count > 0)
-            throw new Unsupported($"it takes a Maybe<{Symbols.MaybeElement(method.Parameters.First(q => lane.Kind(q) == Symbols.ParamKind.Optional).Type)?.Name}> of {first.ToDisplayString()} lanes: optional columns have vector loops of 4- and 8-byte lanes");
 
         // The parameters of a kernel: the main one, and one per field of a flat loop (Flat) with the same setup.
         Kernel Make(bool reductions)
@@ -2618,12 +2614,22 @@ internal sealed partial class Kernel
             Bail($"(~{Compare("Equals", x0, x0, type)})");
             return e == 1 ? x0 : one;
         }
+        bool single = type.SpecialType == SpecialType.System_Single;
         if (!_fast)
-            throw new Unsupported(e is 2 or 3 or 4 or -1 or -2 or 0.5
+            throw new Unsupported(e is 2 or 3 or 4 or -1 or -2 or 0.5 || single
                 ? $"{m.ContainingType.Name}.{m.Name} is not bit-exact in vector form except by 0 and 1: set FloatMode = FloatMode.Fast"
                 : $"{m.ContainingType.Name}.{m.Name} has no vector form in .NET 10 but by a constant 0, 1 (and under FloatMode.Fast 2, 3, 4, -1, -2 or 0.5)");
         if (e is not (2 or 3 or 4 or -1 or -2 or 0.5))
-            throw new Unsupported($"{m.ContainingType.Name}.{m.Name} has no vector form in .NET 10 but by a constant 0, 1, 2, 3, 4, -1, -2 or 0.5");
+        {
+            if (!single)
+                throw new Unsupported($"{m.ContainingType.Name}.{m.Name} of doubles has no vector form in .NET 10 but by a constant 0, 1, 2, 3, 4, -1, -2 or 0.5");
+            // Any other exponent of floats: e^(y ln x) in doubles (LaneMath.Pow), for a finite x > 0 and a finite y; a lane
+            // outside (0, a negative base, infinities, NaN: pow's special cases) sends its vector's rows to the method.
+            string b = Hold(X(), type), y = Hold(Expr(exponent), type);
+            string infinity = Broadcast("float.PositiveInfinity", type);
+            Bail($"(~({Compare("GreaterThan", b, $"{VecOf(type)}.Zero", type)} & {Compare("LessThan", b, infinity, type)} & {Compare("LessThan", $"{V}.Abs({y})", infinity, type)}))");
+            return $"global::EasyEcs.LaneMath.Pow({b}, {y})";
+        }
         string x = Hold(X(), type);
         switch (e)
         {

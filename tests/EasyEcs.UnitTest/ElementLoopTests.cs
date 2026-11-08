@@ -109,6 +109,12 @@ public ref struct ElementRules
     {
         for (int i = 0; i < rates.Length; i++) rates[i].Value = rates[i].Value * 0.5f + 0.75f; // a batch method's loop over its rows
     }
+
+    [ForEach]
+    static void Fade(ref DynamicBuffer<Ember2> embers, in Rate rate)
+    {
+        foreach (ref var e in embers.AsSpan()) e = new Ember2(e.Heat * rate.Value - 0.25f, e.Glow * rate.Value - 0.25f); // each field alike: a flat loop
+    }
 }
 
 /// <summary>The bodies of <see cref="ElementRules"/> as written: no vector form.</summary>
@@ -201,6 +207,12 @@ public ref struct ElementRulesByRow
     static void Ease(Span<Rate> rates)
     {
         for (int i = 0; i < rates.Length; i++) rates[i].Value = rates[i].Value * 0.5f + 0.75f; // a batch method's loop over its rows
+    }
+
+    [ForEach(SimdMode = SimdMode.Off)]
+    static void Fade(ref DynamicBuffer<Ember2> embers, in Rate rate)
+    {
+        foreach (ref var e in embers.AsSpan()) e = new Ember2(e.Heat * rate.Value - 0.25f, e.Glow * rate.Value - 0.25f); // each field alike: a flat loop
     }
 }
 
@@ -459,6 +471,29 @@ public class ElementLoopTests
             }
         }
         """;
+
+    /// <summary>
+    /// A method whose body is one line (the closing brace on the line of its loop) is copied with its loop's vector form:
+    /// the helpers after it start on a line of their own, where their #line directive may stand.
+    /// </summary>
+    [Test]
+    public void AOneLineMethodIsCopiedWithItsLoopsVectorForm()
+    {
+        const string source = """
+            using EasyEcs;
+            public record struct Pair2(float A, float B);
+            public static class R
+            {
+                [ForEach]
+                static void A(ref DynamicBuffer<Pair2> b) { foreach (ref var e in b.AsSpan()) e = new Pair2(e.A * 2, e.B * 2); } // one line: the helpers' #line on a line of their own
+            }
+            """;
+        var tree = CSharpSyntaxTree.ParseText(source, GeneratorTests.Parse, path: "/src/Flat.cs");
+        GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(GeneratorTests.Components).AddSyntaxTrees(tree), out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        string generated = string.Concat(output.SyntaxTrees.Where(GeneratorTests.IsCode).Select(t => t.ToString()));
+        Assert.That(generated, Does.Contain("static nint __Elements0(ref global::Pair2 r1, nint i, nint rows, int at)"), generated);
+    }
 
     [Test]
     public void TheMethodIsCopiedWithTheLoopsVectorFormAndItsLines()

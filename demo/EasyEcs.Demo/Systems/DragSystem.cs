@@ -2,8 +2,9 @@ using EasyEcs;
 
 namespace EasyEcs.Demo;
 
-// Slows every spark down, as air would: a burst expands fast and settles. One call per spark.
-[EcsSystem, UpdateInGroup<PerEntity>]
+// Slows every spark down, as air would: a burst expands fast and settles. Written for one spark,
+// run as a vector loop.
+[EcsSystem, UpdateInGroup<Vectorized>]
 public ref struct DragSystem
 {
     [ForEach]

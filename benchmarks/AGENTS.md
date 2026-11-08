@@ -53,7 +53,8 @@ benchmarks/EasyEcs.Benchmark/          BenchmarkDotNet: the headline worlds, one
   ElementLoopBenchmark.cs              a loop over a row's buffer: as written, with the vector form the generator writes,
                                        and by hand; Decay in place, Widen across two buffers, SumInts and SumFloats into a
                                        variable; 4, 64 and 1,024 elements; HeightMapLoopBenchmark: VoxelServer's height
-                                       map, the plain loop against the Vector128 one it replaced; BatchLoopBenchmark: a
+                                       map, the plain loop against the Vector128 one it replaced; FlatTailBenchmark: a flat loop over 4 to 64
+                                       elements of two floats, as written against its vector form; BatchLoopBenchmark: a
                                        batch method's loop over its rows against the method for one row
   EmitBenchmark.cs                     Emit<T> in parallel and on one thread against a component scanned after, a
                                        ConcurrentQueue and an Interlocked cursor
@@ -84,6 +85,8 @@ benchmarks/EasyEcs.Benchmark/          BenchmarkDotNet: the headline worlds, one
   IntrospectionBenchmark.cs            Introspection (+ Schedule, Entities: the walk of world.Entities)
   KernelBenchmark.cs                   a [ForEach] method for one row as the per-row loop, the batch method and the vector
                                        loop the generator writes
+  LambdaFusionBenchmark.cs             two lambda passes written one after the other as one walk, against the same calls
+                                       apart, on one thread and in parallel
   LambdaPassBenchmark.cs               a lambda pass against the [ForEach] method and the hand-written job, scalar and
                                        vector bodies
   LateHolesBenchmark.cs                vector loops whose runner reached Tier1 before their table had holes: the masked
@@ -202,6 +205,8 @@ benchmarks/EasyEcs.Benchmark/          BenchmarkDotNet: the headline worlds, one
                                        (Locality/Timers.cs)
   TrimBenchmark.cs                     TrimExcess after a peak
   UnloadBenchmark.cs                   unloading a plugin (EasyEcs.Benchmark.Plugin) from a world
+  VectorFormsBenchmark.cs              masked words in parallel chunks, Maybe<T> in parallel and of byte lanes, masked words
+                                       of byte lanes, Pow of floats under FloatMode.Fast: each method against SimdMode.Off
   ViewBenchmark.cs                     a pass taking a [View] against the refs it stands for, vector and scalar, as a lambda pass, and AsX
                                        against Get / Read
   Locality/                            phase 0 of docs/plans/locality.md: hand-written prototypes that decided what got

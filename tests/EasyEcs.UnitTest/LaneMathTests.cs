@@ -145,6 +145,17 @@ public static class LoweredKernels
         o.C = MathF.Tanh(x.Value);
         o.D = MathF.Pow(x.Value, 4);
     }
+
+    // Any other exponent of floats: e^(y ln x) in doubles; a base that is not a finite positive number, or an exponent
+    // that is not finite, sends its vector's rows to the method.
+    [ForEach(SimdMode = SimdMode.Require, FloatMode = FloatMode.Fast)]
+    internal static void Exponents(ref Real4 o, in Real x)
+    {
+        o.A = MathF.Pow(x.Value, 1.5f);
+        o.B = MathF.Pow(x.Value, -0.75f);
+        o.C = MathF.Pow(1.0001f, x.Value);
+        o.D = MathF.Pow(x.Value, x.Value);
+    }
 }
 
 /// <summary>
@@ -503,7 +514,7 @@ public class LaneMathTests
     }
 
     /// <summary>
-    /// The FloatMode.Fast forms (Pow by 2, 3, 4, 0.5, -1, -2; division by any constant; Tan, Log10, Sinh, Cosh, Tanh)
+    /// The FloatMode.Fast forms (Pow by 2, 3, 4, 0.5, -1, -2 and any other exponent; division by any constant; Tan, Log10, Sinh, Cosh, Tanh)
     /// within <paramref name="ulps"/> of the scalar functions over a sample of every float (zeros, infinities, NaN where
     /// the scalar function has them).
     /// </summary>
@@ -513,6 +524,7 @@ public class LaneMathTests
         static Real4 Powers(Real x) { var o = new Real4(); LoweredKernels.Powers(ref o, in x); return o; }
         static Real4 Curves(Real x) { var o = new Real4(); LoweredKernels.Curves(ref o, in x); return o; }
         static Real4 Hyperbolic(Real x) { var o = new Real4(); LoweredKernels.Hyperbolic(ref o, in x); return o; }
+        static Real4 Exponents(Real x) { var o = new Real4(); LoweredKernels.Exponents(ref o, in x); return o; }
         static bool Near(in Real4 a, in Real4 b) => Ulps(a.A, b.A) <= 2 && Ulps(a.B, b.B) <= 2 && Ulps(a.C, b.C) <= 2 && Ulps(a.D, b.D) <= 2;
         static bool Tan(in Real4 a, in Real4 b) =>
             (Ulps(a.A, b.A) <= 4 || MathF.Abs(a.A - b.A) <= 1e-7f) && Ulps(a.B, b.B) <= 2 && Ulps(a.C, b.C) <= 2 && Ulps(a.D, b.D) <= 2;
@@ -521,6 +533,7 @@ public class LaneMathTests
         Sweep<Real, Real4>(Samples(stride), stride, real, LoweredKernels.Powers, Powers, Near, show);
         Sweep<Real, Real4>(Samples(stride), stride, real, LoweredKernels.Curves, Curves, Tan, show);
         Sweep<Real, Real4>(Samples(stride), stride, real, LoweredKernels.Hyperbolic, Hyperbolic, Near, show);
+        Sweep<Real, Real4>(Samples(stride), stride, real, LoweredKernels.Exponents, Exponents, Near, show);
     }
 
     /// <summary>
@@ -563,6 +576,9 @@ public class LaneMathTests
             Assert.That(Ulps(LaneMath.Cosh(v)[0], MathF.Cosh(small)), Is.LessThanOrEqualTo(2), $"Cosh {small}");
             Assert.That(Ulps(LaneMath.Tanh(v)[0], MathF.Tanh(small)), Is.LessThanOrEqualTo(2), $"Tanh {small}");
             Assert.That(Ulps(LaneMath.Log10(Vector128.Create(f))[0], MathF.Log10(f)), Is.LessThanOrEqualTo(2), $"Log10 {f}");
+            float b = MathF.Abs(f), e = (float)(random.NextDouble() * 40 - 20);
+            if (b > 0 && float.IsFinite(b))
+                Assert.That(Ulps(LaneMath.Pow(Vector128.Create(b), Vector128.Create(e))[0], MathF.Pow(b, e)), Is.LessThanOrEqualTo(1), $"Pow {b} {e}");
         }
     }
 }
