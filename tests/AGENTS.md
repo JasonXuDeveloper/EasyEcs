@@ -33,7 +33,7 @@ tests/EasyEcs.UnitTest/        NUnit, one file per feature: Entity, Component, P
                                Lanes (Lanes.Compact and Lanes.Selection against a plain walk, every mask shape and length),
                                LaneMath (the math a vector loop lowers: integer division, a float divided by a power of two, Pow, the throwing
                                Abs / CopySign / Sign, FloatMode.Fast's forms; the Vector128 forms against the scalar operations; every 32-bit input under the explicit category Exhaustive),
-                               Generator (generated code, the vector loops and EECS055 / EECS056's reasons, caching; GeneratorBenchmark's corpus clean, linked: GeneratorCorpus.cs; the
+                               Generator (generated code, the vector loops and EECS055 / EECS056's reasons, caching; GeneratorBenchmark's corpus clean, linked: GeneratorCorpus.cs; the samples, the template and the demo clean, SamplesAreClean, with its tracked exceptions; the
                                harness: Compile, Driver, Analyze, Components), Analyzer (the rules, one file per analyzer
                                file: .Declarations, .Systems, .Usage, .Parallel, .Parts, .Forms (and EECS103's idioms and guards), .Pairs (EECS105-107), .Tiles (EECS115-117, EECS120's reasons, cell methods' EECS055 / EECS056 / EECS059 / EECS073, EECS123 and the layers' parameter left out of EECS026, a cell step's EECS115 reasons and EECS116 advice, lanes of 1 and 4 bytes, EECS115 for cells of two tiles, EECS002 for a result per tile outside a cell method), .Performance (costs,
                                lambda passes, view fields); what each rule reports, the edges it branches on and the code

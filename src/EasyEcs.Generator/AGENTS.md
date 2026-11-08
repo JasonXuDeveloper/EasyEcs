@@ -137,7 +137,7 @@ ComponentGenerator.cs        C# 14 extension members per component / singleton: 
                              for [OrderBy]); classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                              lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
 EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070, EECS072-073 and EECS118 (the
-                             declaration and [ForEach] rules of the range EECS002-103 that are not performance rules;
+                             declaration and [ForEach] rules of the range EECS002-EECS132 that are not performance rules;
                              generators never report diagnostics): DeclarationAnalyzer. Every EasyEcsAnalyzer*.cs
                              file ends with its area's analyzer (DeclarationAnalyzer, SystemAnalyzer, ...: a
                              DiagnosticAnalyzer deriving from EasyEcsAnalyzer.Area with the rules it reports), since
@@ -148,11 +148,15 @@ EasyEcsAnalyzer.Systems.cs   EECS007-008, EECS074-077 and EECS090: systems as de
                              reach into another system; an [EcsSystem] that is no ref struct, an instance member, a hook
                              no signature fits, a system API given a type that is no [EcsSystem], a method named almost
                              like a hook)
-UnusedSuppressor.cs          suppresses IDE0051 / IDE0052 on [ForEach], [EntityMethod] and hook methods (called through
-                             UnsafeAccessor; Rider reads their [MeansImplicitUse])
+UnusedSuppressor.cs          suppresses IDE0051 / IDE0052 on [ForEach], [EntityMethod], [Drain] and hook methods (called
+                             through UnsafeAccessor; Rider reads their [MeansImplicitUse]) and IDE0060 on the parameters
+                             of a [ForEach] / [EntityMethod] method EECS026 checks (one mistake, one diagnostic)
 EasyEcsAnalyzer.Performance.cs  EECS025-028, EECS030-032, EECS034, EECS039, EECS046, EECS052, EECS053, EECS055 (with the
-                             check of EECS056) and EECS123 (a cell method's ITileLayers that cannot bound its pass: the
-                             rows outside are not proved blank):
+                             check of EECS056), EECS123 (a cell method's ITileLayers that cannot bound its pass: the
+                             rows outside are not proved blank), EECS131 (a Scratch<T> collection added to and never
+                             cleared; fix: its Clear() before the first add) and EECS132 (a Lookup<T> key probe in a
+                             method of another type: the pass prepares the index only for its own body and its type's
+                             helpers, Symbols.FindsByKey):
                              code that works but costs (write access that
                              only reads, unused or per-row lookups in [ForEach] methods and jobs, allocations per
                              update, per-entity structural changes and counting over queries, creation loops,
@@ -247,13 +251,15 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              sections under the lanes their first matching label takes, the default section's wherever
                              it stands), their reasons (a subject no lane holds, a list pattern, a switch over a call on
                              a struct: the split), and the inliner's lowering of a switch statement that returns
-EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045, EECS047-051 and EECS122: calls and declarations that compile but do not
+EasyEcsAnalyzer.Usage.cs     EECS037-038, EECS040-045, EECS047-051, EECS122 and EECS129-130: calls and declarations that compile but do not
                              do what they say (a job's WriteMask, a dropped copy, SetIfChanged that cannot compare, calls
                              a pass refuses, an index added to while walked, a record key that prints itself, a sliced
                              filter where every row is needed, the world's own tags written by hand, a ref used after
                              a structural change, Disable of a component that cannot be disabled, filters no entity
                              passes, a second group in one filter, an update during a pass; EECS122: a call of a generated entry
-                             point that binds to the method itself because the entry point's namespace is not in scope)
+                             point that binds to the method itself because the entry point's namespace is not in scope;
+                             EECS129: a singleton added twice, AddSingleton throwing the second time, fix GetOrAddX();
+                             EECS130: an EntityId's Index stored in a component or singleton)
 EasyEcsAnalyzer.Parallel.cs  EECS060-061: code on several threads (a parallel [ForEach] method, the Execute of a job
                              run by ForEachParallel or ParallelFor) that writes memory every thread shares, a parallel
                              job's field read after the call; EECS071: System.Random in a [ForEach] method (fix:
@@ -283,12 +289,13 @@ HandStencil.cs               EECS103 v2: a Tile [ForEach] method's stencil of cu
                              a Rows loop of x += lanes, loads at x + dx, CopyTo into the row) as the cell method
                              (Cell<TCell, TTile>, out TOut: a neighbor per load), kept when Kernel.CellFormOf gives it a
                              row loop in a copy of the compilation; the fix is v1's PerRow
-EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089: a [ForEach] method doing by hand what a parameter does per
+EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089, EECS128: a [ForEach] method doing by hand what a parameter does per
                              chunk (a singleton reset by system code and accumulated row by row: Reduce<T>, reported
                              at the end of the compilation; other entities read through the World: Lookup<T>; records
                              appended to a singleton's list: Emit<T>); a total kept across passes and added to row by row: Reduce<T> of an
                              [Accumulate] singleton (Info until the singleton reduces, then a Warning with its fix);
-                             no fix for a reset total (the reset, the readers move too)
+                             no fix for a reset total (the reset, the readers move too); EECS128: a Reduce<T>'s Value
+                             read as the total (a chunk's partial result), read by PartialReads
 EasyEcsAnalyzer.Layout.cs    EECS091 (compilation end): a component of 32 bytes or more whose fields no frequent
                              [ForEach] pass touches are half of it (ColdFieldPasses: the fields each pass names,
                              collected from AnalyzeBody; components EECS055 already advises to split are left to it)
