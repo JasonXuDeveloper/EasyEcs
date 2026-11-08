@@ -33,8 +33,9 @@ A name is the first doc a reader sees. This audit covers every name, not only th
    - **Ambiguity**: is one word used for two things (group, index, pass, slice, tick, since, run, restore, forget,
      rows, into, destroyed/alive)? Are two names used for one thing?
      Do two names look alike but do different things (owner, 2026-10-28: `[ForEach]`, `[ForEachRecord]` and
-     `[ForEntity]` became `[ForEach]`, `[Drain]` and `[EntityMethod]`, D141)? A `ForEach*` name is a pass over rows;
-     a form that is not one does not borrow the prefix.
+     `[ForEntity]` became `[ForEach]`, `[Drain]` and `[EntityMethod]`, D141)? A `ForEach*` name is a pass over rows,
+     except `ForEachCollected`, the collected form of a `[ForEach]` method (owner, 2026-11-07); a form that is not
+     one does not borrow the prefix.
    - **Behavior**: does the name say its cost, whether it stamps a tick, whether it is a structural change, and
      whether it throws? The convention: `Get` throws, `TryGet` returns false, `Find` enumerates.
    - **ECS vocabulary**: does it match DOTS, Bevy, Flecs, Arch and Friflo where the behavior is the same, and
