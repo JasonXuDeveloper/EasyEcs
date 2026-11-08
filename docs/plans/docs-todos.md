@@ -3501,3 +3501,13 @@ Wide rows of 8-byte words and the AVX2 form (#160; commits c078128 + 042e8a5, te
 - [ ] **decisions.mdx + zh**: A14's two candidates and the IForSpan rule are in `docs/owner-review.md`; once the owner
   settles them, a record each.
 - [ ] **zh XML** (`tools/ApiDocs/zh`): none (no public API changed).
+
+## The site build's lint:seo (found 2026-11-08 by move-guide-folders)
+
+- `bun run build` fails in `lint:seo` on `llms-full.txt`: 3,187,322 characters against the script's 3,000,000 cap
+  (`docs/scripts/lint-seo.ts:346`; 3,167,165 before the guide move). The cap or what the full file carries (the API
+  reference pages are most of it) is the docs pass's call: decide, record it in the script's comment, and keep the
+  build green. Cloudflare runs this build, so the next deploy fails until then.
+- `/zh/docs/ai`'s description was 102 characters (40-90): shortened (the docs commit after a86f374).
+- `lint:search`: the en "ChunkRows" query must find `guide/performance/threading` (the expectation was updated with the
+  move; re-run once the build passes).
