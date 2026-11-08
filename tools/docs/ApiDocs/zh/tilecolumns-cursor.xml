@@ -32,13 +32,13 @@
       步长是常量时由 JIT 单独检查，<paramref name="into" /> 是否有 Width 个格子用一次比较。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.TileColumns`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector256{``0},System.Span{`0})" source="2d23b5c82ca0">
+  <member name="M:EasyEcs.TileColumns`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector256{``0},System.Span{`0})" source="c16534023574">
     <summary>把 <paramref name="value" /> 的 256 位从这一列的格子起存进行 <paramref name="into" />，同 <see cref="M:EasyEcs.TileColumns`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector128{``0},System.Span{`0})" />。O(1)。</summary>
   </member>
-  <member name="M:EasyEcs.TileColumns`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector512{``0},System.Span{`0})" source="3e033350c07c">
+  <member name="M:EasyEcs.TileColumns`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector512{``0},System.Span{`0})" source="37c347f104f9">
     <summary>把 <paramref name="value" /> 的 512 位从这一列的格子起存进行 <paramref name="into" />，同 <see cref="M:EasyEcs.TileColumns`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector128{``0},System.Span{`0})" />。O(1)。</summary>
   </member>
-  <member name="M:EasyEcs.TileColumns`2.Cursor.Store``1(System.Numerics.Vector{``0},System.Span{`0})" source="1e4b4f30bab8">
+  <member name="M:EasyEcs.TileColumns`2.Cursor.Store``1(System.Numerics.Vector{``0},System.Span{`0})" source="77cabe431406">
     <summary>把一个 <c>Vector&lt;TLane&gt;</c> 从这一列的格子起存进行 <paramref name="into" />，同 <see cref="M:EasyEcs.TileColumns`2.Cursor.Store``1(System.Runtime.Intrinsics.Vector128{``0},System.Span{`0})" />。O(1)。</summary>
   </member>
 </doc>

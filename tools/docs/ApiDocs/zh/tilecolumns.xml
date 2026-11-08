@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.TileColumns`2" source="dd7bf5a170b2">
+  <member name="T:EasyEcs.TileColumns`2" source="6c0968239790">
     <summary>
       瓦片一行各列的遍历（<see cref="M:EasyEcs.TileCursor`2.Columns(System.Int32)" />），用 <c>foreach</c>：0、step、2 step……直到 Width 为止，每列一个 <see cref="T:EasyEcs.TileColumns`2.Cursor" />。
     </summary>

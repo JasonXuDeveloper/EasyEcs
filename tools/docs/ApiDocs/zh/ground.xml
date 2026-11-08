@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.Ground`1" source="14ac17f84857">
+  <member name="T:EasyEcs.Ground`1" source="fc24419fde22">
     <summary>
       瓦片的地面：<typeparamref name="TTile" /> 的网格（多层的瓦片）上一层的瓦片，Width × Depth，以它的侧面为面，
       光环、邻域和边界与它相同。同一批实体和键上的第二个场：<c>Tile&lt;Scent, Ground&lt;Chunk&gt;&gt;</c> 是地形的地面，

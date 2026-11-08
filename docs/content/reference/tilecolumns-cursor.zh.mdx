@@ -1,6 +1,6 @@
 ---
-title: "TileColumnWalk<TCell, TTile>.Cursor"
-seoTitle: "TileColumnWalk<TCell, TTile>.Cursor 结构体 – EasyEcs C# API"
+title: "TileColumns<TCell, TTile>.Cursor"
+seoTitle: "TileColumns<TCell, TTile>.Cursor 结构体 – EasyEcs C# API"
 description: "遍历停在行中某一列：它周围的格子，一次一个或一个向量，偏移从这一列算起；还能把一个向量从这一列存进步进写的那一行。"
 ---
 
@@ -10,7 +10,7 @@ description: "遍历停在行中某一列：它周围的格子，一次一个或
 public readonly ref struct Cursor
 ```
 
-嵌套在 [`TileColumnWalk`](/zh/docs/reference/tilecolumnwalk) 里。
+嵌套在 [`TileColumns`](/zh/docs/reference/tilecolumns) 里。
 
 遍历停在行中某一列：它周围的格子，一次一个或一个向量，偏移从这一列算起；还能把一个向量从这一列存进步进写的那一行。偏移以格子计：dx 从 −r 起，到从遍历的最后一列加载仍在行后最后一个 halo 格子（Width + r − 1）处或之前结束为止；dy 和 dz 从 −r 到 r（2D 瓦片 dy 为 0），r 是形状的 [`ITileShape.Halo`](/zh/docs/reference/itileshape#halo)。遍历的每一列都通过同一个检查，所以步长是常量时，常量偏移由 JIT 检查，其他偏移用一次比较。
 
@@ -82,7 +82,7 @@ public void Store<TLane>(Vector128<TLane> value, Span<TCell> into);
 public void Store<TLane>(Vector256<TLane> value, Span<TCell> into);
 ```
 
-把 `value` 的 256 位从这一列的格子起存进行 `into`，同 [`TileColumnWalk.Cursor.Store`](/zh/docs/reference/tilecolumnwalk-cursor#store)。O(1)。
+把 `value` 的 256 位从这一列的格子起存进行 `into`，同 [`TileColumns.Cursor.Store`](/zh/docs/reference/tilecolumns-cursor#store)。O(1)。
 
 ### `Store` [#store-3]
 
@@ -90,7 +90,7 @@ public void Store<TLane>(Vector256<TLane> value, Span<TCell> into);
 public void Store<TLane>(Vector512<TLane> value, Span<TCell> into);
 ```
 
-把 `value` 的 512 位从这一列的格子起存进行 `into`，同 [`TileColumnWalk.Cursor.Store`](/zh/docs/reference/tilecolumnwalk-cursor#store)。O(1)。
+把 `value` 的 512 位从这一列的格子起存进行 `into`，同 [`TileColumns.Cursor.Store`](/zh/docs/reference/tilecolumns-cursor#store)。O(1)。
 
 ### `Store` [#store-4]
 
@@ -98,4 +98,4 @@ public void Store<TLane>(Vector512<TLane> value, Span<TCell> into);
 public void Store<TLane>(Vector<TLane> value, Span<TCell> into);
 ```
 
-把一个 `Vector<TLane>` 从这一列的格子起存进行 `into`，同 [`TileColumnWalk.Cursor.Store`](/zh/docs/reference/tilecolumnwalk-cursor#store)。O(1)。
+把一个 `Vector<TLane>` 从这一列的格子起存进行 `into`，同 [`TileColumns.Cursor.Store`](/zh/docs/reference/tilecolumns-cursor#store)。O(1)。

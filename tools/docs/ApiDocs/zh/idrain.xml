@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.IDrain`1" source="d1ceb10e252c">
+  <member name="T:EasyEcs.IDrain`1" source="0b7a4eb7bcd2">
     <summary>
       生成器为 <see cref="T:EasyEcs.DrainAttribute" /> 方法写的 job：用遍历解析好的值（单例、查找）对一条记录调用这个方法。
       由 <see cref="M:EasyEcs.Emitted`1.Drain``1(EasyEcs.World,``0@)" /> 运行。

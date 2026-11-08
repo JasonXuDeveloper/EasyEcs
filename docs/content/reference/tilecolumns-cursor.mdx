@@ -1,6 +1,6 @@
 ---
-title: "TileColumnWalk<TCell, TTile>.Cursor"
-seoTitle: "TileColumnWalk<TCell, TTile>.Cursor struct – EasyEcs C# API"
+title: "TileColumns<TCell, TTile>.Cursor"
+seoTitle: "TileColumns<TCell, TTile>.Cursor struct – EasyEcs C# API"
 description: "The walk at a column of the row: the cells around it, one or a vector at a time, at offsets from the column…"
 ---
 
@@ -10,7 +10,7 @@ description: "The walk at a column of the row: the cells around it, one or a vec
 public readonly ref struct Cursor
 ```
 
-Nested in [`TileColumnWalk`](/en/docs/reference/tilecolumnwalk).
+Nested in [`TileColumns`](/en/docs/reference/tilecolumns).
 
 The walk at a column of the row: the cells around it, one or a vector at a time, at offsets from the column, and the store of a vector into the row the step writes at the column. An offset is in cells: dx from −r up to where a load from the walk's last column still ends by the row's last halo cell (Width + r − 1), dy and dz from −r to r (dy 0 for a 2D tile), r the shape's [`ITileShape.Halo`](/en/docs/reference/itileshape#halo). Every column of the walk passes the same check, so constant offsets with a constant step are checked by the JIT, others by a compare.
 
@@ -82,7 +82,7 @@ Stores `value` into `into`, a row the step writes ([`Tile.Write`](/en/docs/refer
 public void Store<TLane>(Vector256<TLane> value, Span<TCell> into);
 ```
 
-Stores 256 bits of `value` into the row `into` from the column's cell, as [`TileColumnWalk.Cursor.Store`](/en/docs/reference/tilecolumnwalk-cursor#store) does. O(1).
+Stores 256 bits of `value` into the row `into` from the column's cell, as [`TileColumns.Cursor.Store`](/en/docs/reference/tilecolumns-cursor#store) does. O(1).
 
 ### `Store` [#store-3]
 
@@ -90,7 +90,7 @@ Stores 256 bits of `value` into the row `into` from the column's cell, as [`Tile
 public void Store<TLane>(Vector512<TLane> value, Span<TCell> into);
 ```
 
-Stores 512 bits of `value` into the row `into` from the column's cell, as [`TileColumnWalk.Cursor.Store`](/en/docs/reference/tilecolumnwalk-cursor#store) does. O(1).
+Stores 512 bits of `value` into the row `into` from the column's cell, as [`TileColumns.Cursor.Store`](/en/docs/reference/tilecolumns-cursor#store) does. O(1).
 
 ### `Store` [#store-4]
 
@@ -98,4 +98,4 @@ Stores 512 bits of `value` into the row `into` from the column's cell, as [`Tile
 public void Store<TLane>(Vector<TLane> value, Span<TCell> into);
 ```
 
-Stores a `Vector<TLane>` into the row `into` from the column's cell, as [`TileColumnWalk.Cursor.Store`](/en/docs/reference/tilecolumnwalk-cursor#store) does. O(1).
+Stores a `Vector<TLane>` into the row `into` from the column's cell, as [`TileColumns.Cursor.Store`](/en/docs/reference/tilecolumns-cursor#store) does. O(1).

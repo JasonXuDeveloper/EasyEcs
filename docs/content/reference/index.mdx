@@ -79,7 +79,6 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`ChildOf`](/en/docs/reference/childof) | The hierarchy relation: the entity is a child of ChildOf.Parent. |
 | [`ClusterPair`](/en/docs/reference/clusterpair) | Two clusters whose boxes are near (RowClusters.Pairs): the rows of ClusterPair.First against the rows of ClusterPair.Second, which may be the same cluster. |
 | [`ColumnInfo`](/en/docs/reference/columninfo) | A column of a table (TableInfo). |
-| [`Columns<TTile>`](/en/docs/reference/columns) | The columns of a tile: a tile of one layer, Width × Depth, on the grid of TTile (a tile of several layers), with its sides as faces, its halo, neighborhood and boundary. |
 | [`ComponentSet`](/en/docs/reference/componentset) | A set of component and singleton types, built once and kept (a static readonly field): the components a save writes (World.SaveEntitiesWith) or a copy carries (World.CopyEntities), the record of what persists without the runtime state around it; or, for a restart, the types a whole-world save leaves out (World.SaveWithout) and the singletons a load keeps (World.LoadKeeping). |
 | [`ComponentValue`](/en/docs/reference/componentvalue) | A component of an entity, as Entity.Describe reads it: a boxed copy of its value. |
 | [`Disabled<T>`](/en/docs/reference/disabled) | The tag of an entity whose T is disabled (Entity.Disable): the entity keeps the value of T but lacks it for queries, Has and Get until Entity.Enable gives it back. |
@@ -90,6 +89,7 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`EntityId`](/en/docs/reference/entityid) | The identity of an entity: its index and the incarnation of that index (8 bytes, unmanaged). |
 | [`EntityRandom`](/en/docs/reference/entityrandom) | Deterministic random numbers for [ForEach] methods, parallel ones included (cuRAND's Philox, a counter-based generator): each number is a pure function of a seed, an entity, a tick and a stream, with no state to advance, so it is the same on every run, for any thread count and any order the rows run in. |
 | [`EntitySpan`](/en/docs/reference/entityspan) | The entities of one run of rows in a batch job: element i is the entity whose components are element i of the run's spans. |
+| [`Ground<TTile>`](/en/docs/reference/ground) | The ground of a tile: a tile of one layer, Width × Depth, on the grid of TTile (a tile of several layers), with its sides as faces, its halo, neighborhood and boundary. |
 | [`Lookup<T>`](/en/docs/reference/lookup) | Read-only access to component T of any entity, from a [ForEach] method (MPI's one-sided Get, Unity's ComponentLookup): static void Chase(ref Velocity v, in Target target, Lookup&lt;Position&gt; positions) reads the target's position with positions[target.Id]. |
 | [`Maybe<T>`](/en/docs/reference/maybe) | An optional component of the entity a [ForEach] method visits: static void Regen(ref Health h, Maybe&lt;Buff&gt; buff) visits every entity with Health, and Maybe.HasValue tells whether this one also has a Buff. |
 | [`Mut<T>`](/en/docs/reference/mut) | A component of the entity a [ForEach] method visits that counts as written only when the method writes it: static void Aim(Mut&lt;Target&gt; target, in Position p) =&gt; target.SetIfChanged(new Target(Nearest(p))). |
@@ -112,8 +112,8 @@ Everything is in `namespace EasyEcs`. These pages are generated from the XML doc
 | [`SystemStats`](/en/docs/reference/systemstats) | How often and how long a system ran (WorldOptions.MeasureSystems): its OnUpdate method plus its [ForEach] methods, per run, with the bytes it allocated and the entities its [ForEach] methods visited. |
 | [`TableInfo`](/en/docs/reference/tableinfo) | A table: the entities with one set of component columns (World.DescribeTables). |
 | [`Tile<TCell, TTile>`](/en/docs/reference/tile) | The cells of a tile (an entity whose TTile makes it one, ITile) with those of its neighbors: a [ForEach] parameter, as a CUDA block's tile and its apron, or an MPI rank's subdomain and its ghost cells. |
-| [`TileColumnWalk<TCell, TTile>`](/en/docs/reference/tilecolumnwalk) | A walk of the columns of a tile's row (TileCursor.Columns), with foreach: 0, step, 2 step, ... |
-| [`TileColumnWalk<TCell, TTile>.Cursor`](/en/docs/reference/tilecolumnwalk-cursor) | The walk at a column of the row: the cells around it, one or a vector at a time, at offsets from the column, and the store of a vector into the row the step writes at the column. |
+| [`TileColumns<TCell, TTile>`](/en/docs/reference/tilecolumns) | A walk of the columns of a tile's row (TileCursor.Columns), with foreach: 0, step, 2 step, ... |
+| [`TileColumns<TCell, TTile>.Cursor`](/en/docs/reference/tilecolumns-cursor) | The walk at a column of the row: the cells around it, one or a vector at a time, at offsets from the column, and the store of a vector into the row the step writes at the column. |
 | [`TileCursor<TCell, TTile>`](/en/docs/reference/tilecursor) | A tile's texture at the first cell of a row (Tile.At): the cells around it, one or a vector at a time. |
 | [`TileIds`](/en/docs/reference/tileids) | The neighbors of a tile that Tile.Facing names, walked with foreach. |
 | [`TileRow<TTile>`](/en/docs/reference/tilerow) | A row of a tile: layer TileRow.Y, row TileRow.Z, from Tile.Rows. |
