@@ -259,8 +259,10 @@ internal sealed partial class Kernel
             throw FixableReason($"it destroys its entity and reduces or emits: a destroy that takes a child with it (a hierarchy) skips the child's row, which a vector loop applies after the pass; emit or reduce in a [ForEach] method of its own");
         if (_change != null)
         {
-            _body.Insert(0, $"var __d0 = {Vec(_mask)}.Zero; // the rows the change marks\n");
+            // The rows the change marks: one mark declares them (a mark zeroed then OR-ed once is one more operation and
+            // local; a mark of a plain local is that local), several start from none.
             _body.Append($"this.d0.Mark(in entities, {Row}, global::EasyEcs.Lanes.Ballot(__d0));\n");
+            if (!_body.DeclareOnce("__d0")) _body.Insert(0, $"var __d0 = {Vec(_mask)}.Zero; // the rows the change marks\n");
             if (_change.Value.Length > 0) _setup.Append($"this.v0 = {_change.Value};\n");
         }
     }

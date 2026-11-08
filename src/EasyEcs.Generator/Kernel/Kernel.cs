@@ -330,6 +330,53 @@ internal sealed partial class Kernel
 
         private static readonly Regex Declared = new(@"(?m)^var (__w\d+) = [^\n]*;\n");
 
+        /// <summary>
+        /// Turns the one statement <c>{name} |= x;</c> of each text into its declaration <c>var {name} = x;</c>, or, where x
+        /// is a local no later line writes, drops it and names x where the text names {name}; false (nothing changed) when
+        /// either text ORs into it more or less than once, or the statement is not on a line of its own at the start (a
+        /// nested block would scope the declaration). The caller appends the lines reading {name} first.
+        /// </summary>
+        public bool DeclareOnce(string name)
+        {
+            string or = name + " |= ";
+            string all = _all.ToString(), masked = _masked.ToString();
+            if (Count(all, or) != 1 || Count(masked, or) != 1) return false;
+            int a = all.IndexOf(or, System.StringComparison.Ordinal), m = masked.IndexOf(or, System.StringComparison.Ordinal);
+            if (a > 0 && all[a - 1] != '\n' || m > 0 && masked[m - 1] != '\n') return false;
+            Swap(_all, DeclaredIn(all, a, name, or));
+            Swap(_masked, DeclaredIn(masked, m, name, or));
+            return true;
+        }
+
+        /// <summary><see cref="DeclareOnce"/> in one text, whose statement starts at <paramref name="at"/>.</summary>
+        private static string DeclaredIn(string text, int at, string name, string or)
+        {
+            if (Alias(text, at + or.Length) is not { } source) return text.Substring(0, at) + "var " + name + " = " + text.Substring(at + or.Length);
+            // name |= x; of a plain local nothing writes after: the local itself, without a second name
+            int end = text.IndexOf('\n', at) + 1;
+            return text.Substring(0, at) + new Regex($@"\b{name}\b").Replace(text.Substring(end), source);
+        }
+
+        /// <summary>
+        /// The local the statement at <paramref name="at"/> ORs in when it is a plain name no later line writes, else null.
+        /// </summary>
+        private static string? Alias(string text, int at)
+        {
+            int end = text.IndexOf(";\n", at, System.StringComparison.Ordinal);
+            if (end < 0) return null;
+            string value = text.Substring(at, end - at);
+            if (!Identifier.IsMatch(value)) return null;
+            return new Regex($@"\b{value}\s*[|&^+\-*/]?=[^=]").IsMatch(text.Substring(end)) ? null : value;
+        }
+
+        private static readonly Regex Identifier = new(@"^[A-Za-z_][A-Za-z0-9_]*$");
+
+        private static void Swap(System.Text.StringBuilder sb, string text)
+        {
+            sb.Clear();
+            sb.Append(text);
+        }
+
         private static int Count(string text, string part)
         {
             int n = 0;
