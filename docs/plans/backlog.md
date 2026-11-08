@@ -447,21 +447,21 @@ Starts now. T1 comes before Finish 1b (the move).
 
 ### Lane 5: renames (after feat-later-halos and feat-generated-members merge; owner, 2026-11-07) — 6 items
 
-- [ ] **R1. `tile.Restart(value)` -> `tile.ColdStart(value)`** (`naming.md` B2; `tile.Sweep` stays): Tile.cs,
+- [x] **R1. `tile.Restart(value)` -> `tile.ColdStart(value)`** (`naming.md` B2; `tile.Sweep` stays): Tile.cs,
       EECS115, the generator, VoxelServer, tests, benchmarks (TileRestartBenchmark -> TileColdStartBenchmark, site keys
       with it), ApiDocs zh `tile.xml`.
-- [ ] **R2. The shape `Columns<TTile>` -> `Ground<TTile>`, the column walk `TileColumnWalk<…>` -> `TileColumns<…>`**
+- [x] **R2. The shape `Columns<TTile>` -> `Ground<TTile>`, the column walk `TileColumnWalk<…>` -> `TileColumns<…>`**
       (`c.Columns(step)` stays; `naming.md` B2): Tile.cs, the generator's tile-load interceptor, tests, samples,
       ApiDocs zh.
-- [ ] **R3. `World.MaxChunkRows` -> `World.MaxChunkSize`** (`naming.md` B3, A1), with a code fix on CS0117 from
+- [x] **R3. `World.MaxChunkRows` -> `World.MaxChunkSize`** (`naming.md` B3, A1), with a code fix on CS0117 from
       the released `World.ParallelChunkRows` (the first released rename: the renamed-member mechanism stays for it).
-- [ ] **R4. Delete the code fixes for names that never shipped** (`naming.md` B4): `RenamedAttributes`
+- [x] **R4. Delete the code fixes for names that never shipped** (`naming.md` B4): `RenamedAttributes`
       (`[IndexKey]` -> `[LookupKey]`) and `RenamedArguments` (`ChunkRows` -> `ChunkSize`) in
       EasyEcsCodeFixes.Declarations.cs and their CodeFixTests; owner (2026-11-07): also the other migrations from
       forms that never shipped (the hook attributes, `[GroupBy]` on the struct, EntityRandom's tick written by hand),
       keeping only the fixes from released forms (`WithAny<T>`, the class systems, `ParallelChunkRows`); AGENTS.md's
       CodeFixes line follows; D129 amended in the docs pass (docs-todos S3).
-- [ ] **R5. Internal and hidden names** (`naming.md` A3-A5, approved as "clearly right"): `BadRecordPass` /
+- [x] **R5. Internal and hidden names** (`naming.md` A3-A5, approved as "clearly right"): `BadRecordPass` /
       `HandWrittenRecordPass` / `AnalyzeRecordPass` / `AnalyzeHandWrittenRecordPass` -> `BadDrain` /
       `HandWrittenDrain` / `AnalyzeDrain` / `AnalyzeHandWrittenDrain`; tracking names `RecordMethods` / `RecordBodies` /
       `RecordCode` -> `Drain*` (GeneratorTests' list and the generator's AGENTS.md); the fix `RecordMethod` ->
@@ -470,7 +470,7 @@ Starts now. T1 comes before Finish 1b (the move).
       `RowBeside`; `TileCells.Pool` -> `SizePool`; `CellRows.cs` -> `TilePlane.cs`; `ChunkRowsBenchmark` ->
       `ChunkSizeBenchmark` and `GhostCopyBenchmark` -> `CopyEntitiesBenchmark` (site keys and bench.json mapping
       kept). Run the `StartsWith` / `EndsWith` grep of `naming.md` first.
-- [ ] **R6. `audit-naming` step 4 amended**: "a `ForEach*` name is a pass over rows, except `ForEachCollected`, the
+- [x] **R6. `audit-naming` step 4 amended**: "a `ForEach*` name is a pass over rows, except `ForEachCollected`, the
       collected form of a `[ForEach]` method" (`naming.md` B1). Not approved and kept: `{Owner}ForEach` (not
       `{Owner}Passes`) and `CopyEntities<TTag>` (not `CopyEntitiesWith`); their reasons go into the naming record
       (docs-todos).
