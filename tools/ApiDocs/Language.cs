@@ -33,7 +33,7 @@ public sealed record Language
         IndexDescription = "Every public type of EasyEcs.Core with its members, generated from the XML documentation.",
         IndexIntro = "Everything is in `namespace EasyEcs`. These pages are generated from the XML documentation of `EasyEcs.Core`; " +
                      "the members the generator writes for your own components (`entity.Position`, `world.Clock`, `SetDead()`) are in " +
-                     "[Entities and components](/en/docs/guide/entities-and-components#generated-members), and the complexity of every call in " +
+                     "[Entities and components](/en/docs/guide/basics/entities-and-components#generated-members), and the complexity of every call in " +
                      "[API and complexity](/en/docs/api).",
         TypeColumn = "Type",
         SummaryColumn = "Summary",
@@ -66,7 +66,7 @@ public sealed record Language
         ReferenceTitle = "API 参考",
         IndexDescription = "EasyEcs.Core 的全部公开类型及其成员、参数与复杂度，由 XML 文档注释生成，与源码保持同步。",
         IndexIntro = "所有类型都在 `namespace EasyEcs` 里。这些页面由 `EasyEcs.Core` 的 XML 文档注释生成；生成器为你自己的组件写的成员" +
-                     "（`entity.Position`、`world.Clock`、`SetDead()`）见[实体与组件](/zh/docs/guide/entities-and-components#generated-members)，" +
+                     "（`entity.Position`、`world.Clock`、`SetDead()`）见[实体与组件](/zh/docs/guide/basics/entities-and-components#generated-members)，" +
                      "每个调用的复杂度见 [API 与复杂度](/zh/docs/api)。",
         TypeColumn = "类型",
         SummaryColumn = "说明",

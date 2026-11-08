@@ -117,8 +117,8 @@ internal struct StructuralGate
     {
         if (held == Closed) throw new ObjectDisposedException(nameof(World));
         throw new InvalidOperationException(held == 1
-            ? "A structural change started while another one was running on this world: structural changes are made by the world's owner thread, one at a time (see https://ecs.xgamedev.net/docs/guide/threading)."
-            : "A structural change was made while the world's structure is frozen (systems or a parallel [ForEach] running on several threads, or a batch job holding spans into the tables): record the change as data and apply it in a system or [ForEach] method that runs alone (see https://ecs.xgamedev.net/docs/guide/threading).");
+            ? "A structural change started while another one was running on this world: structural changes are made by the world's owner thread, one at a time (see https://ecs.xgamedev.net/docs/guide/performance/threading)."
+            : "A structural change was made while the world's structure is frozen (systems or a parallel [ForEach] running on several threads, or a batch job holding spans into the tables): record the change as data and apply it in a system or [ForEach] method that runs alone (see https://ecs.xgamedev.net/docs/guide/performance/threading).");
     }
 }
 
