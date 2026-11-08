@@ -151,6 +151,13 @@ owner has asked for once must be written where the next session will find it.
   reply to the owner in Chinese (code, comments, commits and docs stay English); a choice that is the owner's is asked
   as a popup (the question tool) with the recommended option first; an action only the owner can take is given as the
   exact command or dashboard step.
+- **Pick each agent's model by its task** (owner, 2026-11-08: "根据任务决定用什么，机械活用 sonnet，高难度的再用 opus"):
+  a subagent runs on the session's model unless its call names one, so every call names it. Sonnet for mechanical
+  work whose steps the prompt spells out: renames, file maps and stale comments, CI and tool scripts, moving files,
+  rewriting examples into a form already decided, gates and benchmark runs, collecting numbers or a search. Opus for
+  work that needs judgment: generator and vector-loop forms, analyzer rules, core and performance work (finding why
+  something is slower), designs, audits, triage and merges. A Sonnet agent that hits a problem needing judgment stops
+  and hands it back instead of guessing.
 - **Decide, then record what you did not do.** The owner has delegated judgment: do what clearly fits the
   project's rules and goals without asking (public API changes included, with their migration); ask only for what is
   truly the owner's to decide. A proposal you judge not worth doing goes into `docs/owner-review.md` with the reason
