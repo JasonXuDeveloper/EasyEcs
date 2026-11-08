@@ -41,6 +41,15 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
 
 ## Running (worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
+- [ ] **`feat-lane4-rest`** (from 3315196, 2026-11-08): first the CI inlining failure (`ParallelHeavyJob11::__MaskedLoop`
+      over the inliner budget after the wide masked words), then G5, G7, G8, G11 9c, G15, G17, G18.
+- [ ] **`feat-lane1-core`** (from 3315196): C0, C11, C15-C18, then C12-C14 (ArityGenerator's enumerator templates
+      only), C19 last.
+- [ ] **`feat-lane5-renames`** (from 3315196): R1-R6.
+- [x] **`feat-restructure`** merged 2026-11-08 (Finish 1b, D142): the four projects in concern folders, `tools/perf/`,
+      `tools/docs/`, `docs/plans/designs/` and `owner/`; tests 4251 passed, 1 skipped, as the base.
+- [x] **`feat-lane4-generator`** merged 2026-11-08 (2025276): G1-G4, G6, G9, G10, G12-G14, G16, G19, wide masked words,
+      EECS133.
 - [x] **`feat-inner-loops`** merged 2026-11-08 (head fda40ab: WP1, WP4, WP5b (b), WP6b, WP6c, WP7 FireDamage and the
       Sunlit / InWater split, WP8 (e), (f), (h), (d) committed, `Vector2/3/4.Clamp` as a vector loop: ClampVector
       4.1-5.6x, 0 B; gate: 0 warnings, tests in three modes, DocCheck, ApiDocs, agents, VoxelServer; ViewBenchmark Lambda
