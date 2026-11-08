@@ -1198,7 +1198,7 @@ internal sealed partial class Kernel
         // A masked word holds the accumulators for a bail and for a pair's fold.
         string maskedHold = kernel._bails || kernel._lookups.Count > 0 || kernel._reductions.Values.Any(r => r.Fields.Any(f => kernel.IsDoubled(f.Type))) ? held.ToString() : "";
         if (kernel._narrow) kernel._body.Prune(stores.ToString() + masked + kernel._setup);
-        if (kernel._wideOf.Count > 0) kernel.Gate();
+        if (kernel._wideOf.Count > 0) kernel.Gate(Symbols.Simd(lane.Declaration ?? lane.Method) == Symbols.SimdRequire);
         string uses = kernel._body.ToString() + stores + masked + kernel._setup;
         var read = new StringBuilder();
         foreach (var (names, text) in columns)
