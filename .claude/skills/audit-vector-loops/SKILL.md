@@ -43,7 +43,8 @@ form to it):
 
 | Form | x86 | ARM64 today | ARM64 path to add |
 |---|---|---|---|
-| Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`), `Lanes.Bits`, `Emit.AddLanes` | vector | vector (`Vector<T>` is 128-bit) | none needed |
+| Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`, `LaneMath.PerLane`), `Lanes.Bits`, `Emit.AddLanes`, EntityRandom draws (`RandomLanes`) | vector | vector (`Vector<T>` is 128-bit) | none needed |
+| Tables at a lane index (`TableLanes.Pick`: AVX-512 / AVX2 VPERMD, `Vector128.Shuffle`) | vector | vector (`Vector128.Shuffle`: TBL) | owner's M4 run of KernelBenchmark SteerTable |
 | Components of several fields, `Vector2/3/4` (`Interleaved`: AVX2 / AVX-512 shuffles, NEON LD2-4 / ST2-4) | vector | vector | none needed |
 | Narrow lanes' masks of a word (`Interleaved.Lanes8` / `Lanes16`: the word's bits spread by a multiply per ulong) | vector | vector (`Vector<T>` of 128 bits: 2 ulongs) | none needed |
 | Wide components (`Kernel.Wide`: AVX-512 two-source permutes; ARM64 NEON TBL / TBX, `Interleaved.Pick` / `PickInto`) | vector on AVX-512 | vector where its own gate pays ("(Vector512 only)" otherwise) | M4 numbers to check the gate's cost model |
@@ -251,8 +252,18 @@ changes nothing and cannot fail:
   precision (`LaneMath`; `Log2(x) * c` was 3.4 ulps off, `Pow(x, -2)` is `(1 / x)^2`: `1 / (x * x)` broke the bound
   where `x * x` is subnormal). The exhaustive sweeps (`LaneMathTests`, category `Exhaustive`) take about 8 minutes in
   Release on 4 cores and far longer in Debug: run them with `-c Release` after any change to a lowering (D127). Never:
-  functions .NET has no vector form for, written as our own polynomials (`Atan2`, `Cbrt`, general `Pow`). Uniform
-  arguments already need none of this: the scalar call runs once per pass.
+  functions .NET has no vector form for, written as our own polynomials (`Atan2`, `Cbrt`, general `Pow`). Instead
+  they, and the approximate ones without FloatMode.Fast, run once per lane inside the loop (`LaneMath.PerLane`,
+  Kernel/Kernel.PerLane.cs: the scalar function's bits) when the body does at least `Kernel.PerLaneWork` vector
+  operations per call (the gate; `SimdMode.Require` opens it; KernelBenchmark's Aim / Bearing / Sway pairs set the
+  number); a lighter body stays as written and its reason names the functions and the fix. Uniform arguments already
+  need none of this: the scalar call runs once per pass.
+- **Tables at a lane index**: a uniform `[InlineArray]` of at most 16 elements of 4-byte lanes read at an int of the
+  row (`waypoints.Points[goal.Waypoint]`, Kernel/Kernel.Tables.cs): a column per field loaded once per run
+  (`TableLanes.Load`, a setup line), one permute per vector of the column per read (`TableLanes.Pick`: VPERMD over 16
+  or 8 values, `Vector128.Shuffle` per vector of 4: PSHUFB / TBL), the lanes whose index is outside the table sent
+  to the method (it throws). Proof: InlineArrayTests bit for bit and the throwing index, KernelBenchmark SteerTable,
+  BattleServer's Steer. More than 16 elements, 8-byte lanes or an element of mixed sizes keep the reason.
 
 ## Reasons users can fix
 
