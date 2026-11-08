@@ -625,7 +625,10 @@ internal sealed partial class Kernel
     /// fields under 11 operations ran in 0.48 to 0.86 of the scalar time, 4 of 8 under 4 in 0.67 to 0.97; 3 of 12 under 3,
     /// 4 of 16 under 4 and 2 of 8 under 2 in 0.9 to 1.1. The line between them: fewer permutes than 8 per operation (a
     /// permute costs about what 2 of the 15 scalar operations a vector operation saves cost); with 8-byte words a vector
-    /// operation saves 7, so fewer than 3.5 per operation.
+    /// operation saves 7, so fewer than 3.5 per operation, and only with heavy math as on AVX2: on KernelBenchmark (default
+    /// job, two interleaved rounds) Dive (3 of 8 doubles, a square root and a division) ran in 0.48 of the rows' time at
+    /// 1k rows and 0.64 at 100k, while Ledger (2 of 8 longs, 6 light operations, under the line) ran in 1.01 to 1.14 of
+    /// it: 8 rows a vector leave light math too little to gain.
     /// </para>
     /// <para>
     /// AVX2: only with heavy math (a square root, a division, a transcendental), each worth <see cref="Heavy"/> light
@@ -652,13 +655,15 @@ internal sealed partial class Kernel
         foreach (var token in new[] { " / ", ".Sqrt(", ".SquareRoot(", ".Sin(", ".Cos(", ".Exp(", ".Log(" })
             heavy += Count(body, token);
         int unit = WideUnit;
-        _wide512 = unit == 4 ? _permutes < 8 * ops : 2 * _permutes < 7 * ops;
+        _wide512 = unit == 4 ? _permutes < 8 * ops : heavy > 0 && 2 * _permutes < 7 * ops;
         int lanes256 = 32 / unit;
         _wide256 = heavy > 0 && 2 * _moves256 <= (lanes256 - 1) * (ops + (Heavy(unit) - 1) * heavy);
         int rows128 = 16 / unit;
         int saved = (rows128 - 1) * ops + rows128 * (_usedLanes + _writtenLanes) - _moves128;
         _wide128 = 3 * _registers < 2 * saved;
         if (_wide512 || _wide256 || _wide128) return;
+        if (unit == 8 && heavy == 0 && 2 * _permutes < 7 * ops)
+            throw Rejected($"takes 8-byte words without heavy math (a square root, a division, a transcendental): its {ops} vector operations over 8 rows gain less than its {_permutes} permutes cost");
         throw Rejected($"takes {_permutes} permutes per {64 / unit} rows, {(ops == 0 ? "for no vector operation" : ops == 1 ? "more than its 1 vector operation gains" : $"more than its {ops} vector operations gain")}");
 
         static int Count(string body, string token)
