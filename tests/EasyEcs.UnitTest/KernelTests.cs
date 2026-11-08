@@ -862,12 +862,15 @@ public static class WideKernels
         p.Q = Math.Min(p.Q + p.X * p.P, 10) * 0.5 - p.Q / (d.Value + 3);
     }
 
+    // Light math over 8-byte words runs rows on x64 (the wide gate: EECS055 says so) and 128-bit lanes on ARM64.
+#pragma warning disable EECS055
     [ForEach]
     internal static void Tally(ref Probe8 p, in Stamp s)
     {
         p.Id = (p.Id + p.Tag * 3 + s.Value) ^ (p.Tag >> 2);
         p.Tag = (p.Tag ^ 0x55) + p.Id - 7;
     }
+#pragma warning restore EECS055
 
     [ForEach]
     internal static void Sail(ref Hull h, in Depth d)
