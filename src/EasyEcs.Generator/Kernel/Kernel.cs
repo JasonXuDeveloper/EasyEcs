@@ -2483,6 +2483,7 @@ internal sealed partial class Kernel
         }
         if (PairExpr(op) is { } pair) return pair;
         if (op is IInvocationOperation invocation && RandomDraw(invocation) is { } draw) return draw; // Kernel.Random.cs
+        if (op is IInlineArrayAccessOperation or IFieldReferenceOperation { Instance: IInlineArrayAccessOperation } && TableLane(op) is { } picked) return picked; // Kernel.Tables.cs
         if (UsesEntity(op)) throw EntityUse(op);
 
         switch (op)
