@@ -83,7 +83,8 @@ public class CompactBenchmark
 
     public static class Picks
     {
-        [ForEach]
+        // The form the batch methods below are measured against: one row at a time, by design.
+        [ForEach(SimdMode = SimdMode.Off)]
         public static void PerRow(Entity entity, in Health health, ref Hurt hurt)
         {
             if (health.Value < hurt.Below) hurt.Ids[hurt.Count++] = entity.Id;

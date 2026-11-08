@@ -188,8 +188,8 @@ public ref struct StatusSystem
         if (--burning.Ticks == 0) unit.RemoveBurning();                       // flips a bit: the row stays
     }
 
-    [ForEach]
-    static void Thaw(Entity unit, ref Frozen frozen)
+    [ForEach(SimdMode = SimdMode.Off)]                                        // three changes of a row: row by row (a
+    static void Thaw(Entity unit, ref Frozen frozen)                          // vector loop applies one change per method)
     {
         if (--frozen.Ticks > 0) return;
         unit.RemoveFrozen();

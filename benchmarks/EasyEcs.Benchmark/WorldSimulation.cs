@@ -85,7 +85,9 @@ public ref struct AoiSystem
 [EcsSystem]
 public ref struct CombatSystem
 {
-    [ForEach, Without<Dead>, Without<Stunned>]
+    // Two changes of a row (Burning or Stunned) drawn from a seed of the entity's id: row by row (a vector loop applies
+    // one change per method).
+    [ForEach(SimdMode = SimdMode.Off), Without<Dead>, Without<Stunned>]
     private static void Fight(Entity entity, ref Attack attack, ref Health health, ref WorldStats stats)
     {
         if (--attack.Cooldown > 0) return;

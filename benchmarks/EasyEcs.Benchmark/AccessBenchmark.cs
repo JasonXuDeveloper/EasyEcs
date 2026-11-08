@@ -38,7 +38,7 @@ public class AccessBenchmark
     private readonly EntityId[] _spawned = new EntityId[Spawns];
     private static readonly QueryFilter Bosses = QueryFilter.Create().With<Boss>();
 
-#pragma warning disable EECS025, EECS026, EECS027 // the reported side of each pair
+#pragma warning disable EECS025, EECS026, EECS027, EECS055 // the reported side of each pair
     [EcsSystem]
     public ref struct TrackedRef
     {
@@ -80,7 +80,7 @@ public class AccessBenchmark
     {
         [ForEach] static void Run(ref Speed speed, World world) => speed.V += world.GetSingleton<Step>().V;
     }
-#pragma warning restore EECS025, EECS026, EECS027
+#pragma warning restore EECS025, EECS026, EECS027, EECS055
 
     [EcsSystem]
     public ref struct TrackedIn

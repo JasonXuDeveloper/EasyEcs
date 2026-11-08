@@ -14,7 +14,9 @@ namespace EasyEcs.Benchmark;
 /// (<c>HandWritten512</c>, the widest the hardware may have), and as the generator's vector loop of the same per-row
 /// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data; <c>StepHelpers</c> is the
 /// same method written through helpers it calls, inlined into its vector loop: Kernel.Inlining.cs); <c>Integrate</c> and
-/// <c>Count</c> stream memory (one float multiply-add, one int increment per row). <c>Move2</c> / <c>Move3</c> /
+/// <c>Count</c> stream memory (one float multiply-add, one int increment per row); <c>Expire</c> is a timer (<c>--</c> as the
+/// value tested) and <c>Survey</c> running totals kept in a singleton taken by ref, each against its twin with
+/// SimdMode.Off. <c>Move2</c> / <c>Move3</c> /
 /// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity: each field alike, a flat loop over the columns' lanes;
 /// <c>Move2HandCast</c> is the same by hand, the columns cast to floats; <c>Push</c> is Move2 assigned whole, <c>Move2Gaps</c>
 /// Move2 over a table whose every third row lacks the velocity: masked words, which split the fields; <c>Move3Gaps</c> the
@@ -55,6 +57,7 @@ public partial class KernelBenchmark
         _world = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _world.SetPull(0.75f);
         _world.SetWindow(-40f, 120f);
+        _world.AddSingleton<Census>();
         _world.Reserve<Heat, Speed, Mass, Ticks>(Entities);
         var random = new Random(1);
         for (int i = 0; i < Entities; i++)
@@ -623,7 +626,22 @@ public partial class KernelBenchmark
     [Benchmark]
     public void SeekParallelGenerated() => Kernels.SeekParallel(_fields);
 
+    [Benchmark]
+    public void ExpireScalar() => Kernels.ExpireRows(_world);
+
+    [Benchmark]
+    public void ExpireGenerated() => Kernels.Expire(_world);
+
+    [Benchmark]
+    public void SurveyScalar() => Kernels.SurveyRows(_world);
+
+    [Benchmark]
+    public void SurveyGenerated() => Kernels.Survey(_world);
+
     public record struct Window(float Min, float Max) : ISingletonComponent;
+
+    /// <summary>Running totals a [ForEach] method keeps in a singleton taken by ref: a count, a long sum, a maximum.</summary>
+    public struct Census : ISingletonComponent { public int Hot; public long Sum; public int Peak; }
 
     /// <summary>A count, a sum, a minimum and a maximum of ints: exact in any order of the rows.</summary>
     public partial struct Tally : ISingletonComponent
@@ -982,6 +1000,36 @@ public partial class KernelBenchmark
 
         [ForEach]
         internal static void Count(ref Ticks ticks) => ticks.Value++;
+
+        // A timer: -- as the value tested, the row reset when it runs out (a third of the rows each pass at 1k).
+        [ForEach]
+        internal static void Expire(ref Ticks ticks, ref Heat heat) => ExpireRow(ref ticks, ref heat);
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void ExpireRows(ref Ticks ticks, ref Heat heat) => ExpireRow(ref ticks, ref heat);
+
+        private static void ExpireRow(ref Ticks ticks, ref Heat heat)
+        {
+            if (--ticks.Value <= 0)
+            {
+                ticks.Value = 3;
+                heat.Value *= 0.5f;
+            }
+        }
+
+        // Running totals of a singleton taken by ref: the lanes fold into it once per run.
+        [ForEach]
+        internal static void Survey(in Heat heat, in Ticks ticks, ref Census census) => SurveyRow(in heat, in ticks, ref census);
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void SurveyRows(in Heat heat, in Ticks ticks, ref Census census) => SurveyRow(in heat, in ticks, ref census);
+
+        private static void SurveyRow(in Heat heat, in Ticks ticks, ref Census census)
+        {
+            if (heat.Value > 50f) census.Hot++;
+            census.Sum += ticks.Value;
+            census.Peak = Math.Max(census.Peak, ticks.Value);
+        }
 
         // By constants: the quotient and remainder of 8 are shifts, of 7 a division of doubles; a float halved is a product.
         [ForEach]

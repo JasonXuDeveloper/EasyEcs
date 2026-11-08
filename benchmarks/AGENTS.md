@@ -66,7 +66,7 @@ benchmarks/EasyEcs.Benchmark/          BenchmarkDotNet: the headline worlds, one
                                        components, in and past the cache
   FusionBenchmark.cs                   fused walks against passes apart: in a system, parallel, across two systems
   GeneratorBenchmark.cs                the generators per keystroke and the analyzer per build, through Roslyn, over
-                                       GeneratorCorpus.cs
+                                       GeneratorCorpus.cs; the generated text's size as a column (GeneratedBytesColumn)
   GeneratorCorpus.cs                   the battle server and 40 modules, shared with the unit tests that check it clean
                                        (tools/Shared/GeneratorHost.cs: the generators, parse options, references)
   GhostCopyBenchmark.cs                a halo exchange between two worlds: the CreateEntity loop over the border band
