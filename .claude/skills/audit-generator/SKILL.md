@@ -280,7 +280,7 @@ tools/perf/bench.sh GeneratorBenchmark
   parameters). A copy of the compilation per method cost +80 ms and +19 MB per keystroke for 40 view methods.
 - **Body facts belong in implementation-only stages** (`SystemLoops`, merged back by `SystemCode`): what a method
   body vectorizes to is never computed in the declaration transform, which reruns on every IDE keystroke. They are a
-  model per method (`ForEachBodies`, `RecordBodies`, `EntityMethodBodies`), merged per kind: one shared Bodies value
+  model per method (`ForEachBodies`, `DrainBodies`, `EntityMethodBodies`), merged per kind: one shared Bodies value
   makes every body edit rerun every merge. A member users call is declared by the source output and filled by the
   implementation output through a `static partial void` with no accessibility modifier, so the IDE drops the call
   while typing and the member still exists. A stage that legitimately regroups after a body edit is marked `~` in the

@@ -67,7 +67,7 @@ may make it ([Threading](/en/docs/guide/performance/threading)).
 | `IRowOrder<T>`, `RowKeys` | interface, static class | For generated code: how an order reads a row (`Key`, `Point`, static), the Morton code of a point by a cell (`RowKeys.Morton`). |
 | `Scratch<T>` | ref struct | A `[ForEach]` parameter: working memory of the method on the running thread, kept between rows, passes and worlds: `Value`. |
 | `Emit<T>`, `Emitted<T>` | ref struct, struct | A `[ForEach]` parameter, taken by value, appending records (`Add`, `AddRange`) joined in chunk order into singleton `Emitted<T>` (`Items`, a `DynamicBuffer<T>`) when the pass ends. |
-| `[Drain]`, `IDrain<T>` | attribute, interface | On a static method taking `in T` first: the generator runs it on each record of `Emitted<T>` in order, then clears them (`Emitted<T>.Consume` runs its job). |
+| `[Drain]`, `IDrain<T>` | attribute, interface | On a static method taking `in T` first: the generator runs it on each record of `Emitted<T>` in order, then clears them (`Emitted<T>.Drain` runs its job). |
 | `EntityRandom` | record struct | A singleton (`Seed`, `Tick`) and pure static functions: deterministic random numbers per (seed, entity, tick, stream): `Bits`, `Float`, `Range`, `Chance`. |
 | `IForRange`, `IForSpan<T>` | interfaces | Jobs of `world.ParallelFor`: `Execute(start, end)` over a range of indexes, `Execute(start, span)` over the elements of a list. |
 | `Lookup<T>`, `LookupExtensions` | ref struct, static class | A `[ForEach]` parameter reading component `T` of any entity, scheduled as a read of `T`: `this[id]`, `Read(id)`, `Has(id)`; by key for an indexed `T`: `TryFind(key, out entity)`, `Find(key)`, `Count(key)`. |

@@ -429,7 +429,7 @@ public class EmitTests
     }
 
     [Test]
-    public void ARecordPassWalksTheSegmentsInOrder()
+    public void ADrainWalksTheSegmentsInOrder()
     {
         const int attackers = 20_000;
         Tally? first = null;
@@ -458,7 +458,7 @@ public class EmitTests
     }
 
     [Test]
-    public void ARecordPassOverSegmentsDoesNotAllocate()
+    public void ADrainOverSegmentsDoesNotAllocate()
     {
         // One emitter: every chunk's list ends at the size its chunk needs. (Emitters of one record type whose chunks
         // differ in size share the pool, so a list keeps growing now and then until every list has served the larger

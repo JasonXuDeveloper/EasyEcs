@@ -72,7 +72,7 @@ public sealed partial class SystemGenerator
             .Select(static (m, _) => m!)
             .WithTrackingName(name);
         var passes = Of(Symbols.ForEachAttribute, "ForEachBodies");
-        var records = Of(Symbols.DrainAttribute, "RecordBodies");
+        var records = Of(Symbols.DrainAttribute, "DrainBodies");
         var runnerRecords = records.Where(static b => !b.InSystem).Collect();
         return (passes.Where(static b => b.InSystem).Collect().Combine(records.Where(static b => b.InSystem).Collect()).Select(static (all, _) => new Bodies(all.Left, all.Right)),
             passes.Where(static b => !b.InSystem).Collect().Combine(runnerRecords).Select(static (all, _) => new Bodies(all.Left, all.Right)),

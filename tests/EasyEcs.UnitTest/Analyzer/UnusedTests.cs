@@ -65,7 +65,7 @@ public class UnusedTests
     // [Drain] methods and hooks are called through UnsafeAccessor too; IDE0052 (assigned, never read) is suppressed alike.
     [TestCase("IDE0051")]
     [TestCase("IDE0052")]
-    public async Task RecordMethodsAndHooksAreNotUnused(string id)
+    public async Task DrainMethodsAndHooksAreNotUnused(string id)
     {
         var suppressed = await Suppressed("""
             public record struct Hit(int V);

@@ -54,7 +54,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 static (ctx, ct) => UpdateModel.Records(ctx, ct))
             .Where(static m => m is not null)
             .Select(static (m, _) => m!)
-            .WithTrackingName("RecordMethods");
+            .WithTrackingName("DrainMethods");
         // [EntityMethod] methods: entry points that run the method's job on one entity (entity.Run), in a system too.
         var ones = context.SyntaxProvider
             .ForAttributeWithMetadataName(Symbols.EntityMethodAttribute,
@@ -77,7 +77,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         var systemCode = WithBodies(updates, bodies.Systems, "SystemCode");
         context.RegisterImplementationSourceOutput(systemCode, static (spc, model) => Add(spc, model));
         context.RegisterImplementationSourceOutput(WithBodies(runners, bodies.Runners, "ForEachCode"), static (spc, model) => Add(spc, model));
-        context.RegisterImplementationSourceOutput(WithBodies(records, bodies.Records, "RecordCode"), static (spc, model) => Add(spc, model));
+        context.RegisterImplementationSourceOutput(WithBodies(records, bodies.Records, "DrainCode"), static (spc, model) => Add(spc, model));
         context.RegisterImplementationSourceOutput(WithBodies(ones, bodies.Ones, "EntityMethodCode"), static (spc, model) => Add(spc, model));
 
         // The assembly's system set: its non-generic systems and the closed generic systems it names (its own generic
@@ -199,7 +199,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// The pools of the tiles' cells, raised when the assembly loads (TileCells.Pool) for each closed
+    /// The pools of the tiles' cells, raised when the assembly loads (TileCells.SizePool) for each closed
     /// <c>Tile&lt;TCell, TTile&gt;</c> the type's methods take: a buffer of a tile's cells comes back to the pool, and a
     /// FillPool at startup fills it with lists of that length, with no MaxPooledLength line in user code.
     /// </summary>
@@ -207,7 +207,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     {
         var pools = model.Methods.SelectMany(m => m.Parameters)
             .Where(p => p.Kind == Symbols.ParamKind.Tile && p.Pooled)
-            .Select(p => $"global::EasyEcs.TileCells.Pool<{p.Cell}, {p.Shape}>();")
+            .Select(p => $"global::EasyEcs.TileCells.SizePool<{p.Cell}, {p.Shape}>();")
             .Distinct().OrderBy(p => p, System.StringComparer.Ordinal).ToArray();
         if (pools.Length == 0) return;
         sb.Append($"\nfile static class __TilePools\n{{\n    {Code.ModuleInitializer}\n    internal static void Pool()\n    {{\n");
@@ -494,7 +494,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         if (method.Record.Length > 0) // [Drain]: the records in order, then cleared
         {
             sb.Append($"{indent}var {local} = new {job}{Fields(method, world)};\n");
-            sb.Append($"{indent}global::EasyEcs.Emitted<{method.Record}>.Consume({world}, ref {local});\n");
+            sb.Append($"{indent}global::EasyEcs.Emitted<{method.Record}>.Drain({world}, ref {local});\n");
             return;
         }
 
@@ -1009,7 +1009,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             // A stepping tile: the tiles of the color running that may change step (Enter), each sweep of a Gauss-Seidel
             // step until one changes nothing (Sweep), then the step's change is recorded (Leave).
             var tile = method.Parameters[steps];
-            string sweep = tile.Colors.Length > 0 ? $"do {call} while (p{steps}.Sweep({tileEntity})); " : call + " ";
+            string sweep = tile.Colors.Length > 0 ? $"do {call} while (p{steps}.NextSweep({tileEntity})); " : call + " ";
             call = $"if (p{steps}.Enter({tileEntity})) {{ {grids}var w{steps} = new global::EasyEcs.Tile<{tile.Cell}, {tile.Shape}>({tileEntity}, in n{method.GridOf(steps)}); {sweep}p{steps}.Leave({tileEntity}, in n{method.GridOf(steps)}); }}";
             if (runs) call = $"{{ {call} }}";
         }
@@ -1169,7 +1169,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
     /// <summary>
     /// The job of a [Drain] method (an <c>IDrain&lt;T&gt;</c> ref struct, run by
-    /// <c>Emitted&lt;T&gt;.Consume</c>): its singletons resolved once per pass as ref fields, its lookups and emits as a
+    /// <c>Emitted&lt;T&gt;.Drain</c>): its singletons resolved once per pass as ref fields, its lookups and emits as a
     /// [ForEach] job's on one thread, the method called on each record.
     /// </summary>
     private static void EmitRecordJob(StringBuilder sb, OwnerModel owner, ForEachModel method, int number)

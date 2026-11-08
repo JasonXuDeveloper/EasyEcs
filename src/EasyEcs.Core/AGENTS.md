@@ -84,18 +84,18 @@ Entities/Prefab.cs            a recipe of component values outside any world (on
 ```
 Grids/Tile.cs               grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                             Ground<TTile> (a 2D tile of a 3D grid's key), Tile<TCell, TTile> (a [ForEach] parameter:
-                            up to 26 neighbors found by generated code, TileNeighbors; TileCells.Pool: the pool of a
+                            up to 26 neighbors found by generated code, TileNeighbors; TileCells.SizePool: the pool of a
                             tile's cell buffers sized from its shape when the assembly loads), ExchangeHalo into the thread's
                             TileFrame (a texture padded with the halo, a row mask per layer, the state of the tile it
-                            steps), Rows (TZCNT walk; First / Last / LayerOf / RowsOf: the same walk as plain loops for generated code), At / the indexer, Write (a stepped tile's row; JacobiNext: its checks once per tile for generated code), Sweep / ColdStart (a [GaussSeidel]
+                            steps), Rows (TZCNT walk; FirstLayer / LastLayer / LayerOf / RowsOf: the same walk as plain loops for generated code), At / the indexer, Write (a stepped tile's row; JacobiNext: its checks once per tile for generated code), Sweep / ColdStart (a [GaussSeidel]
                             step's sweep count, its cells started from a value: TileFrame.ColdStart), TileCursor.Load128 / 256 / 512,
                             TileCursor.Columns (TileColumns and its Cursor: a row's columns, loads at constant
                             offsets of the column and Store into the row the step writes, checked once for the walk),
                             ChangedEdges / Facing (sleeping tiles written by hand); Plane (a 2D cell pass's halo read
                             in place, out of line as the exchange) and TileLayout.Any (its row masks without a copy)
-Grids/CellRows.cs           TilePlane<TCell, TTile> (the tile's buffer and its eight neighbors' for a cell pass reading
-                            its halo in place: Row along z, Own beside along x, Mask; Fits, the shapes it takes) and
-                            CellRow (a row's vector at i + dx: one load inside the row, else a shift in registers
+Grids/TilePlane.cs          TilePlane<TCell, TTile> (the tile's buffer and its eight neighbors' for a cell pass reading
+                            its halo in place: Row along z, RowBeside along x, Mask; Fits, the shapes it takes) and
+                            PlaneLoads (a row's vector at i + dx: one load inside the row, else a shift in registers
                             against the neighbor's edge vector: PALIGNR / EXT, VPERM2I128 + VPALIGNR, VALIGND, a pair
                             through memory elsewhere); generated code only
 Grids/Cell.cs               Cell<TCell, TTile>: one cell of a tile with its neighbors at constant offsets, the
@@ -213,7 +213,7 @@ Parameters/Emit.cs          Emit<T>: records a [ForEach] pass appends to a poole
                             segments, not copied: EmitStore (BufferStore.Segmented) joins them only when read as one
                             span or written; Count, Clear, [Drain] and ParallelFor take them in place (Run);
                             AddIds / AddLanes: a vector loop's passing lanes appended compacted, in row order;
-                            Emitted<T>.Consume + IDrain<T>: a [Drain] pass (the records walked, then cleared)
+                            Emitted<T>.Drain + IDrain<T>: a [Drain] pass (the records walked, then cleared)
 Parameters/EntityRandom.cs  EntityRandom: deterministic random numbers, a pure function of (seed, entity, tick, stream)
                             (four SplitMix64 finalizer rounds); a singleton (Seed, and a Tick the world adds one to
                             at the start of every update: World.Run) and static members

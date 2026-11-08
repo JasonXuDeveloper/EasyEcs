@@ -127,7 +127,7 @@ Grids/TileTests.Cells.cs  cell methods (Cell<TCell, TTile>) against the whole gr
                           written), a pass bounded to the layers of an ITileLayers component against the whole
                           pass (empty, clamped, 1 and 4 threads, 0 B), SimdMode.Off, an offset past the halo, the
                           schedule, 1 and 4 threads, 0 B; the halo read in place by cross stencils bit for bit
-                          against the copy (box stencils copying it), CellRow's loads at every i and dx of each
+                          against the copy (box stencils copying it), the loads of PlaneLoads at every i and dx of each
                           width
 Grids/TileTests.Halos.cs  kept neighbors (TileNeighborCache) of a by-value Life on a torus of quiet plates against
                           the whole torus, on 1 and 4 threads, through cells written from outside, removed and

@@ -1525,7 +1525,7 @@ public partial class TileTests
     {
         // Nothing ran the system: the generated module initializer raised the pool when the assembly loaded.
         Assert.That(DynamicBuffer<Mineral>.MaxPooledLength, Is.EqualTo(32 * 32 * 8));
-        TileCells.Pool<Mineral, Ground<MineralChunk>>(); // a smaller shape never lowers it
+        TileCells.SizePool<Mineral, Ground<MineralChunk>>(); // a smaller shape never lowers it
         Assert.That(DynamicBuffer<Mineral>.MaxPooledLength, Is.EqualTo(32 * 32 * 8));
 
         // FillPool then hands out lists of a whole chunk.

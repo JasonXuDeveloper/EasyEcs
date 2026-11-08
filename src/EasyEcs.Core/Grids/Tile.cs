@@ -237,7 +237,7 @@ public struct TileNeighbors
 }
 
 /// <summary>
-/// The buffers of a grid's cells, sized from the tile's shape: generated code calls <see cref="Pool{TCell, TTile}"/> when
+/// The buffers of a grid's cells, sized from the tile's shape: generated code calls <see cref="SizePool{TCell, TTile}"/> when
 /// its assembly loads, once for each <see cref="Tile{TCell, TTile}"/> a method of it takes, so the pool of
 /// <c>DynamicBuffer&lt;TCell&gt;</c> keeps lists of a tile's cells (a chunk unloaded hands its lists to the next one
 /// loaded) and <see cref="DynamicBuffer{T}.FillPool"/> fills it with lists of that length, with no
@@ -250,7 +250,7 @@ public static class TileCells
     /// <see cref="DynamicBuffer{T}.MaxPooledLength"/> of <typeparamref name="TCell"/> raised to the cells of a
     /// <typeparamref name="TTile"/> tile (never lowered; nothing for a shape EECS072 rejects). O(1).
     /// </summary>
-    public static void Pool<TCell, TTile>() where TCell : unmanaged where TTile : struct, ITileShape
+    public static void SizePool<TCell, TTile>() where TCell : unmanaged where TTile : struct, ITileShape
     {
         if (TileShapeCheck<TTile>.Validate() != null) return; // the first exchange throws, with the reason
         long cells = (long)TTile.Width * TTile.Depth * TTile.Height;
@@ -1188,13 +1188,13 @@ public ref struct TileRows<TTile> where TTile : struct, ITileShape
         return true;
     }
 
-    /// <summary>The first texture layer of the walk. Generated code walks layers First..Last and the bits of <see cref="RowsOf"/> in place of <c>foreach</c>.</summary>
+    /// <summary>The first texture layer of the walk. Generated code walks layers FirstLayer..LastLayer and the bits of <see cref="RowsOf"/> in place of <c>foreach</c>.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public readonly int First => _layer + 1;
+    public readonly int FirstLayer => _layer + 1;
 
     /// <summary>The last texture layer of the walk. Generated code calls this.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public readonly int Last => _last;
+    public readonly int LastLayer => _last;
 
     /// <summary>The tile layer (<see cref="TileRow{TTile}.Y"/>) of texture layer <paramref name="layer"/>. Generated code calls this.</summary>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]

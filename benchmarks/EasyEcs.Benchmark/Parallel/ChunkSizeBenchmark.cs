@@ -12,7 +12,7 @@ namespace EasyEcs.Benchmark;
 /// allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
-public class ChunkRowsBenchmark
+public class ChunkSizeBenchmark
 {
     public enum Body { Light, Heavy, Uneven, Expensive }
 

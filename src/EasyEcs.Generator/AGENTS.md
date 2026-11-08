@@ -290,7 +290,7 @@ Systems/SystemGenerator.cs            [ForEach] -> struct jobs (per entity or pe
                                       over the method's IForEachEntity job (no vector loop, chase twin or fusion);
                                       [EntityMethod] -> the IForEachEntity job and an entry point Owner.Method(entity, values)
                                       over entity.Run; [Drain] -> an IDrain<T> job run by
-                                      Emitted<T>.Consume (stage RecordMethods, joined to the methods of the updates); a ref Tile -> a stepping pass (the method's colors struct, TileSteps.Of per pass, Enter / the sweeps / Leave per tile, a walk per color until Next: the tiles that woke when the pass sleeps and the method has no filter of its own, through the job's ITileStep.Step, else the query; the wakes of what else it reads; a write of its cells); a closed Tile of any kind -> TileCells.Pool in a module
+                                      Emitted<T>.Drain (stage DrainMethods, joined to the methods of the updates); a ref Tile -> a stepping pass (the method's colors struct, TileSteps.Of per pass, Enter / the sweeps / Leave per tile, a walk per color until Next: the tiles that woke when the pass sleeps and the method has no filter of its own, through the job's ITileStep.Step, else the query; the wakes of what else it reads; a write of its cells); a closed Tile of any kind -> TileCells.Pool in a module
                                       initializer of the type's file (__TilePools: the pool of the cells' buffers sized from the shape); [EcsSystem] -> the code struct __X_SystemCode (hooks, then the
                                       methods in declaration order; [UpdateInterval] -> its Interval / Phase), and per
                                       assembly the set __EasyEcsSystems: one Add per system and per closed generic system any
@@ -307,8 +307,8 @@ Systems/SystemGenerator.cs            [ForEach] -> struct jobs (per entity or pe
                                       implementation output writes;
                                       Systems/SystemGenerator.Kernels.cs: what a method's body decides (vector loop, stable, parallel,
                                       identities, a Lookup's key, chases, pair job, out of line, fusion side: BodyModel) in
-                                      stages only implementation output reads (ForEachBodies, RecordBodies, EntityMethodBodies,
-                                      put back into each type's model by SystemCode / ForEachCode / RecordCode / EntityMethodCode),
+                                      stages only implementation output reads (ForEachBodies, DrainBodies, EntityMethodBodies,
+                                      put back into each type's model by SystemCode / ForEachCode / DrainCode / EntityMethodCode),
                                       so an IDE typing never binds a body and a body's edit changes no source output;
                                       Systems/SystemGenerator.Loops.cs: the loops of a job's Execute Kernel translated (each width's
                                       vector loop, the flat loops, the vector tail), in Execute while it declares at most 32 IL
@@ -319,7 +319,7 @@ Systems/SystemGenerator.cs            [ForEach] -> struct jobs (per entity or pe
                                       first driving the walk, the others sampled, out cells and ref Reduce<T> results per tile;
                                       an out of the driving cell's own type steps its tile: ref Tile, each row written through
                                       Write(row), the second buffer swapped in, no Mut and no commit: Symbols.IsCellStep);
-                                      the job handing it a Tile per input and a Mut per out buffer and result) in place of its accessor: the halo (a NoInlining {Name}_{index}__Exchange{k} per input, so the inliner's budget is left for the rows; a cross stencil of one 2D cell type whose rows are whole vectors reads it in place instead, behind TilePlane.Fits: Tile.Plane, rows through Row / Own, shifted loads through CellRow), the shape's constants and offsets read once, the walk as plain loops over the words of rows (TileRows.RowsOf), bounded with the exchange to the layers of an 'in T' ITileLayers component where the pass may skip rows (Symbols.TileLayers; else EECS123), a stepped tile's buffer checked once (JacobiNext),
+                                      the job handing it a Tile per input and a Mut per out buffer and result) in place of its accessor: the halo (a NoInlining {Name}_{index}__Exchange{k} per input, so the inliner's budget is left for the rows; a cross stencil of one 2D cell type whose rows are whole vectors reads it in place instead, behind TilePlane.Fits: Tile.Plane, rows through Row / RowBeside, shifted loads through PlaneLoads), the shape's constants and offsets read once, the walk as plain loops over the words of rows (TileRows.RowsOf), bounded with the exchange to the layers of an 'in T' ITileLayers component where the pass may skip rows (Symbols.TileLayers; else EECS123), a stepped tile's buffer checked once (JacobiNext),
                                       the out buffer sized and filled with what the method computes on Cell.Blank (the rows the
                                       walk skips; once per system, in the static readonly fields of {Name}_{index}__Blank, when
                                       the method takes nothing besides its cells and out cells), the rows its offsets read (every row when it reads X, Y or Z, or takes

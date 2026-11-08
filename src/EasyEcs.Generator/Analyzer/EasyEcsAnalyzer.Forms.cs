@@ -96,7 +96,7 @@ public static partial class EasyEcsAnalyzer
         "generator gives the cell method its row loop.",
         helpLinkUri: Help("EECS103"));
 
-    public static readonly DiagnosticDescriptor BadRecordPass = new("EECS108", "Invalid [Drain] method",
+    public static readonly DiagnosticDescriptor BadDrain = new("EECS108", "Invalid [Drain] method",
         "[Drain] method '{0}' {1}",
         Category, DiagnosticSeverity.Error, true,
         "A [Drain] method is static and takes the record it handles first, by 'in': the generator runs it on each " +
@@ -105,7 +105,7 @@ public static partial class EasyEcsAnalyzer
         "cleared unhandled. The generator writes nothing for an invalid method.",
         helpLinkUri: Help("EECS108"));
 
-    public static readonly DiagnosticDescriptor HandWrittenRecordPass = new("EECS109", "The records of Emitted<T> walked and cleared by hand",
+    public static readonly DiagnosticDescriptor HandWrittenDrain = new("EECS109", "The records of Emitted<T> walked and cleared by hand",
         "'{0}' walks the records of Emitted<{1}> and clears them by hand: a [Drain] method taking 'in {1} {2}' gets the walk and the Clear generated",
         Category, DiagnosticSeverity.Info, true,
         "Code that gets Emitted<T>'s list, runs a loop over it and clears it handles each record once, in the order the " +
@@ -152,8 +152,8 @@ public static partial class EasyEcsAnalyzer
         start.RegisterSyntaxNodeAction(AnalyzeHandWrittenConsume, SyntaxKind.MethodDeclaration);
         start.RegisterSyntaxNodeAction(AnalyzeHandWrittenVectorLoop, SyntaxKind.MethodDeclaration);
         start.RegisterSymbolAction(AnalyzeConsume, SymbolKind.Method);
-        start.RegisterSymbolAction(AnalyzeRecordPass, SymbolKind.Method);
-        start.RegisterSyntaxNodeAction(AnalyzeHandWrittenRecordPass, SyntaxKind.ForEachStatement);
+        start.RegisterSymbolAction(AnalyzeDrain, SymbolKind.Method);
+        start.RegisterSyntaxNodeAction(AnalyzeHandWrittenDrain, SyntaxKind.ForEachStatement);
         start.RegisterSyntaxNodeAction(AnalyzeHandWrittenCollected, SyntaxKind.InvocationExpression);
         AnalyzeEntityJobs(start);
     });
@@ -214,11 +214,11 @@ public static partial class EasyEcsAnalyzer
 
     // ---------------- EECS108 / EECS109: [Drain] ----------------
 
-    private static void AnalyzeRecordPass(SymbolAnalysisContext context)
+    private static void AnalyzeDrain(SymbolAnalysisContext context)
     {
         var method = (IMethodSymbol)context.Symbol;
         if (Symbols.IsDrain(method) && Symbols.RecordProblem(method) is { } problem)
-            context.ReportDiagnostic(Diagnostic.Create(BadRecordPass, method.Locations.FirstOrDefault(), method.Name, problem));
+            context.ReportDiagnostic(Diagnostic.Create(BadDrain, method.Locations.FirstOrDefault(), method.Name, problem));
     }
 
     /// <summary>
@@ -227,7 +227,7 @@ public static partial class EasyEcsAnalyzer
     /// parameters when the block is a system's OnUpdate holding only 'ref' singleton locals, the list, the loop and the
     /// Clear, and the loop's body uses only the record, those locals and the World.
     /// </summary>
-    private static void AnalyzeHandWrittenRecordPass(SyntaxNodeAnalysisContext context)
+    private static void AnalyzeHandWrittenDrain(SyntaxNodeAnalysisContext context)
     {
         var loop = (ForEachStatementSyntax)context.Node;
         var model = context.SemanticModel;
@@ -252,7 +252,7 @@ public static partial class EasyEcsAnalyzer
         if (RecordFix(block, loop, clear, declarator, world, item, model, ct) is { } parameters)
             properties = properties.Add(FixKind, "Drain").Add(RecordParameters, parameters).Add(RecordName, name);
         string where = model.GetEnclosingSymbol(loop.SpanStart, ct) is { } method ? method.ContainingType?.Name is { } type ? $"{type}.{method.Name}" : method.Name : "the code";
-        context.ReportDiagnostic(Diagnostic.Create(HandWrittenRecordPass, loop.ForEachKeyword.GetLocation(), properties, where, name, item.Name));
+        context.ReportDiagnostic(Diagnostic.Create(HandWrittenDrain, loop.ForEachKeyword.GetLocation(), properties, where, name, item.Name));
     }
 
     /// <summary>
@@ -871,8 +871,8 @@ public sealed class FormAnalyzer : EasyEcsAnalyzer.Area
 {
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
         EasyEcsAnalyzer.BadConsume, EasyEcsAnalyzer.BadUpdateInterval, EasyEcsAnalyzer.HandWrittenConsume,
-        EasyEcsAnalyzer.HandWrittenEntityJob, EasyEcsAnalyzer.HandWrittenVectorLoop, EasyEcsAnalyzer.HandWrittenElementLoop, EasyEcsAnalyzer.HandWrittenStencil, EasyEcsAnalyzer.BadRecordPass,
-        EasyEcsAnalyzer.HandWrittenRecordPass, EasyEcsAnalyzer.HandWrittenCollected);
+        EasyEcsAnalyzer.HandWrittenEntityJob, EasyEcsAnalyzer.HandWrittenVectorLoop, EasyEcsAnalyzer.HandWrittenElementLoop, EasyEcsAnalyzer.HandWrittenStencil, EasyEcsAnalyzer.BadDrain,
+        EasyEcsAnalyzer.HandWrittenDrain, EasyEcsAnalyzer.HandWrittenCollected);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeForms(context);
 }

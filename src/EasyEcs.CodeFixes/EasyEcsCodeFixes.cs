@@ -145,7 +145,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                         _ => Task.FromResult(context.Document.WithSyntaxRoot(collected)), diagnostic.Id + "Collected"), diagnostic);
                     break;
                 case "EECS109" when kind == "Drain" && node.FirstAncestorOrSelf<ForEachStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax hook } } records
-                                    && RecordMethod(root, hook, records, diagnostic.Properties) is { } handle:
+                                    && DrainMethod(root, hook, records, diagnostic.Properties) is { } handle:
                     Register(context, diagnostic, "Handle each record in a [Drain] method", root, hook, handle);
                     break;
                 case "EECS107" when kind == "Pairs" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method

@@ -80,7 +80,7 @@ internal static class TileWalk
 /// A pass: <see cref="Of"/> on the system's thread (the wakes from writes of others, the tiles that left the grid,
 /// the buffers sized from the shape), then the tiles of each color in parallel: in a pass that sleeps, the tiles of
 /// the color's queue (those that woke, <see cref="StepWoken{TJob}"/>), else every tile of the grid (the query's walk;
-/// <see cref="Enter"/>, the method, <see cref="Sweep"/> between the sweeps of a Gauss-Seidel step, <see cref="Leave"/>:
+/// <see cref="Enter"/>, the method, <see cref="NextSweep"/> between the sweeps of a Gauss-Seidel step, <see cref="Leave"/>:
 /// the rows the step skipped zeroed, the rows written compared with the cells, a change and its edges recorded per
 /// tile), then <see cref="Next"/> on the system's thread after each color (the swaps of a Jacobi step, the stamps, the
 /// wakes of the tiles facing the edges that changed, queued by color). Each tile's state is written only by the thread
@@ -154,7 +154,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     /// the grid (or moved) wake the tiles that were around them; the tiles whose cells another system wrote since this
     /// pass last ran (a tile created, loaded or dug, <c>Changed&lt;DynamicBuffer&lt;TCell&gt;&gt;</c>) wake with the tiles
     /// around them, an empty buffer sized for the shape (the pool keeps lists of the tile's cells:
-    /// <see cref="TileCells.Pool{TCell, TTile}"/>). With <paramref name="sleeps"/> (the method
+    /// <see cref="TileCells.SizePool{TCell, TTile}"/>). With <paramref name="sleeps"/> (the method
     /// reads nothing the pass cannot see change), only the tiles that may change step; else every tile does.
     /// <paramref name="maxSweeps"/>: the sweeps a Gauss-Seidel step makes at most before it waits for the next pass
     /// (0: the tile's cells). O(tiles changed by others) plus, when tiles joined or left the grid, O(tiles).
@@ -508,7 +508,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     /// and it made fewer sweeps than the most). The rows written get their masks back, so the next sweep visits the rows
     /// the stencil now reaches.
     /// </summary>
-    public bool Sweep(Entity tile)
+    public bool NextSweep(Entity tile)
     {
         var frame = TileFrame<TCell, TTile>.Current;
         int width = TTile.Width, depth = TTile.Depth, hy = TTile.Height > 1 ? TTile.Halo : 0;

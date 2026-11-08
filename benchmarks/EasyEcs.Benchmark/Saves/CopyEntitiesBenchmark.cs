@@ -17,7 +17,7 @@ namespace EasyEcs.Benchmark;
 /// (the band scattered over the table: runs of one row).
 /// </summary>
 [MemoryDiagnoser]
-public class GhostCopyBenchmark
+public class CopyEntitiesBenchmark
 {
     public record struct HaloPosition(float X, float Y) : IComponent;
     public record struct HaloVelocity(float X, float Y) : IComponent;
