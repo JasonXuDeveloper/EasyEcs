@@ -15,7 +15,7 @@ public record struct Position(float X, float Y) : IComponent;
 public record struct Velocity(float X, float Y) : IComponent;
 public record struct Health(int Value, int Max) : IComponent, ITracked;         // replicated: writes are tracked
 public record struct Replica(int Health, int Waypoint) : IComponent;         // what clients last received
-public record struct ReplicaFire(bool Burning) : IComponent;                 // ... and whether it burned: a bool apart
+public record struct FireReplica(bool Burning) : IComponent;                 // what clients know of the fire
 public record struct Mana(int Value, int Max) : IComponent;
 public record struct Attack(int Damage, int Interval, int Cooldown) : IComponent;
 public record struct Burning(int Ticks) : IComponent, ITracked;               // status effects come and go; clients
@@ -326,7 +326,7 @@ public ref struct ReplicationSystem                                       // onl
     }
 
     [ForEach, Changed<Burning>]                                               // set on fire, or burning on
-    static void SendFire(ref ReplicaFire fire, ref Reduce<Battle> battle)
+    static void SendFire(ref FireReplica fire, ref Reduce<Battle> battle)
     {
         if (fire.Burning) return;
         fire.Burning = true;
@@ -334,7 +334,7 @@ public ref struct ReplicationSystem                                       // onl
     }
 
     [ForEach, Removed<Burning>]                                               // the fire went out: the row lacks it now
-    static void SendFireOut(ref ReplicaFire fire, ref Reduce<Battle> battle)
+    static void SendFireOut(ref FireReplica fire, ref Reduce<Battle> battle)
     {
         if (!fire.Burning) return;                                            // lit and out between two sends
         fire.Burning = false;
@@ -447,11 +447,11 @@ public sealed class BattleServer : IDisposable
 
     // Unit kinds: recipes that belong to no world (no query sees them), copied by Instantiate
     private static readonly Prefab Hero = new Prefab().Set(new Position(), new Velocity(1, 0))   // several at once
-        .SetHealth(500, 500).SetReplica(500, 0).SetReplicaFire(false).SetMana(100, 100).SetAttack(8, 6, 0)     // or one by name
+        .SetHealth(500, 500).SetReplica(500, 0).SetFireReplica(false).SetMana(100, 100).SetAttack(8, 6, 0)     // or one by name
         .SetZone(0).SetKills(0).SetPlayer().Set(new DynamicBuffer<Friend>())
         .SetLoot(new Loot(0));                                    // a starter item: each hero gets a bag of its own
     private static readonly Prefab Grunt = new Prefab().Set(new Position(), new Velocity())
-        .SetHealth(120, 120).SetReplica(120, 0).SetReplicaFire(false).SetAttack(6, 8, 0).SetGoal(0).SetSpawn(default).SetNpc();
+        .SetHealth(120, 120).SetReplica(120, 0).SetFireReplica(false).SetAttack(6, 8, 0).SetGoal(0).SetSpawn(default).SetNpc();
     private static readonly Prefab Brute = new Prefab(Grunt)                                    // a variant: a copy
         .SetHealth(200, 200).SetReplica(200, 0).SetAttack(9, 12, 0);
     internal static readonly Prefab Shot = new Prefab().SetLifetime(20);  // the rest is given per shot (Instantiate)
@@ -613,7 +613,7 @@ public sealed class BattleServer : IDisposable
         updates = 0;
         if (!World.DestroyedSince(acked, gone, out destroyed)) return false;  // too far behind: resynchronize
         updates = World.Count<Replica>(ClientChanges.Since(acked))            // each client its own tick, one filter
-            + World.Count<ReplicaFire>(FiresOut.Since(acked));
+            + World.Count<FireReplica>(FiresOut.Since(acked));
         return true;
     }
     // #endregion catch-up
