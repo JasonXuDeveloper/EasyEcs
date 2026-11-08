@@ -136,6 +136,12 @@ internal sealed partial class Kernel
         public bool MaskedScalar { get; init; }
 
         /// <summary>
+        /// A wide component's AVX2 form pays (its lines start with <see cref="Mark256"/>, heavy math only): a Vector&lt;T&gt;
+        /// loop of its own runs it where <c>Interleaved.IsWide256</c> and the AVX-512 form does not run.
+        /// </summary>
+        public bool Wide256 { get; init; }
+
+        /// <summary>
         /// The largest index the vector form holds exactly in its narrow lanes (<see cref="Lane.IndexFits"/>), which the
         /// caller checks before entering it; 0 when it assumes none.
         /// </summary>
@@ -798,7 +804,7 @@ internal sealed partial class Kernel
             return new Unsupported(reason);
         }
         // A component the loop does not split (more than MaxFields lanes, a field that is not a lane, lanes of two sizes)
-        // still has a vector loop on AVX-512 when the method uses only 4-byte lanes of it (Kernel.Wide.cs); else the reason,
+        // still has a vector loop when the method uses only 4-byte or only 8-byte lanes of it (Kernel.Wide.cs); else the reason,
         // and the advice to split the lanes it uses into a component of their own when they are few.
         WideLayout WideOr(IParameterSymbol p, Unsupported reason)
         {
@@ -1224,6 +1230,7 @@ internal sealed partial class Kernel
             Wide128 = kernel._wide128,
             FlatOnly = flatOnly != null,
             MaskedScalar = !kernel.MaskedFits(kernel._setup.ToString() + prologue + read + kept + maskedHold + kernel._body.Masked + masked, kernel._components.Count),
+            Wide256 = kernel._wide256,
             IndexTop = kernel._indexTop,
             StructuralChanges = kernel.StructuralChanges(),
             VectorTail = kernel._change != null || kernel._emits.Values.Any(e => e.Added),

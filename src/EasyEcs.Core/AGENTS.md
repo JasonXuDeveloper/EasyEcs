@@ -119,6 +119,10 @@ TileSteps.cs                 a stepping tile's pass (ref Tile, TileSteps<TCell, 
                              TileColoring); sleeping tiles, woken by the edges that changed, by others' writes of the
                              cells (and of what else the method reads), by tiles that left the grid, queued by color so
                              a sleeping pass walks only them (StepWoken over the generated job's ITileStep.Step)
+TileNeighborCache.cs         the neighbors a pass taking a tile by value found for each tile (TileNeighborCache<TTile,
+                             TGrid, TKey, TJob>, one per world and method), kept until a tile joins, leaves or moves
+                             (the index's Membership): no search per pass; the halo is still pulled every pass (D73);
+                             World.TileState (the tests' view of it)
 Emit.cs                      Emit<T>: records a [ForEach] pass appends to a pooled list per chunk (EmitPool), handed in
                              chunk order to singleton Emitted<T> (a DynamicBuffer<T>; passes append, readers clear) as
                              segments, not copied: EmitStore (BufferStore.Segmented) joins them only when read as one
@@ -133,7 +137,8 @@ Interleaved.cs               the deinterleaving loads / interleaving stores of g
                              LoadTail / StoreTail: the last rows of a run copied into a vector's worth (a loop that
                              marks rows runs them masked); Interleaved.Wide.cs: Pick / PickInto, the NEON table
                              lookups (TBL / TBX over 1 to 4 registers) of a wide component's 128-bit form, and
-                             IsWideAccelerated (ARM64 with 128-bit Vector<T>)
+                             IsWideAccelerated (ARM64 with 128-bit Vector<T>); Permute256 / Merge256, its AVX2 form's
+                             permutes (VPERMD, VPBLENDD), and IsWide256 (x64 with 256-bit Vector<T> and AVX2)
 LaneMath.cs                  lane functions of generated vector loops .NET has no vector form of: the quotient of
                              int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh / Pow of floats;
                              each at Vector<T>, Vector512 and Vector128 (with AVX: 4 lanes as one Vector256 of doubles)

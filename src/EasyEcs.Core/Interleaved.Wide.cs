@@ -1,16 +1,20 @@
 using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.X86;
 
 namespace EasyEcs;
 
-// The word picks of a generated vector loop over a wide component on ARM64 (Kernel.Wide.cs): a component of up to 16
-// four-byte words per row whose method uses a few of them. The loop loads the rows of a Vector<T> (4 rows at 128 bits)
-// as whole vectors, picks each used word of the 4 rows into one vector with NEON TBL over the (at most 4) vectors that
-// hold them, and writes the vectors holding written words back with TBX (the words it does not write kept as loaded).
+// The word picks of a generated vector loop over a wide component (Kernel.Wide.cs): a component of up to 64 bytes per
+// row whose method uses a few of its 4-byte (or 8-byte) words. On ARM64 the loop loads the rows of a Vector<T> (4 rows
+// of 4-byte words at 128 bits) as whole vectors, picks each used word of the rows into one vector with NEON TBL over the
+// (at most 4) vectors that hold them, and writes the vectors holding written words back with TBX (the words it does not
+// write kept as loaded). On AVX2 (256-bit Vector<T>) it gathers them with a tree of two-source permutes, each two
+// VPERMD and a VPBLENDD (Permute256, Merge256).
 public static partial class Interleaved
 {
     /// <summary>
@@ -92,6 +96,78 @@ public static partial class Interleaved
     {
         if (IsWideAccelerated) return AdvSimd.Arm64.VectorTableLookupExtension(Bytes(into), (Bytes(a), Bytes(b), Bytes(c), Bytes(d)), indexes).As<byte, T>().AsVector();
         return Software(into, indexes, true, a, b, c, d, 4);
+    }
+
+    /// <summary>
+    /// Whether <see cref="Permute256{T}(Vector{T}, Vector256{int})"/> and its two-source forms run as AVX2 permutes on
+    /// <c>Vector&lt;T&gt;</c> (x64 where it is 256 bits); otherwise a generated loop leaves a wide component to its other
+    /// forms or to its rows one at a time.
+    /// </summary>
+    public static bool IsWide256
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Vector<byte>.Count == 32 && Avx2.IsSupported;
+    }
+
+    /// <summary>
+    /// The 32-bit words of <paramref name="a"/> that <paramref name="indexes"/> names (word j of the result from word
+    /// <c>indexes[j] &amp; 7</c>): VPERMD. Only behind <see cref="IsWide256"/>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<T> Permute256<T>(Vector<T> a, Vector256<int> indexes) where T : struct
+    {
+        if (IsWide256) return Avx2.PermuteVar8x32(a.AsVector256().AsInt32(), indexes).As<int, T>().AsVector();
+        return Software256(a, a, indexes, 0, false);
+    }
+
+    /// <summary>
+    /// Word j from <paramref name="b"/> where bit j of <paramref name="blend"/> is set, else from <paramref name="a"/>,
+    /// each at its <paramref name="indexes"/>: two VPERMD and a VPBLENDD (the two-source permute AVX2 lacks).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<T> Permute256<T>(Vector<T> a, Vector<T> b, Vector256<int> indexes, [ConstantExpected] byte blend) where T : struct
+    {
+        if (IsWide256)
+            return Avx2.Blend(Avx2.PermuteVar8x32(a.AsVector256().AsInt32(), indexes), Avx2.PermuteVar8x32(b.AsVector256().AsInt32(), indexes), blend)
+                .As<int, T>().AsVector();
+        return Software256(a, b, indexes, blend, false);
+    }
+
+    /// <summary>
+    /// <paramref name="into"/> with word j taken from <paramref name="b"/> at its <paramref name="indexes"/> where bit j
+    /// of <paramref name="blend"/> is set, its own words kept elsewhere: one VPERMD and a VPBLENDD (a store's write-back).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<T> Merge256<T>(Vector<T> into, Vector<T> b, Vector256<int> indexes, [ConstantExpected] byte blend) where T : struct
+    {
+        if (IsWide256)
+            return Avx2.Blend(into.AsVector256().AsInt32(), Avx2.PermuteVar8x32(b.AsVector256().AsInt32(), indexes), blend).As<int, T>().AsVector();
+        return Software256(into, b, indexes, blend, true);
+    }
+
+    /// <summary>
+    /// <see cref="Permute256{T}(Vector{T}, Vector{T}, Vector256{int}, byte)"/> (and Merge256: <paramref name="keep"/>) in
+    /// software over the first 32 bytes of each vector (the generated loops never get here: they run only where
+    /// <see cref="IsWide256"/> holds); the bytes past 32 of the result are 0.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static Vector<T> Software256<T>(Vector<T> a, Vector<T> b, Vector256<int> indexes, byte blend, bool keep) where T : struct
+    {
+        Span<int> words = stackalloc int[16];
+        var bytes = MemoryMarshal.AsBytes(words);
+        bytes.Clear();
+        var ab = MemoryMarshal.AsBytes(new ReadOnlySpan<Vector<T>>(in a));
+        var bb = MemoryMarshal.AsBytes(new ReadOnlySpan<Vector<T>>(in b));
+        ab.Slice(0, Math.Min(32, ab.Length)).CopyTo(bytes);
+        bb.Slice(0, Math.Min(32, bb.Length)).CopyTo(bytes.Slice(32));
+        Span<int> result = stackalloc int[Math.Max(8, Vector<byte>.Count / 4)];
+        result.Clear();
+        for (int j = 0; j < 8; j++)
+        {
+            bool second = ((blend >> j) & 1) != 0;
+            result[j] = keep && !second ? words[j] : words[(second ? 8 : 0) + (indexes.GetElement(j) & 7)];
+        }
+        return new Vector<T>(MemoryMarshal.Cast<int, T>(result));
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

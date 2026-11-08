@@ -185,6 +185,9 @@ tests/EasyEcs.UnitTest/          NUnit, one file per feature
                                  schedule, 1 and 4 threads, 0 B; the halo read in place by cross stencils bit for bit
                                  against the copy (box stencils copying it), CellRow's loads at every i and dx of each
                                  width
+  TileTests.Halos.cs             kept neighbors (TileNeighborCache) of a by-value Life on a torus of quiet plates against
+                                 the whole torus, on 1 and 4 threads, through cells written from outside, removed and
+                                 given back, a plate destroyed and made again, every plate's kept neighbors read, 0 B
   UnloadTests.cs                 game logic as a plugin assembly, compiled with the generators and unloaded
   UnusedTests.cs                 methods called through UnsafeAccessor are not reported unused (the analyzer's
                                  suppression, [MeansImplicitUse])

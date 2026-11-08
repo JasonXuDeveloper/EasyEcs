@@ -113,9 +113,12 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
         (SystemGenerator.Lambdas.cs) do not get the pre-check, so a lambda reducing into a `[MinBy]` type reports
         Kernel's own reason; and for a record's positional key Kernel.Reduced reports a property reason before the
         kept row. The proof: `ReduceBenchmark.LowestGenerated` against `LowestHandWritten` (same class).
-- [ ] **`feat-later-halos`** (Tile.cs, TileSteps.cs, SystemGenerator.Cells.cs, Kernel.Wide.cs, Interleaved.Wide.cs):
-      push halos for grid neighbors (D73, roadmap #push-halo: a chunk hands its changed edges to its neighbors'
-      halos), and #160 wide rows on AVX2 (heavy math only, by the widelanes numbers).
+- [x] **`feat-later-halos`** merged 2026-11-08 (head 4287251): push halos built and measured, the rings dropped (pull
+      was faster: a kept ring holds the bytes the exchange copies, and finding what changed costs a scan per pass); what
+      ships keeps each tile's neighbor ids per method and world (TileNeighborCache: TileExchange 0.62-0.78, TileActive
+      0.61-0.85, TileStencil 0.85-0.93, TileLayers 1 thread 0.91-0.98, 4 threads within noise, 0 B). #160: 8-byte wide
+      rows on AVX-512 and an AVX2 form, both for heavy math only (KernelBenchmark Dive 0.85 under AVX512=0, 0.48-0.64 on
+      AVX-512; Ledger keeps its rows). Docs to-dos: docs-todos "feat-later-halos". Open: none.
 
 ## Lanes (not started)
 
@@ -438,7 +441,10 @@ runs beside any lane once those two merged.
 Starts when every lane above has merged (owner, 2026-10-27: the refactor before docs and benchmarks, so docs and
 numbers are written once about the final code).
 
-- [ ] **1. Directory restructure** (layout approved 2026-11-07: `finish-scan.md` Report 2 plus `tools/perf/`; it
+- [ ] **1. Directory restructure** (owner, 2026-11-08, L9 / L10: runs as soon as halos, analyzer lane 2 and lane 4
+      merge, before lanes 1, 5 and 6 start; besides the four projects and `tools/perf/` it also groups the
+      `docs/content/guide` pages (folders + meta.json sections + `_redirects` for the old URLs, en and zh), the rest of
+      `tools/`, and `docs/plans/`: the layout of these three is proposed first, as a popup) (layout approved 2026-11-07: `finish-scan.md` Report 2 plus `tools/perf/`; it
       supersedes `layout.md`): `git mv` only, alone, after every branch merged and after lane 3's T1; its six commits,
       `docs/vite.config.ts` recursive, `site.ts:58`, skills' paths, `.DotSettings`, the 107 `tools/perf/` references;
       `inner-loops.md`'s `CellTests.cs` reference dropped.
