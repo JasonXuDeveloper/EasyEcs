@@ -106,7 +106,7 @@ internal static class Recorder
         {
             ct.ThrowIfCancellationRequested();
             int before = lines.Count;
-            if (model.GetDeclaredSymbol(declaration, ct) is INamedTypeSymbol type && Visible(type)) Read(declaration, type, model.Compilation, lines, ct);
+            if (model.GetDeclaredSymbol(declaration, ct) is INamedTypeSymbol type && Visible(type)) Read(declaration, type, model, lines, ct);
             if (hint == null && lines.Count > before) hint = HintName(declaration, model.GetDeclaredSymbol(declaration, ct)!, ct);
         }
 
@@ -167,8 +167,9 @@ internal static class Recorder
     private static bool LaneType(ITypeSymbol type) => type.SpecialType == SpecialType.System_Void || type.IsValueType && !type.IsRefLikeType;
 
     /// <summary>The facts of one type declaration, added to <paramref name="lines"/>.</summary>
-    private static void Read(TypeDeclarationSyntax node, INamedTypeSymbol type, Compilation compilation, List<string> lines, System.Threading.CancellationToken ct)
+    private static void Read(TypeDeclarationSyntax node, INamedTypeSymbol type, SemanticModel model, List<string> lines, System.Threading.CancellationToken ct)
     {
+        var compilation = model.Compilation;
         if (type.IsValueType)
             foreach (var constructor in type.InstanceConstructors)
                 if (constructor.DeclaredAccessibility == Accessibility.Public && !constructor.IsImplicitlyDeclared && constructor.Parameters.All(p => LaneType(p.Type))
@@ -209,7 +210,7 @@ internal static class Recorder
             {
                 try
                 {
-                    var writer = new Writer(compilation, ct);
+                    var writer = new Writer(model, ct);
                     string text = writer.Record(method, body);
                     lines.Add($"[assembly: global::EasyEcs.InlineBody({Literal(id)}, {Literal(text)}{string.Concat(writer.Accessors.Select(a => ", " + Literal(a)))})]");
                     return;
@@ -290,7 +291,7 @@ internal static class Recorder
     /// as their values, <c>this</c> as the parameter <c>@this</c>, hidden fields as placeholders, hidden static helpers
     /// as local functions of their own; anything else hidden fails with the reason.
     /// </summary>
-    private sealed class Writer(Compilation compilation, System.Threading.CancellationToken ct)
+    private sealed class Writer(SemanticModel fileModel, System.Threading.CancellationToken ct)
     {
         /// <summary>The placeholders' fields, in order: <c>kind|type|name</c>.</summary>
         public readonly List<string> Accessors = new();
@@ -308,7 +309,7 @@ internal static class Recorder
         /// <summary>The member (or a helper) as a static local function named <paramref name="name"/>.</summary>
         private string Function(IMethodSymbol method, SyntaxNode body, string name)
         {
-            var model = compilation.GetSemanticModel(body.SyntaxTree);
+            var model = Symbols.ModelOf(body.SyntaxTree, fileModel); // the transform's own model, one per tree
             if (!VisibleType(method.ReturnType) && !method.ReturnsVoid) throw new NotRecorded($"it returns {method.ReturnType.Name}, which other assemblies cannot name");
             var parameters = new List<string>();
             if (!method.IsStatic)

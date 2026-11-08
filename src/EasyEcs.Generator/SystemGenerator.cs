@@ -88,7 +88,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             .WithTrackingName("ClosedSystems")
             .Collect();
         var set = updates.Where(static s => s.Owner.TypeParameters.Length == 0)
-            .Select(static (s, _) => new SetEntry(s.Owner.FullName, CodeName(s.Owner)))
+            .Select(static (s, _) => new SetEntry(s.Owner.FullName, CodeName(s.Owner), SetEntry.HooksOf(s.Hooks.Select(h => h.Kind))))
             .Collect().Combine(closed)
             .Select(static (pair, _) => new EquatableArray<SetEntry>(pair.Left.Concat(pair.Right!).Distinct()
                 .OrderBy(e => e!.System, System.StringComparer.Ordinal).ToArray()!))
@@ -149,7 +149,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     private static void Add(SourceProductionContext context, UpdateModel model)
     {
         var owner = model.Owner;
-        context.AddSource($"{owner.HintName}.{(model.One ? "EntityMethod" : owner.IsSystem ? "System" : "ForEach")}.g.cs", SourceText.From(Emit(model), Encoding.UTF8));
+        context.AddSource($"{owner.HintName}.{(model.One ? "EntityMethod" : owner.IsSystem ? "System" : "ForEach")}.g.cs", SourceText.From(Code.Aliased(Emit(model)), Encoding.UTF8));
         if (model.One || !owner.IsSystem || !owner.IsPublic || owner.TypeParameters.Length == 0) return;
         // Assembly attributes cannot follow the namespace of the code's file.
         string ns = owner.Namespace.Length > 0 ? owner.Namespace + "." : "";
@@ -247,12 +247,19 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 sb.Append($"            case {i}: return {known[i].Code}.Update(world, first, second, secondTick);\n");
             sb.Append("        }\n\n        return false;\n    }\n");
         }
+        // Update calls every system; Create and Destroy only those with the hook (the others keep ISystemCode's empty default).
         foreach (var hook in new[] { "Update", "Create", "Destroy" })
         {
-            sb.Append($"\n    public static void {hook}({world} world, int system, {handle} handle)\n    {{\n        switch (system)\n        {{\n");
-            for (int i = 0; i < entries.Length; i++)
-                sb.Append($"            case {i}: {entries[i].Code}.{hook}(world, handle); return;\n");
-            sb.Append("        }\n    }\n");
+            var cases = Enumerable.Range(0, entries.Length).Where(i => hook == "Update" || entries[i].Hooks.Contains(hook[0])).ToArray();
+            sb.Append($"\n    public static void {hook}({world} world, int system, {handle} handle)\n    {{\n");
+            if (cases.Length > 0)
+            {
+                sb.Append("        switch (system)\n        {\n");
+                foreach (int i in cases) sb.Append($"            case {i}: {entries[i].Code}.{hook}(world, handle); return;\n");
+                sb.Append("        }\n");
+            }
+
+            sb.Append("    }\n");
         }
 
         sb.Append("}\n");
@@ -709,6 +716,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         sb.Append("    }\n\n");
         foreach (var hook in new[] { "Create", "Destroy" })
         {
+            if (!model.Hooks.Any(h => h.Kind == hook)) continue; // ISystemCode's default does nothing
             sb.Append($"    public static void {hook}({world} world, {handle} system)\n    {{\n");
             EmitHookCall(sb, model, hook);
             sb.Append("    }\n\n");
@@ -1615,12 +1623,6 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         public static Kernel.Code? VectorLoop(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, bool parallel,
             System.Threading.CancellationToken ct, out string? scalar)
         {
-            if (Parts.KeptRowReason(method) is { } kept)
-            {
-                scalar = kept.Text;
-                return null;
-            }
-
             return Kernel.Vectorize(method, syntax, model, parallel ? static (i, kind) => kind switch
             {
                 Symbols.ParamKind.Singleton => $"s{i}.Value", // a parallel job's SingletonRef
@@ -1835,8 +1837,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <summary>A pair of systems the set declares as one walk: both by name, and the code that runs it.</summary>
     private sealed record SetFusion(string First, string Second, string Code);
 
-    private sealed record SetEntry(string System, string Code)
+    private sealed record SetEntry(string System, string Code, string Hooks)
     {
+        /// <summary>The hooks besides OnUpdate a system declares, as the set's switches need them: 'C' OnCreate, 'D' OnDestroy.</summary>
+        public static string HooksOf(IEnumerable<string> kinds) =>
+            (kinds.Contains("Create") ? "C" : "") + (kinds.Contains("Destroy") ? "D" : "");
+
         private static readonly HashSet<string> Takers = ["AddSystem", "RemoveSystem", "HasSystem", "System", "TryGetSystem",
             "UpdateBefore", "UpdateAfter", "UpdateBeforeAttribute", "UpdateAfterAttribute"];
 
@@ -1864,7 +1870,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             else if (Symbols.GenericSystemCode(type) is { } open) // another assembly's public system, its code closed here
                 code = open.Construct(arguments.ToArray()).ToDisplayString(Symbols.Fqn);
             else return null;
-            return new SetEntry(type.ToDisplayString(Symbols.Fqn), code);
+            var hooks = type.OriginalDefinition.GetMembers().OfType<IMethodSymbol>()
+                .Where(m => Symbols.HookProblem(m) == null).Select(Symbols.Hook).Where(k => k != Symbols.HookKind.None).Select(k => k.ToString());
+            return new SetEntry(type.ToDisplayString(Symbols.Fqn), code, HooksOf(hooks));
         }
     }
 }

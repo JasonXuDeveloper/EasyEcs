@@ -32,7 +32,7 @@ public sealed partial class SystemGenerator
                 .Select(g => new LambdaFile(g.Key, new EquatableArray<LambdaModel>(g.OrderBy(c => c!.Position).ToArray()!))))
             .WithTrackingName("LambdaFiles");
         context.RegisterImplementationSourceOutput(files, static (spc, file) =>
-            spc.AddSource($"{System.IO.Path.GetFileNameWithoutExtension(file.File)}.{Fnv(file.File):x8}.Lambdas.g.cs", SourceText.From(EmitLambdas(file), Encoding.UTF8)));
+            spc.AddSource($"{System.IO.Path.GetFileNameWithoutExtension(file.File)}.{Fnv(file.File):x8}.Lambdas.g.cs", SourceText.From(Code.Aliased(EmitLambdas(file)), Encoding.UTF8)));
     }
 
     /// <summary>The lambda passes of one source file, in the order they appear.</summary>

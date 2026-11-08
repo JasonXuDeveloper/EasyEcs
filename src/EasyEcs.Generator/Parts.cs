@@ -536,21 +536,12 @@ internal sealed class Parts
     }
 
     /// <summary>
-    /// Why a <c>[ForEach]</c> method that reduces into a <c>[MinBy]</c> / <c>[MaxBy]</c> singleton runs row by row, or null:
-    /// a vector loop would compare each lane's key and carry the other fields with it, a form the vector loops do not
-    /// have yet (docs/plans/backlog.md, "MinBy vector form"). Read before <c>Kernel.Vectorize</c> by the generator and
-    /// EECS055 / EECS056 alike, so both give this reason instead of one about the generated Combine.
+    /// Null: a <c>[ForEach]</c> method reducing into a <c>[MinBy]</c> / <c>[MaxBy]</c> singleton gets its vector loop, or
+    /// its reason, from <c>Kernel.Vectorize</c> (Kernel.KeptReduction, KeptRowWrite) like any other method. EECS055 still
+    /// calls it before Kernel (EasyEcsAnalyzer.Performance.cs, the analyzer lane's file: docs/plans/backlog.md G9 note),
+    /// so it stays until that call goes.
     /// </summary>
-    public static Kernel.ScalarReason? KeptRowReason(IMethodSymbol method)
-    {
-        foreach (var p in method.Parameters)
-            if (Symbols.ReduceElement(p.Type) is INamedTypeSymbol reduced
-                && (Declares(reduced, MinBy) || Declares(reduced, MaxBy)) && Of(reduced) is { KeptOf: { } kept })
-                return new Kernel.ScalarReason(
-                    $"it reduces into {reduced.Name}, which keeps the row with the {(kept.Lowest ? "lowest" : "highest")} {kept.Key} ([{(kept.Lowest ? "MinBy" : "MaxBy")}]): "
-                    + "a vector loop does not keep a row by its key yet, so the method runs row by row", false, null);
-        return null;
-    }
+    public static Kernel.ScalarReason? KeptRowReason(IMethodSymbol method) => null;
 
     /// <summary>Whether a radix sort orders <paramref name="type"/>: an integer, char, bool, float, double or an enum of an integer.</summary>
     public static bool Orderable(ITypeSymbol type) =>

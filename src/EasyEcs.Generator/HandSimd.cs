@@ -525,8 +525,8 @@ internal static class HandSimd
             }
             else if (row.Fields == null)
             {
-                if (row.Component.GetAttributes().Any(a => Symbols.Named(a.AttributeClass, "System.Runtime.InteropServices.StructLayoutAttribute")
-                                                           || Symbols.Named(a.AttributeClass, "System.Runtime.CompilerServices.InlineArrayAttribute")))
+                if (!Kernel.SequentialLayout(row.Component)
+                    || row.Component.GetAttributes().Any(a => Symbols.Named(a.AttributeClass, "System.Runtime.CompilerServices.InlineArrayAttribute")))
                     throw No();
                 var fields = new List<string>();
                 foreach (var field in row.Component.GetMembers().OfType<IFieldSymbol>())

@@ -94,9 +94,14 @@ internal sealed partial class Kernel
         string type = change.Component?.ToDisplayString(Symbols.Fqn) ?? "";
         if (change.Component is { } component)
         {
-            // The method reads the component it changes: it would see the change at once, a vector loop after the pass.
-            foreach (var p in _components.Keys.Concat(_optionals.Keys))
-                if (SymbolEqualityComparer.Default.Equals(p.Type, component) || Symbols.MaybeElement(p.Type) is { } element && SymbolEqualityComparer.Default.Equals(element, component))
+            // The method takes the component it changes: it would see the change at once, a vector loop after the pass. It
+            // sees nothing when no use of the parameter can follow the change (the writes before it are stored either way;
+            // after a Remove the value is gone either way, after a Disable kept, after a Set the Set's value wins).
+            foreach (var p in _components.Keys)
+                if (SymbolEqualityComparer.Default.Equals(p.Type, component) && UsedAfter(p, op) is { } use)
+                    throw FixableReason($"it changes {component.Name}, which it also takes as '{p.Name}', and uses '{p.Name}' after the change ('{use}'): the change would be seen at once by the method and after the pass by a vector loop; change it last, or in a [ForEach] method of its own");
+            foreach (var p in _optionals.Keys)
+                if (Symbols.MaybeElement(p.Type) is { } element && SymbolEqualityComparer.Default.Equals(element, component))
                     throw FixableReason($"it changes {component.Name}, which it also takes as '{p.Name}': the change would be seen at once by the method and after the pass by a vector loop; change it in a [ForEach] method of its own");
             if (change.Kind is "Set" or "Enable" && Symbols.IndexedKey(component, out bool unique) != null && unique)
                 throw new Unsupported($"it gives {component.Name}, a unique key, to the rows it marks: one value would be claimed by every row") { IsWholeMethod = true };
@@ -108,6 +113,27 @@ internal sealed partial class Kernel
         else if (_change with { Text = "" } != marked with { Text = "" })
             throw FixableReason($"it makes two structural changes ('{_change.Text}' and '{Text(op)}'): a vector loop applies one; split the method into one [ForEach] method per change");
         Live(_active, $"__d0 |= {LiveLanes};\n");
+    }
+
+    /// <summary>
+    /// A use of <paramref name="p"/> that may run after <paramref name="change"/>, as text, or null: a reference after it
+    /// in the body, or anywhere in a loop holding it (its next step runs after). Conservative: a use on a path that
+    /// returns before (<c>if (...) { Remove(); return; } p.X = 1;</c>) counts.
+    /// </summary>
+    private static string? UsedAfter(IParameterSymbol p, IOperation change)
+    {
+        var root = change;
+        IOperation? loop = null;
+        while (root.Parent != null)
+        {
+            root = root.Parent;
+            if (root is ILoopOperation && loop == null) loop = root;
+        }
+        foreach (var use in root.Descendants().OfType<IParameterReferenceOperation>())
+            if (SymbolEqualityComparer.Default.Equals(use.Parameter, p) && !change.Syntax.Span.Contains(use.Syntax.Span)
+                && (use.Syntax.SpanStart >= change.Syntax.Span.End || loop != null && loop.Syntax.Span.Contains(use.Syntax.Span)))
+                return Text(use.Parent is IMemberReferenceOperation member ? member : use);
+        return null;
     }
 
     /// <summary>The one value a Set gives every row it marks, as C# over the job's fields (computed once per run).</summary>
@@ -199,6 +225,15 @@ internal sealed partial class Kernel
     private Unsupported EntityUse(IOperation op) => FixableReason(
         $"it uses the Entity in '{Text(op)}': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; "
         + "read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)");
+
+    /// <summary>
+    /// Whether <paramref name="op"/> reaches through the Entity parameter: the parameter, a member of it, or a call on it
+    /// (<c>e.Read&lt;T&gt;()</c>, <c>e.Has&lt;T&gt;()</c>, an extension such as a generated <c>e.HasBoss</c>).
+    /// </summary>
+    private bool UsesEntity(IOperation op) => _entity != null && (IsEntity(Chain(op).Root ?? op)
+        || op is IInvocationOperation { Instance: { } receiver } && IsEntity(receiver)
+        || op is IInvocationOperation { Instance: null, TargetMethod.IsExtensionMethod: true, Arguments: [var first, ..] } && IsEntity(first.Value)
+        || op is IPropertyReferenceOperation { Instance: { } owner } && IsEntity(owner));
 
     /// <summary>Whether <paramref name="op"/> is the Entity parameter itself.</summary>
     private bool IsEntity(IOperation op) => _entity != null && op is IParameterReferenceOperation { Parameter: var p } && SymbolEqualityComparer.Default.Equals(p, _entity);

@@ -170,14 +170,17 @@ PartGenerator.cs             [Sum]..[Any], [MinBy]/[MaxBy], [LookupKey]/[UniqueK
                              IGroup.Group, IOrderKey<K>.OrderKey / BoxPoint, ITile<K> with the shape and the inferred Beside); a
                              struct declaring ITile<K> without those attributes and without Beside gets Beside alone (stage
                              TileParts); Parts.cs: the models and Problems read once for the generator and the analyzer
-                             (other generators read keys, tiles and groups through Symbols; KeptRowReason: EECS055's reason
-                             for a [MinBy] reduction until the vector form)
+                             (other generators read keys, tiles and groups through Symbols; KeptRowReason: null since
+                             Kernel keeps the row in its vector loop, left while the analyzer still calls it)
 TileParts.cs                 a tile's key and a window's key read once for the generator and the analyzer: BesideAxes /
                              Beside (an int key, members X / Z / Y; a 2D (X, Y) key refused: EECS124), WindowAxes / SlotOf
                              (each coordinate masked, row-major; EECS126), and the recognizers of hand-written ones
                              (ShapeValue, SameBeside, HandWindow: EECS125, EECS127)
 Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (enums as their integer's lanes, a bool
-                             component of one field as 1-byte lanes read as a mask; Kernel.Vectorize: the loop, or the
+                             component of one field as 1-byte lanes read as a mask, a tag as a filter with no lanes;
+                             ++ / -- as a value (Step); a ref singleton written only as running sums, counts, Mins or
+                             Maxes folded once per run (RunningTotals); a [MinBy] / [MaxBy] kept row as the best key and
+                             its row per lane (KeptReduction, KeptRowWrite); Kernel.Vectorize: the loop, or the
                              reason EECS055 / EECS056 report, as a ScalarReason: fixable or inherent; a lambda pass's
                              body through the same Translate, with its Lane);
                              Kernel.Unrolled.cs: loops of a constant trip count of at most 16 steps (a for from a
