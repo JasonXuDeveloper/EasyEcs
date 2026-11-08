@@ -16,7 +16,7 @@ generator declares for code written by hand), `.Parameters.cs` ([ForEach] parame
 `.Fusion.cs` (passes that almost share a walk); `UnusedSuppressor.cs`, `Symbols.cs` (shared with the generators),
 `Uses.cs`, `Threads.cs`; fixes in `src/EasyEcs.CodeFixes`. The file map with each file's ids is
 `src/EasyEcs.Generator/AGENTS.md`. Rule list: `docs/content/guide/help/analyzer.mdx` and the range in AGENTS.md
-(EECS002-EECS132).
+(EECS002-EECS133).
 
 ## Coverage (`feature`, part 3)
 

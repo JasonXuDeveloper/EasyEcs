@@ -123,7 +123,9 @@ LambdaPass.cs                what a lambda pass call is, read once for the gener
                              its values, lambda, filters; a change filter's tick first), Problem (EECS095's reason and
                              the captured values), Unreachable (EECS096's reason, through BodyCopy), IsStable, Discards
                              (an expression lambda's dropped value); ParallelFor's element (Call.Element) and its
-                             rules (BufferProblem)
+                             rules (BufferProblem); FromJob (EECS133): ParallelFor(ref items, ref job) of an IForSpan<T>
+                             job that is one loop over its chunk as the lambda pass, checked in a copy of the
+                             compilation (Read, Problem, Unreachable, Kernel.VectorizeElements)
 BodyCopy.cs                  user code copied into a generated file (a lambda pass's body, a method with element loops):
                              Copy (names of types, namespaces and static members qualified, constants as their values,
                              statements a caller replaces), Usings (the directives extension calls need), Unreachable /
@@ -137,7 +139,7 @@ ComponentGenerator.cs        C# 14 extension members per component / singleton: 
                              for [OrderBy]); classes carry [GeneratedCode("EasyEcs.Generator")], so Symbols.IsGenerated
                              lets the analyzer and SystemGenerator treat SetX / GetOrAddX / RemoveX as structural
 EasyEcsAnalyzer.cs           EECS002-006, EECS009-024, EECS035-036, EECS054, EECS056, EECS070, EECS072-073 and EECS118 (the
-                             declaration and [ForEach] rules of the range EECS002-EECS132 that are not performance rules;
+                             declaration and [ForEach] rules of the range EECS002-EECS133 that are not performance rules;
                              generators never report diagnostics): DeclarationAnalyzer. Every EasyEcsAnalyzer*.cs
                              file ends with its area's analyzer (DeclarationAnalyzer, SystemAnalyzer, ...: a
                              DiagnosticAnalyzer deriving from EasyEcsAnalyzer.Area with the rules it reports), since
@@ -174,8 +176,7 @@ PartGenerator.cs             [Sum]..[Any], [MinBy]/[MaxBy], [LookupKey]/[UniqueK
                              IGroup.Group, IOrderKey<K>.OrderKey / BoxPoint, ITile<K> with the shape and the inferred Beside); a
                              struct declaring ITile<K> without those attributes and without Beside gets Beside alone (stage
                              TileParts); Parts.cs: the models and Problems read once for the generator and the analyzer
-                             (other generators read keys, tiles and groups through Symbols; KeptRowReason: null since
-                             Kernel keeps the row in its vector loop, left while the analyzer still calls it)
+                             (other generators read keys, tiles and groups through Symbols)
 TileParts.cs                 a tile's key and a window's key read once for the generator and the analyzer: BesideAxes /
                              Beside (an int key, members X / Z / Y; a 2D (X, Y) key refused: EECS124), WindowAxes / SlotOf
                              (each coordinate masked, row-major; EECS126), and the recognizers of hand-written ones
@@ -199,6 +200,8 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              own gate): AVX-512 (fields gathered by a pruned permute tree) and ARM64's 128 bits (4 rows
                              per vector, one NEON TBL per field over up to 4 registers, a TBX per written vector:
                              Interleaved.Pick / PickInto); lines marked per width, kept or dropped by SystemGenerator;
+                             masked words too (lane writes keep the rows that do not pass, each vector of rows stored
+                             whole; MaskedFits counts the locals per width); SimdMode.Require opens every form;
                              Kernel.Pairs.cs: lanes of two sizes (int rows summed into a long, float into a double) as
                              pairs of vectors (WidenLower / WidenUpper), every lane bit-exact; four times as wide stays scalar;
                              Kernel.Views.cs: a method taking views desugared before translation (view fields as
@@ -302,10 +305,12 @@ EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089, EECS128: a [ForEach] m
 EasyEcsAnalyzer.Layout.cs    EECS091 (compilation end): a component of 32 bytes or more whose fields no frequent
                              [ForEach] pass touches are half of it (ColdFieldPasses: the fields each pass names,
                              collected from AnalyzeBody; components EECS055 already advises to split are left to it)
-EasyEcsAnalyzer.Lambdas.cs   EECS095-097: a lambda pass the generator cannot compile (Error, it would throw; the fix
+EasyEcsAnalyzer.Lambdas.cs   EECS095-097 and EECS133: a lambda pass the generator cannot compile (Error, it would throw; the fix
                              passes captured values before a static lambda), one run through its delegate (the fix
                              makes the private member internal), one left without a vector loop (Info, Kernel's reason); EECS049 for a
-                             lambda pass whose own filters no entity passes
+                             lambda pass whose own filters no entity passes; EECS133: an IForSpan job that is one element loop, whose
+                             lambda pass gets a vector loop (LambdaPass.FromJob; fix: the lambda pass, the job's
+                             declaration deleted)
 EasyEcsAnalyzer.Views.cs     EECS098-101: an invalid [View], a component reached twice through views, a view member
                              that reaches beyond its entity, a view built by hand (fixes: the view as the parameter,
                              entity.AsX()); EECS053's check in view members; EECS025 (compilation end) for a view's

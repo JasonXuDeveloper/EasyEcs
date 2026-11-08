@@ -3461,6 +3461,31 @@ declares `ITile<TKey>` and writes no `Beside` now gets one inferred (it was CS05
   followed by a word with some passing rows reached the vector job after that word (`MaskedRuns` in ArityGenerator), so
   `Emit<T>` records came out of row order and the rows a vector loop marked for a structural change closed their holes
   differently from the method's own moves (D122's row order). The run is now handed to the job first.
+- **guide/help/analyzer + zh, guide's ParallelFor page (the IForSpan / lambda form) + zh: EECS133 (Warning) "An
+  IForSpan job that is one loop over its elements".** `var j = new Scale { By = k }; world.ParallelFor(ref b, ref j);`
+  where `Scale.Execute` is one `foreach (ref float x in items)` (or `for (int i = 0; i < items.Length; i++)` reading
+  only `items[i]`): reported when the lambda pass `world.ParallelFor(ref b, k, static (ref float x, float by) => { x *=
+  by; })` gets a vector loop (checked in a copy of the compilation, `LambdaPass.FromJob`). Not reported: Execute reads
+  `start`, writes a field of the job, holds more than the loop, the job is used after the call or built apart from it,
+  or the lambda would stay scalar. The fix writes the lambda pass (fields as values, their initializers at the call,
+  `default(T)` for the others) and deletes the job's declaration; the job's type stays. Section, table row, fix line.
+- **guide/basics/systems (vector loops: wide components) + zh: masked words of wide rows.** A wide component's vector
+  loop (AVX-512 permutes, the AVX2 form, ARM64's 128 bits) now also runs the words of a table with holes (rows lacking
+  a filtered component): the lanes of rows that do not pass keep their loaded words, so each vector of rows is stored
+  whole. The schedule line reads "masked words vector" for them (still "masked words scalar" for a component of more
+  than 4 lanes holding an inline array, FlatOnly, and where the masked loop would pass the JIT's 32 inlined locals).
+  KernelBenchmark.RigHoles (every third row without Mass): see backlog L4-W for the numbers. decisions D90 + zh: the
+  roadmap item "masked words for wide rows" is done.
+- **decisions D131 + zh (SimdMode.Require): it now also opens every wide form** (512, 256, 128) without the cost
+  gates, as it opens Lookup gathers; the 32-locals limit still applies. KernelBenchmark.BrakeForced against
+  BrakeGenerated shows the gate's call on each machine.
+- **guide/help/analyzer EECS055 + zh: a tile's cells read at the loop's index.** `c[x]` / `tile[x]` of a TileCursor /
+  Tile in a [ForEach] method's loop gives "it reads a tile's cells at its index 'x' ('c[x]'), each a checked offset,
+  not a span: write the step as a cell method (Cell<TCell, TTile>), whose rows get vector loops, or load whole vectors
+  in the loop (c.Load256(x + dx, dy, dz))" instead of "it reads its index as a value".
+- **No page: WorldSimulation's CheckDeath** is `[ForEach(SimdMode = SimdMode.Off)]` with a comment (EECS055's Entity
+  reason now reaches `entity.HasNpc`; a `ReadOnlyMaybe<Npc>` parameter read the column on every row, 1.2-1.3x slower
+  ticks, and left it scalar beside `SetDead`). If a page quotes the benchmark's CheckDeath, update the fence.
 
 ## feat-later-halos (D73's push halos; #160 wide rows on AVX2)
 

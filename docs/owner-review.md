@@ -25,25 +25,6 @@ What would change the verdict: (a) a runtime count of Remove-then-Set of one typ
 (introspection could report it, the analyzer cannot); (b) the same kind of runtime count of how often a bool field
 flips per row, which would let a profile-guided hint choose between the split and the tag.
 
-## A rule for an IForSpan job that is one element loop (inner-loops.md section 6, backlog A15; not built in feat-analyzer-lane2)
-
-**Proposed by** inner-loops.md (section 6, after WP4 shipped the lambda form of `ParallelFor`): an `IForSpan<T>` job
-whose `Execute(int start, Span<T> items)` is one plain loop over `items` would get a vector loop as a lambda pass,
-`world.ParallelFor(ref items, values..., static (ref T item, ...) => ...)`, so a rule could say "write it as a lambda
-pass".
-
-**Why not in this lane.** The analyzer's rule for SIMD written by hand reports a form only when its rewrite, put in
-place in a copy of the compilation, gets the generator's loop (`HandSimd.Rewritten`), and a rule without that check
-would advise rewrites that stay scalar (`ParallelForBenchmark.Heavy`'s inner `k < 8` loop is one). Here the rewrite is
-not of a method but of the call site: the job is built where `ParallelFor(ref items, ref job)` is called, its fields
-set there become the lambda's values, and the loop's body becomes the lambda's. Checking that rewrite needs
-`LambdaPass.Read` and `Kernel.Vectorize` over a call rewritten in a copy of the compilation, a new entry in
-`LambdaPass.cs`, which the vector-loop lane owns while it edits the lambda passes. The cause is the missing call-site
-form of the check, not the rule.
-
-What would change the verdict: the vector-loop lane adding a `LambdaPass` reader over a rewritten call (the job's
-fields as values, its loop's body as the lambda); the rule is then a `HandSimd`-style form with its fix.
-
 ## Countdown timers as a generated form (Finish 1a scan, finish-scan.md item 2; owner, 2026-11-07: not built)
 
 **Proposed by** the generated-members scan: a component that counts down every tick, the entity or the component
@@ -141,11 +122,20 @@ build's guard keeps a short buffer in the loop as written, inline. Kept from the
 What would change the verdict: elements long enough that most rows already enter the helper (then only the tail's
 cost counts: 64 elements came out even), or a helper the JIT inlines into the job (the frame goes with the call).
 
-## Masked words of wide rows: not built (feat-inner-loops-rest (g), 2026-11-08)
+## An element-loop form for a tile cursor's indexer: not built (feat-lane4-generator, backlog G6, 2026-11-08)
 
-**Not attempted in this branch: the code is in the halo work's files.** D90's roadmap item lists masked words for
-narrow lanes and for wide rows. Narrow lanes ship (`Interleaved.Lanes8` / `Lanes16` and their In512 forms, 5x faster in
-`VectorFormsBenchmark.MaskedNarrow`). A wide component's loop (`Kernel.Wide.cs`, `Interleaved.Wide.cs`) runs its
-masked words through the method today; giving it lane masks means changing both files, which the concurrent
-halos branch owns. What would change the verdict: the halos branch merged, then the same lane masks over the wide
-loop's rows (4 per 128-bit vector on ARM64, a permute tree's rows on AVX-512), measured on a wide component with holes.
+**Proposed by** generator.md ("In areas owned", Settle's loops): a `for (int x = 0; x < n; x++)` loop of a Tile
+`[ForEach]` method reading `c[x + dx, dy, dz]` through a TileCursor (or a Tile, a column walk) could become an element
+loop, each offset a stream like `s[i - 1]` over a span.
+
+**Why not.** Each indexer call is a checked offset into the padded buffer (dy and dz bounds, the halo), not a span: an
+element loop would have to prove the column's range once per loop, which is what the tile loads already do
+(`c.Load256(x + dx, dy, dz)`, checked once per loop by the TileLoads interceptor), and the step as a whole is what a
+cell method (`Cell<TCell, TTile>`) writes, rows as vector loops with the halo, blank rows skipped and the shape's
+constants folded; EECS103 v2 (HandStencil) rewrites a cursor stencil written by hand into that cell method. A third
+form would vectorize the same loops a cell method already does, without its blank-row proof or halo reads in place.
+What ships instead: EECS055's reason at such a loop names both forms ("it reads a tile's cells at its index 'x' ...:
+write the step as a cell method (Cell<TCell, TTile>), whose rows get vector loops, or load whole vectors in the loop").
+
+What would change the verdict: a stencil a cell method cannot express (writing its own tile at other cells than the
+row's, or reading cells at offsets computed per row) that users write with the indexer in a hot pass.
