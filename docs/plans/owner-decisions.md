@@ -164,6 +164,7 @@ know. L7 is applied in the dashboard, but the file that documents the dashboard'
 | P15 | 2026-11-07 | Check the plans against the code | run every skill over the repository | the sweep of f9faa23, 78ffdd4, 3b0a5cc | none (one round) |
 | P16 | 2026-11-07 | Finished branches | deleted at the very end of Finish, after master (`research-copy-asm` with them) | backlog "Owner actions", Finish 6 | rule: backlog.md |
 | P17 | 2026-11-07 | Where are decisions kept? ("这些要做的决策得记下来，不然以后找不到了") | this ledger, appended in the same session | plans-ledger branch | rule: AGENTS.md (Workflows) |
+| P18 | 2026-11-08 | Token cost: three Opus agents at once used half the weekly usage overnight; keep, drop to one, pause, or switch to Sonnet? | keep as is: three agents, Opus | this session | none |
 
 ## Hardware runs
 
