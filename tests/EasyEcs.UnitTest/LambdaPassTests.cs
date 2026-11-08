@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -391,5 +392,146 @@ public class LambdaPassTests
         void Parallel() => world.ForEachParallel(dt, static (ref Heat h, in Flow f, float dt) => h.Value += f.Value * dt);
         Parallel();
         Assert.That(Allocations.Of(Parallel), Is.Zero);
+    }
+
+    // ---------------- lambda passes in one walk ----------------
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void Between() { } // a statement between two calls: each runs its own walk
+
+    private static void Fused(World world, float dt)
+    {
+        world.ForEach(dt, static (ref Flow f, in Heat h, float dt) => f.Value = f.Value * 0.5f + h.Value * dt);
+        world.ForEach(dt, static (ref Heat h, in Flow f, float step) => h.Value += f.Value * step);
+    }
+
+    private static void Apart(World world, float dt)
+    {
+        world.ForEach(dt, static (ref Flow f, in Heat h, float dt) => f.Value = f.Value * 0.5f + h.Value * dt);
+        Between();
+        world.ForEach(dt, static (ref Heat h, in Flow f, float step) => h.Value += f.Value * step);
+    }
+
+    private static Totals FusedParallel(World world, float dt)
+    {
+        world.ForEachParallel(dt, static (ref Flow f, in Heat h, float dt) => f.Value = f.Value * 0.5f + h.Value * dt);
+        world.ForEachParallel(static (in Tally t, ref Reduce<Totals> sum) => { sum.Value.Sum += t.Value; sum.Value.Count++; });
+        return world.GetSingleton<Totals>();
+    }
+
+    private static Totals ApartParallel(World world, float dt)
+    {
+        world.ForEachParallel(dt, static (ref Flow f, in Heat h, float dt) => f.Value = f.Value * 0.5f + h.Value * dt);
+        Between();
+        world.ForEachParallel(static (in Tally t, ref Reduce<Totals> sum) => { sum.Value.Sum += t.Value; sum.Value.Count++; });
+        return world.GetSingleton<Totals>();
+    }
+
+    private static void AssertSameHeatAndFlow(World a, World b)
+    {
+        var other = b.Read<Heat, Flow>().GetEnumerator();
+        int rows = 0;
+        foreach (var item in a.Read<Heat, Flow>())
+        {
+            Assert.That(other.MoveNext());
+            Assert.That(BitConverter.SingleToInt32Bits(item.Heat.Value), Is.EqualTo(BitConverter.SingleToInt32Bits(other.Current.Heat.Value)), $"Heat, row {rows}");
+            Assert.That(BitConverter.SingleToInt32Bits(item.Flow.Value), Is.EqualTo(BitConverter.SingleToInt32Bits(other.Current.Flow.Value)), $"Flow, row {rows}");
+            rows++;
+        }
+
+        Assert.That(other.MoveNext(), Is.False);
+    }
+
+    [TestCase(1)]
+    [TestCase(1003)]
+    [TestCase(SystemCode.FusedRows + 300)] // above the cache: one walk per block of rows (below it, each pass on its own)
+    public void ConsecutivePassesShareOneWalk(int count)
+    {
+        using var fused = Filled(count);
+        using var apart = Filled(count);
+        for (int i = 0; i < 3; i++)
+        {
+            Fused(fused, 0.25f);
+            Apart(apart, 0.25f);
+        }
+
+        AssertSameHeatAndFlow(fused, apart);
+    }
+
+    [TestCase(1, 1)]
+    [TestCase(20_000, 1)]
+    [TestCase(SystemCode.FusedRows + 300, 4)]
+    public void ParallelPassesShareOneWalkAndMergeTheirResults(int count, int threads)
+    {
+        var options = new WorldOptions { MaxDegreeOfParallelism = threads };
+        using var fused = new World(options);
+        using var apart = new World(options);
+        foreach (var w in new[] { fused, apart })
+        {
+            w.Reserve<Heat, Flow, Tally>(count);
+            for (int i = 0; i < count; i++) w.CreateEntity(new Heat(i), new Flow(i % 7 - 3), new Tally(i));
+            w.AddSingleton<Totals>();
+        }
+
+        Totals a = default;
+        for (int i = 0; i < 2; i++)
+        {
+            a = FusedParallel(fused, 0.5f);
+            Assert.That(a, Is.EqualTo(ApartParallel(apart, 0.5f)));
+        }
+
+        Assert.That(a.Count, Is.EqualTo(count));
+        AssertSameHeatAndFlow(fused, apart);
+    }
+
+    [Test]
+    public void PassesInOneWalkAllocateNothing()
+    {
+        using var world = Filled(SystemCode.FusedRows + 300);
+        Allocations.WarmUp(() => Fused(world, 0.5f), 10);
+        Assert.That(Allocations.Of(() => Fused(world, 0.5f)), Is.Zero);
+    }
+
+    [Test]
+    public void ConsecutiveCallsAreOneJob()
+    {
+        var (code, errors) = Generate("""
+            public static class Run
+            {
+                public static void F(World world, int n)
+                {
+                    world.ForEach(n, static (ref P p, in Q q, int n) => p.V += q.V * n);
+                    world.ForEach(n, static (in P p, ref Q q, int k) => q.V -= p.V * k);
+                    world.ForEach(static (ref P p, in Q q) => p.V *= 2);
+                }
+            }
+            """);
+        Assert.That(errors, Is.Empty, code);
+        Assert.That(code, Does.Contain("Lambda_Lambda_Lambda_Fused0").And.Contain("one walk: 3 lambda passes")
+            .And.Contain("j1 = new LambdaJob1 { x2 = n }") // the second call's value under the name the first call's interceptor has it
+            .And.Contain("// the walk of the lambda pass before it (Lambda0) ran this one"), code);
+        Assert.That(code, Does.Not.Contain("< global::EasyEcs.SystemCode.FusedRows)"), code); // P written twice: fused at any size
+        (code, errors) = Generate("public static class Run { public static void F(World world, int n) { world.ForEach(n, static (ref P p, in Q q, int n) => p.V += q.V * n); world.ForEach(static (in P p, ref Q q) => q.V -= p.V); } }");
+        Assert.That(errors, Is.Empty, code);
+        Assert.That(code, Does.Contain("Lambda_Lambda_Fused0").And.Contain("< global::EasyEcs.SystemCode.FusedRows)"), code);
+    }
+
+    // Calls that would not give the passes' results in one walk, or whose values the first call does not have.
+    [TestCase("world.ForEach(n, static (ref P p, int n) => p.V += n); Other(); world.ForEach(static (ref P p) => p.V *= 2);", "a statement between")]
+    [TestCase("world.ForEach(n, static (ref P p, int n) => p.V += n); other.ForEach(static (ref P p) => p.V *= 2);", "another World")]
+    [TestCase("world.ForEach(n, static (ref P p, int n) => p.V += n); world.ForEach(m, static (ref P p, int m) => p.V *= m);", "a value the first does not pass")]
+    [TestCase("world.ForEach(n, static (ref P p, int n) => p.V += n); world.ForEach(n + 1, static (ref P p, int m) => p.V *= m);", "a value that is not a name")]
+    [TestCase("world.ForEach(n, static (ref P p, int n) => p.V += n); next: world.ForEach(static (ref P p) => p.V *= 2);", "a label")]
+    [TestCase("world.ForEach(n, static (ref P p, int n) => p.V += n); world.ForEach(static (ref P p) => p.V *= Hidden);", "a body run through its delegate")]
+    [TestCase("world.ForEach(n, static (ref P p, int n) => p.V += n); world.ForEach([With<Q>] static (ref P p) => p.V *= 2);", "another filter")]
+    [TestCase("world.ForEach(n, static (ref P p, int n) => p.V += n); world.ForEachParallel(static (ref P p) => p.V *= 2);", "one parallel")]
+    [TestCase("world.ForEach(n, static (ref P p, int n) => p.V += n); world.ForEach(since, [Changed<T>] static (ref P p) => p.V *= 2);", "a change filter")]
+    [TestCase("world.ForEach(n, static (Entity e, in P p, int n) => { if (p.V > n) e.Set(new Q()); }); world.ForEach(static (ref P p) => p.V *= 2);", "a structural change")]
+    [TestCase("world.ForEach(static (in P p, ref Clock c) => c.Ticks += p.V); world.ForEach(static (ref P p, in Clock c) => p.V += c.Ticks);", "a singleton written once per pass")]
+    public void CallsThatCannotShareAWalkRunApart(string calls, string reason)
+    {
+        var (code, errors) = Generate("public static class Run { private static int Hidden = 2; static void Other() { } public static void F(World world, World other, int n, int m, ulong since) { " + calls + " } }");
+        Assert.That(errors, Is.Empty, code);
+        Assert.That(code, Does.Not.Contain("_Fused"), reason + "\n" + code);
     }
 }
