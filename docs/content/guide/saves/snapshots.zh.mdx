@@ -1,0 +1,316 @@
+---
+title: 快照
+seoTitle: "C# ECS 的 World 快照：用 Capture 和 Restore 做回滚与回放"
+description: 用 Capture 把整个 World 复制到内存，用 Restore 恢复，用于撤销回合、回滚网络同步、回放和测试重置；复用快照时零分配。
+icon: Camera
+---
+
+`world.Capture()` 把 World 的实体、组件和单例复制到一个 `WorldSnapshot` 里，`world.Restore(snapshot)` 再把它们放回去，次数不限。
+回合制服务器可以撤销一步操作，回滚服务器可以倒退几个 tick 补上迟到的输入再重新模拟，回放可以跳回过去，测试可以重置 World。
+复制到一个保留下来的快照里会复用它的数组，所以每个 tick 都 capture 也不分配。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  撤销回合、回滚和客户端预测（保留最近几个 tick 的环形缓冲）、会话内的回放、测试或对局之间重置 World。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  持久化：快照在内存里，并且和 World 共享托管引用。写盘、跨进程用[存档](/zh/docs/guide/saves/saves)。每个 tick 给几百万实体拍快照：
+  每次 capture 都要复制每一行。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### 拍快照和恢复 [#capture-and-restore]
+
+```csharp
+var before = world.Capture();               // O(实体数 × 组件数)
+int held = before.EntityCount;              // 快照里存活的实体数：可以记日志，或据此决定环形缓冲的大小
+
+world.Update();                             // 模拟一个回合
+bool turnAccepted = hero.Health.Value > 0;  // 游戏规则：英雄死掉的回合要撤销
+if (!turnAccepted) world.Restore(before);   // 同样的实体、同样的值、同样的单例 // [!code highlight]
+```
+
+恢复之后快照本身不变，所以还能再恢复一次：
+
+```csharp
+world.Update();
+world.Restore(before);                      // 第二次回到同一个状态
+```
+
+</Step>
+<Step>
+
+### 复用快照做回滚 [#rollback]
+
+`Capture(into)` 覆盖本 World 的一个旧快照，复用它的数组。保留最近几个 tick 的环形缓冲，在快照足够大之后就不再分配。
+
+```csharp
+public static class Rollback
+{
+    public const int Ticks = 8;
+}
+```
+
+```csharp
+var history = new WorldSnapshot[Rollback.Ticks];
+for (int tick = 0; tick < 100; tick++)
+{
+    history[tick % Rollback.Ticks] = world.Capture(history[tick % Rollback.Ticks]);   // 第一次是 null：新建一个
+    world.Update();
+}
+
+world.Restore(history[(100 - 3) % Rollback.Ticks]);                                 // 倒退三个 tick，再重新模拟
+```
+
+</Step>
+</Steps>
+
+### 快照里有什么 [#what-it-holds]
+
+- **实体和组件，按值复制。** 组件里的托管引用（`string`、数组、`List<T>`）和 World 共享，不会被克隆：组件里的集合恢复后是它
+  现在的样子，而不是当时的样子。[`DynamicBuffer<T>`](/zh/docs/guide/data/dynamic-buffers) 是例外：capture 和 restore 都会复制元素。
+  被禁用的组件保留的值也会一起恢复。
+- **单例，按值复制。** `Restore` 之后，每个单例在原来的存储里换成快照里的值，所以之前拿到的 `SingletonRef<T>` 继续有效；
+  capture 之后新加的单例会被移除。
+- **句柄。** 快照里存活实体的句柄重新有效。其他句柄全部失效，包括 capture 之后创建的实体的句柄，哪怕之后有新实体复用了它们的 id。
+- **不包括系统、选项和 `GroupBy` 设置。** 系统照常按注册的样子运行，计数也是自己的：`RunCount` 接着往下数，所以
+  [分帧](/zh/docs/guide/basics/systems#slices)的方法访问的是上次运行之后的那一片，不是拍快照时那一片。World 保留自己的
+  `GroupBy` 调用；拍快照之后新建的表保留下来，但是空的。快照保存的是每一行所在的[分组](/zh/docs/guide/data/groups)：每个实体都回到拍快照时所在的那张分组表。
+
+### 恢复之后，其他部分会看到什么 [#after-restore]
+
+- **变更追踪：** 被追踪组件恢复出来的每一行都算作被写入，没有这个组件的每一行都算作被移除，所以
+  [同步](/zh/docs/guide/changes/change-tracking#removal-detection)会把恢复后的状态重新发一遍。
+- **索引** 在下一次查找时从头重建。
+- **关系** 也一样重建。
+- **[销毁日志](/zh/docs/guide/changes/change-tracking#destroy-log)** 开启时，会记下这次恢复去掉的实体（恢复前活着、快照里没有的）。日志本身不在快照里。
+
+两个调用都会进入结构闸门，查询遍历期间调用会抛异常：在两次更新之间调用，或者在系统的 `OnUpdate` 里、`[ForEach]` 方法之外调用。
+快照只属于拍它的那个 World（否则抛 `ArgumentException`）；[`RemoveTypes`](/zh/docs/guide/saves/migration-and-unload#remove-types) 之前拍的
+快照，之后不能再恢复（抛 `InvalidOperationException`）。但可以往里重新拍：`world.Capture(snapshot)` 会替换掉所有属于被 `RemoveTypes`
+删掉的表的副本，所以跨过一次重载保留下来的快照环，每个快照重新拍过一次之后就能接着用。
+
+### 用于延迟补偿的历史记录 [#lag-compensation]
+
+射击游戏的服务器判定命中时，要看目标在射手眼里的位置：客户端落后若干个 tick，服务器就把目标倒回这么多 tick。这只需要最近几个 tick
+的位置，不需要整个 World。把它们放进一个单例环形缓冲：一个系统每个 tick 把每个命中盒的 `Position` 拷进当前帧，命中判定读射手那个 tick 的帧。
+
+```csharp tab="Components.cs"
+public record struct Hitbox(float Radius) : IComponent;
+
+// 客户端的命中声明：它在 Lag 个 tick 之前打中了站在 At 的 Target。
+public record struct Shot(EntityId Target, Position At, int Lag) : IComponent;
+
+// 一条位置记录：是谁的、在哪个 tick 记的、当时站在哪。
+public record struct Sample(EntityId Entity, long Tick, Position At);
+
+// 最近 Frames 个 tick 的位置，每个 tick 一帧，在环里循环覆盖。
+public struct PositionHistory : ISingletonComponent
+{
+    public const int Frames = 32;          // 最多补偿多少个 tick 的延迟
+    public const int Capacity = 4_096;     // 记录的实体下标数：World 的峰值实体数
+    public long Tick;                      // 正在记录的 tick
+    public Sample[] Samples;               // Frames × Capacity：第 f 帧实体下标 i 在 f * Capacity + i
+}
+```
+
+```csharp tab="Systems.cs"
+// 把这个 tick 的命中盒位置拷进环里。
+[EcsSystem]
+public ref struct RecordPositions
+{
+    // 每个 tick 一次，在下面的方法之前：换到环里的下一帧。
+    static void OnUpdate(World world) => world.PositionHistory.Tick++;
+
+    [ForEach(SimdMode = SimdMode.Off), With<Hitbox>]   // 按实体下标写环形缓冲：逐行执行
+    static void Record(Entity entity, in Position at, ref PositionHistory history)
+    {
+        int index = entity.Id.Index;
+        if (index >= PositionHistory.Capacity) return;            // 超出环的容量：不做补偿
+        int frame = (int)(history.Tick % PositionHistory.Frames);
+        history.Samples[frame * PositionHistory.Capacity + index] = new Sample(entity.Id, history.Tick, at);
+    }
+}
+
+// 拿射手那个 tick 目标所在的位置判定每一发。
+[EcsSystem, UpdateAfter<RecordPositions>]
+public ref struct ResolveShots
+{
+    [ForEach, Consume]                                       // 每发子弹在遍历结束后销毁
+    static void Resolve(in Shot claim, in PositionHistory history, World world)
+    {
+        if (Rewind(in history, claim.Target, claim.Lag, out var then)
+            && world.TryGetEntity(claim.Target, out var target)
+            && target.TryGetHitbox(out var box))
+        {
+            float dx = then.X - claim.At.X;
+            float dy = then.Y - claim.At.Y;
+            if (dx * dx + dy * dy <= box.Radius * box.Radius)
+            {
+                ref var health = ref target.TryGetRef<Health>(out bool found);
+                if (found) health.Value -= 10;
+            }
+        }
+    }
+
+    // target 在 lag 个 tick 之前站在哪，前提是环里还留着那个 tick。
+    static bool Rewind(in PositionHistory history, EntityId target, int lag, out Position at)
+    {
+        at = default;
+        long tick = history.Tick - lag;
+        if (lag < 0 || lag >= PositionHistory.Frames || tick < 1) return false;   // 比环里最老的还早
+        if (target.Index >= PositionHistory.Capacity) return false;
+        int frame = (int)(tick % PositionHistory.Frames);
+        Sample sample = history.Samples[frame * PositionHistory.Capacity + target.Index];
+        if (sample.Entity != target || sample.Tick != tick) return false;         // 那个 tick 没有记录
+        at = sample.At;
+        return true;
+    }
+}
+```
+
+```csharp tab="Program.cs"
+world.AddSingleton<PositionHistory>() = new PositionHistory
+{
+    Samples = new Sample[PositionHistory.Frames * PositionHistory.Capacity],
+};
+world.AddSystem<RecordPositions>();
+world.AddSystem<ResolveShots>();
+```
+
+每条记录都带着实体和 tick，所以一个槽位即使被同一下标的另一个实体、或者上一圈的记录写过，也不会答错人。记录是每个 tick 每个命中盒一次
+24 字节的写入，倒带是一次数组读取，环建好之后不再分配内存。
+
+为什么不每个 tick 拍一个 World 快照：`Capture` 要复制每个组件的每一行和每个单例，每个 tick O(实体数 × 组件数)，只为了留下几个位置。
+而且快照的用法是恢复，恢复会把整个 World 倒回去：血量、背包、之后创建的实体，每一行还都算作变更。命中判定要的是把过去和现在放在一起读，
+再把命中结果作用到现在。环只复制一列，读它不改变任何东西。快照留给回滚：整个状态退回去，再重新模拟。
+
+## 完整例子 [#full-example]
+
+撤销一个回合的中毒：回合开始前拍下 World 的快照，接着跑了五次更新、新建了一个实体，恢复后英雄的血量和实体数都回到原样。把这几个
+文件放进一个引用了 EasyEcs 的控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+
+// 标签：中毒的单位每个 tick 掉血。
+public struct Poisoned : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// 中毒的单位每个 tick 掉 10 点血。
+[EcsSystem]
+public ref struct PoisonSystem
+{
+    [ForEach, With<Poisoned>]
+    static void Hurt(ref Health health)
+    {
+        health.Value -= 10;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<PoisonSystem>();
+Entity hero = world.CreateEntity(new Health(100), new Poisoned());
+
+// 回合开始前：复制所有实体、组件和单例。
+WorldSnapshot beforeTurn = world.Capture();
+
+for (int i = 0; i < 5; i++)
+{
+    world.Update();
+}
+
+Entity minion = world.CreateEntity(new Health(5));
+Console.WriteLine($"after the turn: hero {hero.Health.Value} hp, entities: {world.EntityCount}");
+
+// 撤销这个回合。快照之前的句柄重新有效；小兵的句柄已经失效。
+world.Restore(beforeTurn);
+Console.WriteLine($"restored: hero {hero.Health.Value} hp, entities: {world.EntityCount}");
+Console.WriteLine($"minion alive: {minion.IsAlive}");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+after the turn: hero 50 hp, entities: 2
+restored: hero 100 hp, entities: 1
+minion alive: False
+```
+
+小兵是快照之后才建的，所以恢复时它被移除；即使之后有实体复用了它的 id，它的句柄也一直是失效的。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 为什么 |
+| --- | --- | --- |
+| 每个 tick 调用 `Capture()` | `Capture(snapshot)` 写进保留的快照 | 复用数组：足够大之后不再分配 |
+| 巨大的 World 每个 tick 拍一次 | 隔几个 tick 拍一次，或每个区域一个更小的 World | capture 是 O(实体数 × 组件数) |
+| 用快照写盘 | `Save` / `Load` | 字节流、字段哈希、跨进程 |
+| 需要回滚的集合放在组件里 | 用 `DynamicBuffer<T>` | 缓冲会被复制；其他集合是共享的 |
+
+10 万个实体分布在两张表、外加一个单例：capture 到新快照、restore，以及作为对比的存档到复用缓冲区和加载（`SnapshotBenchmark`）：
+
+<BenchTable bench="SnapshotBenchmark" />
+
+capture 的分配就是新建的那个快照本身；`Capture(into)` 会复用快照。
+
+## 开销 [#what-it-costs]
+
+- **内存：** 每一行、每个单例以及实体记录各一份拷贝。
+- **时间：** 两个方向都是 O(实体数 × 组件数 + 表数 + 单例数)；行按列逐列复制。
+- **恢复之后：** 每个索引在下一次查找时重建一遍，每个被追踪的行都算作已变化。
+- **从不拍快照的 World** 零开销。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 以为组件里的 `List<T>` 会回滚 | 它是共享的：恢复后还是现在的样子 | 改用 `DynamicBuffer<T>` |
+| 查询遍历期间 capture 或 restore | 抛 `InvalidOperationException` | [EECS041](/zh/docs/guide/help/analyzer#eecs041) |
+| 把快照恢复到另一个 World | 抛 `ArgumentException` | 运行时 |
+| 恢复 [`RemoveTypes`](/zh/docs/guide/saves/migration-and-unload#remove-types) 之前拍的快照 | 抛 `InvalidOperationException`：它的表已经没了 | 运行时：`RemoveTypes` 之后往里重新拍 |
+| 每个 tick 拍一个快照，用来倒带判定命中 | 每个 tick 复制每一行，而且一恢复就全部倒回 | 只记位置的[历史环](#lag-compensation) |
+| 继续使用 capture 之后创建的实体的句柄 | 恢复后它们失效 | `IsAlive` |
+| 把快照写到磁盘 | 快照是对象图，不是字节 | 用[存档](/zh/docs/guide/saves/saves) |
+| 在其他线程 capture 或 restore | 结构变更只属于所有者线程 | [EECS014](/zh/docs/guide/help/analyzer#eecs014) |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="存档" href="/zh/docs/guide/saves/saves">
+    把 World 变成字节，写盘或发给其他进程。
+  </Card>
+  <Card title="变更追踪" href="/zh/docs/guide/changes/change-tracking">
+    恢复会把每一行都算作写入或移除。
+  </Card>
+  <Card title="动态缓冲" href="/zh/docs/guide/data/dynamic-buffers">
+    快照会复制元素的列表。
+  </Card>
+</Cards>

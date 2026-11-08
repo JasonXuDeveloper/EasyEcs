@@ -111,9 +111,9 @@ when the system is removed or added twice. Put it in data:
 | --- | --- |
 | Per entity (cooldown, target, path) | A component |
 | Per world (tick, score, configuration, spatial grid) | A singleton |
-| Lookups by value (a player by name, the items of an owner) | An indexed component ([indexes and relations](/en/docs/guide/indexes-and-relations)), not a dictionary kept in sync by hand |
-| Derived and rebuildable (a scratch list reused every update) | A [`Scratch<T>`](/en/docs/guide/threading#scratch) parameter, or a `static readonly` field on the system |
-| A dependency of the host (a mailbox, a connection, a service) | A [`[NotSaved]`](/en/docs/guide/saves#not-saved) singleton the host sets |
+| Lookups by value (a player by name, the items of an owner) | An indexed component ([indexes and relations](/en/docs/guide/data/indexes-and-relations)), not a dictionary kept in sync by hand |
+| Derived and rebuildable (a scratch list reused every update) | A [`Scratch<T>`](/en/docs/guide/performance/threading#scratch) parameter, or a `static readonly` field on the system |
+| A dependency of the host (a mailbox, a connection, a service) | A [`[NotSaved]`](/en/docs/guide/saves/saves#not-saved) singleton the host sets |
 
 ```csharp tab="Before" doccheck=expect-EECS007
 // Before (EECS007): the count lives in the system, where no query, test or other system can see it.
@@ -149,13 +149,13 @@ public ref struct DeathSystem
 }
 ```
 
-A system declares static members only ([EECS075](/en/docs/guide/analyzer#eecs075)). Constants and `static readonly`
+A system declares static members only ([EECS075](/en/docs/guide/help/analyzer#eecs075)). Constants and `static readonly`
 fields (a lookup table, a reusable scratch buffer) are allowed; a mutable static field is
-[EECS007](/en/docs/guide/analyzer#eecs007): it would be state shared by every world and kept when the system is removed.
+[EECS007](/en/docs/guide/help/analyzer#eecs007): it would be state shared by every world and kept when the system is removed.
 
 ### 3. Systems never reference systems [#3-systems-never-reference-systems]
 
-A system that calls another system's members ([EECS008](/en/docs/guide/analyzer#eecs008)), or reaches one through
+A system that calls another system's members ([EECS008](/en/docs/guide/help/analyzer#eecs008)), or reaches one through
 `world.System<T>()` or `TryGetSystem<T>(out …)`, can no longer be removed, reordered or tested alone. Cooperate through data instead:
 
 - **Pipeline:** an earlier system writes a component, a later one reads it. Register the writer first, or order them
@@ -190,7 +190,7 @@ that state later in the update, in the order of the schedule: movement and comba
 adding one changes no existing system.
 
 The same holds for what an entity leaves behind. A resource outside the world (a socket, a reserved seat) is a
-[cleanup component](/en/docs/guide/cleanup-and-disable): `Destroy` retires the entity, which stays, tagged `Retired`,
+[cleanup component](/en/docs/guide/changes/cleanup-and-disable): `Destroy` retires the entity, which stays, tagged `Retired`,
 until a system releases the resource. There is no destroy event to subscribe to.
 
 ### 5. Choose the cheapest representation for frequent changes [#5-choose-the-cheapest-representation-for-frequent-changes]
@@ -202,16 +202,16 @@ still cheaper than a structural change:
 
 - a countdown field (`Burning.Ticks`) instead of re-adding a component every tick;
 - change detection by change ticks: mark the component `ITracked` and give the consumer `[Changed<T>]`, instead
-  of adding and removing a `Changed` tag or scanning every row ([change tracking](/en/docs/guide/change-tracking)).
+  of adding and removing a `Changed` tag or scanning every row ([change tracking](/en/docs/guide/changes/change-tracking)).
   A write is any `ref` access, so a writer that may leave the value as it was writes through a `Mut<T>` parameter
   and `SetIfChanged` (`entity.SetIfChanged` / `SetXIfChanged` outside a `[ForEach]`), which stamps only a value that
-  differs: readers then never compare ([write only when the value changed](/en/docs/guide/change-tracking#set-if-changed)),
+  differs: readers then never compare ([write only when the value changed](/en/docs/guide/changes/change-tracking#set-if-changed)),
   and a loop that only reads walks `world.Read<T…>()`, which stamps nothing;
 - removal detection the same way: `[Removed<T>]` visits the entities that lost a tracked `T`, instead of a `Lost` tag
-  added next to every removal ([removal detection](/en/docs/guide/change-tracking#removal-detection));
+  added next to every removal ([removal detection](/en/docs/guide/changes/change-tracking#removal-detection));
 - pausing with `Disable<T>()`, which hides a component and keeps its value, instead of removing it and storing the
-  value elsewhere ([cleanup and disable](/en/docs/guide/cleanup-and-disable));
-- kinds of entities as [prefabs](/en/docs/guide/prefabs): data that belongs to no world, instantiated where needed,
+  value elsewhere ([cleanup and disable](/en/docs/guide/changes/cleanup-and-disable));
+- kinds of entities as [prefabs](/en/docs/guide/basics/prefabs): data that belongs to no world, instantiated where needed,
   instead of template entities that every query must exclude.
 
 ```csharp
@@ -261,17 +261,17 @@ public ref struct DeathSystem
 }
 ```
 
-The full rules are in [Structural changes](/en/docs/guide/structural-changes).
+The full rules are in [Structural changes](/en/docs/guide/changes/structural-changes).
 
 ### 7. Keep entity handles, never refs, across boundaries [#7-keep-entity-handles-never-refs-across-boundaries]
 
 A `ref` from `Get<T>()` or a `Query` item is valid until the next structural change (of any entity); the `ref`
 parameters of a `[ForEach]` method stay valid through their own body's changes. None is valid across `await`. Keep
 `Entity` handles, which are checked on every access, and read components again when you need them
-([ref and await](/en/docs/guide/refs-and-await)).
+([ref and await](/en/docs/guide/changes/refs-and-await)).
 
 Inside data, keep the `EntityId` instead of the handle: an `Entity` field makes a component managed
-([EECS017](/en/docs/guide/analyzer#eecs017)), and `world.TryGetEntity(id, out var entity)` turns the id back into
+([EECS017](/en/docs/guide/help/analyzer#eecs017)), and `world.TryGetEntity(id, out var entity)` turns the id back into
 a handle and tells you whether the entity still lives.
 
 ### 8. Choose how to hold a collection [#8-choose-how-to-hold-a-collection]
@@ -281,7 +281,7 @@ world sees a write when code takes the component by `ref`, not when the collecti
 
 - **Change it only through `ref`** (a `ref` parameter, `Get`, `TryGetRef`): the row is stamped for `[Changed<T>]`,
   and parallel systems schedule the write. Changing it through an `in` parameter is a race that goes unnoticed; the
-  analyzer reports it ([EECS011](/en/docs/guide/analyzer#eecs011)).
+  analyzer reports it ([EECS011](/en/docs/guide/help/analyzer#eecs011)).
 - **Snapshots share it**: `Capture` copies the reference, not the collection, so restoring brings back the list as
   it is now. Snapshots are for plain data; saves serialize the collection anyway. A `DynamicBuffer<T>` has neither
   problem: its writes need a `ref`, and snapshots copy its elements.
@@ -290,8 +290,8 @@ Then pick the representation by what the items are:
 
 | Items | Hold them as | Why |
 | --- | --- | --- |
-| Things with their own state, queried or changed on their own (inventory items, guild members, buffs) | **One entity per item** with a link to its owner ([indexes and relations](/en/docs/guide/indexes-and-relations)) | Each item has its own components, change ticks, queries and parallel schedule, copied by value in snapshots |
-| A list that belongs to one entity, sent or saved when it changes (a bag of loot, a path, recent hits) | **A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers)** component | Every write needs a `ref`, so each change is tracked; snapshots copy the elements; a write through `in` does not compile |
+| Things with their own state, queried or changed on their own (inventory items, guild members, buffs) | **One entity per item** with a link to its owner ([indexes and relations](/en/docs/guide/data/indexes-and-relations)) | Each item has its own components, change ticks, queries and parallel schedule, copied by value in snapshots |
+| A list that belongs to one entity, sent or saved when it changes (a bag of loot, a path, recent hits) | **A [`DynamicBuffer<T>`](/en/docs/guide/data/dynamic-buffers)** component | Every write needs a `ref`, so each change is tracked; snapshots copy the elements; a write through `in` does not compile |
 | A small, bounded set of values (cooldown slots, the last few inputs) | **A fixed `[InlineArray]` array** in an unmanaged component | No GC, copied by value everywhere, every change a `ref` write |
 | Data read and written as a whole, usually with the save (quest progress, settings, unlocked achievements) | **A collection in a component**, changed through `ref` | One row per player instead of thousands of entities; loaded and saved with the player |
 | Read-mostly data replaced as a whole (a patrol route) | **An immutable collection** (`ImmutableArray<T>`) | Assigning a new one through `ref` is a tracked write; a snapshot keeps the old one |
@@ -342,16 +342,16 @@ them:
 
 | Rule | Broken by | Caught by |
 | --- | --- | --- |
-| Components are data | A class implementing `IComponent` | [EECS006](/en/docs/guide/analyzer#eecs006) |
-| Systems are not objects | `[EcsSystem]` on a class or a plain struct; an instance member in a system | [EECS074](/en/docs/guide/analyzer#eecs074), [EECS075](/en/docs/guide/analyzer#eecs075) |
-| [2. Systems are stateless](#2-systems-are-stateless) | A mutable static field on a system | [EECS007](/en/docs/guide/analyzer#eecs007) |
-| [3. Systems never reference systems](#3-systems-never-reference-systems) | A call of another system's members, `System<T>()` / `TryGetSystem<T>(out …)` inside a system | [EECS008](/en/docs/guide/analyzer#eecs008) |
-| [5. Choose the cheapest representation](#5-choose-the-cheapest-representation-for-frequent-changes) | A `Query` loop that only reads tracked components (every row stamped) | [EECS046](/en/docs/guide/analyzer#eecs046) (warning) |
-| [6. Let the schedule order effects](#6-let-the-schedule-order-effects) | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` in a cycle | [EECS019](/en/docs/guide/analyzer#eecs019) |
-| [7. Keep handles, not refs](#7-keep-entity-handles-never-refs-across-boundaries) | An `Entity` field in a component; a `ref` used after a structural change | [EECS017](/en/docs/guide/analyzer#eecs017), [EECS047](/en/docs/guide/analyzer#eecs047) (warnings) |
-| [8. Choose how to hold a collection](#8-choose-how-to-hold-a-collection) | Changing a collection through `in` | [EECS011](/en/docs/guide/analyzer#eecs011) |
+| Components are data | A class implementing `IComponent` | [EECS006](/en/docs/guide/help/analyzer#eecs006) |
+| Systems are not objects | `[EcsSystem]` on a class or a plain struct; an instance member in a system | [EECS074](/en/docs/guide/help/analyzer#eecs074), [EECS075](/en/docs/guide/help/analyzer#eecs075) |
+| [2. Systems are stateless](#2-systems-are-stateless) | A mutable static field on a system | [EECS007](/en/docs/guide/help/analyzer#eecs007) |
+| [3. Systems never reference systems](#3-systems-never-reference-systems) | A call of another system's members, `System<T>()` / `TryGetSystem<T>(out …)` inside a system | [EECS008](/en/docs/guide/help/analyzer#eecs008) |
+| [5. Choose the cheapest representation](#5-choose-the-cheapest-representation-for-frequent-changes) | A `Query` loop that only reads tracked components (every row stamped) | [EECS046](/en/docs/guide/help/analyzer#eecs046) (warning) |
+| [6. Let the schedule order effects](#6-let-the-schedule-order-effects) | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` in a cycle | [EECS019](/en/docs/guide/help/analyzer#eecs019) |
+| [7. Keep handles, not refs](#7-keep-entity-handles-never-refs-across-boundaries) | An `Entity` field in a component; a `ref` used after a structural change | [EECS017](/en/docs/guide/help/analyzer#eecs017), [EECS047](/en/docs/guide/help/analyzer#eecs047) (warnings) |
+| [8. Choose how to hold a collection](#8-choose-how-to-hold-a-collection) | Changing a collection through `in` | [EECS011](/en/docs/guide/help/analyzer#eecs011) |
 
-The full list, with a fix for each rule, is in [Analyzer rules](/en/docs/guide/analyzer).
+The full list, with a fix for each rule, is in [Analyzer rules](/en/docs/guide/help/analyzer).
 
 ## Checklist for a new feature [#checklist]
 
@@ -371,10 +371,10 @@ The full list, with a fix for each rule, is in [Analyzer rules](/en/docs/guide/a
   <Card title="Getting started" href="/en/docs/getting-started">
     The rules applied, step by step, in a small simulation.
   </Card>
-  <Card title="Systems" href="/en/docs/guide/systems">
+  <Card title="Systems" href="/en/docs/guide/basics/systems">
     Parameters, filters, ordering and groups of `[ForEach]` methods.
   </Card>
-  <Card title="Analyzer rules" href="/en/docs/guide/analyzer">
+  <Card title="Analyzer rules" href="/en/docs/guide/help/analyzer">
     Every EECS rule, why it exists and how to fix it.
   </Card>
 </Cards>

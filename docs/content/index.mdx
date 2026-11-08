@@ -75,7 +75,7 @@ public ref struct MovementSystem
 ```
 
 `ref` marks what the system writes and `in` what it only reads. The generator reads those two words to build the
-loop, to decide which systems may run in parallel, and to tell [change tracking](/en/docs/guide/change-tracking)
+loop, to decide which systems may run in parallel, and to tell [change tracking](/en/docs/guide/changes/change-tracking)
 which rows were written.
 
 ## Where to start [#where-to-start]
@@ -113,34 +113,34 @@ flowchart LR
 The guide has one page per concept, in the order you need them.
 
 <Cards>
-  <Card icon={<FolderTree />} title="Structuring a real project" href="/en/docs/guide/project-structure">
+  <Card icon={<FolderTree />} title="Structuring a real project" href="/en/docs/guide/basics/project-structure">
     Where components, systems, the host loop and the tests go, as `dotnet new easyecs` lays them out.
   </Card>
-  <Card icon={<Boxes />} title="Entities and components" href="/en/docs/guide/entities-and-components">
+  <Card icon={<Boxes />} title="Entities and components" href="/en/docs/guide/basics/entities-and-components">
     Handles, ids, tags and the generated members.
   </Card>
-  <Card icon={<Search />} title="Queries and filters" href="/en/docs/guide/queries">
+  <Card icon={<Search />} title="Queries and filters" href="/en/docs/guide/basics/queries">
     `Query`, `Count`, `Any`, `QueryFilter`, struct jobs and `[EntityMethod]` methods on one entity.
   </Card>
-  <Card icon={<Workflow />} title="Systems" href="/en/docs/guide/systems">
+  <Card icon={<Workflow />} title="Systems" href="/en/docs/guide/basics/systems">
     `[ForEach]` methods, ordering, groups, cadence, consumed events and errors.
   </Card>
-  <Card icon={<Zap />} title="Change tracking" href="/en/docs/guide/change-tracking">
+  <Card icon={<Zap />} title="Change tracking" href="/en/docs/guide/changes/change-tracking">
     Visit only the rows written or removed since a system last ran.
   </Card>
-  <Card icon={<Network />} title="Threading" href="/en/docs/guide/threading">
+  <Card icon={<Network />} title="Threading" href="/en/docs/guide/performance/threading">
     One owner thread per world, parallel systems and parallel `[ForEach]`.
   </Card>
-  <Card icon={<TriangleAlert />} title="Common mistakes" href="/en/docs/guide/common-mistakes">
+  <Card icon={<TriangleAlert />} title="Common mistakes" href="/en/docs/guide/help/common-mistakes">
     What goes wrong first, and the rule or analyzer error that catches it.
   </Card>
 </Cards>
 
 The rest of the guide covers singletons, structural changes, `ref` and `await`, dynamic buffers, indexes and
-relations, hierarchies, groups, cleanup and disable, [prefabs](/en/docs/guide/prefabs), bulk changes, snapshots, saves,
-migration and unloading, [hosting](/en/docs/guide/hosting), [testing](/en/docs/guide/testing),
-[debugging and diagnostics](/en/docs/guide/diagnostics), [troubleshooting](/en/docs/guide/troubleshooting), and every
-[analyzer rule](/en/docs/guide/analyzer).
+relations, hierarchies, groups, cleanup and disable, [prefabs](/en/docs/guide/basics/prefabs), bulk changes, snapshots, saves,
+migration and unloading, [hosting](/en/docs/guide/production/hosting), [testing](/en/docs/guide/production/testing),
+[debugging and diagnostics](/en/docs/guide/production/diagnostics), [troubleshooting](/en/docs/guide/help/troubleshooting), and every
+[analyzer rule](/en/docs/guide/help/analyzer).
 
 ## Compare [#compare]
 

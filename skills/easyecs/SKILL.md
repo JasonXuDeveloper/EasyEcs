@@ -268,11 +268,11 @@ available as Markdown: add `.md` to its URL.
 - Lay a project out like `dotnet new easyecs` (package `EasyEcs.Templates`): data in `Components/`, one system per
   file in `Systems/`, and `Program.cs` only as the host: it builds the world, sets every singleton before the first
   update and adds the systems in one method the tests share. Input from other threads goes through a queue held in a
-  singleton. https://ecs.xgamedev.net/en/docs/guide/project-structure
+  singleton. https://ecs.xgamedev.net/en/docs/guide/basics/project-structure
 - To look inside a world: `world.DescribeTables()` (tables, rows, bytes), `entity.Describe()`, `system.Stats` with
   `WorldOptions.MeasureSystems` (times, `LastAllocated` bytes, `LastEntities` visited), `system.Error` with
   `SystemErrorPolicy.Disable`; on the owner thread between updates, never in game logic.
-  https://ecs.xgamedev.net/en/docs/guide/diagnostics
+  https://ecs.xgamedev.net/en/docs/guide/production/diagnostics
 - Log `world.DescribeSchedule()` at startup (or `.ToMermaid()` for a chart) to see stages and why systems wait; a
   pair listed as ordered only by registration needs `[UpdateBefore<T>]` / `[UpdateAfter<T>]` if its order matters.
   Each system's `Loops` names the loop each `[ForEach]` method got (a vector loop, or why it runs row by row).

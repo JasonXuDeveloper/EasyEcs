@@ -132,7 +132,7 @@ public sealed partial class World : IDisposable
         }
     }
 
-    /// <summary>Create an entity without components. O(1) amortized. Owner thread only (see docs/content/guide/threading.md).</summary>
+    /// <summary>Create an entity without components. O(1) amortized. Owner thread only (see docs/content/guide/performance/threading.md).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     public Entity CreateEntity()
     {
@@ -151,7 +151,7 @@ public sealed partial class World : IDisposable
     /// <see cref="DynamicBuffer{T}"/> gets a list of its own, indexes learn the new entity, tracked components count as
     /// written now. O(components): one row copy, no table search after the first instance. A prefab with members
     /// creates them all and returns the entity of the one passed (O(members × components)). Owner thread only (see
-    /// docs/content/guide/threading.md).
+    /// docs/content/guide/performance/threading.md).
     /// </summary>
     public Entity Instantiate(Prefab prefab) => prefab.IsGroup ? InstantiateGroup(prefab) : Copy(prefab.Row, false);
 
@@ -347,7 +347,7 @@ public sealed partial class World : IDisposable
     /// <summary>
     /// Destroy <paramref name="entity"/> (a handle of this world; <c>Entity.Destroy</c> is the public call); a stale
     /// handle is ignored. An entity holding <see cref="ICleanupComponent"/>s is retired instead (see <see cref="Retire"/>).
-    /// O(components). Owner thread only (see docs/content/guide/threading.md).
+    /// O(components). Owner thread only (see docs/content/guide/performance/threading.md).
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)] // structural change: keeps the loops that call it lean
     internal void DestroyEntity(Entity entity)

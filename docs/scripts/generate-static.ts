@@ -54,11 +54,11 @@ const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 /* ------------------------------------------------------------------ */
 
 /**
- * React Router writes /en/docs/guide/queries as en/docs/guide/queries/index.html,
- * which Cloudflare Pages serves at /en/docs/guide/queries/ and reaches from the
+ * React Router writes /en/docs/guide/basics/queries as en/docs/guide/basics/queries/index.html,
+ * which Cloudflare Pages serves at /en/docs/guide/basics/queries/ and reaches from the
  * slash-less URL only through a 308 redirect. Every link, canonical URL and
  * sitemap entry uses the slash-less URL, so move each page to
- * en/docs/guide/queries.html: Pages then serves it at /en/docs/guide/queries
+ * en/docs/guide/basics/queries.html: Pages then serves it at /en/docs/guide/basics/queries
  * directly and redirects the trailing-slash and .html forms there.
  */
 async function flattenPages(dir: string) {
@@ -295,7 +295,7 @@ const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
         : []),
       `Install: \`${installCommand}\` in a net10.0 project ([NuGet](${nugetUrl})); the package includes the source generator, the analyzer and its code fixes.`,
       'Usage: components are structs implementing `IComponent` (empty structs are tags, `ISingletonComponent` for per-world state); a system is a class deriving from `EcsSystem` with `[ForEach]` methods; `world.AddSystem<T>()`, `world.CreateEntity(...)`, `world.Update()`.',
-      `Project layout: \`dotnet new install EasyEcs.Templates\` and \`dotnet new easyecs\` create a server with \`Components/\`, one system per file in \`Systems/\` and \`Program.cs\` as the host ([Structuring a real project](${siteUrl}/en/docs/guide/project-structure.md)). Debugging: \`world.DescribeTables()\`, \`entity.Describe()\`, \`system.Stats\` and \`system.Error\` ([Debugging and diagnostics](${siteUrl}/en/docs/guide/diagnostics.md)).`,
+      `Project layout: \`dotnet new install EasyEcs.Templates\` and \`dotnet new easyecs\` create a server with \`Components/\`, one system per file in \`Systems/\` and \`Program.cs\` as the host ([Structuring a real project](${siteUrl}/en/docs/guide/basics/project-structure.md)). Debugging: \`world.DescribeTables()\`, \`entity.Describe()\`, \`system.Stats\` and \`system.Error\` ([Debugging and diagnostics](${siteUrl}/en/docs/guide/production/diagnostics.md)).`,
       `EasyEcs targets net10.0 only. It runs in Godot 4 .NET projects that target net10.0 ([Unity and Godot](${siteUrl}/en/docs/faq.md)); it does not run on Unity (support is being evaluated: [Roadmap](${siteUrl}/en/docs/roadmap.md)) or older .NET runtimes.`,
       `These docs describe EasyEcs ${docsVersion}. Source code and issues: ${githubUrl} (MIT license).`,
       `Full text of every page: [llms-full.txt](${siteUrl}/llms-full.txt); Chinese: [llms.zh.txt](${siteUrl}/llms.zh.txt)`,
@@ -323,7 +323,7 @@ const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
         : []),
       `安装：在 net10.0 项目中运行 \`${installCommand}\`（[NuGet](${nugetUrl})），包内已包含源生成器、分析器和代码修复。`,
       '用法：组件是实现 `IComponent` 的结构体（空结构体即标签，World 级状态用 `ISingletonComponent`）；系统是继承 `EcsSystem` 的类，逻辑写在 `[ForEach]` 方法里；然后调用 `world.AddSystem<T>()`、`world.CreateEntity(...)`、`world.Update()`。',
-      `项目结构：\`dotnet new install EasyEcs.Templates\` 后运行 \`dotnet new easyecs\`，生成带 \`Components/\`、\`Systems/\`（一个文件一个系统）和宿主 \`Program.cs\` 的服务器（[项目结构](${siteUrl}/zh/docs/guide/project-structure.md)）。调试：\`world.DescribeTables()\`、\`entity.Describe()\`、\`system.Stats\` 与 \`system.Error\`（[调试与诊断](${siteUrl}/zh/docs/guide/diagnostics.md)）。`,
+      `项目结构：\`dotnet new install EasyEcs.Templates\` 后运行 \`dotnet new easyecs\`，生成带 \`Components/\`、\`Systems/\`（一个文件一个系统）和宿主 \`Program.cs\` 的服务器（[项目结构](${siteUrl}/zh/docs/guide/basics/project-structure.md)）。调试：\`world.DescribeTables()\`、\`entity.Describe()\`、\`system.Stats\` 与 \`system.Error\`（[调试与诊断](${siteUrl}/zh/docs/guide/production/diagnostics.md)）。`,
       `EasyEcs 只面向 net10.0。面向 net10.0 的 Godot 4 .NET 项目可以运行它（[Unity 与 Godot](${siteUrl}/zh/docs/faq.md)）；不支持 Unity（正在评估：[路线图](${siteUrl}/zh/docs/roadmap.md)）和更老的 .NET 运行时。`,
       `本文档对应 EasyEcs ${docsVersion}。源码与问题反馈：[GitHub](${githubUrl})（MIT 协议）。`,
       `全部页面全文：[llms-full.zh.txt](${siteUrl}/llms-full.zh.txt)。英文版：[llms.txt](${siteUrl}/llms.txt)`,
@@ -514,7 +514,7 @@ export async function generateStatic() {
     );
   }
 
-  // Markdown next to each page (/en/docs/guide/queries.md), for LLMs and the
+  // Markdown next to each page (/en/docs/guide/basics/queries.md), for LLMs and the
   // "Copy Markdown" page action; .mdx is served too. Fallback pages have none:
   // their page actions and alternate links point at the English copy.
   for (const page of source.getPages().filter(isOwn)) {

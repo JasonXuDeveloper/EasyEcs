@@ -166,7 +166,7 @@ and the order of effects depends on when buffers are played back.
 
 EasyEcs applies every structural change at once, even in the middle of a pass. A pass still visits each entity at
 most once, entities that join a table during the pass wait for the next one, and the systems that run later in the
-same update see the change. See [Structural changes](/en/docs/guide/structural-changes).
+same update see the change. See [Structural changes](/en/docs/guide/changes/structural-changes).
 
 ## Can an ECS run systems in parallel? [#parallel]
 
@@ -177,7 +177,7 @@ nothing the other touches can run at the same time without locks. In EasyEcs the
 `[ForEach(Parallel = true)]`.
 
 For a server, the simplest parallelism is often one world per thread, such as one per map or zone: worlds share
-nothing, so they need no synchronization at all. See [Threading](/en/docs/guide/threading).
+nothing, so they need no synchronization at all. See [Threading](/en/docs/guide/performance/threading).
 
 ## Is an ECS faster than object-oriented code? [#ecs-vs-oop]
 

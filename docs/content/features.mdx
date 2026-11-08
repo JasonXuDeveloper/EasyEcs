@@ -66,7 +66,7 @@ throws instead of reaching the entity that reuses its id.
   destroying fills the hole with the table's last row. `WorldOptions.InitialEntityCapacity`,
   `EnsureEntityCapacity(n)` and `Reserve<T1, …, Tn>(n)` (the table too) pre-size for a known peak, so a
   long-running server never grows at run time.
-- **Guide:** [Entities and components](/en/docs/guide/entities-and-components)
+- **Guide:** [Entities and components](/en/docs/guide/basics/entities-and-components)
 
 ### Components and tags [#components-and-tags]
 
@@ -78,7 +78,7 @@ Removing a component clears a presence bit and keeps the row, so adding it back 
 - **Skip it for:** values that change every tick on most entities as a tag: use a field.
 - **Cost:** a pass loads only the columns it reads. Gaining a component the table has no column for copies the row
   once; after that, toggling it flips a bit.
-- **Guide:** [Entities and components](/en/docs/guide/entities-and-components)
+- **Guide:** [Entities and components](/en/docs/guide/basics/entities-and-components)
 
 ### Generated members [#generated-members]
 
@@ -91,7 +91,7 @@ a read is never a write.
   generic code.
 - **Cost:** none. Each member is an inlined call to the generic API, and the generator knows which ones are
   structural.
-- **Guide:** [Entities and components](/en/docs/guide/entities-and-components), [Cheat sheet](/en/docs/cheat-sheet#generated-members)
+- **Guide:** [Entities and components](/en/docs/guide/basics/entities-and-components), [Cheat sheet](/en/docs/cheat-sheet#generated-members)
 
 ### Generated parts [#generated-parts]
 
@@ -112,8 +112,8 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
   interface by hand.
 - **Cost:** none at run time; the members are the ones you would write. A setup attribute applies from a world's
   first table holding the type.
-- **Guide:** [Generated parts](/en/docs/guide/entities-and-components#declared-parts),
-  [EECS062-069](/en/docs/guide/analyzer#eecs062)
+- **Guide:** [Generated parts](/en/docs/guide/basics/entities-and-components#declared-parts),
+  [EECS062-069](/en/docs/guide/help/analyzer#eecs062)
 
 ### Systems and [ForEach] [#systems-and-foreach]
 
@@ -127,7 +127,7 @@ each system's record (enabled, error, ticks, stats) and hands out a `SystemHandl
   entity, against <BenchValue k="rawArray.perEntity" /> for the same loop over two plain arrays. Per system and
   update: one direct call from its assembly's system set (no virtual call), and per method a pass that reads the query
   kept for its job type.
-- **Guide:** [Systems](/en/docs/guide/systems), [ECS principles](/en/docs/ecs-principles)
+- **Guide:** [Systems](/en/docs/guide/basics/systems), [ECS principles](/en/docs/ecs-principles)
 
 ### Generic systems [#generic-systems]
 
@@ -137,10 +137,10 @@ static helpers: a ref struct has no base class.
 
 - **Use it for:** one rule applied to several component types (a counter, a decay, a cleanup per kind of resource).
 - **Skip it for:** a generic `[ForEach]` method: nothing would supply its type arguments
-  ([EECS004](/en/docs/guide/analyzer#eecs004)); make the system generic instead.
+  ([EECS004](/en/docs/guide/help/analyzer#eecs004)); make the system generic instead.
 - **Cost:** none beyond the closed systems. Their code is written into the assembly that names them, so Native AOT and
   WebAssembly run them too; a type closed by reflection only has no code (`AddSystem` throws).
-- **Guide:** [Systems](/en/docs/guide/systems#generic-systems)
+- **Guide:** [Systems](/en/docs/guide/basics/systems#generic-systems)
 
 ### Filters [#filters]
 
@@ -154,7 +154,7 @@ then gives each actor type its own filtered group, where an attribute could not 
   (`[WithAny<Frozen, Stunned>]`).
 - **Cost:** matching is cached per query shape; a table that cannot match is skipped once, a table where some rows
   lack a component is tested 64 rows per bit word.
-- **Guide:** [Queries and filters](/en/docs/guide/queries), [Group filters](/en/docs/guide/systems#group-filters)
+- **Guide:** [Queries and filters](/en/docs/guide/basics/queries), [Group filters](/en/docs/guide/basics/systems#group-filters)
 
 ### Optional components [#optional-components]
 
@@ -167,7 +167,7 @@ indexed component accepts.
 - **Skip it for:** the hottest loops: two methods with `[With<T>]` / `[Without<T>]` test nothing per row.
 - **Cost:** one presence-bit test per row in a method that makes no structural change; a lookup per entity in one
   that does.
-- **Guide:** [Systems](/en/docs/guide/systems#maybe), [`ReadOnlyMaybe<T>`](/en/docs/guide/systems#read-only-maybe)
+- **Guide:** [Systems](/en/docs/guide/basics/systems#maybe), [`ReadOnlyMaybe<T>`](/en/docs/guide/basics/systems#read-only-maybe)
 
 ### Vector loops the generator writes (SIMD) [#vector-loops]
 
@@ -179,15 +179,15 @@ one vector each, and the results are those of the per-row method bit for bit.
 
 - **Use it for:** arithmetic over many rows: decay, integration, clamps, counters.
 - **Skip it for:** nothing: it is automatic. A method that does not qualify (lanes of two sizes, a call on every
-  path) runs row by row as before, and [EECS055](/en/docs/guide/analyzer#eecs055) names why;
-  `SimdMode = SimdMode.Require` makes that a build error ([EECS056](/en/docs/guide/analyzer#eecs056)), `SimdMode.Off`
+  path) runs row by row as before, and [EECS055](/en/docs/guide/help/analyzer#eecs055) names why;
+  `SimdMode = SimdMode.Require` makes that a build error ([EECS056](/en/docs/guide/help/analyzer#eecs056)), `SimdMode.Off`
   silences it. Parallel methods, `Maybe<T>` parameters, `byte` and `short` lanes, `Vector2` / `Vector3` fields, whole
   values (`new T(...)`, `with`) and a call under a condition get the loop too; `FloatMode.Fast` lets `Sin`, `Exp`,
   `Log` and friends take vector approximations. `SystemInfo.Loops` names the loop each method got.
 - **Cost:** none at run time beyond the loop itself, written at compile time; a `Reduce<T>` keeps one accumulator per
   lane.
-- **Guide:** [Systems](/en/docs/guide/systems#vector-loops), [FloatMode](/en/docs/guide/systems#float-mode),
-  [high-performance patterns](/en/docs/guide/high-performance)
+- **Guide:** [Systems](/en/docs/guide/basics/systems#vector-loops), [FloatMode](/en/docs/guide/basics/systems#float-mode),
+  [high-performance patterns](/en/docs/guide/performance/high-performance)
 
 ### Batch methods [#batch-methods]
 
@@ -197,7 +197,7 @@ for code you vectorize with `Vector<T>`. `world.ForEachBatch` does the same for 
 - **Use it for:** arithmetic over many rows (movement, decay, sums).
 - **Skip it for:** logic that changes structure: the world's structure is frozen during a batch method.
 - **Cost:** one call per run of rows instead of one per entity.
-- **Guide:** [Systems](/en/docs/guide/systems)
+- **Guide:** [Systems](/en/docs/guide/basics/systems)
 
 ### Singletons [#singletons]
 
@@ -207,7 +207,7 @@ takes it as a `ref` or `in` parameter; `SingletonRef<T>` is a stable handle for 
 - **Use it for:** all world-level state. Systems keep none.
 - **Instead of:** a static field, which every world would share.
 - **Cost:** one lookup per pass for a parameter.
-- **Guide:** [Singletons](/en/docs/guide/singletons)
+- **Guide:** [Singletons](/en/docs/guide/basics/singletons)
 
 ### Ordering, groups and intervals [#system-groups-and-intervals]
 
@@ -219,8 +219,8 @@ update, spread over phases (`world.UpdateCount<G>()` is the count); `Enabled` sw
 - **Use it for:** different cadences: input on every wake-up, simulation on a fixed tick, saving every few seconds;
   one group per kind of actor, declared once through a generic interface.
 - **Cost:** none beyond the systems; an empty group is a no-op. Cycles fail the build
-  ([EECS019](/en/docs/guide/analyzer#eecs019)).
-- **Guide:** [Systems](/en/docs/guide/systems)
+  ([EECS019](/en/docs/guide/help/analyzer#eecs019)).
+- **Guide:** [Systems](/en/docs/guide/basics/systems)
 
 ### Slices [#slices]
 
@@ -231,11 +231,11 @@ this is (the slice is `RunCount % N`); `QueryFilter.Slice(index, of)` does the s
 - **Use it for:** work that may lag a little but costs too much on one tick: re-scoring AI targets, scanning for
   idle sessions, decaying values of a large population.
 - **Skip it for:** `[Changed<T>]` / `[Removed<T>]` methods, which must see every change
-  ([EECS035](/en/docs/guide/analyzer#eecs035)), and logic that must touch every row every tick. Rows that move
+  ([EECS035](/en/docs/guide/help/analyzer#eecs035)), and logic that must touch every row every tick. Rows that move
   between runs may be skipped or visited twice in one cycle.
 - **Cost:** about 1 / N of the rows per run, plus the table walk; with `[UpdateInterval(M)]`, a row is visited once per
   N × M updates. `Query`, `Count` and the bulk calls refuse a sliced filter.
-- **Guide:** [Systems](/en/docs/guide/systems)
+- **Guide:** [Systems](/en/docs/guide/basics/systems)
 
 ### Immediate structural changes [#immediate-structural-changes]
 
@@ -249,7 +249,7 @@ most once: entities that leave before their turn are skipped, entities that join
   change, and the order of effects depends on when the buffer is played back. EasyEcs has no buffer to flush.
 - **Cost:** a pass that may change structure checks one counter after each entity; methods that cannot change
   structure skip even that.
-- **Guide:** [Structural changes](/en/docs/guide/structural-changes), [ref and await](/en/docs/guide/refs-and-await)
+- **Guide:** [Structural changes](/en/docs/guide/changes/structural-changes), [ref and await](/en/docs/guide/changes/refs-and-await)
 
 ### Events destroyed after the pass [#consume]
 
@@ -258,11 +258,11 @@ entities handles each one once, with no `entity.Destroy()` in its body.
 
 - **Use it for:** damage events, client commands, requests: entities that live for one pass.
 - **Skip it for:** entities that outlive the system that reads them; sliced methods
-  ([EECS085](/en/docs/guide/analyzer#eecs085)).
+  ([EECS085](/en/docs/guide/help/analyzer#eecs085)).
 - **Cost:** one `DestroyAll` per table after a pass without structural changes, instead of a destroy per row (a pass
-  that throws then destroys nothing); its system runs alone. [EECS084](/en/docs/guide/analyzer#eecs084) reports the
+  that throws then destroys nothing); its system runs alone. [EECS084](/en/docs/guide/help/analyzer#eecs084) reports the
   hand-written destroy.
-- **Guide:** [Systems](/en/docs/guide/systems#consume)
+- **Guide:** [Systems](/en/docs/guide/basics/systems#consume)
 
 ### Ad-hoc queries [#ad-hoc-queries]
 
@@ -280,7 +280,7 @@ bookkeeping.
 - **Skip it for:** per-tick logic: a system is ordered, scheduled and measured.
 - **Cost:** allocation-free. `Count` sums table counts; `Any` stops at the first match; a struct job is the fastest
   ad-hoc pass. An `[EntityMethod]` entry point (`entity.Run`) is O(1), plus O(1) per component its filter names.
-- **Guide:** [Queries and filters](/en/docs/guide/queries), [`[EntityMethod]`](/en/docs/guide/queries#run-on-one-entity)
+- **Guide:** [Queries and filters](/en/docs/guide/basics/queries), [`[EntityMethod]`](/en/docs/guide/basics/queries#run-on-one-entity)
 
 ## React to changes [#react]
 
@@ -314,7 +314,7 @@ tick (`filter.Since(ack)`), so every client gets exactly what changed since its 
 - **Cost:** 8 bytes per row and one store per write; untracked components pay nothing. Replicating 10 changed
   entities of 100,000 takes <BenchValue k="changed.10" />, against <BenchValue k="changed.10.scan" /> for a scan of
   every row. A table none of whose columns was written since the tick is skipped whole, for `ChangedAny` too.
-- **Guide:** [Change tracking](/en/docs/guide/change-tracking)
+- **Guide:** [Change tracking](/en/docs/guide/changes/change-tracking)
 
 ### Writes that count only when the value changed [#write-only-when-changed]
 
@@ -329,7 +329,7 @@ stores and stamps only a value that differs. Outside a pass, `entity.SetIfChange
 - **Cost:** `Value` is a plain read; each write is one stamp (plus one entity lookup in a method that changes structure or runs in parallel); `SetIfChanged` compares the value
   first (`IEquatable<T>`, which record structs implement, or the bytes of an unmanaged struct). The scheduler counts
   a `Mut<T>` parameter as a write of `T`.
-- **Guide:** [Change tracking](/en/docs/guide/change-tracking)
+- **Guide:** [Change tracking](/en/docs/guide/changes/change-tracking)
 
 ### Removal detection [#removal-detection]
 
@@ -342,7 +342,7 @@ with their other components: removing keeps the row and stamps its tick. `[Remov
 - **Skip it for:** destroyed entities, which have no row: the [destroy log](#destroy-log) reports them.
 - **Cost:** no storage beyond the tick column the component already has. Finding 10 removals among 100,000 entities
   takes <BenchValue k="removed.10" />.
-- **Guide:** [Change tracking](/en/docs/guide/change-tracking#removal-detection)
+- **Guide:** [Change tracking](/en/docs/guide/changes/change-tracking#removal-detection)
 
 ### Destroy log [#destroy-log]
 
@@ -356,7 +356,7 @@ older than the log (`DestroyLogOldestTick`): that client needs the whole state a
   socket): that is a [cleanup component](#cleanup-components).
 - **Cost:** 16 bytes per record, allocated once; one store per destroy; nothing when off (the default).
   `DestroyedSince` is O(records it reports) and allocates nothing.
-- **Guide:** [Change tracking](/en/docs/guide/change-tracking)
+- **Guide:** [Change tracking](/en/docs/guide/changes/change-tracking)
 
 ### Cleanup components [#cleanup-components]
 
@@ -368,7 +368,7 @@ the last cleanup component.
   slot in another service.
 - **Skip it for:** plain data: a destroyed entity's components need no release.
 - **Cost:** tables without a cleanup component pay one flag check per destroy.
-- **Guide:** [Cleanup and disable](/en/docs/guide/cleanup-and-disable)
+- **Guide:** [Cleanup and disable](/en/docs/guide/changes/cleanup-and-disable)
 
 ### Disable and enable [#disable-and-enable]
 
@@ -378,7 +378,7 @@ back. The entity carries the tag `Disabled<T>` meanwhile, so the paused entities
 - **Use it for:** pausing: a cooldown frozen while stunned, an AI switched off while a player controls the unit.
 - **Skip it for:** values you will not need again: remove the component.
 - **Cost:** O(1); the first disable in a table moves the row once to the table with the tag's column.
-- **Guide:** [Cleanup and disable](/en/docs/guide/cleanup-and-disable)
+- **Guide:** [Cleanup and disable](/en/docs/guide/changes/cleanup-and-disable)
 
 ## Find [#find]
 
@@ -403,13 +403,13 @@ Entity owner = world.AccountIndex.Get(7);                       // the one entit
 
 A component whose key is marked `[LookupKey]` (the generator implements `IIndexed<TKey>`) is found by its `Key`: `world.Index<T, TKey>()` (or `world.TeamIndex`)
 with `Find`, `TryFind` and `Count`. Every `Set`, create and destroy keeps the index current; writes through a `ref`,
-which the index could not see, fail the build ([EECS015](/en/docs/guide/analyzer#eecs015)).
+which the index could not see, fail the build ([EECS015](/en/docs/guide/help/analyzer#eecs015)).
 
 - **Use it for:** a player by name, the units of a guild, the entities in a grid cell.
 - **Skip it for:** values that change on most rows every tick and are looked up rarely: every change is a re-link.
 - **Cost:** one node per indexed entity, paid only by worlds that use the index. `Count` is a hash probe, `Find` one
   step per match.
-- **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
+- **Guide:** [Indexes and relations](/en/docs/guide/data/indexes-and-relations)
 
 ### Unique keys [#unique-keys]
 
@@ -420,14 +420,14 @@ holds (`Set`, create, `Instantiate`, `Clone`, `SetAll`, `Enable`, loads and move
 
 - **Use it for:** an account id, a player name, a session token, the occupant of a grid cell: keys that must never
   name two entities.
-- **Skip it for:** `EntityId` keys ([EECS036](/en/docs/guide/analyzer#eecs036)); keys several entities share (a plain
+- **Skip it for:** `EntityId` keys ([EECS036](/en/docs/guide/help/analyzer#eecs036)); keys several entities share (a plain
   `[LookupKey]`).
 - **Cost:** the index exists from the first table holding the component, so every write is checked: one hash probe
   per changed key, an extra pass over the rows for the bulk calls and loads. `Get` and `TryGet` are a hash probe
   that reads the key's record alone: a unique key holds its entity inline, with no array per key. A key that maps
   onto bounded slots (`IDirectMapped<TKey>`: grid cells, small ids) is found by one array entry instead
-  ([direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index)).
-- **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
+  ([direct-mapped keys](/en/docs/guide/data/indexes-and-relations#direct-index)).
+- **Guide:** [Indexes and relations](/en/docs/guide/data/indexes-and-relations)
 
 ### Ordered ranges [#ordered-ranges]
 
@@ -436,7 +436,7 @@ and `Descending()`.
 
 - **Use it for:** leaderboards, matchmaking by rating, the players of a level range.
 - **Cost:** the sorted key list is kept as keys appear and disappear: O(log keys) plus a block move each.
-- **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
+- **Guide:** [Indexes and relations](/en/docs/guide/data/indexes-and-relations)
 
 ### Table groups [#table-groups]
 
@@ -448,7 +448,7 @@ moves the entity to its group's tables.
 - **Use it for:** many zones or matches in one world, each updated or queried on its own.
 - **Skip it for:** values that change often (each change is a row copy) or a handful of entities per group.
 - **Cost:** O(entities) once at `GroupBy`; one row copy per change of group.
-- **Guide:** [Groups](/en/docs/guide/groups)
+- **Guide:** [Groups](/en/docs/guide/data/groups)
 
 ## Structure [#structure]
 
@@ -486,7 +486,7 @@ parties) through `Link` / `Unlink`, with `world.Relations<T>()` for the reverse 
   instead of an entity per item.
 - **Cost:** reverse lookups are O(1) to start and O(1) per link; an `IRelation` link costs 20 bytes plus 8 in its
   target's list, recycled.
-- **Guide:** [Indexes and relations](/en/docs/guide/indexes-and-relations)
+- **Guide:** [Indexes and relations](/en/docs/guide/data/indexes-and-relations)
 
 ### Hierarchy [#hierarchy]
 
@@ -499,7 +499,7 @@ re-parents, and destroying a parent destroys its descendants.
 - **Skip it for:** transform propagation: there is no built-in world transform; write the system that needs it.
 - **Cost:** `Children` is O(1) to start and O(1) per child, after the first call indexes every `ChildOf`;
   `Descendants` is O(1) per entity and allocates nothing once warm; a cascade is O(1) per link.
-- **Guide:** [Hierarchy](/en/docs/guide/hierarchy)
+- **Guide:** [Hierarchy](/en/docs/guide/data/hierarchy)
 
 ### Dynamic buffers [#dynamic-buffers]
 
@@ -515,7 +515,7 @@ write through `in` does not compile. Snapshots copy the elements.
   nothing. A dead buffer's list goes to a pool the next buffer of its type takes it from, on any thread:
   `MaxPooledLength` sets the longest list kept and `FillPool(n)` fills the pool at start-up. `SetCount(n)` returns
   the span to write a whole buffer in place.
-- **Guide:** [Dynamic buffers](/en/docs/guide/dynamic-buffers), [the buffer pool](/en/docs/guide/dynamic-buffers#pool), [ECS principles, rule 8](/en/docs/ecs-principles#8-choose-how-to-hold-a-collection)
+- **Guide:** [Dynamic buffers](/en/docs/guide/data/dynamic-buffers), [the buffer pool](/en/docs/guide/data/dynamic-buffers#pool), [ECS principles, rule 8](/en/docs/ecs-principles#8-choose-how-to-hold-a-collection)
 
 ### Prefabs and cloning [#prefabs-and-cloning]
 
@@ -531,7 +531,7 @@ a state its instances enter later (`SetEnraged()`) flips a presence bit instead 
 - **Skip it for:** entities whose values all differ: create them with their values.
 - **Cost:** one row copy per instance, also with components (no move after the copy); a wave passes the structural
   gate once and grows its table at most once.
-- **Guide:** [Prefabs](/en/docs/guide/prefabs)
+- **Guide:** [Prefabs](/en/docs/guide/basics/prefabs)
 
 ## Persist [#persist]
 
@@ -557,7 +557,7 @@ them back, any number of times. `Capture(into)` reuses a snapshot's arrays.
 - **Skip it for:** persistence across restarts (use [saves](#saves)); managed references inside components are
   shared, not cloned.
 - **Cost:** O(entities × components) both ways; capturing into a reused snapshot allocates nothing.
-- **Guide:** [Snapshots](/en/docs/guide/snapshots)
+- **Guide:** [Snapshots](/en/docs/guide/saves/snapshots)
 
 ### Saves [#saves]
 
@@ -575,7 +575,7 @@ appears is marked `[NotSaved]`: every save leaves it out, and it needs no format
 - **Skip it for:** changing an unmanaged component's layout in place: add a new component type, or old saves will
   not load.
 - **Cost:** one block copy per unmanaged column; allocates nothing once its buffers are large enough.
-- **Guide:** [Saves](/en/docs/guide/saves)
+- **Guide:** [Saves](/en/docs/guide/saves/saves)
 
 ### Migration [#migration]
 
@@ -590,7 +590,7 @@ load computes again.
 - **Use it for:** a player changing zone or server, a match handing its survivors to a lobby (collect the group with
   `Descendants`); records for actors whose entity exists before its stored state arrives.
 - **Cost:** O(entities given × components); `MoveEntities` copies rows directly.
-- **Guide:** [Migration and unloading](/en/docs/guide/migration-and-unload), [Records](/en/docs/guide/migration-and-unload#records)
+- **Guide:** [Migration and unloading](/en/docs/guide/saves/migration-and-unload), [Records](/en/docs/guide/saves/migration-and-unload#records)
 
 ### Unloading plugin types [#unloading]
 
@@ -600,7 +600,7 @@ carried over by a save.
 
 - **Use it for:** hot-reloading game logic on a live server.
 - **Cost:** O(entities with such components + tables + cached queries), on a cold path that allocates.
-- **Guide:** [Migration and unloading](/en/docs/guide/migration-and-unload)
+- **Guide:** [Migration and unloading](/en/docs/guide/saves/migration-and-unload)
 
 ## Scale [#scale]
 
@@ -610,13 +610,13 @@ More entities, more cores, bigger waves.
 
 A world has one owner thread, the one calling `Update`. Structural changes check a plain owner flag (no atomics) and
 throw instead of corrupting the tables when made from a parallel region; the analyzer reports the off-thread changes
-it can see ([EECS013](/en/docs/guide/analyzer#eecs013), [EECS014](/en/docs/guide/analyzer#eecs014)).
+it can see ([EECS013](/en/docs/guide/help/analyzer#eecs013), [EECS014](/en/docs/guide/help/analyzer#eecs014)).
 
 - **Use it for:** one world per map or zone, each on its own thread, with no synchronization. Input from other
   threads goes through a queue you own, drained by a system.
 - **Cost:** four worlds of 25,000 entities on four threads tick in <BenchValue k="tick.fourWorlds" />, against
   <BenchValue k="tick.oneWorld" /> for one world of 100,000.
-- **Guide:** [Threading](/en/docs/guide/threading)
+- **Guide:** [Threading](/en/docs/guide/performance/threading)
 
 ### Parallel systems [#parallel-systems]
 
@@ -627,12 +627,12 @@ order.
 - **Use it for:** several heavy, independent systems and spare cores.
 - **Skip it for:** light systems over a few thousand entities: a stage costs a thread-pool hand-off.
 - **Cost:** allocation-free; `MaxDegreeOfParallelism` bounds the threads.
-- **Guide:** [Threading](/en/docs/guide/threading)
+- **Guide:** [Threading](/en/docs/guide/performance/threading)
 
 ### Parallel [ForEach] [#parallel-foreach]
 
 `[ForEach(Parallel = true)]` cuts one method's rows into chunks that the calling thread and thread-pool threads run
-at once. The analyzer rejects methods that could race ([EECS010](/en/docs/guide/analyzer#eecs010)): structural
+at once. The analyzer rejects methods that could race ([EECS010](/en/docs/guide/help/analyzer#eecs010)): structural
 changes, batch methods, singletons taken by `ref`. `world.ForEachParallel` and `ForEachEntityParallel` do the same
 for struct jobs.
 
@@ -642,8 +642,8 @@ for struct jobs.
 - **Cost:** the threads claim chunks one at a time as they finish, OpenMP's `schedule(dynamic, n)`. By default
   chunks of 1,024 to 16,384 rows, about four per thread, allocation-free; a method that writes a tracked component
   cuts at multiples of 4,096 rows (the blocks its change summaries cover), so a table needs more rows before it is
-  split. `ChunkSize = n` sets the chunk size (rounded up to 64; [EECS054](/en/docs/guide/analyzer#eecs054)).
-- **Guide:** [Threading](/en/docs/guide/threading), [chunk size](/en/docs/guide/threading#chunk-rows)
+  split. `ChunkSize = n` sets the chunk size (rounded up to 64; [EECS054](/en/docs/guide/help/analyzer#eecs054)).
+- **Guide:** [Threading](/en/docs/guide/performance/threading), [chunk size](/en/docs/guide/performance/threading#chunk-rows)
 
 ### Totals over the rows (reductions) [#reductions]
 
@@ -657,10 +657,10 @@ and the partial results, combined in row order, replace `T` when the pass ends: 
   where the rows change).
 - **Cost:** a write into the chunk's own struct per row, no lock or atomic; one job copy per chunk, combined once;
   0 bytes after the first pass. Integers are exact; a float result is the same on any thread count for a fixed
-  `ChunkSize`. [EECS057](/en/docs/guide/analyzer#eecs057) rejects a second write of `T`;
-  [EECS060](/en/docs/guide/analyzer#eecs060) and [EECS061](/en/docs/guide/analyzer#eecs061) report the shared
+  `ChunkSize`. [EECS057](/en/docs/guide/help/analyzer#eecs057) rejects a second write of `T`;
+  [EECS060](/en/docs/guide/help/analyzer#eecs060) and [EECS061](/en/docs/guide/help/analyzer#eecs061) report the shared
   counters and job fields it replaces.
-- **Guide:** [Threading](/en/docs/guide/threading#reductions)
+- **Guide:** [Threading](/en/docs/guide/performance/threading#reductions)
 
 ### Scratch and lookups in parallel methods [#scratch-and-lookups]
 
@@ -674,9 +674,9 @@ it runs. `Lookup<T>` reads component `T` of any entity as it was before the pass
 - **Skip it for:** a small buffer with a fixed bound (`stackalloc`); the row's own components (parameters).
 - **Cost:** `Scratch<T>`, one lookup of the thread's value per chunk and 0 bytes after each thread's first row;
   `Lookup<T>`, one entity lookup per read, faster than the `World` parameter on one thread too. The system reads
-  `T`; [EECS058](/en/docs/guide/analyzer#eecs058) keeps scratch memory out of the world,
-  [EECS059](/en/docs/guide/analyzer#eecs059) a lookup away from a component the method writes.
-- **Guide:** [Scratch](/en/docs/guide/threading#scratch), [lookups](/en/docs/guide/threading#lookups)
+  `T`; [EECS058](/en/docs/guide/help/analyzer#eecs058) keeps scratch memory out of the world,
+  [EECS059](/en/docs/guide/help/analyzer#eecs059) a lookup away from a component the method writes.
+- **Guide:** [Scratch](/en/docs/guide/performance/threading#scratch), [lookups](/en/docs/guide/performance/threading#lookups)
 
 ### Records out of a pass [#emit]
 
@@ -688,9 +688,9 @@ system applies the records and clears them.
   send.
 - **Skip it for:** a result per row (a component of the row) or one total (a [reduction](#reductions)).
 - **Cost:** an append into the chunk's pooled list per record, one copy of each list when the pass ends; 0 bytes in
-  steady state. [EECS089](/en/docs/guide/analyzer#eecs089) reports a list filled by hand,
-  [EECS070](/en/docs/guide/analyzer#eecs070) a pass that reads its own records.
-- **Guide:** [Threading](/en/docs/guide/threading#emit)
+  steady state. [EECS089](/en/docs/guide/help/analyzer#eecs089) reports a list filled by hand,
+  [EECS070](/en/docs/guide/help/analyzer#eecs070) a pass that reads its own records.
+- **Guide:** [Threading](/en/docs/guide/performance/threading#emit)
 
 ### Deterministic random numbers [#entity-random]
 
@@ -701,9 +701,9 @@ seed repeats them.
 - **Use it for:** wandering, spawn rolls, loot, critical hits, AI choices: randomness a replay or a test must repeat.
 - **Skip it for:** secrets (`RandomNumberGenerator`) and randomness nobody repeats outside a pass (`Random.Shared`).
 - **Cost:** four integer mixing rounds per number, no state written, so the method stays a reader and parallel.
-  [EECS071](/en/docs/guide/analyzer#eecs071) reports `System.Random` in a `[ForEach]` method,
-  [EECS088](/en/docs/guide/analyzer#eecs088) two draws of one stream.
-- **Guide:** [Threading](/en/docs/guide/threading#entity-random)
+  [EECS071](/en/docs/guide/help/analyzer#eecs071) reports `System.Random` in a `[ForEach]` method,
+  [EECS088](/en/docs/guide/help/analyzer#eecs088) two draws of one stream.
+- **Guide:** [Threading](/en/docs/guide/performance/threading#entity-random)
 
 ### Parallel loops over other data [#parallel-for]
 
@@ -714,8 +714,8 @@ methods: an `IForRange` job over a range of indexes, an `IForSpan<T>` job over t
 - **Use it for:** heavy work over a list or an array: rolling the records a pass emitted, filling a grid.
 - **Skip it for:** rows of entities (a parallel `[ForEach]`) and light work over a few thousand items.
 - **Cost:** the chunks and helpers of a parallel `[ForEach]`, allocation-free after the first call per job type; a
-  copy of the job per chunk ([EECS061](/en/docs/guide/analyzer#eecs061) reports a field read after the call).
-- **Guide:** [Threading](/en/docs/guide/threading#parallel-for)
+  copy of the job per chunk ([EECS061](/en/docs/guide/help/analyzer#eecs061) reports a field read after the call).
+- **Guide:** [Threading](/en/docs/guide/performance/threading#parallel-for)
 
 ### Grid tiles [#grid-tiles]
 
@@ -728,9 +728,9 @@ an edge beside them changes.
   cells around it.
 - **Skip it for:** sparse objects on a map (an [index](#value-indexes) of cells) and grids small enough for one buffer.
 - **Cost:** one copy of the tile and its halo into a texture of the thread per tile; the rows a stencil cannot change
-  are skipped. [EECS059](/en/docs/guide/analyzer#eecs059), [EECS072](/en/docs/guide/analyzer#eecs072) and
-  [EECS073](/en/docs/guide/analyzer#eecs073) report the misuses.
-- **Guide:** [Grid tiles](/en/docs/guide/grids)
+  are skipped. [EECS059](/en/docs/guide/help/analyzer#eecs059), [EECS072](/en/docs/guide/help/analyzer#eecs072) and
+  [EECS073](/en/docs/guide/help/analyzer#eecs073) report the misuses.
+- **Guide:** [Grid tiles](/en/docs/guide/performance/grids)
 
 ### Bulk operations [#bulk-operations]
 
@@ -740,7 +740,7 @@ change one component on every match, whole 64-row words at a time.
 
 - **Use it for:** waves of monsters, clearing a zone, a round reset, a status lifted from everyone.
 - **Cost:** one pass through the structural gate per call and at most one table growth.
-- **Guide:** [Bulk operations](/en/docs/guide/bulk)
+- **Guide:** [Bulk operations](/en/docs/guide/changes/bulk)
 
 ## Build and operate [#operate]
 
@@ -754,7 +754,7 @@ methods, off-thread structural changes, indexed components written through a `re
 build; a few warnings flag code that works but costs.
 
 - **Use it for:** always; it is on by default and keeps systems decoupled.
-- **Guide:** [Analyzer rules](/en/docs/guide/analyzer)
+- **Guide:** [Analyzer rules](/en/docs/guide/help/analyzer)
 
 ### Per-system timing [#per-system-timing]
 
@@ -766,7 +766,7 @@ and `AverageTime`, the bytes the run allocated (`LastAllocated`, `TotalAllocated
   grows, which one allocates, and whether its cost follows its entity count.
 - **Cost:** per run, two timestamp reads and two allocation-counter reads, plus one count of each `[ForEach]` pass's
   matches; nothing when off.
-- **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics#timing), [Systems](/en/docs/guide/systems#measuring-systems)
+- **Guide:** [Debugging and diagnostics](/en/docs/guide/production/diagnostics#timing), [Systems](/en/docs/guide/basics/systems#measuring-systems)
 
 ### The schedule [#schedule]
 
@@ -777,7 +777,7 @@ keeps apart. `ToString()` prints it as text, `ToMermaid()` as a flowchart.
 - **Use it for:** a log line at startup, a review of why two systems do not run in parallel, finding the pairs that
   need an `[UpdateBefore<T>]` / `[UpdateAfter<T>]` to say what is meant.
 - **Cost:** a cold call that allocates its description; callable from any thread.
-- **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics)
+- **Guide:** [Debugging and diagnostics](/en/docs/guide/production/diagnostics)
 
 ### Errors [#errors]
 
@@ -787,7 +787,7 @@ By default an exception a system throws propagates out of `Update()`. With
 
 - **Use it for:** `Disable` on a live server, where a failure becomes data a health check reads; `Throw` in tests.
 - **Cost:** nothing until a system throws.
-- **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics#errors), [Systems](/en/docs/guide/systems#errors)
+- **Guide:** [Debugging and diagnostics](/en/docs/guide/production/diagnostics#errors), [Systems](/en/docs/guide/basics/systems#errors)
 
 ### Introspection [#introspection]
 
@@ -796,7 +796,7 @@ component values. A debugger shows an entity's components directly.
 
 - **Use it for:** admin tools, memory reports, debugging.
 - **Cost:** allocates the description (a cold path), never touches the hot paths.
-- **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics)
+- **Guide:** [Debugging and diagnostics](/en/docs/guide/production/diagnostics)
 
 ### Giving memory back [#trim-excess]
 
@@ -809,7 +809,7 @@ the buffers of saves, loads and migrations. Handles, queries, systems, indexes a
 - **Skip it for:** every tick: what it drops, the next structural changes allocate again.
 - **Cost:** O(tables × (cached queries + snapshots) + rows of the shrunk tables × columns); allocates (cold). The
   entity records keep their length.
-- **Guide:** [Debugging and diagnostics](/en/docs/guide/diagnostics)
+- **Guide:** [Debugging and diagnostics](/en/docs/guide/production/diagnostics)
 
 ### Native AOT [#native-aot]
 
@@ -826,7 +826,7 @@ arrange entities and singletons, call `world.Update()`, assert on the data.
 
 - **Use it for:** every real server and every system.
 - **Cost:** none from EasyEcs: no hosting or test package, the pattern is a few classes of your own.
-- **Guide:** [Hosting](/en/docs/guide/hosting), [Testing systems](/en/docs/guide/testing)
+- **Guide:** [Hosting](/en/docs/guide/production/hosting), [Testing systems](/en/docs/guide/production/testing)
 
 ### Templates and samples [#templates]
 
@@ -834,10 +834,10 @@ arrange entities and singletons, call `world.Update()`, assert on the data.
 (a prefab spawner among them) and a `Program.cs` that only hosts the world (`--tests` adds an NUnit project with a
 test file per system); `dotnet new easyecs-system` adds a system.
 The [samples](/en/docs/samples) are complete programs in learning order, and the guide pages of
-features such as [change tracking](/en/docs/guide/change-tracking#full-example) end their "How to use it" part with a
+features such as [change tracking](/en/docs/guide/changes/change-tracking#full-example) end their "How to use it" part with a
 full example.
 
-- **Guide:** [Getting started](/en/docs/getting-started), [Structuring a real project](/en/docs/guide/project-structure),
+- **Guide:** [Getting started](/en/docs/getting-started), [Structuring a real project](/en/docs/guide/basics/project-structure),
   [Samples](/en/docs/samples)
 
 ## Compared with other libraries [#compared]

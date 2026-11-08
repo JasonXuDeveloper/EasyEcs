@@ -17,7 +17,7 @@ World 保存组件数据，系统按 tick 处理匹配的实体；库不要求�
 
 是否适合，取决于工作负载。大量对象需要执行相同的更新、而且热路径成本需要稳定时，ECS 值得考虑；若只是普通的数据库增删改查，
 几乎没有针对大量对象的共同处理，就没必要引入 ECS。EasyEcs 负责 World、查询、系统和状态管理，网络传输与宿主由应用提供。
-[ASP.NET Core 和 Worker 托管指南](/zh/docs/guide/hosting)展示了如何让 HTTP 请求通过通道进入 World，避免请求线程直接修改它。
+[ASP.NET Core 和 Worker 托管指南](/zh/docs/guide/production/hosting)展示了如何让 HTTP 请求通过通道进入 World，避免请求线程直接修改它。
 
 ## EasyEcs 能用于生产吗？ [#production-ready]
 
@@ -43,14 +43,14 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 有意保留的分配：创建 World、第一个拥有新组件组合的实体（新建一张表）、某种查询形状的第一次使用、表或 `DynamicBuffer<T>`
 超出容量时扩容，以及 `DescribeTables` 这类冷路径工具。`InitialEntityCapacity`、`Reserve<T1, …, Tn>(count)`、`Reserve(prefab, count)`
 和 `bag.EnsureCapacity(n)` 可以把扩容挪到 tick 之外。打开 `WorldOptions.MeasureSystems` 后，`system.Stats.LastAllocated`
-能指出是哪个系统在分配（[诊断](/zh/docs/guide/diagnostics#timing)）。
+能指出是哪个系统在分配（[诊断](/zh/docs/guide/production/diagnostics#timing)）。
 
 ## 高峰过后，World 会把内存还回去吗？ [#memory-after-a-peak]
 
 只在你要求时。表满了翻倍，实体走了行还留着，下一波实体来了直接复用、不用分配；所以一个装过一百万实体的 World 会一直留着这些行。
 `world.TrimExcess()` 丢掉空表，把其余的表缩到现在装着的大小（向上取整到 2 的幂），并释放存档、加载和迁移用的缓冲。句柄、查询、
 索引和快照照常可用。在所有者线程上、安静的时候调（一局比赛之后、维护任务里），不要每个 tick 都调：它丢掉的东西下次用时还要再分配
-（[还回内存](/zh/docs/guide/diagnostics#trim)）。
+（[还回内存](/zh/docs/guide/production/diagnostics#trim)）。
 
 ## 它是线程安全的吗？ [#is-it-thread-safe]
 
@@ -59,41 +59,41 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 - **每个 World 有一个所有者线程。** 它的系统、查询和组件读写都在这个线程上执行。服务端上每个线程跑一个 World（每张地图、每个区域或每场对局一个）：
   World 之间不共享任何东西，不加锁就能用满多核。
 - **结构变更属于所有者线程。** 增删组件、创建销毁实体都会检查一个普通的所有者标志：在并行阶段、并行 `[ForEach]` 或声称不做结构变更的遍历里
-  做结构变更，会直接抛异常，而不会把表弄坏。分析器能看出的跨线程修改会直接报错（[EECS013、EECS014](/zh/docs/guide/analyzer)）。
+  做结构变更，会直接抛异常，而不会把表弄坏。分析器能看出的跨线程修改会直接报错（[EECS013、EECS014](/zh/docs/guide/help/analyzer)）。
 - **EasyEcs 自己加的并行是经过检查的。** `WorldOptions.ParallelSystems` 只让生成的访问集互不冲突的系统一起跑，结果与逐个运行相同；
   `[ForEach(Parallel = true)]` 方法不能做结构变更，也不能写单例（EECS010）；它的线程做完一块就领下一块（OpenMP 的
-  `schedule(dynamic, n)`），几百行重活用 `ChunkSize = n` 指定块大小（[块大小](/zh/docs/guide/threading#chunk-rows)）。对所有行求总数用 `Reduce<T>` 参数，
-  每块一个部分结果（[归约](/zh/docs/guide/threading#reductions)）；并行方法写静态字段或共享对象报 EECS060，遍历之后读并行 job 的字段报 EECS061。
+  `schedule(dynamic, n)`），几百行重活用 `ChunkSize = n` 指定块大小（[块大小](/zh/docs/guide/performance/threading#chunk-rows)）。对所有行求总数用 `Reduce<T>` 参数，
+  每块一个部分结果（[归约](/zh/docs/guide/performance/threading#reductions)）；并行方法写静态字段或共享对象报 EECS060，遍历之后读并行 job 的字段报 EECS061。
 - **来自其他线程的输入**（网络、IO）放进你自己的队列，由一个系统在所有者线程上取出处理。
 
-不要跨 `await` 持有 `ref`：保留 `Entity`，`await` 之后重新取组件。详见[多线程与并行](/zh/docs/guide/threading)和
-[ref 与 await](/zh/docs/guide/refs-and-await)。
+不要跨 `await` 持有 `ref`：保留 `Entity`，`await` 之后重新取组件。详见[多线程与并行](/zh/docs/guide/performance/threading)和
+[ref 与 await](/zh/docs/guide/changes/refs-and-await)。
 
 ## 怎么在 ASP.NET Core 或 Worker Service 里运行 EasyEcs？ [#hosting]
 
 给 World 指定一个所有者：一个 `BackgroundService` 负责建 World、按 `PeriodicTimer` 调用 `world.Update()`，主机停止时存档。请求
 处理代码从不碰 World：它们把请求写进有界的 `Channel<T>`，由一个系统每个 tick 读空（回复用 `TaskCompletionSource`），读取则看
 World 发布的不可变状态。发给单个实体（一个 actor、一个玩家）的请求，在所有者线程上用 `[EntityMethod]` 方法直接在这个实体上处理：
-方法要的组件一次查找全部拿到，实体已经没了或不匹配时返回 `false`（[单个实体](/zh/docs/guide/queries#run-on-one-entity)）。
-不需要专门的托管包；完整的服务器见[在 .NET 服务器里托管](/zh/docs/guide/hosting)。
+方法要的组件一次查找全部拿到，实体已经没了或不匹配时返回 `false`（[单个实体](/zh/docs/guide/basics/queries#run-on-one-entity)）。
+不需要专门的托管包；完整的服务器见[在 .NET 服务器里托管](/zh/docs/guide/production/hosting)。
 
 ## 怎么测试一个系统？ [#testing]
 
 在测试里建一个 World，加上系统和它需要的实体、单例，调用 `world.Update()`，再断言组件。系统之间从不互相调用，没有要 mock 的东西；
 共用服务器的初始化方法，测试跑的就是真实的顺序。零分配预算也只是多一个测试：在预热后的更新前后统计
-`GC.GetAllocatedBytesForCurrentThread()`（[测试系统](/zh/docs/guide/testing)）。
+`GC.GetAllocatedBytesForCurrentThread()`（[测试系统](/zh/docs/guide/production/testing)）。
 
 ## EasyEcs 项目该怎么组织？ [#project-structure]
 
 照 `dotnet new easyecs` 的结构来：组件放 `Components/`（按描述的东西一个文件，只放数据），`Systems/` 里一个文件一个系统、
 每个系统只做一件事，`Program.cs` 只做宿主：建 World、设单例、在一个地方按顺序加系统、跑循环。不同的更新频率各用一个分组，其他线程
-的输入走邮箱（一个队列，放在消费它的系统的 `readonly` 字段里），`--tests` 会给每个系统生成一个测试文件（[项目结构](/zh/docs/guide/project-structure)）。
+的输入走邮箱（一个队列，放在消费它的系统的 `readonly` 字段里），`--tests` 会给每个系统生成一个测试文件（[项目结构](/zh/docs/guide/basics/project-structure)）。
 
 ## 怎么调试一个 ECS World？ [#debugging]
 
 直接问 World：`world.DescribeTables()` 列出每张表的组件、实体数和字节数，`entity.Describe()` 返回实体的组件值（调试器里展开 `Entity`
 也能看到），打开 `WorldOptions.MeasureSystems` 后 `system.Stats` 记录每个系统的耗时、分配的字节和访问的实体数，`world.DescribeSchedule()`
-列出各个阶段以及每个系统为什么要等，`SystemErrorPolicy.Disable` 停掉的系统，异常留在 `system.Error` 里。在所有者线程上、两次更新之间读这些数据（[调试与诊断](/zh/docs/guide/diagnostics)）。
+列出各个阶段以及每个系统为什么要等，`SystemErrorPolicy.Disable` 停掉的系统，异常留在 `system.Error` 里。在所有者线程上、两次更新之间读这些数据（[调试与诊断](/zh/docs/guide/production/diagnostics)）。
 
 ## 能在 Unity 或 Godot 里用 EasyEcs 吗？ [#unity-godot]
 
@@ -130,10 +130,10 @@ EasyEcs 在 <FeatureCount k="ahead" /> 项更快，<FeatureCount k="even" /> 项
 
 | 需求 | 调用 | 页面 |
 | --- | --- | --- |
-| 内存里的撤销、回滚、预测、回放 | `world.Capture()` / `world.Restore(snapshot)` | [快照](/zh/docs/guide/snapshots) |
-| 把整个 World 存盘、存数据库或交给另一个进程 | `world.Save(output)` / `world.Load(bytes)` | [存档](/zh/docs/guide/saves) |
-| 把相关的实体（一个玩家和它拥有的东西）交给另一个 World 或服务器 | `SaveEntities` / `LoadEntities`、`MoveEntities` | [迁移与卸载](/zh/docs/guide/migration-and-unload) |
-| actor 需要持久化的部分，恢复到它的实体上且不算变更 | `SaveEntitiesWith(output, ids, set)` / `LoadEntitiesInto(bytes, entities, markWritten: false)` | [记录](/zh/docs/guide/migration-and-unload#records) |
+| 内存里的撤销、回滚、预测、回放 | `world.Capture()` / `world.Restore(snapshot)` | [快照](/zh/docs/guide/saves/snapshots) |
+| 把整个 World 存盘、存数据库或交给另一个进程 | `world.Save(output)` / `world.Load(bytes)` | [存档](/zh/docs/guide/saves/saves) |
+| 把相关的实体（一个玩家和它拥有的东西）交给另一个 World 或服务器 | `SaveEntities` / `LoadEntities`、`MoveEntities` | [迁移与卸载](/zh/docs/guide/saves/migration-and-unload) |
+| actor 需要持久化的部分，恢复到它的实体上且不算变更 | `SaveEntitiesWith(output, ids, set)` / `LoadEntitiesInto(bytes, entities, markWritten: false)` | [记录](/zh/docs/guide/saves/migration-and-unload#records) |
 
 ```csharp
 using System.Buffers;
@@ -170,7 +170,7 @@ world.Load(output.WrittenSpan);  // 组件里存的 EntityId 仍然指向同样�
 <IlcInstructionSet>native</IlcInstructionSet>
 ```
 
-这样生成的程序只能在具备这些指令的 CPU 上运行：`native` 适合在运行它的机器（或镜像）上构建，级别适合一批机器。服务器部署见[托管](/zh/docs/guide/hosting#deploy)。
+这样生成的程序只能在具备这些指令的 CPU 上运行：`native` 适合在运行它的机器（或镜像）上构建，级别适合一批机器。服务器部署见[托管](/zh/docs/guide/production/hosting#deploy)。
 
 ## 为什么没有事件？ [#why-are-there-no-events]
 
@@ -215,13 +215,13 @@ public ref struct ClearHitsSystem
 结构变更立即生效，遍历途中也一样（[D2](/zh/docs/decisions#d2-structural-changes-apply-at-once-no-command-buffers)）：遍历期间被移除的行变成墓碑，
 遍历永远看不到行在脚下移动。代码怎么写就怎么执行，也不存在一个延后生效的“第二版本”World。并行 job 不做结构变更；排在它们后面、
 运行在所有者线程上的系统根据它们写下的数据去做（[D3](/zh/docs/decisions#d3-no-command-buffer-for-parallel-jobs)）。在遍历里改结构时遍历会看到什么，
-见[结构变更](/zh/docs/guide/structural-changes)。
+见[结构变更](/zh/docs/guide/changes/structural-changes)。
 
 ## 系统怎么排顺序？ [#order-systems]
 
 系统按注册顺序运行。要让一个系统依赖另一个，就把依赖写出来：系统上的 `[UpdateBefore<T>]` 或 `[UpdateAfter<T>]` 只在所在分组内移动这一个系统，
 加一条排序不会打乱其他系统（[D5](/zh/docs/decisions#d5-order-systems-by-dependencies-not-priorities)）。出现环时 `AddSystem` 抛异常，
-分析器能看到时报 EECS019。没有整数优先级：`Priority` 在 4.1 中删除了。运行节奏不同的系统放进单独调用更新的[系统分组](/zh/docs/guide/systems)，
+分析器能看到时报 EECS019。没有整数优先级：`Priority` 在 4.1 中删除了。运行节奏不同的系统放进单独调用更新的[系统分组](/zh/docs/guide/basics/systems)，
 或者给它标上 `[UpdateInterval(N, Phase = P)]`。
 
 ## 怎么修改组件？ [#how-do-i-change-a-component]
@@ -256,10 +256,10 @@ foreach (var item in world.Query<Position, Velocity>())
 - `var hp = entity.Health; hp.Value--;` 改的是副本。要用 `ref var`。
 - 只读时用 `in`，不要用 `ref`：对 `ITracked` 组件的每次 `ref` 访问都算一次修改，同步时会把没人改过的行也发出去。
   所以被追踪组件的生成属性是只读的，写入用 `entity.WriteX()`；只读的循环走 `world.Read<…>()`，不要用 `Query`
-  （[EECS046](/zh/docs/guide/analyzer#eecs046)）。只写访问到的部分行的方法用 `Mut<T>`，它只给写了的行打 tick；
-  `SetIfChanged`（以及生成的 `entity.SetXIfChanged(...)`）只在值不同时才写（[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)）。
-- 组件里的集合要通过组件的 `ref` 修改，不能通过 `in`：否则变更追踪和调度器都发现不了（[EECS011](/zh/docs/guide/analyzer#eecs011)）。
-  每个实体需要一个列表时，用 [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers)。
+  （[EECS046](/zh/docs/guide/help/analyzer#eecs046)）。只写访问到的部分行的方法用 `Mut<T>`，它只给写了的行打 tick；
+  `SetIfChanged`（以及生成的 `entity.SetXIfChanged(...)`）只在值不同时才写（[什么算写入](/zh/docs/guide/changes/change-tracking#what-counts-as-a-write)）。
+- 组件里的集合要通过组件的 `ref` 修改，不能通过 `in`：否则变更追踪和调度器都发现不了（[EECS011](/zh/docs/guide/help/analyzer#eecs011)）。
+  每个实体需要一个列表时，用 [`DynamicBuffer<T>`](/zh/docs/guide/data/dynamic-buffers)。
 
 ## 一个 World 最多能有多少种组件？ [#component-limit]
 
@@ -271,7 +271,7 @@ foreach (var item in world.Query<Position, Velocity>())
 不必。生成器把每个系统的 job 写进单独的 `file` 类，通过 `[UnsafeAccessor]` 调用你的 `[ForEach]` 方法和钩子（私有的也行），编译出来就是直接调用
 （[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。系统就是普通的 `[EcsSystem] ref struct`，生成的成员也不会和你的成员冲突。
 写了 `partial` 照样能编译。用特性声明成员的组件或单例（`[Sum]`、`[LookupKey]`、`[Group]`）连同外层类型都要是 `partial`：生成器把这些成员写进类型本身
-（[EECS062](/zh/docs/guide/analyzer#eecs062)）。
+（[EECS062](/zh/docs/guide/help/analyzer#eecs062)）。
 
 ## 为什么 IDE 说 `[ForEach]` 方法从没被使用？ [#never-used]
 

@@ -15,7 +15,7 @@ generator declares for code written by hand), `.Parameters.cs` ([ForEach] parame
 `.Records.cs` (Emit<T> records nobody clears), `.Pairs.cs` (pair methods), `.Tiles.cs` (tiles and cell methods),
 `.Fusion.cs` (passes that almost share a walk); `UnusedSuppressor.cs`, `Symbols.cs` (shared with the generators),
 `Uses.cs`, `Threads.cs`; fixes in `src/EasyEcs.CodeFixes`. The file map with each file's ids is
-`src/EasyEcs.Generator/AGENTS.md`. Rule list: `docs/content/guide/analyzer.mdx` and the range in AGENTS.md
+`src/EasyEcs.Generator/AGENTS.md`. Rule list: `docs/content/guide/help/analyzer.mdx` and the range in AGENTS.md
 (EECS002-EECS132).
 
 ## Coverage (`feature`, part 3)
@@ -106,7 +106,7 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 - Hand-rolled copies of a `Symbols` helper in a rule.
 - False positives on `ref readonly`, lambdas, generated members (`[GeneratedCode("EasyEcs.Generator")]`), loops with
   break/return, explicit types, code after a structural change.
-- Mistakes no rule catches (`docs/content/guide/common-mistakes.mdx`, `guide/troubleshooting.mdx`).
+- Mistakes no rule catches (`docs/content/guide/help/common-mistakes.mdx`, `guide/help/troubleshooting.mdx`).
 - Messages that no longer match runtime behavior; descriptor names, titles and code-fix titles that do not
   match the rule (`audit-naming`).
 - Methods that are almost vector loops: EECS055 names the blocking statement and the split when the user can fix it

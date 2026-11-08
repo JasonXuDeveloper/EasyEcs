@@ -28,7 +28,7 @@ apply immediately. This page maps the concepts; it has no benchmarks against Uni
 | Unity Entities | EasyEcs | Notes |
 | --- | --- | --- |
 | `World`, `EntityManager` | `World` | One object: entities, components, singletons and systems. One owner thread per world. |
-| `Entity` (index, version) | `Entity` handle; `EntityId` (index, version) to store in data | A component stores an `EntityId`, not an `Entity` ([EECS017](/en/docs/guide/analyzer#eecs017)). |
+| `Entity` (index, version) | `Entity` handle; `EntityId` (index, version) to store in data | A component stores an `EntityId`, not an `Entity` ([EECS017](/en/docs/guide/help/analyzer#eecs017)). |
 | `IComponentData` struct | `IComponent` struct | Unmanaged columns are pinned and 64-byte aligned. |
 | Empty `IComponentData` (tag) | Empty `IComponent` struct | Adding or removing a tag flips a presence bit after the first time. |
 | `ISharedComponentData` (chunks split by value) | `IGroup` + `world.GroupBy<T>()` | A table per group value; `QueryFilter.InGroup<T>(value)` walks one. |
@@ -36,26 +36,26 @@ apply immediately. This page maps the concepts; it has no benchmarks against Uni
 | `IEnableableComponent`, `SetComponentEnabled` | `entity.Disable<T>()` / `Enable<T>()` | The value stays and queries skip it; no row moves after the first time. |
 | `ICleanupComponentData` | `ICleanupComponent` + the `Retired` tag | `Destroy` retires an entity that has cleanup components: it keeps them until a system removes them. |
 | `SystemAPI.GetSingleton<T>()` | `ISingletonComponent`, a `ref T` parameter of a `[ForEach]` method | Per-world singletons, no entity needed. |
-| `ISystem` / `SystemBase` with `OnCreate` / `OnUpdate` / `OnDestroy` | `[EcsSystem]` with `OnCreate` / `OnUpdate` / `OnDestroy` | Systems are stateless: state goes into components or singletons ([EECS007](/en/docs/guide/analyzer#eecs007)). |
+| `ISystem` / `SystemBase` with `OnCreate` / `OnUpdate` / `OnDestroy` | `[EcsSystem]` with `OnCreate` / `OnUpdate` / `OnDestroy` | Systems are stateless: state goes into components or singletons ([EECS007](/en/docs/guide/help/analyzer#eecs007)). |
 | `SystemAPI.Query<RefRW<A>, RefRO<B>>()` | a `[ForEach]` method taking `ref A`, `in B` | The generator writes the job; `ref` is a write, `in` a read. |
 | `IJobEntity` | a `[ForEach]` method (a generated struct job) | |
-| `ScheduleParallel` | `[ForEach(Parallel = true)]` | Chunks of rows on the thread pool; the analyzer rejects methods that would race ([EECS010](/en/docs/guide/analyzer#eecs010)). |
-| `IJobParallelFor`'s batch count | `[ForEach(Parallel = true, ChunkSize = n)]` | The rows a thread takes at a time, for few heavy rows ([chunk size](/en/docs/guide/threading#chunk-rows)). |
-| `IJobParallelFor` summing into a `NativeReference` (with `[NativeDisableParallelForRestriction]` and `Interlocked`, or a `NativeArray` per thread) | a `Reduce<T>` parameter of a parallel `[ForEach]` method | A partial result per chunk, no atomic per row, combined in row order into a singleton ([reductions](/en/docs/guide/threading#reductions)); EECS060 reports the shared-counter version. |
-| `ComponentLookup<T>` with `[ReadOnly]` in a job | a `Lookup<T>` parameter | `T` of any entity as it was before the pass, by id or by key; the system reads `T`, so it may run in parallel, and EECS059 rejects a method that also writes `T` ([lookups](/en/docs/guide/threading#lookups)). |
-| A `NativeList` allocated per job, or `[NativeSetThreadIndex]` and a list per thread | a `Scratch<T>` parameter | One `T` per method and thread, allocated once, cleared by the row ([scratch](/en/docs/guide/threading#scratch)). |
+| `ScheduleParallel` | `[ForEach(Parallel = true)]` | Chunks of rows on the thread pool; the analyzer rejects methods that would race ([EECS010](/en/docs/guide/help/analyzer#eecs010)). |
+| `IJobParallelFor`'s batch count | `[ForEach(Parallel = true, ChunkSize = n)]` | The rows a thread takes at a time, for few heavy rows ([chunk size](/en/docs/guide/performance/threading#chunk-rows)). |
+| `IJobParallelFor` summing into a `NativeReference` (with `[NativeDisableParallelForRestriction]` and `Interlocked`, or a `NativeArray` per thread) | a `Reduce<T>` parameter of a parallel `[ForEach]` method | A partial result per chunk, no atomic per row, combined in row order into a singleton ([reductions](/en/docs/guide/performance/threading#reductions)); EECS060 reports the shared-counter version. |
+| `ComponentLookup<T>` with `[ReadOnly]` in a job | a `Lookup<T>` parameter | `T` of any entity as it was before the pass, by id or by key; the system reads `T`, so it may run in parallel, and EECS059 rejects a method that also writes `T` ([lookups](/en/docs/guide/performance/threading#lookups)). |
+| A `NativeList` allocated per job, or `[NativeSetThreadIndex]` and a list per thread | a `Scratch<T>` parameter | One `T` per method and thread, allocated once, cleared by the row ([scratch](/en/docs/guide/performance/threading#scratch)). |
 | `EntityQuery` with `WithAll` / `WithNone` / `WithAny` | `[With<T>]`, `[Without<T>]`, `[WithAny<T1, T2>]`; `QueryFilter` for ad-hoc calls | |
 | Change filter (`WithChangeFilter<T>`) | `ITracked` + `[Changed<T>]` | Per row, not per chunk, and opt-in per component type. |
 | Structural change events | `[Removed<T>]` | The entities that lost a tracked component since the system last ran. |
 | `EntityCommandBuffer` | none | `entity.Set`, `Remove`, `Destroy` apply at once, also mid-pass. |
 | `ComponentSystemGroup`, `[UpdateInGroup]` | `ISystemGroup`, `[UpdateInGroup<T>]`, `world.Update<TGroup>()` | |
-| `[UpdateBefore]` / `[UpdateAfter]` | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | A cycle is a build error ([EECS019](/en/docs/guide/analyzer#eecs019)). |
+| `[UpdateBefore]` / `[UpdateAfter]` | `[UpdateBefore<T>]` / `[UpdateAfter<T>]` | A cycle is a build error ([EECS019](/en/docs/guide/help/analyzer#eecs019)). |
 | `RateManager`, fixed-step groups | `[UpdateInterval(N)]`, a group updated when you choose | |
 | Prefab entity, `EntityManager.Instantiate(prefab, array)` | `Prefab`, `world.Instantiate(prefab, span)` | A `Prefab` lives outside every world; no baking step builds it. |
 | Baking, authoring components | none | Build entities in code, from a prefab or from a save. |
 | `LinkedEntityGroup` (destroyed together) | `ChildOf(parent)`, cascading destroy | `world.Children(parent)` lists the children. |
-| Burst | the .NET JIT, Native AOT, and the generator's [vector loops](/en/docs/guide/systems#vector-loops) | Struct jobs are specialized and inlined per job type; a per-row method over components of 1 to 4 numbers of one type also gets a `Vector<T>` loop, with the scalar results bit for bit. |
-| Burst Inspector (does this job vectorize?) | [EECS055](/en/docs/guide/analyzer#eecs055), and `[ForEach(SimdMode = SimdMode.Require)]` ([EECS056](/en/docs/guide/analyzer#eecs056)) | The build names why a method stayed scalar; `Require` turns that into an error, so no inspector is needed. |
+| Burst | the .NET JIT, Native AOT, and the generator's [vector loops](/en/docs/guide/basics/systems#vector-loops) | Struct jobs are specialized and inlined per job type; a per-row method over components of 1 to 4 numbers of one type also gets a `Vector<T>` loop, with the scalar results bit for bit. |
+| Burst Inspector (does this job vectorize?) | [EECS055](/en/docs/guide/help/analyzer#eecs055), and `[ForEach(SimdMode = SimdMode.Require)]` ([EECS056](/en/docs/guide/help/analyzer#eecs056)) | The build names why a method stayed scalar; `Require` turns that into an error, so no inspector is needed. |
 
 ## The same system [#same-system]
 
@@ -134,7 +134,7 @@ Unity's change filter works per chunk: a chunk counts as changed when any system
 returns whole chunks, written or not. EasyEcs tracks per row, opt-in per component: mark the component
 `ITracked` and `[Changed<T>]` visits only the rows written through a `ref` since the system last ran, skipping
 unwritten tables, 4,096-row blocks and 64-row words. `[Removed<T>]` does the same for the entities that lost the
-component. See [change tracking](/en/docs/guide/change-tracking).
+component. See [change tracking](/en/docs/guide/changes/change-tracking).
 
 ## Is EasyEcs a Unity ECS? [#unity]
 
@@ -152,7 +152,7 @@ target netstandard2.1.
   <Card title="Getting started" href="/en/docs/getting-started">
     A first world, components and systems in a few minutes.
   </Card>
-  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/basics/systems">
     Methods, filters, ordering, groups and parallel methods.
   </Card>
 </Cards>

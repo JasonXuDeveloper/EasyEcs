@@ -1,0 +1,652 @@
+---
+title: 索引与关系
+seoTitle: "C# ECS 的值索引、有序范围查询和实体关系"
+description: 按值（名字、区域、分数区间）或按指向的实体查找实体，索引由 World 自动维护。涵盖 [LookupKey]、[UniqueKey]、IRelation 和目标销毁策略。
+icon: Network
+---
+
+查询按“有哪些组件”找实体。服务器还经常要按值找：名叫 “alice” 的玩家、3 号区域里的单位、分数前十、某个玩家拥有的物品、
+某支队伍的成员。用 `[LookupKey]` 标出组件的键，World 就会为它维护一份索引：每次 `Set` 都立即更新索引，查找时既不用追赶
+变化，也不用扫描。关系同样是索引：持有 `EntityId` 的组件能回答“谁指向这个实体”，`IRelation` 缓冲则让一个实体链接多个实体。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  按键查找（按名字找玩家、按区域找单位）、有序遍历（排行榜、截止时间、匹配分段）、反向链接（主人的物品、弓手的箭）
+  和多对多链接（队伍成员、关注者）。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  只在全量遍历里顺带判断的键：普通 `[ForEach]` 反正要读它。键很少、每个键下实体很多、而且要整组遍历（16 个区域、10 万玩家）：
+  用[分组](/zh/docs/guide/data/groups)，每个键独占自己的表，遍历是满速的。不必手写字典再手动同步：索引就是这张字典。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+### 值索引 [#value-indexes]
+
+用 `[LookupKey]` 标出查找实体用的成员（`partial` 结构体的位置参数、字段或属性）：生成器给它加上 `IIndexed<TKey>`，
+并显式实现返回该成员的 `Key`。`world.Index<T, TKey>()` 第一次调用时创建索引；生成的 `world.XIndex` 属性返回的是同一个。
+由多个成员算出的键要手写：实现 `IIndexed<TKey>` 和它的 `Key`（例如[下文](#direct-index)格子的 `(X, Y)`）。
+
+<Tabs items={['你写的', '生成器写的']}>
+<Tab value="你写的">
+
+```csharp
+public partial record struct Callsign([LookupKey] string Value) : IComponent;
+public partial record struct Zone([LookupKey] int Id) : IComponent;
+```
+
+</Tab>
+<Tab value="生成器写的">
+
+```csharp doccheck=skip
+partial record struct Callsign : IIndexed<string>
+{
+    readonly string IIndexed<string>.Key => Value;
+}
+
+partial record struct Zone : IIndexed<int>
+{
+    readonly int IIndexed<int>.Key => Id;
+}
+```
+
+</Tab>
+</Tabs>
+
+键是显式实现的，所以不进 record 的成员，也不进它的 `ToString()`。结构体以及包着它的每一层类型都得是 `partial`，生成器才能往里加代码
+（[EECS062](/zh/docs/guide/help/analyzer#eecs062)，有代码修复）。手写的 `Key` 只返回一个成员时会被报告，修复就是换成特性
+（[EECS067](/zh/docs/guide/help/analyzer#eecs067)）；一个组件上两个键报 [EECS036](/zh/docs/guide/help/analyzer#eecs036)。
+
+```csharp
+var alpha = world.CreateEntity(new Callsign("alpha"), new Zone(1));
+world.CreateEntity(new Callsign("bravo"), new Zone(1));
+
+var zones = world.ZoneIndex;                        // world.Index<Zone, int>()：存到局部变量或字段里
+int inOne = zones.Count(1);                         // O(1)
+foreach (var e in zones.Find(1)) { /* 1 号区域里的每个实体 */ }
+int toVisit = zones.Find(1).Count;                  // O(1)：循环会看到多少个，先按它确定缓冲区大小
+int occupied = zones.KeyCount;                      // O(1)：有实体的区域有几个（管理后台的指标）
+if (world.CallsignIndex.TryFind("alpha", out var found)) { /* 拥有这个键的任一实体 */ }
+
+alpha.SetZone(2);                                   // 一次 Set：索引立即把 alpha 挪过去 // [!code highlight]
+int inTwo = zones.Count(2);                         // 1
+```
+
+被索引的组件用 `in`、`Read<T>()` 或生成的属性（`alpha.Zone`，`ref readonly`）读取，用 `Set` 或生成的 `SetX` 写入。
+通过 `ref` 写入会在索引不知情时改掉键，所以分析器直接拒绝（[EECS015](/zh/docs/guide/help/analyzer#eecs015)）。一个组件只有一个索引、
+一种键类型。
+
+`Find(key).Count`（`world.Children(parent)` 也有）是查找时拥有这个键的实体数，不用遍历：按它确定缓冲区大小，不要把匹配遍历两遍。
+循环中被销毁的实体，遍历会跳过，但仍然计入。`KeyCount` 是有实体持有的不同键的个数（地图上有多少格子被占用），随实体进出维护；
+关系索引有 `TargetCount`：它的链接指向的不同目标的个数。
+
+### 组件本身就是键 [#self-key]
+
+键可以是整个组件：按 id 找商店，按地址找 actor。把 `[LookupKey]`（或 `[UniqueKey]`）标在结构体本身上，生成器就让组件以自己为键
+实现 `IIndexed`：
+
+<Tabs items={['你写的', '生成器写的']}>
+<Tab value="你写的">
+
+```csharp
+[LookupKey] public readonly partial record struct Shop(long Id) : IComponent;
+```
+
+</Tab>
+<Tab value="生成器写的">
+
+```csharp doccheck=skip
+partial record struct Shop : IIndexed<Shop>
+{
+    readonly Shop IIndexed<Shop>.Key => this;     // 显式实现：公开的 Key 属性会让 ToString() 无限递归
+}
+```
+
+</Tab>
+</Tabs>
+
+```csharp
+var shop = world.CreateEntity(new Shop(7));
+if (world.ShopIndex.TryFind(new Shop(7), out var found)) { /* id 为 7 的商店 */ }
+```
+
+record struct 上如果写公开的 `Key => this`，生成的 `ToString()` 会打印 `Key`，`Key` 又打印 `Key`，直到栈溢出。生成的显式实现让
+`Key` 不算 record 的成员；手写的 `Key` 如果返回值本身或某一个成员，会被报告，修复就是改用特性
+（[EECS067](/zh/docs/guide/help/analyzer#eecs067)）。[Actors 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors)就建立在这个
+写法上：每类 actor 一个类型，它同时是键、系统组和组的过滤条件。
+
+### 有序遍历和范围查询 [#ordered-index]
+
+键可以比较时（`IComparable<TKey>`：分数、等级、截止时间），同一个索引还能按键的顺序遍历：
+
+| 调用 | 访问 |
+| --- | --- |
+| `Range(min, max)` | 从 `min` 到 `max`（含两端）的键，升序 |
+| `RangeDescending(min, max)` | 同样的键，降序 |
+| `Ascending()` / `Descending()` | 所有被索引的实体，按键排序 |
+
+```csharp
+public partial record struct Score([LookupKey] int Points) : IComponent;
+```
+
+```csharp
+for (int i = 0; i < 100; i++) world.CreateEntity(new Score(i * 10));
+
+int shown = 0;
+foreach (var leader in world.ScoreIndex.Descending())         // 排行榜从第一名开始
+{
+    if (++shown > 10) break;
+}
+foreach (var rival in world.ScoreIndex.Range(400, 500)) { /* 一个匹配分段 */ }
+```
+
+第一次有序遍历时排一次序，之后键的增减都会保持有序。
+
+### `EntityId` 键：每个实体一条链接 [#entityid-keys]
+
+持有 `EntityId` 并以它为键的组件就是一条链接：每支箭有一个主人，索引回答“这个主人有哪些箭”。存 `EntityId`，不要存 `Entity`
+句柄（[EECS017](/zh/docs/guide/help/analyzer#eecs017)）：id 只有 8 字节，非托管，能随 World 存盘，而且句柄可以隐式转换成它。
+
+```csharp
+public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
+public struct Arrow : IComponent;
+```
+
+```csharp
+var archer = world.CreateEntity(new Health(10));
+for (int i = 0; i < 3; i++) world.CreateEntity(new OwnedBy(archer), new Arrow());
+
+int quiver = world.OwnedByIndex.Count(archer);                // 3：一次数组访问，不用哈希
+foreach (var arrow in world.OwnedByIndex.Find(archer)) { /* 弓手的每一支箭 */ }
+```
+
+`EntityId` 带着实体的版本号，所以指向已销毁实体的链接，永远不会匹配上之后复用同一编号的新实体。要把 id 变回句柄，用
+`world.TryGetEntity(id, out var entity)`，它同时告诉你实体是否还活着。父子链接是内置的，见[层级](/zh/docs/guide/data/hierarchy)。
+
+### 唯一键：一个键只对应一个实体 [#unique-keys]
+
+有些键只能指向一个实体，绝不能指向两个：账号 id、会话令牌、格子上的占位者。把 `[LookupKey]` 换成 `[UniqueKey]`（生成器加上
+`IUniqueIndexed<TKey>`），World 就会拒绝任何让第二个实体拿到同一个键的写入。`Get(key)` 返回这个键唯一的实体（没有实体持有时抛异常），
+`TryGet(key, out entity)` 告诉你有没有；`Find`、`Count`、`TryFind` 和有序遍历照常可用。
+
+```csharp
+public partial record struct Account([UniqueKey] long Id) : IComponent;
+```
+
+```csharp
+var ada = world.CreateEntity(new Account(1001));
+var bo = world.CreateEntity(new Account(2002));
+
+var accounts = world.AccountIndex;                      // world.Index<Account, long>()
+Entity holder = accounts.Get(1001);                     // ada：O(1)，没有实体持有这个键时抛异常
+bool taken = accounts.TryGet(3003, out _);              // false：没人用 3003
+
+try
+{
+    bo.SetAccount(1001);                                // 1001 在 ada 手上 // [!code highlight]
+}
+catch (InvalidOperationException)
+{
+    // 在任何改动之前就被拒绝：bo 还是 2002，ada 还是 1001
+}
+```
+
+- **每一种写入都会检查**，而且在改动之前：`Set` 和生成的 `SetX`、`CreateEntity`、`CreateEntities`、`GetOrAdd`（它占用默认值的键）、
+  `Enable` / `EnableAll`、`SetAll`、`Instantiate`（带不带[给定组件](/zh/docs/guide/basics/prefabs#instantiate-with-values)都一样）、`Clone`，
+  以及 `LoadEntities`、`LoadEntitiesInto`、`MoveEntities` 带进来的实体（见[迁移](/zh/docs/guide/saves/migration-and-unload#unique-keys)）。
+  会重复键的写入抛 `InvalidOperationException`，消息里写明组件、键和持有它的实体。`Load` 的存档里同一个键给了两个实体时，抛
+  `InvalidDataException`。
+- **被拒绝的写入不留痕迹。** 实体保留原来的值和原来的表；一次写多个组件的调用一个也不写；批量操作（`CreateEntities`、`SetAll`、
+  `EnableAll`、加载）不创建、也不修改任何实体。
+- **批量操作不能重复键。** `CreateEntities`、作用于多个实体的 `SetAll`、多于一个实体的 `Instantiate(prefab, span)` 和 `Clone`
+  都会让每个副本拿到同一个键：除非键是 null，否则抛异常。
+- **再写一次自己的键没问题。** `ada.SetAccount(1001)` 什么也不改。
+- **把键转给别人：先改原持有者。** 先给 `ada` 换一个键，再把 1001 给 `bo`。要交换两个键，借一个空闲的键周转：`ada` 换到备用键，
+  `bo` 换到 1001，`ada` 再换到 2002。
+- **销毁、`Remove` 和 `Disable` 都会释放键。** 禁用期间组件不占键；如果这期间别的实体拿走了这个键，再启用就抛异常（组件保持禁用）。
+- **null 键不算键。** `string` 键为 null 的实体可以有任意多个，查找找不到它们，`TryGet(null, out _)` 返回 false。默认值的键（`0`）
+  是正常的键。
+- **`EntityId` 键不能唯一。** 加载和迁移是先复制行、再改写 `EntityId`，来不及事先检查，所以 `IUniqueIndexed<EntityId>` 会被拒绝
+  （[EECS036](/zh/docs/guide/help/analyzer#eecs036)）：这种链接用 `IIndexed<EntityId>` 索引。唯一组件另带第二种键类型，EECS036 同样拒绝。
+- **每个 World 的键互不相干。** 两个 World 里可以各有一个账号 1001 的实体。
+
+唯一组件的索引是立即建立的：每个 World 在第一张包含该组件的表出现时就建好它，所以第一次写入就会检查。`IIndexed` 的索引等到第一次查找才建，
+从不查找的 World 不用付钱；唯一索引等不了，因为查找之前的每一次写入都可能混进重复的键。生成器在程序集加载时登记每个唯一组件的索引怎么建。
+生成器看不到的唯一组件（运行时才闭合的泛型组件），第一次写入会抛 `InvalidOperationException`，直到在任意一个 World 里调用一次
+`world.Index<T, TKey>()` 完成登记。
+
+#### 直接映射的键：`IDirectMapped<TKey>` [#direct-index]
+
+能映射到一小段有界槽位上的唯一键（玩家周围的格子或地形、房间、座位、小 id），查找时可以不走哈希。实现 `IDirectMapped<TKey>`
+而不是 `IUniqueIndexed<TKey>`，写明有多少个槽位、每个键落在哪个槽位：索引在哈希旁边多存一个槽位数组，`Get`、`TryGet` 和每次写入的唯一性检查
+都只读一个数组元素。哈希仍然是索引本身：槽位超出范围、或者槽位被别的键占着（冲突）的键通过哈希找到，`Find`、`Count` 和有序遍历也和
+其他唯一索引一样。
+
+<Callout type="idea" title="适合">
+  World 同时持有的键落在互不相同的槽位上：对已加载区域边长取模的网格坐标、有界地图的格子、玩家槽位、小 id。每个 tick 要查几千次的
+  查找（物体周围的方块、单位脚下的格子）就从一次哈希探测变成读一个数组元素。
+</Callout>
+
+<Callout type="warn" title="别用于">
+  稀疏的键或很大的范围（账号 id、令牌、名字）：数组会和范围一样长、大部分是空的，取模又会让大部分键冲突。每个 tick 只查几次的键：
+  哈希探测已经是 O(1)。
+</Callout>
+
+<TypeTable
+  type={{
+    Slots: {
+      type: 'static abstract int',
+      description: '槽位数组的长度，World 创建索引时读一次。开销是 Slots 乘以（键的大小加 12 字节）。',
+    },
+    'SlotOf(TKey key)': {
+      type: 'static abstract int',
+      description: '键的槽位，0 到 Slots - 1；其他值把这个键留给哈希。每次查找、每次写入键都会调用：几条指令，不带状态。',
+    },
+  }}
+/>
+
+```csharp
+public record struct Tile(int X, int Y) : IComponent, IDirectMapped<(int, int)>
+{
+    public (int, int) Key => (X, Y);
+
+    // 同时加载的格子彼此相距不到 64，所以坐标对 64 取模，每个格子都有自己的槽位。
+    static int IDirectMapped<(int, int)>.Slots => 64 * 64;
+    static int IDirectMapped<(int, int)>.SlotOf((int, int) key) => (key.Item2 & 63) * 64 + (key.Item1 & 63);
+}
+```
+
+```csharp
+world.CreateEntity(new Tile(3, 5));
+
+var tiles = world.TileIndex;                            // world.Index<Tile, (int, int)>()
+bool here = tiles.TryGet((3, 5), out var tile);         // true：读一个数组元素 // [!code highlight]
+bool far = tiles.TryGet((67, 5), out _);                // false：它的槽位存着 (3, 5)，也没有这个槽位的键只在哈希里
+world.CreateEntity(new Tile(67, 5));                    // 冲突：结果正确，通过哈希找到
+```
+
+- **其余一切都是唯一索引。** 同样的写入检查、同样的异常、同样的 `Find`、`Count` 和有序遍历；只有 `Get`、`TryGet` 和写入的检查先读槽位。
+- **冲突是正确的，只是慢一点。** 一个槽位的第二个键只在哈希里，要多一次探测；键经常冲突的槽位函数比 `IUniqueIndexed<TKey>` 快不了。
+- **槽位函数只做算术。** 每次查找和写入键都会调用它；对 2 的幂取模（`& 63`）或者直接用键就够了。
+- **由生成器登记**，和唯一索引一样：不用反射，Native AOT 下照样可用。
+
+`VoxelServer` 就是这样给地形建索引的：地形的槽位是它的坐标对 64 取模，玩家周围加载的地形相距从不到 64，物理、水和 AOI 为每个物体做的查找
+都只读一个元素（[数据](/zh/docs/samples/voxel-server#data)）。
+
+### 关系：每个实体多条链接 [#relations]
+
+一个实体每种组件只能有一个，所以 `EntityId` 键只能给每个实体一条链接。关系可以有任意多条：元素实现 `IRelation`，放在
+[`DynamicBuffer<T>`](/zh/docs/guide/data/dynamic-buffers) 里，`world.Relations<T>()` 负责找出链接到某个目标的实体。
+
+```csharp
+public record struct MemberOf(EntityId Target) : IRelation;
+```
+
+```csharp
+var red = world.CreateEntity();
+var blue = world.CreateEntity();
+var knight = world.CreateEntity().Link(new MemberOf(red)).Link(new MemberOf(blue));   // 同时在两支队伍
+
+var parties = world.Relations<MemberOf>();                    // 存到局部变量或字段里
+int members = parties.Count(red);                             // O(1)
+foreach (var member in parties.Find(red)) { /* red 的每个成员 */ }
+int links = parties.Find(red).Count;                          // O(1)：循环会走过的链接数，先按它确定缓冲区大小
+int withMembers = parties.TargetCount;                        // O(1)：有成员的队伍有几个
+bool inBlue = knight.Links<MemberOf>(blue);
+knight.Unlink<MemberOf>(blue);                                // 退出 blue
+```
+
+实体没有缓冲时，`Link` 会先加上缓冲，再追加链接并建立索引。读取链接用 `Read<DynamicBuffer<T>>()` 或 `in` 参数；
+修改链接用 `Link`、`Unlink` 或整个缓冲的 `Set`，这样索引才能跟上（通过 `ref` 写入属于
+[EECS015](/zh/docs/guide/help/analyzer#eecs015)）。
+
+只要有代码写出 `DynamicBuffer<MemberOf>`（`[ForEach]` 参数、一次 `Read`），生成器就会为这个关系生成具名成员：
+
+| 生成的成员 | 等价于 |
+| --- | --- |
+| `e.LinkMemberOf(target)` | `e.Link(new MemberOf(target))`，返回实体 |
+| `e.UnlinkMemberOf(target)` | `e.Unlink<MemberOf>(target)`，返回删掉了几条链接 |
+| `e.LinksMemberOf(target)` | `e.Links<MemberOf>(target)` |
+| `e.MemberOf` / `e.HasMemberOf` / `e.RemoveMemberOf()` | 全部链接（`ref readonly DynamicBuffer<MemberOf>`）、是否有链接、全部删掉 |
+| `world.MemberOfIndex` | `world.Relations<MemberOf>()` |
+
+```csharp
+public record struct PartyCount(int Parties) : IComponent;
+
+[EcsSystem]
+public ref struct CountParties
+{
+    [ForEach]
+    static void Count(in DynamicBuffer<MemberOf> parties, ref PartyCount count) => count = new PartyCount(parties.Count);
+}
+```
+
+```csharp
+var paladin = world.CreateEntity(new PartyCount()).LinkMemberOf(red).LinkMemberOf(blue);
+bool withBlue = paladin.LinksMemberOf(blue);                  // true
+paladin.UnlinkMemberOf(blue);                                 // 删掉 1 条链接
+int linked = paladin.MemberOf.Count;                          // 1
+int inRed = world.MemberOfIndex.Count(red);                   // 骑士和圣骑士
+```
+
+`LinkX` 的参数就是构造一条链接要的东西：每个公开构造函数一个重载；没有构造函数时，接收全部字段和带公开 `set` / `init` 的自动属性
+（`struct Ally : IRelation { public EntityId Target { get; init; } public int Weight; }` 得到 `e.LinkAlly(target, weight)`）。
+关系没有 `WriteX()` 和 `GetOrAddX()`：链接带索引，只能通过上面这些调用修改。
+
+### 目标被销毁时 [#target-policies]
+
+目标死了，指向它的链接怎么办，是游戏规则的一部分。索引可以在每次销毁时直接执行这条规则：
+
+| `TargetPolicy` | 指向被销毁实体的链接 | 例子 |
+| --- | --- | --- |
+| `Keep`（默认） | 保留，仍能用死去的 id 查到（之后不会有实体拥有这个 id），由你自己的系统清理 | 审计记录 |
+| `Remove` | 删除：从实体上移除这个组件，关系则丢掉这些链接 | 宠物死了，主人失去宠物 |
+| `Destroy` | 链接方也一起销毁，指向它们的也依次销毁 | 召唤物随召唤者一起消失 |
+
+```csharp
+world.OwnedByIndex.WhenTargetDestroyed(TargetPolicy.Destroy);       // 弓手死了，箭也没了
+world.Relations<MemberOf>().WhenTargetDestroyed(TargetPolicy.Remove); // 队伍解散，不留链接
+
+archer.Destroy();
+int arrowsLeft = world.Count<Arrow>();                              // 0
+```
+
+`WhenTargetDestroyed` 按 World、按索引分别设置。对每个 World 都成立的规则声明在类型上：关系或以 `EntityId` 为键的组件标上
+`[WhenTargetDestroyed(policy)]`，每个 World 从第一张包含该组件的表起就采用这条策略，第一次销毁就会遵守，也不会忘了调用设置。
+World 自己调用 `WhenTargetDestroyed` 会覆盖它。
+
+```csharp
+[WhenTargetDestroyed(TargetPolicy.Destroy)]                         // 召唤者死了，召唤物也消失，每个 World 都是
+public partial record struct SummonedBy([LookupKey] EntityId Summoner) : IComponent;
+
+[WhenTargetDestroyed(TargetPolicy.Remove)]                          // 公会解散，不留链接
+public record struct InGuild(EntityId Target) : IRelation;
+```
+
+[层级](/zh/docs/guide/data/hierarchy)用的 `ChildOf` 一开始就是 `Destroy`。特性标在不链接任何实体的类型上会被报告
+（[EECS068](/zh/docs/guide/help/analyzer#eecs068)）。
+
+### 对称关系：两边各一条链接 [#symmetric-relations]
+
+好友、交易、决斗：有些关系从哪一端看都一样。关系是单向的（拥有者链接到目标），所以对称关系就是两条链接，两边各一条，一起写。
+把两次写入放在同一个地方，再让 `TargetPolicy.Remove` 负责一方被销毁时的清理：被销毁的实体自己的链接随它一起消失，索引再删掉对方指向它的那条。
+
+```csharp
+public record struct Friend(EntityId Target) : IRelation;
+
+public static class Friendships
+{
+    // 好友关系是两条链接，每个玩家身上一条，所以两边一起改。
+    public static void Befriend(Entity a, Entity b)
+    {
+        if (a.Links<Friend>(b)) return;
+        a.Link(new Friend(b));
+        b.Link(new Friend(a));
+    }
+
+    public static void Unfriend(Entity a, Entity b)
+    {
+        a.Unlink<Friend>(b);
+        b.Unlink<Friend>(a);
+    }
+}
+```
+
+```csharp
+var friends = world.Relations<Friend>();
+friends.WhenTargetDestroyed(TargetPolicy.Remove);          // 离开的玩家不留下任何链接
+
+var ana = world.CreateEntity();
+var ben = world.CreateEntity();
+Friendships.Befriend(ana, ben);
+int bensFriends = friends.Count(ben);                      // 1：ana 链接到 ben
+
+ana.Destroy();                                             // ana 的链接随她消失，ben 指向她的那条也被删掉
+bool stillLinked = ben.Links<Friend>(ana);                 // false
+```
+
+每一方从自己的缓冲里读出自己的好友；而且每条链接都有对应的反向链接，所以 `friends.Count(player)`（指向这个玩家的链接数）也就是他的好友数。
+`Unfriend` 同样一次删掉两条。
+
+### 由索引驱动的系统 [#index-driven-foreach]
+
+`[ForEach]` 方法可以对访问到的每个实体再遍历一次索引：危险区伤害区域里的单位，公会统计成员。把 `World`（或 `Entity`）
+作为参数拿到索引；这样系统会单独运行，正好满足索引只属于 World 所有者线程的要求。
+
+```csharp
+public record struct Hazard(int Zone, int Damage) : IComponent;
+
+[EcsSystem]
+public ref struct BurnZones
+{
+    [ForEach]
+    static void Burn(in Hazard hazard, World world)
+    {
+        foreach (var unit in world.ZoneIndex.Find(hazard.Zone)) // [!code highlight]
+        {
+            ref var health = ref unit.TryGetRef<Health>(out bool found);   // 只查一次
+            if (found) health.Value -= hazard.Damage;
+        }
+    }
+}
+```
+
+无论 World 里有多少单位，遍历只碰这个区域里的那些。`Find` 循环里可以销毁实体，但不能修改这个索引对应的组件：某个键清空后，
+它的 id 数组会交给下一个变大的键，遍历可能读到别的键的实体。先收集，再修改。
+
+## 完整例子 [#full-example]
+
+按队伍、按名字、按等级查找单位，属于某个弓箭手的箭，以及同时加入多个队伍的英雄。把这几个文件放进一个引用了 EasyEcs 的
+控制台项目（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// 值索引：Key 是用来查找实体的值。
+public partial record struct Team([LookupKey] int Id) : IComponent;
+
+// 唯一键：两个玩家不能同名。
+public partial record struct PlayerName([UniqueKey] string Value) : IComponent;
+
+// int 键可以比较大小，所以这个索引还能按顺序遍历一段等级。
+public partial record struct Level([LookupKey] int Value) : IComponent;
+
+// 链接：每支箭有一个主人，索引列出某个主人的所有箭。
+[WhenTargetDestroyed(TargetPolicy.Destroy)]                       // 弓箭手被销毁时，它的箭也一起销毁
+public partial record struct OwnedBy([LookupKey] EntityId Owner) : IComponent;
+
+public struct Arrow : IComponent;
+
+// 关系：一个实体可以有多个，所在的每个队伍一个。
+public record struct MemberOf(EntityId Target) : IRelation;
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+
+// ---- 值索引 ----
+for (int i = 0; i < 9; i++)
+{
+    world.CreateEntity(new Team(i % 3), new Level(i + 1));
+}
+
+world.CreateEntity(new PlayerName("alice"), new Level(42));
+
+// 生成的属性就是 world.Index<Team, int>()：存进局部变量或字段里用。
+var teams = world.TeamIndex;
+Console.WriteLine($"team 0: {teams.Count(0)} units");
+
+// 遍历队伍索引时不能修改 Team：先收集单位，再修改。
+var moving = new List<Entity>();
+foreach (var unit in teams.Find(1))
+{
+    moving.Add(unit);
+}
+
+// 一次 Set 立刻把实体挪到新键下。
+foreach (var unit in moving)
+{
+    unit.SetTeam(2);
+}
+
+Console.WriteLine($"team 1: {teams.Count(1)} units, team 2: {teams.Count(2)} units");
+
+// 唯一的键找到一个实体。
+if (world.PlayerNameIndex.TryGet("alice", out var alice))
+{
+    Console.WriteLine($"alice is level {alice.Level.Value}");
+}
+
+Console.Write("levels 3 to 6:");
+foreach (var unit in world.LevelIndex.Range(3, 6))
+{
+    Console.Write($" {unit.Level.Value}");
+}
+
+Console.WriteLine();
+
+// ---- 每个实体一条链接：箭和它的主人 ----
+Entity archer = world.CreateEntity(new Team(0));
+for (int i = 0; i < 3; i++)
+{
+    world.CreateEntity(new OwnedBy(archer), new Arrow());
+}
+
+var arrows = world.OwnedByIndex;
+Console.WriteLine($"the archer owns {arrows.Count(archer)} arrows");
+
+// ---- 每个实体多条链接：队伍 ----
+Entity red = world.CreateEntity();
+Entity blue = world.CreateEntity();
+Entity hero = world.CreateEntity();
+hero.Link(new MemberOf(red));
+hero.Link(new MemberOf(blue));
+world.CreateEntity().Link(new MemberOf(red));
+
+var parties = world.Relations<MemberOf>();
+Console.WriteLine($"red has {parties.Count(red)} members, blue has {parties.Count(blue)}");
+
+hero.Unlink<MemberOf>(blue);
+Console.WriteLine($"after the hero left: blue has {parties.Count(blue)}");
+
+archer.Destroy();
+Console.WriteLine($"arrows left after the archer died: {world.Count<Arrow>()}");
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+team 0: 3 units
+team 1: 0 units, team 2: 6 units
+alice is level 42
+levels 3 to 6: 3 4 5 6
+the archer owns 3 arrows
+red has 2 members, blue has 1
+after the hero left: blue has 0
+arrows left after the archer died: 0
+```
+
+1 队的单位先收集起来再改队伍，遍历就不会读到正在清空的键。箭跟着弓箭手一起销毁，是因为设了
+`TargetPolicy.Destroy`；不设的话，它们会留着一条指向已销毁实体的链接。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 原因 |
+| --- | --- | --- |
+| 在热循环里调用 `world.Index<T, TKey>()` | 把索引存进局部变量或字段（或用 `world.XIndex`） | 创建是冷路径；属性虽是 O(1)，也还是一次查找 |
+| 键没变也调用 `Set` | `unit.SetZoneIfChanged(id)`，或者先比较 | 键不变的 `Set` 不会重新链接，但仍是一次写入 |
+| 扫描比较键 | `Find(key)` / `Count(key)` | O(1)，之后每个匹配 O(1) |
+| 自己维护“键 → 实体”的字典，每次写入前手动检查 | `IUniqueIndexed<TKey>`，`Get` / `TryGet` | 每次写入一次哈希探测，所有写入路径都会检查 |
+| 在唯一索引旁边手写一个实体 id 网格 | [`IDirectMapped<TKey>`](#direct-index) | 每次查找读一个数组元素，每次写入都会维护，背后还有哈希 |
+| 每个 tick 给查询结果排序 | `Range` / `Descending` | 键在变化时一直保持有序 |
+| 整组遍历很多大键 | [`GroupBy`](/zh/docs/guide/data/groups) | 同组的行连续存放在自己的表里 |
+
+10 万件物品里有 100 件换了主人，然后统计 100 个背包（`IndexBenchmark`）；100 个玩家改变关注对象，然后统计并遍历 100 个
+玩家的关注者（`RelationBenchmark`）；1,000 个分数变化，然后读出前 10 名和一个分段，对比手写扫描维护前 10 名
+（`OrderedIndexBenchmark`）：
+
+<BenchTable bench="IndexBenchmark" />
+
+<BenchTable bench="RelationBenchmark" />
+
+<BenchTable bench="OrderedIndexBenchmark" />
+
+## 开销 [#what-it-costs]
+
+- **不用就没有开销。** 索引在第一次查找时建立（遍历一次匹配的表）；从不调用 `Index` 或 `Relations` 的 World 什么都不付。
+  [唯一](#unique-keys)索引例外：第一张包含该组件的表出现时它就在了。
+- **唯一键：** `Get` 和 `TryGet` 是一次哈希探测；写唯一组件时，改动之前多一次探测。`SetAll`、`EnableAll` 和 `Load` 对它们的行多走一遍占键；
+  `Clone`、`Instantiate`、`LoadEntities`、`LoadEntitiesInto` 和 `MoveEntities` 每行每个唯一组件一次探测。预热之后都不分配内存。
+- **直接映射的键：** `Get`、`TryGet` 和写入的检查读一个槽位；超出范围、或槽位被别的键占着的键再加一次哈希探测。槽位数组的开销是 `Slots`
+  乘以（键的大小加 12 字节），随索引一起分配。
+- **内存：** 每个被索引的实体一个节点，每个键一个 id 数组；唯一键把它唯一的实体直接存在键自己的记录里，没有数组，所以 `Get` 只读这一条记录。关系的每个元素一个 20 字节的链接（可回收），外加目标列表里的 8 字节。
+- **`Count`** 是一次哈希探测，`EntityId` 键则是一次数组访问；**`Find`** 每个实体多一步，它的 `.Count` 不多花一步。
+- **改了键的 `Set`** 会把实体从旧键摘下、挂到新键上（几次数组写入；非实体键多一次哈希探测）。
+- **有序遍历：** 第一次排序；之后每出现或消失一个键，开销是 O(log 键数) 加一次块移动。
+- **分配：** 只在索引遇到新键或更大的实体 id 时发生，查找本身从不分配。
+- **目标策略：** 每个被销毁的实体 O(1)，它的每条链接 O(1)。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 通过 `ref`、`Get<T>()` 或查询元素写入被索引的组件 | 索引还停在旧键上 | [EECS015](/zh/docs/guide/help/analyzer#eecs015) |
+| 组件里存 `Entity` 句柄 | 变成托管列，有写屏障，存不了盘 | [EECS017](/zh/docs/guide/help/analyzer#eecs017) |
+| 在 `Find` 循环里给实体加上同一索引的组件或换新键 | 遍历可能读到别的键的实体（移除组件、销毁实体没问题） | [EECS042](/zh/docs/guide/help/analyzer#eecs042)：先收集，再修改 |
+| record struct 上写公开的 `Key => this` | `ToString()` 无限打印 `Key`，栈溢出 | [EECS043](/zh/docs/guide/help/analyzer#eecs043)（有代码修复）：结构体上标 `[LookupKey]`，或写 `Shop IIndexed<Shop>.Key => this;` |
+| 在不是 `partial` 的结构体上（或类型里）标 `[LookupKey]`、`[UniqueKey]` | 编译错误：生成器加不了键 | [EECS062](/zh/docs/guide/help/analyzer#eecs062)（有代码修复） |
+| 手写只返回一个成员的 `Key` | 能用，但公开的 `Key` 会进 record 的 `ToString()` 和相等比较成员 | [EECS067](/zh/docs/guide/help/analyzer#eecs067)（有代码修复）：成员上标 `[LookupKey]` |
+| 在不链接任何实体的类型上标 `[WhenTargetDestroyed]` | 编译错误：没有目标可看 | [EECS068](/zh/docs/guide/help/analyzer#eecs068) |
+| 在其他线程使用索引 | 索引属于所有者线程 | [多线程与并行](/zh/docs/guide/performance/threading#what-the-world-synchronizes) |
+| 同一个组件用两种键类型建索引 | 抛 `InvalidOperationException`：每个组件一个索引 | 运行时 |
+| 键是 `null`（`string` 的默认值） | 实体不会出现在任何键下 | 设计如此 |
+| 唯一键已被别的实体持有 | 抛 `InvalidOperationException`，什么也不改 | 运行时：先 `TryGet`，或者先从原持有者手里移走 |
+| 还没从原持有者手里拿走，就把唯一键给了新持有者 | 抛 `InvalidOperationException` | 先改原持有者 |
+| 对带唯一键的实体 `Clone`、`CreateEntities` 或 `Instantiate(prefab, span)` 多个 | 抛 `InvalidOperationException`：副本会共用这个键 | 每个实体给自己的键 |
+| 稀疏的键或很大的范围（账号 id）用 `IDirectMapped<TKey>` | 槽位数组和范围一样长、大部分是空的，或者大部分键冲突 | 用普通的 `IUniqueIndexed<TKey>` |
+| 同时持有的键会冲突的槽位函数（取模比已加载区域还小） | 查找都走哈希：没有收益 | 让 `Slots` 覆盖 World 同时持有的键 |
+| `IUniqueIndexed<EntityId>`，或唯一组件另带第二种键类型 | 编译错误 | [EECS036](/zh/docs/guide/help/analyzer#eecs036)：链接用 `IIndexed<EntityId>` |
+| 对称链接只写了一边 | 一个玩家是对方的好友，反过来却不是 | 用一个辅助方法同时写两边（[对称关系](#symmetric-relations)） |
+
+## 和其他库的对比 [#compared]
+
+Friflo 支持组件索引（`IIndexedComponent`）和链接（`ILinkComponent`、`ILinkRelation`）；DefaultEcs 有 `EntityMultiMap<TKey>`；
+Arch 的关系在单独的包里。下面每个库用的都是自己的内置索引：
+
+<BenchChart bench="IndexComparison" param="Trades=100" title="10 万件物品中 100 件换主人，然后统计 100 个背包" />
+
+<BenchChart bench="RelationComparison" title="好友列表：100 个玩家改变关注对象，然后读取 100 个关注者列表" />
+
+范围查询和区域查找，区域分别用值索引和[分组](/zh/docs/guide/data/groups)实现：
+
+<BenchChart bench="ValueQueryComparison" title="10 万玩家中统计一个分数区间，并汇总四个区域的金币" />
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="层级" href="/zh/docs/guide/data/hierarchy">
+    `ChildOf`、`Children` 和级联销毁。
+  </Card>
+  <Card title="分组" href="/zh/docs/guide/data/groups">
+    按值拆表：整组遍历一个键的最快方式。
+  </Card>
+  <Card title="动态缓冲" href="/zh/docs/guide/data/dynamic-buffers">
+    存放关系链接的缓冲。
+  </Card>
+  <Card title="示例：GameLoop" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/GameLoop">
+    一个用值索引按客户端 id 查找玩家的服务器。
+  </Card>
+</Cards>

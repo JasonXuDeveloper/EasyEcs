@@ -41,31 +41,31 @@ One page per concept, under [guide/](guide):
 
 | Page | Source |
 |---|---|
-| [Structuring a real project](https://ecs.xgamedev.net/en/docs/guide/project-structure) | [guide/project-structure.mdx](guide/project-structure.mdx) |
-| [Entities and components](https://ecs.xgamedev.net/en/docs/guide/entities-and-components) | [guide/entities-and-components.mdx](guide/entities-and-components.mdx) |
-| [Prefabs and cloning](https://ecs.xgamedev.net/en/docs/guide/prefabs) | [guide/prefabs.mdx](guide/prefabs.mdx) |
-| [Queries and filters](https://ecs.xgamedev.net/en/docs/guide/queries) | [guide/queries.mdx](guide/queries.mdx) |
-| [Systems](https://ecs.xgamedev.net/en/docs/guide/systems) | [guide/systems.mdx](guide/systems.mdx) |
-| [Singletons](https://ecs.xgamedev.net/en/docs/guide/singletons) | [guide/singletons.mdx](guide/singletons.mdx) |
-| [Structural changes](https://ecs.xgamedev.net/en/docs/guide/structural-changes) | [guide/structural-changes.mdx](guide/structural-changes.mdx) |
-| [ref and await](https://ecs.xgamedev.net/en/docs/guide/refs-and-await) | [guide/refs-and-await.mdx](guide/refs-and-await.mdx) |
-| [Change tracking](https://ecs.xgamedev.net/en/docs/guide/change-tracking) | [guide/change-tracking.mdx](guide/change-tracking.mdx) |
-| [Dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/dynamic-buffers) | [guide/dynamic-buffers.mdx](guide/dynamic-buffers.mdx) |
-| [Indexes and relations](https://ecs.xgamedev.net/en/docs/guide/indexes-and-relations) | [guide/indexes-and-relations.mdx](guide/indexes-and-relations.mdx) |
-| [Hierarchy](https://ecs.xgamedev.net/en/docs/guide/hierarchy) | [guide/hierarchy.mdx](guide/hierarchy.mdx) |
-| [Groups](https://ecs.xgamedev.net/en/docs/guide/groups) | [guide/groups.mdx](guide/groups.mdx) |
-| [Cleanup and disable](https://ecs.xgamedev.net/en/docs/guide/cleanup-and-disable) | [guide/cleanup-and-disable.mdx](guide/cleanup-and-disable.mdx) |
-| [Bulk changes](https://ecs.xgamedev.net/en/docs/guide/bulk) | [guide/bulk.mdx](guide/bulk.mdx) |
-| [Snapshots](https://ecs.xgamedev.net/en/docs/guide/snapshots) | [guide/snapshots.mdx](guide/snapshots.mdx) |
-| [Save and load](https://ecs.xgamedev.net/en/docs/guide/saves) | [guide/saves.mdx](guide/saves.mdx) |
-| [Migration and unload](https://ecs.xgamedev.net/en/docs/guide/migration-and-unload) | [guide/migration-and-unload.mdx](guide/migration-and-unload.mdx) |
-| [Threading](https://ecs.xgamedev.net/en/docs/guide/threading) | [guide/threading.mdx](guide/threading.mdx) |
-| [Hosting in a .NET server](https://ecs.xgamedev.net/en/docs/guide/hosting) | [guide/hosting.mdx](guide/hosting.mdx) |
-| [Testing systems](https://ecs.xgamedev.net/en/docs/guide/testing) | [guide/testing.mdx](guide/testing.mdx) |
-| [Debugging and diagnostics](https://ecs.xgamedev.net/en/docs/guide/diagnostics) | [guide/diagnostics.mdx](guide/diagnostics.mdx) |
-| [Analyzer rules](https://ecs.xgamedev.net/en/docs/guide/analyzer) | [guide/analyzer.mdx](guide/analyzer.mdx) |
-| [Common mistakes](https://ecs.xgamedev.net/en/docs/guide/common-mistakes) | [guide/common-mistakes.mdx](guide/common-mistakes.mdx) |
-| [Troubleshooting](https://ecs.xgamedev.net/en/docs/guide/troubleshooting) | [guide/troubleshooting.mdx](guide/troubleshooting.mdx) |
+| [Structuring a real project](https://ecs.xgamedev.net/en/docs/guide/basics/project-structure) | [guide/basics/project-structure.mdx](guide/basics/project-structure.mdx) |
+| [Entities and components](https://ecs.xgamedev.net/en/docs/guide/basics/entities-and-components) | [guide/basics/entities-and-components.mdx](guide/basics/entities-and-components.mdx) |
+| [Prefabs and cloning](https://ecs.xgamedev.net/en/docs/guide/basics/prefabs) | [guide/basics/prefabs.mdx](guide/basics/prefabs.mdx) |
+| [Queries and filters](https://ecs.xgamedev.net/en/docs/guide/basics/queries) | [guide/basics/queries.mdx](guide/basics/queries.mdx) |
+| [Systems](https://ecs.xgamedev.net/en/docs/guide/basics/systems) | [guide/basics/systems.mdx](guide/basics/systems.mdx) |
+| [Singletons](https://ecs.xgamedev.net/en/docs/guide/basics/singletons) | [guide/basics/singletons.mdx](guide/basics/singletons.mdx) |
+| [Structural changes](https://ecs.xgamedev.net/en/docs/guide/changes/structural-changes) | [guide/changes/structural-changes.mdx](guide/changes/structural-changes.mdx) |
+| [ref and await](https://ecs.xgamedev.net/en/docs/guide/changes/refs-and-await) | [guide/changes/refs-and-await.mdx](guide/changes/refs-and-await.mdx) |
+| [Change tracking](https://ecs.xgamedev.net/en/docs/guide/changes/change-tracking) | [guide/changes/change-tracking.mdx](guide/changes/change-tracking.mdx) |
+| [Dynamic buffers](https://ecs.xgamedev.net/en/docs/guide/data/dynamic-buffers) | [guide/data/dynamic-buffers.mdx](guide/data/dynamic-buffers.mdx) |
+| [Indexes and relations](https://ecs.xgamedev.net/en/docs/guide/data/indexes-and-relations) | [guide/data/indexes-and-relations.mdx](guide/data/indexes-and-relations.mdx) |
+| [Hierarchy](https://ecs.xgamedev.net/en/docs/guide/data/hierarchy) | [guide/data/hierarchy.mdx](guide/data/hierarchy.mdx) |
+| [Groups](https://ecs.xgamedev.net/en/docs/guide/data/groups) | [guide/data/groups.mdx](guide/data/groups.mdx) |
+| [Cleanup and disable](https://ecs.xgamedev.net/en/docs/guide/changes/cleanup-and-disable) | [guide/changes/cleanup-and-disable.mdx](guide/changes/cleanup-and-disable.mdx) |
+| [Bulk changes](https://ecs.xgamedev.net/en/docs/guide/changes/bulk) | [guide/changes/bulk.mdx](guide/changes/bulk.mdx) |
+| [Snapshots](https://ecs.xgamedev.net/en/docs/guide/saves/snapshots) | [guide/saves/snapshots.mdx](guide/saves/snapshots.mdx) |
+| [Save and load](https://ecs.xgamedev.net/en/docs/guide/saves/saves) | [guide/saves/saves.mdx](guide/saves/saves.mdx) |
+| [Migration and unload](https://ecs.xgamedev.net/en/docs/guide/saves/migration-and-unload) | [guide/saves/migration-and-unload.mdx](guide/saves/migration-and-unload.mdx) |
+| [Threading](https://ecs.xgamedev.net/en/docs/guide/performance/threading) | [guide/performance/threading.mdx](guide/performance/threading.mdx) |
+| [Hosting in a .NET server](https://ecs.xgamedev.net/en/docs/guide/production/hosting) | [guide/production/hosting.mdx](guide/production/hosting.mdx) |
+| [Testing systems](https://ecs.xgamedev.net/en/docs/guide/production/testing) | [guide/production/testing.mdx](guide/production/testing.mdx) |
+| [Debugging and diagnostics](https://ecs.xgamedev.net/en/docs/guide/production/diagnostics) | [guide/production/diagnostics.mdx](guide/production/diagnostics.mdx) |
+| [Analyzer rules](https://ecs.xgamedev.net/en/docs/guide/help/analyzer) | [guide/help/analyzer.mdx](guide/help/analyzer.mdx) |
+| [Common mistakes](https://ecs.xgamedev.net/en/docs/guide/help/common-mistakes) | [guide/help/common-mistakes.mdx](guide/help/common-mistakes.mdx) |
+| [Troubleshooting](https://ecs.xgamedev.net/en/docs/guide/help/troubleshooting) | [guide/help/troubleshooting.mdx](guide/help/troubleshooting.mdx) |
 
 ## Compare
 

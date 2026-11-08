@@ -21,25 +21,25 @@ import { Boxes, FlaskConical, Network, Save } from 'lucide-react';
 
 下面每一项都有单独的一节，附上用到它的代码。
 
-- **一个 tick 分三个组**：输入、模拟、同步各是一个[系统组](/zh/docs/guide/systems#system-groups)，各由自己的
+- **一个 tick 分三个组**：输入、模拟、同步各是一个[系统组](/zh/docs/guide/basics/systems#system-groups)，各由自己的
   `world.Update<TGroup>()` 运行（[一个 tick](#one-tick)）。
 - **一个系统只做一件事**：35 个小系统，每个只响应一份数据（一个标签、一个变了的组件、一个请求实体），再把数据交给下一个；没有系统调用别的系统。
-- **地形是实体，它的状态是存在位**：[唯一索引](/zh/docs/guide/indexes-and-relations#unique-keys)找到某个位置的地形，
-  [动态缓冲](/zh/docs/guide/dynamic-buffers)装它的方块和水，所有地形都来自同一个带全部标签的[预制体](/zh/docs/guide/prefabs)，
+- **地形是实体，它的状态是存在位**：[唯一索引](/zh/docs/guide/data/indexes-and-relations#unique-keys)找到某个位置的地形，
+  [动态缓冲](/zh/docs/guide/data/dynamic-buffers)装它的方块和水，所有地形都来自同一个带全部标签的[预制体](/zh/docs/guide/basics/prefabs)，
   所以状态变化从不把它搬到另一张表（[地形的一生](#chunks)）。
-- **地形跟着玩家走，并且会存下来**：用 [`SaveEntities` 和 `LoadEntities`](/zh/docs/guide/migration-and-unload)
+- **地形跟着玩家走，并且会存下来**：用 [`SaveEntities` 和 `LoadEntities`](/zh/docs/guide/saves/migration-and-unload)
   在遍历之后存下一组实体再读回（[地形的一生](#chunks)）。
 - **不轮询的视野管理**：四个系统响应四种变化；谁看得见一片地形通过索引数出来，被销毁的实体在哪里被看见，由一个
-  [清理组件](/zh/docs/guide/cleanup-and-disable)留到它的消失包发出为止（[视野](#aoi)）。
+  [清理组件](/zh/docs/guide/changes/cleanup-and-disable)留到它的消失包发出为止（[视野](#aoi)）。
 - **水按 GPU 的方式分趟算**：一个在网格瓦片上自己加载光环的并行 SIMD 着色器，然后提交；模板跳过干的行，缓冲不清零（[水](#water)）。
-- **数据是网格或一列时用 SIMD**：水、高度图，以及[批量方法](/zh/docs/guide/systems#batch-methods)里的火焰伤害（[SIMD](#simd)）。
+- **数据是网格或一列时用 SIMD**：水、高度图，以及[批量方法](/zh/docs/guide/basics/systems#batch-methods)里的火焰伤害（[SIMD](#simd)）。
 - **时间和状态都是数据**：冷却、着火、掉落物的存在时间都是它们结束的 tick；挖掘、死亡、重生都是组件和实体（[掉落物](#items)、[僵尸](#zombies)）。
-- **自动排好序的排行榜**：按挖掘数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)（[排行榜](#leaderboard)）。
-- **只下发变了的东西**：[`[Changed<T>]`、`[ChangedAny<..>]`](/zh/docs/guide/change-tracking#changed-any)、
-  [`Maybe<T>` 和 `ReadOnlyMaybe<T>`](/zh/docs/guide/systems#maybe)，以及一次[批量移除](/zh/docs/guide/bulk)（[下发](#replication)）。
-- **停机存档、不分配的缓冲**：[`SaveWithout` 和 `LoadKeeping`](/zh/docs/guide/saves#restart) 写进一个复用的 writer，
+- **自动排好序的排行榜**：按挖掘数索引玩家的[有序索引](/zh/docs/guide/data/indexes-and-relations#ordered-index)（[排行榜](#leaderboard)）。
+- **只下发变了的东西**：[`[Changed<T>]`、`[ChangedAny<..>]`](/zh/docs/guide/changes/change-tracking#changed-any)、
+  [`Maybe<T>` 和 `ReadOnlyMaybe<T>`](/zh/docs/guide/basics/systems#maybe)，以及一次[批量移除](/zh/docs/guide/changes/bulk)（[下发](#replication)）。
+- **停机存档、不分配的缓冲**：[`SaveWithout` 和 `LoadKeeping`](/zh/docs/guide/saves/saves#restart) 写进一个复用的 writer，
   缓冲池按地形的大小设置（[程序](#program)）。
-- **可测量**：[`MeasureSystems` 和 `DescribeSchedule`](/zh/docs/guide/diagnostics)。
+- **可测量**：[`MeasureSystems` 和 `DescribeSchedule`](/zh/docs/guide/production/diagnostics)。
 
 ## 思路来自哪里 [#ideas]
 
@@ -90,7 +90,7 @@ flowchart LR
   unload --> send
 ```
 
-一个 tick 分三部分，每部分是一个[系统组](/zh/docs/guide/systems#system-groups)：一个起名用的 struct，加上它的系统上的 `[UpdateInGroup<T>]`。
+一个 tick 分三部分，每部分是一个[系统组](/zh/docs/guide/basics/systems#system-groups)：一个起名用的 struct，加上它的系统上的 `[UpdateInGroup<T>]`。
 
 <include lang="csharp" meta='title="Groups.cs"'>../../../samples/VoxelServer/Groups.cs</include>
 
@@ -106,7 +106,7 @@ flowchart LR
 ## 数据 [#data]
 
 组件按世界的各个部分分文件。注释说明每个值的含义和谁来写。地形是实体：它的键 `Chunk` 是
-[直接映射](/zh/docs/guide/indexes-and-relations#direct-index)的唯一键（`world.ChunkIndex`，地形的槽位是它的坐标对 64 取模，查找只读一个数组元素），8,192 个方块和对应的水是两个字节缓冲，
+[直接映射](/zh/docs/guide/data/indexes-and-relations#direct-index)的唯一键（`world.ChunkIndex`，地形的槽位是它的坐标对 64 取模，查找只读一个数组元素），8,192 个方块和对应的水是两个字节缓冲，
 水的各趟把自己的数据也放在它上面（`NextFluid`、`FluidStep`）；`Chunk` 也是网格的瓦片形状（`ITile<ChunkPos>`）。
 
 <include lang="csharp" meta='tab="地形"'>../../../samples/VoxelServer/Components/Chunks.cs</include>
@@ -147,13 +147,13 @@ stateDiagram-v2
 请求带 `[UniqueKey]`，第二个要它的玩家能找到它，就不再重复请求。请求创建时带着 `Saved` 标签，区域文件里没有这片地形时去掉它：
 这是存在位，所以所有请求都在同一张表里，保持到来的顺序。遍历期间不能加载或创建实体（EECS041），所以 `ChunkReadSystem`（`With<Saved>`）
 和 `ChunkGenerateSystem`（`Without<Saved>`）在遍历之后的 `OnUpdate` 里处理这些请求：每个 tick 各用
-[`CollectIds`](/zh/docs/guide/queries#collect-ids) 最多取 `Rules.MaxRequests` 个，只销毁这些，其余的等下一个 tick。卸载过的地形用 `LoadEntities` 从区域文件读回，里面的僵尸和掉落物也一起回来；
+[`CollectIds`](/zh/docs/guide/basics/queries#collect-ids) 最多取 `Rules.MaxRequests` 个，只销毁这些，其余的等下一个 tick。卸载过的地形用 `LoadEntities` 从区域文件读回，里面的僵尸和掉落物也一起回来；
 从没见过的地形是地形预制体的一个实例，方块通过 `SetCount` 返回的 span 原地写入。
 
 <include lang="csharp" meta='title="Systems/Chunks.cs"'>../../../samples/VoxelServer/Systems/Chunks.cs#load</include>
 
 每片地形都是同一个预制体的实例，这个预制体带着地形以后会有的所有组件和标签，标签处于不存在状态。所以所有地形共用一张表，
-读回的地形也一样（它的存档保留了这些列），`Fresh`、`Flowing`、`Unloading` 的来去只是翻[存在位](/zh/docs/guide/structural-changes#during-a-pass)：
+读回的地形也一样（它的存档保留了这些列），`Fresh`、`Flowing`、`Unloading` 的来去只是翻[存在位](/zh/docs/guide/changes/structural-changes#during-a-pass)：
 地形从不搬到另一张表。这不只是省一次搬动的开销：遍历不会访问开始之后才加入匹配表的实体，一个系统要是唤醒正在访问的地形旁边的地形，
 遍历就会漏掉其中一些。
 
@@ -183,7 +183,7 @@ stateDiagram-v2
 
 谁看得见一片地形是数出来的，从不搜索：每个玩家的视野都是 `Rules.PlayerVision`，所以看得见一片地形的玩家，就是以它为中心的正方形里的
 视野中心；`ViewCenter` 带索引，`world.ViewCenterIndex.Count(chunk)` 以 O(1) 数出中心落在某片地形的玩家。待在原地形的实体和玩家
-在这里没有任何开销，不管过多少个 tick。刚出现的玩家还没有 `ViewCenter`：[`ReadOnlyMaybe<ViewCenter>`](/zh/docs/guide/systems#read-only-maybe)
+在这里没有任何开销，不管过多少个 tick。刚出现的玩家还没有 `ViewCenter`：[`ReadOnlyMaybe<ViewCenter>`](/zh/docs/guide/basics/systems#read-only-maybe)
 在有的时候读它，而且和 `Maybe<T>` 不同，它只能读，所以这个带索引的组件从不被打 tick。
 
 <include lang="csharp" meta='title="Systems/Aoi.cs"'>../../../samples/VoxelServer/Systems/Aoi.cs#aoi</include>
@@ -195,7 +195,7 @@ stateDiagram-v2
 <include lang="csharp" meta='title="Systems/Movement.cs"'>../../../samples/VoxelServer/Systems/Movement.cs#grid</include>
 
 跨地形时要知道客户端原先在哪片地形看见这个实体；被销毁的实体也要知道，而那时它的组件已经没了。`Visible` 记着这片地形，它是一个
-[清理组件](/zh/docs/guide/cleanup-and-disable)：销毁带清理组件的实体时，实体会退休而不是消失，只留下清理组件，直到某个系统去掉最后一个。
+[清理组件](/zh/docs/guide/changes/cleanup-and-disable)：销毁带清理组件的实体时，实体会退休而不是消失，只留下清理组件，直到某个系统去掉最后一个。
 `ViewCenter` 也是清理组件，所以离开的玩家会一直处于退休状态，直到它的视野被释放。
 
 `ZombieTargetSystem` 用同一个索引找目标：僵尸 `Vision` 范围内最近的玩家（每个预制体设置自己的范围），从它自己的地形一圈一圈往外走，
@@ -229,14 +229,14 @@ flowchart LR
 
 <include lang="csharp" meta='tab="Water/Wake.cs"'>../../../samples/VoxelServer/Systems/Water/Wake.cs</include>
 
-**各趟。** `WaterFlowSystem` 就是着色器。`Chunk` 是网格的一块[瓦片](/zh/docs/guide/grids)
+**各趟。** `WaterFlowSystem` 就是着色器。`Chunk` 是网格的一块[瓦片](/zh/docs/guide/performance/grids)
 （`ITile<ChunkPos>`：16 x 16 x 32 个格子，邻居是旁边的地形），所以方法以 `Tile<Fluid, Chunk>` 和 `Tile<Block, Chunk>` 接收地形的水和方块，
 生成器每片地形找一次四个邻居。要算的层来自这片地形和邻居的 `FluidCount`（通过 `Beside` 和 `Lookup<FluidCount>`，不用搜索）；
 `ExchangeHalo(from, to)` 把这些层填进这个线程的一张纹理，每层外面一圈一格宽的方块取自每个邻居朝向这边的那一行或一列，下面和上面各多一层，
 就像 CUDA 的线程块把它的瓦片和光环载入共享内存。循环采样邻居没有边界情况；每行 16 个方块用一个 `Vector128<byte>` 算。
-它读到的邻居都是这一遍之前的样子，只写 `NextFluid`，所以是[并行方法](/zh/docs/guide/systems#parallel-methods)。同时流动的地形只有几百个，
+它读到的邻居都是这一遍之前的样子，只写 `NextFluid`，所以是[并行方法](/zh/docs/guide/basics/systems#parallel-methods)。同时流动的地形只有几百个，
 每个要花几微秒，远少于写被追踪组件的遍历默认每块的 4,096 行，所以它设了 `ChunkSize = 64`，线程每次领 64 片地形
-（[块大小](/zh/docs/guide/threading#chunk-rows)）。字节通道是整数运算：每台机器上的水都一样。
+（[块大小](/zh/docs/guide/performance/threading#chunk-rows)）。字节通道是整数运算：每台机器上的水都一样。
 
 不必清零的都不清零。模板（`Rows(TileStencil.Layer | TileStencil.Above)`）只访问自己、旁边或上面有水的行，其余的行不写：每次提交后这一步的缓冲
 就等于水，所以干的行在里面本来就是零。纹理每个线程只分配一次，加载会写满循环要采样的每个纹素。
@@ -254,7 +254,7 @@ flowchart LR
 <include lang="csharp" meta='tab="Water/Commit.cs"'>../../../samples/VoxelServer/Systems/Water/Commit.cs</include>
 
 {/* TODO(water overlap): 计划中的推送光环（地形的边变了时推给邻居，而不是每个流动的地形每一步都去收集）和 MPI 式的内部/外圈重叠写在这里，
-连同 Flow 的改动；再更新 guide/grids。只拷贝变化过的边测过、已放弃（decisions#d73-survey-items-not-added）。 */}
+连同 Flow 的改动；再更新 guide/performance/grids。只拷贝变化过的边测过、已放弃（decisions#d73-survey-items-not-added）。 */}
 
 `FloatSystem` 把站在水里的东西（玩家、僵尸和掉落物）托起来，顺着水面的坡度推向周围更低的水，水位越低推得越弱：泉眼旁边或下落的水里是全力，
 水流末端只有八分之一。它遍历地形，按 `FluidCount` 跳过干的地形，其余的通过按地形索引的实体找到其中的物体，所以物体所在方块的水
@@ -323,7 +323,7 @@ flowchart LR
 - **带着色器的网格**：就是上面的水。每个方块的下一个水位都是它邻居的同一个函数，网格又是字节缓冲，所以一条指令算 16 个方块。
 - **沿一个轴归约的网格**：高度图，256 列各自的顶，一条指令算 16 列，每层一次 `ConditionalSelect`，没有分支。它的 256 个字节要改写 32 次，
   所以放在栈上，最后一次拷进缓冲：直接在缓冲的数组上读写 32 次要慢一个数量级。
-- **一列相同的变化**：火焰伤害给每只着火的僵尸扣一点血。[批量方法](/zh/docs/guide/systems#batch-methods)把一段连续的行当成 span 拿到，
+- **一列相同的变化**：火焰伤害给每只着火的僵尸扣一点血。[批量方法](/zh/docs/guide/basics/systems#batch-methods)把一段连续的行当成 span 拿到，
   `Vector<int>` 在 AVX2 上一条指令改 8 个（Arm 上 4 个）。JIT 不会自己把这些循环向量化，所以方法里手写；整数通道在每台机器上结果都一样。
 
 其他系统对每个实体做的事都不一样：物理查每个物体周围的方块，找目标遍历索引，追击读另一个实体的位置。查找加分支的循环用向量帮不上忙，
@@ -331,7 +331,7 @@ flowchart LR
 
 ## 自动排好序的排行榜 [#leaderboard]
 
-`Score` 是玩家挖的方块数，标了 `[LookupKey]`，所以 `world.ScoreIndex` 是按分数索引玩家的[有序索引](/zh/docs/guide/indexes-and-relations#ordered-index)。键可比较，
+`Score` 是玩家挖的方块数，标了 `[LookupKey]`，所以 `world.ScoreIndex` 是按分数索引玩家的[有序索引](/zh/docs/guide/data/indexes-and-relations#ordered-index)。键可比较，
 所以索引能按顺序遍历：`Descending()` 从挖得最多的人开始。`DigSystem` 写分数时索引就保持有序，所以榜首只是走三项，从不对所有玩家排序。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#leaderboard</include>
@@ -341,13 +341,13 @@ flowchart LR
 ## 下发什么 [#replication]
 
 变了的地形来自
-[`[ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]`](/zh/docs/guide/change-tracking#changed-any)：只有自系统上次运行以来方块或水变了的地形，
-才会发给视野里有它的玩家（它的 `Viewers`）。`Fresh` 地形已经整块发过；之后 `ChunkSentSystem` 用一次[批量调用](/zh/docs/guide/bulk)
+[`[ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]`](/zh/docs/guide/changes/change-tracking#changed-any)：只有自系统上次运行以来方块或水变了的地形，
+才会发给视野里有它的玩家（它的 `Viewers`）。`Fresh` 地形已经整块发过；之后 `ChunkSentSystem` 用一次[批量调用](/zh/docs/guide/changes/bulk)
 `World.RemoveAll<Fresh>()` 清掉所有地形的这个标签，一次处理一整个字的存在位。
 
 <include lang="csharp" meta='title="Systems/Replication.cs"'>../../../samples/VoxelServer/Systems/Replication.cs#chunks</include>
 
-移动过的实体来自 `[Changed<Position>]`，由上面的 `Mut<Position>` 打 tick。更新里带着有血条的实体的血量：[`Maybe<Health>`](/zh/docs/guide/systems#maybe)
+移动过的实体来自 `[Changed<Position>]`，由上面的 `Mut<Position>` 打 tick。更新里带着有血条的实体的血量：[`Maybe<Health>`](/zh/docs/guide/basics/systems#maybe)
 在实体有 `Health` 时读它，所以玩家、僵尸和掉落物由一个方法下发，查询也不要求 `Health`。时钟是模拟组的第一个系统，而不在同步组里，所以同步频率较低的服务器，游戏时间照样正常走。
 
 <include lang="csharp" meta='tab="实体"'>../../../samples/VoxelServer/Systems/Replication.cs#entities</include>
@@ -356,8 +356,8 @@ flowchart LR
 
 ## 程序 [#program]
 
-World 和它的选项：[`MeasureSystems`](/zh/docs/guide/diagnostics) 用来计时（`--schedule` 打印 `DescribeSchedule`）；
-[缓冲池](/zh/docs/guide/dynamic-buffers#what-it-costs)大到能放下一片地形的缓冲，所以新加载的地形复用卸载地形的列表，刚唤醒的地形复用刚静下来的地形的列表。
+World 和它的选项：[`MeasureSystems`](/zh/docs/guide/production/diagnostics) 用来计时（`--schedule` 打印 `DescribeSchedule`）；
+[缓冲池](/zh/docs/guide/data/dynamic-buffers#what-it-costs)大到能放下一片地形的缓冲，所以新加载的地形复用卸载地形的列表，刚唤醒的地形复用刚静下来的地形的列表。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#options</include>
 
@@ -366,7 +366,7 @@ World 和它的选项：[`MeasureSystems`](/zh/docs/guide/diagnostics) 用来计
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#players</include>
 
-停机时存档，但不存预制体和区域文件，它们每次启动都会重新设置（[`SaveWithout`](/zh/docs/guide/saves#restart)）；重启的 World 先设置好它们，
+停机时存档，但不存预制体和区域文件，它们每次启动都会重新设置（[`SaveWithout`](/zh/docs/guide/saves/saves#restart)）；重启的 World 先设置好它们，
 再把存档读进来（`LoadKeeping`）。存档写进一个 `NinoArrayBufferWriter`，`Save` 直接在里面写，不再拷贝；经常存档的服务器留一个反复用。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#save</include>
@@ -429,16 +429,16 @@ bot 回来时再读回。耗时打印到 stderr：平均 tick 与 50 ms 预算�
 ## 相关页面 [#related]
 
 <Cards>
-  <Card icon={<Boxes />} title="动态缓冲" href="/zh/docs/guide/dynamic-buffers">
+  <Card icon={<Boxes />} title="动态缓冲" href="/zh/docs/guide/data/dynamic-buffers">
     每个实体一个列表，比如地形的方块，和普通组件一样被追踪。
   </Card>
-  <Card icon={<FlaskConical />} title="变更追踪" href="/zh/docs/guide/change-tracking">
+  <Card icon={<FlaskConical />} title="变更追踪" href="/zh/docs/guide/changes/change-tracking">
     什么算写入、Mut&lt;T&gt;、ChangedAny。
   </Card>
-  <Card icon={<Network />} title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
+  <Card icon={<Network />} title="迁移与卸载" href="/zh/docs/guide/saves/migration-and-unload">
     存下一组实体再读回，比如一片地形和里面的东西。
   </Card>
-  <Card icon={<Save />} title="存档" href="/zh/docs/guide/saves">
+  <Card icon={<Save />} title="存档" href="/zh/docs/guide/saves/saves">
     存下 World、从存档重启、跳过每次启动自己设置的部分。
   </Card>
 </Cards>

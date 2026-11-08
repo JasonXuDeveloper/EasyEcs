@@ -46,11 +46,13 @@ const rules: Rule[] = [
   { wrong: /(?<!按)块对/g, right: '簇对 (a block pair of an ordered table)' },
   // A link to a page is labelled with the page's title, as its sidebar entry is.
   {
-    wrong: /\[(?:多线程|线程模型|线程)\]\(\/zh\/docs\/guide\/threading/g,
-    right: '[多线程与并行](/zh/docs/guide/threading…)',
+    wrong:
+      /\[(?:多线程|线程模型|线程)\]\(\/zh\/docs\/guide\/performance\/threading/g,
+    right: '[多线程与并行](/zh/docs/guide/performance/threading…)',
   },
   {
-    wrong: /title="(?:多线程|线程模型)" href="\/zh\/docs\/guide\/threading/g,
+    wrong:
+      /title="(?:多线程|线程模型)" href="\/zh\/docs\/guide\/performance\/threading/g,
     right: 'title="多线程与并行"',
   },
 ];

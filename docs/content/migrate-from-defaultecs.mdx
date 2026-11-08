@@ -46,7 +46,7 @@ dotnet add package EasyEcs
 The rows name the components of the example below (`Hp`, the tag `Dead`). For each
 component the generator writes named members (`e.Hp`, `HasHp`, `SetHp(…)`, `IsDead`): use them
 in your code. The generic calls after them (`Get<T>()`, `Set(c)`, `Remove<T>()`) are for generic code
-([generated members](/en/docs/guide/entities-and-components#generated-members)).
+([generated members](/en/docs/guide/basics/entities-and-components#generated-members)).
 
 ### Entities and components [#entities-and-components]
 
@@ -239,12 +239,12 @@ The two versions of the whole tick, on the same machine:
 
 | Mistake | What happens | Caught by |
 | --- | --- | --- |
-| Porting the state object as a field of the system | Systems are stateless | [EECS007](/en/docs/guide/analyzer#eecs007): use a singleton |
-| Taking a component by value in a `[ForEach]` method | A copy: writes are lost | [EECS002](/en/docs/guide/analyzer#eecs002), with a code fix to `ref` / `in` |
-| Adding components one `Set` at a time on creation | One row copy per component | [EECS052](/en/docs/guide/analyzer#eecs052) (warning, with a code fix): `world.CreateEntity(a, b, c)` |
-| A static method without `Entity` or `World` that destroys | It promised no structural change | [EECS013](/en/docs/guide/analyzer#eecs013) |
+| Porting the state object as a field of the system | Systems are stateless | [EECS007](/en/docs/guide/help/analyzer#eecs007): use a singleton |
+| Taking a component by value in a `[ForEach]` method | A copy: writes are lost | [EECS002](/en/docs/guide/help/analyzer#eecs002), with a code fix to `ref` / `in` |
+| Adding components one `Set` at a time on creation | One row copy per component | [EECS052](/en/docs/guide/help/analyzer#eecs052) (warning, with a code fix): `world.CreateEntity(a, b, c)` |
+| A static method without `Entity` or `World` that destroys | It promised no structural change | [EECS013](/en/docs/guide/help/analyzer#eecs013) |
 | Keeping `NotifyChanged` calls | Nothing to call: there is no such method | Compiler error |
-| Taking a tracked component by `ref` only to read it | Every visited row counts as changed | [EECS025](/en/docs/guide/analyzer#eecs025) (warning, with a code fix): declare it `in` |
+| Taking a tracked component by `ref` only to read it | Every visited row counts as changed | [EECS025](/en/docs/guide/help/analyzer#eecs025) (warning, with a code fix): declare it `in` |
 | Using `GetHashCode()` as an entity id | Ids are recycled | Store `entity.Id` (`EntityId`, with its version) |
 
 ## Related [#related]
@@ -253,10 +253,10 @@ The two versions of the whole tick, on the same machine:
   <Card title="EasyEcs vs DefaultEcs" href="/en/docs/vs-defaultecs">
     The two libraries side by side, with every benchmark.
   </Card>
-  <Card title="Systems and [ForEach]" href="/en/docs/guide/systems">
+  <Card title="Systems and [ForEach]" href="/en/docs/guide/basics/systems">
     Parameters, filters, ordering, groups and parallel methods.
   </Card>
-  <Card title="Change tracking" href="/en/docs/guide/change-tracking">
+  <Card title="Change tracking" href="/en/docs/guide/changes/change-tracking">
     `[Changed<T>]` and `[Removed<T>]` instead of reactive sets.
   </Card>
 </Cards>

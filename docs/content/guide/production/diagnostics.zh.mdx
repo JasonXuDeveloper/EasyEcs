@@ -1,0 +1,535 @@
+---
+title: 调试与诊断
+seoTitle: "调试 C# ECS World：Describe、Stats 与 Error"
+description: "调试运行中的 EasyEcs World：表和内存、实体的组件、每个系统的耗时、分配和实体数、系统调度，以及出错停掉的系统。"
+icon: Stethoscope
+---
+
+实体只是一个 id，数据散在各张表的列里，所以在调试器里盯着一个句柄看不出什么；服务器变慢了，也不会告诉你是哪个系统变重了。
+这些问题都能用 World 手里现成的数据回答：`world.DescribeTables()` 列出每张表的行数和字节数，`entity.Describe()`（以及调试器）显示
+实体的组件值，`system.Stats` 记录每个系统的耗时、分配的字节和访问的实体数，`world.DescribeSchedule()` 说明哪些系统一起跑、
+为什么，`system.Error` 保存出错系统的异常。高峰过去之后，`world.TrimExcess()` 把多占的内存还回去。
+
+## 什么时候用 [#when-to-use-it]
+
+<Callout type="idea" title="适合">
+  线上服务器的管理或健康检查接口（实体数、每张表占的内存、最慢的系统、在分配内存的系统、出错停掉的系统），导出到
+  OpenTelemetry 的指标，tick 超时时打一行日志，启动时把调度写进日志，在 IDE 里对某个实体下断点，压测之后看内存报告。
+</Callout>
+
+<Callout type="warn" title="不适合">
+  游戏逻辑：系统要知道实体有什么组件，用过滤条件或 `HasX`，不要用 `Describe`。每个 tick 都调：`Describe` 每次都分配返回值，
+  放在请求或定时器里调，别放进循环。比较两个版本的耗时：`system.Stats` 适合看线上的趋势，版本对比用 BenchmarkDotNet
+  （[性能指南](/zh/docs/performance#measuring)）。
+</Callout>
+
+## 怎么用 [#how-to-use-it]
+
+### 看一个实体 [#entity]
+
+`entity.Describe()` 以 `ComponentValue` 的形式返回实体的组件：每个值装箱后的副本，[被禁用](/zh/docs/guide/changes/cleanup-and-disable#disable-a-component)
+的组件 `Enabled` 为 false。失效的句柄返回空数组。在调试器里，`Entity` 显示为 `Entity 1000v1`（下标和版本号），展开后是 id、
+是否存活和它的组件，展开时才去读。
+
+```csharp
+var guard = world.CreateEntity(new Position(5, 5), new Health(50));
+foreach (var component in guard.Describe())
+    Console.WriteLine(component.Enabled ? $"{component.Value}" : $"{component.Value} (disabled)");
+```
+
+`Console.WriteLine(entity)` 打印的也是 `Entity 1000v1`，`EntityId` 打印成 `1000v1`：日志里记这个，客户端回传实体时也用它。
+
+### 看所有的表 [#tables]
+
+`world.DescribeTables()` 每张表返回一个 `TableInfo`：`Columns`（每列有组件的 `Type`、没有这个组件的行数 `Absent`，以及
+[分组](/zh/docs/guide/data/groups) World 里的 `Group`）、存活实体数 `Entities`、在用的行数 `Rows`、已分配的行数 `Capacity`，
+以及这些行占的字节数 `Bytes`。
+
+```csharp
+foreach (var table in world.DescribeTables())
+{
+    var names = new List<string>();
+    foreach (var column in table.Columns) names.Add(column.Type.Name);
+    Console.WriteLine($"[{string.Join(", ", names)}] {table.Entities} entities, {table.Bytes:N0} bytes");
+}
+```
+
+从里面看什么：
+
+- **内存在哪：** 看每张表的 `Bytes`。它跟着 `Capacity` 走，不跟着 `Entities` 走：一张表装过一波实体，行就留着给下一波用，
+  直到 [`TrimExcess`](#trim) 把它缩小。
+- **移除过的组件：** 列的 `Absent` 是移除或禁用了这个组件的行数，因为[移除时行保留](/zh/docs/guide/basics/entities-and-components#storage)。
+  占比很大，说明这张表的大部分实体已经没有这个组件了。
+- **组件组合：** 每一种不同的组件组合就是一张表。几百张小表说明代码加出了很多种组合；[分组](/zh/docs/guide/data/groups)则是有意拆表。
+  `Entities` 为 0 的表是以前装过实体的组合，`TrimExcess` 会把它们丢掉。
+- **空洞：** `Rows` 大于 `Entities`，是进行中的遍历留下的空洞，遍历结束就合上。
+
+`world.EntityCount` 是实体总数（O(1)），`world.Count<T>(filter)` 是一次查询会访问的实体数，把各表的数量加起来得到。
+
+### 给每个系统计时 [#timing]
+
+打开 `WorldOptions.MeasureSystems` 后，每个系统的每次运行（`OnUpdate` 加上它的 `[ForEach]` 方法）都会被统计：`system.Stats`
+里有 `Runs`、`LastTime`、`TotalTime`、`AverageTime`，还有下面的字节数和实体数。`world.Systems` 列出所有系统且不分配内存，状态页可以直接找出最慢的那个
+（[统计系统耗时](/zh/docs/guide/basics/systems#measuring-systems)）。
+
+```csharp
+[EcsSystem]
+public ref struct RegenSystem
+{
+    [ForEach]
+    static void Regen(ref Health health) => health.Value++;
+}
+```
+
+```csharp
+using var measured = new World(new WorldOptions { MeasureSystems = true });
+measured.AddSystem<RegenSystem>();
+measured.Update();
+foreach (var system in measured.Systems)
+    Console.WriteLine($"{system.Name}: last {system.Stats.LastTime.TotalMicroseconds} μs");
+```
+
+每次运行还会记下分配了多少内存、访问了多少实体。状态页不光能找出最慢的系统，还能找出在制造垃圾的系统，或者人口涨了的系统：
+
+| 字段 | 内容 |
+| --- | --- |
+| `LastAllocated`、`TotalAllocated` | 最近一次运行和所有运行在托管堆上分配的字节数：运行这个系统的线程上的分配，加上替它的并行 [`[ForEach]`](/zh/docs/guide/basics/systems#parallel-methods) 方法跑分块的辅助线程上的分配。同一个并行阶段里的其他系统不会算进来。 |
+| `LastEntities`、`TotalEntities` | 最近一次运行和所有运行里，`[ForEach]` 方法匹配到的实体数：每个方法的查询在遍历开始时数一次（带上它的过滤条件；`[Changed<T>]` / `[Removed<T>]` 只算系统上次运行以来写过或移除过的行），各方法相加。 |
+
+实体数怎么理解：
+
+- **开始时匹配的数量，不是逐个访问的数量。** 会改结构的遍历里，这是个上限：轮到之前就被销毁或移走的实体算进去了，但没被访问。
+- **只算 `[ForEach]` 方法。** `OnUpdate` 里的查询和循环不算。
+- **分帧的方法只报自己那一份。** `[ForEach(Slices = N)]` 方法报的是匹配数除以 N（[分帧](/zh/docs/guide/basics/systems#slices)）。
+
+```csharp
+foreach (var system in measured.Systems)
+{
+    var stats = system.Stats;
+    Console.WriteLine($"{system.Name}: {stats.LastTime.TotalMicroseconds} μs, " +
+                      $"{stats.LastAllocated} B, {stats.LastEntities} entities");
+}
+```
+
+这些默认都是关的：`MeasureSystems` 为 false 时，每次系统运行只多一次字段判断，每个并行分块多一个分支，什么都不统计。打开后，
+每次运行读两次分配计数器（辅助线程每个分块也各读两次），每次 `[ForEach]` 遍历数一次匹配数，代价和 `world.Count` 一样。
+
+### 看系统调度 [#schedule]
+
+`world.DescribeSchedule()` 返回 World 怎么跑它的系统：每个组的阶段（开了 `ParallelSystems` 时可以同时跑的系统）、每个系统读写
+什么、一个系统为什么要等前一个阶段，以及哪些互相冲突的系统之间只靠注册顺序排先后。`ToString()` 输出缩进的文本，`ToMermaid()`
+输出一张 mermaid 流程图，可以放进文档或看板。
+
+```csharp
+public record struct Poisoned(int DamagePerTick) : IComponent;
+public record struct NetPosition(float X, float Y) : IComponent;   // 上次发给客户端的位置
+
+[EcsSystem]
+public ref struct MoveSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position.X += velocity.X;
+        position.Y += velocity.Y;
+    }
+}
+
+[EcsSystem, UpdateAfter<RegenSystem>]
+public ref struct PoisonSystem
+{
+    [ForEach]
+    static void Hurt(ref Health health, in Poisoned poisoned) => health.Value -= poisoned.DamagePerTick;
+}
+
+[EcsSystem]
+public ref struct ReplicateSystem
+{
+    [ForEach]
+    static void Copy(in Position position, ref NetPosition sent) => sent = new NetPosition(position.X, position.Y);
+}
+```
+
+```csharp
+using var server = new World(new WorldOptions { ParallelSystems = true });
+server.AddSystem<MoveSystem>();
+server.AddSystem<RegenSystem>();
+server.AddSystem<PoisonSystem>();
+server.AddSystem<ReplicateSystem>();
+Console.Write(server.DescribeSchedule());
+```
+
+输出：
+
+```text
+Group Default
+  Stage 1
+    MoveSystem, reads Velocity, writes Position
+    RegenSystem, writes Health
+  Stage 2
+    PoisonSystem, reads Poisoned, writes Health
+      after RegenSystem: ordered, Health
+    ReplicateSystem, reads Position, writes NetPosition
+      after MoveSystem: Position
+  Registration order only: MoveSystem before ReplicateSystem (Position)
+```
+
+`MoveSystem` 和 `RegenSystem` 没有共享的数据，所以在同一个阶段。`PoisonSystem` 等 `RegenSystem`，因为
+`[UpdateAfter<RegenSystem>]` 这么要求（`ordered`），而且两个都写 `Health`。`ReplicateSystem` 等 `MoveSystem`，只是因为它读
+`MoveSystem` 写的 `Position`：没有任何特性规定它们的先后，复制发出去的是这个 tick 还是上个 tick 的位置，取决于它们是按什么
+顺序加进来的。这就是**只靠注册顺序的系统对**：两个系统有冲突，又没有任何一条 `[UpdateBefore]` / `[UpdateAfter]` 链给它们排序。
+反过来注册，后跑的那个看到的数据就变了，所以每一对都要给出它需要的顺序，这里是在 `ReplicateSystem` 上加
+`[UpdateAfter<MoveSystem>]`。`RunsAlone` 的系统（有 `OnUpdate`、`World` 参数、`[Consume]` 方法，或不只当身份用的 `Entity`）和所有系统都冲突，显示为 `runs alone`。
+
+`server.DescribeSchedule().ToMermaid()` 把同一份调度画成流程图：每个组、每个阶段一个子图，每个等待是一条实线箭头，标着冲突的
+数据，每个只靠注册顺序的系统对是一条虚线箭头：
+
+```text
+flowchart TD
+  subgraph g0["Default"]
+    subgraph g0s0["Stage 1"]
+      g0n0["MoveSystem<br/>reads: Velocity<br/>writes: Position"]
+      g0n1["RegenSystem<br/>writes: Health"]
+    end
+    subgraph g0s1["Stage 2"]
+      g0n2["PoisonSystem<br/>reads: Poisoned<br/>writes: Health"]
+      g0n3["ReplicateSystem<br/>reads: Position<br/>writes: NetPosition"]
+    end
+  end
+  g0n1 -->|"Health"| g0n2
+  g0n0 -->|"Position"| g0n3
+  g0n0 -. "registration order" .-> g0n3
+```
+
+启动时、最后一次 `AddSystem` 之后把调度写一次日志：每次部署的日志里都记着系统是怎么跑的，新冒出来的“只靠注册顺序”的系统对在
+代码审查时就能看到，不用等它变成 bug。`DescribeSchedule` 是冷路径（分配返回值，每个组 O(系统数³)），任何线程都可以调：它读的是
+最近一次 `AddSystem` 或 `RemoveSystem` 发布的调度。
+
+### 把统计发布成指标 [#metrics]
+
+OpenTelemetry、`dotnet-counters` 和 Prometheus 导出器读的都是 `System.Diagnostics.Metrics`。EasyEcs 不需要为此加包：一个
+`Meter` 加几个可观测的仪表，数据来自 World 的线程在每次更新后拷的一份统计。导出器的线程在采集时（每隔几秒）读这份拷贝，从不碰
+World；tick 上每个系统拷 56 字节，不分配内存：
+
+```csharp
+using System.Diagnostics.Metrics;
+
+public sealed class SystemMetrics : IDisposable
+{
+    private readonly Meter _meter = new("Game.World");
+    private readonly Lock _gate = new();
+    private readonly SystemStats[] _stats;
+    private readonly KeyValuePair<string, object>[][] _tags;   // 每个系统一个 "system" 标签，只建一次
+
+    public SystemMetrics(World world)
+    {
+        _stats = new SystemStats[world.Systems.Count];
+        _tags = new KeyValuePair<string, object>[_stats.Length][];
+        int i = 0;
+        foreach (var system in world.Systems)
+            _tags[i++] = [new KeyValuePair<string, object>("system", system.Name)];
+
+        _meter.CreateObservableGauge<double>("ecs.system.duration",
+            () => Read(static stats => stats.LastTime.TotalMilliseconds), unit: "ms");
+        _meter.CreateObservableGauge<long>("ecs.system.entities",
+            () => Read(static stats => stats.LastEntities), unit: "{entity}");
+        _meter.CreateObservableCounter<long>("ecs.system.allocated",
+            () => Read(static stats => stats.TotalAllocated), unit: "By");
+    }
+
+    // World 的线程，world.Update() 之后：拷一份每个系统的统计。
+    public void Publish(World world)
+    {
+        lock (_gate)
+        {
+            int i = 0;
+            foreach (var system in world.Systems) _stats[i++] = system.Stats;
+        }
+    }
+
+    // 导出器的线程，每次采集一次。
+    private Measurement<T>[] Read<T>(Func<SystemStats, T> value) where T : struct
+    {
+        lock (_gate)
+        {
+            var measurements = new Measurement<T>[_stats.Length];
+            for (int i = 0; i < _stats.Length; i++)
+                measurements[i] = new Measurement<T>(value(_stats[i]), _tags[i]);
+            return measurements;
+        }
+    }
+
+    public void Dispose() => _meter.Dispose();
+}
+```
+
+在最后一次 `AddSystem` 之后创建它（数组按 `world.Systems` 的数量分配），World 要开着 `MeasureSystems`；在拥有 World 的循环里，
+每次 `world.Update()` 之后调 `Publish`（[托管](/zh/docs/guide/production/hosting#operations)）。OpenTelemetry 在 `WithMetrics` 里
+`AddMeter("Game.World")` 就能收到；`dotnet-counters monitor --counters Game.World` 不用任何配置就能看。测量值在每次采集时分配，
+在导出器的线程上，不在 tick 上。
+
+### 高峰过后还回内存 [#trim]
+
+表满了就翻倍，实体走了行还留着，下一波实体来了直接复用，不用分配。可如果高峰短期内不会再来（活动结束了、一局比赛清空了一个区），
+这些行就一直占着。`world.TrimExcess()` 把它们还回去：
+
+- **丢掉所有空表**：空表离开 World，也离开每个缓存查询的匹配列表；之后的变更需要它时会重新创建。
+- **缩小其余的表**：缩到实体数向上取整到 2 的幂，最少 64 行，列、存在位和变更 tick 摘要一起缩。
+- **释放可复用的缓冲**：存档、加载、迁移和预制体查找用的缓冲，需要时再建。
+
+留下的：World 的空表、这个 World 的任何 `WorldSnapshot` 还持有行的表（快照照样能恢复）、实体记录（句柄不做边界检查直接按下标
+访问）、索引、关系、单例，以及池化的 `DynamicBuffer<T>` 列表。句柄、查询、系统、分组和变更追踪都不受影响。
+
+```csharp
+long before = 0;
+foreach (var table in world.DescribeTables()) before += table.Bytes;
+world.TrimExcess();
+long after = 0;
+foreach (var table in world.DescribeTables()) after += table.Bytes;
+Console.WriteLine($"gave back {before - after:N0} bytes of tables");
+```
+
+在安静的时候调，在所有者线程上、两次更新之间：一波实体清掉之后、两局比赛之间，或者放在维护任务里，`EntityCount` 远低于峰值时
+才调。不要每个 tick 都调：它丢掉的东西，之后的结构变更又要重新分配，修剪过的 World 会把已经付过的扩容再付一遍。遍历进行中
+（`Query` 循环或 `[ForEach]` 方法里）调会抛 `InvalidOperationException`。
+
+### 找出出错的系统 [#errors]
+
+默认情况下，系统抛出的异常会传出 `Update()`。设成 `SystemErrors = SystemErrorPolicy.Disable` 后，出错的系统会被关掉，异常留在
+`system.Error` 里，更新继续往下跑：故障变成了健康检查能读的数据。把 `Enabled` 设回 `true` 会清掉 `Error` 并重试这个系统
+（[错误处理](/zh/docs/guide/basics/systems#errors)）。
+
+```csharp
+using var guarded = new World(new WorldOptions { SystemErrors = SystemErrorPolicy.Disable });
+guarded.AddSystem<RegenSystem>();
+guarded.Update();
+foreach (var system in guarded.Systems)
+    if (system.Error is { } error) Console.Error.WriteLine($"{system.Name} is off: {error.Message}");
+```
+
+### 在哪个线程读 [#threads]
+
+在 World 的所有者线程上、两次更新之间读诊断数据，就像[托管指南](/zh/docs/guide/production/hosting#reads)发布状态那样：读到的是一个完整
+tick 之后的数字。`world.DescribeTables()` 也可以在别的线程上调，看个大概（不会破坏 World），但同一时刻正在变的表可能读到一半。
+`world.DescribeSchedule()` 在任何线程上都安全。`entity.Describe()`、`system.Stats` 和 `TrimExcess()` 只属于所有者线程：别的线程
+通过拷贝读统计，就像[指标](#metrics)那样。
+
+## 完整例子 [#full-example]
+
+一个有行人和守卫的 World，其中一个系统有 bug，跑三次更新之后打印诊断信息。把这些文件放进一个引用了 EasyEcs 的控制台项目
+（`dotnet add package EasyEcs`），用 `dotnet run` 运行。
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Position(float X, float Y) : IComponent;
+public record struct Velocity(float X, float Y) : IComponent;
+public record struct Health(int Value) : IComponent;
+public record struct Cooldown(int Ticks) : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+[EcsSystem]
+public ref struct MoveSystem
+{
+    [ForEach]
+    static void Move(ref Position position, in Velocity velocity)
+    {
+        position.X += velocity.X;
+        position.Y += velocity.Y;
+    }
+}
+
+// 一个待查的 bug：冷却结束时应该移除组件，这里却抛了异常。
+[EcsSystem]
+public ref struct CooldownSystem
+{
+    [ForEach]
+    static void Tick(ref Cooldown cooldown)
+    {
+        cooldown.Ticks--;
+        if (cooldown.Ticks < 0)
+        {
+            throw new InvalidOperationException("a cooldown went below zero");
+        }
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+var options = new WorldOptions
+{
+    // 给每个系统的每次运行计时：system.Stats。
+    MeasureSystems = true,
+    // 抛异常的系统会被关掉，异常保存下来：system.Error。
+    SystemErrors = SystemErrorPolicy.Disable,
+};
+using var world = new World(options);
+world.AddSystem<MoveSystem>();
+world.AddSystem<CooldownSystem>();
+
+var walkers = new Entity[1_000];
+world.CreateEntities(walkers, new Position(0, 0), new Velocity(1, 0));
+var guards = new Entity[200];
+world.CreateEntities(guards, new Position(5, 5), new Health(50), new Cooldown(2));
+
+// 一个停下的行人：行还在，Velocity 列记下一行没有这个组件。
+walkers[0].RemoveVelocity();
+
+for (int tick = 0; tick < 3; tick++)
+{
+    world.Update();
+}
+
+Diagnostics.PrintTables(world);
+Diagnostics.PrintEntity(guards[0]);
+Diagnostics.PrintSystems(world);
+```
+
+</Accordion>
+<Accordion title="Diagnostics.cs">
+
+```csharp title="Diagnostics.cs" doccheck=example
+using EasyEcs;
+
+// 管理接口会返回的内容，这里直接打印。冷路径代码，会分配内存：在两次更新之间调用。
+public static class Diagnostics
+{
+    public static void PrintTables(World world)
+    {
+        Console.WriteLine($"{world.EntityCount} entities");
+        foreach (var table in world.DescribeTables())
+        {
+            var columns = new List<string>();
+            foreach (var column in table.Columns)
+            {
+                string absent = column.Absent > 0 ? $" ({column.Absent} absent)" : "";
+                columns.Add(column.Type.Name + absent);
+            }
+
+            Console.WriteLine($"  [{string.Join(", ", columns)}] {table.Entities} entities, " +
+                              $"{table.Capacity} rows allocated, {table.Bytes:N0} bytes");
+        }
+    }
+
+    public static void PrintEntity(Entity entity)
+    {
+        Console.WriteLine(entity);
+        foreach (var component in entity.Describe())
+        {
+            string state = component.Enabled ? "" : " (disabled)";
+            Console.WriteLine($"  {component.Value}{state}");
+        }
+    }
+
+    public static void PrintSystems(World world)
+    {
+        foreach (var system in world.Systems)
+        {
+            string name = system.Name;
+            string state = system.Error is { } error ? $"off: {error.Message}" : "on";
+            Console.WriteLine($"{name}: {system.Stats.Runs} runs, {state}");
+        }
+    }
+}
+```
+
+</Accordion>
+</Accordions>
+
+输出：
+
+```text
+1200 entities
+  [] 0 entities, 64 rows allocated, 512 bytes
+  [Position, Velocity (1 absent)] 1000 entities, 1024 rows allocated, 24,840 bytes
+  [Position, Cooldown, Health] 200 entities, 256 rows allocated, 6,256 bytes
+Entity 1000v1
+  Position { X = 5, Y = 5 }
+  Cooldown { Ticks = -1 }
+  Health { Value = 50 }
+MoveSystem: 3 runs, on
+CooldownSystem: 3 runs, off: a cooldown went below zero
+```
+
+停下的行人还留在原来的表里，记在 `Velocity (1 absent)` 中。第一张表是 World 的空表，不带组件的 `CreateEntity()` 会把实体放在
+这里。守卫身上留着出错系统写下的值 `Cooldown { Ticks = -1 }`；`CooldownSystem` 被关掉并保存了异常，`MoveSystem` 照常运行：
+第三次更新没有停在这个 bug 上。
+
+## 怎么用得快 [#how-to-use-it-fast]
+
+| 别这样 | 这样做 | 为什么 |
+| --- | --- | --- |
+| 每个 tick 都调 `DescribeTables()` / `Describe()` | 在请求或定时器里调，放在两次更新之间 | 它会分配返回值 |
+| 用 `entity.Describe()` 判断有没有某个组件 | `HasX`、`TryGetX`、过滤条件 | 不装箱，不分配 |
+| 用秒表包住 `world.Update()` | `MeasureSystems` 和 `system.Stats` | 按系统统计：每次运行读两次时钟、两次分配计数器，每次 `[ForEach]` 遍历一次 `Count` |
+| 用 `GC.GetAllocatedBytesForCurrentThread()` 包住整个 tick | `system.Stats.LastAllocated` | 能指出是哪个系统，并行分块也算在内 |
+| 在导出器的线程上读 `system.Stats` | 每次更新后发布一份拷贝 | 统计属于所有者线程 |
+| 猜哪些系统会一起跑 | `world.DescribeSchedule()`，启动时写进日志 | 能看到阶段和只靠注册顺序的系统对 |
+| 每个 tick 或每次销毁实体后都调 `TrimExcess()` | 高峰过后，放在维护任务里调 | 它丢掉的东西下次用时还要再分配 |
+| 线上服务器用 try/catch 包住 `Update()` | `SystemErrorPolicy.Disable` 和 `system.Error` | 其他系统照常运行 |
+
+为看板描述战斗服的 World、为调试器描述一个实体、描述它的系统调度（`IntrospectionBenchmark`），以及高峰过后修剪 World
+（`TrimBenchmark`）：
+
+<BenchTable bench="IntrospectionBenchmark" />
+<BenchTable bench="TrimBenchmark" />
+
+## 开销 [#what-it-costs]
+
+- **`world.DescribeTables()`：** O(表数 + 列数)；每张表分配一个 `TableInfo` 和它的列。
+- **`entity.Describe()`：** O(实体的组件数)；每个值装箱一次。
+- **`MeasureSystems`：** 每次系统运行读两次时间戳、两次线程的分配计数器（辅助线程每跑一个分块再读两次），每次 `[ForEach]`
+  遍历做一次 `Count`（O(匹配的表数)，加上过滤条件要测试的行字）。关掉时每次运行一次字段判断、每个分块一个分支。`SystemStats`
+  每个系统 56 字节。
+- **`world.DescribeSchedule()`：** O(组数 × 系统数³)，分配返回值。`ToString()` 和 `ToMermaid()` 是 O(系统数 + 等待数 + 系统对数)，
+  分配输出的文本。
+- **`world.TrimExcess()`：** O(表数 × (缓存的查询数 + 快照数) + 被缩小的表的行数 × 列数)，分配缩小后的数组（冷路径）。被丢掉的表和
+  转移边下次需要时再分配一次。
+- **`SystemErrorPolicy.Disable`：** 系统不抛异常就没有开销。
+- **调试器视图：** 运行时没有开销，调试器来读时才读。
+
+## 常见陷阱 [#pitfalls]
+
+| 错误 | 后果 | 谁能发现 |
+| --- | --- | --- |
+| 在系统里或每个 tick 调 `DescribeTables()` / `Describe()` | 热路径上分配内存 | 代码审查 |
+| 更新进行中从别的线程读 `DescribeTables()` | 读到正在变的表的中间状态 | 在所有者线程上、两次更新之间读 |
+| 以为实体走了 `Bytes` 就会降 | 表保留容量给下一波实体 | 高峰过后调 `TrimExcess()` |
+| 每个 tick 都调 `TrimExcess()` | 表被丢掉又重建，扩容重新付一遍：tick 上出现分配 | 放进维护任务里调（[常见错误](/zh/docs/guide/help/common-mistakes#trim-every-tick)） |
+| 在 `Query` 循环或 `[ForEach]` 方法里调 `TrimExcess()` | `InvalidOperationException` | [EECS041](/zh/docs/guide/help/analyzer#eecs041)：在两次更新之间调 |
+| 在导出器的线程上读 `system.Stats` | tick 正在写的结构体被读到一半 | 在所有者线程上发布一份拷贝 |
+| 以为 `LastEntities` 会算上 `OnUpdate` 里的查询 | 只统计 `[ForEach]` 遍历 | 真需要就在 `OnUpdate` 里自己数 |
+| 调度里留着只靠注册顺序的系统对 | 调换 `AddSystem` 的顺序，系统看到的数据就变了 | 加上 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` |
+| 测试里也开着 `SystemErrorPolicy.Disable` | 出错的系统悄悄停掉，测试却在检查别的东西 | 测试里保持默认的 `Throw`（[测试](/zh/docs/guide/production/testing#errors)） |
+| 日志里只记 `entity.Id.Index` | 下标会被之后的实体复用 | 记实体本身或它的 `EntityId`（`1000v1`） |
+
+## 相关页面 [#related]
+
+<Cards>
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems#measuring-systems">
+    统计系统耗时、错误处理和系统列表。
+  </Card>
+  <Card title="在 .NET 服务器里托管" href="/zh/docs/guide/production/hosting#operations">
+    从 World 的循环里发布健康状态和指标。
+  </Card>
+  <Card title="问题排查" href="/zh/docs/guide/help/troubleshooting">
+    EasyEcs 抛出的异常是什么意思，怎么修。
+  </Card>
+  <Card title="架构" href="/zh/docs/architecture#storage-model">
+    `DescribeTables` 报告的表、列和行。
+  </Card>
+</Cards>

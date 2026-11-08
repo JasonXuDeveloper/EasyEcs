@@ -37,7 +37,7 @@ generator and analyzer run in `dotnet build` and in the editor's build alike.
 ## The data and the systems [#data]
 
 Components hold Godot's own `Vector2`, and the arena and the tick length are
-[singletons](/en/docs/guide/singletons). The systems move and bounce the entities, and know nothing of the scene.
+[singletons](/en/docs/guide/basics/singletons). The systems move and bounce the entities, and know nothing of the scene.
 
 <include lang="csharp" meta='tab="Components.cs"'>../../../samples/Godot/Components.cs</include>
 
@@ -47,7 +47,7 @@ Components hold Godot's own `Vector2`, and the arena and the tick length are
 
 The node is the host and the systems are the game. `Main` moves data between Godot and the world: it creates the
 world and the entities in `_Ready`, calls `world.Update()` in `_PhysicsProcess` (Godot's fixed tick), and disposes
-what it made in `_ExitTree` ([hosting a world](/en/docs/guide/hosting#owner)). After each update it copies every
+what it made in `_ExitTree` ([hosting a world](/en/docs/guide/production/hosting#owner)). After each update it copies every
 position into one float buffer and hands it to `RenderingServer.MultimeshSetBuffer`: one draw for every entity, no
 node per entity. The `--ticks` option and
 the report CI checks are in
@@ -73,7 +73,7 @@ ships for them and are not tested here.
   <Card icon={<Sprout />} title="HelloWorld" href="/en/docs/samples/hello-world">
     The smallest world: components, systems, an update.
   </Card>
-  <Card icon={<Clock />} title="Hosting a world" href="/en/docs/guide/hosting">
+  <Card icon={<Clock />} title="Hosting a world" href="/en/docs/guide/production/hosting">
     One owner, a fixed step, start and stop with the host.
   </Card>
   <Card icon={<Rocket />} title="Getting started" href="/en/docs/getting-started">

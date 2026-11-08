@@ -29,7 +29,7 @@ CI 会构建并运行每个示例，输出固定的示例还会和页面上的�
 
 ## 示例的结构 [#how-a-sample-reads]
 
-从上往下读，和 EasyEcs 项目的布局一致（[项目结构](/zh/docs/guide/project-structure)）：`Components.cs` 放数据，然后是系统，
+从上往下读，和 EasyEcs 项目的布局一致（[项目结构](/zh/docs/guide/basics/project-structure)）：`Components.cs` 放数据，然后是系统，
 每个只做一件事，最后是很短的 `Program.cs`：创建 World，加单例和系统，运行并打印。真实程序需要、但不是本课重点的代码
 （线程间的邮箱、模拟客户端、报告输出）单独放在 `Host/` 或 `Support.cs` 里，并注明这一点。
 
@@ -55,7 +55,7 @@ dotnet run --project samples/HelloWorld
   <Card icon={<Swords />} title="示例：战斗服务器" href="/zh/docs/example">
     一个服务器用上 EasyEcs 的全部功能。
   </Card>
-  <Card icon={<BookOpen />} title="指南" href="/zh/docs/guide/project-structure">
+  <Card icon={<BookOpen />} title="指南" href="/zh/docs/guide/basics/project-structure">
     每个功能一页，各带一个完整例子。
   </Card>
 </Cards>

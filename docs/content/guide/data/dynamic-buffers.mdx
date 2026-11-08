@@ -1,0 +1,523 @@
+---
+title: Dynamic buffers
+seoTitle: "DynamicBuffer<T>: a list per entity in a C# ECS"
+description: DynamicBuffer<T> gives each entity its own list (a bag, a path, the hits of a tick) as a change-tracked component that allocates nothing once it has room.
+icon: ListOrdered
+---
+
+A server keeps many small lists that belong to one entity: the item ids in a bag, the waypoints of a path, the hits a
+unit took this tick, the orders a player queued. `DynamicBuffer<T>` holds such a list as a component. You add it,
+query it and take it as a `[ForEach]` parameter like any other component, and every write to the list is a tracked
+change, so `[Changed<DynamicBuffer<T>>]` finds exactly the bags to send or save.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  Lists of plain values that only their owner uses and that are sent or saved when they change: item ids or stacks
+  in a bag, waypoints, recent events, pending orders. Also the links of a [relation](/en/docs/guide/data/indexes-and-relations#relations),
+  which are buffers of `IRelation` elements.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Items with state of their own that systems query one by one (a sword with durability): make each an entity that
+  points at its owner. A few values with a fixed maximum (four cooldown slots): a fixed `[InlineArray]` array in an
+  unmanaged component holds no GC object at all.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+<Steps>
+<Step>
+
+### Declare the element [#declare-the-element]
+
+The element is a plain struct or an enum (`DynamicBuffer<Block>` for the blocks of a chunk); it does not implement
+`IComponent`. `DynamicBuffer<Loot>` is the component.
+
+```csharp
+public record struct Loot(int Item);
+public record struct Sent(int Items) : IComponent;
+public struct Player : IComponent;
+```
+
+An enum element gets the same generated members as a struct (`chunk.Block`, `WriteBlock()`, below), and a byte-sized
+enum keeps a list of one byte per element, such as the blocks of a voxel chunk:
+
+```csharp
+public enum Block : byte { Air, Stone, Water }
+public struct Chunk : IComponent;
+
+public static class Chunks
+{
+    public static int Water(Entity chunk)
+    {
+        int water = 0;
+        foreach (var block in chunk.Block)                     // a read: not stamped
+            if (block == Block.Water) water++;
+        return water;
+    }
+}
+```
+
+</Step>
+<Step>
+
+### Create entities with an empty buffer [#create-entities]
+
+`new DynamicBuffer<T>()` holds no list yet. Each entity gets its own list on its first write, so one value can create
+a whole wave of entities.
+
+```csharp
+var players = new Entity[1_000];
+world.CreateEntities(players, new DynamicBuffer<Loot>(), new Sent(), new Player());
+foreach (var p in players) p.WriteLoot().EnsureCapacity(8);   // room for a full bag: no growth later
+```
+
+</Step>
+<Step>
+
+### Write through a `ref` [#write-through-a-ref]
+
+The writing methods take the buffer by `ref`, so the write is stamped like any write of a tracked component.
+
+```csharp title="Pickup.cs"
+[EcsSystem]
+public ref struct Pickup
+{
+    [ForEach, With<Player>]
+    static void Collect(ref DynamicBuffer<Loot> bag) // [!code highlight]
+    {
+        if (bag.Count == 8) bag.RemoveAt(0);         // a full bag drops its oldest item
+        bag.Add(new Loot(1));
+    }
+}
+```
+
+</Step>
+<Step>
+
+### React to the lists that changed [#react-to-changes]
+
+A `[Changed<DynamicBuffer<Loot>>]` method visits only the bags written since its system last ran. It reads them with
+`in`, which is not a write.
+
+```csharp title="SendBags.cs"
+[EcsSystem]
+public ref struct SendBags
+{
+    [ForEach, Changed<DynamicBuffer<Loot>>] // [!code highlight]
+    static void Send(in DynamicBuffer<Loot> bag, ref Sent sent)
+    {
+        int items = 0;
+        foreach (var loot in bag) items += loot.Item;
+        sent = new Sent(items);
+    }
+}
+```
+
+```csharp
+world.AddSystem<Pickup>();
+world.AddSystem<SendBags>();
+world.Update();
+```
+
+</Step>
+</Steps>
+
+### Choosing how to hold a list [#choosing-how-to-hold-a-list]
+
+| The list | Hold it as |
+| --- | --- |
+| Plain values only its owner uses, sent or saved when it changes: item ids or stacks, waypoints, the hits of a tick | **`DynamicBuffer<T>`** |
+| Items with state of their own (durability, buffs with timers) that systems query or change one by one | **One entity per item** with an [`EntityId`](/en/docs/guide/data/indexes-and-relations#entityid-keys) link to the owner |
+| A few values with a fixed maximum (4 cooldown slots, the last 8 inputs) | **A fixed `[InlineArray]` array** in an unmanaged component |
+| Data read and written as a whole with the save (quest progress, settings) | **A collection in a component**, changed through `ref` |
+
+A player's bag of loot ids is a buffer; a sword with durability and enchantments is an entity that points at its
+owner. The full table, with read-mostly and immutable data, is in
+[ECS principles, rule 8](/en/docs/ecs-principles#8-choose-how-to-hold-a-collection).
+
+### Reading and writing [#reading-and-writing]
+
+| Read (`in`, `Read<T>()`, or a `ref`) | Write (a `ref` only: a `ref` parameter, `Get<T>()`, `TryGetRef<T>`) |
+| --- | --- |
+| `Count`, `Capacity`, `bag[i]` (read-only), `AsReadOnlySpan()`, `foreach` | `Add`, `AddRange`, `Insert`, `RemoveAt`, `RemoveAtSwapBack`, `Clear`, `SetCount`, `EnsureCapacity`, `TrimExcess`, `AsSpan()` (writable) |
+
+The writes are extension methods on `ref DynamicBuffer<T>`, so the compiler rejects them on an `in` parameter or on
+`Read<T>()`: a list cannot change without a tracked write.
+
+Outside systems, reach the buffer through its entity. For an element (a struct or an enum) that some code names as
+`DynamicBuffer<Loot>`, the generator writes named members:
+
+| Generated | Same as |
+| --- | --- |
+| `e.Loot` | `e.Read<DynamicBuffer<Loot>>()`: a `ref readonly`, not stamped |
+| `e.HasLoot` | `e.Has<DynamicBuffer<Loot>>()` |
+| `e.WriteLoot()` | `e.Get<DynamicBuffer<Loot>>()`: a `ref`, stamped as written |
+| `e.GetOrAddLoot()` | `e.GetOrAdd<DynamicBuffer<Loot>>()`: adds an empty buffer first if missing |
+| `e.RemoveLoot()` | `e.Remove<DynamicBuffer<Loot>>()` |
+
+```csharp
+ref var bag = ref player.WriteLoot();                          // a ref local: a tracked write
+bag.Add(new Loot(7));
+bag.Insert(0, new Loot(1));                                    // at the front: the rest shift by one
+bag.AddRange([new Loot(2), new Loot(3)]);                      // a span: one copy, one growth at most
+bag.RemoveAtSwapBack(1);                                       // O(1): the last element fills the hole
+foreach (ref var loot in bag.AsSpan()) loot = new Loot(loot.Item * 10);   // change elements in place
+bag.TrimExcess();                                              // give back the room a big bag no longer needs
+
+int held = player.Loot.Count;                                  // a read: not stamped
+ReadOnlySpan<Loot> items = player.Loot.AsReadOnlySpan();       // the elements, read-only
+ref var stash = ref hero.GetOrAddLoot();                       // an empty buffer if the hero had none
+```
+
+A relation's buffer gets no `WriteX()` or `GetOrAddX()`: its links are indexed and change only through
+[`Link`](/en/docs/guide/data/indexes-and-relations#relations) / [`Unlink`](/en/docs/guide/data/indexes-and-relations#relations).
+
+### Write a whole buffer in place: `SetCount` [#set-count]
+
+`SetCount(n)` sets the number of elements and returns the span to write: elements past `n` are removed, elements
+added are `default`. Code that computes a whole list (a path, a generated chunk) writes it straight into the buffer,
+with no span to fill first and no copy:
+
+```csharp
+public record struct Waypoint(float X, float Y);
+public record struct Destination(float X, float Y) : IComponent, ITracked;
+
+[EcsSystem]
+public ref struct PathSystem
+{
+    const int Steps = 8;
+
+    [ForEach, Changed<Destination>]
+    static void Plan(in Position from, in Destination to, ref DynamicBuffer<Waypoint> path)
+    {
+        var points = path.SetCount(Steps);                     // the whole path, written in place
+        for (int i = 0; i < points.Length; i++)
+        {
+            float t = (i + 1) / (float)Steps;
+            points[i] = new Waypoint(from.X + (to.X - from.X) * t, from.Y + (to.Y - from.Y) * t);
+        }
+    }
+}
+```
+
+The span is the buffer's `AsSpan()`: valid until the next call that changes its count or capacity.
+
+A buffer rewritten many times in one computation is the exception. When the same cells are read and written over many
+passes, say 32 layers that each update the same 256 bytes, compute them in a `stackalloc`'d span and copy the result in
+once through the span `SetCount` returns. The passes then run on memory that belongs to the method alone and stays in
+the cache. A computation that writes each element once still writes straight into the span.
+
+```csharp
+public record struct Shade(byte Level);
+
+[EcsSystem]
+public ref struct ShadeSystem
+{
+    const int Cells = 256;                                     // a 16 × 16 column
+    const int Layers = 32;
+
+    [ForEach, With<Chunk>]
+    static void Darken(in DynamicBuffer<Block> blocks, ref DynamicBuffer<Shade> shade)
+    {
+        // 32 passes over the same 256 cells: on the stack, then one copy into the buffer
+        Span<byte> light = stackalloc byte[Cells];
+        light.Fill(15);
+        var solid = blocks.AsReadOnlySpan();
+        for (int layer = Layers - 1; layer >= 0; layer--)
+            for (int i = 0; i < Cells; i++)
+                if (solid[layer * Cells + i] != Block.Air && light[i] > 0) light[i]--;
+        var levels = shade.SetCount(Cells);
+        for (int i = 0; i < Cells; i++) levels[i] = new Shade(light[i]);
+    }
+}
+```
+
+### Copies [#copies]
+
+The list lives in an object the component refers to. A copy of a `DynamicBuffer<T>` value would refer to the same
+list, so writes through the copy would not be stamped, and storing the copy would give two entities one list. The
+analyzer rejects every copy ([EECS012](/en/docs/guide/help/analyzer#eecs012)):
+
+```csharp doccheck=expect-EECS012
+public static class Bags
+{
+    public static int Items(Entity player)
+    {
+        var copy = player.Loot;                          // EECS012: a copy of the buffer
+        return copy.Count;
+    }
+}
+```
+
+Use `ref` and `in` parameters, `ref` locals and `Get` / `Read`. A new value is `new DynamicBuffer<T>()` (or
+`default`), which holds no list.
+
+### Moves, removal, snapshots and prefabs [#lifecycle]
+
+- A row that moves to another table (a component added) keeps its list.
+- Removing the component or destroying the entity drops the list; adding the component back starts with none.
+- `world.Capture()` shares each list with the [snapshot](/en/docs/guide/saves/snapshots) until either side writes it
+  (copy-on-write), so neither ever sees the other's writes. `Restore` shares the list back to a row that has not
+  written it since, and copies the elements into a row that has, on the owner thread: the next write of that row,
+  often in a parallel pass, finds its own list instead of copying one on a helper thread.
+- `world.Instantiate(prefab)` and `entity.Clone()` give the new entity a list of its own with the same elements. A
+  [prefab](/en/docs/guide/basics/prefabs) gets its elements with `SetBuffer(...)`:
+
+```csharp
+var chest = new Prefab().SetBuffer(new Loot(1), new Loot(2));
+var opened = world.Instantiate(chest);                        // its own list: Loot 1, Loot 2
+```
+
+- [`Save`](/en/docs/guide/saves/saves) writes the elements: unmanaged ones as raw rows, managed ones through Nino.
+
+### Buffers that come and go: the buffer pool, `MaxPooledLength` and `FillPool` [#pool]
+
+A buffer that dies (its entity destroyed, the component removed, `TrimExcess` of an empty one) gives its list, emptied,
+to a pool of its element type, and the next buffer of that type to take its first element (`Add`, `SetCount`,
+`EnsureCapacity`) takes it instead of allocating one, on any thread. Actors loaded and unloaded, units spawned and
+killed, chunks loaded around players: once warm, their buffers allocate nothing. Two static settings per element type
+shape the pool:
+
+<TypeTable
+  type={{
+    'DynamicBuffer<T>.MaxPooledLength': {
+      type: 'static int',
+      description: 'The longest list, in elements, a dead buffer gives back; a longer one is left to the GC. 0 pools none.',
+      default: '4 KB of elements (4,096 for a byte-sized enum)',
+    },
+    'DynamicBuffer<T>.FillPool(lists)': {
+      type: 'static void',
+      description: 'Allocates empty lists of MaxPooledLength elements now, until the pool holds that many (lists already pooled count).',
+      default: 'nothing reserved',
+    },
+  }}
+/>
+
+<Callout type="idea" title="Use it for">
+  `MaxPooledLength`: buffers longer than 4 KB that come and go in numbers (the blocks of chunks, large mailboxes). With
+  the default each dead list goes to the GC and each new buffer allocates again. `FillPool`: a server that knows its
+  peak and wants even the first climb to it allocation-free.
+</Callout>
+
+<Callout type="warn" title="Skip it when">
+  Buffers live as long as their entity (the bags of players who stay), or stay under 4 KB: the default pool already
+  recycles them. Do not reserve far above the peak: the lists are held for the process's life.
+</Callout>
+
+Both are process-wide, for every world and thread: set them once at start-up, before a world uses the type, and set
+the capacity first, because `FillPool` makes its lists as long as the capacity is when it runs. A voxel server
+whose chunks hold 8,192 blocks, with at most 512 chunks loaded around its players:
+
+```csharp
+const int ChunkBlocks = 16 * 16 * 32;
+const int PeakChunks = 512;
+
+DynamicBuffer<Block>.MaxPooledLength = ChunkBlocks;           // a whole chunk's list goes back to the pool
+DynamicBuffer<Block>.FillPool(PeakChunks);                    // the peak, allocated before the first tick
+
+using var server = new World();
+var loaded = new Entity[PeakChunks];
+server.CreateEntities(loaded, new DynamicBuffer<Block>(), new Chunk());
+foreach (var chunk in loaded) chunk.WriteBlock().SetCount(ChunkBlocks);   // each takes a reserved list
+```
+
+- **What the pool holds:** at most the lists of the buffers that died while none were taken, so its peak: that many
+  lists of `MaxPooledLength` elements. 512 lists of 8,192 one-byte blocks are 4 MB, held for the process's life.
+- **Across threads:** each thread keeps a few lists of its own and trades the rest in batches with a pool all threads
+  share, one lock per batch, so the lists the owner thread gets back from destroyed buffers serve the first writes of a
+  [parallel `[ForEach]`](/en/docs/guide/performance/threading#parallel-foreach-methods) on the helper threads too.
+
+What the pool saves, 1,000 actors with a mailbox each unloaded and loaded again, is the `BufferChurnBenchmark` table
+[below](#how-to-use-it-fast); why the limit is a setting of each element type: [D65](/en/docs/decisions#d65-buffer-pool-capacity).
+
+## Full example [#full-example]
+
+A hero picks up a numbered item every tick into a bag that holds four, and a sync system counts the bags that
+changed. A chest has a bag too, but nothing writes it. Put the files in a console project that references EasyEcs
+(`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+// An element of a bag: any struct. DynamicBuffer<Loot> is the component.
+public record struct Loot(int Item);
+
+// A tag: the entities that pick up loot.
+public struct Collector : IComponent;
+
+// The number of the next item to drop.
+public record struct Drops(int Next) : ISingletonComponent;
+
+// How many bags were sent since the start.
+public record struct Synced(int Bags) : ISingletonComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Every collector picks up the next item. A full bag drops its oldest item first.
+[EcsSystem]
+public ref struct PickupSystem
+{
+    const int BagSize = 4;
+
+    // The bag is taken by `ref`: writing it is a tracked change.
+    [ForEach, With<Collector>]
+    static void Pick(ref DynamicBuffer<Loot> bag, ref Drops drops)
+    {
+        if (bag.Count == BagSize)
+        {
+            bag.RemoveAt(0);
+        }
+
+        drops.Next++;
+        bag.Add(new Loot(drops.Next));
+    }
+}
+
+// Sends only the bags written since this system last ran.
+[EcsSystem, UpdateAfter<PickupSystem>]
+public ref struct SyncBagsSystem
+{
+    [ForEach, Changed<DynamicBuffer<Loot>>]
+    static void Sync(ref Synced synced)
+    {
+        synced.Bags++;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSingleton<Drops>();
+world.AddSingleton<Synced>();
+world.AddSystem<PickupSystem>();
+world.AddSystem<SyncBagsSystem>();
+
+// An empty buffer holds no list: each entity gets its own on its first write.
+Entity hero = world.CreateEntity(new DynamicBuffer<Loot>(), new Collector());
+Entity chest = world.CreateEntity(new DynamicBuffer<Loot>());
+
+// Make room for a full bag now, so the list never grows later.
+hero.WriteLoot().EnsureCapacity(4);
+
+for (int i = 0; i < 6; i++)
+{
+    world.Update();
+}
+
+// hero.Loot is a read (Read<T>), not a change.
+Console.Write("hero's bag:");
+foreach (var loot in hero.Loot)
+{
+    Console.Write($" {loot.Item}");
+}
+
+Console.WriteLine();
+Console.WriteLine($"the chest holds {chest.Loot.Count} items");
+Console.WriteLine($"bags synced: {world.Synced.Bags}");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+hero's bag: 3 4 5 6
+the chest holds 0 items
+bags synced: 7
+```
+
+The bag holds the last four items. Seven syncs: the first run sees both bags as new, then only the hero's bag is
+written, once in each of the five updates that follow.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| Letting a list grow from empty | `EnsureCapacity(n)` once where the size is known | Adding within the capacity allocates nothing |
+| Filling a span on the stack, then `AddRange` of it, to write a whole buffer in one pass | Write the span `SetCount(n)` returns | One pass over the elements instead of two, and no stack the size of the buffer |
+| Many passes of read-modify-write over the buffer's span | The passes on a `stackalloc`'d span, then one copy into the span `SetCount(n)` returns | The passes run on the method's own memory; the buffer is written once |
+| A new list per tick | `Clear()` and refill | `Clear` keeps the capacity: a list refilled every tick allocates nothing once it reached its size |
+| `RemoveAt(i)` when the order does not matter | `RemoveAtSwapBack(i)` | O(1) instead of O(count) |
+| Reading through a `ref` parameter | An `in` parameter | A `ref` stamps the row, and every `[Changed<T>]` reader visits it ([EECS025](/en/docs/guide/help/analyzer#eecs025)) |
+| Keeping a span across `Add` | Take a new span after any call that may grow the list | `Add`, `AddRange`, `Insert`, `SetCount`, `EnsureCapacity` and `TrimExcess` may reallocate the array |
+| Buffers longer than 4 KB of elements that come and go (chunks, large mailboxes) | [`MaxPooledLength`](#pool) raised to their length at start-up | A new buffer reuses a dead one's list instead of allocating |
+| Allocating lists while the world climbs to a peak it knows | [`FillPool(peak)`](#pool) at start-up, after `MaxPooledLength` | The lists are paid for before the first tick |
+| A `ref` buffer written on some rows only | A [`Mut<DynamicBuffer<T>>`](/en/docs/guide/changes/change-tracking#set-if-changed) (`x.Write().Add(…)`) | Only the rows written are stamped ([EECS053](/en/docs/guide/help/analyzer#eecs053)) |
+
+Measured on 100,000 bags of 8 items, of which 1,000 trade an item per tick and one `[Changed]` system sends the
+changed bags (`DynamicBufferBenchmark`), against the same bag as a `List<T>` in a tracked component:
+
+<BenchTable bench="DynamicBufferBenchmark" />
+
+The buffer and the list it replaces are measured side by side above, and the bag cannot change without the change
+being tracked.
+
+1,000 actors with a mailbox of four messages unloaded and loaded again each operation (`BufferChurnBenchmark`): the
+new buffers take the lists of the dead ones.
+
+<BenchTable bench="BufferChurnBenchmark" />
+
+## What it costs [#what-it-costs]
+
+- **Memory:** one reference per row in the column, plus one object and one array per entity, made by its first write.
+  There is no inline capacity: every list lives on the heap.
+- **A write** stamps the row once, like any [tracked component](/en/docs/guide/changes/change-tracking#what-it-costs).
+- **Adding within the capacity** allocates nothing; growing doubles the array (at least 4 elements).
+- **A buffer that dies** (its entity destroyed, the component removed) hands its list, emptied, to the next buffer of
+  its element type that takes its first element, on any thread; lists longer than `MaxPooledLength` go to the GC, and the
+  pool holds at most the lists of its peak ([the buffer pool](#pool)).
+- **An empty buffer holds no list**, also one a prefab gives its instances (`SetBuffer<T>()` with no elements): its
+  first element takes a list from the pool. `LoadEntities` and `Load` read each buffer into a list from the pool and
+  hand that list to the entity, without copying it again.
+- **`TrimExcess`** gives back what a list that once grew large no longer needs. On an empty buffer it gives the list
+  back to the pool: the buffer holds no list, and the next first write of any buffer of `T` reuses it. Scratch
+  buffers used only while an entity is active (the step of a simulation that sleeps between bursts) then hold no memory
+  in between.
+- **Parallel methods** may take a `ref DynamicBuffer<T>`: each chunk writes only its own entities' lists.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Copying the buffer into a local, a field or another entity | Two owners of one list; writes through the copy are not tracked | [EECS012](/en/docs/guide/help/analyzer#eecs012) |
+| Calling `Add` on an `in` parameter or on `Read<T>()` | Does not compile: the writes need a `ref` | The compiler |
+| Keeping an `AsSpan()` (or the span of `SetCount`) across an `Add` | The span still points at the old array | Code review: take a new span |
+| Reading the buffer through a `ref` parameter | Every visited row counts as changed | [EECS025](/en/docs/guide/help/analyzer#eecs025) |
+| A `ref` buffer written on some rows only (an early `return`, an `Add` in an `if`) | Every visited row counts as changed, also the rows left alone | [EECS053](/en/docs/guide/help/analyzer#eecs053): a `Mut<DynamicBuffer<T>>` |
+| Buffers longer than `MaxPooledLength` that come and go | Every dead list goes to the GC, every new buffer allocates | Raise [`MaxPooledLength`](#pool) at start-up; the creating system's `TotalAllocated` ([diagnostics](/en/docs/guide/production/diagnostics)) shows it |
+| `FillPool` before `MaxPooledLength` is raised | The reserved lists are the old length and grow on their first fill | Code review: the capacity first |
+| `FillPool` far above the peak | Memory held for the process's life: lists × capacity | Reserve the measured peak |
+| One entity per element of a plain list | An entity, a row and an index entry per item | Use a buffer for plain values |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Change tracking" href="/en/docs/guide/changes/change-tracking">
+    `[Changed<T>]` and what counts as a write.
+  </Card>
+  <Card title="Indexes and relations" href="/en/docs/guide/data/indexes-and-relations#relations">
+    `IRelation` buffers: an entity linked to many others.
+  </Card>
+  <Card title="Saves" href="/en/docs/guide/saves/saves">
+    Buffers are saved with their elements.
+  </Card>
+  <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
+    Bags that are saved, loaded and moved with their players.
+  </Card>
+</Cards>

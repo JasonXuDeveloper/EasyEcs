@@ -1,6 +1,6 @@
 # Writing the EasyEcs docs
 
-How a page of https://ecs.xgamedev.net is written. `content/guide/change-tracking.mdx` (and its `.zh.mdx`) is the
+How a page of https://ecs.xgamedev.net is written. `content/guide/changes/change-tracking.mdx` (and its `.zh.mdx`) is the
 reference page: when in doubt, do what it does.
 
 ## Files
@@ -85,8 +85,8 @@ readers search for, one `##` per question.
 - Every heading of a Chinese page carries the English id, so anchors are the same in both languages and links from
   one language to the other keep working: `## 变更追踪 [#change-tracking]`. Give English headings an explicit id
   too when the text is long or likely to change: `## Compared with other libraries [#compared]`.
-- Internal links are absolute and name the language: `/en/docs/guide/queries#filters` on English pages,
-  `/zh/docs/guide/queries#filters` on Chinese pages. `bun run lint:links` checks every target and every `#anchor`.
+- Internal links are absolute and name the language: `/en/docs/guide/basics/queries#filters` on English pages,
+  `/zh/docs/guide/basics/queries#filters` on Chinese pages. `bun run lint:links` checks every target and every `#anchor`.
 - Links to the repository (README, a source file) are full GitHub URLs on `master`.
 
 ## Code

@@ -326,7 +326,7 @@ public static partial class EasyEcsAnalyzer
     /// </summary>
     private const int SmallCount = 4096;
 
-    private static string Help(string id) => "https://ecs.xgamedev.net/en/docs/guide/analyzer#" + id.ToLowerInvariant();
+    private static string Help(string id) => "https://ecs.xgamedev.net/en/docs/guide/help/analyzer#" + id.ToLowerInvariant();
 
     /// <summary>EasyEcs's types in the compilation (null without a reference to it).</summary>
     private sealed class Core

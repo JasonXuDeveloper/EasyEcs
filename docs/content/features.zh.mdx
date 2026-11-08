@@ -59,7 +59,7 @@ public ref struct MovementSystem
 - **适合：** 每个独立的模拟一个 World（一张地图、一个场景、一局对战、一个测试）。代码里存 `Entity` 句柄，组件里存 `EntityId`。
 - **开销：** 每个实体 id 一条 16 字节的记录。带组件创建时一次放进最终的表；销毁时用表的最后一行填洞。
   `WorldOptions.InitialEntityCapacity`、`EnsureEntityCapacity(n)` 和 `Reserve<T1, …, Tn>(n)`（连表一起）按已知峰值预分配，长期运行的服务器运行时不会再扩容。
-- **指南：** [实体与组件](/zh/docs/guide/entities-and-components)
+- **指南：** [实体与组件](/zh/docs/guide/basics/entities-and-components)
 
 ### 组件与标签 [#components-and-tags]
 
@@ -69,7 +69,7 @@ public ref struct MovementSystem
 - **适合：** 每个实体的数据，按系统会一起读的内容拆分；来来去去的状态用标签。
 - **别用于：** 大多数实体每个 tick 都在变的值，不要做成标签，用字段。
 - **开销：** 一次遍历只加载它读的列。获得一个表里没有对应列的组件，这一行拷贝一次；之后再开关只是翻一个位。
-- **指南：** [实体与组件](/zh/docs/guide/entities-and-components)
+- **指南：** [实体与组件](/zh/docs/guide/basics/entities-and-components)
 
 ### 生成成员 [#generated-members]
 
@@ -79,7 +79,7 @@ public ref struct MovementSystem
 
 - **适合：** 所有写明具体组件的代码。泛型 API（`Get<T>()`、`Set(…)`）留给泛型代码。
 - **开销：** 没有。每个成员都是对泛型 API 的内联调用，生成器也知道哪些是结构变更。
-- **指南：** [实体与组件](/zh/docs/guide/entities-and-components)、[速查表](/zh/docs/cheat-sheet#generated-members)
+- **指南：** [实体与组件](/zh/docs/guide/basics/entities-and-components)、[速查表](/zh/docs/cheat-sheet#generated-members)
 
 ### 生成的部分 [#generated-parts]
 
@@ -96,8 +96,8 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 - **适合：** 所有的键、分组和逐字段的总数：一个特性代替一个接口及其成员。
 - **别用于：** 由多个成员算出的键、不是逐字段的归约：手写接口。
 - **开销：** 运行时没有；生成的成员就是你本来要写的那些。设置类特性从 World 第一张包含该类型的表起生效。
-- **指南：** [生成的部分](/zh/docs/guide/entities-and-components#declared-parts)、
-  [EECS062-069](/zh/docs/guide/analyzer#eecs062)
+- **指南：** [生成的部分](/zh/docs/guide/basics/entities-and-components#declared-parts)、
+  [EECS062-069](/zh/docs/guide/help/analyzer#eecs062)
 
 ### 系统与 [ForEach] [#systems-and-foreach]
 
@@ -108,7 +108,7 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 - **适合：** 一个 tick 里所有逐实体的逻辑。
 - **开销：** 把 `Velocity` 加到 `Position` 的 `[ForEach]` 系统，每个实体 <BenchValue k="forEach.perEntity" />；同样的循环手写在两个普通数组上是
   <BenchValue k="rawArray.perEntity" />。每个系统每次更新：所在程序集的系统集合直接调用一次（没有虚调用），每个方法一次遍历，直接读按 job 类型保存的查询。
-- **指南：** [系统](/zh/docs/guide/systems)、[ECS 设计原则](/zh/docs/ecs-principles)
+- **指南：** [系统](/zh/docs/guide/basics/systems)、[ECS 设计原则](/zh/docs/ecs-principles)
 
 ### 泛型系统 [#generic-systems]
 
@@ -116,9 +116,9 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 各自添加、排序、调度。系统之间就靠它或静态辅助方法共享代码：ref struct 没有基类。
 
 - **适合：** 同一条规则作用于几种组件类型（计数、衰减、按资源种类清理）。
-- **别用于：** 泛型的 `[ForEach]` 方法：没人能给它提供类型实参（[EECS004](/zh/docs/guide/analyzer#eecs004)）；把系统做成泛型。
+- **别用于：** 泛型的 `[ForEach]` 方法：没人能给它提供类型实参（[EECS004](/zh/docs/guide/help/analyzer#eecs004)）；把系统做成泛型。
 - **开销：** 除了封闭出来的系统本身没有额外开销。它们的代码写进点名它们的程序集，Native AOT 和 WebAssembly 也能跑；只有靠反射构造的封闭类型没有代码（`AddSystem` 抛异常）。
-- **指南：** [系统](/zh/docs/guide/systems#generic-systems)
+- **指南：** [系统](/zh/docs/guide/basics/systems#generic-systems)
 
 ### 过滤条件 [#filters]
 
@@ -129,7 +129,7 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 
 - **适合：** 状态（`[Without<Dead>]`）、角色（`[With<Player>]`）、多选一（`[WithAny<Frozen, Stunned>]`）。
 - **开销：** 匹配结果按查询形状缓存；不可能匹配的表只跳过一次，部分行缺组件的表按位字一次检测 64 行。
-- **指南：** [查询与过滤](/zh/docs/guide/queries)、[分组过滤](/zh/docs/guide/systems#group-filters)
+- **指南：** [查询与过滤](/zh/docs/guide/basics/queries)、[分组过滤](/zh/docs/guide/basics/systems#group-filters)
 
 ### 可选组件 [#optional-components]
 
@@ -139,7 +139,7 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 - **适合：** 只有部分实体才有的加成（伤害计算时的护甲、回血时的增益）。
 - **别用于：** 最热的循环：用 `[With<T>]` / `[Without<T>]` 拆成两个方法，每行都不用检测。
 - **开销：** 不做结构变更的方法每行检测一个存在位；做结构变更的方法每个实体查找一次。
-- **指南：** [系统](/zh/docs/guide/systems#maybe)、[`ReadOnlyMaybe<T>`](/zh/docs/guide/systems#read-only-maybe)
+- **指南：** [系统](/zh/docs/guide/basics/systems#maybe)、[`ReadOnlyMaybe<T>`](/zh/docs/guide/basics/systems#read-only-maybe)
 
 ### 生成器写出的向量循环（SIMD） [#vector-loops]
 
@@ -149,12 +149,12 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 
 - **适合：** 对大量行做算术：衰减、积分、截断、计数。
 - **别用于：** 不用管：它是自动的。不符合条件的方法（两种大小的通道、每条路径上都有函数调用）照旧逐行运行，
-  [EECS055](/zh/docs/guide/analyzer#eecs055) 会说明原因；`SimdMode = SimdMode.Require` 让它成为构建错误（[EECS056](/zh/docs/guide/analyzer#eecs056)），
+  [EECS055](/zh/docs/guide/help/analyzer#eecs055) 会说明原因；`SimdMode = SimdMode.Require` 让它成为构建错误（[EECS056](/zh/docs/guide/help/analyzer#eecs056)），
   `SimdMode.Off` 不再提示。并行方法、`Maybe<T>` 参数、`byte` 和 `short` 通道、`Vector2` / `Vector3` 字段、整体赋值（`new T(...)`、`with`）
   和条件分支里的调用也能得到循环；`FloatMode.Fast` 让 `Sin`、`Exp`、`Log` 等改用向量近似。`SystemInfo.Loops` 列出每个方法得到的循环。
 - **开销：** 运行时只有循环本身，循环在编译时写好；`Reduce<T>` 每条通道一个累加器。
-- **指南：** [系统](/zh/docs/guide/systems#vector-loops)、[FloatMode](/zh/docs/guide/systems#float-mode)、
-  [高性能写法](/zh/docs/guide/high-performance)
+- **指南：** [系统](/zh/docs/guide/basics/systems#vector-loops)、[FloatMode](/zh/docs/guide/basics/systems#float-mode)、
+  [高性能写法](/zh/docs/guide/performance/high-performance)
 
 ### 批量方法 [#batch-methods]
 
@@ -164,7 +164,7 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 - **适合：** 对大量行做算术（移动、衰减、求和）。
 - **别用于：** 需要结构变更的逻辑：批量方法执行期间 World 的结构是冻结的。
 - **开销：** 每段行调用一次，而不是每个实体一次。
-- **指南：** [系统](/zh/docs/guide/systems)
+- **指南：** [系统](/zh/docs/guide/basics/systems)
 
 ### 单例 [#singletons]
 
@@ -174,7 +174,7 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 - **适合：** 所有 World 级状态。系统自身不存状态。
 - **别用静态字段代替：** 静态字段由所有 World 共享。
 - **开销：** 作为参数时每次遍历查找一次。
-- **指南：** [单例](/zh/docs/guide/singletons)
+- **指南：** [单例](/zh/docs/guide/basics/singletons)
 
 ### 排序、分组与间隔 [#system-groups-and-intervals]
 
@@ -183,8 +183,8 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 分组的过滤条件（`[Without<Frozen>]`，或分组自己、它实现的接口上的 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`）作用于分组里所有系统的 `[ForEach]` 方法。
 
 - **适合：** 不同的节奏：输入每次唤醒都处理，模拟按固定 tick 跑，存盘每隔几秒一次；每种 actor 一个分组，用一个泛型接口统一声明。
-- **开销：** 除了系统本身没有额外开销；空分组的更新什么都不做。排序成环会编译失败（[EECS019](/zh/docs/guide/analyzer#eecs019)）。
-- **指南：** [系统](/zh/docs/guide/systems)
+- **开销：** 除了系统本身没有额外开销；空分组的更新什么都不做。排序成环会编译失败（[EECS019](/zh/docs/guide/help/analyzer#eecs019)）。
+- **指南：** [系统](/zh/docs/guide/basics/systems)
 
 ### 分帧 [#slices]
 
@@ -193,11 +193,11 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 `QueryFilter.Slice(index, of)` 做同样的事。
 
 - **适合：** 晚一点也无妨、但一个 tick 做完太贵的工作：重新给 AI 目标打分、扫描空闲会话、给大量实体做数值衰减。
-- **别用于：** `[Changed<T>]` / `[Removed<T>]` 方法，它们必须看到每一次变更（[EECS035](/zh/docs/guide/analyzer#eecs035)）；
+- **别用于：** `[Changed<T>]` / `[Removed<T>]` 方法，它们必须看到每一次变更（[EECS035](/zh/docs/guide/help/analyzer#eecs035)）；
   每个 tick 必须处理每一行的逻辑。两次运行之间搬动过的行，在一轮里可能被跳过或访问两次。
 - **开销：** 每次运行处理约 1/N 的行，外加遍历表的开销；配合 `[UpdateInterval(M)]`，每行每 N × M 次更新访问一次。
   `Query`、`Count` 和批量调用不接受分帧过的过滤条件。
-- **指南：** [系统](/zh/docs/guide/systems)
+- **指南：** [系统](/zh/docs/guide/basics/systems)
 
 ### 立即生效的结构变更 [#immediate-structural-changes]
 
@@ -208,17 +208,17 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 - **和命令缓冲相比：** 把变更推迟到缓冲里的库，会让系统看到一个马上就要变的状态，效果的先后还取决于缓冲何时回放。
   EasyEcs 没有需要回放的缓冲。
 - **开销：** 可能做结构变更的遍历，每个实体之后检查一个计数器；不可能做结构变更的方法连这一步都省了。
-- **指南：** [结构变更](/zh/docs/guide/structural-changes)、[ref 与 await](/zh/docs/guide/refs-and-await)
+- **指南：** [结构变更](/zh/docs/guide/changes/structural-changes)、[ref 与 await](/zh/docs/guide/changes/refs-and-await)
 
 ### 遍历后销毁的事件 [#consume]
 
 `[ForEach, Consume]` 在遍历结束时正好销毁这一遍访问过的行：处理事件或命令实体的方法每个只处理一次，方法体里不用写 `entity.Destroy()`。
 
 - **适合：** 伤害事件、客户端命令、请求：只活一遍的实体。
-- **别用于：** 比读它的系统活得更久的实体；分帧的方法（[EECS085](/zh/docs/guide/analyzer#eecs085)）。
+- **别用于：** 比读它的系统活得更久的实体；分帧的方法（[EECS085](/zh/docs/guide/help/analyzer#eecs085)）。
 - **开销：** 没有结构变更的遍历之后，每张表一次 `DestroyAll`，而不是每行一次销毁（这时遍历抛异常就什么都不销毁）；所在的系统独自运行。
-  手写的销毁由 [EECS084](/zh/docs/guide/analyzer#eecs084) 报告。
-- **指南：** [系统](/zh/docs/guide/systems#consume)
+  手写的销毁由 [EECS084](/zh/docs/guide/help/analyzer#eecs084) 报告。
+- **指南：** [系统](/zh/docs/guide/basics/systems#consume)
 
 ### 临时查询 [#ad-hoc-queries]
 
@@ -233,7 +233,7 @@ public partial struct Census : ISingletonComponent { [Sum] public int Alive; [Ma
 - **别用于：** 每个 tick 都要跑的逻辑：系统有排序、有调度、有耗时统计。
 - **开销：** 零分配。`Count` 只是把表的行数加起来；`Any` 找到第一个就停；结构体 job 是最快的临时遍历。
   `[EntityMethod]` 的入口（`entity.Run`）是 O(1)，过滤条件每多一个组件多 O(1)。
-- **指南：** [查询与过滤](/zh/docs/guide/queries)、[`[EntityMethod]`](/zh/docs/guide/queries#run-on-one-entity)
+- **指南：** [查询与过滤](/zh/docs/guide/basics/queries)、[`[EntityMethod]`](/zh/docs/guide/basics/queries#run-on-one-entity)
 
 ## 响应变化 [#react]
 
@@ -261,7 +261,7 @@ public ref struct ReplicationSystem
   只在值变了时写入（[见下](#write-only-when-changed)），照样追踪。
 - **开销：** 每行 8 字节，每次写入一次存储；不追踪的组件没有任何开销。10 万实体里同步 10 个变化的实体耗时 <BenchValue k="changed.10" />，
   扫描全部行是 <BenchValue k="changed.10.scan" />。自 tick 以来没有任何列被写过的表整张跳过，`ChangedAny` 也一样。
-- **指南：** [变更追踪](/zh/docs/guide/change-tracking)
+- **指南：** [变更追踪](/zh/docs/guide/changes/change-tracking)
 
 ### 值变了才算写入 [#write-only-when-changed]
 
@@ -273,7 +273,7 @@ public ref struct ReplicationSystem
 - **别用于：** 大多数行反正都会写的值：普通 `ref` 更便宜。
 - **开销：** `Value` 就是一次普通读取；每次写入打一次 tick（方法会做结构变更或并行运行时，再加一次实体查找）；`SetIfChanged` 先比较值（`IEquatable<T>`，record struct 自带；
   否则按非托管结构体的字节比较）。调度器把 `Mut<T>` 参数算作对 `T` 的写入。
-- **指南：** [变更追踪](/zh/docs/guide/change-tracking)
+- **指南：** [变更追踪](/zh/docs/guide/changes/change-tracking)
 
 ### 移除检测 [#removal-detection]
 
@@ -283,7 +283,7 @@ public ref struct ReplicationSystem
 - **适合：** 告诉客户端什么没了（火灭了、护盾碎了），释放组件代表的东西（预留的格子）。
 - **别用于：** 已销毁的实体，它们没有行：由[销毁日志](#destroy-log)报告。
 - **开销：** 除了组件本来就有的 tick 列，不占额外存储。10 万实体里找出 10 次移除耗时 <BenchValue k="removed.10" />。
-- **指南：** [变更追踪](/zh/docs/guide/change-tracking#removal-detection)
+- **指南：** [变更追踪](/zh/docs/guide/changes/change-tracking#removal-detection)
 
 ### 销毁日志 [#destroy-log]
 
@@ -294,7 +294,7 @@ public ref struct ReplicationSystem
 - **适合：** 把实体的消失同步给很多客户端，而它们确认到的 tick 各不相同。
 - **别用于：** 只有一个读取方、而且必须在实体消失前处理它（释放座位、关闭连接）：那是[清理组件](#cleanup-components)的事。
 - **开销：** 每条记录 16 字节，一次性分配；每次销毁一次存储；关闭时（默认）没有开销。`DestroyedSince` 是 O(报告的记录数)，不分配内存。
-- **指南：** [变更追踪](/zh/docs/guide/change-tracking)
+- **指南：** [变更追踪](/zh/docs/guide/changes/change-tracking)
 
 ### 清理组件 [#cleanup-components]
 
@@ -304,7 +304,7 @@ public ref struct ReplicationSystem
 - **适合：** World 之外、必须恰好释放一次的资源：一个连接、一个预留的座位、另一个服务里的槽位。
 - **别用于：** 纯数据：已销毁实体的组件不需要释放。
 - **开销：** 没有清理组件的表，每次销毁多检查一个标志。
-- **指南：** [清理与禁用](/zh/docs/guide/cleanup-and-disable)
+- **指南：** [清理与禁用](/zh/docs/guide/changes/cleanup-and-disable)
 
 ### 禁用与启用 [#disable-and-enable]
 
@@ -314,7 +314,7 @@ public ref struct ReplicationSystem
 - **适合：** 暂停：眩晕期间冻结冷却，玩家接管单位时关掉 AI。
 - **别用于：** 以后不再需要的值：直接移除组件。
 - **开销：** O(1)；一张表里第一次禁用时，这一行搬到带标签列的表，只搬一次。
-- **指南：** [清理与禁用](/zh/docs/guide/cleanup-and-disable)
+- **指南：** [清理与禁用](/zh/docs/guide/changes/cleanup-and-disable)
 
 ## 查找 [#find]
 
@@ -338,12 +338,12 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 ### 值索引 [#value-indexes]
 
 键标了 `[LookupKey]` 的组件（生成器实现 `IIndexed<TKey>`）可以按 `Key` 查找：`world.Index<T, TKey>()`（或 `world.TeamIndex`）的 `Find`、`TryFind` 和 `Count`。
-每次 `Set`、创建和销毁都会更新索引；经 `ref` 写入时索引看不到，所以编译期直接报错（[EECS015](/zh/docs/guide/analyzer#eecs015)）。
+每次 `Set`、创建和销毁都会更新索引；经 `ref` 写入时索引看不到，所以编译期直接报错（[EECS015](/zh/docs/guide/help/analyzer#eecs015)）。
 
 - **适合：** 按名字找玩家、找公会里的单位、找某个网格格子里的实体。
 - **别用于：** 大多数行每个 tick 都在变、又很少查找的值：每次变化都要重新挂链。
 - **开销：** 每个被索引的实体一个节点，只有用到索引的 World 才付出。`Count` 是一次哈希查找，`Find` 每个匹配一步。
-- **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
+- **指南：** [索引与关系](/zh/docs/guide/data/indexes-and-relations)
 
 ### 唯一键 [#unique-keys]
 
@@ -352,11 +352,11 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 `InvalidOperationException`。引用类型键为 null 时视为没有键。
 
 - **适合：** 账号 id、玩家名、会话令牌、格子的占用者：绝不能对应两个实体的键。
-- **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/analyzer#eecs036)）；几个实体共用的键（用普通的 `[LookupKey]`）。
+- **别用于：** `EntityId` 键（[EECS036](/zh/docs/guide/help/analyzer#eecs036)）；几个实体共用的键（用普通的 `[LookupKey]`）。
 - **开销：** 第一张含该组件的表出现时索引就建好了，所以每次写入都会检查：每个变了的键一次哈希查找，批量调用和读档多遍历一遍行。
   `Get` 和 `TryGet` 是一次哈希查找，只读这个键自己的记录：唯一键直接存它的实体，每个键没有数组。能映射到有界槽位的键
-  （`IDirectMapped<TKey>`：网格格子、小 id）改为读一个数组元素（[直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index)）。
-- **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
+  （`IDirectMapped<TKey>`：网格格子、小 id）改为读一个数组元素（[直接映射的键](/zh/docs/guide/data/indexes-and-relations#direct-index)）。
+- **指南：** [索引与关系](/zh/docs/guide/data/indexes-and-relations)
 
 ### 有序区间 [#ordered-ranges]
 
@@ -364,7 +364,7 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 
 - **适合：** 排行榜、按分数匹配、某个等级区间的玩家。
 - **开销：** 键出现和消失时维护有序的键列表：每次 O(log 键数)，再加一次块移动。
-- **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
+- **指南：** [索引与关系](/zh/docs/guide/data/indexes-and-relations)
 
 ### 按值分表 [#table-groups]
 
@@ -374,7 +374,7 @@ Entity owner = world.AccountIndex.Get(7);                       // 唯一键对�
 - **适合：** 一个 World 里有很多场景或对局，各自单独更新、单独查询。
 - **别用于：** 经常变化的值（每次变化一次行拷贝），或者每组只有寥寥几个实体。
 - **开销：** `GroupBy` 时一次 O(实体数)；每次换组一次行拷贝。
-- **指南：** [分组](/zh/docs/guide/groups)
+- **指南：** [分组](/zh/docs/guide/data/groups)
 
 ## 组织 [#structure]
 
@@ -409,7 +409,7 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 - **适合：** 归属关系、队伍成员、增益作用的单位、有自己状态的物品。
 - **别用于：** 只有主人自己读的一袋普通值：[动态缓冲](#dynamic-buffers)只是一个组件，不用每个元素一个实体。
 - **开销：** 反查 O(1) 起步，每条链接 O(1)；一条 `IRelation` 链接占 20 字节，再加目标列表里的 8 字节，可回收复用。
-- **指南：** [索引与关系](/zh/docs/guide/indexes-and-relations)
+- **指南：** [索引与关系](/zh/docs/guide/data/indexes-and-relations)
 
 ### 层级 [#hierarchy]
 
@@ -422,7 +422,7 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 - **别用于：** 变换传播：没有内置的世界坐标变换，需要的话自己写系统。
 - **开销：** 第一次调用为所有 `ChildOf` 建一次索引之后，`Children` O(1) 起步、每个子实体 O(1)；`Descendants` 每个实体 O(1)，
   预热后不分配内存；级联销毁每条链接 O(1)。
-- **指南：** [层级](/zh/docs/guide/hierarchy)
+- **指南：** [层级](/zh/docs/guide/data/hierarchy)
 
 ### 动态缓冲 [#dynamic-buffers]
 
@@ -433,7 +433,7 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 - **别用于：** 有自己状态的元素（每个元素一个实体，加一条关系），或者数量固定的一小组值（非托管组件里的 `[InlineArray]`）。
 - **开销：** 每个实体一个对象加一个数组，第一次写入时创建；容量之内的写入不分配内存。销毁的缓冲把列表交给池，同类型的下一个缓冲
   从池里取，不论在哪个线程：`MaxPooledLength` 决定最长保留多长的列表，`FillPool(n)` 在启动时把池填满。`SetCount(n)` 返回 span，原地写整个缓冲。
-- **指南：** [动态缓冲](/zh/docs/guide/dynamic-buffers)、[缓冲池](/zh/docs/guide/dynamic-buffers#pool)、[ECS 设计原则第 8 条](/zh/docs/ecs-principles#8-choose-how-to-hold-a-collection)
+- **指南：** [动态缓冲](/zh/docs/guide/data/dynamic-buffers)、[缓冲池](/zh/docs/guide/data/dynamic-buffers#pool)、[ECS 设计原则第 8 条](/zh/docs/ecs-principles#8-choose-how-to-hold-a-collection)
 
 ### 预制体与克隆 [#prefabs-and-cloning]
 
@@ -446,7 +446,7 @@ var guard = world.Instantiate(goblin, new ChildOf(archer));          // 自带�
 - **适合：** 反复刷出的实体种类：NPC 类型、投射物、掉落物，写在代码里或启动时从配置加载；带组件的形式适合父实体、位置或主人每个实例都不同的刷怪。
 - **别用于：** 每个值都不一样的实体：直接带值创建。
 - **开销：** 每个实例一次行拷贝，带组件也一样（拷贝之后不再搬行）；一整波只过一次结构闸门，表最多扩容一次。
-- **指南：** [预制体](/zh/docs/guide/prefabs)
+- **指南：** [预制体](/zh/docs/guide/basics/prefabs)
 
 ## 持久化 [#persist]
 
@@ -471,7 +471,7 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 撤销一回合、客户端预测的回滚、回放、测试之间重置 World。
 - **别用于：** 跨重启的持久化（用[存档](#saves)）；组件里的托管引用是共享的，不会深拷贝。
 - **开销：** 两个方向都是 O(实体数 × 组件数)；拍进复用的快照不分配内存。
-- **指南：** [快照](/zh/docs/guide/snapshots)
+- **指南：** [快照](/zh/docs/guide/saves/snapshots)
 
 ### 存档 [#saves]
 
@@ -485,7 +485,7 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 跨重启持久化、落盘的回放、把一个 World 发到另一台机器。
 - **别用于：** 原地修改非托管组件的内存布局：请新增一个组件类型，否则旧存档加载不了。
 - **开销：** 每个非托管列一次块拷贝；缓冲足够大之后不再分配内存。
-- **指南：** [存档](/zh/docs/guide/saves)
+- **指南：** [存档](/zh/docs/guide/saves/saves)
 
 ### 迁移 [#migration]
 
@@ -497,7 +497,7 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 玩家换场景或换服，对局结束把幸存者交给大厅（用 `Descendants` 收集整组）；实体先于存储数据出现的 actor 用记录。
 - **开销：** O(给出的实体数 × 组件数)；`MoveEntities` 直接拷贝行。
-- **指南：** [迁移与卸载](/zh/docs/guide/migration-and-unload)、[记录](/zh/docs/guide/migration-and-unload#records)
+- **指南：** [迁移与卸载](/zh/docs/guide/saves/migration-and-unload)、[记录](/zh/docs/guide/saves/migration-and-unload#records)
 
 ### 卸载插件类型 [#unloading]
 
@@ -506,7 +506,7 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 在线服务器热重载游戏逻辑。
 - **开销：** O(持有这些组件的实体数 + 表数 + 缓存的查询数)，走冷路径，会分配内存。
-- **指南：** [迁移与卸载](/zh/docs/guide/migration-and-unload)
+- **指南：** [迁移与卸载](/zh/docs/guide/saves/migration-and-unload)
 
 ## 扩展 [#scale]
 
@@ -515,12 +515,12 @@ restarted.Load(bytes.WrittenSpan);
 ### 每个线程一个 World [#threading-model]
 
 一个 World 有一个所有者线程，就是调用 `Update` 的那个。结构变更检查一个普通的所有者标志（没有原子操作），在并行区域里发生时直接抛异常，
-而不是把表写坏；分析器能看到的跨线程变更会在编译期报出（[EECS013](/zh/docs/guide/analyzer#eecs013)、[EECS014](/zh/docs/guide/analyzer#eecs014)）。
+而不是把表写坏；分析器能看到的跨线程变更会在编译期报出（[EECS013](/zh/docs/guide/help/analyzer#eecs013)、[EECS014](/zh/docs/guide/help/analyzer#eecs014)）。
 
 - **适合：** 每张地图或每个场景一个 World，各占一个线程，完全不需要同步。其他线程的输入通过你自己的队列交给它，由一个系统取出处理。
 - **开销：** 4 个各 2.5 万实体的 World 在 4 个线程上一个 tick 耗时 <BenchValue k="tick.fourWorlds" />，一个 10 万实体的 World 是
   <BenchValue k="tick.oneWorld" />。
-- **指南：** [多线程与并行](/zh/docs/guide/threading)
+- **指南：** [多线程与并行](/zh/docs/guide/performance/threading)
 
 ### 并行系统 [#parallel-systems]
 
@@ -530,20 +530,20 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 几个互相独立的重系统，加上空闲的核。
 - **别用于：** 只处理几千个实体的轻系统：每个阶段都有一次线程池交接的开销。
 - **开销：** 零分配；`MaxDegreeOfParallelism` 限制线程数。
-- **指南：** [多线程与并行](/zh/docs/guide/threading)
+- **指南：** [多线程与并行](/zh/docs/guide/performance/threading)
 
 ### 并行 [ForEach] [#parallel-foreach]
 
 `[ForEach(Parallel = true)]` 把一个方法要处理的行切成块，由调用线程和线程池线程同时执行。分析器拒绝可能竞争的方法
-（[EECS010](/zh/docs/guide/analyzer#eecs010)）：结构变更、批量方法、以 `ref` 接收单例。`world.ForEachParallel` 和
+（[EECS010](/zh/docs/guide/help/analyzer#eecs010)）：结构变更、批量方法、以 `ref` 接收单例。`world.ForEachParallel` 和
 `ForEachEntityParallel` 对结构体 job 做同样的事。
 
 - **适合：** 几万个实体以上、每个实体计算量大的工作：转向、寻路跟随、AI 打分；配上 `ChunkSize = n`，也适合只有几百行、每行几微秒的活（地形、寻路）。
 - **别用于：** 几千个实体的轻量行：交接的开销比活本身还大。
 - **开销：** 线程做完一块就领下一块，也就是 OpenMP 的 `schedule(dynamic, n)`。默认每块 1,024 到 16,384 行，大约每个线程四块，零分配；
   写被追踪组件的方法按 4,096 行的整数倍切块（变更摘要一段的行数），所以表要更大才会被拆开。`ChunkSize = n` 指定每块的行数
-  （向上取整到 64；[EECS054](/zh/docs/guide/analyzer#eecs054)）。
-- **指南：** [多线程与并行](/zh/docs/guide/threading)、[`ChunkSize`](/zh/docs/guide/threading#chunk-rows)
+  （向上取整到 64；[EECS054](/zh/docs/guide/help/analyzer#eecs054)）。
+- **指南：** [多线程与并行](/zh/docs/guide/performance/threading)、[`ChunkSize`](/zh/docs/guide/performance/threading#chunk-rows)
 
 ### 对所有行求总数（归约） [#reductions]
 
@@ -553,9 +553,9 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 存活的单位数、一种资源的总量、人群的范围：每遍对大量行求一个结果。
 - **别用于：** 每个实体各自的结果（写进这一行的组件），以及每个 tick 只有几行会改变的总数（在改这些行的地方更新）。
 - **开销：** 每行一次对本块自己的结构体的写入，没有锁也没有原子操作；每块一个 job 副本，合并一次；第一遍之后零分配。整数精确；
-  `ChunkSize` 固定时，浮点结果在任何线程数下都相同。[EECS057](/zh/docs/guide/analyzer#eecs057) 拒绝对 `T` 的第二处写入；
-  [EECS060](/zh/docs/guide/analyzer#eecs060) 和 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告它所替代的共享计数器和 job 字段。
-- **指南：** [多线程与并行](/zh/docs/guide/threading#reductions)
+  `ChunkSize` 固定时，浮点结果在任何线程数下都相同。[EECS057](/zh/docs/guide/help/analyzer#eecs057) 拒绝对 `T` 的第二处写入；
+  [EECS060](/zh/docs/guide/help/analyzer#eecs060) 和 [EECS061](/zh/docs/guide/help/analyzer#eecs061) 报告它所替代的共享计数器和 job 字段。
+- **指南：** [多线程与并行](/zh/docs/guide/performance/threading#reductions)
 
 ### 并行方法里的临时空间和查找 [#scratch-and-lookups]
 
@@ -566,9 +566,9 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 一行的候选、边界或缓冲（`Scratch<T>`）；目标的位置、首领、某个键的持有者（`Lookup<T>`）。
 - **别用于：** 上限固定的小缓冲（`stackalloc`）；当前行自己的组件（直接作为参数）。
 - **开销：** `Scratch<T>` 每块查一次这个线程的值，每个线程第一行之后零分配；`Lookup<T>` 每次读取一次实体查找，单线程时也比 `World` 参数快。
-  系统算作读 `T`；[EECS058](/zh/docs/guide/analyzer#eecs058) 不让临时内存进入 World，[EECS059](/zh/docs/guide/analyzer#eecs059)
+  系统算作读 `T`；[EECS058](/zh/docs/guide/help/analyzer#eecs058) 不让临时内存进入 World，[EECS059](/zh/docs/guide/help/analyzer#eecs059)
   不让方法查找自己会写的组件。
-- **指南：** [临时空间](/zh/docs/guide/threading#scratch)、[查找](/zh/docs/guide/threading#lookups)
+- **指南：** [临时空间](/zh/docs/guide/performance/threading#scratch)、[查找](/zh/docs/guide/performance/threading#lookups)
 
 ### 遍历产出的记录 [#emit]
 
@@ -578,8 +578,8 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 并行遍历给其他实体或网络产出的东西：要结算的伤害、要发送的事件。
 - **别用于：** 每行一个的结果（行自己的组件）或一个总数（[归约](#reductions)）。
 - **开销：** 每条记录追加一次到块的池化列表，遍历结束时每个列表拷贝一次；稳定运行时零分配。手工填充的列表由
-  [EECS089](/zh/docs/guide/analyzer#eecs089) 报告，读自己记录的遍历由 [EECS070](/zh/docs/guide/analyzer#eecs070) 报告。
-- **指南：** [多线程与并行](/zh/docs/guide/threading#emit)
+  [EECS089](/zh/docs/guide/help/analyzer#eecs089) 报告，读自己记录的遍历由 [EECS070](/zh/docs/guide/help/analyzer#eecs070) 报告。
+- **指南：** [多线程与并行](/zh/docs/guide/performance/threading#emit)
 
 ### 确定性随机数 [#entity-random]
 
@@ -589,8 +589,8 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 游荡、刷怪判定、掉落、暴击、AI 选择：回放或测试必须重现的随机性。
 - **别用于：** 机密（`RandomNumberGenerator`），以及遍历之外没人需要重现的随机性（`Random.Shared`）。
 - **开销：** 每个数四轮整数混合，不写任何状态，所以方法仍是只读的，可以并行。`[ForEach]` 方法里的 `System.Random` 由
-  [EECS071](/zh/docs/guide/analyzer#eecs071) 报告，同一个流抽两次由 [EECS088](/zh/docs/guide/analyzer#eecs088) 报告。
-- **指南：** [多线程与并行](/zh/docs/guide/threading#entity-random)
+  [EECS071](/zh/docs/guide/help/analyzer#eecs071) 报告，同一个流抽两次由 [EECS088](/zh/docs/guide/help/analyzer#eecs088) 报告。
+- **指南：** [多线程与并行](/zh/docs/guide/performance/threading#entity-random)
 
 ### 其他数据上的并行循环 [#parallel-for]
 
@@ -600,8 +600,8 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 列表或数组上的重活：处理遍历产出的记录、填充网格。
 - **别用于：** 实体的行（用并行 `[ForEach]`），以及几千个元素的轻活。
 - **开销：** 和并行 `[ForEach]` 一样的分块和辅助线程，每种 job 第一次调用之后零分配；每块一份 job 拷贝
-  （调用之后读 job 字段由 [EECS061](/zh/docs/guide/analyzer#eecs061) 报告）。
-- **指南：** [多线程与并行](/zh/docs/guide/threading#parallel-for)
+  （调用之后读 job 字段由 [EECS061](/zh/docs/guide/help/analyzer#eecs061) 报告）。
+- **指南：** [多线程与并行](/zh/docs/guide/performance/threading#parallel-for)
 
 ### 网格瓦片 [#grid-tiles]
 
@@ -611,8 +611,8 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 热量、流体、元胞自动机、影响力场、体素光照：格子的下一个值由周围的格子算出。
 - **别用于：** 地图上稀疏的物体（用格子的[索引](#value-indexes)），以及一个缓冲就装得下的小网格。
 - **开销：** 每个瓦片把自己和光环拷贝一次到线程的纹理里；模板计算改变不了的行直接跳过。误用由
-  [EECS059](/zh/docs/guide/analyzer#eecs059)、[EECS072](/zh/docs/guide/analyzer#eecs072) 和 [EECS073](/zh/docs/guide/analyzer#eecs073) 报告。
-- **指南：** [网格瓦片](/zh/docs/guide/grids)
+  [EECS059](/zh/docs/guide/help/analyzer#eecs059)、[EECS072](/zh/docs/guide/help/analyzer#eecs072) 和 [EECS073](/zh/docs/guide/help/analyzer#eecs073) 报告。
+- **指南：** [网格瓦片](/zh/docs/guide/performance/grids)
 
 ### 批量操作 [#bulk-operations]
 
@@ -621,7 +621,7 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 一波怪物、清空一个场景、回合重置、给所有人解除一个状态。
 - **开销：** 每次调用只过一次结构闸门，表最多扩容一次。
-- **指南：** [批量操作](/zh/docs/guide/bulk)
+- **指南：** [批量操作](/zh/docs/guide/changes/bulk)
 
 ## 构建与运维 [#operate]
 
@@ -633,7 +633,7 @@ restarted.Load(bytes.WrittenSpan);
 经 `in` 的写入、可能竞争的并行方法、跨线程的结构变更、经 `ref` 写入的被索引组件、成环的排序，都会编译失败；还有几条警告标出能跑但有代价的写法。
 
 - **适合：** 一直开着；默认就是开的，它让系统保持解耦。
-- **指南：** [分析器规则](/zh/docs/guide/analyzer)
+- **指南：** [分析器规则](/zh/docs/guide/help/analyzer)
 
 ### 系统耗时统计 [#per-system-timing]
 
@@ -643,7 +643,7 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 在线服务器上的诊断接口、指标导出或日志，看哪个系统越来越慢、哪个在分配内存、耗时是不是跟着实体数涨。
 - **开销：** 打开时每次执行读两次时间戳、两次分配计数，每个 `[ForEach]` 遍历再数一次匹配数；关闭时没有开销。
-- **指南：** [调试与诊断](/zh/docs/guide/diagnostics#timing)、[系统](/zh/docs/guide/systems#measuring-systems)
+- **指南：** [调试与诊断](/zh/docs/guide/production/diagnostics#timing)、[系统](/zh/docs/guide/basics/systems#measuring-systems)
 
 ### 调度 [#schedule]
 
@@ -652,7 +652,7 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 启动时打一行日志；排查两个系统为什么没有并行；找出需要用 `[UpdateBefore<T>]` / `[UpdateAfter<T>]` 写明顺序的系统对。
 - **开销：** 冷调用，会为描述分配内存；任何线程都能调用。
-- **指南：** [调试与诊断](/zh/docs/guide/diagnostics)
+- **指南：** [调试与诊断](/zh/docs/guide/production/diagnostics)
 
 ### 异常处理 [#errors]
 
@@ -661,7 +661,7 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 在线服务器用 `Disable`，故障变成健康检查能读到的数据；测试里用 `Throw`。
 - **开销：** 系统不抛异常就没有开销。
-- **指南：** [调试与诊断](/zh/docs/guide/diagnostics#errors)、[系统](/zh/docs/guide/systems#errors)
+- **指南：** [调试与诊断](/zh/docs/guide/production/diagnostics#errors)、[系统](/zh/docs/guide/basics/systems#errors)
 
 ### 运行时自省 [#introspection]
 
@@ -669,7 +669,7 @@ restarted.Load(bytes.WrittenSpan);
 
 - **适合：** 管理后台、内存报告、调试。
 - **开销：** 生成描述时分配内存（冷路径），不碰热路径。
-- **指南：** [调试与诊断](/zh/docs/guide/diagnostics)
+- **指南：** [调试与诊断](/zh/docs/guide/production/diagnostics)
 
 ### 归还内存 [#trim-excess]
 
@@ -679,7 +679,7 @@ restarted.Load(bytes.WrittenSpan);
 - **适合：** 峰值过后的空闲时刻：一波怪清完、一局对战结束、`world.EntityCount` 远低于峰值时的维护任务。
 - **别用于：** 每个 tick 调用：它删掉的东西，之后的结构变更又要重新分配。
 - **开销：** O(表数 × (缓存的查询数 + 快照数) + 被缩小的表的行数 × 列数)；会分配内存（冷路径）。实体记录的长度不变。
-- **指南：** [调试与诊断](/zh/docs/guide/diagnostics)
+- **指南：** [调试与诊断](/zh/docs/guide/production/diagnostics)
 
 ### Native AOT [#native-aot]
 
@@ -695,16 +695,16 @@ World 跑在 ASP.NET Core 应用或 Worker Service 里，由一个托管服务�
 
 - **适合：** 每个真实的服务器、每个系统。
 - **开销：** EasyEcs 这边没有：不需要托管包或测试包，这个模式就是你自己的几个类。
-- **指南：** [托管](/zh/docs/guide/hosting)、[测试系统](/zh/docs/guide/testing)
+- **指南：** [托管](/zh/docs/guide/production/hosting)、[测试系统](/zh/docs/guide/production/testing)
 
 ### 模板与示例程序 [#templates]
 
 `dotnet new easyecs` 创建一个按固定 tick 运行的控制台服务器：`Components/`、每个系统一个文件的 `Systems/`（其中有一个
 用预制体刷怪的系统），`Program.cs` 只负责托管 World（加 `--tests` 多一个 NUnit 项目，每个系统一个测试文件）；
 `dotnet new easyecs-system` 添加一个系统。[示例](/zh/docs/samples)按学习顺序收录完整程序；指南里
-[变更追踪](/zh/docs/guide/change-tracking#full-example)等功能页的“怎么用”部分最后都有一个完整例子。
+[变更追踪](/zh/docs/guide/changes/change-tracking#full-example)等功能页的“怎么用”部分最后都有一个完整例子。
 
-- **指南：** [快速开始](/zh/docs/getting-started)、[项目结构](/zh/docs/guide/project-structure)、[示例](/zh/docs/samples)
+- **指南：** [快速开始](/zh/docs/getting-started)、[项目结构](/zh/docs/guide/basics/project-structure)、[示例](/zh/docs/samples)
 
 ## 和其他库的对比 [#compared]
 
