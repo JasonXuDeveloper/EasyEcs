@@ -49,8 +49,8 @@ public class GeneratedTextTests
     private static (SyntaxTree[] Trees, Compilation Compilation) Generate()
     {
         var sources = GeneratorCorpus.Sources(false).Select((s, i) => (Path: $"Corpus{i}.cs", Text: s)).ToList();
-        foreach (var file in new[] { "Fixtures.cs", "KernelTests.cs", "StructuralLoopTests.cs", "FusionTests.cs", "LambdaPassTests.cs" })
-            sources.Add((file, File.ReadAllText(Path.Combine(Here(), file))));
+        foreach (var file in new[] { "Fixtures.cs", "VectorLoops/KernelTests.cs", "VectorLoops/StructuralLoopTests.cs", "Systems/FusionTests.cs", "Systems/LambdaPassTests.cs" })
+            sources.Add((file, File.ReadAllText(Path.Combine(Here(), "..", file))));
         var trees = sources.Select(s => CSharpSyntaxTree.ParseText(s.Text, GeneratorCorpus.Parse, path: s.Path)).ToArray();
         var references = GeneratorCorpus.References().Add(MetadataReference.CreateFromFile(typeof(TestAttribute).Assembly.Location));
         var compilation = GeneratorCorpus.Compilation([.. trees], references);
