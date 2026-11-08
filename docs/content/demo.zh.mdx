@@ -7,7 +7,7 @@ icon: Play
 
 import { BookOpen, Compass, Gauge, Rocket } from 'lucide-react';
 
-这个页面在你的浏览器里运行一个 EasyEcs World。几个发射器沿着一条曲线缓缓移动，一圈一圈地喷出粒子；阻力让粒子逐渐减速，颜色按速度变化，所以越老的粒子颜色越冷；撞到墙会闪一下，寿命将尽时淡出，再由发射器补上。把指针移到画布上，粒子会旋转着被吸过去。可以切换数量，看向量循环和逐个粒子调用各花多少时间，以及一次更新的总耗时。
+这个页面在你的浏览器里运行一个 EasyEcs World。几个发射器沿着一条曲线缓缓移动，一圈一圈地喷出粒子；阻力让粒子逐渐减速，颜色按速度变化，所以越老的粒子颜色越冷；撞到墙会闪一下，寿命将尽时淡出，再由发射器补上。把指针移到画布上，粒子会旋转着被吸过去。可以切换数量，看生成的 SIMD 循环和逐个粒子调用各花多少时间，以及一次更新的总耗时。
 
 <EcsDemo />
 
@@ -35,11 +35,11 @@ flowchart LR
 
 JavaScript 和 .NET 之间没有逐实体的调用，两边每帧都不分配内存：数组放在固定对象堆（POH）上，地址永远不变。指针是输入，输入就是数据：页面把它写进 `Pointer` 单例，`AttractSystem` 在下一次更新时读取。
 
-## 向量循环和 SIMD [#batch-simd]
+## SIMD 的实测对比 [#batch-simd]
 
 画布下方实时显示同一份移动工作的两种运行方式各花多少时间。`MovementSystem` 和 `DragSystem` 是为单个粒子写的普通 `[ForEach]` 方法，生成器把它们编译成[向量循环](/zh/docs/guide/basics/systems#vector-loops)，一条指令处理多个粒子（`Move` 处理 `Position` 和 `Velocity` 平铺的 float，`Slow` 处理它们交错的字段）。`MovementPerEntitySystem` 和 `DragPerEntitySystem` 用 `SimdMode.Off` 运行同样的方法，每个粒子调用一次。
 
-两组系统做的事和结果完全一样，分别放在 `Vectorized` 和 `PerEntity` 两个系统组里。宿主每帧轮流更新其中一个，并分别计时，所以画面不受影响，两边的耗时也测在同一批粒子上；系统里没有任何模式开关。WebAssembly 的 SIMD 是 128 位，所以这里的循环用 `Vector128`；在服务器上，同样的方法会用上机器最宽的向量。数量越大，向量循环省下的时间越明显。
+两组系统做的事和结果完全一样，分别放在 `Vectorized` 和 `PerEntity` 两个系统组里。宿主每帧轮流更新其中一个，并分别计时，所以画面不受影响，两边的耗时也测在同一批粒子上；系统里没有任何模式开关。WebAssembly 的 SIMD 是 128 位，所以这里的循环用 `Vector128`；在服务器上，同样的方法会用上机器最宽的向量。数量越大，生成的循环省下的时间越明显。
 
 ## 代码 [#code]
 

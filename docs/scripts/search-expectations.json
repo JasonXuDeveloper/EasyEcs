@@ -10,7 +10,7 @@
     { "query": "ForEach", "page": "guide/basics/systems" },
     { "query": "vector loop", "page": "guide/basics/systems", "top": 3 },
     { "query": "chunk size", "page": "guide/performance/threading", "top": 3 },
-    { "query": "ChunkRows", "page": "guide/performance/threading", "top": 3 },
+    { "query": "MaxChunkRows", "page": "guide/performance/threading", "top": 3 },
     {
       "query": "MaxPooledLength",
       "page": "guide/data/dynamic-buffers",
