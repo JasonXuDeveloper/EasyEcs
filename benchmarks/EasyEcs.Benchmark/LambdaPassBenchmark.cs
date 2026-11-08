@@ -8,7 +8,8 @@ namespace EasyEcs.Benchmark;
 /// int split) =&gt; …)</c>, intercepted by the job the generator writes for it), the same body as a <c>[ForEach]</c>
 /// method of a static class, and the struct job a user writes by hand. The scalar body divides as a long by a value (no
 /// vector loop for the integer division of 8-byte lanes); the vector body multiplies and adds (a vector loop for the lambda and the method, the
-/// hand-written job one row at a time). 0 bytes every way.
+/// hand-written job one row at a time). A fourth row, <c>VectorLambdaDelegate</c>, names a private member in the vector
+/// body, so the generator cannot copy it and the pass runs through its delegate (the EECS096 fallback). 0 bytes every way.
 /// </summary>
 [MemoryDiagnoser]
 public class LambdaPassBenchmark
@@ -55,6 +56,14 @@ public class LambdaPassBenchmark
 
     [Benchmark, BenchmarkCategory("Vector")]
     public void VectorLambda() => _world.ForEach(_rate, static (ref Health h, in Regen r, int rate) => h.Value += r.Value * rate + 1);
+
+    // The row measures the EECS096 fallback on purpose: the body names a private member, so the pass runs through its delegate.
+#pragma warning disable EECS096
+    [Benchmark, BenchmarkCategory("Vector")]
+    public void VectorLambdaDelegate() => _world.ForEach(_rate, static (ref Health h, in Regen r, int rate) => h.Value += r.Value * rate + One());
+#pragma warning restore EECS096
+
+    private static int One() => 1;
 
     [Benchmark, BenchmarkCategory("Vector")]
     public void VectorHandWritten()
