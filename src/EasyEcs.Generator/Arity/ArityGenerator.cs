@@ -704,8 +704,12 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// The rows [<paramref name="first"/>, <paramref name="count"/>) of a table whose rows must be tested, word by
                     /// word: whole words make runs, the others go to the job with their passing rows (a table of <c>Masked</c>,
                     /// or a chunk of a parallel masked pass, which ends on a word or at the table's end).
+                    /// Out of line, called once per table or chunk: the job's masked Execute and its vector loops inline into
+                    /// this walk, under the inliner's budget of this method, which the JIT sizes from the root's own IL. Inlined
+                    /// into a chunk's <c>Run</c> (a few loads and a call), a job with two widths of masked loops over lookups
+                    /// ran past that budget, and the second width became a call per word.
                     /// </summary>
-                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                    [MethodImpl(MethodImplOptions.NoInlining)]
                     private void MaskedRuns<{{tps}}, TJob>(ref TJob job, Archetype archetype, RowFilter rows, int first, int count, {{List(n, i => $"ushort b{i}")}})
                 {{cons}}
                         where TJob : struct, IForEachMasked<{{tps}}>, allows ref struct
