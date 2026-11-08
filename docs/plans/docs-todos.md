@@ -3334,3 +3334,10 @@ declares `ITile<TKey>` and writes no `Beside` now gets one inferred (it was CS05
   34-35 against 16.6-17.0; Heavy 10k 40-45 against 12.1-13.2; Heavy 100k 322-375 against 76-91. Considered: intercepting
   hand-written jobs (dropped: D63/D18 allow interceptors for lambda passes only), a `ParallelFor(count, ...)` over
   arrays (no use beyond buffers, D80).
+
+## The battle server's ReplicaFire (2026-11-08, at the feat-inner-loops merge)
+
+- `Replica(int Health, bool Burning, int Waypoint)` became `Replica(int Health, int Waypoint)` plus
+  `ReplicaFire(bool Burning)`: `SendFire` / `SendFireOut` read only the bool, which EECS055 now reports as a Warning
+  (a bool among a component's fields, used alone). example.mdx + zh name neither type, but the replication walkthrough
+  (en :165) should say the fire sends write a component of their own, and the regions it includes changed.
