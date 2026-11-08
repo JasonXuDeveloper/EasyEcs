@@ -45,7 +45,8 @@ namespace EasyEcs.Benchmark;
 /// <c>BrakeForced</c> is the same method with SimdMode.Require, every form forced open (owner-m4.md 4). <c>Brighten</c> runs on byte lanes (a saturating sum and a wrapping one, 64 rows per Vector512).
 /// <c>Wave</c> calls Sin and Exp per row (FloatMode.Fast: .NET's vector forms). <c>StepParallel</c> / <c>SeekParallel</c> run
 /// <c>Step</c> / <c>Seek</c> on several threads, the per-row parallel job against the vector loop in each chunk. <c>Holes</c> / <c>Halves</c> run <c>Step</c> over
-/// a table where every third row / a random half of the rows lacks <c>Mass</c> (removed in place): rows the vector loop
+/// a table where every third row / a random half of the rows lacks <c>Mass</c> (<c>RigHoles</c>: Brake's math over a wide
+/// component's rows, every third without <c>Mass</c>) (removed in place): rows the vector loop
 /// leaves out (a lane mask per word of 64 rows). 0 bytes either way.
 /// </summary>
 [MemoryDiagnoser, IsaColumn]
@@ -53,7 +54,7 @@ public partial class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _ratios, _fields, _fragments, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger;
+    private World _world, _ratios, _fields, _fragments, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger, _rigs;
 
     [GlobalSetup]
     public void Setup()
@@ -84,6 +85,15 @@ public partial class KernelBenchmark
         _fragments = Fragments();
         _gaps = Gaps(Entities);
         _halves = Holes(Entities, i => random.Next(2) == 0);
+
+        _rigs = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        _rigs.Reserve<Rig, Mass>(Entities);
+        for (int i = 0; i < Entities; i++)
+        {
+            var rig = _rigs.CreateEntity(new Rig { X = (float)random.NextDouble(), P = (float)random.NextDouble() - 0.5f, Q = (float)random.NextDouble() * 4, A1 = i },
+                new Mass { Value = (float)random.NextDouble() * 5 });
+            if (i % 3 == 0) rig.Remove<Mass>();
+        }
 
         _pixels = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _pixels.Reserve<Lum, Glow>(Entities);
@@ -222,6 +232,7 @@ public partial class KernelBenchmark
         _gaps.Dispose();
         _holes.Dispose();
         _halves.Dispose();
+        _rigs.Dispose();
         _pixels.Dispose();
         _vectors.Dispose();
         _craft.Dispose();
@@ -291,6 +302,16 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void HolesGenerated() => Kernels.Step(_holes);
+
+    [Benchmark]
+    public void RigHolesScalar()
+    {
+        var job = new RigHolesRows();
+        _rigs.ForEach<Rig, Mass, RigHolesRows>(ref job);
+    }
+
+    [Benchmark]
+    public void RigHolesGenerated() => Kernels.RigHoles(_rigs);
 
     [Benchmark]
     public void HalvesScalar()
@@ -928,6 +949,12 @@ public partial class KernelBenchmark
     }
 #pragma warning restore EECS091
 
+    private struct RigHolesRows : IForEach<Rig, Mass>, INoStructuralChanges
+    {
+        public void Execute(ref Rig rig, ref Mass mass) => Kernels.RigHoles(ref rig, in mass);
+        static int IForEach<Rig, Mass>.WriteMask => 1;
+    }
+
     private struct BrakeRows : IForEach<Rig>, INoStructuralChanges
     {
         public Pull Pull;
@@ -1310,6 +1337,15 @@ public partial class KernelBenchmark
         {
             rig.X = rig.X - rig.P * pull.Value;
             rig.Q = MathF.Min(rig.Q + rig.X, 10) * 0.5f + pull.Value * pull.Value;
+        }
+
+        // Brake's math over rows of which every third lacks Mass: every word of the table masked, a wide component's lanes
+        // under the passing rows' mask.
+        [ForEach]
+        internal static void RigHoles(ref Rig rig, in Mass mass)
+        {
+            rig.X = rig.X - rig.P * mass.Value;
+            rig.Q = MathF.Min(rig.Q + rig.X, 10) * 0.5f + mass.Value * mass.Value;
         }
 
         // Brake with every wide form forced open: what ARM64's refused table lookups would cost.

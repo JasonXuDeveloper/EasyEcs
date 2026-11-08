@@ -126,7 +126,9 @@ public ref struct StatusSystem
 [EcsSystem]
 public ref struct DeathSystem
 {
-    [ForEach, Without<Dead>]
+    // Row by row: the Npc check runs only on the rare dead row, where a ReadOnlyMaybe<Npc> parameter would read its
+    // column on every row (1.2-1.3x slower world ticks) and still leave the method scalar beside SetDead.
+    [ForEach(SimdMode = SimdMode.Off), Without<Dead>]
     private static void CheckDeath(Entity entity, in Health health, ref WorldStats stats)
     {
         if (health.Value > 0) return;
