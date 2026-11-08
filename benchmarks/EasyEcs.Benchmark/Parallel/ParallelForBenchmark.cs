@@ -42,7 +42,7 @@ public class ParallelForBenchmark
         span.CopyTo(s_items);
         s_count = Records;
         long share = Records / (Environment.ProcessorCount * 4L); // the runner's default chunk
-        s_chunk = (int)Math.Clamp((share + 63) & ~63L, 1024, World.MaxChunkRows);
+        s_chunk = (int)Math.Clamp((share + 63) & ~63L, 1024, World.MaxChunkSize);
     }
 
     [GlobalCleanup]

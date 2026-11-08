@@ -524,7 +524,7 @@ public ref struct SendPositionsSystem
 ### 并行方法 [#parallel-methods]
 
 `[ForEach(Parallel = true)]` 把匹配的行切成块（默认每个线程大约四块，块大小是 64 行的倍数，介于 1,024 和
-`World.MaxChunkRows` = 16,384 之间），调用线程加上最多 `WorldOptions.MaxDegreeOfParallelism - 1` 个线程池线程做完一块就领下一块，
+`World.MaxChunkSize` = 16,384 之间），调用线程加上最多 `WorldOptions.MaxDegreeOfParallelism - 1` 个线程池线程做完一块就领下一块，
 和 OpenMP 的 `schedule(dynamic, n)` 一样。它适合几万个实体、每个实体计算量都很重的工作（寻路、转向、AI 评分），或者配上 `ChunkSize`
 处理只有几百行、每行几微秒的活；计算很轻时，分发的开销比省下的还多。
 

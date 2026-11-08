@@ -201,7 +201,7 @@ public class DrainTests
     [Test]
     public void ARecordPassDoesNotAllocateAfterItsFirstUpdates()
     {
-        var (world, _) = Fighters(World.MaxChunkRows * 2);
+        var (world, _) = Fighters(World.MaxChunkSize * 2);
         using var _w = world;
         world.AddSystem<Strikes>();
         world.AddSystem<Book>();

@@ -216,6 +216,29 @@ public sealed partial class EasyEcsCodeFixes
         return null;
     }
 
+    /// <summary>The members of EasyEcs types that shipped under another name, (type, old name, new name): the old name no longer binds.</summary>
+    private static readonly (string Type, string Old, string New)[] RenamedMembers = [("World", "ParallelChunkRows", "MaxChunkSize")];
+
+    /// <summary>
+    /// CS0117 on <c>Type.Member</c> of a renamed member (<see cref="RenamedMembers"/>) of an EasyEcs type: the name takes
+    /// the new one, the qualification kept. Null for any other member, or a type that is not EasyEcs's.
+    /// </summary>
+    private static async Task<(string Title, SyntaxNode Old, SyntaxNode New)?> RenamedMember(Document document, MemberAccessExpressionSyntax access, CancellationToken token)
+    {
+        string spelled = access.Name.Identifier.ValueText;
+        foreach (var (type, old, renamed) in RenamedMembers)
+        {
+            if (spelled != old) continue;
+            var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+            if (model?.GetSymbolInfo(access.Expression, token).Symbol is not INamedTypeSymbol { Name: var name, ContainingNamespace: { Name: "EasyEcs", ContainingNamespace.IsGlobalNamespace: true } }
+                || name != type)
+                return null;
+            return ($"Rename it to {renamed}", access.Name, SyntaxFactory.IdentifierName(renamed).WithTriviaFrom(access.Name));
+        }
+
+        return null;
+    }
+
     /// <summary>EECS090: a method named almost like a hook takes the hook's name (the analyzer checked it has no caller).</summary>
     private static MethodDeclarationSyntax RenamedHook(MethodDeclarationSyntax method, string hook) =>
         method.WithIdentifier(SyntaxFactory.Identifier(hook).WithTriviaFrom(method.Identifier));

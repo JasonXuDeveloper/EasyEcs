@@ -895,6 +895,10 @@ public class CodeFixTests
         "=> new EntityRandom(1);", "Drop the tick: the world advances it on every update")]
     [TestCase("CS1739", "public static class C { public static EntityRandom R() => new EntityRandom(Seed: 1, Tick: 2); }",
         "=> new EntityRandom(Seed: 1);", "Drop the tick: the world advances it on every update")]
+    [TestCase("CS0117", "public static class C { public static int Cap() => World.ParallelChunkRows * 2; }",
+        "World.MaxChunkSize * 2", "Rename it to MaxChunkSize")]
+    [TestCase("CS0117", "public static class C { public static int Cap() => EasyEcs.World.ParallelChunkRows; }",
+        "EasyEcs.World.MaxChunkSize;", "Rename it to MaxChunkSize")]
     [TestCase("CS0246", "[EcsSystem] public ref struct S { [ForEach(Parallel = true, ChunkRows = 64)] static void M(ref P p) { } }",
         "[ForEach(Parallel = true, ChunkSize = 64)]", "Rename it to ChunkSize")]
     [TestCase("CS1739", "public struct J : IForRange { public void Execute(int start, int end) { } } public static class C { public static void Go(World w) { var j = new J(); w.ParallelFor(10, ref j, chunkRows: 64); } }",
@@ -980,6 +984,17 @@ public class CodeFixTests
         var actions = new List<CodeAction>();
         await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
         Assert.That(actions, Is.Empty, "only the names RenamedAttributes lists are migrated");
+    }
+
+    // CS0117 on a member of the same name of another type is no renamed EasyEcs member.
+    [Test]
+    public async Task AMissingMemberOfAnotherTypeIsNoRenamedOne()
+    {
+        var document = Document(Data + "public static class Other { } public static class C { public static int Cap() => Other.ParallelChunkRows; }");
+        var diagnostic = (await document.Project.GetCompilationAsync())!.GetDiagnostics().First(d => d.Id == "CS0117");
+        var actions = new List<CodeAction>();
+        await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        Assert.That(actions, Is.Empty, "only the members RenamedMembers lists, of the types it names, are migrated");
     }
 
     [Test]

@@ -26,7 +26,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS024", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS035", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS055", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS118", "EECS119", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "EECS122", "EECS125", "EECS127", "EECS129", "EECS131", "EECS133", "CS0234", "CS0246", "CS0305", "CS0592",
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS118", "EECS119", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "EECS122", "EECS125", "EECS127", "EECS129", "EECS131", "EECS133", "CS0117", "CS0234", "CS0246", "CS0305", "CS0592",
             "CS0200", "CS0272", "CS1501", "CS1503", "CS1620", "CS1729", "CS1739", "CS7036");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
@@ -111,6 +111,10 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                 case "CS0246" or "CS1739" when RenamedArgument(node) is { } renamedArgument
                                                && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false):
                     Register(context, diagnostic, renamedArgument.Title, root, renamedArgument.Old, renamedArgument.New);
+                    break;
+                case "CS0117" when node is IdentifierNameSyntax { Parent: MemberAccessExpressionSyntax access } name && access.Name == name
+                                   && await RenamedMember(context.Document, access, context.CancellationToken).ConfigureAwait(false) is { } renamedMember:
+                    Register(context, diagnostic, renamedMember.Title, root, renamedMember.Old, renamedMember.New);
                     break;
                 case "EECS090" when kind == "Hook" && diagnostic.Properties.TryGetValue("Hook", out var hook) && hook != null
                                     && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method:
