@@ -165,6 +165,7 @@ know. L7 is applied in the dashboard, but the file that documents the dashboard'
 | P16 | 2026-11-07 | Finished branches | deleted at the very end of Finish, after master (`research-copy-asm` with them) | backlog "Owner actions", Finish 6 | rule: backlog.md |
 | P17 | 2026-11-07 | Where are decisions kept? ("这些要做的决策得记下来，不然以后找不到了") | this ledger, appended in the same session | plans-ledger branch | rule: AGENTS.md (Workflows) |
 | P18 | 2026-11-08 | Token cost: three Opus agents at once used half the weekly usage overnight; keep, drop to one, pause, or switch to Sonnet? | keep as is: three agents, Opus | this session | none |
+| P19 | 2026-11-08 | Which model does each agent use? ("根据任务决定用什么，机械活用 sonnet，高难度的再用 opus") | Sonnet for mechanical work the prompt spells out, Opus for work needing judgment; every Agent call names its model | AGENTS.md (Workflows) | rule: AGENTS.md |
 
 ## Hardware runs
 
