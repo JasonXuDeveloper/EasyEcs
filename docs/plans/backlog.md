@@ -444,7 +444,7 @@ numbers are written once about the final code).
 - [ ] **1. Directory restructure** (owner, 2026-11-08, L9 / L10: runs as soon as halos, analyzer lane 2 and lane 4
       merge, before lanes 1, 5 and 6 start; besides the four projects and `tools/perf/` it also groups the
       `docs/content/guide` pages (folders + meta.json sections + `_redirects` for the old URLs, en and zh), the rest of
-      `tools/`, and `docs/plans/`: the layout of these three is proposed first, as a popup) (layout approved 2026-11-07: `finish-scan.md` Report 2 plus `tools/perf/`; it
+      `tools/`, and `docs/plans/`, as chosen in L11 / L12) (layout approved 2026-11-07: `finish-scan.md` Report 2 plus `tools/perf/`; it
       supersedes `layout.md`): `git mv` only, alone, after every branch merged and after lane 3's T1; its six commits,
       `docs/vite.config.ts` recursive, `site.ts:58`, skills' paths, `.DotSettings`, the 107 `tools/perf/` references;
       `inner-loops.md`'s `CellTests.cs` reference dropped.
