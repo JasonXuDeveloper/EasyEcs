@@ -165,7 +165,7 @@ public struct TileNeighbors
 
     /// <summary>
     /// The neighbors of <paramref name="entity"/> in grid <typeparamref name="TGrid"/> of shape
-    /// <typeparamref name="TShape"/>'s faces and neighborhood (the grid's component, or <see cref="Columns{TTile}"/> of
+    /// <typeparamref name="TShape"/>'s faces and neighborhood (the grid's component, or <see cref="Ground{TTile}"/> of
     /// it), found in <paramref name="index"/> (its built value index, <see cref="LookupExtensions.Prepared{T, TKey}"/>):
     /// one index lookup per neighbor. Generated code calls this; compiled on its own, for the shape.
     /// </summary>
@@ -237,7 +237,7 @@ public struct TileNeighbors
 }
 
 /// <summary>
-/// The buffers of a grid's cells, sized from the tile's shape: generated code calls <see cref="Pool{TCell, TTile}"/> when
+/// The buffers of a grid's cells, sized from the tile's shape: generated code calls <see cref="SizePool{TCell, TTile}"/> when
 /// its assembly loads, once for each <see cref="Tile{TCell, TTile}"/> a method of it takes, so the pool of
 /// <c>DynamicBuffer&lt;TCell&gt;</c> keeps lists of a tile's cells (a chunk unloaded hands its lists to the next one
 /// loaded) and <see cref="DynamicBuffer{T}.FillPool"/> fills it with lists of that length, with no
@@ -250,7 +250,7 @@ public static class TileCells
     /// <see cref="DynamicBuffer{T}.MaxPooledLength"/> of <typeparamref name="TCell"/> raised to the cells of a
     /// <typeparamref name="TTile"/> tile (never lowered; nothing for a shape EECS072 rejects). O(1).
     /// </summary>
-    public static void Pool<TCell, TTile>() where TCell : unmanaged where TTile : struct, ITileShape
+    public static void SizePool<TCell, TTile>() where TCell : unmanaged where TTile : struct, ITileShape
     {
         if (TileShapeCheck<TTile>.Validate() != null) return; // the first exchange throws, with the reason
         long cells = (long)TTile.Width * TTile.Depth * TTile.Height;
@@ -374,7 +374,7 @@ internal struct TileSources<TCell>
 /// Valid for the call it is passed to (a ref struct).
 /// </summary>
 /// <typeparam name="TCell">The cell: the element of the entity's <c>DynamicBuffer&lt;TCell&gt;</c>.</typeparam>
-/// <typeparam name="TTile">The tile's shape: the component that places the entity in the grid, or <see cref="Columns{TTile}"/> of it.</typeparam>
+/// <typeparam name="TTile">The tile's shape: the component that places the entity in the grid, or <see cref="Ground{TTile}"/> of it.</typeparam>
 public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
 {
     private readonly Entity _entity;
@@ -812,7 +812,7 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
     /// <summary>
     /// The sweep a <see cref="GaussSeidelAttribute">[GaussSeidel]</see> step of the tile is in: 0 in its first, one more
     /// in each sweep after it (0 in a Jacobi step, which is one sweep). For what a step does once (a mask of the ground
-    /// read in its first sweep into a <see cref="Scratch{T}"/>, the cells it starts from: <see cref="Restart"/>) and for
+    /// read in its first sweep into a <see cref="Scratch{T}"/>, the cells it starts from: <see cref="ColdStart"/>) and for
     /// sweeps in turns of direction (odd sweeps from the last row back to the first: a field crosses the tile both ways
     /// in two sweeps, the fast sweeping method of distance fields). Counted per step: a tile that runs out of
     /// <see cref="GaussSeidelAttribute.MaxSweeps"/> starts at 0 in its next. O(1); throws for a tile the method does not
@@ -837,18 +837,18 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
     /// after it keep what they wrote. For a field whose sources come and go (a distance field, a scent): relaxed in place
     /// from its last values, a value whose source left lingers and only fades a step per sweep (distance-vector routing's
     /// count to infinity); from nothing, the tile settles in as many sweeps as the paths through it turn. The pass compares
-    /// the settled rows with the cells, so a tile whose field came out the same sleeps as before. A restarted tile that
+    /// the settled rows with the cells, so a tile whose field came out the same sleeps as before. A cold-started tile that
     /// runs out of <see cref="GaussSeidelAttribute.MaxSweeps"/> starts again in its next step: give it the sweeps to
     /// settle. O(cells of the layers exchanged); throws for a tile that is not the one a [GaussSeidel] step sweeps, or
     /// before its halo is exchanged.
     /// </summary>
     /// <param name="value">What the tile's cells start from: <c>default</c> (no scent, unreached), or the far value of a
     /// minimum (<c>int.MaxValue</c>).</param>
-    public readonly void Restart(TCell value = default)
+    public readonly void ColdStart(TCell value = default)
     {
         var frame = Exchanged();
         if (frame.Stepping != _entity.Id || frame.Next != null) TileFrame<TCell, TTile>.ThrowNotSweeping();
-        if (frame.Sweep == 0) frame.Restart(value);
+        if (frame.Sweep == 0) frame.ColdStart(value);
     }
 
     /// <summary>The frame, once this tile's halo is in it.</summary>
@@ -1022,13 +1022,13 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
 }
 
 /// <summary>
-/// The columns of a tile: a tile of one layer, Width × Depth, on the grid of <typeparamref name="TTile"/> (a tile of
+/// The ground of a tile: a tile of one layer, Width × Depth, on the grid of <typeparamref name="TTile"/> (a tile of
 /// several layers), with its sides as faces, its halo, neighborhood and boundary. A second field on the same entities
-/// and keys: <c>Tile&lt;Scent, Columns&lt;Chunk&gt;&gt;</c> is a chunk's ground beside the
+/// and keys: <c>Tile&lt;Scent, Ground&lt;Chunk&gt;&gt;</c> is a chunk's ground beside the
 /// <c>Tile&lt;Water, Chunk&gt;</c> of its blocks, its cells a <c>DynamicBuffer&lt;Scent&gt;</c> of Width × Depth.
 /// </summary>
 /// <typeparam name="TTile">The grid's tile component.</typeparam>
-public readonly struct Columns<TTile> : ITileShape where TTile : struct, ITileShape
+public readonly struct Ground<TTile> : ITileShape where TTile : struct, ITileShape
 {
     /// <inheritdoc cref="ITileShape.Width"/>
     public static int Width => TTile.Width;
@@ -1188,13 +1188,13 @@ public ref struct TileRows<TTile> where TTile : struct, ITileShape
         return true;
     }
 
-    /// <summary>The first texture layer of the walk. Generated code walks layers First..Last and the bits of <see cref="RowsOf"/> in place of <c>foreach</c>.</summary>
+    /// <summary>The first texture layer of the walk. Generated code walks layers FirstLayer..LastLayer and the bits of <see cref="RowsOf"/> in place of <c>foreach</c>.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public readonly int First => _layer + 1;
+    public readonly int FirstLayer => _layer + 1;
 
     /// <summary>The last texture layer of the walk. Generated code calls this.</summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public readonly int Last => _last;
+    public readonly int LastLayer => _last;
 
     /// <summary>The tile layer (<see cref="TileRow{TTile}.Y"/>) of texture layer <paramref name="layer"/>. Generated code calls this.</summary>
     [EditorBrowsable(EditorBrowsableState.Never), MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1289,10 +1289,10 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
     /// <paramref name="step"/> is not 1 to Width.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TileColumnWalk<TCell, TTile> Columns(int step)
+    public TileColumns<TCell, TTile> Columns(int step)
     {
         if ((uint)(step - 1) >= (uint)TTile.Width) TileLayout.ThrowStep(step);
-        return new TileColumnWalk<TCell, TTile>(ref _at, step);
+        return new TileColumns<TCell, TTile>(ref _at, step);
     }
 
     /// <summary>
@@ -1325,13 +1325,13 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
 /// </summary>
 /// <typeparam name="TCell">The cell.</typeparam>
 /// <typeparam name="TTile">The tile's component and shape.</typeparam>
-public ref struct TileColumnWalk<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
+public ref struct TileColumns<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
 {
     private readonly ref TCell _row;
     private readonly int _step, _last;
     private int _x;
 
-    internal TileColumnWalk(ref TCell row, int step)
+    internal TileColumns(ref TCell row, int step)
     {
         _row = ref row;
         _step = step;
@@ -1340,7 +1340,7 @@ public ref struct TileColumnWalk<TCell, TTile> where TCell : unmanaged where TTi
     }
 
     /// <summary>Itself: <c>foreach</c> walks it.</summary>
-    public readonly TileColumnWalk<TCell, TTile> GetEnumerator() => this;
+    public readonly TileColumns<TCell, TTile> GetEnumerator() => this;
 
     /// <summary>The column the walk is at.</summary>
     public readonly Cursor Current
@@ -1558,14 +1558,14 @@ internal sealed class TileFrame<TCell, TTile> where TCell : unmanaged where TTil
     }
 
     /// <summary>
-    /// The first sweep of a Gauss-Seidel step from <paramref name="value"/> (<see cref="Tile{TCell, TTile}.Restart"/>): the
+    /// The first sweep of a Gauss-Seidel step from <paramref name="value"/> (<see cref="Tile{TCell, TTile}.ColdStart"/>): the
     /// tile's cells in the layers exchanged set to it, and the sweep compared with it, not with the cells: every row
     /// counts as written (this sweep and the step: <see cref="Before"/> holds the value, the pass compares every row with
     /// the cells when the step ends). The row masks keep the rows the cells had for the value default (more rows than
     /// hold a value now, which is safe, and the rows the field is likely to reach again in this sweep: a mask of none would
     /// let the field into the tile one row per sweep), every row for another value.
     /// </summary>
-    public void Restart(TCell value)
+    public void ColdStart(TCell value)
     {
         int width = TTile.Width, depth = TTile.Depth, hy = TTile.Height > 1 ? TTile.Halo : 0;
         bool zero = TileLayout.IsZero(value);
@@ -1585,7 +1585,7 @@ internal sealed class TileFrame<TCell, TTile> where TCell : unmanaged where TTil
 
     [DoesNotReturn, StackTraceHidden] // a call that never returns: see TileLayout.ThrowOffset
     public static void ThrowNotSweeping() => throw new InvalidOperationException(
-        $"Restart is for the tile a [GaussSeidel] step sweeps: take Tile<{typeof(TCell).Name}, {typeof(TTile).Name}> by ref in a [GaussSeidel] method");
+        $"ColdStart is for the tile a [GaussSeidel] step sweeps: take Tile<{typeof(TCell).Name}, {typeof(TTile).Name}> by ref in a [GaussSeidel] method");
 
     [DoesNotReturn, StackTraceHidden] // a call that never returns: see TileLayout.ThrowOffset
     public static void ThrowNotStepping() => throw new InvalidOperationException(

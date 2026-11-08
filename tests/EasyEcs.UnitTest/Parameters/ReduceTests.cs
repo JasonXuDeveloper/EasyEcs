@@ -329,7 +329,7 @@ public partial class ReduceTests
     [Test]
     public void ParallelIntegerReductionsAreExactOnEveryRun()
     {
-        const int count = World.MaxChunkRows * 5 + 123;
+        const int count = World.MaxChunkSize * 5 + 123;
         using var world = Pointed(count);
         world.AddSystem<ParallelScores>();
         for (int run = 0; run < 300; run++)
@@ -434,11 +434,11 @@ public partial class ReduceTests
     [Test]
     public void ARunnerReducesIntoItsSingleton()
     {
-        using var world = Pointed(World.MaxChunkRows * 3);
+        using var world = Pointed(World.MaxChunkSize * 3);
         for (int run = 0; run < 20; run++)
         {
             Runners.Score(world);
-            Assert.That(world.Scores.Sum, Is.EqualTo((long)(World.MaxChunkRows * 3 - 1) * World.MaxChunkRows * 3 / 2));
+            Assert.That(world.Scores.Sum, Is.EqualTo((long)(World.MaxChunkSize * 3 - 1) * World.MaxChunkSize * 3 / 2));
         }
     }
 
@@ -457,7 +457,7 @@ public partial class ReduceTests
     [Test]
     public void AParallelReductionDoesNotAllocateAfterItsFirstPass()
     {
-        using var world = Pointed(World.MaxChunkRows * 4);
+        using var world = Pointed(World.MaxChunkSize * 4);
         world.AddSystem<ParallelScores>();
         for (int i = 0; i < 10; i++) world.Update();
         Assert.That(Allocations.Of(() => { for (int i = 0; i < 300; i++) world.Update(); }), Is.Zero);
@@ -559,7 +559,7 @@ public partial class ReduceTests
     [TestCase(4, true)]
     public void AnAccumulatedTotalIsTheHandWrittenOneBitForBit(int threads, bool parallel)
     {
-        using var world = Pointed(World.MaxChunkRows * 2 + 77, threads);
+        using var world = Pointed(World.MaxChunkSize * 2 + 77, threads);
         var more = new Entity[300];
         world.CreateEntities(more, new Points(0), new Spot(0, 0)); // a second table
         for (int i = 0; i < more.Length; i++) more[i].Points = new Points(-i * 3);
@@ -608,8 +608,8 @@ public partial class ReduceTests
     [Test]
     public void RunnersAndLambdaPassesAccumulateToo()
     {
-        using var world = Pointed(World.MaxChunkRows * 3);
-        long pass = (long)(World.MaxChunkRows * 3 - 1) * World.MaxChunkRows * 3 / 2;
+        using var world = Pointed(World.MaxChunkSize * 3);
+        long pass = (long)(World.MaxChunkSize * 3 - 1) * World.MaxChunkSize * 3 / 2;
         TotalRunners.Add(world);
         TotalRunners.Add(world);
         Assert.That(world.Grand.Sum, Is.EqualTo(2 * pass));
@@ -620,7 +620,7 @@ public partial class ReduceTests
     [Test]
     public void AnAccumulatedTotalDoesNotAllocateAfterItsFirstPass()
     {
-        using var world = Pointed(World.MaxChunkRows * 4);
+        using var world = Pointed(World.MaxChunkSize * 4);
         world.AddSystem<ParallelTotals>();
         world.AddSystem<SerialTotals>();
         for (int i = 0; i < 10; i++) world.Update();
@@ -711,14 +711,14 @@ public partial class ReduceTests
     [Test]
     public void AKeptRowIsTheFirstOfTheLowestOnAnyThreadCount()
     {
-        int rows = World.MaxChunkRows * 4;
+        int rows = World.MaxChunkSize * 4;
         foreach (int threads in new[] { 1, 4 })
         {
             using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
             var entities = new Entity[rows];
             world.CreateEntities(entities, new Points(0));
             for (int i = 0; i < rows; i++) entities[i].Points = new Points(3 + i % 97);
-            foreach (int tie in new[] { 500, World.MaxChunkRows + 7, rows - 1 }) entities[tie].Points = new Points(1);
+            foreach (int tie in new[] { 500, World.MaxChunkSize + 7, rows - 1 }) entities[tie].Points = new Points(1);
             world.AddSystem<FindLeast>();
             for (int run = 0; run < 3; run++)
             {
@@ -728,7 +728,7 @@ public partial class ReduceTests
 
             entities[500].Points = new Points(2);                                  // the next tie, in a later chunk
             world.Update();
-            Assert.That(world.Least, Is.EqualTo(new Least(entities[World.MaxChunkRows + 7].Id, 1)), $"{threads} threads");
+            Assert.That(world.Least, Is.EqualTo(new Least(entities[World.MaxChunkSize + 7].Id, 1)), $"{threads} threads");
 
             Allocations.WarmUp(() => world.Update(), 20);
             Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero, $"{threads} threads");
@@ -823,7 +823,7 @@ public partial class ReduceTests
             world.Update();
             Assert.That(world.Heaviest, Is.EqualTo(new Heaviest { Weight = float.NegativeInfinity }), "no rows: the identity");
 
-            var entities = new Entity[World.MaxChunkRows * 3];
+            var entities = new Entity[World.MaxChunkSize * 3];
             world.CreateEntities(entities, new Weight(0));
             for (int i = 0; i < entities.Length; i++) entities[i].Weight = new Weight(i % 3 == 0 ? float.NaN : i % 50);
             world.Update();
@@ -835,7 +835,7 @@ public partial class ReduceTests
     public void AnAccumulatedKeptRowKeepsTheEarlierPassOnATie()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
-        var entities = new Entity[World.MaxChunkRows * 2];
+        var entities = new Entity[World.MaxChunkSize * 2];
         world.CreateEntities(entities, new Points(0));
         for (int i = 0; i < entities.Length; i++) entities[i].Points = new Points(10 + i % 13);
         world.AddSystem<FindFewest>();

@@ -113,7 +113,7 @@ Generator/ViewTests.cs               [View] parameters, Mut fields, AsX, EECS053
 ```
 Grids/TileTests.cs        tiles: column loads checked once per loop against the indexer, and past the row still
                           throwing
-Grids/TileTests.Steps.cs  Jacobi and [GaussSeidel] steps against the whole grid, sleeping tiles, Restart and
+Grids/TileTests.Steps.cs  Jacobi and [GaussSeidel] steps against the whole grid, sleeping tiles, ColdStart and
                           turning sweeps (tile.Sweep), 0 B
 Grids/TileTests.Cells.cs  cell methods (Cell<TCell, TTile>) against the whole grid and the tile methods they
                           replace: a blur per boundary, a halo of 2, Life in bytes (and every neighborhood of 0 to
@@ -127,7 +127,7 @@ Grids/TileTests.Cells.cs  cell methods (Cell<TCell, TTile>) against the whole gr
                           written), a pass bounded to the layers of an ITileLayers component against the whole
                           pass (empty, clamped, 1 and 4 threads, 0 B), SimdMode.Off, an offset past the halo, the
                           schedule, 1 and 4 threads, 0 B; the halo read in place by cross stencils bit for bit
-                          against the copy (box stencils copying it), CellRow's loads at every i and dx of each
+                          against the copy (box stencils copying it), the loads of PlaneLoads at every i and dx of each
                           width
 Grids/TileTests.Halos.cs  kept neighbors (TileNeighborCache) of a by-value Life on a torus of quiet plates against
                           the whole torus, on 1 and 4 threads, through cells written from outside, removed and

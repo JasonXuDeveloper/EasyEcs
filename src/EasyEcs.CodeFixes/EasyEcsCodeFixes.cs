@@ -26,8 +26,8 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
             "EECS022", "EECS023", "EECS024", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS035", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS055", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS118", "EECS119", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "EECS122", "EECS125", "EECS127", "EECS129", "EECS131", "EECS133", "CS0234", "CS0246", "CS0305", "CS0592",
-            "CS0200", "CS0272", "CS1501", "CS1503", "CS1620", "CS1729", "CS1739", "CS7036");
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS118", "EECS119", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "EECS122", "EECS125", "EECS127", "EECS129", "EECS131", "EECS133", "CS0117", "CS0246", "CS0305",
+            "CS1501", "CS1503", "CS1620", "CS7036");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -98,36 +98,13 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                    && ToSystem(old, baseType) is { } system:
                     Register(context, diagnostic, "Make it an [EcsSystem] ref struct", root, old, system);
                     break;
-                case "CS0246" when node.FirstAncestorOrSelf<AttributeSyntax>() is { } attribute
-                                   && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
-                                   && FromHookAttribute(attribute) is { } unmarked:
-                    Register(context, diagnostic, unmarked.Title, root, unmarked.Old, unmarked.New);
-                    break;
-                case "CS0246" or "CS0234" when node.FirstAncestorOrSelf<AttributeSyntax>() is { } attribute
-                                   && RenamedAttribute(attribute) is { } renamed
-                                   && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false):
-                    Register(context, diagnostic, renamed.Title, root, renamed.Old, renamed.New);
-                    break;
-                case "CS0246" or "CS1739" when RenamedArgument(node) is { } renamedArgument
-                                               && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false):
-                    Register(context, diagnostic, renamedArgument.Title, root, renamedArgument.Old, renamedArgument.New);
+                case "CS0117" when node is IdentifierNameSyntax { Parent: MemberAccessExpressionSyntax access } name && access.Name == name
+                                   && await RenamedMember(context.Document, access, context.CancellationToken).ConfigureAwait(false) is { } renamedMember:
+                    Register(context, diagnostic, renamedMember.Title, root, renamedMember.Old, renamedMember.New);
                     break;
                 case "EECS090" when kind == "Hook" && diagnostic.Properties.TryGetValue("Hook", out var hook) && hook != null
                                     && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method:
                     Register(context, diagnostic, $"Rename it to {hook}", root, method, RenamedHook(method, hook));
-                    break;
-                case "CS0592" when node.FirstAncestorOrSelf<AttributeSyntax>() is { } attribute
-                                   && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
-                                   && GroupByOnMember(attribute) is { } moved:
-                    Register(context, diagnostic, moved.Title, root, moved.Old, moved.New);
-                    break;
-                case "CS0272" or "CS0200" when node.FirstAncestorOrSelf<ExpressionStatementSyntax>() is { } statement && IsTickWrite(statement.Expression)
-                                   && await IsEntityRandomTick(context.Document, statement, context.CancellationToken).ConfigureAwait(false):
-                    Register(context, diagnostic, "Remove it: the world advances EntityRandom's tick on every update", root, statement, null);
-                    break;
-                case "CS1501" or "CS1729" or "CS1739" when ArgumentsAt(node) is { } tickArguments && TickArgument(tickArguments) is { } tick
-                                                         && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false):
-                    Register(context, diagnostic, "Drop the tick: the world advances it on every update", root, tickArguments, tickArguments.WithArguments(tickArguments.Arguments.Remove(tick)));
                     break;
                 case "CS0305" when node.FirstAncestorOrSelf<GenericNameSyntax>() is { } any && IsSingleWithAny(any)
                                    && await ReferencesEasyEcs(context.Document, context.CancellationToken).ConfigureAwait(false)
@@ -168,7 +145,7 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                         _ => Task.FromResult(context.Document.WithSyntaxRoot(collected)), diagnostic.Id + "Collected"), diagnostic);
                     break;
                 case "EECS109" when kind == "Drain" && node.FirstAncestorOrSelf<ForEachStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax hook } } records
-                                    && RecordMethod(root, hook, records, diagnostic.Properties) is { } handle:
+                                    && DrainMethod(root, hook, records, diagnostic.Properties) is { } handle:
                     Register(context, diagnostic, "Handle each record in a [Drain] method", root, hook, handle);
                     break;
                 case "EECS107" when kind == "Pairs" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method

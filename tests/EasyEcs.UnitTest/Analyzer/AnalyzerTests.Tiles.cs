@@ -27,8 +27,8 @@ public partial class AnalyzerTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach, GaussSeidel(MaxSweeps = -1)] static void A(ref Tile<byte, G> t) { } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach, GaussSeidel] static void A(ref Tile<byte, N> t) { } }")]                                                                  // a key with a string
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Tile<byte, G> t, Mut<DynamicBuffer<int>> b) { t.ExchangeHalo(); foreach (var row in t.Rows()) t.Write(row).Clear(); b.Write(); } }")] // Write by value
-    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); t.Restart(); foreach (var row in t.Rows()) t.Write(row).Clear(); } }")]   // Restart in a Jacobi step
-    [TestCase("[EcsSystem] public ref struct S { [ForEach, GaussSeidel] static void A(ref Tile<byte, G> t, Tile<int, G> u) { u.ExchangeHalo(); u.Restart(); t.ExchangeHalo(); foreach (var row in t.Rows()) t.Write(row).Clear(); } }")] // Restart by value
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); t.ColdStart(); foreach (var row in t.Rows()) t.Write(row).Clear(); } }")]   // ColdStart in a Jacobi step
+    [TestCase("[EcsSystem] public ref struct S { [ForEach, GaussSeidel] static void A(ref Tile<byte, G> t, Tile<int, G> u) { u.ExchangeHalo(); u.ColdStart(); t.ExchangeHalo(); foreach (var row in t.Rows()) t.Write(row).Clear(); } }")] // ColdStart by value
     [TestCase("[EcsSystem] public ref struct S { [ForEach, GaussSeidel] static void A(ref Tile<byte, G> t, Tile<int, G> u, ref P p) { p.V = u.Sweep; t.ExchangeHalo(); } }")] // Sweep by value
     public Task TileStepsTheGeneratorCannotWriteReport(string source) => ReportsOnTiles("EECS115", source);
 
@@ -41,9 +41,9 @@ public partial class AnalyzerTests
 
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); foreach (var row in t.Rows()) t.Write(row).Clear(); } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true), GaussSeidel(MaxSweeps = 4)] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); foreach (var row in t.Rows()) t.Write(row).Clear(); } }")]
-    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true), GaussSeidel] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); t.Restart(); foreach (var row in t.Rows()) t.Write(row).Clear(); } }")] // a restarted sweep
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true), GaussSeidel] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); t.ColdStart(); foreach (var row in t.Rows()) t.Write(row).Clear(); } }")] // a restarted sweep
     [TestCase("[EcsSystem] public ref struct S { [ForEach, GaussSeidel] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); for (int k = 0; k < 4; k++) t.Write(new TileRow<G>(0, (t.Sweep & 1) == 0 ? k : 3 - k)).Clear(); } }")] // sweeps in turns of direction
-    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, Columns<G>> t, Tile<int, G> blocks) { blocks.ExchangeHalo(); t.ExchangeHalo(); foreach (var row in t.Rows()) t.Write(row)[0] = (byte)blocks[0, 0, row.Z]; } }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, Ground<G>> t, Tile<int, G> blocks) { blocks.ExchangeHalo(); t.ExchangeHalo(); foreach (var row in t.Rows()) t.Write(row)[0] = (byte)blocks[0, 0, row.Z]; } }")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, G> t) => Step(t); static void Step(Tile<byte, G> t) { t.ExchangeHalo(); foreach (var row in t.Rows()) t.Write(row).Clear(); } }")] // a helper's copy of the stepped tile
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, G> t, Lookup<DynamicBuffer<byte>> cells, in G g) { if (cells.Has(default)) t.ExchangeHalo(); } }")] // Jacobi: the cells stay as they were
     public Task TileStepsAreClean(string source) => AssertClean(GeneratorTests.Components, TileParts, source);
@@ -53,7 +53,7 @@ public partial class AnalyzerTests
         "[EcsSystem] public ref struct S { [ForEach, GaussSeidel] static void A(ref Tile<byte, G> t, Lookup<DynamicBuffer<byte>> cells) { if (cells.Has(default)) t.ExchangeHalo(); } }");
 
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, G> t, Tile<byte, G> u) { } }")]                         // the step and a read of its cells
-    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Tile<byte, G> t, Tile<byte, Columns<G>> u, Mut<DynamicBuffer<int>> b) => b.Write(); }")] // one buffer, two shapes
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Tile<byte, G> t, Tile<byte, Ground<G>> u, Mut<DynamicBuffer<int>> b) => b.Write(); }")] // one buffer, two shapes
     public Task TwoTilesOfOneBufferReport(string source) => ReportsOnTiles("EECS073", source);
 
     // Cell methods: an out cell of the cell's own type stepping the tile (clean; EECS115 for a [GaussSeidel] one, for

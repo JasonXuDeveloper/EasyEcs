@@ -1161,7 +1161,7 @@ public partial class TileTests
     }
 
     /// <summary>
-    /// The halo read in place (TilePlane, CellRow's shifts: cross stencils) against the method as written over the copied
+    /// The halo read in place (TilePlane, PlaneLoads's shifts: cross stencils) against the method as written over the copied
     /// halo, bit for bit: rows of several vectors at every width (32 floats stepping their tile), shifts by one and two
     /// bytes (64 bytes); box stencils of the same shapes and a row the shape does not let it read in place (12 floats),
     /// which copy the halo; on a grid with holes and quiet rows, 1 and 4 threads. The schedule says which read in place.
@@ -1226,7 +1226,7 @@ public partial class TileTests
     }
 
     /// <summary>
-    /// CellRow's loads of a row's lanes from i + dx against the lanes read one at a time from the row and the rows beside
+    /// PlaneLoads's loads of a row's lanes from i + dx against the lanes read one at a time from the row and the rows beside
     /// it: bytes, shorts, floats and doubles, every dx a vector reaches, every vector of a row of three, each width
     /// (where a width is not accelerated, or its shift instruction is missing, the shift through memory).
     /// </summary>
@@ -1260,10 +1260,10 @@ public partial class TileTests
 #pragma warning disable CA1857 // every dx through one loop: the shift's immediate is then not a constant, which the JIT handles with a slower form
                     switch (form)
                     {
-                        case 16: CellRow.Load128(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
-                        case 32: CellRow.Load256(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
-                        case 64: CellRow.Load512(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
-                        default: CellRow.LoadVector(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
+                        case 16: PlaneLoads.Load128(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
+                        case 32: PlaneLoads.Load256(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
+                        case 64: PlaneLoads.Load512(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
+                        default: PlaneLoads.LoadVector(ref row[0], ref west[0], ref east[0], i, dx, width).CopyTo(got); break;
                     }
 #pragma warning restore CA1857
                     for (int j = 0; j < lanes; j++)

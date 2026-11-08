@@ -11,7 +11,7 @@
     { "query": "vector loop", "page": "guide/basics/systems", "top": 3 },
     { "query": "chunk size", "page": "guide/performance/threading", "top": 3 },
     {
-      "query": "MaxChunkRows",
+      "query": "MaxChunkSize",
       "page": "guide/performance/threading",
       "top": 3
     },

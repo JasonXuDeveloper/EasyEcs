@@ -260,7 +260,7 @@ public static partial class EasyEcsAnalyzer
         "[ForEach] method '{0}' takes '{1}' and '{2}', both Tile<{3}>: they load into one texture and read one buffer",
         Category, DiagnosticSeverity.Error, true,
         "A Tile<TCell, TTile> loads into the running thread's texture for TCell and TTile, and both parameters read the " +
-        "same DynamicBuffer<TCell> of the same entity (a Tile<TCell, Columns<TTile>> as well, which the buffer cannot " +
+        "same DynamicBuffer<TCell> of the same entity (a Tile<TCell, Ground<TTile>> as well, which the buffer cannot " +
         "be the cells of too; one taken by ref as well, whose step writes the buffer the other reads): the second load " +
         "replaces the first while it is still sampled. " +
         "Take one tile per field: one cell type (one struct, one buffer) per field the stencil reads, each its own " +

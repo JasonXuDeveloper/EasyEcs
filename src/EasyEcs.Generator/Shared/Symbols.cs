@@ -1523,14 +1523,14 @@ internal static class Symbols
 
     /// <summary>
     /// The cell type, the shape and the grid's tile component of a <c>Tile&lt;TCell, TTile&gt;</c>, else null: the shape is
-    /// the tile component, or <c>Columns&lt;T&gt;</c> of the grid's T.
+    /// the tile component, or <c>Ground&lt;T&gt;</c> of the grid's T.
     /// </summary>
     public static (ITypeSymbol Cell, ITypeSymbol Shape, ITypeSymbol Grid)? TileElements(ITypeSymbol type)
     {
         if (type is not INamedTypeSymbol { IsGenericType: true } named
             || !Named(named.ConstructedFrom, "EasyEcs.Tile<TCell, TTile>") && !Named(named.ConstructedFrom, "EasyEcs.Cell<TCell, TTile>")) return null;
         var shape = named.TypeArguments[1];
-        var grid = shape is INamedTypeSymbol { IsGenericType: true } columns && Named(columns.ConstructedFrom, "EasyEcs.Columns<TTile>")
+        var grid = shape is INamedTypeSymbol { IsGenericType: true } columns && Named(columns.ConstructedFrom, "EasyEcs.Ground<TTile>")
             ? columns.TypeArguments[0] : shape;
         return (named.TypeArguments[0], shape, grid);
     }

@@ -12,7 +12,7 @@ namespace EasyEcs;
 /// <summary>
 /// The halo of a 2D tile read in place by a cell pass (<see cref="Tile{TCell, TTile}.Plane"/>): the tile's buffer and its
 /// eight neighbors', each row of the padded plane found where it lives (<see cref="Row"/>), and the vectors that cross a
-/// row's ends shifted in registers from the neighbor's edge (<see cref="CellRow"/>), so nothing is copied into the
+/// row's ends shifted in registers from the neighbor's edge (<see cref="PlaneLoads"/>), so nothing is copied into the
 /// texture. Generated code uses this. Valid for the pass it is made in (a ref struct).
 /// </summary>
 /// <typeparam name="TCell">The cell.</typeparam>
@@ -71,7 +71,7 @@ public readonly ref struct TilePlane<TCell, TTile> where TCell : unmanaged where
     /// neighbor beside it (<paramref name="side"/> −1 or 1), whose edge vectors a shift along x reads. O(1).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public ref TCell Own(int z, [ConstantExpected] int side)
+    public ref TCell RowBeside(int z, [ConstantExpected] int side)
     {
         int width = TTile.Width;
         if (side < 0) return ref Unsafe.Add(ref _west, z * width);
@@ -127,7 +127,7 @@ public readonly ref struct TilePlane<TCell, TTile> where TCell : unmanaged where
 // JIT folds them before it imports the intrinsics), which CA1857 cannot see through the parameters.
 #pragma warning disable CA1857
 [EditorBrowsable(EditorBrowsableState.Never)]
-public static class CellRow
+public static class PlaneLoads
 {
     /// <summary>The 128 bits of a row's lanes from <paramref name="i"/> + <paramref name="dx"/>.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

@@ -29,7 +29,7 @@ public sealed partial class World
 {
     /// <summary>
     /// Run <paramref name="job"/> over indexes 0 to <paramref name="count"/> - 1 on several threads: the range is cut
-    /// into chunks (a multiple of 64 indexes: about four per thread, between 1,024 and <see cref="MaxChunkRows"/>,
+    /// into chunks (a multiple of 64 indexes: about four per thread, between 1,024 and <see cref="MaxChunkSize"/>,
     /// until a call has measured the items' cost, then chunks of about 25 µs for heavy items and fewer for a short loop;
     /// or <paramref name="chunkSize"/> rounded up to 64) that the calling thread and up to
     /// <see cref="WorldOptions.MaxDegreeOfParallelism"/> - 1 helper threads claim one at a time, each running a copy

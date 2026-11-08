@@ -162,7 +162,7 @@ public class GeneratorTests
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }",
         "[ForEach] static void A(Tile<byte, G> t, ref P p) => p.V = t.Cells.Length;",
         "public global::EasyEcs.TileNeighbors n0;", "(k0, entity, out n0);", "h0.Around(k0, entity, out n0);", "new global::EasyEcs.Tile<byte, global::G>(entity, in n0)",
-        "file static class __TilePools\n{\n    [global::System.Runtime.CompilerServices.ModuleInitializer]\n    internal static void Pool()\n    {\n        global::EasyEcs.TileCells.Pool<byte, global::G>();\n    }\n}")]
+        "file static class __TilePools\n{\n    [global::System.Runtime.CompilerServices.ModuleInitializer]\n    internal static void Pool()\n    {\n        global::EasyEcs.TileCells.SizePool<byte, global::G>();\n    }\n}")]
     // A pair method: the pass orders and pairs the neighbors' tables (2 axes), the cutoff read from its test, a vector loop
     // of a cluster of rows against each neighbor; with the neighbor's entity, one pair at a time. The system runs alone.
     [TestCase("public struct Fp : IComponent { public float X, Y; }",
@@ -1374,10 +1374,10 @@ public class GeneratorTests
     // Every tracked stage of ComponentGenerator and SystemGenerator: a new stage is added here (the test fails until it is).
     private static readonly string[] TrackedStages =
     [
-        "ForEachMethods", "RecordMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
+        "ForEachMethods", "DrainMethods", "Systems", "SystemUpdates", "ClosedSystems", "SystemSet", "Components", "ExtensionMembers", "BufferUses",
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
         "GroupBy", "TargetPolicies", "NotSaved", "EntityMethods", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
-        "SystemPlaces", "SystemFusions", "SetFusions", "ForEachBodies", "RecordBodies", "EntityMethodBodies", "SystemCode", "ForEachCode", "RecordCode",
+        "SystemPlaces", "SystemFusions", "SetFusions", "ForEachBodies", "DrainBodies", "EntityMethodBodies", "SystemCode", "ForEachCode", "DrainCode",
         "EntityMethodCode", "RecordedTypes", "TileParts",
         "IsEasyEcsCore", // ArityGenerator's one stage: the package ships it, idle outside EasyEcs.Core
     ];
@@ -1480,8 +1480,8 @@ public class GeneratorTests
     private static readonly string[] ImplementationOnlyStages =
     [
         "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "ClosedSystems", "SystemSet", "SystemPlaces", "SystemFusions", "SetFusions",
-        "SavedComponents", "SavedBuffers", "GroupBy", "TargetPolicies", "NotSaved", "ModuleInitializers", "ForEachBodies", "RecordBodies", "EntityMethodBodies",
-        "SystemCode", "ForEachCode", "RecordCode", "EntityMethodCode", "ImplementationSourceOutput",
+        "SavedComponents", "SavedBuffers", "GroupBy", "TargetPolicies", "NotSaved", "ModuleInitializers", "ForEachBodies", "DrainBodies", "EntityMethodBodies",
+        "SystemCode", "ForEachCode", "DrainCode", "EntityMethodCode", "ImplementationSourceOutput",
     ];
 
     [TestCase("a [ForEach] body", "p.V += q.V;", "p.V += 2 * q.V;", "ForEachBodies SystemCode ~SystemFusions ImplementationSourceOutput")]

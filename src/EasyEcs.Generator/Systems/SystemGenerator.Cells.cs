@@ -128,7 +128,7 @@ public sealed partial class SystemGenerator
         }
         // The halo read in place (TilePlane, no copy into the texture) where the pass can: one cell of a 2D tile, its
         // rows whole vectors at 128 bits too (no cell is left to the method, which reads the texture), every load of a
-        // stream shifted along x a plain one CellRow takes over, and the shape's constants letting it (Fits, a JIT
+        // stream shifted along x a plain one PlaneLoads takes over, and the shape's constants letting it (Fits, a JIT
         // constant: the other branch is dropped). The texture's form stays the other branch. Only for a cross stencil
         // (a shift along x on the cell's own row alone): its 2r shifted streams share one pair of edge vectors, while
         // the copy it saves holds 2r band rows; a box stencil shifts on 2r + 1 rows, each with its own edge loads and
@@ -167,10 +167,10 @@ public sealed partial class SystemGenerator
                 // Each row the offsets read along z, where it lives (the tile, or the tile north or south), and the rows
                 // beside the walked row along x when a stream shifts across its ends (a cross stencil shifts on it alone).
                 foreach (var dz in form.Offsets.Select(o => o.Dz).Distinct())
-                    row.Append(dz == 0 ? $"ref {CellName(0)} __in0 = ref __plane.Own(__z, 0);\n"
+                    row.Append(dz == 0 ? $"ref {CellName(0)} __in0 = ref __plane.RowBeside(__z, 0);\n"
                         : $"ref {CellName(0)} __in{Dz(dz)} = ref __plane.Row({(dz < 0 ? $"__z - {-dz}" : $"__z + {dz}")});\n");
                 if (form.Offsets.Any(o => o.Dx != 0))
-                    row.Append($"ref {CellName(0)} __inW0 = ref __plane.Own(__z, -1);\nref {CellName(0)} __inE0 = ref __plane.Own(__z, 1);\n");
+                    row.Append($"ref {CellName(0)} __inW0 = ref __plane.RowBeside(__z, -1);\nref {CellName(0)} __inE0 = ref __plane.RowBeside(__z, 1);\n");
             }
             else
                 for (int k = 0; k < cells.Count; k++)
@@ -264,7 +264,7 @@ public sealed partial class SystemGenerator
                 if (ranged)
                     for (int k = 0; k < cells.Count; k++) walking.Append($"{AccessorPrefix}__Exchange{k}(ref __tile{k}, __from, __to);\n");
                 walking.Append($"var __walk = {(plane ? "__plane" : "__tile0")}.Rows((global::EasyEcs.TileStencil){stencil});\n");
-                walking.Append("for (int __l = __walk.First, __last = __walk.Last; __l <= __last; __l++)\n{\n    int __y = __walk.LayerOf(__l);\n");
+                walking.Append("for (int __l = __walk.FirstLayer, __last = __walk.LastLayer; __l <= __last; __l++)\n{\n    int __y = __walk.LayerOf(__l);\n");
                 walking.Append("    for (ulong __m = __walk.RowsOf(__l); __m != 0; __m &= __m - 1)\n    {\n");
                 var inner = new StringBuilder();
                 inner.Append($"int __z = global::System.Numerics.BitOperations.TrailingZeroCount(__m);\nvar __row = new global::EasyEcs.TileRow<{shape}>(__y, __z);\n");
@@ -332,7 +332,7 @@ public sealed partial class SystemGenerator
 
     /// <summary>
     /// The row loops <paramref name="loops"/> reading the halo in place: each load of a stream shifted along x by a
-    /// CellRow load of its width (the vector across the row's end shifted in registers from the row beside it); null
+    /// PlaneLoads load of its width (the vector across the row's end shifted in registers from the row beside it); null
     /// when a stream shifted along x is read otherwise than by a plain load (a bool's mask, interleaved fields).
     /// </summary>
     private static string? PlaneLoads(string loops, EquatableArray<(int Cell, int Dx, int Dy, int Dz)> offsets)
@@ -353,7 +353,7 @@ public sealed partial class SystemGenerator
                 "global::System.Runtime.Intrinsics.Vector128" => "Load128",
                 _ => "LoadVector",
             };
-            return $"{m.Groups[1].Value}global::EasyEcs.CellRow.{load}(ref e{n}, ref __west{n}, ref __east{n}, (nint)({m.Groups[4].Value}), {dx}, (int)rows);";
+            return $"{m.Groups[1].Value}global::EasyEcs.PlaneLoads.{load}(ref e{n}, ref __west{n}, ref __east{n}, (nint)({m.Groups[4].Value}), {dx}, (int)rows);";
         });
     }
 }

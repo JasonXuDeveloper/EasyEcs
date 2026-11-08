@@ -7,7 +7,7 @@ namespace EasyEcs.Benchmark;
 // A scent read only once settled (VoxelServer's zombies follow one): Odor.Strength on a spring, one less per cell away,
 // 0 past its reach, over the torus of 32 x 32 plates of 16 x 16 cells. The springs are a second buffer beside the field
 // and move a cell or a hop per update, so the scent they leave behind must go. Settled by [GaussSeidel] from nothing in
-// every step (Restart), the same with its odd sweeps from the last row back (Turn: tile.Sweep), by [GaussSeidel] from
+// every step (ColdStart), the same with its odd sweeps from the last row back (Turn: tile.Sweep), by [GaussSeidel] from
 // the field's last values (Linger: what a spring left only fades a step per sweep), and by
 // hand as the sample does it: a step per color (a generic system: a color tag cannot be an attribute's argument, CS8968)
 // that copies the plate's halo onto the stack, its own cells cleared, sweeps until it settles and writes the plate's
@@ -37,7 +37,7 @@ public struct OdorRed : IComponent;
 public struct OdorBlack : IComponent;
 
 [MemoryDiagnoser]
-public class TileRestartBenchmark
+public class TileColdStartBenchmark
 {
     [Params(1, 4)] public int Threads;
 
@@ -47,31 +47,31 @@ public class TileRestartBenchmark
     /// <summary>The cells a spring moves per update: a step (its old scent still nearly right) or a hop of 8 (gone).</summary>
     [Params(1, 8)] public int Hop;
 
-    private World _restart, _turn, _linger, _hand, _columns;
-    private Dictionary<Plot, Entity> _restartPlates, _turnPlates, _lingerPlates, _handPlates, _columnsPlates;
+    private World _coldStart, _turn, _linger, _hand, _columns;
+    private Dictionary<Plot, Entity> _coldStartPlates, _turnPlates, _lingerPlates, _handPlates, _columnsPlates;
     private int _tick;
 
     [GlobalSetup]
     public void Setup()
     {
-        (_restart, _restartPlates) = Make(Threads, hand: false);
-        _restart.AddSystem<TileRestartSystems.RestartSystem>();
+        (_coldStart, _coldStartPlates) = Make(Threads, hand: false);
+        _coldStart.AddSystem<TileColdStartSystems.ColdStartSystem>();
         (_columns, _columnsPlates) = Make(Threads, hand: false);
-        _columns.AddSystem<TileRestartSystems.RestartColumnsSystem>();
+        _columns.AddSystem<TileColdStartSystems.ColdStartColumnsSystem>();
         (_turn, _turnPlates) = Make(Threads, hand: false);
-        _turn.AddSystem<TileRestartSystems.TurnSystem>();
+        _turn.AddSystem<TileColdStartSystems.TurnSystem>();
         (_linger, _lingerPlates) = Make(Threads, hand: false);
-        _linger.AddSystem<TileRestartSystems.LingerSystem>();
+        _linger.AddSystem<TileColdStartSystems.LingerSystem>();
         (_hand, _handPlates) = Make(Threads, hand: true);
-        _hand.AddSystem<TileRestartSystems.HandStepSystem<OdorRed>>();
-        _hand.AddSystem<TileRestartSystems.HandCommitSystem<OdorRed>>();
-        _hand.AddSystem<TileRestartSystems.HandStepSystem<OdorBlack>>();
-        _hand.AddSystem<TileRestartSystems.HandCommitSystem<OdorBlack>>();
+        _hand.AddSystem<TileColdStartSystems.HandStepSystem<OdorRed>>();
+        _hand.AddSystem<TileColdStartSystems.HandCommitSystem<OdorRed>>();
+        _hand.AddSystem<TileColdStartSystems.HandStepSystem<OdorBlack>>();
+        _hand.AddSystem<TileColdStartSystems.HandCommitSystem<OdorBlack>>();
         for (int i = 0; i < 64; i++)
         {
-            Restart();
+            ColdStart();
             _tick--;
-            RestartColumns();
+            ColdStartColumns();
             _tick--;
             Turn();
             _tick--;
@@ -82,13 +82,13 @@ public class TileRestartBenchmark
         // Settled from the same springs, the three are one field (a settled scent is the strength less the steps).
         for (int i = 0; i < 2 * Plot.Side; i++)
         {
-            _restart.Update();
+            _coldStart.Update();
             _columns.Update();
             _turn.Update();
             _linger.Update();
             _hand.Update();
         }
-        var left = _restart.Query<OdorPlot, DynamicBuffer<Odor>>().GetEnumerator();
+        var left = _coldStart.Query<OdorPlot, DynamicBuffer<Odor>>().GetEnumerator();
         while (left.MoveNext())
         {
             var cells = left.Current.Component2.AsReadOnlySpan();
@@ -104,7 +104,7 @@ public class TileRestartBenchmark
     [GlobalCleanup]
     public void Cleanup()
     {
-        _restart.Dispose();
+        _coldStart.Dispose();
         _columns.Dispose();
         _turn.Dispose();
         _linger.Dispose();
@@ -119,14 +119,14 @@ public class TileRestartBenchmark
     }
 
     [Benchmark]
-    public void Restart()
+    public void ColdStart()
     {
-        Move(_restartPlates, _tick++);
-        _restart.Update();
+        Move(_coldStartPlates, _tick++);
+        _coldStart.Update();
     }
 
     [Benchmark]
-    public void RestartColumns()
+    public void ColdStartColumns()
     {
         Move(_columnsPlates, _tick++);
         _columns.Update();
@@ -185,21 +185,21 @@ public class TileRestartBenchmark
     }
 }
 
-internal static class TileRestartSystems
+internal static class TileColdStartSystems
 {
     /// <summary>The rule: a spring's strength, any other cell the strongest of its neighbors less one.</summary>
     public static int Rule(bool spring, int north, int south, int west, int east) =>
         spring ? Odor.Strength : Math.Max(0, Math.Max(Math.Max(north, south), Math.Max(west, east)) - 1);
 
     [EcsSystem]
-    public ref struct RestartSystem
+    public ref struct ColdStartSystem
     {
         [ForEach(Parallel = true, ChunkSize = 16), GaussSeidel]
         static void Settle(ref Tile<Odor, OdorPlot> odor, Tile<OdorSpring, OdorPlot> springs)
         {
             springs.ExchangeHalo(0, 0, mask: false);
             odor.ExchangeHalo();
-            odor.Restart();
+            odor.ColdStart();
             for (int z = 0; z < 16; z++) // a source term: every row
             {
                 var row = new TileRow<OdorPlot>(0, z);
@@ -212,16 +212,16 @@ internal static class TileRestartSystems
         }
     }
 
-    /// <summary>Restart with each row's cells walked by the cursor (c.Columns(1)): the neighbors at constant offsets of the column.</summary>
+    /// <summary>ColdStart with each row's cells walked by the cursor (c.Columns(1)): the neighbors at constant offsets of the column.</summary>
     [EcsSystem]
-    public ref struct RestartColumnsSystem
+    public ref struct ColdStartColumnsSystem
     {
         [ForEach(Parallel = true, ChunkSize = 16), GaussSeidel]
         static void Settle(ref Tile<Odor, OdorPlot> odor, Tile<OdorSpring, OdorPlot> springs)
         {
             springs.ExchangeHalo(0, 0, mask: false);
             odor.ExchangeHalo();
-            odor.Restart();
+            odor.ColdStart();
             for (int z = 0; z < 16; z++) // a source term: every row
             {
                 var row = new TileRow<OdorPlot>(0, z);
@@ -241,7 +241,7 @@ internal static class TileRestartSystems
         {
             springs.ExchangeHalo(0, 0, mask: false);
             odor.ExchangeHalo();
-            odor.Restart();
+            odor.ColdStart();
             for (int k = 0; k < 16; k++) // odd sweeps from the last row back: the scent crosses the plate both ways
             {
                 var row = new TileRow<OdorPlot>(0, (odor.Sweep & 1) == 0 ? k : 15 - k);

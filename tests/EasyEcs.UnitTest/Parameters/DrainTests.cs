@@ -78,7 +78,7 @@ public class DrainTests
         }
     }
 
-    /// <summary>Emit and handle in one system: the record method runs after the pass, in declaration order.</summary>
+    /// <summary>Emit and handle in one system: the drain method runs after the pass, in declaration order.</summary>
     [EcsSystem]
     public ref struct StrikeAndBook
     {
@@ -147,7 +147,7 @@ public class DrainTests
     }
 
     [Test]
-    public void ARecordMethodRunsAfterTheMethodsDeclaredBeforeIt()
+    public void ADrainMethodRunsAfterTheMethodsDeclaredBeforeIt()
     {
         var (world, entities) = Fighters(1_000);
         using var _w = world;
@@ -190,7 +190,7 @@ public class DrainTests
     }
 
     [Test]
-    public void ARecordPassWritesEmittedForTheScheduler()
+    public void ADrainWritesEmittedForTheScheduler()
     {
         using var world = new World(new WorldOptions { ParallelSystems = true });
         world.AddSystem<Strikes>();
@@ -199,9 +199,9 @@ public class DrainTests
     }
 
     [Test]
-    public void ARecordPassDoesNotAllocateAfterItsFirstUpdates()
+    public void ADrainDoesNotAllocateAfterItsFirstUpdates()
     {
-        var (world, _) = Fighters(World.MaxChunkRows * 2);
+        var (world, _) = Fighters(World.MaxChunkSize * 2);
         using var _w = world;
         world.AddSystem<Strikes>();
         world.AddSystem<Book>();
@@ -229,7 +229,7 @@ public class DrainTests
         string text = string.Join("\n", output.SyntaxTrees.Select(t => t.ToString()));
         Assert.That(text, Does.Contain("internal ref struct HJob0 : global::EasyEcs.IDrain<global::Rec>"));
         Assert.That(text, Does.Contain("public void Execute(in global::Rec record) => __ForEach.H_0(default, in record, ref s1, new global::EasyEcs.Lookup<global::P>(World, null), new global::EasyEcs.Emit<global::Other>(ref this.e3));"));
-        Assert.That(text, Does.Contain("global::EasyEcs.Emitted<global::Rec>.Consume(world, ref job0);"));
+        Assert.That(text, Does.Contain("global::EasyEcs.Emitted<global::Rec>.Drain(world, ref job0);"));
         Assert.That(text, Does.Contain("access.WriteSingleton<global::EasyEcs.Emitted<global::Rec>>();"));
         Assert.That(text, Does.Contain("public static void G(global::EasyEcs.World world, ref int n)"));
         Assert.That(text, Does.Contain("\"H: the records of Emitted<Rec>, in order, then cleared\""));
@@ -244,7 +244,7 @@ public class DrainTests
     [TestCase("public static class R { [Drain] static void A<T>(in Rec r) { } }", "is generic")]
     [TestCase("public static class R { [Drain, ForEach] static void A(in Rec r) { } }", "also has [ForEach] or [EntityMethod]")]
     [TestCase("[EcsSystem] public ref struct S { [Drain] static void A(in Rec r, int n) { } }", "takes 'n', which a pass over records has none of")] // a caller's value in a system
-    public async Task AnInvalidRecordMethodIsReported(string source, string reason)
+    public async Task AnInvalidDrainMethodIsReported(string source, string reason)
     {
         var found = (await GeneratorTests.Analyze([Data + source])).Where(d => d.Id == "EECS108").Select(d => d.GetMessage()).ToArray();
         Assert.That(found, Has.Exactly(1).Items);
@@ -253,7 +253,7 @@ public class DrainTests
 
     [TestCase("public static class R { [Drain] static void A(in Rec r, ref Tally t, Lookup<P> p, World w, Emit<Other> o, ref int n) { } }")]
     [TestCase("[EcsSystem] public ref struct S { [Drain] static void A(in Rec r, in Tally t, World w) { } }")]
-    public async Task AValidRecordMethodIsNotReported(string source) =>
+    public async Task AValidDrainMethodIsNotReported(string source) =>
         Assert.That((await GeneratorTests.Analyze([Data + source])).Where(d => d.Id.StartsWith("EECS1") || d.Severity == DiagnosticSeverity.Error), Is.Empty);
 
     [TestCase("[EcsSystem] public ref struct S { static void OnUpdate(World w) { ref var t = ref w.GetOrAddSingleton<Tally>(); ref var rs = ref w.GetSingleton<Emitted<Rec>>().Items; foreach (var r in rs) t.N += r.V; rs.Clear(); } }", true)]

@@ -25,7 +25,7 @@ public sealed partial class EasyEcsCodeFixes
     /// Handle(in T record, ref S s, ...)</c> holding the loop's body (the singleton locals as 'ref' parameters, the World
     /// when the body uses it: the analyzer's property), its lines moved out by one level.
     /// </summary>
-    private static MethodDeclarationSyntax? RecordMethod(SyntaxNode root, MethodDeclarationSyntax hook, ForEachStatementSyntax loop,
+    private static MethodDeclarationSyntax? DrainMethod(SyntaxNode root, MethodDeclarationSyntax hook, ForEachStatementSyntax loop,
         System.Collections.Immutable.ImmutableDictionary<string, string?> props)
     {
         if (!props.TryGetValue("RecordParameters", out var others) || others == null || !props.TryGetValue("Record", out var record) || record == null) return null;

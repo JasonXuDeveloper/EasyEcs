@@ -172,7 +172,7 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
     /// that throws leaves every record in place. O(records), no allocation. Owner thread. Generated code calls this.
     /// </summary>
     [EditorBrowsable(EditorBrowsableState.Never)]
-    public static void Consume<TJob>(World world, ref TJob job) where TJob : IDrain<T>, allows ref struct
+    public static void Drain<TJob>(World world, ref TJob job) where TJob : IDrain<T>, allows ref struct
     {
         if (!world.HasSingleton<Emitted<T>>()) return;
         ref var items = ref world.GetSingleton<Emitted<T>>().Items; // a box of its own: the ref outlives other singletons' adds
@@ -214,7 +214,7 @@ public struct Emitted<T> : ISingletonComponent, IBuffer where T : struct
 
 /// <summary>
 /// The job of a <see cref="DrainAttribute"/> method, which the generator writes: the method called on one
-/// record with the values its pass resolved (singletons, lookups). Run by <see cref="Emitted{T}.Consume{TJob}"/>.
+/// record with the values its pass resolved (singletons, lookups). Run by <see cref="Emitted{T}.Drain{TJob}"/>.
 /// </summary>
 /// <typeparam name="T">The record.</typeparam>
 public interface IDrain<T> where T : struct

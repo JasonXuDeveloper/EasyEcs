@@ -95,9 +95,9 @@ Grids/TileInPlaceBenchmark.cs   the hand-written Laplacian with its halo copied 
                                 in registers (InPlaceShift), and the four neighbor lookups alone
 Grids/TileLayersBenchmark.cs    a seven-point cell method over tall tiles whose warmth sits in a band of layers:
                                 every layer against the band an ITileLayers component gives
-Grids/TileRestartBenchmark.cs   a scent whose springs move, read once settled: [GaussSeidel] settled from nothing
-                                each step (Restart), the same in sweeps of turning direction (Turn: tile.Sweep) and
-                                from its last values (Linger), Restart walked by c.Columns(1) (RestartColumns),
+Grids/TileColdStartBenchmark.cs a scent whose springs move, read once settled: [GaussSeidel] settled from nothing
+                                each step (ColdStart), the same in sweeps of turning direction (Turn: tile.Sweep) and
+                                from its last values (Linger), ColdStart walked by c.Columns(1) (ColdStartColumns),
                                 springs stepping or hopping, against the sample's sweep by hand from a cleared copy,
                                 a step and a commit per color
 Grids/TileSettleBenchmark.cs    a field read once settled, sources moving: [GaussSeidel] against the in-place sweep
@@ -185,7 +185,7 @@ OrderedTables/RowOrderBenchmark.cs       the core's re-sort: narrow and wide tab
 ## Parallel/
 
 ```
-Parallel/ChunkRowsBenchmark.cs        chunk sizes inferred from the measured cost: light, heavy, uneven and few expensive
+Parallel/ChunkSizeBenchmark.cs        chunk sizes inferred from the measured cost: light, heavy, uneven and few expensive
                                       rows
 Parallel/ParallelForBenchmark.cs      World.ParallelFor over an Emitted<T> list: light and heavy steps (+ LightLambda / HeavyLambda: the lambda form against the hand-written jobs)
 Parallel/ParallelPassBenchmark.cs     one heavy system as [ForEach] and [ForEach(Parallel = true)]
@@ -240,7 +240,7 @@ Relations/RelationBenchmark.cs   friend lists as a relation: Link / Unlink and t
 ```
 Saves/FullCopyBenchmark.cs       the whole-column copies snapshots still make: Capture / Restore of untracked
                                  components, in and past the cache
-Saves/GhostCopyBenchmark.cs      a halo exchange between two worlds: the CreateEntity loop over the border band
+Saves/CopyEntitiesBenchmark.cs      a halo exchange between two worlds: the CreateEntity loop over the border band
                                  against SaveEntitiesWith + LoadEntities and CopyEntities<Ghost>, 1 or 3 components,
                                  rows sorted or scattered
 Saves/MigrationBenchmark.cs      players changing worlds: through bytes against MoveEntities; a record saved and
