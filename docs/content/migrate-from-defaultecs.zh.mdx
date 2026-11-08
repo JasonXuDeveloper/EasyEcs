@@ -43,7 +43,7 @@ dotnet add package EasyEcs
 
 表里用的是下面例子中的组件（`Hp`、标签 `Dead`）。生成器为每个组件写好具名成员（`e.Hp`、`HasHp`、
 `SetHp(…)`、`IsDead`），业务代码直接用它们；排在后面的泛型调用（`Get<T>()`、`Set(c)`、`Remove<T>()`）留给泛型代码
-（[生成的成员](/zh/docs/guide/entities-and-components#generated-members)）。
+（[生成的成员](/zh/docs/guide/basics/entities-and-components#generated-members)）。
 
 ### 实体和组件 [#entities-and-components]
 
@@ -96,7 +96,7 @@ public struct Velocity : IComponent { public float X, Y; }
 public struct Health : IComponent { public int Value, Max; }
 public struct Lifetime : IComponent { public int Ticks; }
 public struct Player : IComponent { public long AccountId; }
-public struct Projectile : IComponent { public int OwnerId; }
+public struct Projectile : IComponent { public EntityId Owner; }
 public struct Dead : IComponent;
 
 public struct WorldStats : ISingletonComponent
@@ -173,7 +173,7 @@ public ref struct ShootingSystem
         if ((stats.Tick + shooter.Id.Index) % 20 != 0) return;
         stats.Spawns++;
         world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
-            new Projectile { OwnerId = shooter.Id.Index });
+            new Projectile { Owner = shooter.Id });
     }
 }
 ```
@@ -234,12 +234,12 @@ world.Update();
 
 | 错误 | 后果 | 谁来发现 |
 | --- | --- | --- |
-| 把状态对象搬成系统的字段 | 系统必须无状态 | [EECS007](/zh/docs/guide/analyzer#eecs007)：改用单例 |
-| `[ForEach]` 方法按值接组件 | 拿到的是副本，写入丢失 | [EECS002](/zh/docs/guide/analyzer#eecs002)，代码修复改成 `ref` / `in` |
-| 创建时一个一个 `Set` 组件 | 每加一个组件复制一次行 | [EECS052](/zh/docs/guide/analyzer#eecs052)（警告，有代码修复）：`world.CreateEntity(a, b, c)` |
-| 不带 `Entity` 或 `World` 的静态方法里做销毁 | 它承诺了不做结构变更 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
+| 把状态对象搬成系统的字段 | 系统必须无状态 | [EECS007](/zh/docs/guide/help/analyzer#eecs007)：改用单例 |
+| `[ForEach]` 方法按值接组件 | 拿到的是副本，写入丢失 | [EECS002](/zh/docs/guide/help/analyzer#eecs002)，代码修复改成 `ref` / `in` |
+| 创建时一个一个 `Set` 组件 | 每加一个组件复制一次行 | [EECS052](/zh/docs/guide/help/analyzer#eecs052)（警告，有代码修复）：`world.CreateEntity(a, b, c)` |
+| 不带 `Entity` 或 `World` 的静态方法里做销毁 | 它承诺了不做结构变更 | [EECS013](/zh/docs/guide/help/analyzer#eecs013) |
 | 留着 `NotifyChanged` 调用 | 没有这个方法 | 编译错误 |
-| 被追踪的组件只读却按 `ref` 接 | 访问过的每一行都算变了 | [EECS025](/zh/docs/guide/analyzer#eecs025)（警告，有代码修复）：声明成 `in` |
+| 被追踪的组件只读却按 `ref` 接 | 访问过的每一行都算变了 | [EECS025](/zh/docs/guide/help/analyzer#eecs025)（警告，有代码修复）：声明成 `in` |
 | 拿 `GetHashCode()` 当实体 id | id 会被回收复用 | 存 `entity.Id`（带版本的 `EntityId`） |
 
 ## 相关页面 [#related]
@@ -248,10 +248,10 @@ world.Update();
   <Card title="EasyEcs 与 DefaultEcs" href="/zh/docs/vs-defaultecs">
     两个库并排对比，附全部跑分。
   </Card>
-  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems">
     参数、过滤、顺序、分组和并行方法。
   </Card>
-  <Card title="变更追踪" href="/zh/docs/guide/change-tracking">
+  <Card title="变更追踪" href="/zh/docs/guide/changes/change-tracking">
     用 `[Changed<T>]` 和 `[Removed<T>]` 代替响应式集合。
   </Card>
 </Cards>

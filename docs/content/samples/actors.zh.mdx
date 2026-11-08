@@ -22,17 +22,17 @@ dotnet run --project samples/Actors
 ## 数据 [#data]
 
 一类 Actor 就是一个类型，靠一个接口同时承担三件事：`Shop` 和 `Bank` 实现 `IActor<TSelf>`，于是同时是 Actor 的键组件
-（[值索引](/zh/docs/guide/indexes-and-relations#value-indexes)）、这一类的[系统分组](/zh/docs/guide/systems#system-groups)，
-以及这个分组的[过滤条件](/zh/docs/guide/systems#group-filters)（`ISystemGroupWith<In<Shop>>`）：特性写不出类型参数，接口替每一类
+（[值索引](/zh/docs/guide/data/indexes-and-relations#value-indexes)）、这一类的[系统分组](/zh/docs/guide/basics/systems#system-groups)，
+以及这个分组的[过滤条件](/zh/docs/guide/basics/systems#group-filters)（`ISystemGroupWith<In<Shop>>`）：特性写不出类型参数，接口替每一类
 声明一次过滤条件。键就是 Actor 本身：类型上标 `[LookupKey]`，生成器写出显式的 `Key`，record 的 `ToString()` 不会打印它
-（公开的 `Key => this` 属性会让 `ToString()` 无限打印 `Key`，EECS043）。`Stock` 和 `Balance` 要持久化，都是 `ITracked`（[变更追踪](/zh/docs/guide/change-tracking)）；`Sales` 和 `Closed` 只在内存里。
+（公开的 `Key => this` 属性会让 `ToString()` 无限打印 `Key`，EECS043）。`Stock` 和 `Balance` 要持久化，都是 `ITracked`（[变更追踪](/zh/docs/guide/changes/change-tracking)）；`Sales` 和 `Closed` 只在内存里。
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/Actors/Components.cs</include>
 
 ## 消息 [#messages]
 
 一条消息就是在一个实体上运行的方法：`Buy` 和 `Deposit` 是
-[`[EntityMethod]` 方法](/zh/docs/guide/queries#run-on-one-entity)，`Mailman` 在索引里按键找到 Actor，调用生成的入口
+[`[EntityMethod]` 方法](/zh/docs/guide/basics/queries#run-on-one-entity)，`Mailman` 在索引里按键找到 Actor，调用生成的入口
 `Messages.Buy(shop, quantity)`。入口通过 `entity.Run` 运行方法，一次查找拿到它要的全部组件，`[Without<Closed>]`
 拒绝已关门的商店。卖掉最后一件的 `Buy` 会在方法中途加上 `Closed`：这是一次结构变更，方法里的 ref 仍然指向商店的值。
 `Mailman` 先读库存再跑 `Buy`：方法一运行，它的 `ref` 组件就会被打 tick，被拒绝的订单如果也跑了它，下一次保存就会把没变的商店再存一遍。
@@ -42,7 +42,7 @@ dotnet run --project samples/Actors
 ## 每类 Actor 的系统 [#systems]
 
 每个系统属于它那一类的分组，所以 `world.Update<Shop>()` 只在商店上跑商店的系统。`InterestSystem` 通过
-[`Mut<Balance>`](/zh/docs/guide/change-tracking#set-if-changed) 写入：`SetIfChanged` 只给真正增长了的余额打 tick。
+[`Mut<Balance>`](/zh/docs/guide/changes/change-tracking#set-if-changed) 写入：`SetIfChanged` 只给真正增长了的余额打 tick。
 
 <include lang="csharp" meta='tab="Systems/ShopSystems.cs"'>../../../samples/Actors/Systems/ShopSystems.cs</include>
 
@@ -51,7 +51,7 @@ dotnet run --project samples/Actors
 ## 保存变过的 [#saving]
 
 保存分组只有一个系统，覆盖所有种类的 Actor。它的 `[Changed<T>]` 方法选出它上次运行后被写过的行，所以每次运行列出的是上次保存后
-被写过的 Actor，它自己的运行就是标记。保存记录会改写表，遍历期间不允许（[EECS041](/zh/docs/guide/analyzer#eecs041)），所以
+被写过的 Actor，它自己的运行就是标记。保存记录会改写表，遍历期间不允许（[EECS041](/zh/docs/guide/help/analyzer#eecs041)），所以
 系统把 Actor 记进 `Unsaved` 单例，由宿主在 `world.Update<Saving>()` 之后保存。
 
 <include lang="csharp" meta='title="Systems/SaveSystems.cs"'>../../../samples/Actors/Systems/SaveSystems.cs</include>
@@ -59,7 +59,7 @@ dotnet run --project samples/Actors
 ## 激活 [#activation]
 
 `Activate` 返回已激活的 Actor；没有就用这一类的预制体创建一个，再用 `LoadEntitiesInto(..., markWritten: false)` 把它的
-[记录](/zh/docs/guide/migration-and-unload#records)（持久化组件的 `ComponentSet`）加载上去，加载不算变更。新 Actor 没有记录，默认值就是它的初始状态，
+[记录](/zh/docs/guide/saves/migration-and-unload#records)（持久化组件的 `ComponentSet`）加载上去，加载不算变更。新 Actor 没有记录，默认值就是它的初始状态，
 下一次保存会写下它们。
 
 <include lang="csharp" meta='title="Activation.cs"'>../../../samples/Actors/Activation.cs</include>
@@ -93,16 +93,16 @@ restarted: shop 1 has 3 (sold 0), bank 7 has 1060
 ## 相关页面 [#related]
 
 <Cards>
-  <Card icon={<ListTree />} title="索引与关系" href="/zh/docs/guide/indexes-and-relations">
+  <Card icon={<ListTree />} title="索引与关系" href="/zh/docs/guide/data/indexes-and-relations">
     按键找到 Actor 的索引。
   </Card>
-  <Card icon={<Layers />} title="系统" href="/zh/docs/guide/systems#system-groups">
+  <Card icon={<Layers />} title="系统" href="/zh/docs/guide/basics/systems#system-groups">
     系统分组和分组的过滤条件，每类 Actor 一个。
   </Card>
-  <Card icon={<Workflow />} title="查询" href="/zh/docs/guide/queries#run-on-one-entity">
+  <Card icon={<Workflow />} title="查询" href="/zh/docs/guide/basics/queries#run-on-one-entity">
     `[EntityMethod]` 方法：一个实体上的工作，也就是消息的形状。
   </Card>
-  <Card icon={<Database />} title="迁移与记录" href="/zh/docs/guide/migration-and-unload#records">
+  <Card icon={<Database />} title="迁移与记录" href="/zh/docs/guide/saves/migration-and-unload#records">
     要持久化的记录，加载到 Actor 上。
   </Card>
 </Cards>

@@ -81,7 +81,7 @@ dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Ni
   separate cadences (input on every wake, simulation on a fixed tick).
 - **Built for processes that run for months.** Ids are recycled behind version-checked handles, memory is bounded by
   the peak entity count, a structural change off the owner thread throws or is reported at compile time instead of
-  tearing the tables; the supported model is one owner thread per world (see [Threading](https://ecs.xgamedev.net/docs/guide/threading)),
+  tearing the tables; the supported model is one owner thread per world (see [Threading](https://ecs.xgamedev.net/docs/guide/performance/threading)),
   and one world per thread scales across cores.
 
 ## Features
@@ -89,26 +89,26 @@ dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Ni
 Every feature has a guide page with a full example; [Features](https://ecs.xgamedev.net/docs/features) lists them all
 with what each costs and when to use it, and [API and complexity](https://ecs.xgamedev.net/docs/api) lists every call.
 
-- **Entities and data**: [worlds, entities, components and tags](https://ecs.xgamedev.net/docs/guide/entities-and-components),
-  [prefabs and cloning](https://ecs.xgamedev.net/docs/guide/prefabs), [singletons](https://ecs.xgamedev.net/docs/guide/singletons),
-  [dynamic buffers](https://ecs.xgamedev.net/docs/guide/dynamic-buffers), [immediate structural changes](https://ecs.xgamedev.net/docs/guide/structural-changes),
-  [bulk changes](https://ecs.xgamedev.net/docs/guide/bulk), [cleanup components and disable](https://ecs.xgamedev.net/docs/guide/cleanup-and-disable).
-- **Systems and queries**: [systems](https://ecs.xgamedev.net/docs/guide/systems) of `[ForEach]` methods with filters, `Maybe<T>`,
+- **Entities and data**: [worlds, entities, components and tags](https://ecs.xgamedev.net/docs/guide/basics/entities-and-components),
+  [prefabs and cloning](https://ecs.xgamedev.net/docs/guide/basics/prefabs), [singletons](https://ecs.xgamedev.net/docs/guide/basics/singletons),
+  [dynamic buffers](https://ecs.xgamedev.net/docs/guide/data/dynamic-buffers), [immediate structural changes](https://ecs.xgamedev.net/docs/guide/changes/structural-changes),
+  [bulk changes](https://ecs.xgamedev.net/docs/guide/changes/bulk), [cleanup components and disable](https://ecs.xgamedev.net/docs/guide/changes/cleanup-and-disable).
+- **Systems and queries**: [systems](https://ecs.xgamedev.net/docs/guide/basics/systems) of `[ForEach]` methods with filters, `Maybe<T>`,
   batch methods, slices, `[UpdateInterval]`, `[Consume]`, groups, ordering and generic systems;
-  [ad-hoc queries and struct jobs](https://ecs.xgamedev.net/docs/guide/queries), `[EntityMethod]` for one entity.
-- **Compute**: [vector loops, parallel passes and batch methods](https://ecs.xgamedev.net/docs/guide/high-performance);
-  [reductions, scratch, lookups, emitted records, deterministic random numbers](https://ecs.xgamedev.net/docs/guide/threading#reductions);
-  [grids shaded by tiles](https://ecs.xgamedev.net/docs/guide/grids).
-- **[Change tracking](https://ecs.xgamedev.net/docs/guide/change-tracking)**: `[Changed<T>]`, `[ChangedAny<..>]`, `Mut<T>`,
+  [ad-hoc queries and struct jobs](https://ecs.xgamedev.net/docs/guide/basics/queries), `[EntityMethod]` for one entity.
+- **Compute**: [vector loops, parallel passes and batch methods](https://ecs.xgamedev.net/docs/guide/performance/high-performance);
+  [reductions, scratch, lookups, emitted records, deterministic random numbers](https://ecs.xgamedev.net/docs/guide/performance/threading#reductions);
+  [grids shaded by tiles](https://ecs.xgamedev.net/docs/guide/performance/grids).
+- **[Change tracking](https://ecs.xgamedev.net/docs/guide/changes/change-tracking)**: `[Changed<T>]`, `[ChangedAny<..>]`, `Mut<T>`,
   `[Removed<T>]` and the destroy log.
-- **Finding entities**: [value and unique indexes, ordered ranges, relations](https://ecs.xgamedev.net/docs/guide/indexes-and-relations),
-  [hierarchy](https://ecs.xgamedev.net/docs/guide/hierarchy), [table groups](https://ecs.xgamedev.net/docs/guide/groups).
-- **State over time**: [snapshots](https://ecs.xgamedev.net/docs/guide/snapshots), [saves and restarts](https://ecs.xgamedev.net/docs/guide/saves),
-  [migration, records and plugin unloading](https://ecs.xgamedev.net/docs/guide/migration-and-unload).
-- **[Threads](https://ecs.xgamedev.net/docs/guide/threading)**: one owner thread per world, parallel systems and parallel
+- **Finding entities**: [value and unique indexes, ordered ranges, relations](https://ecs.xgamedev.net/docs/guide/data/indexes-and-relations),
+  [hierarchy](https://ecs.xgamedev.net/docs/guide/data/hierarchy), [table groups](https://ecs.xgamedev.net/docs/guide/data/groups).
+- **State over time**: [snapshots](https://ecs.xgamedev.net/docs/guide/saves/snapshots), [saves and restarts](https://ecs.xgamedev.net/docs/guide/saves/saves),
+  [migration, records and plugin unloading](https://ecs.xgamedev.net/docs/guide/saves/migration-and-unload).
+- **[Threads](https://ecs.xgamedev.net/docs/guide/performance/threading)**: one owner thread per world, parallel systems and parallel
   `[ForEach]` methods, Native AOT.
-- **Tools**: [per-system timing, schedule, introspection, trimming](https://ecs.xgamedev.net/docs/guide/diagnostics),
-  [the analyzer](https://ecs.xgamedev.net/docs/guide/analyzer) (EECS002-EECS089, with code fixes).
+- **Tools**: [per-system timing, schedule, introspection, trimming](https://ecs.xgamedev.net/docs/guide/production/diagnostics),
+  [the analyzer](https://ecs.xgamedev.net/docs/guide/help/analyzer) (EECS002-EECS089, with code fixes).
 
 ## Example
 
@@ -322,35 +322,35 @@ Markdown copy of every page.
   them. No object per system, no virtual call: an assembly's systems run through one generated switch, and a generated
   pass finds its query by its job type. Classes deriving from `EcsSystem` change (a code change, with a code fix on
   the compiler's error: see the [migration guide](https://ecs.xgamedev.net/en/docs/migration#v4-8-systems)), and
-  EECS074 to EECS077 keep the new form ([systems](https://ecs.xgamedev.net/en/docs/guide/systems)).
+  EECS074 to EECS077 keep the new form ([systems](https://ecs.xgamedev.net/en/docs/guide/basics/systems)).
 - **SIMD without writing it.** A `[ForEach]` method over numbers runs as a vector loop the generator writes from its
   body, the way Burst compiles a job, with the same results bit for bit: components of 1 to 4 fields, narrow lanes
   (`byte`, `short`), `Vector2` / `Vector3` / `Vector4` fields, `Maybe<T>` parameters, parallel methods, totals into a
   `Reduce<T>` of `[Sum]` / `[Min]` / `[Max]` fields, and on AVX-512 components of up to 16 words. EECS055 names why a method stayed scalar, `SimdMode = SimdMode.Require` makes
   that a build error, and `FloatMode.Fast` takes the vector approximations of `Sin`, `Exp` and the rest
-  ([vector loops](https://ecs.xgamedev.net/en/docs/guide/systems#vector-loops)).
+  ([vector loops](https://ecs.xgamedev.net/en/docs/guide/basics/systems#vector-loops)).
 - **Parallel passes that need no locks.** `[ForEach]` parameters do per chunk what shared state would do with locks:
   `Reduce<T>` for totals (OpenMP's `reduction`), `Emit<T>` for records a later system applies, `Lookup<T>` to read
   other entities, `Scratch<T>` for a thread's working memory, `EntityRandom` for random numbers that are the same on
   any number of threads; `world.ParallelFor` runs a loop over other data on the same threads, and `ChunkRows` spreads
-  a few heavy rows ([threading](https://ecs.xgamedev.net/en/docs/guide/threading#reductions)). EECS060 and EECS061
+  a few heavy rows ([threading](https://ecs.xgamedev.net/en/docs/guide/performance/threading#reductions)). EECS060 and EECS061
   report parallel code that races, EECS086 to EECS089 a hand-written version of these parameters.
 - **Grids shaded like a GPU draws.** A grid cut into tiles is shaded by a method that takes a `Tile<TCell, TTile>`:
   the generator finds the neighbors, `ExchangeHalo` adds their edges (the halo, as wide and with as many neighbors as the
   stencil reads), and quiet tiles sleep until an edge beside them changes; `IDirectIndexed<TKey>` finds a tile by one
-  array read ([grids](https://ecs.xgamedev.net/en/docs/guide/grids)).
+  array read ([grids](https://ecs.xgamedev.net/en/docs/guide/performance/grids)).
 - **Declare it, the generator writes it.** `[Sum]`, `[Min]`, `[Max]` and the others on a singleton's fields declare a
   reduction; `[LookupKey]`, `[UniqueKey]` and `[Group]` on a member declare an index key or a group; `[GroupBy]`,
   `[WhenTargetDestroyed]` and `[NotSaved]` on a type declare every world's setup for it
-  ([declared parts](https://ecs.xgamedev.net/en/docs/guide/entities-and-components#declared-parts)).
+  ([declared parts](https://ecs.xgamedev.net/en/docs/guide/basics/entities-and-components#declared-parts)).
   `[UpdateInterval(n, Phase = p)]` on a system declares its cadence; `[EntityMethod]` writes the job and the entry point that
   run a method on one entity; `[Consume]` destroys the rows a pass handled
-  ([systems](https://ecs.xgamedev.net/en/docs/guide/systems#consume)).
+  ([systems](https://ecs.xgamedev.net/en/docs/guide/basics/systems#consume)).
 - **Servers that reach their peak and stop allocating.** `Reserve(prefab, n)` covers index keys, the retired table and
   free ids too; `DynamicBuffer<T>.FillPool` and `MaxPooledLength` keep the lists of buffers that come and go (chunks
   around players) in a pool shared across threads; `prefab.SetAbsent<T>()` gives instances a column for a state they
   enter later, so entering it moves no row; restores and loads reuse what the last one allocated
-  ([prefabs](https://ecs.xgamedev.net/en/docs/guide/prefabs#reserve)).
+  ([prefabs](https://ecs.xgamedev.net/en/docs/guide/basics/prefabs#reserve)).
 - **Smaller additions.** `ReadOnlyMaybe<T>`, `buffer.SetCount(n)`, `entity.GetOrAdd(value)`,
   `SaveEntitiesWithout`, `world.CollectIds`, enum elements in a `DynamicBuffer`, generic systems closed in another
   assembly under Native AOT, `<IlcInstructionSet>native</IlcInstructionSet>` in the templates for the `Vector512`

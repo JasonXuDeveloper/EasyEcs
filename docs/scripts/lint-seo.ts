@@ -12,8 +12,9 @@
  *   the home pages;
  * - sitemap.xml lists every indexable page (with lastmod and alternates) and
  *   nothing else; robots.txt allows the AI crawlers and names the sitemap;
- * - llms.txt / llms-full.txt and their Chinese versions link or contain every
- *   page, and every indexable docs page has its Markdown copy.
+ * - llms.txt links every page; llms-full.txt contains every written page and
+ *   llms-reference.txt every API reference page (Chinese versions alike), each
+ *   within its cap; every indexable docs page has its Markdown copy.
  *
  * `bun run build` runs it last (scripts/after-build.ts); on its own,
  * `bun run lint:seo` checks the last build.
@@ -335,6 +336,10 @@ export function lintSeo() {
     en: readFileSync(path.join(outDir, 'llms-full.txt'), 'utf8'),
     zh: readFileSync(path.join(outDir, 'llms-full.zh.txt'), 'utf8'),
   };
+  const llmsReference = {
+    en: readFileSync(path.join(outDir, 'llms-reference.txt'), 'utf8'),
+    zh: readFileSync(path.join(outDir, 'llms-reference.zh.txt'), 'utf8'),
+  };
   for (const lang of ['en', 'zh'] as const) {
     const name = lang === 'en' ? 'llms.txt' : 'llms.zh.txt';
     const full = lang === 'en' ? 'llms-full.txt' : 'llms-full.zh.txt';
@@ -343,8 +348,17 @@ export function lintSeo() {
     // The list stays a list: it is read whole by agents with small budgets.
     if (llms[lang].length > 60_000)
       fail(name, `${llms[lang].length} characters (max 60,000)`);
+    // The written pages and the generated reference are capped apart, so the reference's growth (every public
+    // member) never pushes the guide out of llms-full.txt.
     if (llmsFull[lang].length > 3_000_000)
       fail(full, `${llmsFull[lang].length} characters (max 3,000,000)`);
+    const reference =
+      lang === 'en' ? 'llms-reference.txt' : 'llms-reference.zh.txt';
+    if (llmsReference[lang].length > 2_000_000)
+      fail(
+        reference,
+        `${llmsReference[lang].length} characters (max 2,000,000)`,
+      );
   }
   for (const page of source.getPages()) {
     const lang = localeOf(page);
@@ -354,8 +368,16 @@ export function lintSeo() {
     const md = `${siteUrl}${shown.url}.md`;
     const name = lang === 'en' ? 'llms.txt' : 'llms.zh.txt';
     if (!llms[lang].includes(`](${md})`)) fail(name, `does not link ${md}`);
-    const full = lang === 'en' ? 'llms-full.txt' : 'llms-full.zh.txt';
-    if (!llmsFull[lang].includes(`URL: ${siteUrl}${shown.url}\n`))
+    const isRef = shown.slugs[0] === 'reference';
+    const full = isRef
+      ? lang === 'en'
+        ? 'llms-reference.txt'
+        : 'llms-reference.zh.txt'
+      : lang === 'en'
+        ? 'llms-full.txt'
+        : 'llms-full.zh.txt';
+    const text = isRef ? llmsReference[lang] : llmsFull[lang];
+    if (!text.includes(`URL: ${siteUrl}${shown.url}\n`))
       fail(full, `does not contain ${shown.url}`);
     if (own && !existsSync(path.join(outDir, `${page.url.slice(1)}.md`)))
       fail(page.url, 'no Markdown copy');

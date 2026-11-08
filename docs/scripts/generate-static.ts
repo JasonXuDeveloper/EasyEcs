@@ -54,11 +54,11 @@ const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 /* ------------------------------------------------------------------ */
 
 /**
- * React Router writes /en/docs/guide/queries as en/docs/guide/queries/index.html,
- * which Cloudflare Pages serves at /en/docs/guide/queries/ and reaches from the
+ * React Router writes /en/docs/guide/basics/queries as en/docs/guide/basics/queries/index.html,
+ * which Cloudflare Pages serves at /en/docs/guide/basics/queries/ and reaches from the
  * slash-less URL only through a 308 redirect. Every link, canonical URL and
  * sitemap entry uses the slash-less URL, so move each page to
- * en/docs/guide/queries.html: Pages then serves it at /en/docs/guide/queries
+ * en/docs/guide/basics/queries.html: Pages then serves it at /en/docs/guide/basics/queries
  * directly and redirects the trailing-slash and .html forms there.
  */
 async function flattenPages(dir: string) {
@@ -295,10 +295,10 @@ const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
         : []),
       `Install: \`${installCommand}\` in a net10.0 project ([NuGet](${nugetUrl})); the package includes the source generator, the analyzer and its code fixes.`,
       'Usage: components are structs implementing `IComponent` (empty structs are tags, `ISingletonComponent` for per-world state); a system is a class deriving from `EcsSystem` with `[ForEach]` methods; `world.AddSystem<T>()`, `world.CreateEntity(...)`, `world.Update()`.',
-      `Project layout: \`dotnet new install EasyEcs.Templates\` and \`dotnet new easyecs\` create a server with \`Components/\`, one system per file in \`Systems/\` and \`Program.cs\` as the host ([Structuring a real project](${siteUrl}/en/docs/guide/project-structure.md)). Debugging: \`world.DescribeTables()\`, \`entity.Describe()\`, \`system.Stats\` and \`system.Error\` ([Debugging and diagnostics](${siteUrl}/en/docs/guide/diagnostics.md)).`,
+      `Project layout: \`dotnet new install EasyEcs.Templates\` and \`dotnet new easyecs\` create a server with \`Components/\`, one system per file in \`Systems/\` and \`Program.cs\` as the host ([Structuring a real project](${siteUrl}/en/docs/guide/basics/project-structure.md)). Debugging: \`world.DescribeTables()\`, \`entity.Describe()\`, \`system.Stats\` and \`system.Error\` ([Debugging and diagnostics](${siteUrl}/en/docs/guide/production/diagnostics.md)).`,
       `EasyEcs targets net10.0 only. It runs in Godot 4 .NET projects that target net10.0 ([Unity and Godot](${siteUrl}/en/docs/faq.md)); it does not run on Unity (support is being evaluated: [Roadmap](${siteUrl}/en/docs/roadmap.md)) or older .NET runtimes.`,
       `These docs describe EasyEcs ${docsVersion}. Source code and issues: ${githubUrl} (MIT license).`,
-      `Full text of every page: [llms-full.txt](${siteUrl}/llms-full.txt); Chinese: [llms.zh.txt](${siteUrl}/llms.zh.txt)`,
+      `Full text of every written page: [llms-full.txt](${siteUrl}/llms-full.txt); the generated API reference: [llms-reference.txt](${siteUrl}/llms-reference.txt); Chinese: [llms.zh.txt](${siteUrl}/llms.zh.txt)`,
       'Each page below is also served as HTML at the same URL without `.md`.',
     ],
     optional: [
@@ -323,10 +323,10 @@ const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
         : []),
       `安装：在 net10.0 项目中运行 \`${installCommand}\`（[NuGet](${nugetUrl})），包内已包含源生成器、分析器和代码修复。`,
       '用法：组件是实现 `IComponent` 的结构体（空结构体即标签，World 级状态用 `ISingletonComponent`）；系统是继承 `EcsSystem` 的类，逻辑写在 `[ForEach]` 方法里；然后调用 `world.AddSystem<T>()`、`world.CreateEntity(...)`、`world.Update()`。',
-      `项目结构：\`dotnet new install EasyEcs.Templates\` 后运行 \`dotnet new easyecs\`，生成带 \`Components/\`、\`Systems/\`（一个文件一个系统）和宿主 \`Program.cs\` 的服务器（[项目结构](${siteUrl}/zh/docs/guide/project-structure.md)）。调试：\`world.DescribeTables()\`、\`entity.Describe()\`、\`system.Stats\` 与 \`system.Error\`（[调试与诊断](${siteUrl}/zh/docs/guide/diagnostics.md)）。`,
+      `项目结构：\`dotnet new install EasyEcs.Templates\` 后运行 \`dotnet new easyecs\`，生成带 \`Components/\`、\`Systems/\`（一个文件一个系统）和宿主 \`Program.cs\` 的服务器（[项目结构](${siteUrl}/zh/docs/guide/basics/project-structure.md)）。调试：\`world.DescribeTables()\`、\`entity.Describe()\`、\`system.Stats\` 与 \`system.Error\`（[调试与诊断](${siteUrl}/zh/docs/guide/production/diagnostics.md)）。`,
       `EasyEcs 只面向 net10.0。面向 net10.0 的 Godot 4 .NET 项目可以运行它（[Unity 与 Godot](${siteUrl}/zh/docs/faq.md)）；不支持 Unity（正在评估：[路线图](${siteUrl}/zh/docs/roadmap.md)）和更老的 .NET 运行时。`,
       `本文档对应 EasyEcs ${docsVersion}。源码与问题反馈：[GitHub](${githubUrl})（MIT 协议）。`,
-      `全部页面全文：[llms-full.zh.txt](${siteUrl}/llms-full.zh.txt)。英文版：[llms.txt](${siteUrl}/llms.txt)`,
+      `全部文档页面全文：[llms-full.zh.txt](${siteUrl}/llms-full.zh.txt)；自动生成的 API 参考：[llms-reference.zh.txt](${siteUrl}/llms-reference.zh.txt)。英文版：[llms.txt](${siteUrl}/llms.txt)`,
       '下列每个页面去掉 `.md` 即为对应的 HTML 页面；尚无中文版的页面链接到英文原文。',
     ],
     optional: [
@@ -424,13 +424,29 @@ function llmsList(locale: Locale) {
   return `${lines.join('\n')}\n`;
 }
 
-/** Every page, in sidebar order, as one document (English where no Chinese page exists yet) */
-async function llmsFull(locale: Locale) {
-  const pages = sidebarSections(locale).flatMap((section) =>
-    section.pages.map(ownOrEnglish),
-  );
+/** A page of the generated API reference (docs/content/reference, written by tools/ApiDocs). */
+function isReference(page: Page) {
+  return page.slugs[0] === 'reference';
+}
+
+/**
+ * The pages of a language in sidebar order, as one document (English where no Chinese page exists yet): the
+ * written pages in llms-full.txt, the generated API reference in llms-reference.txt, so the reference's growth never
+ * crowds out the guide.
+ */
+async function llmsFull(locale: Locale, reference: boolean) {
+  const pages = sidebarSections(locale)
+    .flatMap((section) => section.pages.map(ownOrEnglish))
+    .filter((page) => isReference(page) === reference);
+  const title = reference
+    ? locale === 'zh'
+      ? 'API 参考'
+      : 'API reference'
+    : locale === 'zh'
+      ? '文档'
+      : 'documentation';
   const header = [
-    `# EasyEcs ${docsVersion} ${locale === 'zh' ? '文档' : 'documentation'}`,
+    `# EasyEcs ${docsVersion} ${title}`,
     '',
     `> ${productSummary[locale]}`,
     '',
@@ -503,18 +519,21 @@ export async function generateStatic() {
   ];
   for (const locale of locales) {
     const list = llmsList(locale);
-    const full = await llmsFull(locale);
+    const full = await llmsFull(locale, false);
+    const reference = await llmsFull(locale, true);
     const suffix = locale === 'en' ? '' : `.${locale}`;
     tasks.push(
       write(`llms${suffix}.txt`, list),
       write(`llms-full${suffix}.txt`, full),
+      write(`llms-reference${suffix}.txt`, reference),
       // Also under the language prefix: /zh/llms.txt
       write(`${locale}/llms.txt`, list),
       write(`${locale}/llms-full.txt`, full),
+      write(`${locale}/llms-reference.txt`, reference),
     );
   }
 
-  // Markdown next to each page (/en/docs/guide/queries.md), for LLMs and the
+  // Markdown next to each page (/en/docs/guide/basics/queries.md), for LLMs and the
   // "Copy Markdown" page action; .mdx is served too. Fallback pages have none:
   // their page actions and alternate links point at the English copy.
   for (const page of source.getPages().filter(isOwn)) {

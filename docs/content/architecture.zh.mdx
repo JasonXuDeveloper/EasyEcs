@@ -39,18 +39,18 @@ flowchart TB
   - 非托管列是固定在 POH（pinned object heap）上的数组，第 0 行从 64 字节边界开始：大小是 2 的幂的组件，一行永远不会跨两条缓存行，
     向量读取也始终对齐。
   - 含引用的类型用普通 `T[]` 存；一行失去实体或组件时，这行的引用会被清掉，GC 才能回收它们指向的对象。
-  - [`DynamicBuffer<T>`](/zh/docs/guide/dynamic-buffers) 列每行存一个引用，指向这一行自己的列表，第一次写入时才创建。
+  - [`DynamicBuffer<T>`](/zh/docs/guide/data/dynamic-buffers) 列每行存一个引用，指向这一行自己的列表，第一次写入时才创建。
     搬行时只搬引用；快照和克隆会把元素复制进新列表。
   - 表满了翻倍，自己从不收缩：每张表的大小以它曾经容纳的最多实体数为上限。`world.TrimExcess()` 是唯一会还回内存的调用：它丢掉
     空表（从注册表、转移边和每个缓存查询的匹配里去掉；之后的变更需要时再创建），把其余的表缩到实体数向上取整到 2 的幂、最少 64 行，
     存在位和变更 tick 摘要一起缩。它只把 `StorageVersion` 加一次，并保留所有仍被存活快照持有行的表
-    （[还回内存](/zh/docs/guide/diagnostics#trim)）。
+    （[还回内存](/zh/docs/guide/production/diagnostics#trim)）。
 - **存在位。** 移除组件时实体留在原表，只清掉这一行对应组件的位（每行一位，每个 `ulong` 管 64 行）。一列在第一次移除时才有存在位；
   在那之前每行都有这个组件，列上也没有任何位。每列还记着有多少存活行缺这个组件，遍历据此按表决定：整张跳过、逐行全走，还是测位。
   只有一列有差异时，`Count` 和 `Any` 直接用这些计数作答，不读位。
 - **禁用组件**也是存在位：`entity.Disable<T>()` 清掉 `T` 的位并加上 `Disabled<T>` 标签；表在第一次禁用时多出这个标签列
   （每张表搬一次行，之后只是翻位）。
-- **分组。** 类型上的 `[GroupBy]`（或 `world.GroupBy<T>()`）让表除了按掩码，还按 [`IGroup`](/zh/docs/guide/groups) 组件的值区分，同一分组的实体在内存里连续，
+- **分组。** 类型上的 `[GroupBy]`（或 `world.GroupBy<T>()`）让表除了按掩码，还按 [`IGroup`](/zh/docs/guide/data/groups) 组件的值区分，同一分组的实体在内存里连续，
   `QueryFilter.InGroup<T>(g)` 只走这个分组的表。
 - **掩码**（`BitMask`）是带溢出区的 256 位 SIMD 位集。组件位是 `ushort`，一个进程最多可用 65,536 种组件：前 256 种内联
   （每次匹配表只需一次 `Vector256` 测试），其余放进溢出数组；溢出数组在第一次建表或建迁移边时分配，从不在热路径上分配。
@@ -81,7 +81,7 @@ flowchart TB
 遍历途中实体不会挪位置（[D24](/zh/docs/decisions#d24-an-indexs-key-holds-its-entities-in-one-array)）。键是本 World 实体的情况
 （关系、`ChildOf`）放在按目标 id 索引的数组里，查关系不用算哈希。索引在写入时维护：`Set`、`CreateEntity` 和 `CreateEntities`
 调用一个内联钩子，对没有索引的组件，JIT 会把它整个删掉。通过 `ref` 的写入无法被发现（`ref` 在值改变之前就交出去了），
-所以分析器直接拒绝它（[EECS015](/zh/docs/guide/analyzer)），而不是让每次查找都为此买单。第一次查找用一次查询建好索引；
+所以分析器直接拒绝它（[EECS015](/zh/docs/guide/help/analyzer)），而不是让每次查找都为此买单。第一次查找用一次查询建好索引；
 销毁实体或移除被索引的组件会立刻把它从索引里摘掉。
 
 ### 为什么只有添加才搬行 [#why-rows-move-only-on-adds]
@@ -134,7 +134,7 @@ stateDiagram-v2
   组件里存 `EntityId`，不要存句柄。
 - id 后进先出地回收：刚释放的 id 缓存行还是热的，`Meta` 的大小也只取决于存活实体数的峰值。`Meta` 永不收缩（`Dispose` 时只清零），
   句柄访问它因此不需要边界检查。
-- 对持有 [`ICleanupComponent`](/zh/docs/guide/cleanup-and-disable) 的实体调用 `Destroy` 会让它退休：失去其他组件，带着 `Retired` 标签留下，
+- 对持有 [`ICleanupComponent`](/zh/docs/guide/changes/cleanup-and-disable) 的实体调用 `Destroy` 会让它退休：失去其他组件，带着 `Retired` 标签留下，
   直到某个系统移除它最后一个清理组件。
 - 开启 `WorldOptions.DestroyLogCapacity` 后，每个 id 不再存活时（销毁、级联、迁出、最后一个清理组件被移除、`Restore` 或 `Load` 拿掉的实体），
   World 都会把它记进一个固定大小的环，每条记录 16 字节（`EntityId` 加变更 tick），随 World 一起预分配。读者各自保存自己的 tick，用
@@ -195,7 +195,7 @@ flowchart LR
   JIT 因此能把它们留在寄存器里。冷状态放在按线程池化的 `QueryWalk` 里，每张表、每次结构变更才访问一次。
   一个票据（ticket）用来区分遍历的当前使用者和已经结束的枚举器副本。
 
-使用者视角的规则见[遍历中的结构变更](/zh/docs/guide/structural-changes)。
+使用者视角的规则见[遍历中的结构变更](/zh/docs/guide/changes/structural-changes)。
 
 ## 系统 [#systems]
 
@@ -224,7 +224,7 @@ flowchart LR
 - `AddSystem` 调用 `OnCreate` 方法；`RemoveSystem` 和 `Dispose` 调用 `OnDestroy` 方法，`Dispose` 按逆序调用。
 - 异常会从更新中抛出；在 `SystemErrorPolicy.Disable` 下，抛异常的系统被关掉，异常留在 `system.Error` 里。
 - 系统之间只通过数据协作（[D1](/zh/docs/decisions#d1-state-changes-are-data-no-events-or-callbacks)），所有行为都按调度顺序执行。
-  使用细节见[系统](/zh/docs/guide/systems)。
+  使用细节见[系统](/zh/docs/guide/basics/systems)。
 
 ## 源生成器与分析器 [#source-generators-and-analyzer-easyecsgenerator]
 
@@ -234,7 +234,7 @@ flowchart LR
 | `SystemGenerator` | 把 `[ForEach]` 方法变成结构体 job（逐实体，或对 span 参数按连续行段），放在单独的 file 类里，通过 `[UnsafeAccessor]` 调用用户方法（[D16](/zh/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)）。每个 `[EcsSystem]` 得到一个代码结构体（`__X_SystemCode : ISystemCode`：钩子、job、访问集和节奏），每个程序集得到一个系统集合（`__EasyEcsSystems`），由模块初始化器注册；系统之外的静态方法得到一个入口。生成的 job 声明 `OneQuery`（它的过滤条件是常量），遍历直接读 World 按 job 类型保存的查询（[D104](/zh/docs/decisions#d104-one-query-per-job-type)）。`[Changed<T>]` / `[Removed<T>]` 变成 `Since(LastRunTick + 1)` 加一次对 `T` 的读声明；`Parallel = true` 把 job 分块执行。不可能做结构变更的 job 会加上 `INoStructuralChanges`。处理数值的逐实体方法会按方法体生成向量循环（`Kernel`：分支用掩码，支持窄通道、结构体值、宽行；[D68](/zh/docs/decisions#d68-vector-loops-without-opting-in)），否则给出逐行运行的原因；`[EntityMethod]`、`[Consume]` 和 `[UpdateInterval]` 也在这里编译。 |
 | `ComponentGenerator` | 为每个组件和单例生成 C# 14 扩展成员：`entity.Health`、`HasHealth`、`SetHealth(…)`、`IsDead`、`world.Clock`、`world.KillsIndex`、每种查询形状的 `item.Position`、缓冲和预制体的写方法，以及存档可以引用的类型和类型声明的设置（`[GroupBy]`、`[WhenTargetDestroyed]`、`[NotSaved]`）的注册。 |
 | `PartGenerator` | 把 partial 结构体用特性声明的内容写进它的另一个部分：由 `[Sum]` .. `[Any]` 生成 `IReduction<T>`，由 `[LookupKey]` / `[UniqueKey]` 生成显式的 `Key`，由 `[Group]` 生成 `Group`（[D101](/zh/docs/decisions#d101-declaration-attributes)）。 |
-| `EasyEcsAnalyzer` | 报告 EECS002–EECS103：生成器跳过的无效输入，以及违反 [ECS 设计原则](/zh/docs/ecs-principles)的代码，以及能用但有开销的代码。每个领域一个分析器（声明、系统、性能、用法、线程、生成部分、生成形式、lambda 遍历、视图、记录、遍历融合；`EasyEcsAnalyzer.All`），所以 `NoWarn` 掉一个领域的规则就省下它的开销。生成器从不报诊断，两者共用同一套检查。机械性的修复由 [EasyEcs.CodeFixes](/zh/docs/guide/analyzer) 提供。 |
+| `EasyEcsAnalyzer` | 报告 EECS002–EECS103：生成器跳过的无效输入，以及违反 [ECS 设计原则](/zh/docs/ecs-principles)的代码，以及能用但有开销的代码。每个领域一个分析器（声明、系统、性能、用法、线程、生成部分、生成形式、lambda 遍历、视图、记录、遍历融合；`EasyEcsAnalyzer.All`），所以 `NoWarn` 掉一个领域的规则就省下它的开销。生成器从不报诊断，两者共用同一套检查。机械性的修复由 [EasyEcs.CodeFixes](/zh/docs/guide/help/analyzer) 提供。 |
 
 生成器遵循增量生成的规则：先用 `ForAttributeWithMetadataName` 或纯语法谓词过滤；模型是由字符串组成、可比较相等的 record
 （任何符号、语法节点或位置都不会留到变换之后）；每个阶段都有追踪名；还有测试（`GeneratorTests`）保证一次编辑只重跑它改变的阶段，
@@ -283,9 +283,9 @@ flowchart TB
   （[D22](/zh/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)）。每次更新零分配。
 - 一次运行的同步只按块、按次，从不按行：领一块是在游标上做一次比较并交换，做完一块是对剩余块数做一次 `Interlocked.Decrement`（再对用时做一次
   `Interlocked.Add`）；调用线程用 `Volatile.Read` 自旋等这个计数，每次 `Decrement` 的完整内存屏障让这一块的写入（包括它的部分结果）排在合并之前
-  （[运行器怎样同步](/zh/docs/guide/threading#runner-contract)）。
+  （[运行器怎样同步](/zh/docs/guide/performance/threading#runner-contract)）。
 
-使用者视角的规则见[多线程与并行](/zh/docs/guide/threading)。
+使用者视角的规则见[多线程与并行](/zh/docs/guide/performance/threading)。
 
 ## 相关页面 [#related]
 

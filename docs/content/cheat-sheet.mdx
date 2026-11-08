@@ -32,30 +32,30 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 
 | Declare | Means | Guide |
 | --- | --- | --- |
-| `struct X : IComponent` | Per-entity data, one column per type | [Entities and components](/en/docs/guide/entities-and-components) |
-| `struct X : IComponent` with no fields | A tag: a yes-or-no state used in filters | [Entities and components](/en/docs/guide/entities-and-components) |
-| `struct X : ISingletonComponent` | One value per world | [Singletons](/en/docs/guide/singletons) |
-| `: ITracked` | Rows record the tick of their last write and removal | [Change tracking](/en/docs/guide/change-tracking) |
-| `[LookupKey]` on a member (or on the struct: the whole value) of a `partial` struct | Found by value through `world.Index<T, TKey>()`; the generator writes `IIndexed<TKey>` and its `Key` (a key of several members: `IIndexed<TKey>` by hand) | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
-| `[UniqueKey]` on a member (or the struct) | A key that names one entity (`IUniqueIndexed<TKey>`): `index.Get(key)`; a write that would give a second entity the key throws | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
-| `: IDirectMapped<TKey>` with `Key`, `static Slots`, `static SlotOf(key)` | A unique key that maps onto bounded slots (grid cells): `Get` / `TryGet` read one array entry | [Direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index) |
-| `[LookupKey] EntityId` | A link to one entity, found from the target | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
-| `: IRelation` with `Target` | Many links per entity, kept in a buffer | [Indexes and relations](/en/docs/guide/indexes-and-relations) |
-| `[Group]` on an `int` (or `int` enum) member; `[GroupBy]` on the struct | Splits tables by value (`IGroup`): in every world with `[GroupBy]`, else after `world.GroupBy<T>()` | [Groups](/en/docs/guide/groups) |
-| `[WhenTargetDestroyed(policy)]` on a relation or an `EntityId`-keyed component | What destroying a target does to the links to it, in every world | [Target policies](/en/docs/guide/indexes-and-relations#target-policies) |
-| `[Sum]` / `[Product]` / `[Min]` / `[Max]` / `[All]` / `[Any]` on the fields of a `partial` singleton | A reduction: the generator writes `IReduction<T>` (`Identity`, `Combine`) for `ref Reduce<T>` | [Reductions](/en/docs/guide/threading#reductions) |
-| `[NotSaved]` | Runtime state no save holds (a connection, a cache); needs no Nino formatter | [Saves](/en/docs/guide/saves#not-saved) |
-| `: ITile<TKey>` (`Width`, `Depth`, `Key`, `Beside`) on a tile component | A grid tile: its cells in a `DynamicBuffer<TCell>`, its neighbours found by the generator for `Tile<TCell, TTile>` | [Grid tiles](/en/docs/guide/grids) |
-| `: ICleanupComponent` | Outlives `Destroy`: the other components go, the entity gets the `Retired` tag and stays until a system removes the last cleanup component | [Cleanup and disable](/en/docs/guide/cleanup-and-disable) |
-| `Disabled<T>` | The tag an entity carries while its `T` is disabled: query it to find the paused ones | [Cleanup and disable](/en/docs/guide/cleanup-and-disable) |
-| `DynamicBuffer<T>` | A list per entity, every write tracked | [Dynamic buffers](/en/docs/guide/dynamic-buffers) |
-| `ChildOf(EntityId Parent)` | The built-in hierarchy link | [Hierarchy](/en/docs/guide/hierarchy) |
-| `struct G : ISystemGroup` | A group of systems with its own cadence | [Systems](/en/docs/guide/systems) |
-| `: ISystemGroupWith<T>` / `ISystemGroupWithout<T>` on a group (or an interface it implements) | The group's systems visit only entities with / without `T`; a generic interface gives each actor type its own filtered group | [Systems](/en/docs/guide/systems#group-filters) |
-| `class S<T> : EcsSystem` | A generic system: each closed type (`S<Position>`) is a system of its own | [Systems](/en/docs/guide/systems#generic-systems) |
+| `struct X : IComponent` | Per-entity data, one column per type | [Entities and components](/en/docs/guide/basics/entities-and-components) |
+| `struct X : IComponent` with no fields | A tag: a yes-or-no state used in filters | [Entities and components](/en/docs/guide/basics/entities-and-components) |
+| `struct X : ISingletonComponent` | One value per world | [Singletons](/en/docs/guide/basics/singletons) |
+| `: ITracked` | Rows record the tick of their last write and removal | [Change tracking](/en/docs/guide/changes/change-tracking) |
+| `[LookupKey]` on a member (or on the struct: the whole value) of a `partial` struct | Found by value through `world.Index<T, TKey>()`; the generator writes `IIndexed<TKey>` and its `Key` (a key of several members: `IIndexed<TKey>` by hand) | [Indexes and relations](/en/docs/guide/data/indexes-and-relations) |
+| `[UniqueKey]` on a member (or the struct) | A key that names one entity (`IUniqueIndexed<TKey>`): `index.Get(key)`; a write that would give a second entity the key throws | [Indexes and relations](/en/docs/guide/data/indexes-and-relations) |
+| `: IDirectMapped<TKey>` with `Key`, `static Slots`, `static SlotOf(key)` | A unique key that maps onto bounded slots (grid cells): `Get` / `TryGet` read one array entry | [Direct-mapped keys](/en/docs/guide/data/indexes-and-relations#direct-index) |
+| `[LookupKey] EntityId` | A link to one entity, found from the target | [Indexes and relations](/en/docs/guide/data/indexes-and-relations) |
+| `: IRelation` with `Target` | Many links per entity, kept in a buffer | [Indexes and relations](/en/docs/guide/data/indexes-and-relations) |
+| `[Group]` on an `int` (or `int` enum) member; `[GroupBy]` on the struct | Splits tables by value (`IGroup`): in every world with `[GroupBy]`, else after `world.GroupBy<T>()` | [Groups](/en/docs/guide/data/groups) |
+| `[WhenTargetDestroyed(policy)]` on a relation or an `EntityId`-keyed component | What destroying a target does to the links to it, in every world | [Target policies](/en/docs/guide/data/indexes-and-relations#target-policies) |
+| `[Sum]` / `[Product]` / `[Min]` / `[Max]` / `[All]` / `[Any]` on the fields of a `partial` singleton | A reduction: the generator writes `IReduction<T>` (`Identity`, `Combine`) for `ref Reduce<T>` | [Reductions](/en/docs/guide/performance/threading#reductions) |
+| `[NotSaved]` | Runtime state no save holds (a connection, a cache); needs no Nino formatter | [Saves](/en/docs/guide/saves/saves#not-saved) |
+| `: ITile<TKey>` (`Width`, `Depth`, `Key`, `Beside`) on a tile component | A grid tile: its cells in a `DynamicBuffer<TCell>`, its neighbours found by the generator for `Tile<TCell, TTile>` | [Grid tiles](/en/docs/guide/performance/grids) |
+| `: ICleanupComponent` | Outlives `Destroy`: the other components go, the entity gets the `Retired` tag and stays until a system removes the last cleanup component | [Cleanup and disable](/en/docs/guide/changes/cleanup-and-disable) |
+| `Disabled<T>` | The tag an entity carries while its `T` is disabled: query it to find the paused ones | [Cleanup and disable](/en/docs/guide/changes/cleanup-and-disable) |
+| `DynamicBuffer<T>` | A list per entity, every write tracked | [Dynamic buffers](/en/docs/guide/data/dynamic-buffers) |
+| `ChildOf(EntityId Parent)` | The built-in hierarchy link | [Hierarchy](/en/docs/guide/data/hierarchy) |
+| `struct G : ISystemGroup` | A group of systems with its own cadence | [Systems](/en/docs/guide/basics/systems) |
+| `: ISystemGroupWith<T>` / `ISystemGroupWithout<T>` on a group (or an interface it implements) | The group's systems visit only entities with / without `T`; a generic interface gives each actor type its own filtered group | [Systems](/en/docs/guide/basics/systems#group-filters) |
+| `class S<T> : EcsSystem` | A generic system: each closed type (`S<Position>`) is a system of its own | [Systems](/en/docs/guide/basics/systems#generic-systems) |
 
-Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an entity link as an `EntityId`, not an
-`Entity` ([EECS017](/en/docs/guide/analyzer#eecs017)).
+Components are structs ([EECS006](/en/docs/guide/help/analyzer#eecs006)). Keep an entity link as an `EntityId`, not an
+`Entity` ([EECS017](/en/docs/guide/help/analyzer#eecs017)).
 
 ## World [#world]
 
@@ -75,8 +75,8 @@ Components are structs ([EECS006](/en/docs/guide/analyzer#eecs006)). Keep an ent
 | `world.DescribeTables()` | Tables, columns, rows and bytes, for tools |
 | `world.DescribeSchedule()` | Every group's stages, each system's reads and writes, why it waits, the pairs only registration orders; `ToString()` / `ToMermaid()` |
 | `world.TrimExcess()` | Drops empty tables and shrinks the others after a peak, at a quiet moment |
-| `world.ParallelFor(count, ref job)` / `ParallelFor(ref buffer, ref job)` | An `IForRange` job over indexes, or an `IForSpan<T>` job over a `DynamicBuffer<T>`'s elements, in chunks on the world's runner ([ParallelFor](/en/docs/guide/threading#parallel-for)) |
-| `world.SetEntityRandom(Seed: s)` | The seed of `EntityRandom`; every `Update()` advances its tick: each number a function of (seed, entity, tick, stream) ([EntityRandom](/en/docs/guide/threading#entity-random)) |
+| `world.ParallelFor(count, ref job)` / `ParallelFor(ref buffer, ref job)` | An `IForRange` job over indexes, or an `IForSpan<T>` job over a `DynamicBuffer<T>`'s elements, in chunks on the world's runner ([ParallelFor](/en/docs/guide/performance/threading#parallel-for)) |
+| `world.SetEntityRandom(Seed: s)` | The seed of `EntityRandom`; every `Update()` advances its tick: each number a function of (seed, entity, tick, stream) ([EntityRandom](/en/docs/guide/performance/threading#entity-random)) |
 | `world.DestroyedSince(since, into, out count)` / `DestroyLogOldestTick` | Entities destroyed since a tick, with `WorldOptions.DestroyLogCapacity`; `false`: the reader is older than the log |
 
 ```csharp
@@ -135,7 +135,7 @@ bool applied = Requests.TakeHit(unit, 30);           // false: not alive or no H
 ```
 
 A `ref` stays valid until the next structural change and never across `await`
-([ref and await](/en/docs/guide/refs-and-await)).
+([ref and await](/en/docs/guide/changes/refs-and-await)).
 
 ## Generated members [#generated-members]
 
@@ -164,7 +164,7 @@ bool rewritten = unit.SetHealthIfChanged(80);       // false: the value is alrea
 bool dead = unit.IsDead;
 ```
 
-Guide: [Entities and components](/en/docs/guide/entities-and-components).
+Guide: [Entities and components](/en/docs/guide/basics/entities-and-components).
 
 ## Systems and [ForEach] [#systems]
 
@@ -184,8 +184,8 @@ public ref struct MovementSystem
 A static per-entity method whose components hold 1 to 4 numbers of one size (`float`, `int`, …) also gets a vector
 loop written by the generator (`Vector512` where the CPU has AVX-512, then `Vector<T>`), with the same results bit for
 bit
-([vector loops](/en/docs/guide/systems#vector-loops)). This one gets it: two `float`s per component.
-[EECS055](/en/docs/guide/analyzer#eecs055) says why a method did not, and `SystemInfo.Loops` in
+([vector loops](/en/docs/guide/basics/systems#vector-loops)). This one gets it: two `float`s per component.
+[EECS055](/en/docs/guide/help/analyzer#eecs055) says why a method did not, and `SystemInfo.Loops` in
 `world.DescribeSchedule()` names the loop each method got.
 
 ### [ForEach] parameters [#foreach-parameters]
@@ -193,20 +193,20 @@ bit
 | Parameter | Is | Notes |
 | --- | --- | --- |
 | `ref T` | A component the method writes | 1 to 9 components; a write for change tracking |
-| `in T` | A component the method reads | Not a write ([EECS011](/en/docs/guide/analyzer#eecs011) catches writes through `in`) |
-| `Span<T>` / `ReadOnlySpan<T>` | A run of rows of `T` (a batch method) | Cannot mix with per-entity parameters ([EECS009](/en/docs/guide/analyzer#eecs009)) |
+| `in T` | A component the method reads | Not a write ([EECS011](/en/docs/guide/help/analyzer#eecs011) catches writes through `in`) |
+| `Span<T>` / `ReadOnlySpan<T>` | A run of rows of `T` (a batch method) | Cannot mix with per-entity parameters ([EECS009](/en/docs/guide/help/analyzer#eecs009)) |
 | `ref S` / `in S` | A singleton | Resolved once per pass; throws if it was not added |
 | `Entity` | The current entity | Use it for structural changes |
 | `World` | The world | For creating entities from a static method |
 | `EntitySpan` | The entities of a batch method's run | Batch methods only |
 | `Maybe<T>` | A component the entity may lack | `HasValue`, `Value` |
 | `ReadOnlyMaybe<T>` | The same, read only (indexed components too) | `HasValue`, `Value` (`ref readonly`) |
-| `Scratch<T>` | The method's working memory on the running thread, kept between rows | `Value` (`ref T`, `default` at first: `scratch.Value ??= new()`); clear it per row; never store what it holds ([scratch](/en/docs/guide/threading#scratch), [EECS058](/en/docs/guide/analyzer#eecs058)) |
-| `Lookup<T>` | Read-only `T` of any entity, as it was before the pass; parallel too | `lookup[id]` (`ReadOnlyMaybe<T>`), `Read(id)`, `Has(id)`; `TryFind`, `Find`, `Count` by key ([lookups](/en/docs/guide/threading#lookups), [EECS059](/en/docs/guide/analyzer#eecs059)) |
-| `ref Reduce<T>` | A total over the rows into singleton `T : IReduction<T>` | Always by `ref` (else EECS002); the `Value` field is this chunk's partial result; the combined result replaces `T` ([reductions](/en/docs/guide/threading#reductions), [EECS057](/en/docs/guide/analyzer#eecs057)) |
-| `Emit<T>` | Records the pass appends, by value: `Add(record)` / `AddRange(records)` | Joined in row order into singleton `Emitted<T>` (`Items`, a `DynamicBuffer<T>`) when the pass ends; a later system applies and clears them ([Emit](/en/docs/guide/threading#emit), [EECS070](/en/docs/guide/analyzer#eecs070)) |
-| `in EntityRandom` | The singleton of deterministic random numbers | `random.Float(entity.Id, stream)`, `Range`, `Chance`, `Bits`: the same on any thread count ([EntityRandom](/en/docs/guide/threading#entity-random), [EECS071](/en/docs/guide/analyzer#eecs071)) |
-| `Tile<TCell, TTile>` | A grid tile's cells with its neighbours' edges | `tile.ExchangeHalo()`, then `Rows` and `At(row).Load128`; parallel ([grid tiles](/en/docs/guide/grids)) |
+| `Scratch<T>` | The method's working memory on the running thread, kept between rows | `Value` (`ref T`, `default` at first: `scratch.Value ??= new()`); clear it per row; never store what it holds ([scratch](/en/docs/guide/performance/threading#scratch), [EECS058](/en/docs/guide/help/analyzer#eecs058)) |
+| `Lookup<T>` | Read-only `T` of any entity, as it was before the pass; parallel too | `lookup[id]` (`ReadOnlyMaybe<T>`), `Read(id)`, `Has(id)`; `TryFind`, `Find`, `Count` by key ([lookups](/en/docs/guide/performance/threading#lookups), [EECS059](/en/docs/guide/help/analyzer#eecs059)) |
+| `ref Reduce<T>` | A total over the rows into singleton `T : IReduction<T>` | Always by `ref` (else EECS002); the `Value` field is this chunk's partial result; the combined result replaces `T` ([reductions](/en/docs/guide/performance/threading#reductions), [EECS057](/en/docs/guide/help/analyzer#eecs057)) |
+| `Emit<T>` | Records the pass appends, by value: `Add(record)` / `AddRange(records)` | Joined in row order into singleton `Emitted<T>` (`Items`, a `DynamicBuffer<T>`) when the pass ends; a later system applies and clears them ([Emit](/en/docs/guide/performance/threading#emit), [EECS070](/en/docs/guide/help/analyzer#eecs070)) |
+| `in EntityRandom` | The singleton of deterministic random numbers | `random.Float(entity.Id, stream)`, `Range`, `Chance`, `Bits`: the same on any thread count ([EntityRandom](/en/docs/guide/performance/threading#entity-random), [EECS071](/en/docs/guide/help/analyzer#eecs071)) |
+| `Tile<TCell, TTile>` | A grid tile's cells with its neighbours' edges | `tile.ExchangeHalo()`, then `Rows` and `At(row).Load128`; parallel ([grid tiles](/en/docs/guide/performance/grids)) |
 | `Mut<T>` | A component the method writes on some rows | `Value` reads; `Write()` and a `SetIfChanged(value)` that changed it stamp the row; a write for the scheduler |
 | Any other type (outside a system) | A value the caller passes to the entry point | `ref int count`, `in Settings s` |
 
@@ -214,20 +214,20 @@ bit
 
 | Attribute | On | Does |
 | --- | --- | --- |
-| `[ForEach]` / `[ForEach(Parallel = true)]` | Method | The method is the loop; `Parallel` splits rows across threads ([EECS010](/en/docs/guide/analyzer#eecs010)) |
-| `[ForEach(Parallel = true, ChunkSize = n)]` | Method | Threads claim `n` rows at a time (OpenMP's `schedule(dynamic, n)`): for a few hundred heavy rows ([chunk size](/en/docs/guide/threading#chunk-rows), [EECS054](/en/docs/guide/analyzer#eecs054)) |
-| `[ForEach(SimdMode = SimdMode.Require)]` | Method | The method must get its vector loop, else a build error ([EECS056](/en/docs/guide/analyzer#eecs056)); `SimdMode.Off` keeps it scalar without [EECS055](/en/docs/guide/analyzer#eecs055) |
-| `[ForEach(FloatMode = FloatMode.Fast)]` | Method | `Sin`, `Cos`, `Exp`, `Log`, `Log2`, `Hypot` in the vector loop take .NET's vector approximations, and a float `Reduce<T>` sum adds lane by lane; `Exact` (the default) keeps the method's results bit for bit ([FloatMode](/en/docs/guide/systems#float-mode)) |
-| `[ForEach, Consume]` | Method | The rows the pass visited are destroyed when it ends: events, commands ([Consume](/en/docs/guide/systems#consume), [EECS084](/en/docs/guide/analyzer#eecs084)) |
-| `[EntityMethod]` | Static method | Runs on one entity through a generated entry point, `Owner.Method(entity, values)` ([one entity](/en/docs/guide/queries#run-on-one-entity), [EECS080](/en/docs/guide/analyzer#eecs080)) |
-| `[ForEach(Slices = N)]` | Method | Each run visits one slice, about 1 / N of the rows: every row once per N runs (not with `Changed` / `Removed`: [EECS035](/en/docs/guide/analyzer#eecs035)) |
+| `[ForEach]` / `[ForEach(Parallel = true)]` | Method | The method is the loop; `Parallel` splits rows across threads ([EECS010](/en/docs/guide/help/analyzer#eecs010)) |
+| `[ForEach(Parallel = true, ChunkSize = n)]` | Method | Threads claim `n` rows at a time (OpenMP's `schedule(dynamic, n)`): for a few hundred heavy rows ([chunk size](/en/docs/guide/performance/threading#chunk-rows), [EECS054](/en/docs/guide/help/analyzer#eecs054)) |
+| `[ForEach(SimdMode = SimdMode.Require)]` | Method | The method must get its vector loop, else a build error ([EECS056](/en/docs/guide/help/analyzer#eecs056)); `SimdMode.Off` keeps it scalar without [EECS055](/en/docs/guide/help/analyzer#eecs055) |
+| `[ForEach(FloatMode = FloatMode.Fast)]` | Method | `Sin`, `Cos`, `Exp`, `Log`, `Log2`, `Hypot` in the vector loop take .NET's vector approximations, and a float `Reduce<T>` sum adds lane by lane; `Exact` (the default) keeps the method's results bit for bit ([FloatMode](/en/docs/guide/basics/systems#float-mode)) |
+| `[ForEach, Consume]` | Method | The rows the pass visited are destroyed when it ends: events, commands ([Consume](/en/docs/guide/basics/systems#consume), [EECS084](/en/docs/guide/help/analyzer#eecs084)) |
+| `[EntityMethod]` | Static method | Runs on one entity through a generated entry point, `Owner.Method(entity, values)` ([one entity](/en/docs/guide/basics/queries#run-on-one-entity), [EECS080](/en/docs/guide/help/analyzer#eecs080)) |
+| `[ForEach(Slices = N)]` | Method | Each run visits one slice, about 1 / N of the rows: every row once per N runs (not with `Changed` / `Removed`: [EECS035](/en/docs/guide/help/analyzer#eecs035)) |
 | `[With<T>]` | Method, system group | Requires `T` without passing it |
 | `[Without<T>]` | Method, system group | Excludes entities with `T` |
 | `[WithAny<A, B>]` | Method, system group | Requires at least one of them |
 | `[Changed<T>]` | Method | Rows whose tracked `T` was written since the system last ran |
 | `[Removed<T>]` | Method | Entities that lost tracked `T` since the system last ran |
 | `[ChangedAny<A, B>]` / `[RemovedAny<A, B>]` | Method | Rows where at least one of 2 to 9 tracked components was written, or lost |
-| `[UpdateBefore<S>]` / `[UpdateAfter<S>]` | System | Ordering ([EECS019](/en/docs/guide/analyzer#eecs019) rejects cycles) |
+| `[UpdateBefore<S>]` / `[UpdateAfter<S>]` | System | Ordering ([EECS019](/en/docs/guide/help/analyzer#eecs019) rejects cycles) |
 | `[UpdateInGroup<G>]` | System | Runs on `world.Update<G>()` only |
 
 ```csharp
@@ -244,7 +244,7 @@ public ref struct DecaySystem
 ```
 
 `[Changed<T>]` and `[Removed<T>]` go on methods only. A system group takes `[With<T>]`, `[Without<T>]` and
-`[WithAny<T1, T2>]` ([EECS023](/en/docs/guide/analyzer#eecs023) flags them on any other struct), or `ISystemGroupWith<T>` /
+`[WithAny<T1, T2>]` ([EECS023](/en/docs/guide/help/analyzer#eecs023) flags them on any other struct), or `ISystemGroupWith<T>` /
 `ISystemGroupWithout<T>`, which a generic group interface needs because an attribute cannot name a type parameter:
 
 ```csharp
@@ -266,8 +266,8 @@ public struct Shop : IActorGroup<Shop>;             // the systems of [UpdateInG
 | `RunCount` | Runs before the current one (a sliced method visits slice `RunCount % N`) |
 | `Stats` | `Runs`, `LastTime`, `TotalTime`, `AverageTime`, `LastAllocated` / `TotalAllocated` (bytes), `LastEntities` / `TotalEntities` (matched when its pass starts) with `MeasureSystems` |
 
-Systems keep no state ([EECS007](/en/docs/guide/analyzer#eecs007)) and never reference each other
-([EECS008](/en/docs/guide/analyzer#eecs008)). Guide: [Systems](/en/docs/guide/systems).
+Systems keep no state ([EECS007](/en/docs/guide/help/analyzer#eecs007)) and never reference each other
+([EECS008](/en/docs/guide/help/analyzer#eecs008)). Guide: [Systems](/en/docs/guide/basics/systems).
 
 ## Queries and filters [#queries]
 
@@ -306,7 +306,7 @@ bool anyDead = world.Any<Dead>();
 | `.Slice(index, of)` | Slice `index` of the `of` slices of every table, for the `ForEach` calls only |
 | `.InGroup<T>(group)` | One group of a grouped component |
 
-Guide: [Queries and filters](/en/docs/guide/queries).
+Guide: [Queries and filters](/en/docs/guide/basics/queries).
 
 ## Singletons [#singletons]
 
@@ -322,7 +322,7 @@ world.SetClock(0);                                  // generated: adds it if mis
 world.Clock.Tick++;
 ```
 
-Guide: [Singletons](/en/docs/guide/singletons).
+Guide: [Singletons](/en/docs/guide/basics/singletons).
 
 ## Change tracking [#change-tracking]
 
@@ -369,8 +369,8 @@ var gone = new EntityId[4096];
 if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* older than the log: send everything */ }
 ```
 
-Guide: [Change tracking](/en/docs/guide/change-tracking), with the
-[whole table of writes](/en/docs/guide/change-tracking#what-counts-as-a-write).
+Guide: [Change tracking](/en/docs/guide/changes/change-tracking), with the
+[whole table of writes](/en/docs/guide/changes/change-tracking#what-counts-as-a-write).
 
 ## Indexes, relations, hierarchy, groups [#indexes]
 
@@ -404,9 +404,9 @@ Entity holder = world.AccountIndex.Get(42);        // the same entity; a second 
 ```
 
 Indexed and grouped components are written with `Set`, never through a `ref`
-([EECS015](/en/docs/guide/analyzer#eecs015)), and not while a `foreach` walks their index
-([EECS042](/en/docs/guide/analyzer#eecs042)). Guides: [Indexes and relations](/en/docs/guide/indexes-and-relations),
-[Hierarchy](/en/docs/guide/hierarchy), [Groups](/en/docs/guide/groups).
+([EECS015](/en/docs/guide/help/analyzer#eecs015)), and not while a `foreach` walks their index
+([EECS042](/en/docs/guide/help/analyzer#eecs042)). Guides: [Indexes and relations](/en/docs/guide/data/indexes-and-relations),
+[Hierarchy](/en/docs/guide/data/hierarchy), [Groups](/en/docs/guide/data/groups).
 
 ## Prefabs and bulk operations [#prefabs-and-bulk]
 
@@ -417,10 +417,10 @@ Indexed and grouped components are written with `Set`, never through a `ref`
 | `prefab.SetBuffer(items)` | A `DynamicBuffer<T>` each instance gets a copy of |
 | `world.Instantiate(prefab)` / `Instantiate(prefab, span)` | One entity, or a wave in one pass |
 | `world.Instantiate(prefab, a, b, …)` / `Instantiate(prefab, span, a, b, …)` | The same with up to 9 components of its own, replacing or adding to the prefab's: one row copy |
-| `prefab.SetAbsent<T>()` | A column for `T` without the component: adding `T` to an instance later flips a presence bit, the row stays ([SetAbsent](/en/docs/guide/prefabs#set-absent)) |
+| `prefab.SetAbsent<T>()` | A column for `T` without the component: adding `T` to an instance later flips a presence bit, the row stays ([SetAbsent](/en/docs/guide/basics/prefabs#set-absent)) |
 | `world.CreateEntities(span, a, b, …)` | A wave with the same values |
 | `world.DestroyAll<T…>(filter)` | Destroys every match; returns how many |
-| `world.CollectIds<T1..Tn>(span, filter)` | Writes the ids of the first matches into `span`, in query order, until it is full; returns how many ([bounded batch](/en/docs/guide/queries#collect-ids)) |
+| `world.CollectIds<T1..Tn>(span, filter)` | Writes the ids of the first matches into `span`, in query order, until it is full; returns how many ([bounded batch](/en/docs/guide/basics/queries#collect-ids)) |
 | `world.DestroyEntities(ids)` | Destroys a list of ids in one pass; returns how many |
 | `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | One component set or removed on every match; `SetAll` skips entities tagged `Retired` unless the filter names it |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | One component disabled or enabled on every match |
@@ -434,7 +434,7 @@ world.SetAll(new Velocity(0, 0), QueryFilter.Create().With<Health>());
 world.DestroyAll<Dead>();
 ```
 
-Guides: [Prefabs](/en/docs/guide/prefabs), [Bulk operations](/en/docs/guide/bulk).
+Guides: [Prefabs](/en/docs/guide/basics/prefabs), [Bulk operations](/en/docs/guide/changes/bulk).
 
 ## Dynamic buffers [#dynamic-buffers]
 
@@ -449,7 +449,7 @@ by `ref` from `e.WriteLoot()` (or `GetOrAddLoot()`), so each one counts for chan
 | `EnsureCapacity(n)` / `TrimExcess()` | Grows once before a known count, gives memory back |
 | `AsSpan()` | A `Span<T>` over the elements, for writes in place |
 | `SetCount(n)` | Sets the count (added elements `default`) and returns the span to write the whole buffer in place |
-| `DynamicBuffer<T>.MaxPooledLength = n` (static) | The longest list a dead buffer of `T` gives back to its pool, set once at startup ([pool](/en/docs/guide/dynamic-buffers#pool)) |
+| `DynamicBuffer<T>.MaxPooledLength = n` (static) | The longest list a dead buffer of `T` gives back to its pool, set once at startup ([pool](/en/docs/guide/data/dynamic-buffers#pool)) |
 | `DynamicBuffer<T>.FillPool(n)` (static) | Fills the pool with `n` empty lists at startup, after `MaxPooledLength` |
 
 ```csharp
@@ -460,7 +460,7 @@ loot.Add(new Loot(7));
 loot.RemoveAtSwapBack(0);
 ```
 
-Guide: [Dynamic buffers](/en/docs/guide/dynamic-buffers).
+Guide: [Dynamic buffers](/en/docs/guide/data/dynamic-buffers).
 
 ## Snapshots, saves, migration [#persistence]
 
@@ -503,8 +503,8 @@ next.SetConfig(64);                                 // the new version's configu
 next.LoadKeeping(restart.WrittenSpan, NewConfig, markWritten: false);   // Config stays as set
 ```
 
-Guides: [Snapshots](/en/docs/guide/snapshots), [Saves](/en/docs/guide/saves),
-[Migration and unloading](/en/docs/guide/migration-and-unload#records).
+Guides: [Snapshots](/en/docs/guide/saves/snapshots), [Saves](/en/docs/guide/saves/saves),
+[Migration and unloading](/en/docs/guide/saves/migration-and-unload#records).
 
 ## World options [#world-options]
 
@@ -521,10 +521,10 @@ Guides: [Snapshots](/en/docs/guide/snapshots), [Saves](/en/docs/guide/saves),
 using var server = new World(new WorldOptions { ParallelSystems = true, SystemErrors = SystemErrorPolicy.Disable });
 ```
 
-Guide: [Threading](/en/docs/guide/threading).
+Guide: [Threading](/en/docs/guide/performance/threading).
 
-Running it in a server and checking it: [Hosting](/en/docs/guide/hosting),
-[Testing systems](/en/docs/guide/testing), [Debugging and diagnostics](/en/docs/guide/diagnostics).
+Running it in a server and checking it: [Hosting](/en/docs/guide/production/hosting),
+[Testing systems](/en/docs/guide/production/testing), [Debugging and diagnostics](/en/docs/guide/production/diagnostics).
 
 ## Related [#related]
 

@@ -148,7 +148,7 @@ world.CreateEntities(garrison, new Position(0, 0), new Velocity(0, 0), new Healt
 
 | 需求 | 用 | 实测 |
 | --- | --- | --- |
-| 系统的逐实体逻辑 | [`[ForEach]`](/zh/docs/guide/systems) 方法 | 每个实体 <BenchValue k="forEach.perEntity" />，两个普通数组是 <BenchValue k="rawArray.perEntity" /> |
+| 系统的逐实体逻辑 | [`[ForEach]`](/zh/docs/guide/basics/systems) 方法 | 每个实体 <BenchValue k="forEach.perEntity" />，两个普通数组是 <BenchValue k="rawArray.perEntity" /> |
 | 多行上的算术 | 向量化的批量 `[ForEach]` 方法（span） | <BenchValue k="ops.iterate2Simd" />，逐实体是 <BenchValue k="ops.iterate2" />（100,000 个实体） |
 | 繁重的逐实体工作 | `[ForEach(Parallel = true)]` | <BenchValue k="parallel.forEach.on" />，单线程是 <BenchValue k="parallel.forEach.off" />（100,000 个实体，4 核） |
 | 系统之外、每个 tick 都跑的循环 | 通过入口运行的静态 `[ForEach]` 方法，或 struct job（`world.ForEach`） | <BenchValue k="runner.runner" />，`Query` 循环是 <BenchValue k="runner.query" /> |
@@ -156,7 +156,7 @@ world.CreateEntities(garrison, new Position(0, 0), new Velocity(0, 0), new Healt
 | “有多少？”/“有没有？” | `world.Count` / `world.Any` | 100,000 行需要逐位测试时 <BenchValue k="count.tested" /> |
 | 上次运行以来写过的少数行 | `ITracked` + `[Changed<T>]` | <BenchValue k="changed.10" />，全扫描是 <BenchValue k="changed.10.scan" />（100,000 个里写了 10 个） |
 | 失去某个组件的实体 | `ITracked` + `[Removed<T>]` | <BenchValue k="removed.10" />（100,000 个里移除了 10 个） |
-| 按值找实体 | [值索引](/zh/docs/guide/indexes-and-relations) | 见[下面](#benchmarks)的 `IndexBenchmark` |
+| 按值找实体 | [值索引](/zh/docs/guide/data/indexes-and-relations) | 见[下面](#benchmarks)的 `IndexBenchmark` |
 
 <BenchSource />
 
@@ -167,7 +167,7 @@ world.CreateEntities(garrison, new Position(0, 0), new Velocity(0, 0), new Healt
 ## 常规写法与最快写法 [#regular-code-and-the-fastest-code]
 
 常规写法适合大多数系统：短，而且已经是生成的 struct job。当某个系统在 `WorldOptions.MeasureSystems` 的计时里冒头
-（[测量系统](/zh/docs/guide/systems#measuring-systems)），跑分测的就是下面这些改写：
+（[测量系统](/zh/docs/guide/basics/systems#measuring-systems)），跑分测的就是下面这些改写：
 
 | 常规 | 最快 | 实测 |
 | --- | --- | --- |
@@ -247,7 +247,7 @@ public ref struct BounceSimdSystem
 ### 临时循环：struct job [#ad-hoc-loops-a-struct-job]
 
 `world.Query` 是工具和请求处理里方便的循环。系统之外每个 tick 都跑的循环，写成 struct job：`world.ForEach` 按表特化并
-内联它。标上 `INoStructuralChanges`，再声明它的 `WriteMask`（[job 要声明什么](/zh/docs/guide/queries)）。
+内联它。标上 `INoStructuralChanges`，再声明它的 `WriteMask`（[job 要声明什么](/zh/docs/guide/basics/queries)）。
 
 ```csharp title="EnergyJob.cs"
 public struct EnergyJob : IForEach<Velocity>, INoStructuralChanges   // 不做结构变更：走精简循环
@@ -410,7 +410,7 @@ int removed = world.DestroyAll<Dead>();                               // 所有�
 int lifted = world.RemoveAll<Stunned>();                              // 解除所有眩晕，按整字处理行
 ```
 
-只构造一次（`static readonly`）的[预制体](/zh/docs/guide/prefabs)，每个实例只复制一次行；World 只查一次它的目标表并缓存
+只构造一次（`static readonly`）的[预制体](/zh/docs/guide/basics/prefabs)，每个实例只复制一次行；World 只查一次它的目标表并缓存
 下来。`entity.Set(a, b)`、`entity.Remove<A, B>()` 一次调用改多个组件：写法更简洁，性能和逐个调用相同，因为第二次搬行走的是已缓存的转移
 （[D29](/zh/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same)）。
 
@@ -443,30 +443,30 @@ int lifted = world.RemoveAll<Stunned>();                              // 解除�
 - **不要跨 `await` 或在字段里保留 `ref`**：保留 `Entity` 句柄。
 - **不要存裸的实体下标**：id 会被回收；存 `EntityId`（下标加版本）。
 - **不要在每次更新都跑的方法里写捕获局部变量的 lambda**：哪怕那个分支没走，闭包在进入方法时就分配了。
-  `AllocationTests` 就在 `World.Update` 里抓到过这样一个（[EECS028](/zh/docs/guide/analyzer#eecs028)）。
-- **每次更新都跑的代码里不要用 LINQ、`params object[]` 或字符串格式化**（[EECS028](/zh/docs/guide/analyzer#eecs028)）。
-- **不要拿方法用不到的 `Entity` 或单例参数**：循环会为每一行加载它（[EECS026](/zh/docs/guide/analyzer#eecs026)）。
-- **被追踪的组件只读时不要按 `ref` 接**：否则访问过的每一行都算变了（[EECS025](/zh/docs/guide/analyzer#eecs025)）。
+  `AllocationTests` 就在 `World.Update` 里抓到过这样一个（[EECS028](/zh/docs/guide/help/analyzer#eecs028)）。
+- **每次更新都跑的代码里不要用 LINQ、`params object[]` 或字符串格式化**（[EECS028](/zh/docs/guide/help/analyzer#eecs028)）。
+- **不要拿方法用不到的 `Entity` 或单例参数**：循环会为每一行加载它（[EECS026](/zh/docs/guide/help/analyzer#eecs026)）。
+- **被追踪的组件只读时不要按 `ref` 接**：否则访问过的每一行都算变了（[EECS025](/zh/docs/guide/help/analyzer#eecs025)）。
 - **不要在 `[ForEach]` 方法里通过被访问的实体查它的组件，或查单例**：作为参数，每张表只解析一次
-  （[EECS027](/zh/docs/guide/analyzer#eecs027)）。
+  （[EECS027](/zh/docs/guide/help/analyzer#eecs027)）。
 - **不要遍历查询逐个修改、计数或判断实体**：`SetAll`、`DestroyAll`、`Count`、`Any` 和过滤条件按表处理
-  （[EECS030](/zh/docs/guide/analyzer#eecs030)、[EECS032](/zh/docs/guide/analyzer#eecs032)）。
+  （[EECS030](/zh/docs/guide/help/analyzer#eecs030)、[EECS032](/zh/docs/guide/help/analyzer#eecs032)）。
 - **不要在别的线程上使用值索引或销毁实体**：索引在所有者线程上跟随这些变化，没有做同步。
 
 ## 常见陷阱 [#pitfalls]
 
 | 错误 | 后果 | 谁来发现 |
 | --- | --- | --- |
-| 批量方法里又接了逐实体参数 | 它没法接收一段连续的行 | [EECS009](/zh/docs/guide/analyzer#eecs009) |
-| 不带 `Entity` 或 `World` 的静态 `[ForEach]` 方法里做结构变更 | 方法承诺了不做结构变更，它的精简循环依赖这一点 | [EECS013](/zh/docs/guide/analyzer#eecs013) |
-| 并行方法写单例或做结构变更 | 线程之间数据竞争 | [EECS010](/zh/docs/guide/analyzer#eecs010) |
-| 组件里存 `Entity` | 列里有了引用：不再固定，GC 要扫描 | [EECS017](/zh/docs/guide/analyzer#eecs017)（警告） |
-| 通过 `ref` 写被索引的组件 | 索引看不到新键 | [EECS015](/zh/docs/guide/analyzer#eecs015) |
-| 只读被追踪组件的 `ref` 参数 | 访问过的每一行都算变了 | [EECS025](/zh/docs/guide/analyzer#eecs025)（警告，代码修复：`in`） |
-| 每次更新都跑的代码里有闭包或 LINQ | 每个 tick 都产生垃圾 | [EECS028](/zh/docs/guide/analyzer#eecs028)（警告），再加上自己测试里 `AllocationTests` 式的检查 |
-| `[ForEach]` 方法里通过被访问的 `Entity` 查组件 | 每行查一次 | [EECS027](/zh/docs/guide/analyzer#eecs027)（警告） |
-| 遍历查询逐个实体做结构变化 | 每次调用搬一行 | [EECS030](/zh/docs/guide/analyzer#eecs030)（警告，代码修复：批量调用） |
-| 新 World 不预留空间，逐个塞满实体 | 大对象堆上一轮轮翻倍的数组触发完整 GC（[见上](#cold-create)） | [EECS031](/zh/docs/guide/analyzer#eecs031)（警告，代码修复：`CreateEntities` 或 `Reserve<T1, …, Tn>(n)`） |
+| 批量方法里又接了逐实体参数 | 它没法接收一段连续的行 | [EECS009](/zh/docs/guide/help/analyzer#eecs009) |
+| 不带 `Entity` 或 `World` 的静态 `[ForEach]` 方法里做结构变更 | 方法承诺了不做结构变更，它的精简循环依赖这一点 | [EECS013](/zh/docs/guide/help/analyzer#eecs013) |
+| 并行方法写单例或做结构变更 | 线程之间数据竞争 | [EECS010](/zh/docs/guide/help/analyzer#eecs010) |
+| 组件里存 `Entity` | 列里有了引用：不再固定，GC 要扫描 | [EECS017](/zh/docs/guide/help/analyzer#eecs017)（警告） |
+| 通过 `ref` 写被索引的组件 | 索引看不到新键 | [EECS015](/zh/docs/guide/help/analyzer#eecs015) |
+| 只读被追踪组件的 `ref` 参数 | 访问过的每一行都算变了 | [EECS025](/zh/docs/guide/help/analyzer#eecs025)（警告，代码修复：`in`） |
+| 每次更新都跑的代码里有闭包或 LINQ | 每个 tick 都产生垃圾 | [EECS028](/zh/docs/guide/help/analyzer#eecs028)（警告），再加上自己测试里 `AllocationTests` 式的检查 |
+| `[ForEach]` 方法里通过被访问的 `Entity` 查组件 | 每行查一次 | [EECS027](/zh/docs/guide/help/analyzer#eecs027)（警告） |
+| 遍历查询逐个实体做结构变化 | 每次调用搬一行 | [EECS030](/zh/docs/guide/help/analyzer#eecs030)（警告，代码修复：批量调用） |
+| 新 World 不预留空间，逐个塞满实体 | 大对象堆上一轮轮翻倍的数组触发完整 GC（[见上](#cold-create)） | [EECS031](/zh/docs/guide/help/analyzer#eecs031)（警告，代码修复：`CreateEntities` 或 `Reserve<T1, …, Tn>(n)`） |
 
 ## 覆盖了什么 [#coverage]
 
@@ -676,10 +676,10 @@ dotnet run -c Release --project benchmarks/EasyEcs.Comparison -- --check        
   <Card title="与其他 ECS 库对比" href="/zh/docs/comparison">
     同样的工作在 Friflo.Engine.ECS、Arch 和 DefaultEcs 里，附全部结果。
   </Card>
-  <Card title="查询与过滤" href="/zh/docs/guide/queries">
+  <Card title="查询与过滤" href="/zh/docs/guide/basics/queries">
     `Query`、struct job、`Count` 和 `Any`，以及 job 要声明什么。
   </Card>
-  <Card title="系统与 [ForEach]" href="/zh/docs/guide/systems">
+  <Card title="系统与 [ForEach]" href="/zh/docs/guide/basics/systems">
     批量方法、并行方法、分组、间隔和计时。
   </Card>
 </Cards>

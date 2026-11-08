@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Operations;
@@ -15,8 +16,8 @@ namespace EasyEcs.Generator;
 /// <c>SetIfChanged</c> on a type it cannot compare, calls a pass refuses made during one, an indexed component changed
 /// while its index is walked, a record struct key that prints itself, a sliced filter where every row is needed, and
 /// the world's own tags written by hand, a ref used after a structural change, a component that cannot be disabled,
-/// filters no entity passes, a second group in one filter and an update during a pass. Each is a call or a declaration
-/// the runtime throws for, or a write it loses.
+/// filters no entity passes, a second group in one filter, an update during a pass and an AddSingleton of a singleton
+/// the world has (EECS129), an entity's index stored in a component (EECS130). Each is a call or a declaration the runtime throws for, or a write it loses.
 /// </summary>
 public static partial class EasyEcsAnalyzer
 {
@@ -133,6 +134,27 @@ public static partial class EasyEcsAnalyzer
         "and closes the holes, which moves rows the loop has not reached yet behind it, so the loop misses them (a loop " +
         "that outlives the update ends as no pass). Record what to do, and update after the loop.", helpLinkUri: Help("EECS051"));
 
+    public static readonly DiagnosticDescriptor SingletonAddedTwice = new("EECS129", "AddSingleton of a singleton the world has",
+        "'{0}' adds singleton {1}, which the world has {2}: AddSingleton throws InvalidOperationException for a singleton the world has; take it as it is with 'GetOrAddSingleton<{1}>()', or replace its value with 'Set{1}(...)' ('GetOrAddSingleton<{1}>() = default' puts the default back)",
+        Category, DiagnosticSeverity.Error, true,
+        "AddSingleton<T>() adds a singleton the world lacks and throws InvalidOperationException for one it has, instead " +
+        "of quietly putting back the default every system then reads. The rule reports it after a call of an earlier " +
+        "statement of its block that always runs and leaves the world with T (SetX, AddSingleton, GetOrAddSingleton, " +
+        "GetOrAddX, GetSingleton; Error: it always throws), and in a system's OnUpdate or a [ForEach] method, which run " +
+        "again, with no RemoveSingleton<T> / RemoveX and no HasSingleton<T> / HasX / TryGetSingleton<T> before it (Warning: " +
+        "it throws from the second run on). GetOrAddSingleton<T>() returns the same ref the first time and never throws.",
+        helpLinkUri: Help("EECS129"));
+
+    public static readonly DiagnosticDescriptor RawIndexInData = new("EECS130", "A component stores an entity's index",
+        "'{0}' stores the index of an EntityId in '{1}': ids are recycled, so once that entity is destroyed the index names whichever entity is created next in its slot; store the EntityId, whose version tells a destroyed entity apart (world.TryGetEntity finds nothing)",
+        Category, DiagnosticSeverity.Warning, true,
+        "EntityId.Index is a slot that the world hands to the next entity it creates once the entity holding it is destroyed. " +
+        "A component (or singleton) that keeps the index alone then points at that next entity, and nothing tells the " +
+        "difference. The EntityId (8 bytes, unmanaged, as cheap to store) carries the version too: world.TryGetEntity, " +
+        "Lookup<T> and the indexes find nothing for a destroyed entity's id. The rule reports the index assigned to a field " +
+        "or property of a component or singleton, or passed to its constructor or to a generated SetX / GetOrAddX.",
+        helpLinkUri: Help("EECS130"));
+
     public static readonly DiagnosticDescriptor EntryPointNotImported = new("EECS122", "A generated entry point outside the namespaces in scope",
         "'{0}' takes {1}: it is the generated entry point of [{2}] method '{3}', an extension member declared in namespace '{4}', which is not in scope here, so the call binds to the method itself; add 'using {4};'",
         Category, DiagnosticSeverity.Warning, true,
@@ -188,7 +210,129 @@ public static partial class EasyEcsAnalyzer
             start.RegisterOperationAction(c => AnalyzeRefAcrossChange(c, core), OperationKind.VariableDeclarator);
             start.RegisterOperationAction(c => AnalyzeItemAcrossChange(c, core), OperationKind.Loop);
             start.RegisterOperationAction(c => AnalyzeEntryPointScope(c, core), OperationKind.Invalid);
+            start.RegisterOperationAction(c => AnalyzeRawIndex(c, core), OperationKind.FieldReference);
         });
+
+    // ---------------- EECS130: an entity's index stored in a component ----------------
+
+    /// <summary>
+    /// EECS130: <c>id.Index</c> of an <c>EntityId</c> that lands in a component or singleton: assigned to one of its fields
+    /// or properties (an object initializer's too), or passed to its constructor or to a generated <c>SetX</c> /
+    /// <c>GetOrAddX</c>. EECS017's sibling: the id, not a part of it.
+    /// </summary>
+    private static void AnalyzeRawIndex(OperationAnalysisContext context, Core core)
+    {
+        var read = (IFieldReferenceOperation)context.Operation;
+        if (read.Field.Name != "Index" || !Symbols.Named(read.Field.ContainingType, Symbols.EntityId)) return;
+        IOperation value = read;
+        while (value.Parent is IConversionOperation { IsImplicit: true } or IParenthesizedOperation) value = value.Parent;
+        ISymbol? into = value.Parent switch
+        {
+            ISimpleAssignmentOperation assignment when assignment.Value == value && assignment.Target is IMemberReferenceOperation { Member: IFieldSymbol or IPropertySymbol } member
+                && IsData(member.Member.ContainingType) => member.Member,
+            IArgumentOperation { Parameter: { ContainingSymbol: IMethodSymbol { MethodKind: MethodKind.Constructor } ctor } parameter } when IsData(ctor.ContainingType) => parameter,
+            IArgumentOperation { Parameter: { } parameter, Parent: IInvocationOperation call } when Symbols.IsGenerated(call.TargetMethod)
+                && (call.TargetMethod.Name.StartsWith("Set") || call.TargetMethod.Name.StartsWith("GetOrAdd")) && Named(call.TargetMethod, core) is { } written && IsData(written) => parameter,
+            _ => null,
+        };
+        if (into == null) return;
+        var owner = into is IParameterSymbol { ContainingSymbol: IMethodSymbol { MethodKind: MethodKind.Constructor } c } ? c.ContainingType
+            : into is IParameterSymbol { ContainingSymbol: IMethodSymbol m } ? Named(m, core) : into.ContainingType;
+        context.ReportDiagnostic(Diagnostic.Create(RawIndexInData, read.Syntax.GetLocation(), Shorten(read.Syntax), owner?.Name + "." + into.Name));
+
+        static bool IsData(ITypeSymbol? type) => type != null && (Symbols.Implements(type, Symbols.Component) || Symbols.Implements(type, Symbols.Singleton));
+    }
+
+    // ---------------- EECS129: AddSingleton of a singleton the world has ----------------
+
+    /// <summary>
+    /// EECS129 for <paramref name="call"/>, <c>world.AddSingleton&lt;T&gt;()</c>: an Error after a call of an earlier
+    /// statement of its block that always runs and leaves the same world with T, with no removal or check of T after
+    /// it; a Warning in a system's OnUpdate or a [ForEach] method (they run again) with no removal or presence check of
+    /// T before it. The fix takes the singleton with <c>GetOrAddSingleton&lt;T&gt;()</c>, the same ref on the first run.
+    /// </summary>
+    private static void AnalyzeSingletonAdd(OperationAnalysisContext context, IInvocationOperation call, ITypeSymbol singleton, Core core)
+    {
+        string? receiver = Symbols.Receiver(call)?.Syntax.ToString();
+        if (receiver == null || call.Syntax is not InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name: GenericNameSyntax name } access } syntax)
+            return;
+        IOperation statement = call;
+        while (statement.Parent is { } parent and not IBlockOperation) statement = parent;
+        string? before = null; // the call that left the world with T, in an earlier statement of the block
+        if (statement.Parent is IBlockOperation block)
+            foreach (var earlier in block.Operations)
+            {
+                if (earlier == statement) break;
+                foreach (var other in earlier.DescendantsAndSelf())
+                    switch (SingletonEffect(other, singleton, core))
+                    {
+                        case SingletonUse.Ensures when other is IInvocationOperation ensures && Symbols.Receiver(ensures)?.Syntax.ToString() == receiver && Symbols.AlwaysRuns(other, earlier):
+                            before = Shorten(other.Syntax);
+                            break;
+                        case SingletonUse.Removes or SingletonUse.Checks:
+                            before = null;
+                            break;
+                    }
+            }
+
+        bool again = false;
+        if (before == null)
+        {
+            if (context.ContainingSymbol is not IMethodSymbol owner
+                || !(Symbols.IsForEach(owner) || Symbols.Hook(owner) == Symbols.HookKind.Update && Symbols.IsSystem(owner.ContainingType))) return;
+            IOperation top = call;
+            while (top.Parent != null) top = top.Parent;
+            foreach (var other in top.Descendants())
+                if (other.Syntax.SpanStart < call.Syntax.SpanStart && SingletonEffect(other, singleton, core) is SingletonUse.Removes or SingletonUse.Checks)
+                    return; // removed or checked first: the add may be right
+            again = true;
+        }
+
+        string type = singleton.ToMinimalDisplayString(call.SemanticModel!, call.Syntax.SpanStart);
+        // The generated world.GetOrAddX() where it binds to X's own member (EECS033 would ask for it), else the generic call.
+        string generated = access.Expression + ".GetOrAdd" + singleton.Name + "()";
+        string fixedCall = Binds(call.SemanticModel!, syntax, generated, out var bound) && singleton is INamedTypeSymbol named && GeneratedFor(bound!, named, call.SemanticModel!.Compilation)
+            ? generated
+            : syntax.WithExpression(access.WithName(name.WithIdentifier(SyntaxFactory.Identifier("GetOrAddSingleton")))).ToString();
+        var properties = ImmutableDictionary<string, string?>.Empty
+            .Add(FixTitle, $"Take it with {fixedCall.Substring(access.Expression.ToString().Length + 1)}").Add(Replace, fixedCall);
+        string when = !again ? $"already: '{before}' runs before it"
+            : Symbols.IsForEach((IMethodSymbol)context.ContainingSymbol!) ? "from the second row on (a [ForEach] method runs for every entity, every update)"
+            : "from its second run on (OnUpdate runs every update)";
+        context.ReportDiagnostic(Diagnostic.Create(SingletonAddedTwice, call.Syntax.GetLocation(),
+            again ? DiagnosticSeverity.Warning : DiagnosticSeverity.Error, null, properties, Shorten(call.Syntax), type, when));
+    }
+
+    private enum SingletonUse { None, Ensures, Removes, Checks }
+
+    /// <summary>
+    /// What <paramref name="operation"/>, a call or the generated <c>HasX</c>, does to singleton <paramref name="singleton"/>
+    /// of its world: leaves the world with it (adds, sets, reads it), removes it, or checks whether it is there.
+    /// </summary>
+    private static SingletonUse SingletonEffect(IOperation operation, ITypeSymbol singleton, Core core)
+    {
+        if (operation is IPropertyReferenceOperation { Property: { Name: var property } has } && property.StartsWith("Has") && Symbols.IsGenerated(has))
+            return Symbols.Named(has.ContainingType?.ExtensionParameter?.Type, Symbols.World) && SymbolEqualityComparer.Default.Equals(Named(has, core), singleton)
+                ? SingletonUse.Checks : SingletonUse.None;
+        if (operation is not IInvocationOperation call) return SingletonUse.None;
+        var method = call.TargetMethod;
+        if (Symbols.Named(method.ContainingType, Symbols.World))
+        {
+            if (method.TypeArguments.Length != 1 || !SymbolEqualityComparer.Default.Equals(method.TypeArguments[0], singleton)) return SingletonUse.None;
+            return method.Name switch
+            {
+                "AddSingleton" or "GetOrAddSingleton" or "GetSingleton" or "SingletonRef" => SingletonUse.Ensures,
+                "RemoveSingleton" => SingletonUse.Removes,
+                "HasSingleton" or "TryGetSingleton" => SingletonUse.Checks,
+                _ => SingletonUse.None,
+            };
+        }
+
+        if (!Symbols.IsGenerated(method) || !Symbols.OnWorld(call) || !SymbolEqualityComparer.Default.Equals(Named(method, core), singleton)) return SingletonUse.None;
+        return method.Name.StartsWith("Set") || method.Name.StartsWith("GetOrAdd") ? SingletonUse.Ensures
+            : method.Name.StartsWith("Remove") ? SingletonUse.Removes
+            : method.Name.StartsWith("Has") || method.Name.StartsWith("TryGet") ? SingletonUse.Checks : SingletonUse.None;
+    }
 
     // ---------------- EECS122: a generated entry point whose namespace is not in scope ----------------
 
@@ -468,6 +612,10 @@ public static partial class EasyEcsAnalyzer
         var method = call.TargetMethod;
         var type = method.ContainingType;
         bool onEntity = Symbols.Named(type, Symbols.Entity), onWorld = Symbols.Named(type, Symbols.World);
+
+        // EECS129: AddSingleton of a singleton the world has.
+        if (onWorld && method.Name == "AddSingleton" && method.TypeArguments.Length == 1)
+            AnalyzeSingletonAdd(context, call, method.TypeArguments[0], core);
 
         // EECS040: SetIfChanged of a value it cannot compare.
         if (method.Name == "SetIfChanged" && (onEntity && method.TypeArguments.Length == 1 ? method.TypeArguments[0]
@@ -1035,7 +1183,7 @@ public sealed class UsageAnalyzer : EasyEcsAnalyzer.Area
         EasyEcsAnalyzer.JobWrites, EasyEcsAnalyzer.KeyPrintsItself, EasyEcsAnalyzer.NeverMatches,
         EasyEcsAnalyzer.NotComparable, EasyEcsAnalyzer.NotDisableable, EasyEcsAnalyzer.RefAcrossChange,
         EasyEcsAnalyzer.RefusedInPass, EasyEcsAnalyzer.RemovedRequired, EasyEcsAnalyzer.SecondGroup,
-        EasyEcsAnalyzer.SlicedFilter, EasyEcsAnalyzer.UpdateInPass, EasyEcsAnalyzer.EntryPointNotImported);
+        EasyEcsAnalyzer.SlicedFilter, EasyEcsAnalyzer.UpdateInPass, EasyEcsAnalyzer.EntryPointNotImported, EasyEcsAnalyzer.SingletonAddedTwice, EasyEcsAnalyzer.RawIndexInData);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeUsage(context);
 }

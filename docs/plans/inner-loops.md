@@ -80,7 +80,7 @@
 | `BattleServer.LootValue` | buffer sum outside a pass | out of scope |
 | `HistogramBenchmark` | `[InlineArray(1024)]` bins | scatter: not vectorizable |
 | `demo/EasyEcs.Demo/Systems/MovementBatchSystem.cs`, `DragBatchSystem.cs` | Vector128 casts, odd-row tail | EECS103 (Drag has a user call `Units.Keep`, so no plain form and no report) |
-| `docs/content/guide/grids.mdx` | 25 `Load128`/`Vector128` mentions | docs pass |
+| `docs/content/guide/performance/grids.mdx` | 25 `Load128`/`Vector128` mentions | docs pass |
 | tests: `TileTests.cs` | Load128 stencils | keep as tests of the cursor |
 
 ## 2. User-facing forms and what the generator writes

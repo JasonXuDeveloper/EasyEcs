@@ -324,7 +324,7 @@ int pooled = world.Count<Bullet>(QueryFilter.Create().With<Inactive>()); // 存�
 **决定。** World 的系统、查询和结构变更都在它的所有者线程上执行；并行阶段和并行 `[ForEach]` 是仅有的并行，由生成器证明安全。
 其他线程把工作投递给所有者线程。
 
-**原因。** 任何热路径上都没有锁；规则三行就能说清（[多线程与并行](/zh/docs/guide/threading)）。
+**原因。** 任何热路径上都没有锁；规则三行就能说清（[多线程与并行](/zh/docs/guide/performance/threading)）。
 
 ## D14. 没有共享组件 [#d14-no-shared-components]
 
@@ -677,7 +677,7 @@ ParallelSystems 804-808 -> 746-768 μs，ParallelForEach 294-308 -> 267-271 μs�
 - **不比它替代的代码慢。** 在 10,000 个实体上调用 1,000 次，1、3 或 5 个组件，有无过滤、有无结构变更，对照通过句柄手写的同样工作
   （`SingleEntityBenchmark`）：耗时是手写的 0.69 到 1.06 倍，0 B。1.04 和 1.06 的两组（有过滤又有结构变更，3 和 5 个组件）在误差范围内。
 - **线程规则仍归所有者线程。** 结构闸门空闲时（所有者线程不在任何区域里），用普通的标志写入冻结结构；在并行区域里，区域的冻结已经持有；
-  分析器把 `Run` 当作结构变更调用报出（[EECS010](/zh/docs/guide/analyzer#eecs010)、EECS013、EECS014）。
+  分析器把 `Run` 当作结构变更调用报出（[EECS010](/zh/docs/guide/help/analyzer#eecs010)、EECS013、EECS014）。
 
 **比较过。**
 - **通过查询缓存检查过滤条件：** 每次调用都要按过滤条件查一次表集合，比 job 本身还贵；检查这一行所在表的掩码和存在位，过滤条件每个组件 O(1)。
@@ -999,10 +999,10 @@ tick；会做结构变更的方法和并行的逐实体方法里，写入前先�
   系统要时间就读一个时钟单例。
 - **`[Requires<B>]`**（加 A 时自动加 B）。每种实体一个预制体，一次拷贝就带齐整套组件；隐式添加则是读代码的人看不到的结构变更。
 - **实体映射表**（外部键到实体）。`IUniqueIndexed<TKey>` 就是这张表，而且每次写入都会维护它。
-- **内置 `Meter`。** 数据都在 `SystemStats` 里；发布到 OpenTelemetry 是宿主自己几行代码的事（[调试与诊断](/zh/docs/guide/diagnostics)），
+- **内置 `Meter`。** 数据都在 `SystemStats` 里；发布到 OpenTelemetry 是宿主自己几行代码的事（[调试与诊断](/zh/docs/guide/production/diagnostics)），
   EasyEcs 也就不必依赖指标库。
 - **World 校验和**（帧同步里查不同步）。对 `world.Save` 的输出做哈希，用户代码里就能做；内置的话，每个用户都被绑死在一种算法和一种顺序上。
-- **部分快照 API**（只拍部分组件）。用一个系统把需要的值拷进单例里的环形缓冲（[快照](/zh/docs/guide/snapshots)里的延迟补偿写法），
+- **部分快照 API**（只拍部分组件）。用一个系统把需要的值拷进单例里的环形缓冲（[快照](/zh/docs/guide/saves/snapshots)里的延迟补偿写法），
   只拷需要的东西，也不用多一条存储路径。
 
 ## D52. 只当身份用的 `Entity` 不让系统单独运行 [#d52-identity-entity]
@@ -1351,7 +1351,7 @@ C# 14 扩展成员和泛型特性。拦截器只替换一种调用：lambda 遍�
 
 ## D68. 向量循环无需开启 [#d68-vector-loops-without-opting-in]
 
-**决定。** 生成器为每个符合条件的 `[ForEach]` 方法写出 `Vector<T>` 循环（[向量循环](/zh/docs/guide/systems#vector-loops)）：静态、逐实体、
+**决定。** 生成器为每个符合条件的 `[ForEach]` 方法写出 `Vector<T>` 循环（[向量循环](/zh/docs/guide/basics/systems#vector-loops)）：静态、逐实体、
 非并行，没有 `Entity` / `World` / `Mut<T>` / `Maybe<T>`，组件有 1 到 4 个同一种基本类型的字段（多个字段由解交错加载和交错存储拆成每个字段一个向量，
 `EasyEcs.Interleaved`），方法体只有算术、比较、分支和有精确向量对应的 `Math` 函数。默认开启（`SimdMode.Auto`）：看起来是为向量循环写的方法
 保持标量时，EECS055 说明原因；`SimdMode = SimdMode.Require` 让这种情况成为错误（EECS056）；`SimdMode.Off` 让方法退出。最后一个完整向量之后的行，
@@ -1386,7 +1386,7 @@ C# 14 扩展成员和泛型特性。拦截器只替换一种调用：lambda 遍�
 ## D69. 归约是一个参数，按块的顺序合并 [#d69-reductions]
 
 **决定。** 一遍上的总数是 `[ForEach]` 方法的一个 `ref Reduce<T>` 参数，`T` 是为自己实现 `IReduction<T>` 的单例（静态的 `Identity` 和满足结合律的
-`Combine`）（[归约](/zh/docs/guide/threading#reductions)）。并行遍历的每一块，或单线程时的整遍，累加进自己从 `Identity` 开始的副本；这一遍
+`Combine`）（[归约](/zh/docs/guide/performance/threading#reductions)）。并行遍历的每一块，或单线程时的整遍，累加进自己从 `Identity` 开始的副本；这一遍
 结束时，World 的运行器按块的顺序（也就是行的顺序）合并这些副本，结果替换 `T`。系统按 `T` 的写者调度。EECS057 拒绝同一遍里对 `T` 的第二处写入。
 
 **原因。**
@@ -1748,7 +1748,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 
 **考虑过的方案。**
 - **属性和特性并存：** 同一件事两种说法，还得学两者的先后规则。这个破坏性变更每个系统改一行，代码修复替你改，迁移指南里有示例。
-- **运行时决定节奏：** 要在运行时改变系统运行频率的服务器，把系统放进一个分组，到期时更新这个分组（[系统分组](/zh/docs/guide/systems#system-groups)），
+- **运行时决定节奏：** 要在运行时改变系统运行频率的服务器，把系统放进一个分组，到期时更新这个分组（[系统分组](/zh/docs/guide/basics/systems#system-groups)），
   这也是 [D51](#d51-not-added) 推荐的、代替按时间间隔运行的做法。
 
 ## D84. `[Consume]` 能整批销毁时就整批销毁访问过的行 [#d84-consume]
@@ -1883,7 +1883,7 @@ EECS070 拒绝同时接收 `Emitted<T>` 或同一个 `T` 有两个 `Emit<T>` 的
 - **EECS089**（建议）报告逐条追加到 `ref` 单例所持列表里的记录。对应的参数是 `Emit<T>`。
 
 **原因。**
-- **手写的形式把方法限制在一个线程上。** `ref` 单例在并行遍历里会产生竞争（[EECS010](/zh/docs/guide/analyzer#eecs010)），`World`
+- **手写的形式把方法限制在一个线程上。** `ref` 单例在并行遍历里会产生竞争（[EECS010](/zh/docs/guide/help/analyzer#eecs010)），`World`
   参数让系统在自己的阶段里单独运行。[D69](#d69-reductions)、[D75](#d75-lookup) 和 [D78](#d78-emit) 已经把这些参数和手写形式比过。
   有了这些规则，用户遇到的就是更快的写法。
 - **EECS086 要看到重置才报告。** 第一版报告所有累加。它在文档里命中了 16 个示例，每一个都是累计总数：分数、到目前为止的死亡数、
@@ -2000,7 +2000,7 @@ EECS083 的描述符（`BadUpdateInterval`）。4.8 新增的 `Lookup<T>.TryFind
 钩子，每个钩子接收 `World`、`SystemHandle`、两者或都不接收。World 从不创建系统。它按类型添加系统（`AddSystem<T>()`，`T : struct, allows ref struct`），
 并为系统保存一条记录：是否启用、错误、间隔和相位、上次运行的 tick、运行次数、统计。`SystemHandle` 是指向这条记录的（world、槽位、版本），
 指向已移除系统的句柄会抛异常，就像失效的 `Entity` 一样。没有继承：基类共享的东西改成泛型系统或放辅助函数的静态类，构造函数参数改成
-[`[NotSaved]`](/zh/docs/guide/saves#not-saved) 单例。EECS074 到 EECS077 维护这种写法，CS0246 上的一个代码修复会改写 4.7 的类系统。
+[`[NotSaved]`](/zh/docs/guide/saves/saves#not-saved) 单例。EECS074 到 EECS077 维护这种写法，CS0246 上的一个代码修复会改写 4.7 的类系统。
 
 **原因。**
 - **系统是一组静态函数的名字。** 状态属于组件和单例（[ECS 原则](/zh/docs/ecs-principles)）；实例只会招来字段（EECS007 只能一个个地管），

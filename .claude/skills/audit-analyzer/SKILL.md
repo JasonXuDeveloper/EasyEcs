@@ -10,20 +10,29 @@ metadata:
 Files in `src/EasyEcs.Generator`: `EasyEcsAnalyzer.cs` (declarations and [ForEach] rules), `.Performance.cs` (code
 that works but costs), `.Usage.cs` (code that compiles but does not do what it says), `.Systems.cs` (systems as
 declarations), `.Parallel.cs` (code on several threads), `.Parts.cs` (generated parts), `.Forms.cs` (what the
-generator declares for code written by hand), `.Parameters.cs` ([ForEach] parameters done by hand),
-`UnusedSuppressor.cs`, `Symbols.cs` (shared with the generators), `Uses.cs`, `Threads.cs`; fixes in
-`src/EasyEcs.CodeFixes`. Rule list: `docs/content/guide/analyzer.mdx` and the range in AGENTS.md (EECS002-089).
+generator declares for code written by hand), `.Parameters.cs` ([ForEach] parameters done by hand), `.Members.cs`
+(EECS033, an analyzer of its own), `.Layout.cs` (cold fields), `.Lambdas.cs` (lambda passes), `.Views.cs` ([View]),
+`.Records.cs` (Emit<T> records nobody clears), `.Pairs.cs` (pair methods), `.Tiles.cs` (tiles and cell methods),
+`.Fusion.cs` (passes that almost share a walk); `UnusedSuppressor.cs`, `Symbols.cs` (shared with the generators),
+`Uses.cs`, `Threads.cs`; fixes in `src/EasyEcs.CodeFixes`. The file map with each file's ids is
+`src/EasyEcs.Generator/AGENTS.md`. Rule list: `docs/content/guide/help/analyzer.mdx` and the range in AGENTS.md
+(EECS002-EECS132).
 
 ## Coverage (`feature`, part 3)
 
 Every misuse that compiles and every pattern that works but costs gets a rule, in three kinds:
 
 - **Wrong (Error) or likely wrong (Warning)**: a structural change in a pass, a ref used after a change, shared
-  writes from parallel code, filters no entity passes.
+  writes from parallel code, filters no entity passes, a `Reduce<T>`'s `Value` read as if it were the total
+  (EECS128), a singleton added twice (EECS129: `AddSingleton` throws the second time; fix the generated `GetOrAddX()`), an
+  `EntityId.Index` stored in data (EECS130: the slot is recycled, the version is what tells a dead entity apart), a
+  key probe in a helper of another type the pass never prepared the index for (EECS132; helpers of the method's own
+  type are followed by `Symbols.FindsByKey`, which the generator reads too).
 - **Generic calls where a generated member exists stay a Warning** (EECS033), never an Error: the generic API is
   right in generic code and the core; the generator and the vector loops recognize both forms through `Symbols`.
 - **Costly or a better form exists (Warning: users miss Info)**: write access that only reads, per-row lookups, a `Query` loop that only
-  reads (`Read`), per-entity structural changes (bulk calls), a method that could be a vector loop (EECS055 /
+  reads (`Read`), per-entity structural changes (bulk calls), a `Scratch<T>` collection added to and never cleared
+  (EECS131: it grows by every row of every pass; fix: the `Clear()` before the first add), a method that could be a vector loop (EECS055 /
   EECS056, the exact reason from `Kernel.Vectorize`). Info is left for hints a user may not be able to act on
   (EECS055's reasons that come from the algorithm itself; the fixable ones become a Warning that names the fix).
 - **Written by hand where the generator writes it** (EECS080-089): a hand-written job instead of `[EntityMethod]`,
@@ -41,7 +50,8 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
   parameter type or another attribute already says, or a hand-written form where a declaration exists, is reported
   with a code fix to the one form; a merged or dropped declaration gets a rule and fix from the old form.
 - **One mistake, one diagnostic** (D60): when two rules fire on the same code, the rule whose fix removes the other's
-  case reports it. Pin each pair in `GeneratorTests.OneMistakeIsReportedOnce`.
+  case reports it. Pin each pair in `AnalyzerTests.OneMistakeIsReportedOnce`; a pair one of whose rules `All` leaves
+  out (EECS055, EECS092, the IDE's own rules) in `AnalyzerTests.OverlappingRulesReportOnce`, which counts both ids.
 - **Detection lives in `Symbols.cs`** once (structural calls, [ForEach] context, `Symbols.Requirements`, query loops,
   branch walks); the generators read the same helpers, so what the generator skips is what the analyzer reports.
 - Rule ids are stable; a removed id is never reused.
@@ -96,7 +106,7 @@ Every misuse that compiles and every pattern that works but costs gets a rule, i
 - Hand-rolled copies of a `Symbols` helper in a rule.
 - False positives on `ref readonly`, lambdas, generated members (`[GeneratedCode("EasyEcs.Generator")]`), loops with
   break/return, explicit types, code after a structural change.
-- Mistakes no rule catches (`docs/content/guide/common-mistakes.mdx`, `guide/troubleshooting.mdx`).
+- Mistakes no rule catches (`docs/content/guide/help/common-mistakes.mdx`, `guide/help/troubleshooting.mdx`).
 - Messages that no longer match runtime behavior; descriptor names, titles and code-fix titles that do not
   match the rule (`audit-naming`).
 - Methods that are almost vector loops: EECS055 names the blocking statement and the split when the user can fix it
@@ -148,11 +158,14 @@ done. Each round checks coverage per rule, not in total:
   innermost scope's namesake); loops with `break` / `return` / `continue`; conditional and ternary paths; the code right after a
   structural change; explicit and `var` types; `#if` / preprocessor; an empty body; attributes on the wrong target;
   the rule's threshold just below and just above (sizes, counts, cadence).
-- **Pairs**: every pair of rules that can fire on one snippet is pinned in `GeneratorTests.OneMistakeIsReportedOnce`.
+- **Pairs**: every pair of rules that can fire on one snippet is pinned in `AnalyzerTests.OneMistakeIsReportedOnce`
+  (or `OverlappingRulesReportOnce` when `All` leaves one of them out).
 - **Messages and fixes**: the message's placeholders filled (no `{0}` left), the fix's output compiles and reports
   nothing, and running the fix twice changes nothing.
-- **Exemplary code reports nothing**: a test compiles `samples/`, `BattleServer.cs` and the docs fences (DocCheck)
-  with no EasyEcs warning.
+- **Exemplary code reports nothing**: `GeneratorTests.SamplesAreClean` compiles each project of `samples/` (Godot
+  aside: it needs the Godot SDK), the template and the demo with every generator and the analyzer and fails on any
+  EasyEcs finding, Info included (its tracked exceptions name the backlog item that removes them);
+  `TheBenchmarkCorpusIsClean` does the same for `BattleServer.cs` and the corpus, DocCheck for the docs fences.
 
 - **Ids are taken at merge, not on a branch**: two branches built at once both took EECS105-106 for different rules;
   the second branch merged renumbers its rules (descriptor, code fix list, tests, docs-todos, owner-review, zh XML)

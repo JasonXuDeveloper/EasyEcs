@@ -422,7 +422,7 @@ The [battle server example](/en/docs/example) shows most of them.
 | Their feature | In | EasyEcs |
 | --- | --- | --- |
 | Command buffer for changes during a query | Friflo, Arch, DefaultEcs | not needed: changes apply at once, also mid-pass |
-| Thread-safe command buffer | Friflo | a queue you own, drained by a system on the world's thread ([threading](/en/docs/guide/threading)) |
+| Thread-safe command buffer | Friflo | a queue you own, drained by a system on the world's thread ([threading](/en/docs/guide/performance/threading)) |
 | Component added / removed / set events | Friflo, Arch, DefaultEcs | state changes are data: a component the next system queries |
 | `WhenChanged` sets and `NotifyChanged` | DefaultEcs | `[Changed<T>]`, `QueryFilter.Changed<T>(since)`: a `ref` write is the change |
 | `WhenRemoved` sets, removal events | DefaultEcs, Friflo, Arch | `[Removed<T>]`, `QueryFilter.Removed<T>(since)` |

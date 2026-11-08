@@ -210,6 +210,24 @@ public static partial class EasyEcsAnalyzer
         "under the entity by later rows, on another thread in a parallel pass. Copy what the row produced into the " +
         "component's own storage (a DynamicBuffer, a value), or keep the data in a component.", helpLinkUri: Help("EECS058"));
 
+    public static readonly DiagnosticDescriptor ScratchNeverCleared = new("EECS131", "Scratch memory added to and never cleared",
+        "[ForEach] method '{0}' adds to '{1}', which its Scratch<{2}> '{3}' keeps from row to row, and never clears it: each row finds the items of every row its thread ran before, of this pass and earlier ones, and the collection grows without bound; clear it at the start of the row",
+        Category, DiagnosticSeverity.Warning, true,
+        "A Scratch<T> value is never reset: a row finds what the last row on its thread left, of any pass and any world. " +
+        "A collection in it that rows add to and nothing clears keeps every item of every row, so a row reads items that " +
+        "are not its own, and the memory grows with each update. Clear it where the row starts using it (the fix inserts " +
+        "'Clear()' before the first statement that adds to it); assigning it a new value also starts it empty.",
+        helpLinkUri: Help("EECS131"));
+
+    public static readonly DiagnosticDescriptor UnpreparedIndex = new("EECS132", "A Lookup<T> found by key in a method of another type",
+        "'{0}' hands Lookup<{1}> '{2}' to '{3}', which finds {1} by key: {4} builds the index before the pass only when it finds by key itself or through a method of its own type, so the call throws InvalidOperationException (index not prepared); find by key in {4}, or move '{3}' into {5}",
+        Category, DiagnosticSeverity.Error, true,
+        "A Lookup<T> of an indexed T finds entities by key (TryFind, Find, Count) through T's value index, which a pass " +
+        "may not build while it runs (a parallel one would race). The generator builds it before the pass when the " +
+        "[ForEach] method or lambda pass finds by key, on the parameter or through a method of its own type that it hands " +
+        "the lookup to (read three calls deep). A method of another type is not read, so a find there throws " +
+        "InvalidOperationException: the index was not prepared.", helpLinkUri: Help("EECS132"));
+
     public static readonly DiagnosticDescriptor LookupOfWritten = new("EECS059", "A lookup of a component the pass writes",
         "Parameter '{0}' of {1} looks up {2}, which {3}",
         Category, DiagnosticSeverity.Error, true,
@@ -782,12 +800,14 @@ public static partial class EasyEcsAnalyzer
         if (method.IsGenericMethod && !outside)
             context.ReportDiagnostic(Diagnostic.Create(Generic, location, method.Name));
         if (Symbols.SlicesProblem(method) is { } slices)
-            context.ReportDiagnostic(Diagnostic.Create(BadSlices, location, method.Name, slices));
+            context.ReportDiagnostic(Diagnostic.Create(BadSlices, location, // dropped, the method runs every row on every run
+                ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Slices"), method.Name, slices));
         if (Symbols.ChunkSizeProblem(method) is { } chunks)
             context.ReportDiagnostic(Diagnostic.Create(BadChunkSize, location, // dropped, the method runs as without it
                 ImmutableDictionary<string, string?>.Empty.Add(FixKind, "ChunkSize"), method.Name, chunks));
         if (Symbols.MaxRowsProblem(method) is { } budget)
-            context.ReportDiagnostic(Diagnostic.Create(BadMaxRows, location, method.Name, budget));
+            context.ReportDiagnostic(Diagnostic.Create(BadMaxRows, location, // dropped, the method runs every row in one walk
+                ImmutableDictionary<string, string?>.Empty.Add(FixKind, "MaxRows"), method.Name, budget));
         if (Symbols.Unnameable(method) is { } unnameable)
             context.ReportDiagnostic(Diagnostic.Create(Unnameable, location, // the type its code fix makes internal, with its containers
                 Symbols.Hidden(unnameable)?.Locations.Where(l => l.IsInSource) ?? [],
@@ -877,13 +897,54 @@ public static partial class EasyEcsAnalyzer
         if (function.AttributeLists.Count == 0
             || context.SemanticModel.GetDeclaredSymbol(function, context.CancellationToken) is not IMethodSymbol method
             || !Symbols.IsGeneratedJob(method)) return;
-        context.ReportDiagnostic(Diagnostic.Create(LocalForEach, function.Identifier.GetLocation(), method.Name));
+        // The fix moves it into its type as a static method: when it captures nothing of the method around it, the type
+        // can hold a [ForEach] method (a system or a static class), and no member of the type has its name.
+        var type = method.ContainingType;
+        bool movable = (Symbols.IsSystem(type) || type.IsStatic) && type.GetMembers(method.Name).IsEmpty
+                       && method.TypeParameters.IsEmpty && !Captures(function, method, context.SemanticModel, context.CancellationToken);
+        context.ReportDiagnostic(Diagnostic.Create(LocalForEach, function.Identifier.GetLocation(),
+            movable ? ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Move") : null, method.Name));
+    }
+
+    /// <summary>Whether local function <paramref name="function"/> names a local, a parameter or a type parameter of the code around it, or <c>this</c>.</summary>
+    private static bool Captures(LocalFunctionStatementSyntax function, IMethodSymbol local, SemanticModel model, System.Threading.CancellationToken token)
+    {
+        if (function.Modifiers.Any(SyntaxKind.StaticKeyword)) return function.DescendantNodes().OfType<IdentifierNameSyntax>()
+            .Any(name => model.GetSymbolInfo(name, token).Symbol is ITypeParameterSymbol { DeclaringMethod: { } owner } && !SymbolEqualityComparer.Default.Equals(owner, local));
+        foreach (var node in function.DescendantNodes(n => n is not AttributeListSyntax)) // an attribute's name binds to its constructor
+        {
+            if (node is ThisExpressionSyntax or BaseExpressionSyntax) return true;
+            if (node is not IdentifierNameSyntax name) continue;
+            // A member reached through something (p.V, p?.V) or named by an object initializer (new P { V = 1 }) is
+            // not the implicit 'this' of an instance member.
+            if (name.Parent is MemberAccessExpressionSyntax access && access.Name == name || name.Parent is MemberBindingExpressionSyntax
+                || name.Parent is AssignmentExpressionSyntax { Parent: InitializerExpressionSyntax } assignment && assignment.Left == name) continue;
+            var symbol = model.GetSymbolInfo(name, token).Symbol;
+            var owner = symbol switch
+            {
+                ILocalSymbol or IParameterSymbol or IRangeVariableSymbol => symbol.ContainingSymbol,
+                ITypeParameterSymbol { DeclaringMethod: { } declaring } => declaring,
+                IMethodSymbol { MethodKind: MethodKind.LocalFunction } => symbol.ContainingSymbol,
+                IFieldSymbol or IPropertySymbol or IMethodSymbol or IEventSymbol when !symbol.IsStatic => local.ContainingType, // an instance member
+                _ => null,
+            };
+            if (owner == null) continue;
+            for (ISymbol? s = owner; ; s = s.ContainingSymbol)
+            {
+                if (SymbolEqualityComparer.Default.Equals(s, local)) break; // its own (or of a function inside it)
+                if (s is null or INamedTypeSymbol) return true;            // of the method around it, or an instance member
+            }
+        }
+
+        return false;
     }
 
     /// <summary>EECS010: a [ForEach(Parallel = true)] method that cannot run on several threads.</summary>
     private static void AnalyzeParallel(SyntaxNodeAnalysisContext context)
     {
         var syntax = (MethodDeclarationSyntax)context.Node;
+        // Cheapest rejection first: no attribute, no [ForEach] (a partial method's may sit on its other part).
+        if (syntax.AttributeLists.Count == 0 && !syntax.Modifiers.Any(SyntaxKind.PartialKeyword)) return;
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
             || !Symbols.IsForEach(method) || !Symbols.IsParallel(method)
             || method.PartialDefinitionPart != null) return; // a partial method: reported once, on its definition

@@ -22,17 +22,17 @@ dotnet run --project samples/HelloWorld
 ## The data [#data]
 
 Components are plain data: fields and no logic. `Position` and `Velocity` are on both entities; `Player`, a
-component with no fields, is a [tag](/en/docs/guide/entities-and-components#tags) that systems filter on; `Clock` is
-a [singleton](/en/docs/guide/singletons), one value per world.
+component with no fields, is a [tag](/en/docs/guide/basics/entities-and-components#tags) that systems filter on; `Clock` is
+a [singleton](/en/docs/guide/basics/singletons), one value per world.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/HelloWorld/Components.cs</include>
 
 ## The systems [#systems]
 
-[Systems](/en/docs/guide/systems) have one job each and no state of their own. A `[ForEach]` method runs once per
+[Systems](/en/docs/guide/basics/systems) have one job each and no state of their own. A `[ForEach]` method runs once per
 entity that has its component parameters, `ref` for what it writes and `in` for what it reads. `MoveSystem` moves
 every entity with a position and a velocity, `ReportSystem` prints the players only (`[With<Player>]` is a
-[filter](/en/docs/guide/queries#filters)), and `ClockSystem` advances the clock once per update in `OnUpdate`, not
+[filter](/en/docs/guide/basics/queries#filters)), and `ClockSystem` advances the clock once per update in `OnUpdate`, not
 once per entity.
 
 <include lang="csharp" meta='title="Systems.cs"'>../../../samples/HelloWorld/Systems.cs</include>
@@ -65,10 +65,10 @@ no `Player` tag, so it is never printed.
   <Card icon={<Rocket />} title="Getting started" href="/en/docs/getting-started">
     Install the package and build a first simulation step by step.
   </Card>
-  <Card icon={<Layers />} title="Entities and components" href="/en/docs/guide/entities-and-components">
+  <Card icon={<Layers />} title="Entities and components" href="/en/docs/guide/basics/entities-and-components">
     Components, tags, ids and the generated members.
   </Card>
-  <Card icon={<Workflow />} title="Systems" href="/en/docs/guide/systems">
+  <Card icon={<Workflow />} title="Systems" href="/en/docs/guide/basics/systems">
     [ForEach] methods, ordering, groups and cadence.
   </Card>
 </Cards>

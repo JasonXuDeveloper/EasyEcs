@@ -31,7 +31,7 @@ Read them in this order: each one assumes what the ones before it taught.
 
 ## How a sample reads [#how-a-sample-reads]
 
-Top-down, the way an EasyEcs project is laid out ([project structure](/en/docs/guide/project-structure)):
+Top-down, the way an EasyEcs project is laid out ([project structure](/en/docs/guide/basics/project-structure)):
 `Components.cs` holds the data, then the systems, one job each, then a short `Program.cs` that creates the world,
 adds the singletons and systems, runs and prints. Code a real program needs but that is not the lesson (a mailbox
 between threads, fake clients, the report) is in a file or folder of its own, `Host/` or `Support.cs`, that says so.
@@ -59,7 +59,7 @@ library, the generator and the analyzer.
   <Card icon={<Swords />} title="Example: a battle server" href="/en/docs/example">
     Every feature of EasyEcs in one server.
   </Card>
-  <Card icon={<BookOpen />} title="Guide" href="/en/docs/guide/project-structure">
+  <Card icon={<BookOpen />} title="Guide" href="/en/docs/guide/basics/project-structure">
     One page per feature, each with a complete example.
   </Card>
 </Cards>

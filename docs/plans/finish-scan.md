@@ -6,9 +6,9 @@ Backlog: `docs/plans/backlog.md`, Finish, items 1a and 1b. Report 2 refreshes `d
 
 ## Report 1: the generated-members scan (Finish 1a)
 
-Scope: the public API (the generated members of `guide/entities-and-components.mdx`, the attributes, the `[ForEach]`
+Scope: the public API (the generated members of `guide/basics/entities-and-components.mdx`, the attributes, the `[ForEach]`
 parameters), `benchmarks/EasyEcs.Benchmark/BattleServer.cs`, every sample, the templates, the live demo, and the C#
-fences of `docs/content/guide/*.mdx` (English; the Chinese pages repeat the same fences), `example.mdx`,
+fences of `docs/content/guide/**/*.mdx` (English; the Chinese pages repeat the same fences), `example.mdx`,
 `getting-started.mdx`, README and the public skill (7,083 fence lines extracted and counted by normalized line).
 Settled records were read first and are not re-proposed: D26 (generated members only where they save lines, style
 alone rejected), D51, D56 (no generated `AddSystems()`, no cached filters from attributes, no counting members, no
@@ -46,8 +46,8 @@ reduction would replace; `Battle`'s per-method `battle.Replicated++` moves to `[
 
 **Pattern.** Every tile writes the same neighbor function: step the key's coordinate by one per face.
 
-- `docs/content/guide/grids.mdx:50-56`, `:279-287` (3D), `:358-364`, `:468-474`, `:547-553`
-- `docs/content/guide/analyzer.mdx:2425`, `:2437` (a 1D `int` key: `face == TileFaces.West ? index - 1 : index + 1`)
+- `docs/content/guide/performance/grids.mdx:50-56`, `:279-287` (3D), `:358-364`, `:468-474`, `:547-553`
+- `docs/content/guide/help/analyzer.mdx:2425`, `:2437` (a 1D `int` key: `face == TileFaces.West ? index - 1 : index + 1`)
 - `samples/VoxelServer/Components/Chunks.cs:29-35`, `samples/VoxelServer/Components/Scent.cs:65-71` (identical)
 - `benchmarks/EasyEcs.Benchmark/TileLayersBenchmark.cs:20` (the other tile benchmarks wrap: periodic grids)
 - the Chinese twins of the five grids fences; about 40 tile types in `tests/EasyEcs.UnitTest/TileTests*.cs` and
@@ -165,7 +165,7 @@ would be a second way to say a system's group; the rewrite (voxel-rewrite.md, st
 
 **Pattern.** `static int IDirectMapped<ChunkPos>.Slots => 64 * 64;` and
 `static int IDirectMapped<ChunkPos>.SlotOf(ChunkPos pos) => (pos.Z & 63) * 64 + (pos.X & 63);` at
-`samples/VoxelServer/Components/Chunks.cs:23-24` and `Scent.cs:60-61` (identical), `docs/content/guide/grids.mdx:465-466`,
+`samples/VoxelServer/Components/Chunks.cs:23-24` and `Scent.cs:60-61` (identical), `docs/content/guide/performance/grids.mdx:465-466`,
 `indexes-and-relations.mdx:277-278` (a tuple key), `reference/idirectmapped.mdx:20` (generated from the XML doc).
 
 ```csharp
@@ -772,7 +772,7 @@ list a directory.
 | `.github/scripts` | `check-sample.sh` (sample folders, `docs/content/samples/<slug>.mdx`), `release-notes.sh` (the changelog) | nothing inside the moved projects |
 | `tools/` scripts and projects | `bench.sh` (project dirs and class names, `docs/src/data/bench.json`), `inlining.sh` + `Inlining/Program.cs` and `loopbound.sh` + `LoopBound/Program.cs` (benchmark types by name), `jitdisasm.sh` (method names), `DocCheck` (`docs/content`, `README.md`), `ApiDocs` (the built assembly and its XML; zh entries keyed by doc id) | class and type names do not change; none reads a source folder |
 | Docs includes | 21 regions of `benchmarks/EasyEcs.Benchmark/BattleServer.cs` (`example.mdx:97-296`, `example.zh.mdx:88-261`), `samples/**`, `demo/EasyEcs.Demo/**` | none moves |
-| GitHub links in pages | `example(.zh).mdx:14-16` (`BattleServer.cs`, `BattleServerTests.cs`), `migrate-from-{arch,friflo,defaultecs}(.zh).mdx` and `comparison(.zh).mdx` (`WorldSimulation.cs`, the Comparison files), `performance(.zh).mdx` (`BenchmarkConfig.cs`), `guide/prefabs(.zh).mdx:348/321` (`AllocationTests.cs`) | those files stay |
+| GitHub links in pages | `example(.zh).mdx:14-16` (`BattleServer.cs`, `BattleServerTests.cs`), `migrate-from-{arch,friflo,defaultecs}(.zh).mdx` and `comparison(.zh).mdx` (`WorldSimulation.cs`, the Comparison files), `performance(.zh).mdx` (`BenchmarkConfig.cs`), `guide/basics/prefabs(.zh).mdx:348/321` (`AllocationTests.cs`) | those files stay |
 | Comments naming paths | `benchmarks/EasyEcs.Comparison/{ComparisonBenchmark,Shared,EasyEcsSimulation}.cs` (`WorldSimulation.cs`), `tests/EasyEcs.UnitTest/LocalityTests.cs:8` (`Locality/`) | those stay |
 | The docs site's other scripts | `build-demo.sh:14` (the demo project), `sync-benchmarks.ts` (the Comparison csproj, BenchmarkDotNet reports), `lint-links.ts` (pages only) | outside the moved folders |
 | Templates and the demo build | `EasyEcs.Templates.csproj:28` (`content\**`), `docs/scripts/build-demo.sh` | unrelated to the moved projects |

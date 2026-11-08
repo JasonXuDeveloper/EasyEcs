@@ -38,7 +38,7 @@ The plugin's data rides on the host's entities: a `Score` per unit and a `Bonus`
 <include lang="csharp" meta='title="HotReload.Plugin/Components.cs"'>../../../samples/HotReload/HotReload.Plugin/Components.cs</include>
 
 `JoinScoringSystem` gives the units without a score one, a whole table at a time with `World.SetAll`
-([bulk changes](/en/docs/guide/bulk)); `ScoringSystem` adds the bonus to every moving unit.
+([bulk changes](/en/docs/guide/changes/bulk)); `ScoringSystem` adds the bonus to every moving unit.
 
 <include lang="csharp" meta='title="HotReload.Plugin/Systems.cs"'>../../../samples/HotReload/HotReload.Plugin/Systems.cs</include>
 
@@ -56,9 +56,9 @@ The host's own system, which runs through every reload because it is not in the 
 Version 1: load, three updates, save, remove the plugin's types, unload. Version 2: a new context, the save loaded,
 two more updates. `world.RemoveTypes(assembly)` takes the plugin's systems, components and singletons out of the
 world, so nothing roots the plugin and its context can be collected
-([unloading a plugin's types](/en/docs/guide/migration-and-unload#remove-types)). The save carries the plugin's
+([unloading a plugin's types](/en/docs/guide/saves/migration-and-unload#remove-types)). The save carries the plugin's
 component values over the reload because it names types by a hash of their full name, not by the assembly that
-loaded them ([hot reload](/en/docs/guide/migration-and-unload#hot-reload), [saves](/en/docs/guide/saves)). `RunAndUnload` is not inlined so that nothing of the plugin is left on `Main`'s stack. The
+loaded them ([hot reload](/en/docs/guide/saves/migration-and-unload#hot-reload), [saves](/en/docs/guide/saves/saves)). `RunAndUnload` is not inlined so that nothing of the plugin is left on `Main`'s stack. The
 collectible context, finding the `IGamePlugin` and waiting for collection are in
 [`Host/Plugins.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/HotReload/HotReload.Host/Host/Plugins.cs),
 and the checks in
@@ -87,13 +87,13 @@ and the first context was collected, and the host's 100 units and its `MoveSyste
 ## Related [#related]
 
 <Cards>
-  <Card icon={<Workflow />} title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+  <Card icon={<Workflow />} title="Migration and unload" href="/en/docs/guide/saves/migration-and-unload">
     RemoveTypes, hot reload, and moving entities between worlds.
   </Card>
-  <Card icon={<Save />} title="Saves" href="/en/docs/guide/saves">
+  <Card icon={<Save />} title="Saves" href="/en/docs/guide/saves/saves">
     What a save holds and how types are named in it.
   </Card>
-  <Card icon={<Boxes />} title="Bulk changes" href="/en/docs/guide/bulk">
+  <Card icon={<Boxes />} title="Bulk changes" href="/en/docs/guide/changes/bulk">
     SetAll and the other whole-table changes.
   </Card>
   <Card icon={<Layers />} title="MultiWorld sample" href="/en/docs/samples/multi-world">

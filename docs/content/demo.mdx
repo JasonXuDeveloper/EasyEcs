@@ -10,7 +10,7 @@ import { BookOpen, Compass, Gauge, Rocket } from 'lucide-react';
 This page runs an EasyEcs world in your browser. Emitters drift along a curve and fire rings of sparks; drag
 slows the sparks down, so their color, set by speed, cools as they age; they flash where they hit a wall and fade out
 at the end of their life, and the emitters replace them. Move the pointer over the canvas and the sparks swirl
-towards it. Pick a count and watch what an update costs, and what the batch systems save over per-entity ones.
+towards it. Pick a count and watch what an update costs, and what the vector loops save over one call per spark.
 
 <EcsDemo />
 
@@ -27,7 +27,7 @@ towards it. Pick a count and watch what an update costs, and what the batch syst
 The world is `demo/EasyEcs.Demo` in the repository: a .NET 10 WebAssembly app that references EasyEcs.Core and its
 generator like any other project. Each animation frame, the page calls `Demo.Step(dt)` once:
 
-1. The host writes the step into the `Clock` singleton and updates a motion group: `world.Update<Batched>()` and
+1. The host writes the step into the `Clock` singleton and updates a motion group: `world.Update<Vectorized>()` and
    `world.Update<PerEntity>()` take turns, one per frame. Either one slows every spark by drag, then moves it.
 2. `world.Update()` runs the default group in the order the systems were added: `LifetimeSystem` destroys the sparks
    whose time ran out, `OrbitSystem` moves the emitters along their curve, `BurstSystem` fires a ring from each
@@ -41,7 +41,7 @@ generator like any other project. Each animation frame, the page calls `Demo.Ste
 
 ```mermaid
 flowchart LR
-    P[Page] -->|"Step(dt)"| M["Update&lt;Batched&gt;() or<br/>Update&lt;PerEntity&gt;()"]
+    P[Page] -->|"Step(dt)"| M["Update&lt;Vectorized&gt;() or<br/>Update&lt;PerEntity&gt;()"]
     M --> U["world.Update()"]
     U --> F[Frame.Write]
     F -->|float array| P
@@ -52,19 +52,19 @@ No call crosses between JavaScript and .NET per entity, and nothing is allocated
 array lives on the pinned object heap, so its address never changes. The pointer is input, and input is data: the
 page writes it into the `Pointer` singleton, and `AttractSystem` reads it on the next update.
 
-## Batch methods and SIMD [#batch-simd]
+## Vector loops and SIMD [#batch-simd]
 
-Below the canvas, the page shows what the same motion costs written two ways, measured live. `DragSystem` and
-`MovementSystem` are plain `[ForEach]` methods, called once per spark. `DragBatchSystem` and `MovementBatchSystem` are
-[batch methods](/en/docs/guide/systems#batch-methods): they receive spans over runs of whole rows, cast them to
-`Vector128<float>` and work on two sparks per instruction, with one scalar step for an odd spark at the end. The cast
-is valid because `Position` and `Velocity` are two floats each, so a run of rows is one float array.
+Below the canvas, the page shows what the same motion costs run two ways, measured live. `MovementSystem` and
+`DragSystem` are plain `[ForEach]` methods written for one spark; the generator compiles them to
+[vector loops](/en/docs/guide/basics/systems#vector-loops) that work on several sparks per instruction (`Move` over the
+flat floats of `Position` and `Velocity`, `Slow` over their interleaved fields). `MovementPerEntitySystem` and
+`DragPerEntitySystem` run the same methods with `SimdMode.Off`, one call per spark.
 
-Both pairs do the same work and give the same result. They sit in two system groups, `Batched` and `PerEntity`, and
-the host updates them in turns, one per frame, timing each: the picture does not change, both are measured on the
-same sparks, and the systems hold no mode flag. WebAssembly SIMD is 128 bits wide, so `Vector128` runs as hardware
-SIMD here while wider vectors do not; on a server the same code can use `Vector256` or `Vector<float>`. The larger
-the count, the more the batch version saves.
+Both pairs do the same work and give the same result. They sit in two system groups, `Vectorized` and `PerEntity`,
+and the host updates them in turns, one per frame, timing each: the picture does not change, both are measured on the
+same sparks, and the systems hold no mode flag. WebAssembly SIMD is 128 bits wide, so the loop runs on `Vector128`
+here; on a server the same methods get the machine's widest vectors. The larger the count, the more the vector loop
+saves.
 
 ## The code [#code]
 
@@ -72,24 +72,24 @@ These are the files the demo is built from, included from the repository. Every 
 state: the clock, the walls, the pointer and the population target are singletons, and a wall hit is written as data
 (`Flash`) for `FadeSystem` to pick up ([ECS principles](/en/docs/ecs-principles)).
 
-<Tabs items={['Components', 'Groups', 'MovementBatchSystem', 'DragBatchSystem', 'MovementSystem', 'DragSystem', 'LifetimeSystem', 'OrbitSystem', 'BurstSystem', 'AttractSystem', 'BounceSystem', 'FadeSystem', 'Units', 'Frame', 'Host']}>
+<Tabs items={['Components', 'Groups', 'MovementSystem', 'DragSystem', 'MovementPerEntitySystem', 'DragPerEntitySystem', 'LifetimeSystem', 'OrbitSystem', 'BurstSystem', 'AttractSystem', 'BounceSystem', 'FadeSystem', 'Units', 'Frame', 'Host']}>
 <Tab value="Components">
 <include lang="csharp" meta='title="Components.cs"'>../../demo/EasyEcs.Demo/Components.cs</include>
 </Tab>
 <Tab value="Groups">
 <include lang="csharp" meta='title="Groups.cs"'>../../demo/EasyEcs.Demo/Groups.cs</include>
 </Tab>
-<Tab value="MovementBatchSystem">
-<include lang="csharp" meta='title="Systems/MovementBatchSystem.cs"'>../../demo/EasyEcs.Demo/Systems/MovementBatchSystem.cs</include>
-</Tab>
-<Tab value="DragBatchSystem">
-<include lang="csharp" meta='title="Systems/DragBatchSystem.cs"'>../../demo/EasyEcs.Demo/Systems/DragBatchSystem.cs</include>
-</Tab>
 <Tab value="MovementSystem">
 <include lang="csharp" meta='title="Systems/MovementSystem.cs"'>../../demo/EasyEcs.Demo/Systems/MovementSystem.cs</include>
 </Tab>
 <Tab value="DragSystem">
 <include lang="csharp" meta='title="Systems/DragSystem.cs"'>../../demo/EasyEcs.Demo/Systems/DragSystem.cs</include>
+</Tab>
+<Tab value="MovementPerEntitySystem">
+<include lang="csharp" meta='title="Systems/MovementPerEntitySystem.cs"'>../../demo/EasyEcs.Demo/Systems/MovementPerEntitySystem.cs</include>
+</Tab>
+<Tab value="DragPerEntitySystem">
+<include lang="csharp" meta='title="Systems/DragPerEntitySystem.cs"'>../../demo/EasyEcs.Demo/Systems/DragPerEntitySystem.cs</include>
 </Tab>
 <Tab value="LifetimeSystem">
 <include lang="csharp" meta='title="Systems/LifetimeSystem.cs"'>../../demo/EasyEcs.Demo/Systems/LifetimeSystem.cs</include>

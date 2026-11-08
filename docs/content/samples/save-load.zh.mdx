@@ -20,14 +20,14 @@ dotnet run --project samples/SaveLoad
 
 ## 数据 [#data]
 
-只含数字的组件、本身就是实体的剑、[动态缓冲](/zh/docs/guide/dynamic-buffers)用的背包元素、一个单例，以及唯一的托管组件。存档把非托管组件
-按原始字节写出；`Name` 里有字符串，所以标成 [`[NinoType]`](/zh/docs/guide/saves#declare)，由 Nino 序列化，Nino 的生成器随 EasyEcs 包一起提供。
+只含数字的组件、本身就是实体的剑、[动态缓冲](/zh/docs/guide/data/dynamic-buffers)用的背包元素、一个单例，以及唯一的托管组件。存档把非托管组件
+按原始字节写出；`Name` 里有字符串，所以标成 [`[NinoType]`](/zh/docs/guide/saves/saves#declare)，由 Nino 序列化，Nino 的生成器随 EasyEcs 包一起提供。
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/SaveLoad/Components.cs</include>
 
 ## 玩家 [#players]
 
-`Players.Spawn` 创建一个玩家，背包里放三瓶药水和一张地图，剑作为它的[子实体](/zh/docs/guide/hierarchy)（`ChildOf`）。`Reserve` 在创建剑的循环之前先留好空间。
+`Players.Spawn` 创建一个玩家，背包里放三瓶药水和一张地图，剑作为它的[子实体](/zh/docs/guide/data/hierarchy)（`ChildOf`）。`Reserve` 在创建剑的循环之前先留好空间。
 
 <include lang="csharp" meta='title="Players.cs"'>../../../samples/SaveLoad/Players.cs</include>
 
@@ -35,11 +35,11 @@ dotnet run --project samples/SaveLoad
 
 三步，每步都有检查：
 
-1. 整个 World：[`world.Save(writer)`](/zh/docs/guide/saves#save) 写到文件，再用 [`world.Load(bytes)`](/zh/docs/guide/saves#load)
+1. 整个 World：[`world.Save(writer)`](/zh/docs/guide/saves/saves#save) 写到文件，再用 [`world.Load(bytes)`](/zh/docs/guide/saves/saves#load)
    读进新 World。id、组件、动态缓冲和单例都原样回来。
-2. bob 和他的剑：[`SaveEntities`](/zh/docs/guide/migration-and-unload#save-entities)，再像另一台服务器那样 `LoadEntities` 进另一个 World。
+2. bob 和他的剑：[`SaveEntities`](/zh/docs/guide/saves/migration-and-unload#save-entities)，再像另一台服务器那样 `LoadEntities` 进另一个 World。
    到达的实体拿到新 id，彼此之间的链接跟着改过来。
-3. carol：[`MoveEntities`](/zh/docs/guide/migration-and-unload#move-entities) 一次调用把她交给同一线程上的另一个 World，中间不做任何编码。
+3. carol：[`MoveEntities`](/zh/docs/guide/saves/migration-and-unload#move-entities) 一次调用把她交给同一线程上的另一个 World，中间不做任何编码。
 
 打印检查结果和 World 的
 `Checks`、`WorldText` 在 [`Support.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/SaveLoad/Support.cs)：
@@ -75,13 +75,13 @@ all checks passed
   <Card icon={<Globe />} title="MultiWorld" href="/zh/docs/samples/multi-world">
     下一个示例：每个线程一个 World。
   </Card>
-  <Card icon={<Save />} title="存档" href="/zh/docs/guide/saves">
+  <Card icon={<Save />} title="存档" href="/zh/docs/guide/saves/saves">
     存档里有什么、重启，以及结构会变的组件。
   </Card>
-  <Card icon={<ArrowRightLeft />} title="迁移与卸载" href="/zh/docs/guide/migration-and-unload">
+  <Card icon={<ArrowRightLeft />} title="迁移与卸载" href="/zh/docs/guide/saves/migration-and-unload">
     把一组实体带到另一个 World 或进程。
   </Card>
-  <Card icon={<Network />} title="层级" href="/zh/docs/guide/hierarchy">
+  <Card icon={<Network />} title="层级" href="/zh/docs/guide/data/hierarchy">
     ChildOf、子实体、子树和级联销毁。
   </Card>
 </Cards>

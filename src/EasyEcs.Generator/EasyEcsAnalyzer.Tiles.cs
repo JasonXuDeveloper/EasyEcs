@@ -78,6 +78,7 @@ public static partial class EasyEcsAnalyzer
 
     private static void AnalyzeTiles(CompilationStartAnalysisContext start)
     {
+        if (Core.Create(start.Compilation) == null) return; // no EasyEcs: no action at all
         // EECS116: the steps that write a second buffer beside a tile (its next cells, its cells), and the plain copies.
         var steps = new ConcurrentQueue<(ITypeSymbol Next, ITypeSymbol Cells, IMethodSymbol Method)>();
         var copies = new ConcurrentQueue<(ITypeSymbol Next, ITypeSymbol Cells, IMethodSymbol Method)>();
@@ -312,7 +313,7 @@ public static partial class EasyEcsAnalyzer
         string? lane = null;
         if (span.Parent is ArgumentSyntax { Parent: ArgumentListSyntax { Arguments.Count: 1, Parent: InvocationExpressionSyntax cast } }
             && model.GetSymbolInfo(cast, ct).Symbol is IMethodSymbol { Name: "Cast", TypeArguments.Length: 2 } castMethod
-            && castMethod.ContainingType.ToDisplayString() == "System.Runtime.InteropServices.MemoryMarshal"
+            && Symbols.Named(castMethod.ContainingType, "System.Runtime.InteropServices.MemoryMarshal")
             && SymbolEqualityComparer.Default.Equals(castMethod.TypeArguments[0], nextCell))
         {
             init = cast;

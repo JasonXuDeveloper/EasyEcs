@@ -953,10 +953,10 @@ public ref struct LoopsSystem
     }
 
     // Scalar with a reason on purpose: the schedule names it (TheScheduleNamesEachMethodsLoop), and so does EECS055.
-#pragma warning disable EECS055
+#pragma warning disable EECS055, EECS130 // EECS130: the index is the value checked, not a reference kept
     [ForEach]
     static void Mark(Entity entity, ref Heat health) => health.Value = entity.Id.Index;
-#pragma warning restore EECS055
+#pragma warning restore EECS055, EECS130
 }
 
 /// <summary>

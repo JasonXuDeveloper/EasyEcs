@@ -145,17 +145,18 @@ public static partial class EasyEcsAnalyzer
     /// <summary>EECS080's properties: field=parameter pairs, the components' modifiers, the filter attributes, the calls' replacements; EECS084's entity parameter to drop.</summary>
     public const string JobParameters = "Parameters", JobModifiers = "Modifiers", JobFilter = "Filter", JobCall = "Call", DropEntity = "DropEntity";
 
-    internal static void InitializeForms(AnalysisContext context)
+    internal static void InitializeForms(AnalysisContext context) => context.RegisterCompilationStartAction(start =>
     {
-        context.RegisterSymbolAction(AnalyzeScheduleAttribute, SymbolKind.NamedType);
-        context.RegisterSyntaxNodeAction(AnalyzeHandWrittenConsume, SyntaxKind.MethodDeclaration);
-        context.RegisterSyntaxNodeAction(AnalyzeHandWrittenVectorLoop, SyntaxKind.MethodDeclaration);
-        context.RegisterSymbolAction(AnalyzeConsume, SymbolKind.Method);
-        context.RegisterSymbolAction(AnalyzeRecordPass, SymbolKind.Method);
-        context.RegisterSyntaxNodeAction(AnalyzeHandWrittenRecordPass, SyntaxKind.ForEachStatement);
-        context.RegisterSyntaxNodeAction(AnalyzeHandWrittenCollected, SyntaxKind.InvocationExpression);
-        context.RegisterCompilationStartAction(AnalyzeEntityJobs);
-    }
+        if (Core.Create(start.Compilation) == null) return; // no EasyEcs: no action at all
+        start.RegisterSymbolAction(AnalyzeScheduleAttribute, SymbolKind.NamedType);
+        start.RegisterSyntaxNodeAction(AnalyzeHandWrittenConsume, SyntaxKind.MethodDeclaration);
+        start.RegisterSyntaxNodeAction(AnalyzeHandWrittenVectorLoop, SyntaxKind.MethodDeclaration);
+        start.RegisterSymbolAction(AnalyzeConsume, SymbolKind.Method);
+        start.RegisterSymbolAction(AnalyzeRecordPass, SymbolKind.Method);
+        start.RegisterSyntaxNodeAction(AnalyzeHandWrittenRecordPass, SyntaxKind.ForEachStatement);
+        start.RegisterSyntaxNodeAction(AnalyzeHandWrittenCollected, SyntaxKind.InvocationExpression);
+        AnalyzeEntityJobs(start);
+    });
 
     // ---------------- EECS083: [UpdateInterval] ----------------
 

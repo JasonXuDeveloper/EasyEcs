@@ -1,0 +1,10 @@
+{
+  "title": "Changes",
+  "pages": [
+    "structural-changes",
+    "bulk",
+    "cleanup-and-disable",
+    "refs-and-await",
+    "change-tracking"
+  ]
+}

@@ -200,10 +200,15 @@ owner-review "Countdown timers"); its lesson is a docs to-do.
 
 Starts now; Forms / Views / Lambdas areas wait for feat-inner-loops, Parts / Tiles for feat-generated-members.
 
-- [ ] **A1. A test runs the analyzer over the samples, templates and demo** (`analyzer.md` 1a, `code.md` 3.2):
+- [x] **A1. A test runs the analyzer over the samples, templates and demo** (`analyzer.md` 1a, `code.md` 3.2):
       `SamplesAreClean` (sources + generated output, Info included, a negative control); GeneratorCorpus's filter
       narrowed from all EECS055 / EECS086 to the inherent EECS055 reasons (the EECS086 exception goes with Finish 2c).
       Files: tests/GeneratorTests.cs, benchmarks/GeneratorCorpus.cs. The gate for every severity raise.
+      Done (feat-analyzer-lane2): `GeneratorTests.SamplesAreClean` over every sample but Godot, the template and
+      the demo (Nino referenced), with a negative control and four tracked exceptions that fail once fixed (A2:
+      Actors EECS109, VoxelServer EECS109 / EECS086 / EECS107); the template's `Spawner` is `[NotSaved]`;
+      GameLoop's EECS086 was a false positive (a method that changes structure: fixed in EECS086). GeneratorCorpus
+      filters only Info EECS055.
 - [ ] **A2. Finish 2b: EECS086's non-reducing total, EECS109 and EECS055's bool reason become Warnings** (owner,
       2026-10-27; `analyzer.md` 1b-1d), after the exemplar pass removed their blockers (BattleServer `Battle` ->
       `[Accumulate]`, VoxelServer's `SendPackets` -> `[Drain]` and its bools split, Actors' `Storage.Save`): EECS086
@@ -211,39 +216,66 @@ Starts now; Forms / Views / Lambdas areas wait for feat-inner-loops, Parts / Til
       fix); EECS109 Warning only when the walk could be a static `[Drain]` method (Info with its reason otherwise,
       `samples/Actors/Host/Storage.cs`), the indexed `for` and the non-ref `foreach` detected too; EECS055's bool
       reason (code in feat-inner-loops item e). Proof: `analyzer.md` 1b-1d tests, A1 green.
-- [ ] **A3. Rule: `Reduce<T>.Value` read as the total** (`analyzer.md` 3a; common-mistakes #reduce-value), Warning,
+- [x] **A3. Rule: `Reduce<T>.Value` read as the total** (`analyzer.md` 3a; common-mistakes #reduce-value), Warning,
       the accumulation reader shared with Kernel / `Accumulations`. Proof: positives and negatives listed there.
-- [ ] **A4. Rule: `AddSingleton<T>` on a world that has T** (`analyzer.md` 3b; D58), Error in one block, Warning in
+      Done: EECS128 (provisional id). A read flowing back into the same field or the value holding it, a kept
+      row's condition and Combine are not reads; `HistogramBenchmark`, BattleServer's `FindWeakest` and the Reduce
+      / Fusion / Kernel tests stay clean.
+- [x] **A4. Rule: `AddSingleton<T>` on a world that has T** (`analyzer.md` 3b; D58), Error in one block, Warning in
       a hook or `[ForEach]` body, fix to `SetX` / `GetOrAddSingleton`. Proof: tests and a code-fix test.
-- [ ] **A5. Rule: a raw entity index stored in a component** (`analyzer.md` 3c), Warning, EECS017's sibling.
-- [ ] **A6. Rule: a `Scratch<T>` added to and never cleared** (`finish-scan.md` item 7; threading.mdx:1068 says
+      Done: EECS129 (provisional id), fix to the generated `GetOrAddX()` (the generic call where none binds).
+- [x] **A5. Rule: a raw entity index stored in a component** (`analyzer.md` 3c), Warning, EECS017's sibling.
+      Done: EECS130 (provisional id), no fix. WorldSimulation's `Projectile.OwnerId` keeps the int (its ports
+      store ints; pragma with the reason), NeighborTests / KernelTests store indexes on purpose (pragmas).
+- [x] **A6. Rule: a `Scratch<T>` added to and never cleared** (`finish-scan.md` item 7; threading.mdx:1068 says
       "Code review" today), Warning + a fix inserting `Clear()`; the rule recorded in `audit-analyzer`.
-- [ ] **A7. Locality pitfalls** (docs-todos "Locality phase 0"): `Lookup.Find` from a helper ("not prepared") as a
+      Done: EECS131 (provisional id) + the fix inserting `Clear()`; recorded in `audit-analyzer`.
+- [x] **A7. Locality pitfalls** (docs-todos "Locality phase 0"): `Lookup.Find` from a helper ("not prepared") as a
       rule; EECS036 / CS0315's message for a `[LookupKey]` member named `Key`; a qualified `[ForEach]` call inside its
       type. Build or record each.
-- [ ] **A8. Views follow-ups** (docs-todos "feat-views"): EECS053 through views in lambdas (verify first), EECS025 for
+      Done: EECS132 (provisional id) for a key probe in another type's method; helpers of the method's own type
+      are now followed by the generator (`Symbols.FindsByKey`, three calls deep), so they no longer throw; a
+      `[LookupKey]` member named `Key` is no longer EECS036 (it got no index, hence CS0315); the bare call of an
+      entry point gets a fix (CS7036 / CS1501 / CS1503 / CS1620).
+- [x] **A8. Views follow-ups** (docs-todos "feat-views"): EECS053 through views in lambdas (verify first), EECS025 for
       a never-written view ref field, EECS049 for view locals; EECS049 for a `[WithAny<Q, T>]` whose every type is in
       `[Without<>]`. Build or record each. After feat-inner-loops.
-- [ ] **A9. EECS021 false positive on a partial static runner** (`analyzer.md` 4): skip the method itself unless its
+      Done: EECS025 for a never-written view ref field, EECS049 for view locals and for an all-excluded
+      `[WithAny]` were already built and tested; EECS053 through a lambda pass's view pinned in ViewTests.
+- [x] **A9. EECS021 false positive on a partial static runner** (`analyzer.md` 4): skip the method itself unless its
       entry point is reachable. Files: Symbols.cs. Proof: the snippet, private and public.
-- [ ] **A10. Build cost: syntax rejection before `GetDeclaredSymbol`** (`analyzer.md` 6) in `AnalyzeVectorLoop` /
+      Done: a private method no longer collides with its own entry point; public / internal still EECS021.
+- [x] **A10. Build cost: syntax rejection before `GetDeclaredSymbol`** (`analyzer.md` 6) in `AnalyzeVectorLoop` /
       `AnalyzeParallel`; the Tiles, Views, Records, Pairs, Forms and Fusion areas behind `Core.Create`; the two
       `ToDisplayString() ==` comparisons (Performance.cs:308, Tiles.cs:315; `generator.md` "In areas owned") by
       `Symbols.Named`. Proof: GeneratorBenchmark CompileAndAnalyze minus Compile, diagnostics diffed.
-- [ ] **A11. Messages and fixes** (`analyzer.md` 7): EECS118's reasons end with what to write; the drop-the-argument
+      Done: Views / Pairs / Forms / Fusion / Tiles / Records behind `Core.Create`, syntax rejection before
+      `GetDeclaredSymbol`, `Symbols.Named` for both display-string compares; numbers in the hand-back.
+- [x] **A11. Messages and fixes** (`analyzer.md` 7): EECS118's reasons end with what to write; the drop-the-argument
       fix for EECS035 / EECS118; EECS024's move-to-a-static-method fix. Proof: CodeFixTests per fix.
-- [ ] **A12. Thin tests and the suppressor** (`analyzer.md` 8): EECS004, 068, 104, 058, 108, 118, 099 / 100, 057 /
+      Done: EECS118 / EECS035 messages end with "drop X or Y" and get the remove fix; EECS024 gets the move fix
+      (also fixed: Captures counted `p.V` and the attribute's name as captures).
+- [x] **A12. Thin tests and the suppressor** (`analyzer.md` 8): EECS004, 068, 104, 058, 108, 118, 099 / 100, 057 /
       063 / 070; `UnusedSuppressor` cases for `[Drain]`, hooks, IDE0052, and its justification text.
-- [ ] **A13. Overlap pins** (`analyzer.md` 9) in `AnalyzerTests.OneMistakeIsReportedOnce`: EECS086 / 055, EECS103 /
+      Done: the thin rules at their edges (AnalyzerTests.Declarations / .Parts, PartTests, MaxRowsTests),
+      `UnusedSuppressor` for `[Drain]`, hooks, IDE0052 and the justification text.
+- [x] **A13. Overlap pins** (`analyzer.md` 9) in `AnalyzerTests.OneMistakeIsReportedOnce`: EECS086 / 055, EECS103 /
       055, EECS109 / 092; IDE0060 suppressed on `[ForEach]` / `[EntityMethod]` parameters (EECS026 owns them).
-- [ ] **A14. Smaller candidates** (`analyzer.md` 3, end): "removing a component to pause it", "a flag where a tag
+      Done: `AnalyzerTests.OverlappingRulesReportOnce` (EECS086 / 055 twice, EECS109 / 092); EECS103 / 055 was
+      pinned in HandWrittenVectorLoopReports; IDE0060 suppressed (EECSS03) and tested in UnusedTests.
+- [x] **A14. Smaller candidates** (`analyzer.md` 3, end): "removing a component to pause it", "a flag where a tag
       would do" (overlaps A2's bool split): weigh, then build or record in decisions / owner-review.
-- [ ] **A15. Stale instructions** (`analyzer.md` 10, docs-todos S1): `audit-analyzer` SKILL's file list (`.Members`,
+      Recorded in `docs/owner-review.md` with the causes (no signal tells a pause from an end; the bool split of
+      EECS055 already gives that code its fix, and how often a flag flips is not in the code).
+- [x] **A15. Stale instructions** (`analyzer.md` 10, docs-todos S1): `audit-analyzer` SKILL's file list (`.Members`,
       `.Layout`, `.Lambdas`, `.Views`, `.Records`, `.Pairs`, `.Tiles`, `.Fusion`), its range (EECS002-EECS123) and the
       overlap test's name; `src/EasyEcs.Generator/AGENTS.md` 135-136 and root `AGENTS.md`'s range; the
       `GeneratorCorpus.cs` comment; the code comment `EasyEcsAnalyzer.Performance.cs:17` ("the generated member is a
       suggestion"); an `IForSpan` Execute that is one element loop -> "write it as a lambda pass" (inner-loops.md
       section 6): build after WP4 merges or record.
+      Done: the skill's file list, range and test names, both AGENTS.md ranges and file-map lines, the
+      Performance.cs summary, GeneratorCorpus's comment. The IForSpan rule is recorded in `docs/owner-review.md`
+      (its check needs a rewritten-call form of `LambdaPass`, which the vector-loop lane owns).
 
 ### Lane 3: tooling and CI (tools/, .github/, docs/scripts, test and benchmark harness, sample hosts) — 19 items
 
@@ -444,7 +476,7 @@ numbers are written once about the final code).
 - [ ] **1. Directory restructure** (owner, 2026-11-08, L9 / L10: runs as soon as halos, analyzer lane 2 and lane 4
       merge, before lanes 1, 5 and 6 start; besides the four projects and `tools/perf/` it also groups the
       `docs/content/guide` pages (folders + meta.json sections + `_redirects` for the old URLs, en and zh), the rest of
-      `tools/`, and `docs/plans/`: the layout of these three is proposed first, as a popup) (layout approved 2026-11-07: `finish-scan.md` Report 2 plus `tools/perf/`; it
+      `tools/`, and `docs/plans/`, as chosen in L11 / L12) (layout approved 2026-11-07: `finish-scan.md` Report 2 plus `tools/perf/`; it
       supersedes `layout.md`): `git mv` only, alone, after every branch merged and after lane 3's T1; its six commits,
       `docs/vite.config.ts` recursive, `site.ts:58`, skills' paths, `.DotSettings`, the 107 `tools/perf/` references;
       `inner-loops.md`'s `CellTests.cs` reference dropped.

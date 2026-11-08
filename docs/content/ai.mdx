@@ -18,8 +18,8 @@ The skill holds the rules that matter when writing EasyEcs code: components and 
 structural changes, `entity.Run` for a request on one entity, threads and refs, performance, persistence (snapshots,
 saves, records with `LoadEntitiesInto`), what EasyEcs does not do (including the actor pattern it leaves to you),
 project layout and debugging, and an example. They are drawn from the [ECS principles](/en/docs/ecs-principles), the
-[analyzer rules](/en/docs/guide/analyzer), the [performance guide](/en/docs/performance),
-[project structure](/en/docs/guide/project-structure) and [diagnostics](/en/docs/guide/diagnostics).
+[analyzer rules](/en/docs/guide/help/analyzer), the [performance guide](/en/docs/performance),
+[project structure](/en/docs/guide/basics/project-structure) and [diagnostics](/en/docs/guide/production/diagnostics).
 
 An agent reads only the skill's description until a task writes, reviews or migrates EasyEcs code; then it loads the
 rules. Other conversations pay nothing for them. Claude Code, Cursor, Codex, GitHub Copilot, Gemini CLI and the other
@@ -59,20 +59,21 @@ The analyzer still checks every build, so a rule the agent misses becomes a comp
 | File | What it holds |
 | --- | --- |
 | [`/llms.txt`](https://ecs.xgamedev.net/llms.txt) | A summary of EasyEcs, its key facts and a link to the Markdown copy of every English page ([llmstxt.org](https://llmstxt.org) format) |
-| [`/llms-full.txt`](https://ecs.xgamedev.net/llms-full.txt) | The full text of every English page in one file |
-| [`/llms.zh.txt`](https://ecs.xgamedev.net/llms.zh.txt), [`/llms-full.zh.txt`](https://ecs.xgamedev.net/llms-full.zh.txt) | The same for the Chinese pages (also at `/zh/llms.txt` and `/zh/llms-full.txt`) |
+| [`/llms-full.txt`](https://ecs.xgamedev.net/llms-full.txt) | The full text of every English page in one file, the API reference aside |
+| [`/llms-reference.txt`](https://ecs.xgamedev.net/llms-reference.txt) | The generated API reference in one file: every public type and member |
+| [`/llms.zh.txt`](https://ecs.xgamedev.net/llms.zh.txt), [`/llms-full.zh.txt`](https://ecs.xgamedev.net/llms-full.zh.txt), [`/llms-reference.zh.txt`](https://ecs.xgamedev.net/llms-reference.zh.txt) | The same for the Chinese pages (also at `/zh/llms.txt`, `/zh/llms-full.txt` and `/zh/llms-reference.txt`) |
 
-Give an assistant `llms.txt` when it can follow links, `llms-full.txt` when it cannot. The full file includes the
+Give an assistant `llms.txt` when it can follow links, `llms-full.txt` when it cannot, and `llms-reference.txt` too when it needs exact signatures. The full file includes the
 code of the [battle server example](/en/docs/example), so a model sees every feature used together.
 
 ## Markdown copies of every page [#markdown-copies]
 
-Add `.md` to a page's URL for its Markdown: `https://ecs.xgamedev.net/en/docs/guide/queries.md`. The docs home is
+Add `.md` to a page's URL for its Markdown: `https://ecs.xgamedev.net/en/docs/guide/basics/queries.md`. The docs home is
 `/en/docs.md`. A request for the page itself with `Accept: text/markdown` gets the same Markdown, so tools that ask for
 Markdown first need no special URL:
 
 ```bash
-curl -H "Accept: text/markdown" https://ecs.xgamedev.net/en/docs/guide/systems
+curl -H "Accept: text/markdown" https://ecs.xgamedev.net/en/docs/guide/basics/systems
 ```
 
 The menu at the top of each page copies its Markdown or opens it in ChatGPT, Claude, T3 Chat or Scira with the page

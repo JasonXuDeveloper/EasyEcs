@@ -45,7 +45,7 @@ flowchart TB
     power-of-two-sized component never straddles two lines, and vector loads stay aligned.
   - Columns of types that hold references are plain `T[]`; a row's references are cleared when the row loses its
     entity or its component, so the GC can collect what they pointed to.
-  - A [`DynamicBuffer<T>`](/en/docs/guide/dynamic-buffers) column holds one reference per row to that row's own
+  - A [`DynamicBuffer<T>`](/en/docs/guide/data/dynamic-buffers) column holds one reference per row to that row's own
     list, created by its first write. Moving the row moves the reference; snapshots and clones copy the elements into
     new lists.
   - Tables double when full and never shrink on their own: each is bounded by the most entities it ever held.
@@ -53,7 +53,7 @@ flowchart TB
     their edges and every cached query match; a later change creates them again) and shrinks the others to their
     entities rounded up to a power of two, 64 rows at least, with their presence bits and change-tick summaries. It
     bumps `StorageVersion` once and keeps every table a live snapshot holds rows of
-    ([give memory back](/en/docs/guide/diagnostics#trim)).
+    ([give memory back](/en/docs/guide/production/diagnostics#trim)).
 - **Presence bits.** Removing a component keeps the entity in its table and clears the row's bit for that
   component (one bit per row, 64 rows per `ulong`). A column gets its bits on its first removal; until then every row
   has the component and the column carries no bits. Each column also counts its living rows that lack the component,
@@ -62,7 +62,7 @@ flowchart TB
 - **Disabled components** are presence bits too: `entity.Disable<T>()` clears `T`'s bit and adds a `Disabled<T>` tag,
   whose column the table gains on the first disable (one row move per table, then bit flips).
 - **Groups.** `[GroupBy]` on the type (or `world.GroupBy<T>()`) keys tables by the value of an
-  [`IGroup`](/en/docs/guide/groups) component as well as by their mask, so the entities of one group are contiguous
+  [`IGroup`](/en/docs/guide/data/groups) component as well as by their mask, so the entities of one group are contiguous
   and `QueryFilter.InGroup<T>(g)` walks only their tables.
 - **Masks** (`BitMask`) are 256-bit SIMD bitsets with an overflow. Component bits are `ushort`s, so a process can use
   up to 65,536 component types: the first 256 are inline (one `Vector256` test per table match), the rest go to an
@@ -99,7 +99,7 @@ is filled by the key's next entity, so entities never move under a loop
 (relations, `ChildOf`) sit in an array indexed by the target's id, so a relation lookup hashes nothing. The index is
 kept on write: `Set`, `CreateEntity` and `CreateEntities` call one inlined hook that the JIT removes for components
 without an index. A write through a `ref` cannot be seen (the ref is handed out before the value changes), so the
-analyzer rejects it ([EECS015](/en/docs/guide/analyzer)) instead of every lookup paying for it. The first lookup
+analyzer rejects it ([EECS015](/en/docs/guide/help/analyzer)) instead of every lookup paying for it. The first lookup
 builds the index with one query; destroying an entity or removing an indexed component unlinks it at once.
 
 ### Why rows move only on adds [#why-rows-move-only-on-adds]
@@ -154,7 +154,7 @@ stateDiagram-v2
 - Ids are recycled last in, first out: recently freed ids still have warm cache lines, and `Meta` stays bounded by
   the peak number of live entities. `Meta` never shrinks (on `Dispose` it is cleared), which lets handles index it
   without bounds checks.
-- `Destroy` on an entity that holds an [`ICleanupComponent`](/en/docs/guide/cleanup-and-disable) retires it: it loses its
+- `Destroy` on an entity that holds an [`ICleanupComponent`](/en/docs/guide/changes/cleanup-and-disable) retires it: it loses its
   other components and keeps a `Retired` tag until a system removes its last cleanup component.
 - With `WorldOptions.DestroyLogCapacity`, the world records every id when it stops being alive (a destroy, a cascade, a move
   out, the last cleanup component removed, an entity a `Restore` or `Load` takes away) in a fixed ring of 16-byte
@@ -231,7 +231,7 @@ Every iteration API walks tables front to back. What differs is the bookkeeping 
   `QueryWalk`, pooled per thread, reached once per table and per structural change. A ticket tells a walk's current
   use from a copy of an enumerator that already ended.
 
-The rules from the user's side: [Structural changes during iteration](/en/docs/guide/structural-changes).
+The rules from the user's side: [Structural changes during iteration](/en/docs/guide/changes/structural-changes).
 
 ## Systems [#systems]
 
@@ -268,7 +268,7 @@ flowchart LR
 - An exception propagates out of the update, or, with `SystemErrorPolicy.Disable`, switches its system off and stays
   in `system.Error`.
 - Systems cooperate through data only ([D1](/en/docs/decisions#d1-state-changes-are-data-no-events-or-callbacks)),
-  so all behavior runs in schedule order. User-facing details: [Systems](/en/docs/guide/systems).
+  so all behavior runs in schedule order. User-facing details: [Systems](/en/docs/guide/basics/systems).
 
 ## Source generators and analyzer [#source-generators-and-analyzer-easyecsgenerator]
 
@@ -278,7 +278,7 @@ flowchart LR
 | `SystemGenerator` | Turns `[ForEach]` methods into struct jobs (per entity, or per run of rows for span parameters) in a file class of their own, which call the user's method through `[UnsafeAccessor]` ([D16](/en/docs/decisions#d16-no-partial-generated-code-lives-outside-the-users-type)). Each `[EcsSystem]` gets a code struct (`__X_SystemCode : ISystemCode`: its hooks, jobs, access set and cadence), and each assembly a system set (`__EasyEcsSystems`) registered by a module initializer; a static method outside a system gets an entry point. A generated job declares `OneQuery` (its filter is a constant), so its passes read the query the world keeps for the job type ([D104](/en/docs/decisions#d104-one-query-per-job-type)). `[Changed<T>]` / `[Removed<T>]` become `Since(LastRunTick + 1)` and a declared read of `T`; `Parallel = true` runs the job over chunks. Jobs that cannot change structure get `INoStructuralChanges`. A per-entity method over numbers gets a vector loop written from its body (`Kernel`: masks for branches, narrow lanes, struct values, wide rows; [D68](/en/docs/decisions#d68-vector-loops-without-opting-in)), or the reason it runs row by row; `[EntityMethod]`, `[Consume]` and `[UpdateInterval]` are compiled here too. |
 | `ComponentGenerator` | C# 14 extension members per component and singleton: `entity.Health`, `HasHealth`, `SetHealth(…)`, `IsDead`, `world.Clock`, `world.KillsIndex`, `item.Position` per query shape, the buffer and prefab writers, and the registration of the types a save may name and of the setup a type declares (`[GroupBy]`, `[WhenTargetDestroyed]`, `[NotSaved]`). |
 | `PartGenerator` | Writes what a partial struct declares with attributes into a part of it: `IReduction<T>` from `[Sum]` .. `[Any]`, the explicit `Key` of `[LookupKey]` / `[UniqueKey]`, the `Group` of `[Group]` ([D101](/en/docs/decisions#d101-declaration-attributes)). |
-| `EasyEcsAnalyzer` | Reports EECS002–EECS103: input the generators skip, code that breaks the [ECS principles](/en/docs/ecs-principles), and code that works but costs. One analyzer per area (declarations, systems, performance, usage, threads, parts, forms, lambda passes, views, records, fusion; `EasyEcsAnalyzer.All`), so a `NoWarn` of an area's rules skips its cost. Generators never report diagnostics; both use the same checks. [EasyEcs.CodeFixes](/en/docs/guide/analyzer) offers the mechanical fixes. |
+| `EasyEcsAnalyzer` | Reports EECS002–EECS103: input the generators skip, code that breaks the [ECS principles](/en/docs/ecs-principles), and code that works but costs. One analyzer per area (declarations, systems, performance, usage, threads, parts, forms, lambda passes, views, records, fusion; `EasyEcsAnalyzer.All`), so a `NoWarn` of an area's rules skips its cost. Generators never report diagnostics; both use the same checks. [EasyEcs.CodeFixes](/en/docs/guide/help/analyzer) offers the mechanical fixes. |
 
 The generators follow the incremental rules: `ForAttributeWithMetadataName` or syntax-only predicates first, models
 that are equatable records of strings (no symbol, node or location survives a transform), a tracking name per stage,
@@ -343,9 +343,9 @@ flowchart TB
 - A run's synchronization is per chunk and per run, never per row: a chunk is claimed by one compare-and-swap on the
   cursor and finished by one `Interlocked.Decrement` of the chunks remaining (and an `Interlocked.Add` of its time);
   the caller spins on `Volatile.Read` of that count, and each `Decrement`'s full fence orders the chunk's writes, its
-  partial result included, before the merge ([how the runner synchronizes](/en/docs/guide/threading#runner-contract)).
+  partial result included, before the merge ([how the runner synchronizes](/en/docs/guide/performance/threading#runner-contract)).
 
-The rules from the user's side: [Threading](/en/docs/guide/threading).
+The rules from the user's side: [Threading](/en/docs/guide/performance/threading).
 
 ## Related [#related]
 

@@ -176,8 +176,12 @@ public ref struct ShootingSystem
     {
         if (!Rng.Chance(stats.Tick, shooter.Id.Index, 3, 50)) return;
         stats.Spawns++;
+        // The ports of EasyEcs.Comparison store each library's int id here and nothing reads it back: an EntityId would
+        // make this one component twice as wide as theirs (EECS130 says to store the EntityId where the id is used).
+#pragma warning disable EECS130
         world.CreateEntity(p, new Velocity { X = v.X * 4, Y = v.Y * 4 }, new Lifetime { Ticks = 20 },
             new Projectile { OwnerId = shooter.Id.Index });
+#pragma warning restore EECS130
     }
 }
 

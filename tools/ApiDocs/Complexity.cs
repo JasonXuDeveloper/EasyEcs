@@ -84,7 +84,7 @@ public static partial class Complexity
         return cells;
     }
 
-    // A link relative to the API page (guide/change-tracking.md#ticks), as a site URL.
+    // A link relative to the API page (guide/changes/change-tracking.md#ticks), as a site URL.
     [GeneratedRegex(@"\]\((?!https?:|/|#)([^)#]*?)\.mdx?(#[^)]*)?\)")]
     private static partial Regex Relative();
 

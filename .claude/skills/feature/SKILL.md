@@ -68,7 +68,7 @@ generated source or a profile and fixed in the same branch before it merges.
     member, an attribute, a parameter: users miss Info); Info only for hints the user may not be able to act on.
 - The message names the type or member and the fix; a scalar fallback's reason comes from `Kernel.Vectorize` and names the part to split when the user can fix it (`audit-vector-loops`).
 - Tests: positive cases, negative cases, false-positive guards, the overlap test (one diagnostic per mistake).
-- The rule list and range in AGENTS.md, `docs/content/guide/analyzer.mdx` + `.zh.mdx`, `skills/easyecs/SKILL.md` (the public skill).
+- The rule list and range in AGENTS.md, `docs/content/guide/help/analyzer.mdx` + `.zh.mdx`, `skills/easyecs/SKILL.md` (the public skill).
 
 ## 4. Code fix (`audit-analyzer`)
 

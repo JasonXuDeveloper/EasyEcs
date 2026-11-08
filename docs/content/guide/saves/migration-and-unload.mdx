@@ -1,0 +1,521 @@
+---
+title: Migration and unload
+seoTitle: "Move entities between worlds and hot-reload C# ECS logic"
+description: "Move a player and what it owns to another world or server with SaveEntities and MoveEntities, and hot-reload game logic with a collectible AssemblyLoadContext."
+icon: ArrowRightLeft
+---
+
+A player walks through a portal into another zone's world, or is handed to another server. Their entity, their items
+and their pets must arrive together, still pointing at each other. `SaveEntities` / `LoadEntities` carry such a party
+through bytes, `MoveEntities` copies it straight into another world of the thread, and both rewrite the `EntityId`s
+inside the party to the new entities. A long-running server also replaces its game logic without a restart:
+`RemoveTypes` takes a plugin's systems and components out of a world, so its collectible `AssemblyLoadContext` can
+unload and a new version can load the saved data.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  - **Zone or map changes** between worlds of one thread: `MoveEntities`.
+  - **Handing a player to another server**, or storing an offline player: `SaveEntities` / `LoadEntities`.
+  - **A record** of part of an entity, such as an actor's balance without its connection, loaded onto the entity it
+    already has: a `ComponentSet` and `LoadEntitiesInto` ([records](#records)).
+  - **Hot reload** of game logic in a server that must not restart: `RemoveTypes`.
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Moving a whole world: [`Save`](/en/docs/guide/saves/saves) / [`Load`](/en/docs/guide/saves/saves) keeps every id. Entities that change "zone" inside one
+  world: a [group](/en/docs/guide/data/groups) or a component value is enough. Reloading types that are not in a collectible
+  context: the default context never unloads. A record of every component of an entity that does not exist yet:
+  `SaveEntities` without a set and `LoadEntities` create it.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+### Entities through bytes [#save-entities]
+
+`SaveEntities(output, ids)` writes the listed entities and their components (stale ids and repeats are skipped; no
+singletons). `LoadEntities(bytes, handles)` creates them in another world, in this or another process, with new ids,
+and writes their handles in save order. `ids` is a span: an array, `[a.Id, b.Id]` (built on the stack), the ids
+themselves (`SaveEntities(output, a.Id, b.Id)`), or the list you collected as `CollectionsMarshal.AsSpan(list)`,
+read in place rather than copied by `ToArray()`.
+
+```csharp
+using Nino.Core;
+
+public record struct Sword(int Damage) : IComponent;
+
+// Indexed by its owner: a hero's pets are found without a scan of every pet.
+public partial record struct Pet([LookupKey] EntityId Owner) : IComponent;
+```
+
+```csharp
+using System.Runtime.InteropServices;
+
+var hero = world.CreateEntity(new Health(100));
+world.CreateEntity(new Sword(10), new ChildOf(hero));
+world.CreateEntity(new Pet(hero), new Health(20));
+
+// Collect the group: the hero, what hangs on it, what points at it.
+var party = new List<EntityId>();
+world.Descendants(hero).AddTo(party, includeRoot: true);                // the hero, then children, grandchildren and so on
+foreach (var pet in world.PetIndex.Find(hero.Id)) party.Add(pet.Id);    // the index, not a scan of every Pet
+
+var bytes = new NinoArrayBufferWriter();
+world.SaveEntities(bytes, CollectionsMarshal.AsSpan(party));                  // the party only // [!code highlight]
+
+using var otherServer = new World();
+var arrived = new Entity[party.Count];
+int created = otherServer.LoadEntities(bytes.WrittenSpan, arrived);   // new ids, links rewritten // [!code highlight]
+```
+
+`Descendants` walks depth first and lists each entity before its children, so the party holds every parent ahead of
+what hangs on it: the order `MoveEntities` wants, since it destroys the originals last first and a child then goes
+before its parent. `Children` lists one level only. A `ChildOf` cycle makes the walk throw
+`InvalidOperationException`. Find what points at the hero (pets, followers) through an index on the field, as above,
+or through a [relation](/en/docs/guide/data/indexes-and-relations#relations): a query that tests every `Pet` grows with the world, not with the
+party.
+
+### Entities to another world of the thread [#move-entities]
+
+`MoveEntities(target, ids, moved)` does the same between two worlds of the thread, without encoding: rows are copied,
+ids rewritten, then the originals are destroyed. `moved` receives the new handles in order (`default` for a skipped
+id).
+
+```csharp
+using System.Runtime.InteropServices;
+
+using var nextZone = new World();
+var moved = new List<Entity>();                    // Reused across moves: no allocation once it is large enough.
+CollectionsMarshal.SetCount(moved, party.Count);
+int count = world.MoveEntities(nextZone, CollectionsMarshal.AsSpan(party), CollectionsMarshal.AsSpan(moved));   // hero, sword and pet leave this world
+```
+
+- The originals are destroyed with their children, so move a [hierarchy](/en/docs/guide/data/hierarchy#moving) together.
+- Cleanup components do not move: they stay on the originals, now retired, for the systems of this world to release,
+  and the new entities do not have them, so a resource is released once.
+- An entity retired already, kept for its cleanup components (tagged `Retired`), is skipped like a stale id: it
+  is not copied, not counted, and its `moved` entry is `default`.
+- Both worlds must be owned by the calling thread; moving a world into itself is refused (`ArgumentException`).
+
+### A record of what persists [#records]
+
+An actor's entity holds runtime state next to what persists: a connection, timers, a cache, and a bank balance that
+must survive a restart. A `ComponentSet` names the components of the record, `SaveEntitiesWith(output, ids, set)` writes
+those only (the others need no Nino formatter), and `LoadEntitiesInto(bytes, entities)` puts them onto entities that
+exist already, such as the one the actor got when it was activated, before its record came back from the database.
+
+Use a record when only part of an entity outlives the process (the rest is rebuilt by the code that activates it), or
+when the entity is created before its data arrives. Build the set once, in a `static readonly` field, from the
+components that persist; save into a reused `NinoArrayBufferWriter` and store the written bytes wherever the data
+lives (a database row, a file, a message to another server).
+
+```csharp
+public record struct Bank(long Gold) : IComponent;
+public record struct Connection(int Socket) : IComponent;              // runtime only: never saved
+
+public static class Records
+{
+    public static readonly ComponentSet Persistent = ComponentSet.Create().With<Bank>();   // built once
+}
+```
+
+```csharp
+var actor = world.CreateEntity(new Bank(500), new Connection(7));
+var record = new NinoArrayBufferWriter();
+world.SaveEntitiesWith(record, [actor.Id], Records.Persistent);            // Bank only // [!code highlight]
+
+// Later, maybe in another process: the actor is activated, then its record arrives.
+var activated = world.CreateEntity(new Connection(9));
+world.LoadEntitiesInto(record.WrittenSpan, [activated]);               // Bank added, Connection kept // [!code highlight]
+```
+
+```csharp
+var restored = world.CreateEntity(new Connection(10));
+// Instead of the call above: the record restored without counting as a change.
+world.LoadEntitiesInto(record.WrittenSpan, [restored], markWritten: false);
+```
+
+- The i-th saved entity loads onto the i-th entity given; the counts must match, every entity must be alive in this
+  world and appear once, or the call throws `ArgumentException` before changing anything.
+- Each entity moves table at most once, whatever the number of components it receives. Components the record holds
+  are added or replace the entity's values; the others stay.
+- Indexes, groups and change tracking follow as with `Set`. A disabled component arrives disabled with its value.
+- A load is a write: `[Changed<T>]` methods see the loaded components. When the record only restores what was there
+  (an actor coming back from its database), pass `markWritten: false`: every component the record holds ends with no
+  change tick, also one that replaces a default (from a prefab, say), so a system that saves or replicates changed
+  components does not send the record straight back. Components the record does not hold keep their ticks.
+- The price of `markWritten: false`: the restored components are invisible to every `[Changed<T>]` method and
+  `Since` filter until code writes them. A replicator that sends changes to clients must send the full state itself
+  to a client that has not seen the entity yet.
+- So one prefab per kind of actor serves both cases: a new actor keeps the prefab's defaults as its first state
+  (written, so the next save stores them), and a restored one gets its record over them (not written). The
+  [Actors sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Actors) does this.
+- `SaveEntitiesWith` also writes an entity that holds none of the set's components, as an empty entry, so the
+  i-th saved entity still matches the i-th entity given.
+- `EntityId` fields are rewritten as below, onto the entities given; a `ChildOf` whose parent is not in the record is
+  not set.
+- `LoadEntitiesInto` is a structural change: owner thread only ([EECS014](/en/docs/guide/help/analyzer#eecs014)), not while a pass iterates
+  (`InvalidOperationException`), never in a parallel method ([EECS010](/en/docs/guide/help/analyzer#eecs010)), and in a
+  `[ForEach]` method only when it takes `Entity` or `World` ([EECS013](/en/docs/guide/help/analyzer#eecs013)).
+- A set names components for a save of entities. It can also name singletons (`WithSingleton<T>()`, or `With(typeof(...))`,
+  which takes either kind) for a whole-world [restart](/en/docs/guide/saves/saves#restart): `SaveWithout(output, in exclude)` leaves
+  its types out, `LoadKeeping(input, in keep)` keeps its singletons. A save of entities writes no singletons, so
+  `SaveEntitiesWith` and `SaveEntitiesWithout` with a set that names one throw `ArgumentException`.
+- A framework that learns its types at run time builds the set by `Type`:
+
+```csharp
+public static class RuntimeRecords
+{
+    public static readonly ComponentSet Persistent = ComponentSet.Create().With(typeof(Bank));
+}
+```
+
+#### Everything but a set: `SaveEntitiesWithout` [#save-entities-without]
+
+The other way round, `SaveEntitiesWithout(output, ids, set)` writes everything but the set: the data an entity computes
+again after a load (a height map, a cache, a flow field), left out so the save stays small. The components left out need
+no Nino formatter, and a `Disabled<T>` tag goes with its component.
+
+```csharp
+public record struct Terrain(int Seed) : IComponent;
+public record struct HeightMap(int[] Heights) : IComponent;            // computed from Terrain after a load
+
+public static class ChunkSaves
+{
+    public static readonly ComponentSet Derived = ComponentSet.Create().With<HeightMap>();   // built once
+}
+```
+
+```csharp
+var chunk = world.CreateEntity(new Terrain(42), new HeightMap(new int[256]));
+var chunkSave = new NinoArrayBufferWriter();
+world.SaveEntitiesWithout(chunkSave, [chunk.Id], ChunkSaves.Derived);   // Terrain only // [!code highlight]
+```
+
+`LoadEntities` then creates the chunk with its `Terrain` and no `HeightMap`; a system with `[Without<HeightMap>]`
+computes it again.
+
+| The entity | Save it with |
+| --- | --- |
+| Everything persists | `SaveEntities(output, ids)` |
+| A few components persist among runtime state (a bank balance beside a connection, timers, caches) | `SaveEntitiesWith(output, ids, persistent)` |
+| Most components persist, a few are computed again after a load (a height map, a flow field, a path) | `SaveEntitiesWithout(output, ids, derived)` |
+
+Name the smaller set: a component added later then lands on the right side by default, persisted with `Without`,
+left out with `With`.
+
+### How ids are rewritten [#entityid-rewriting]
+
+The generator records where every `EntityId` field of a component or buffer element is, private fields and nested
+structs included. When entities arrive:
+
+| An `EntityId` field that named | Becomes |
+| --- | --- |
+| An entity that arrives | The id of its new entity |
+| Any other entity (it stayed behind) | `EntityId.Null` |
+| The parent of a `ChildOf` that stayed behind | The `ChildOf` is removed: the entity is a root here |
+
+Ids inside collections (a `List<EntityId>` in a component) are not rewritten. Indexes and groups learn the arrivals,
+and their tracked components count as written.
+
+### Unique keys on arrival [#unique-keys]
+
+A [unique key](/en/docs/guide/data/indexes-and-relations#unique-keys) (an account id) names one entity per world, and
+entities that arrive must not bring a key the world has given already. `LoadEntities`, `LoadEntitiesInto` and
+`MoveEntities` check every unique key of the arrivals against the target world before the first row arrives:
+
+- A key another entity of the target holds: `InvalidOperationException`, and nothing arrives. `MoveEntities` then
+  leaves the originals alive in the source, so the player is still where it was.
+- A key the bytes give to two entities (a damaged or hand-built save): `InvalidDataException`.
+- `LoadEntitiesInto` onto an entity that holds the key itself is fine: it gets the key it has. Keys swapped between
+  the entities given are refused, like any key given to a second entity.
+
+A player who comes back to a world that still holds an old copy of them (a stale session, a ghost left by a crash)
+is refused until that copy is destroyed or loses its key: destroy it first, then load or move the player in.
+
+The [destroy log](/en/docs/guide/changes/change-tracking#destroy-log) records the originals `MoveEntities` destroys in the
+source world, so readers there see the entities leave.
+
+### Unloading a plugin's types [#remove-types]
+
+`world.RemoveTypes(assembly)` (or `RemoveTypes(context)` for every assembly of an `AssemblyLoadContext`) removes
+everything of the plugin from the world: its systems (their `OnDestroy` runs), singletons, indexes and groupings, and
+its components from every entity. The entities stay, without those components. Tables that had such a column are
+dropped with every cache naming them, so the world holds no reference to the assembly. Once every world removed it,
+the collectible context can unload; when it does, EasyEcs forgets the types' save ids and reuses their component
+bits once no live world mentions them.
+
+### Hot reload [#hot-reload]
+
+Saves record types by id, so a reload keeps the plugin's data: save, remove the types, unload, load the new
+version, load the save.
+
+```csharp
+using System.Buffers;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
+
+public sealed class PluginContext() : AssemblyLoadContext("plugin", isCollectible: true);
+
+public static class Plugins
+{
+    public static Assembly Reload(World world, PluginContext old, PluginContext next, string path)
+    {
+        var saved = new ArrayBufferWriter<byte>();
+        world.Save(saved);                                      // the plugin's components too, by type id
+        world.RemoveTypes(old);                                 // its systems, singletons and components leave // [!code highlight]
+        old.Unload();                                           // collected once nothing else roots it
+
+        var plugin = next.LoadFromAssemblyPath(path);
+        RuntimeHelpers.RunModuleConstructor(plugin.ManifestModule.ModuleHandle);   // registers its types for Load
+        world.Load(saved.WrittenSpan);                          // the new version's components take the values
+        return plugin;                                          // then add its systems to the world
+    }
+}
+```
+
+The order matters: while both versions are loaded their types share ids, and a load would refuse them as ambiguous.
+Keep the components the host owns (positions, ids) in an assembly that is never reloaded, and hold no references of
+your own to the old version's types (systems, plugin objects), or the context cannot be collected. A
+[snapshot](/en/docs/guide/saves/snapshots) taken before `RemoveTypes` cannot be restored after it.
+
+The [HotReload sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload) runs the whole cycle
+and checks that the old context was collected and that the plugin's data carried over.
+
+A reload leaves memory behind: the save and load buffers grown to the whole world, and tables that the entities left.
+Once the new version runs, `world.TrimExcess()` gives it back, at a quiet moment rather than in a tick
+([give memory back after a peak](/en/docs/guide/production/diagnostics#trim)).
+
+A restart of the whole process goes through bytes the same way, with two differences: the old process leaves out
+what it must not bring back (runtime state, its configuration), and the new process keeps the configuration it set
+before the load. `SaveWithout(output, in exclude)` and `LoadKeeping(input, in keep, markWritten: false)` do both: see
+[Restart](/en/docs/guide/saves/saves#restart).
+
+## Full example [#full-example]
+
+A hero with a sword (and a gem in the sword) and a pet walks into another zone: the party is collected with
+`Descendants` and the pet index, moved with `MoveEntities`, and the pet still points at its hero. Then an actor's bank
+comes back from an earlier run as a record, loaded with `markWritten: false`, and a `[Changed<Bank>]` saver finds
+nothing to save until a deposit. Put the files in a console project that references EasyEcs
+(`dotnet add package EasyEcs`) and run it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Health(int Value) : IComponent;
+
+// Hangs on the hero through ChildOf; a gem hangs on the sword.
+public record struct Sword(int Damage) : IComponent;
+
+public record struct Gem(int Bonus) : IComponent;
+
+// Points at its owner. Indexed by the owner, so the owner's pets are found without a scan.
+public partial record struct Pet([LookupKey] EntityId Owner) : IComponent;
+
+// What persists of an actor, and what does not.
+public record struct Bank(long Gold) : IComponent, ITracked;
+
+public record struct Connection(int Socket) : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Writes to storage the banks written since its last run.
+[EcsSystem]
+public ref struct SaveChangedBanks
+{
+    [ForEach, Changed<Bank>]
+    static void Save(Entity actor, in Bank bank)
+    {
+        Console.WriteLine($"saving {actor.Id}: {bank.Gold} gold");
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Party.cs">
+
+```csharp title="Party.cs" doccheck=example
+using EasyEcs;
+
+public static class Party
+{
+    // The hero, what hangs on it (each parent before its children), and its pets.
+    public static List<EntityId> Collect(World world, Entity hero)
+    {
+        var party = new List<EntityId>();
+        world.Descendants(hero).AddTo(party, includeRoot: true);
+
+        foreach (var pet in world.PetIndex.Find(hero.Id))
+        {
+            party.Add(pet.Id);
+        }
+
+        return party;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Records.cs">
+
+```csharp title="Records.cs" doccheck=example
+using EasyEcs;
+
+public static class Records
+{
+    // The components of an actor that outlive the process. Built once.
+    public static readonly ComponentSet Persistent = ComponentSet.Create().With<Bank>();
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using System.Runtime.InteropServices;
+using EasyEcs;
+using Nino.Core;
+
+// Two zones of one process. The next zone has entities already, so ids differ there.
+using var zone = new World();
+using var nextZone = new World();
+nextZone.CreateEntity(new Health(50));
+nextZone.CreateEntity(new Health(50));
+
+var hero = zone.CreateEntity(new Health(100));
+var sword = zone.CreateEntity(new Sword(10), new ChildOf(hero));
+zone.CreateEntity(new Gem(3), new ChildOf(sword));
+zone.CreateEntity(new Pet(hero.Id), new Health(20));
+
+// The hero walks through a portal: the party moves, its ids are rewritten.
+List<EntityId> party = Party.Collect(zone, hero);
+var moved = new Entity[party.Count];
+zone.MoveEntities(nextZone, CollectionsMarshal.AsSpan(party), moved);
+for (int i = 0; i < party.Count; i++)
+{
+    Console.WriteLine($"{party[i]} -> {moved[i].Id}");
+}
+
+Entity pet = moved[^1];
+Console.WriteLine($"pet owner: {pet.Pet.Owner}, hero: {moved[0].Id}");
+Console.WriteLine($"left behind: {zone.EntityCount} entities");
+
+// A record: an actor's bank, saved by an earlier run without its connection.
+using var earlier = new World();
+var saved = earlier.CreateEntity(new Bank(500), new Connection(7));
+var record = new NinoArrayBufferWriter();
+earlier.SaveEntitiesWith(record, [saved.Id], Records.Persistent);
+
+using var world = new World();
+world.AddSystem<SaveChangedBanks>();
+
+// The actor is activated without a Bank: the record adds it, not marked as written.
+var actor = world.CreateEntity(new Connection(9));
+world.LoadEntitiesInto(record.WrittenSpan, [actor], markWritten: false);
+Console.WriteLine($"update after the load ({actor.Bank.Gold} gold):");
+world.Update();
+
+actor.SetBank(Gold: 650);
+Console.WriteLine("update after a deposit:");
+world.Update();
+```
+
+</Accordion>
+</Accordions>
+
+
+It prints:
+
+```text
+0v1 -> 2v1
+1v1 -> 3v1
+2v1 -> 4v1
+3v1 -> 5v1
+pet owner: 2v1, hero: 2v1
+left behind: 0 entities
+update after the load (500 gold):
+update after a deposit:
+saving 0v1: 650 gold
+```
+
+Every entity of the party gets a new id in the next zone (two ids were taken there), the pet's `Owner` names the
+hero's new id, and nothing stays behind. The restored bank is not saved again on the update after the load; the
+deposit is.
+
+## How to use it fast [#how-to-use-it-fast]
+
+| Instead of | Do | Why |
+| --- | --- | --- |
+| `SaveEntities` + `LoadEntities` between worlds of one process | `MoveEntities` | Rows copied, no encoding |
+| A new buffer per migration | One `NinoArrayBufferWriter`, `ResetWrittenCount()` each time | No allocation once it is large enough |
+| Many small migrations of one entity | One migration of the whole party | A save's fixed cost (the types by id) is paid once |
+| `SaveEntities` of whole entities when only some components persist | A `ComponentSet` | The runtime components are not written, and need no formatter |
+| A `ComponentSet` built for every save | One `static readonly` set | Each `With` copies the set |
+| Saving what a load computes again (height maps, caches, flow fields) | `SaveEntitiesWithout` with a set of the derived components | A smaller save, and no formatter for them |
+| A reload that rebuilds the world | `RemoveTypes`, then `Load` | The host's entities and components stay where they are |
+| Living with the buffers a reload grew | `TrimExcess()` once the new version runs | The save and load buffers and empty tables are released |
+
+10 players with 99 items each, moved to another world and back through bytes and in memory, and one entity of four
+components through bytes, and a record of two of its components saved and loaded onto an entity that holds the
+others (`MigrationBenchmark`); a plugin with a tracked and an indexed component on every player, a
+singleton, a system and an index, removed with `RemoveTypes` (`UnloadBenchmark`):
+
+<BenchTable bench="MigrationBenchmark" />
+
+<BenchTable bench="UnloadBenchmark" />
+
+## What it costs [#what-it-costs]
+
+- **Migration:** O(entities × components); the rewrite of ids is a lookup per `EntityId` field.
+- **Allocation:** none for `SaveEntities`, `LoadEntities`, `LoadEntitiesInto` and `MoveEntities` once their buffers are large enough.
+- **`RemoveTypes`:** O(entities with such components + tables + cached queries); it allocates, and it is cold: run it
+  between updates, not in a tick.
+- **Steady state:** nothing. The unload support costs no time in worlds that never call `RemoveTypes`.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| Moving a parent without its children | The children are destroyed with the original | Collect the party with `Descendants` |
+| Collecting the party with `Children` only | Grandchildren are left out, and destroyed with their parent | `Descendants` walks every level |
+| `EntityId`s in a `List<T>` inside a component | Not rewritten: they name entities of the old world | Use fields, a buffer or a relation |
+| An `Entity` handle in a component | Not saved, not rewritten | [EECS017](/en/docs/guide/help/analyzer#eecs017) |
+| Loading the new plugin before unloading the old one | Ambiguous type ids: `InvalidDataException` | The reload order above |
+| Keeping references to the old plugin's systems | The context is never collected | Drop them after `RemoveTypes` |
+| `RemoveTypes` during an update or a pass | `InvalidOperationException` | [EECS041](/en/docs/guide/help/analyzer#eecs041) for a pass; at run time during an update |
+| Restoring a snapshot taken before `RemoveTypes` | `InvalidOperationException` | At run time |
+| Migrating from another thread | Both worlds belong to their owner thread | [EECS014](/en/docs/guide/help/analyzer#eecs014) |
+| Moving or loading a player whose unique key the target holds | `InvalidOperationException`; nothing arrives, the originals stay | Destroy the stale holder first ([unique keys](#unique-keys)) |
+| A singleton in the set of `SaveEntitiesWith` or `SaveEntitiesWithout` | `ArgumentException`: a save of entities writes no singletons | Singletons go in a whole-world [restart](/en/docs/guide/saves/saves#restart) save |
+| A component left out by `SaveEntitiesWithout` that nothing computes again | The loaded entity lacks it for good | A system with `[Without<T>]` that rebuilds it, or keep it in the save |
+| A component that persists left out of the record's set | Not saved: the loaded entity keeps its own value, or has none | Build the set from the persisting components, in one place |
+| A record loaded with `LoadEntities` | New entities beside the live ones | `LoadEntitiesInto` with the live entities |
+| `LoadEntitiesInto` with another number of entities than the save holds, or a stale one | `ArgumentException`; nothing changes | One live entity per saved entity, in save order |
+| A restored record seen as changed | A `Changed<T>` saver or replicator sends it straight back | `markWritten: false` |
+| Replicating only `[Changed<T>]` rows after a `markWritten: false` load | A client that has not seen the entity never gets the restored values | Send the full state to a new client |
+
+## Related [#related]
+
+<Cards>
+  <Card title="Saves" href="/en/docs/guide/saves/saves">
+    The whole world as bytes, versioning and Nino.
+  </Card>
+  <Card title="Hierarchy" href="/en/docs/guide/data/hierarchy">
+    Collect a party with `Descendants`.
+  </Card>
+  <Card title="Sample: SaveLoad" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/SaveLoad">
+    `SaveEntities`, `LoadEntities` and `MoveEntities`, verified step by step.
+  </Card>
+  <Card title="Sample: HotReload" href="https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/HotReload">
+    A collectible plugin unloaded and reloaded with its data.
+  </Card>
+</Cards>

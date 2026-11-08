@@ -270,7 +270,7 @@ public void CreateEntities<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Span<Entity> enti
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-创建 `entities.Length` 个带 2 个组件的实体（每个实体的值都一样），直接放进最终的原型，并把句柄写进 `entities`。整批只过一次结构闸门，表最多扩容一次：O(数量 × 2)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
+创建 `entities.Length` 个带 2 个组件的实体（每个实体的值都一样），直接放进最终的原型，并把句柄写进 `entities`。整批只过一次结构闸门，表最多扩容一次：O(数量 × 2)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/performance/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：均摊 O(count × n)
 
@@ -280,7 +280,7 @@ public void CreateEntities<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Span<Entity> enti
 public Entity CreateEntity();
 ```
 
-创建一个没有组件的实体。均摊 O(1)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
+创建一个没有组件的实体。均摊 O(1)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/performance/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -303,7 +303,7 @@ public Entity CreateEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in T1 c1, in T2 c
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-创建一个带 2 个组件的实体，直接放进最终的原型（中途不搬行）。均摊 O(2)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
+创建一个带 2 个组件的实体，直接放进最终的原型（中途不搬行）。均摊 O(2)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/performance/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -359,7 +359,7 @@ public int DestroyAll<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter filter 
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-销毁所有同时拥有 `T1, T2`（并匹配 `filter`）的存活实体，返回销毁的数量。只过一次结构闸门：O(匹配的原型数 + 行数)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
+销毁所有同时拥有 `T1, T2`（并匹配 `filter`）的存活实体，返回销毁的数量。只过一次结构闸门：O(匹配的原型数 + 行数)。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/performance/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S)
 
@@ -623,6 +623,24 @@ public void ForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job
 
 **复杂度**（[API 表](/zh/docs/api)）：O(M + S / 64 + 段数 + 部分通过的字数)
 
+### `ForEachMaskedParallel` [#foreachmaskedparallel]
+
+```csharp
+public void ForEachMaskedParallel<T1, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where TJob : struct, IForEachMasked<T1>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, T5, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9>, INoStructuralChanges;
+```
+
+组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
+
+多线程版的 [`World.ForEachMasked`](/zh/docs/reference/world#foreachmasked)：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多 [`World.MaxChunkRows`](/zh/docs/reference/world#maxchunkrows) 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 `chunkSize` 向上取整到 64：`[ForEach(Parallel = true, ChunkSize = n)]`），由调用线程和最多 [`WorldOptions.MaxDegreeOfParallelism`](/zh/docs/reference/worldoptions#maxdegreeofparallelism) - 1 个辅助线程同时执行，每个线程用自己的一份 `job` 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：`Merges`，即 `Reduce<T>`；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据（单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。每种 job 类型第一次调用之后零分配。
+
 ### `ForEachParallel` [#foreachparallel]
 
 ```csharp
@@ -788,7 +806,7 @@ public ValueIndex<T, TKey> Index<T, TKey>() where T : struct, IComponent, IIndex
 public Entity Instantiate(Prefab prefab);
 ```
 
-创建一个实体，带上 `prefab` 每个组件的副本。值原样复制：[`DynamicBuffer`](/zh/docs/reference/dynamicbuffer) 拿到自己的一份列表，索引收录新实体，被追踪组件算作刚刚写入。O(组件数)：一次行复制，第一个实例之后不再查找表。带成员的预制体会创建所有成员，返回传入的那个预制体对应的实体（O(成员数 × 组件数)）。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
+创建一个实体，带上 `prefab` 每个组件的副本。值原样复制：[`DynamicBuffer`](/zh/docs/reference/dynamicbuffer) 拿到自己的一份列表，索引收录新实体，被追踪组件算作刚刚写入。O(组件数)：一次行复制，第一个实例之后不再查找表。带成员的预制体会创建所有成员，返回传入的那个预制体对应的实体（O(成员数 × 组件数)）。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/performance/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -828,7 +846,7 @@ public Entity Instantiate<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Prefab prefab, in 
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-同时给出 2 个组件的 [`World.Instantiate`](/zh/docs/reference/world#instantiate)：先复制 `prefab` 的每个组件，再写入给出的值（覆盖预制体的值，被禁用的组件像 `Set` 一样启用），实体直接放进两者合起来的那张表（没有中间的移动，一次行复制）。被追踪组件算作刚刚写入，索引和分组收录这些值，给出的 [`ChildOf`](/zh/docs/reference/childof) 链入层级。均摊 O(组件数)，表存在之后零分配。带成员的预制体会创建所有成员，并把这些组件设到传入的那个预制体对应的实体上（它多一次行移动）。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
+同时给出 2 个组件的 [`World.Instantiate`](/zh/docs/reference/world#instantiate)：先复制 `prefab` 的每个组件，再写入给出的值（覆盖预制体的值，被禁用的组件像 `Set` 一样启用），实体直接放进两者合起来的那张表（没有中间的移动，一次行复制）。被追踪组件算作刚刚写入，索引和分组收录这些值，给出的 [`ChildOf`](/zh/docs/reference/childof) 链入层级。均摊 O(组件数)，表存在之后零分配。带成员的预制体会创建所有成员，并把这些组件设到传入的那个预制体对应的实体上（它多一次行移动）。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/performance/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -958,6 +976,32 @@ public int MoveEntities(World target, ReadOnlySpan<EntityId> entities, Span<Enti
 ### `ParallelFor` [#parallelfor]
 
 ```csharp
+public void ParallelFor<T>(ref DynamicBuffer<T> items, Delegate body);
+```
+
+对 `items` 的每个元素执行 `body`（一个静态 lambda），元素切成块，由多个线程执行，和 [`World.ParallelFor`](/zh/docs/reference/world#parallelfor-3) 执行 job 的方式一样：`world.ParallelFor(ref hits.Items, static (ref Hit hit) => hit.Amount += 1)`。lambda 先以 `ref`（或 `in`）接收元素，再按顺序接收它前面传入的值。EasyEcs 生成器把每处调用编译成一个 [`IForSpan`](/zh/docs/reference/iforspan) job，方法体符合条件时（和 [ForEach] 方法的条件一样），它对一块元素的循环是向量循环，所以每种 job 第一次调用之后零分配。方法体不能改变 World 的结构，也不能写别的元素要读的数据。只能在所有者线程上调用。
+
+**类型参数**
+
+- `T`：元素类型。
+
+**参数**
+
+- `items`：这些元素，原地写入（单例的 buffer、[`Emitted`](/zh/docs/reference/emitted) 的记录）。
+- `body`：写在调用处的静态 lambda。
+
+**异常**
+
+- `InvalidOperationException`：生成器没有编译这处调用（EECS095 说明原因）。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.ParallelFor<TJob>(count, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+- `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+
+### `ParallelFor` [#parallelfor-2]
+
+```csharp
 public void ParallelFor<TJob>(int count, ref TJob job, int chunkSize = 0) where TJob : struct, IForRange;
 ```
 
@@ -972,13 +1016,44 @@ public void ParallelFor<TJob>(int count, ref TJob job, int chunkSize = 0) where 
 - `world.ParallelFor<TJob>(count, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 - `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
 
-### `ParallelFor` [#parallelfor-2]
+### `ParallelFor` [#parallelfor-3]
 
 ```csharp
 public void ParallelFor<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>;
 ```
 
-对 `items`（一个 [`Emitted`](/zh/docs/reference/emitted) 单例的记录、某个单例的缓冲区）的元素运行 [`World.ParallelFor`](/zh/docs/reference/world#parallelfor)：每个块以 span 拿到自己的元素，可以写。调用运行期间列表不能改变。并行遍历留在各块列表里的 [`Emitted`](/zh/docs/reference/emitted) 记录就地运行，按顺序，不先合并：一个块跨两个这样的列表时，每个列表调用一次，各自带自己的 `start`。
+对 `items`（一个 [`Emitted`](/zh/docs/reference/emitted) 单例的记录、某个单例的缓冲区）的元素运行 [`World.ParallelFor`](/zh/docs/reference/world#parallelfor-2)：每个块以 span 拿到自己的元素，可以写。调用运行期间列表不能改变。并行遍历留在各块列表里的 [`Emitted`](/zh/docs/reference/emitted) 记录就地运行，按顺序，不先合并：一个块跨两个这样的列表时，每个列表调用一次，各自带自己的 `start`。
+
+**复杂度**（[API 表](/zh/docs/api)）：
+
+- `world.ParallelFor<TJob>(count, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+- `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)`：O(count)，分摊到最多 `MaxDegreeOfParallelism` 个线程
+
+### `ParallelFor` [#parallelfor-4]
+
+```csharp
+public void ParallelFor<T, TValue1>(ref DynamicBuffer<T> items, TValue1 value1, Delegate body);
+public void ParallelFor<T, TValue1, TValue2>(ref DynamicBuffer<T> items, TValue1 value1, TValue2 value2, Delegate body);
+public void ParallelFor<T, TValue1, TValue2, TValue3>(ref DynamicBuffer<T> items, TValue1 value1, TValue2 value2, TValue3 value3, Delegate body);
+public void ParallelFor<T, TValue1, TValue2, TValue3, TValue4>(ref DynamicBuffer<T> items, TValue1 value1, TValue2 value2, TValue3 value3, TValue4 value4, Delegate body);
+```
+
+对 `items` 的每个元素执行 `body`（一个静态 lambda），元素切成块，由多个线程执行，和 [`World.ParallelFor`](/zh/docs/reference/world#parallelfor-3) 执行 job 的方式一样：`world.ParallelFor(ref hits.Items, keep, static (ref Hit hit, float keep) => hit.Amount *= keep)`。lambda 先以 `ref`（或 `in`）接收元素，再按顺序接收它前面传入的值。EasyEcs 生成器把每处调用编译成一个 [`IForSpan`](/zh/docs/reference/iforspan) job，方法体符合条件时（和 [ForEach] 方法的条件一样），它对一块元素的循环是向量循环，所以每种 job 第一次调用之后零分配。方法体不能改变 World 的结构，也不能写别的元素要读的数据。只能在所有者线程上调用。
+
+**类型参数**
+
+- `T`：元素类型。
+- `TValue1`：`value1` 的类型。
+
+**参数**
+
+- `items`：这些元素，原地写入（单例的 buffer、[`Emitted`](/zh/docs/reference/emitted) 的记录）。
+- `value1`：lambda 前面的第一个值，调用期间存在 job 里：对应 lambda 在元素之后的参数。
+- `body`：写在调用处的静态 lambda。
+
+**异常**
+
+- `InvalidOperationException`：生成器没有编译这处调用（EECS095 说明原因）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 
@@ -1097,6 +1172,10 @@ public void Reserve(Prefab prefab, int count);
 
 预先扩好 `prefab` 的实例要进的表和实体存储，接下来 `count` 次 [`World.Instantiate`](/zh/docs/reference/world#instantiate) 都不会再扩容：一波刷怪的扩容开销在 tick 之前就付掉了。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实例放进别的表时，扩的是那张表；带成员的预制体，每个成员的表都扩。O(组件数) 加一次扩容。只能在所有者线程调用。
 
+**异常**
+
+- `ArgumentOutOfRangeException`：`count` 为负数，或者这些实例会超出一个 World 能容纳的实体数。
+
 **复杂度**（[API 表](/zh/docs/api)）：
 
 - `world.Reserve<T1..Tn>(count)`：O(n)，外加一次扩容
@@ -1118,7 +1197,7 @@ public void Reserve<T1, T2, T3, T4, T5, T6, T7, T8, T9>(int count) where T1 : st
 
 组件数量从 1 到 9，每个数量一个重载，都由同一个模板生成；这里是两个组件那个重载的说明。
 
-预先扩好正好有 `T1, T2` 的实体所在的表和实体存储，接下来 `count` 次带这些组件的 `CreateEntity` / `CreateEntities` 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实体放进别的表时，扩的是那张表；之后再加组件会把实体搬到别的表，那些表照常自己扩容。O(2) 加一次扩容。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/threading)）。
+预先扩好正好有 `T1, T2` 的实体所在的表和实体存储，接下来 `count` 次带这些组件的 `CreateEntity` / `CreateEntities` 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组（[`World.GroupBy`](/zh/docs/reference/world#groupby)）把实体放进别的表时，扩的是那张表；之后再加组件会把实体搬到别的表，那些表照常自己扩容。O(2) 加一次扩容。只能在所有者线程调用（见[多线程与并行](/zh/docs/guide/performance/threading)）。
 
 **复杂度**（[API 表](/zh/docs/api)）：
 

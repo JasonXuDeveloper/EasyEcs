@@ -22,8 +22,8 @@ dotnet run --project samples/SaveLoad
 ## The data [#data]
 
 Numbers-only components, a sword that is an entity of its own, a bag element for a
-[dynamic buffer](/en/docs/guide/dynamic-buffers), a singleton, and the one managed component. A save writes the
-unmanaged components as their bytes; `Name` holds a string, so it is a [`[NinoType]`](/en/docs/guide/saves#declare),
+[dynamic buffer](/en/docs/guide/data/dynamic-buffers), a singleton, and the one managed component. A save writes the
+unmanaged components as their bytes; `Name` holds a string, so it is a [`[NinoType]`](/en/docs/guide/saves/saves#declare),
 serialized by Nino, whose generator comes with the EasyEcs package.
 
 <include lang="csharp" meta='title="Components.cs"'>../../../samples/SaveLoad/Components.cs</include>
@@ -31,7 +31,7 @@ serialized by Nino, whose generator comes with the EasyEcs package.
 ## The players [#players]
 
 `Players.Spawn` creates a player with a bag of three potions and a map, and its swords as
-[children](/en/docs/guide/hierarchy) (`ChildOf`). `Reserve` makes room for the swords before the loop that creates
+[children](/en/docs/guide/data/hierarchy) (`ChildOf`). `Reserve` makes room for the swords before the loop that creates
 them.
 
 <include lang="csharp" meta='title="Players.cs"'>../../../samples/SaveLoad/Players.cs</include>
@@ -40,12 +40,12 @@ them.
 
 Three steps, each checked:
 
-1. The whole world: [`world.Save(writer)`](/en/docs/guide/saves#save) to a file and
-   [`world.Load(bytes)`](/en/docs/guide/saves#load) into a new world. Ids, components, dynamic buffers and singletons
+1. The whole world: [`world.Save(writer)`](/en/docs/guide/saves/saves#save) to a file and
+   [`world.Load(bytes)`](/en/docs/guide/saves/saves#load) into a new world. Ids, components, dynamic buffers and singletons
    come back as they were.
-2. Bob and his swords: [`SaveEntities`](/en/docs/guide/migration-and-unload#save-entities), then `LoadEntities` into
+2. Bob and his swords: [`SaveEntities`](/en/docs/guide/saves/migration-and-unload#save-entities), then `LoadEntities` into
    another world, as another server would. The arrivals get new ids, and the links between them follow.
-3. Carol: [`MoveEntities`](/en/docs/guide/migration-and-unload#move-entities) hands her to another world of the same
+3. Carol: [`MoveEntities`](/en/docs/guide/saves/migration-and-unload#move-entities) hands her to another world of the same
    thread in one call, without encoding anything.
 
 `Checks` and `WorldText`, which print the checks and a world, are in
@@ -83,13 +83,13 @@ the children of its new id; in the zone, destroying bob destroys his swords too.
   <Card icon={<Globe />} title="MultiWorld" href="/en/docs/samples/multi-world">
     The next sample: one world per thread.
   </Card>
-  <Card icon={<Save />} title="Saves" href="/en/docs/guide/saves">
+  <Card icon={<Save />} title="Saves" href="/en/docs/guide/saves/saves">
     What a save holds, restarts, and components whose shape changes.
   </Card>
-  <Card icon={<ArrowRightLeft />} title="Migration and unload" href="/en/docs/guide/migration-and-unload">
+  <Card icon={<ArrowRightLeft />} title="Migration and unload" href="/en/docs/guide/saves/migration-and-unload">
     Groups of entities to another world or process.
   </Card>
-  <Card icon={<Network />} title="Hierarchy" href="/en/docs/guide/hierarchy">
+  <Card icon={<Network />} title="Hierarchy" href="/en/docs/guide/data/hierarchy">
     ChildOf, children, subtrees and destroy cascades.
   </Card>
 </Cards>

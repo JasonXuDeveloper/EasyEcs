@@ -24,10 +24,10 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
 {
     public override ImmutableArray<string> FixableDiagnosticIds { get; } =
         ImmutableArray.Create("EECS002", "EECS005", "EECS006", "EECS007", "EECS010", "EECS011", "EECS012", "EECS015", "EECS017",
-            "EECS022", "EECS023", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS037",
+            "EECS022", "EECS023", "EECS024", "EECS025", "EECS026", "EECS027", "EECS030", "EECS031", "EECS032", "EECS033", "EECS035", "EECS037",
             "EECS038", "EECS039", "EECS043", "EECS046", "EECS052", "EECS053", "EECS054", "EECS055", "EECS061", "EECS062", "EECS065", "EECS066", "EECS067", "EECS069", "EECS071",
-            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS119", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "EECS122", "EECS125", "EECS127", "CS0234", "CS0246", "CS0305", "CS0592",
-            "CS0200", "CS0272", "CS1501", "CS1729", "CS1739");
+            "EECS074", "EECS075", "EECS080", "EECS081", "EECS084", "EECS086", "EECS109", "EECS118", "EECS119", "EECS088", "EECS090", "EECS091", "EECS095", "EECS096", "EECS101", "EECS103", "EECS107", "EECS117", "EECS122", "EECS125", "EECS127", "EECS129", "EECS131", "CS0234", "CS0246", "CS0305", "CS0592",
+            "CS0200", "CS0272", "CS1501", "CS1503", "CS1620", "CS1729", "CS1739", "CS7036");
 
     public override FixAllProvider GetFixAllProvider() => WellKnownFixAllProviders.BatchFixer;
 
@@ -134,6 +134,14 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                                    && MergedWithAny(any) is { } merged:
                     Register(context, diagnostic, merged.Title, root, merged.Old, merged.New);
                     break;
+                case "EECS131" when kind == "Clear" && diagnostic.Properties.TryGetValue("Clear", out var clear) && clear != null
+                                    && diagnostic.AdditionalLocations.Count == 1
+                                    && root.FindNode(diagnostic.AdditionalLocations[0].SourceSpan).FirstAncestorOrSelf<StatementSyntax>() is { } first:
+                    Register(context, diagnostic, "Clear it at the start of the row", root, first.Parent!,
+                        first.Parent!.InsertNodesBefore(first, [SyntaxFactory.ParseStatement(clear)
+                            .WithLeadingTrivia(first.GetLeadingTrivia().Where(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).LastOrDefault())
+                            .WithTrailingTrivia(EndOfLine(root))]));
+                    break;
                 case "EECS084" when kind == "Consume" && node.FirstAncestorOrSelf<ExpressionStatementSyntax>() is { Parent: BlockSyntax { Parent: MethodDeclarationSyntax method } } destroy:
                     diagnostic.Properties.TryGetValue("DropEntity", out var dropEntity);
                     if (dropEntity != null && await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false)) dropEntity = null;
@@ -195,6 +203,10 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                 case "EECS080" when kind == "EntityMethod":
                     context.RegisterCodeFix(CodeAction.Create("Write it as an [EntityMethod] method",
                         token => ToEntityMethod(context.Document, diagnostic, token), diagnostic.Id), diagnostic);
+                    break;
+                case "CS7036" or "CS1501" or "CS1503" or "CS1620" when node.FirstAncestorOrSelf<InvocationExpressionSyntax>() is { Expression: IdentifierNameSyntax bare } call
+                                                                     && await EntryPointCall(context.Document, call, bare, context.CancellationToken).ConfigureAwait(false) is { } qualified:
+                    Register(context, diagnostic, $"Call its entry point: {qualified.Expression}", root, call, qualified);
                     break;
                 case "EECS122" when diagnostic.Properties.TryGetValue("Namespace", out var imported) && imported != null && root is CompilationUnitSyntax unit:
                     context.RegisterCodeFix(CodeAction.Create($"Add 'using {imported};'", _ => Task.FromResult(context.Document.WithSyntaxRoot(unit.AddUsings(
@@ -270,10 +282,15 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                     Register(context, diagnostic, taken == null ? $"Use parameter '{name}'" : $"Take it as a parameter ('{taken}')", root, method,
                         Lookups(root, method, diagnostic.AdditionalLocations, name, taken, through));
                     break;
-                case "EECS054" when kind == "ChunkSize" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
-                                    && Named(method, "ChunkSize") is { Parent: AttributeArgumentListSyntax list } chunks:
-                    Register(context, diagnostic, "Remove ChunkSize", root, list,
-                        list.Arguments.Count == 1 ? null : list.RemoveNode(chunks, SyntaxRemoveOptions.KeepNoTrivia));
+                case "EECS024" when kind == "Move" && node.FirstAncestorOrSelf<LocalFunctionStatementSyntax>() is { } local
+                                    && local.FirstAncestorOrSelf<MemberDeclarationSyntax>() is { Parent: TypeDeclarationSyntax owner } holder:
+                    context.RegisterCodeFix(CodeAction.Create("Move it into the type as a static method",
+                        _ => Task.FromResult(context.Document.WithSyntaxRoot(MovedLocal(root, owner, holder, local))), diagnostic.Id), diagnostic);
+                    break;
+                case "EECS054" or "EECS035" or "EECS118" when kind is "ChunkSize" or "Slices" or "MaxRows" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
+                                    && Named(method, kind) is { Parent: AttributeArgumentListSyntax list } dropped:
+                    Register(context, diagnostic, "Remove " + kind, root, list,
+                        list.Arguments.Count == 1 ? null : list.RemoveNode(dropped, SyntaxRemoveOptions.KeepNoTrivia));
                     break;
                 case "EECS071" when kind == "Random" && diagnostic.Properties.TryGetValue("Text", out var draw) && draw != null
                                     && node.FirstAncestorOrSelf<InvocationExpressionSyntax>() is { } call
@@ -588,6 +605,43 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
     /// <summary>EECS005, EECS010, EECS081: the method becomes static (the caller checked that it reads no instance state).</summary>
     private static void MakeStatic(CodeFixContext context, Diagnostic diagnostic, SyntaxGenerator generator, SyntaxNode root, MethodDeclarationSyntax method) =>
         Register(context, diagnostic, "Make it static", root, method, generator.WithModifiers(method, generator.GetModifiers(method).WithIsStatic(true)));
+
+    /// <summary>
+    /// EECS024: local function <paramref name="local"/> removed from <paramref name="member"/> and declared after it in
+    /// <paramref name="owner"/> as a static method (its attributes, parameters and body as written; the analyzer offered
+    /// the fix only when it captures nothing and its name is free in the type).
+    /// </summary>
+    private static SyntaxNode MovedLocal(SyntaxNode root, TypeDeclarationSyntax owner, MemberDeclarationSyntax member, LocalFunctionStatementSyntax local)
+    {
+        var modifiers = SyntaxFactory.TokenList(local.Modifiers.Where(m => !m.IsKind(SyntaxKind.StaticKeyword)))
+            .Insert(0, SyntaxFactory.Token(SyntaxKind.StaticKeyword).WithTrailingTrivia(SyntaxFactory.Space));
+        var method = SyntaxFactory.MethodDeclaration(local.AttributeLists, modifiers, local.ReturnType, null, local.Identifier, local.TypeParameterList,
+                local.ParameterList, local.ConstraintClauses, local.Body, local.ExpressionBody, local.SemicolonToken)
+            .WithLeadingTrivia(member.GetLeadingTrivia().Where(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).LastOrDefault())
+            .WithTrailingTrivia(EndOfLine(root));
+        var tracked = root.TrackNodes(member, local);
+        tracked = tracked.RemoveNode(tracked.GetCurrentNode(local)!, SyntaxRemoveOptions.KeepNoTrivia)!;
+        return tracked.InsertNodesAfter(tracked.GetCurrentNode(member)!, [method]);
+    }
+
+    /// <summary>
+    /// A call by its bare name of a [ForEach], [Drain] or [EntityMethod] method inside the method's own type
+    /// (<c>Separate(world)</c>): the name binds to the method itself, so the arguments of its entry point do not fit. The
+    /// call qualified by the type (<c>Crowd.Separate(world)</c>), when it binds there to a generated entry point; else null.
+    /// </summary>
+    private static async Task<InvocationExpressionSyntax?> EntryPointCall(Document document, InvocationExpressionSyntax call, IdentifierNameSyntax bare, CancellationToken token)
+    {
+        var model = await document.GetSemanticModelAsync(token).ConfigureAwait(false);
+        var type = model == null ? null : model.GetEnclosingSymbol(call.SpanStart, token)?.ContainingType;
+        if (type == null || !type.GetMembers(bare.Identifier.ValueText).Any(m => m is IMethodSymbol method && method.GetAttributes().Any(a =>
+                a.AttributeClass is { Name: "ForEachAttribute" or "DrainAttribute" or "EntityMethodAttribute", ContainingNamespace.Name: "EasyEcs" })))
+            return null;
+        var qualified = call.WithExpression(SyntaxFactory.MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression,
+            SyntaxFactory.ParseTypeName(type.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)), bare.WithoutTrivia()).WithTriviaFrom(bare));
+        var bound = model!.GetSpeculativeSymbolInfo(call.SpanStart, qualified, SpeculativeBindingOption.BindAsExpression).Symbol;
+        return bound is IMethodSymbol entry && entry.ContainingType is { IsExtension: true } || bound?.GetAttributes().Any(a => a.AttributeClass?.Name == "GeneratedCodeAttribute") == true
+            ? qualified : null;
+    }
 
     private static void Register(CodeFixContext context, Diagnostic diagnostic, string title, SyntaxNode root, SyntaxNode node,
         SyntaxNode? replacement) =>

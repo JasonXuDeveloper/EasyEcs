@@ -451,6 +451,7 @@ public class ViewRuleTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(VT v) { if (v.Q.V > 0) return; v.Add(); } }")]   // a member on some rows
     [TestCase("public static class R { [EntityMethod] static void A(VT v, int n) { if (n > 0) v.T.V = n; } }")]              // one entity
     [TestCase("[View] public ref struct W { public ref T T; public void Up(int n) { if (n > 0) T.V += n; } }")]           // in the view's member
+    [TestCase("public static class U { public static void F(World w) => w.ForEach(static (VT v) => { if (v.Q.V > 0) v.T.V++; }); }")] // a lambda pass's view
     public async Task ATrackedComponentWrittenThroughAViewOnSomeRowsIsReported(string source) =>
         Assert.That(await SomeRows(source), Is.EqualTo(new[] { "EECS053" }));
 

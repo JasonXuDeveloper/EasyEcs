@@ -107,10 +107,10 @@
       （<see cref="T:EasyEcs.ITracked" />）不打 tick。O(1)。
     </summary>
   </member>
-  <member name="M:EasyEcs.Entity.Remove``2" source="3ce16bab43f0">
+  <member name="M:EasyEcs.Entity.Remove``2" source="22825b817300">
     <summary>
       移除 2 个组件；没有的组件忽略。实体的行留在原处（不搬行）。返回实体，方便链式调用。O(2)。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
+      （见<see href="/zh/docs/guide/performance/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.Entity.Unlink``1(EasyEcs.EntityId)" source="c917b0bb4689">
@@ -119,10 +119,10 @@
       O(实体的链接数)。实体不存活时抛异常。
     </summary>
   </member>
-  <member name="M:EasyEcs.Entity.Set``2(``0@,``1@)" source="b45aadfbd436">
+  <member name="M:EasyEcs.Entity.Set``2(``0@,``1@)" source="980c23a9ee96">
     <summary>
       用传入的值添加或覆盖 2 个组件，最多一次行复制。返回实体，方便链式调用。均摊 O(2)。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
+      （见<see href="/zh/docs/guide/performance/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.Entity.ToString" source="5512d3ae8701">

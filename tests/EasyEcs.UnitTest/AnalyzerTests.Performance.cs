@@ -288,6 +288,61 @@ public partial class AnalyzerTests
         Assert.That(costs.Select(d => d.Id), Is.Empty, string.Join("\n", costs.Select(d => d.GetMessage())));
     }
 
+    internal const string Damage = "public partial struct Damage : ISingletonComponent { [Sum] public int Total; [Max] public int Peak; } ";
+
+    // EECS128: a Reduce<T>'s Value read inside the pass is a chunk's partial result, never the total.
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(ref P p, ref Reduce<Damage> d) { d.Value.Total += p.V; if (d.Value.Total > 1000) p.V = 0; } }")] // in a condition
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, ref Reduce<Damage> d) { d.Value.Total += 1; p.V = Helpers.Look(new P { V = d.Value.Total }); } }")] // into a call, serial too
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, ref Reduce<Damage> d) { d.Value.Total += 1; p.V = d.Value.Peak; } }")] // assigned out
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Damage> d) { var all = d.Value; d.Value.Total = all.Total + p.V; } }")] // the whole value copied
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Damage> d) { d.Value.Total += p.V; d.Value.Peak = System.Math.Max(d.Value.Peak, d.Value.Total); } }")] // compared with another field
+    [TestCase("public static class R { [ForEach] public static void A(ref P p, ref Reduce<Damage> d) { d.Value.Total++; p.V = d.Value.Total; } }")] // a runner's method
+    public async Task APartialResultReadAsTheTotalIsReported(string members) => await AssertReports("EECS128", Components, Extra, Damage + members);
+
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(in P p, ref Reduce<Damage> d) { d.Value.Total += p.V; d.Value.Peak = System.Math.Max(d.Value.Peak, p.V); } }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Damage> d) { d.Value.Total -= p.V; d.Value.Peak = System.Math.Max(p.V, d.Value.Peak); } }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Damage> d) { if (p.V > d.Value.Peak) d.Value.Peak = p.V; } }")] // the max written as an if
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Damage> d) => d.Combine(new Damage { Total = p.V, Peak = p.V }); }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Damage> d) => Helpers.Inc(ref d.Value.Total); }")] // a ref argument: written
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Damage> d) => d.Value = new Damage { Total = d.Value.Total + p.V, Peak = d.Value.Peak }; }")] // the whole value rewritten
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Damage> d) { if (p.V < d.Value.Peak) d.Value = new Damage { Peak = p.V }; } }")] // a kept row
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Damage> d) => d.Value.Peak = int.Max(d.Value.Peak, p.V); }")] // int.Max
+    [TestCase("public struct Bins : ISingletonComponent, IReduction<Bins> { public int[] Counts; public static Bins Identity => new() { Counts = new int[4] }; public static Bins Combine(Bins a, Bins b) => a; } "
+        + "[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Bins> b) => b.Value.Counts[p.V & 3]++; }")] // an element of an array it holds
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Reduce<Damage> d) => d.Value.Total += p.V; static void OnUpdate(World w) { if (w.GetSingleton<Damage>().Total > 1000) w.GetSingleton<Damage>().Total = 0; } }")] // the total, after the pass
+    public async Task WritesOfAPartialResultAreNotReported(string members) =>
+        Assert.That(await Count("EECS128", Components, Extra, Damage + members), Is.Zero);
+
+    // EECS131: a scratch collection added to and never cleared keeps every row's items.
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<System.Collections.Generic.List<int>> s) { s.Value ??= new(); s.Value.Add(p.V); p.V = s.Value.Count; } }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(ref P p, Scratch<System.Collections.Generic.List<int>> s) { var list = s.Value ??= new(); for (int i = 0; i < p.V; i++) list.Add(i); p.V = list.Count; } }")] // a local, in a loop
+    [TestCase("public struct Work { public System.Collections.Generic.Stack<int> Open; } [EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<Work> w) { w.Value.Open ??= new(); w.Value.Open.Push(p.V); p.V = w.Value.Open.Count; } }")] // a member of the value
+    [TestCase("public static class R { [ForEach] public static void A(ref P p, Scratch<System.Collections.Generic.HashSet<int>> s) { var seen = s.Value ??= new(); if (seen.Add(p.V)) p.V++; } }")] // a runner's, Add as a test
+    public async Task ScratchNeverClearedIsReported(string members) => await AssertReports("EECS131", Components, Extra, members);
+
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<System.Collections.Generic.List<int>> s) { var list = s.Value ??= new(); list.Clear(); list.Add(p.V); p.V = list.Count; } }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<System.Collections.Generic.List<int>> s) { s.Value ??= new(); s.Value.Add(p.V); p.V = s.Value.Count; s.Value.Clear(); } }")] // cleared at the end
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<System.Collections.Generic.List<int>> s) { var list = s.Value ??= new(); list.Add(p.V); p.V = list.Count; s.Value.Clear(); } }")] // the alias and the path
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<System.Collections.Generic.List<int>> s) { s.Value = new(); s.Value.Add(p.V); p.V = s.Value.Count; } }")] // a new one per row (EECS028's)
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<System.Collections.Generic.List<int>> s) { s.Value ??= new(); s.Value.RemoveAll(static x => true); s.Value.Add(p.V); p.V = s.Value.Count; } }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<System.Collections.Generic.List<int>> s) { s.Value?.Clear(); s.Value ??= new(); s.Value.Add(p.V); p.V = s.Value.Count; } }")] // cleared through ?.
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<int[]> s) { s.Value ??= new int[4]; s.Value[0] = p.V; p.V = s.Value[0]; } }")] // nothing added
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, System.Collections.Generic.List<int> l) { } }")] // no scratch (EECS002's)
+    public async Task ScratchClearedIsNotReported(string members) =>
+        Assert.That(await Count("EECS131", Components, Extra, members), Is.Zero);
+
+    // EECS132: a key probe through a Lookup<T> in a method of another type finds an index the pass did not build.
+    [TestCase("public static class Finder { public static bool Owns(Lookup<Owned> owned, EntityId id) => owned.TryFind(id, out _); } [EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Link l, Lookup<Owned> o) { if (Finder.Owns(o, l.Target)) p.V++; } }")]
+    [TestCase("public static class Finder { public static int Count(this Lookup<Owned> owned, EntityId id, int k) => k + owned.Count(id); } public static class R { [ForEach] public static void A(ref P p, in Link l, Lookup<Owned> o) => p.V = Finder.Count(o, l.Target, 1); }")]
+    public async Task AKeyProbeInAMethodOfAnotherTypeIsReported(string members) => await AssertReports("EECS132", Components, Extra, members);
+
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Link l, Lookup<Owned> o) { if (o.TryFind(l.Target, out _)) p.V++; } }")] // in the method
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Link l, Lookup<Owned> o) { if (Owns(o, l.Target)) p.V++; } static bool Owns(Lookup<Owned> owned, EntityId id) => owned.Count(id) > 0; }")] // a helper of its type
+    [TestCase("public static class R { [ForEach] public static void A(ref P p, in Link l, Lookup<Owned> o) { if (R.Owns(o, l.Target)) p.V++; } static bool Owns(Lookup<Owned> owned, EntityId id) => Deep(owned, id); static bool Deep(Lookup<Owned> x, EntityId id) => x.TryFind(id, out _); }")] // qualified, two deep
+    [TestCase("public static class Finder { public static bool Has(Lookup<Owned> owned, EntityId id) => owned.Has(id); } [EcsSystem] public ref struct S { [ForEach] static void A(ref P p, in Link l, Lookup<Owned> o) { if (Finder.Has(o, l.Target)) p.V++; } }")] // no key probe
+    public async Task AKeyProbeThePassPreparesIsNotReported(string members) =>
+        Assert.That(await Count("EECS132", Components, Extra, members), Is.Zero);
+
     // One mistake, one diagnostic: where two rules see the same code, one defers to the other (the one whose fix
     // removes what the other would report).
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(DynamicBuffer<Loot> items, ref P p) => p.V = items.Count; }", "EECS002")] // not EECS012
@@ -317,5 +372,21 @@ public partial class AnalyzerTests
     {
         var all = await All(source);
         Assert.That(all.Select(d => d.Id).OrderBy(x => x), Is.EqualTo(ids), string.Join("\n", all.Select(d => d.Id + " " + d.GetMessage())));
+    }
+
+    // The pairs All leaves EECS055 (or the other rule) out of: the rule whose fix removes the other's cause reports alone.
+    // EECS103 / EECS055 is pinned by AnalyzerTests.Forms.HandWrittenVectorLoopReports, IDE0060 / EECS026 by UnusedTests.
+    [TestCase("[EcsSystem] public ref struct R { static void OnUpdate(World w) => w.Clock = default; } [EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Clock c) => c.Ticks += p.V; }",
+        "EECS086", "EECS055")] // a reset singleton accumulated row by row: Reduce<T> gives the vector loop back
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Clock c) => c.Ticks += p.V; }",
+        "EECS086", "EECS055")] // a running total: [Accumulate]
+    [TestCase("public record struct Shot(int V); [EcsSystem] public ref struct E { [ForEach] static void A(in P p, Emit<Shot> s) => s.Add(new Shot(p.V)); } "
+        + "[EcsSystem] public ref struct S { static void OnUpdate(World w) { ref var t = ref w.GetOrAddSingleton<Clock>(); ref var rs = ref w.GetOrAddSingleton<Emitted<Shot>>().Items; foreach (var r in rs) t.Ticks += r.V; rs.Clear(); } }",
+        "EECS109", "EECS092")] // the walk and Clear a [Drain] method writes: the records are cleared
+    public async Task OverlappingRulesReportOnce(string source, string reported, string deferring)
+    {
+        var found = await GeneratorTests.Analyze([Components, Extra, source]);
+        Assert.That(found.Count(d => d.Id == reported), Is.EqualTo(1), string.Join("\n", found.Select(d => d.Id + " " + d.GetMessage())));
+        Assert.That(found.Where(d => d.Id == deferring).Select(d => d.GetMessage()), Is.Empty);
     }
 }

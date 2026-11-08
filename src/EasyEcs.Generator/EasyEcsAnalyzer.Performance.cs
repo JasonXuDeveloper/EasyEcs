@@ -11,12 +11,14 @@ using Microsoft.CodeAnalysis.Operations;
 namespace EasyEcs.Generator;
 
 /// <summary>
-/// The rules for code that works but does more than it needs (EECS025-EECS033, EECS039, EECS046, EECS052, EECS053), EECS034
-/// and EECS055-EECS056: what a [ForEach] method declares and does per row, allocations in code that runs every update, structural changes
-/// and queries one call could make, a component added right after its entity is created, the generated members, and
-/// the methods left without a vector loop. A rule whose code costs is a warning (EECS025-EECS032), the generated member is a
-/// suggestion (the same call at the same cost, shorter), a scalar loop a message (EECS055; an error when the method
-/// requires a vector loop, EECS056) and an update inside a system an error. Each is reported only where the cheaper form does the
+/// The rules for code that works but does more than it needs (EECS025-EECS032, EECS039, EECS046, EECS052, EECS053, EECS131),
+/// EECS034, EECS055-EECS056 and EECS132: what a [ForEach] method declares and does per row, allocations in code that runs
+/// every update, structural changes and queries one call could make, a component added right after its entity is created,
+/// a scratch collection never cleared, a key probe in a helper the pass did not prepare the index for, and the methods
+/// left without a vector loop. A rule whose code costs is a warning (EECS025-EECS032, EECS131), a scalar loop a warning
+/// when the user can fix it and a message when the reason is the algorithm's (EECS055; an error when the method requires
+/// a vector loop, EECS056), an update inside a system and an unprepared index errors. The generated member a call says
+/// shorter (EECS033) is MemberAnalyzer's (EasyEcsAnalyzer.Members.cs). Each is reported only where the cheaper form does the
 /// same thing; the code fixes (EasyEcs.CodeFixes) apply the replacement the analyzer computed, so the analyzer stays
 /// the only place that decides.
 /// </summary>
@@ -214,6 +216,8 @@ public static partial class EasyEcsAnalyzer
     private static void AnalyzeVectorLoop(SyntaxNodeAnalysisContext context, ColdFieldPasses layout)
     {
         var syntax = (MethodDeclarationSyntax)context.Node;
+        // Cheapest rejection first: no attribute, no [ForEach] (a partial method's may sit on its other part).
+        if (syntax.AttributeLists.Count == 0 && !syntax.Modifiers.Any(SyntaxKind.PartialKeyword)) return;
         if (context.SemanticModel.GetDeclaredSymbol(syntax, context.CancellationToken) is not { } method
             || !Symbols.IsForEach(method) || !Symbols.IsValidForEach(method) || method.PartialDefinitionPart != null // a partial method: once, on its definition
             || Symbols.IsEntityMethod(method) || Symbols.MaxRows(method) > 0) return; // one entity per call (an [EntityMethod], a collected row): no loop to vectorize
@@ -307,7 +311,7 @@ public static partial class EasyEcsAnalyzer
                 Symbols.ParamKind.Optional => Symbols.MaybeElement(p.Type),
                 _ => null,
             };
-            if (type is INamedTypeSymbol named && named.ToDisplayString() == component)
+            if (type is INamedTypeSymbol named && (named.IsGenericType ? named.ToDisplayString() == component : Symbols.Named(named, component)))
                 return ColdFieldPasses.FieldsUsed(body, p) is { } used ? ColdFieldPasses.SplitFix(named, used) : null;
         }
         return null;
@@ -322,7 +326,7 @@ public static partial class EasyEcsAnalyzer
     /// </summary>
     private const int SmallCount = 4096;
 
-    private static string Help(string id) => "https://ecs.xgamedev.net/en/docs/guide/analyzer#" + id.ToLowerInvariant();
+    private static string Help(string id) => "https://ecs.xgamedev.net/en/docs/guide/help/analyzer#" + id.ToLowerInvariant();
 
     /// <summary>EasyEcs's types in the compilation (null without a reference to it).</summary>
     private sealed class Core
@@ -389,6 +393,7 @@ public static partial class EasyEcsAnalyzer
             AnalyzeParameters(context, method, body, uses);
             AnalyzeHandWritten(context, method, body, core, resets);
             AnalyzeScratch(context, method, body);
+            AnalyzeUnpreparedIndexes(context, method, body);
             AnalyzeLookups(context, core, method, body);
             AnalyzeAllocations(context, method, body, Symbols.IsEntityMethod(method) ? "on every call" : "for every entity it visits, each update", true);
         }
@@ -1209,6 +1214,7 @@ public static partial class EasyEcsAnalyzer
     private static void AnalyzeScratch(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body)
     {
         if (!method.Parameters.Any(p => Symbols.Classify(p) == Symbols.ParamKind.Scratch)) return;
+        AnalyzeScratchClears(context, method, body);
         foreach (var operation in body.Descendants())
         {
             if (operation is not ISimpleAssignmentOperation assignment || Uses.Root(assignment.Value) is not { } source
@@ -1219,6 +1225,109 @@ public static partial class EasyEcsAnalyzer
             context.ReportDiagnostic(Diagnostic.Create(ScratchEscape, assignment.Syntax.GetLocation(), method.Name,
                 Shorten(assignment.Value.Syntax), Symbols.ScratchElement(source.Type)!.Name, source.Name, Shorten(assignment.Target.Syntax)));
         }
+    }
+
+    /// <summary>
+    /// EECS132: a Lookup&lt;T&gt; parameter of a non-unique indexed T whose index the pass does not build
+    /// (<see cref="Symbols.LookupKey"/> is null) handed to a method of another type that finds by key through it.
+    /// </summary>
+    private static void AnalyzeUnpreparedIndexes(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body)
+    {
+        foreach (var p in method.Parameters)
+        {
+            if (Symbols.LookupElement(p.Type) is not INamedTypeSymbol component || Symbols.IndexedKey(component, out bool unique) == null || unique
+                || Symbols.LookupKey(p, body.Syntax) != null) continue;
+            foreach (var operation in body.Descendants())
+                if (operation is IArgumentOperation { Value: IParameterReferenceOperation passed, Parameter: { ContainingSymbol: IMethodSymbol callee } parameter } argument
+                    && SymbolEqualityComparer.Default.Equals(passed.Parameter, p)
+                    && callee.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(context.CancellationToken) is MethodDeclarationSyntax declaration
+                    && ((SyntaxNode?)declaration.Body ?? declaration.ExpressionBody) is { } inner
+                    && Symbols.FindsByKey(inner, parameter.Name, callee.ContainingType, 0))
+                {
+                    context.ReportDiagnostic(Diagnostic.Create(UnpreparedIndex, argument.Syntax.GetLocation(), Shorten(argument.Parent!.Syntax),
+                        component.Name, p.Name, callee.ContainingType.Name + "." + callee.Name, Symbols.Describe(method), method.ContainingType.Name));
+                    break;
+                }
+        }
+    }
+
+    /// <summary>The calls that add to a collection, and the ones that empty it.</summary>
+    private static readonly HashSet<string> Adders = ["Add", "AddRange", "Push", "Enqueue", "Insert", "InsertRange", "TryAdd"],
+        Clearers = ["Clear", "RemoveAll", "RemoveRange"];
+
+    /// <summary>
+    /// EECS131: a collection a Scratch&lt;T&gt; parameter holds (<c>s.Value</c>, a member of it, or a local taken from it:
+    /// <c>var list = s.Value ??= new()</c>) that the method adds to and never clears (Clear, RemoveAll, RemoveRange) or
+    /// assigns anew. The fix's statement (<c>list.Clear();</c>, with <c>?.</c> where the value may still be null) goes
+    /// before the statement of the block declaring it (the method's body for the scratch itself) that holds the first add.
+    /// </summary>
+    private static void AnalyzeScratchClears(OperationBlockAnalysisContext context, IMethodSymbol method, IOperation body)
+    {
+        List<(IInvocationOperation Add, string Path, IParameterSymbol Scratch)>? adds = null;
+        HashSet<string>? cleared = null;
+        foreach (var operation in body.Descendants())
+            switch (operation)
+            {
+                case IInvocationOperation { Instance: { } receiver } call when Adders.Contains(call.TargetMethod.Name) || Clearers.Contains(call.TargetMethod.Name):
+                    if (ScratchPath(Accessed(receiver)) is not var (path, scratch)) break;
+                    if (Clearers.Contains(call.TargetMethod.Name)) (cleared ??= []).Add(path);
+                    else if (receiver.Type?.GetMembers("Clear").Any(m => m is IMethodSymbol { Parameters.Length: 0, IsStatic: false }) == true
+                             && !Ancestors(call).Any(a => a is IAnonymousFunctionOperation or ILocalFunctionOperation))
+                        (adds ??= []).Add((call, path, scratch));
+                    break;
+                case ISimpleAssignmentOperation { Target: var target } when ScratchPath(target) is var (written, _):
+                    (cleared ??= []).Add(written); // a new value: empty
+                    break;
+            }
+
+        if (adds == null) return;
+        var reported = new HashSet<string>();
+        foreach (var (add, path, scratch) in adds)
+        {
+            if (cleared?.Contains(path) == true || !reported.Add(path)) continue;
+            var receiver = add.Instance!;
+            while (receiver is IConversionOperation { IsImplicit: true } conversion) receiver = conversion.Operand;
+            // Before the statement holding the add in the block that declares what it adds to: a local's own block, the
+            // method's body for the scratch; never inside the loop that adds, which would empty it between adds.
+            var scope = receiver is ILocalReferenceOperation { Local: var local } ? local.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax()
+                    .FirstAncestorOrSelf<BlockSyntax>() : body.Syntax as BlockSyntax ?? (body.Syntax as BaseMethodDeclarationSyntax)?.Body;
+            var before = scope == null ? null : add.Syntax.AncestorsAndSelf().OfType<StatementSyntax>().FirstOrDefault(s => s.Parent == scope);
+            bool fresh = receiver is ILocalReferenceOperation { Local: var named } && named.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax()
+                is VariableDeclaratorSyntax { Initializer.Value: AssignmentExpressionSyntax { RawKind: (int)Microsoft.CodeAnalysis.CSharp.SyntaxKind.CoalesceAssignmentExpression } };
+            var properties = before == null ? null : ImmutableDictionary<string, string?>.Empty.Add(FixKind, "Clear")
+                .Add("Clear", receiver.Syntax + (receiver.Type is { IsReferenceType: true } && !fresh ? "?" : "") + ".Clear();");
+            context.ReportDiagnostic(Diagnostic.Create(ScratchNeverCleared, add.Syntax.GetLocation(),
+                before == null ? null : [before.GetLocation()], properties, method.Name, Shorten(receiver.Syntax),
+                Symbols.ScratchElement(scratch.Type)!.Name, scratch.Name));
+        }
+    }
+
+    /// <summary>What the receiver of a conditional call stands for: <c>s.Value</c> in <c>s.Value?.Clear()</c>.</summary>
+    private static IOperation Accessed(IOperation receiver)
+    {
+        if (receiver is not IConditionalAccessInstanceOperation) return receiver;
+        for (var at = receiver.Parent; at != null; at = at.Parent)
+            if (at is IConditionalAccessOperation access) return access.Operation;
+        return receiver;
+    }
+
+    /// <summary>
+    /// The path a Scratch&lt;T&gt; parameter's collection is reached by (<c>s.Value</c>, <c>s.Value.Ids</c>), a local taken
+    /// from one (<c>var list = s.Value ??= new()</c>) standing for its path, and the parameter; null for anything else.
+    /// </summary>
+    private static (string Path, IParameterSymbol Scratch)? ScratchPath(IOperation operation)
+    {
+        while (operation is IConversionOperation { IsImplicit: true } conversion) operation = conversion.Operand;
+        if (operation is ILocalReferenceOperation { Local: { RefKind: RefKind.None } local }
+            && local.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is VariableDeclaratorSyntax { Initializer.Value: var value }
+            && operation.SemanticModel?.GetOperation(value) is { } initializer)
+        {
+            while (initializer is IConversionOperation { IsImplicit: true } c) initializer = c.Operand;
+            if (initializer is ICoalesceAssignmentOperation coalesce) initializer = coalesce.Target;
+            return Uses.Root(initializer) is { } aliased && IsScratch(aliased) ? (initializer.Syntax.ToString(), aliased) : null;
+        }
+
+        return Uses.Root(operation) is { } root && IsScratch(root) && operation is IMemberReferenceOperation ? (operation.Syntax.ToString(), root) : null;
     }
 
     private static string Shorten(SyntaxNode syntax)
@@ -2034,10 +2143,10 @@ public sealed class PerformanceAnalyzer : EasyEcsAnalyzer.Area
         EasyEcsAnalyzer.Allocation, EasyEcsAnalyzer.CreateInLoop, EasyEcsAnalyzer.CreateThenSet,
         EasyEcsAnalyzer.IndexedByRef, EasyEcsAnalyzer.NoVectorLoop,
         EasyEcsAnalyzer.PerEntityChange, EasyEcsAnalyzer.QueryByHand, EasyEcsAnalyzer.ReadOnlyQuery,
-        EasyEcsAnalyzer.RowLookup, EasyEcsAnalyzer.ScalarLoop, EasyEcsAnalyzer.ScalarElementLoop, EasyEcsAnalyzer.ScratchEscape,
+        EasyEcsAnalyzer.RowLookup, EasyEcsAnalyzer.ScalarLoop, EasyEcsAnalyzer.ScalarElementLoop, EasyEcsAnalyzer.ScratchEscape, EasyEcsAnalyzer.ScratchNeverCleared, EasyEcsAnalyzer.UnpreparedIndex,
         EasyEcsAnalyzer.SomeRowsWritten, EasyEcsAnalyzer.UntrackedMut, EasyEcsAnalyzer.UnusedParameter,
         EasyEcsAnalyzer.UpdateInSystem, EasyEcsAnalyzer.WriteAccessOnlyReads, EasyEcsAnalyzer.HandWrittenEmit,
-        EasyEcsAnalyzer.HandWrittenLookup, EasyEcsAnalyzer.HandWrittenReduce, EasyEcsAnalyzer.HandWrittenTotal, EasyEcsAnalyzer.ColdFields, EasyEcsAnalyzer.UnboundedLayers);
+        EasyEcsAnalyzer.HandWrittenLookup, EasyEcsAnalyzer.HandWrittenReduce, EasyEcsAnalyzer.HandWrittenTotal, EasyEcsAnalyzer.PartialRead, EasyEcsAnalyzer.ColdFields, EasyEcsAnalyzer.UnboundedLayers);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializePerformance(context);
 }

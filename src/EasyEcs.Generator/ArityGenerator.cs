@@ -243,7 +243,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
             entity.Append($$"""
                     /// <summary>
                     /// Add or overwrite {{what}} with the given value{{(n == 1 ? "" : "s")}}, with at most one row copy. Returns the entity
-                    /// for chaining. O({{n}}) amortized. Owner thread only (see docs/content/guide/threading.md).
+                    /// for chaining. O({{n}}) amortized. Owner thread only (see docs/content/guide/performance/threading.md).
                     /// </summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public Entity Set<{{tps}}>({{values}})
@@ -269,7 +269,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                     /// <summary>
                     /// Remove {{what}}; missing components are ignored. The entity keeps its row (no move). Returns the entity
-                    /// for chaining. O({{n}}). Owner thread only (see docs/content/guide/threading.md).
+                    /// for chaining. O({{n}}). Owner thread only (see docs/content/guide/performance/threading.md).
                     /// </summary>
                     [MethodImpl(MethodImplOptions.AggressiveInlining)]
                     public Entity Remove<{{tps}}>()
@@ -322,7 +322,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <paramref name="count"/> <c>CreateEntity</c> / <c>CreateEntities</c> calls with these components never grow
                     /// them: a start-up or a wave of spawns pays its growth once, before the loop. Entities whose groups put them
                     /// in another table (<see cref="GroupBy{T}"/>) grow that one; components added later move entities to other
-                    /// tables, which grow on their own. O({{n}}) plus one growth. Owner thread only (see docs/content/guide/threading.md).
+                    /// tables, which grow on their own. O({{n}}) plus one growth. Owner thread only (see docs/content/guide/performance/threading.md).
                     /// </summary>
                     public void Reserve<{{tps}}>(int count)
                 {{cons}}
@@ -342,7 +342,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                     /// <summary>
                     /// Create an entity with {{what}} placed directly in its final archetype (no intermediate moves).
-                    /// O({{n}}) amortized. Owner thread only (see docs/content/guide/threading.md).
+                    /// O({{n}}) amortized. Owner thread only (see docs/content/guide/performance/threading.md).
                     /// </summary>
                     [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
                     public Entity CreateEntity<{{tps}}>({{values}})
@@ -373,7 +373,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// copy). Tracked components count as written now, indexes and groups learn the values, a given
                     /// <see cref="ChildOf"/> links the hierarchy. O(components) amortized, allocation-free once the table exists.
                     /// A prefab with members creates them all and sets the components on the entity of the one passed after
-                    /// (one row move for it). Owner thread only (see docs/content/guide/threading.md).
+                    /// (one row move for it). Owner thread only (see docs/content/guide/performance/threading.md).
                     /// </summary>
                     [MethodImpl(MethodImplOptions.NoInlining)] // keeps the loops that call it lean
                     public Entity Instantiate<{{tps}}>(Prefab prefab, {{values}})
@@ -432,7 +432,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <summary>
                     /// Create <c>entities.Length</c> entities with {{what}} (the same value{{(n == 1 ? "" : "s")}} for each), placed directly in
                     /// their final archetype, and write their handles to <paramref name="entities"/>. One pass through the
-                    /// structural gate and at most one table growth: O(count × {{n}}). Owner thread only (see docs/content/guide/threading.md).
+                    /// structural gate and at most one table growth: O(count × {{n}}). Owner thread only (see docs/content/guide/performance/threading.md).
                     /// </summary>
                     public void CreateEntities<{{tps}}>(Span<Entity> entities, {{values}})
                 {{cons}}
@@ -873,7 +873,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
 
                     /// <summary>
                     /// Destroy every alive entity having all of <c>{{tps}}</c> (and matching <paramref name="filter"/>) and return
-                    /// how many. One pass through the structural gate: O(matching archetypes + rows). Owner thread only (see docs/content/guide/threading.md).
+                    /// how many. One pass through the structural gate: O(matching archetypes + rows). Owner thread only (see docs/content/guide/performance/threading.md).
                     /// </summary>
                     public int DestroyAll<{{tps}}>(in QueryFilter filter = default)
                 {{cons}}

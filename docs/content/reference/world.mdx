@@ -270,7 +270,7 @@ public void CreateEntities<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Span<Entity> enti
 
 One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
 
-Create `entities.Length` entities with 2 components (the same values for each), placed directly in their final archetype, and write their handles to `entities`. One pass through the structural gate and at most one table growth: O(count × 2). Owner thread only (see docs/content/guide/threading.md).
+Create `entities.Length` entities with 2 components (the same values for each), placed directly in their final archetype, and write their handles to `entities`. One pass through the structural gate and at most one table growth: O(count × 2). Owner thread only (see docs/content/guide/performance/threading.md).
 
 **Complexity** ([API table](/en/docs/api)): O(count × n) amortized
 
@@ -280,7 +280,7 @@ Create `entities.Length` entities with 2 components (the same values for each), 
 public Entity CreateEntity();
 ```
 
-Create an entity without components. O(1) amortized. Owner thread only (see docs/content/guide/threading.md).
+Create an entity without components. O(1) amortized. Owner thread only (see docs/content/guide/performance/threading.md).
 
 **Complexity** ([API table](/en/docs/api)):
 
@@ -303,7 +303,7 @@ public Entity CreateEntity<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in T1 c1, in T2 c
 
 One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
 
-Create an entity with 2 components placed directly in its final archetype (no intermediate moves). O(2) amortized. Owner thread only (see docs/content/guide/threading.md).
+Create an entity with 2 components placed directly in its final archetype (no intermediate moves). O(2) amortized. Owner thread only (see docs/content/guide/performance/threading.md).
 
 **Complexity** ([API table](/en/docs/api)):
 
@@ -359,7 +359,7 @@ public int DestroyAll<T1, T2, T3, T4, T5, T6, T7, T8, T9>(in QueryFilter filter 
 
 One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
 
-Destroy every alive entity having all of `T1, T2` (and matching `filter`) and return how many. One pass through the structural gate: O(matching archetypes + rows). Owner thread only (see docs/content/guide/threading.md).
+Destroy every alive entity having all of `T1, T2` (and matching `filter`) and return how many. One pass through the structural gate: O(matching archetypes + rows). Owner thread only (see docs/content/guide/performance/threading.md).
 
 **Complexity** ([API table](/en/docs/api)): O(M + S)
 
@@ -623,6 +623,24 @@ One overload per number of components, 1 to 9 (generated from one template); thi
 
 **Complexity** ([API table](/en/docs/api)): O(M + S / 64 + runs + partly passing words)
 
+### `ForEachMaskedParallel` [#foreachmaskedparallel]
+
+```csharp
+public void ForEachMaskedParallel<T1, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where TJob : struct, IForEachMasked<T1>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, T5, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, T5, T6, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, T5, T6, T7, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, T5, T6, T7, T8, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8>, INoStructuralChanges;
+public void ForEachMaskedParallel<T1, T2, T3, T4, T5, T6, T7, T8, T9, TJob>(ref TJob job, in QueryFilter filter = default, int chunkSize = 0) where T1 : struct, IComponent where T2 : struct, IComponent where T3 : struct, IComponent where T4 : struct, IComponent where T5 : struct, IComponent where T6 : struct, IComponent where T7 : struct, IComponent where T8 : struct, IComponent where T9 : struct, IComponent where TJob : struct, IForEachMasked<T1, T2, T3, T4, T5, T6, T7, T8, T9>, INoStructuralChanges;
+```
+
+One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
+
+[`World.ForEachMasked`](/en/docs/reference/world#foreachmasked) on several threads: the matching rows are cut into chunks (a multiple of 64 rows: about four per thread, at most [`World.MaxChunkRows`](/en/docs/reference/world#maxchunkrows), until a call has measured the rows' cost, then chunks of about 25 µs for heavy rows and fewer for a short pass; 16 for a job that merges, whatever the threads and the cost, so its result does not depend on them; or `chunkSize` rounded up to 64: `[ForEach(Parallel = true, ChunkSize = n)]`) that the calling thread and up to [`WorldOptions.MaxDegreeOfParallelism`](/en/docs/reference/worldoptions#maxdegreeofparallelism) - 1 helper threads run at the same time, each with its own copy of `job` (state a job keeps in its fields is not merged back, unless the job merges: `Merges`, a `Reduce<T>`; its copies, one per chunk, the size of the job's fields, are then kept in an array reused by every call and combined in chunk order). The job must not change structure or write anything that another row's run reads (a singleton, another entity); nothing else may change the world during the call. Fewer than two chunks of rows, or a runner already busy, run on the calling thread. Allocation-free after the first call per job type.
+
 ### `ForEachParallel` [#foreachparallel]
 
 ```csharp
@@ -788,7 +806,7 @@ The value index of `T`: find entities by `T`'s key, or by the entity a relation 
 public Entity Instantiate(Prefab prefab);
 ```
 
-Create an entity with a copy of every component of `prefab`. Values are copied as they are: a [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) gets a list of its own, indexes learn the new entity, tracked components count as written now. O(components): one row copy, no table search after the first instance. A prefab with members creates them all and returns the entity of the one passed (O(members × components)). Owner thread only (see docs/content/guide/threading.md).
+Create an entity with a copy of every component of `prefab`. Values are copied as they are: a [`DynamicBuffer`](/en/docs/reference/dynamicbuffer) gets a list of its own, indexes learn the new entity, tracked components count as written now. O(components): one row copy, no table search after the first instance. A prefab with members creates them all and returns the entity of the one passed (O(members × components)). Owner thread only (see docs/content/guide/performance/threading.md).
 
 **Complexity** ([API table](/en/docs/api)):
 
@@ -828,7 +846,7 @@ public Entity Instantiate<T1, T2, T3, T4, T5, T6, T7, T8, T9>(Prefab prefab, in 
 
 One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
 
-[`World.Instantiate`](/en/docs/reference/world#instantiate) with 2 components given as well: a copy of every component of `prefab`, then the given values (replacing the prefab's, a disabled one enabled as `Set` does), the entity placed directly in the table of both (no intermediate moves, one row copy). Tracked components count as written now, indexes and groups learn the values, a given [`ChildOf`](/en/docs/reference/childof) links the hierarchy. O(components) amortized, allocation-free once the table exists. A prefab with members creates them all and sets the components on the entity of the one passed after (one row move for it). Owner thread only (see docs/content/guide/threading.md).
+[`World.Instantiate`](/en/docs/reference/world#instantiate) with 2 components given as well: a copy of every component of `prefab`, then the given values (replacing the prefab's, a disabled one enabled as `Set` does), the entity placed directly in the table of both (no intermediate moves, one row copy). Tracked components count as written now, indexes and groups learn the values, a given [`ChildOf`](/en/docs/reference/childof) links the hierarchy. O(components) amortized, allocation-free once the table exists. A prefab with members creates them all and sets the components on the entity of the one passed after (one row move for it). Owner thread only (see docs/content/guide/performance/threading.md).
 
 **Complexity** ([API table](/en/docs/api)):
 
@@ -958,6 +976,32 @@ Move `entities` (stale ids, repeats and retired entities, kept alive for their c
 ### `ParallelFor` [#parallelfor]
 
 ```csharp
+public void ParallelFor<T>(ref DynamicBuffer<T> items, Delegate body);
+```
+
+Runs `body`, a static lambda, for every element of `items`, the elements split into chunks run on several threads as [`World.ParallelFor`](/en/docs/reference/world#parallelfor-3) runs a job: `world.ParallelFor(ref hits.Items, static (ref Hit hit) => hit.Amount += 1)`. The lambda takes the element by `ref` (or `in`) and then the values before it, in order. The EasyEcs generator compiles each call into an [`IForSpan`](/en/docs/reference/iforspan) job whose loop over a chunk's elements is a vector loop where the body qualifies (as a [ForEach] method's), so the call allocates nothing after the first per job. The body must not change the world's structure nor write what another element reads. Owner thread only.
+
+**Type parameters**
+
+- `T`: The element.
+
+**Parameters**
+
+- `items`: The elements, written in place (a buffer of a singleton, an [`Emitted`](/en/docs/reference/emitted)'s records).
+- `body`: A static lambda written at the call.
+
+**Exceptions**
+
+- `InvalidOperationException`: The generator did not compile this call (EECS095 says why).
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.ParallelFor<TJob>(count, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+- `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+
+### `ParallelFor` [#parallelfor-2]
+
+```csharp
 public void ParallelFor<TJob>(int count, ref TJob job, int chunkSize = 0) where TJob : struct, IForRange;
 ```
 
@@ -972,13 +1016,44 @@ Run `job` over indexes 0 to `count` - 1 on several threads: the range is cut int
 - `world.ParallelFor<TJob>(count, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
 - `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
 
-### `ParallelFor` [#parallelfor-2]
+### `ParallelFor` [#parallelfor-3]
 
 ```csharp
 public void ParallelFor<T, TJob>(ref DynamicBuffer<T> items, ref TJob job, int chunkSize = 0) where TJob : struct, IForSpan<T>;
 ```
 
-[`World.ParallelFor`](/en/docs/reference/world#parallelfor) over the elements of `items` (an [`Emitted`](/en/docs/reference/emitted) singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The list must not change while the call runs. The records of an [`Emitted`](/en/docs/reference/emitted) that parallel passes left in their chunks' lists are run where they are, in order, not joined first: a chunk that spans two of those lists gets one call per list, each with its own `start`.
+[`World.ParallelFor`](/en/docs/reference/world#parallelfor-2) over the elements of `items` (an [`Emitted`](/en/docs/reference/emitted) singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The list must not change while the call runs. The records of an [`Emitted`](/en/docs/reference/emitted) that parallel passes left in their chunks' lists are run where they are, in order, not joined first: a chunk that spans two of those lists gets one call per list, each with its own `start`.
+
+**Complexity** ([API table](/en/docs/api)):
+
+- `world.ParallelFor<TJob>(count, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+- `ParallelFor<T, TJob>(ref buffer, ref job, chunkSize)`: O(count), divided over up to `MaxDegreeOfParallelism` threads
+
+### `ParallelFor` [#parallelfor-4]
+
+```csharp
+public void ParallelFor<T, TValue1>(ref DynamicBuffer<T> items, TValue1 value1, Delegate body);
+public void ParallelFor<T, TValue1, TValue2>(ref DynamicBuffer<T> items, TValue1 value1, TValue2 value2, Delegate body);
+public void ParallelFor<T, TValue1, TValue2, TValue3>(ref DynamicBuffer<T> items, TValue1 value1, TValue2 value2, TValue3 value3, Delegate body);
+public void ParallelFor<T, TValue1, TValue2, TValue3, TValue4>(ref DynamicBuffer<T> items, TValue1 value1, TValue2 value2, TValue3 value3, TValue4 value4, Delegate body);
+```
+
+Runs `body`, a static lambda, for every element of `items`, the elements split into chunks run on several threads as [`World.ParallelFor`](/en/docs/reference/world#parallelfor-3) runs a job: `world.ParallelFor(ref hits.Items, keep, static (ref Hit hit, float keep) => hit.Amount *= keep)`. The lambda takes the element by `ref` (or `in`) and then the values before it, in order. The EasyEcs generator compiles each call into an [`IForSpan`](/en/docs/reference/iforspan) job whose loop over a chunk's elements is a vector loop where the body qualifies (as a [ForEach] method's), so the call allocates nothing after the first per job. The body must not change the world's structure nor write what another element reads. Owner thread only.
+
+**Type parameters**
+
+- `T`: The element.
+- `TValue1`: The type of `value1`.
+
+**Parameters**
+
+- `items`: The elements, written in place (a buffer of a singleton, an [`Emitted`](/en/docs/reference/emitted)'s records).
+- `value1`: The first value before the lambda, held by its job for the call: the lambda's parameter after the element.
+- `body`: A static lambda written at the call.
+
+**Exceptions**
+
+- `InvalidOperationException`: The generator did not compile this call (EECS095 says why).
 
 **Complexity** ([API table](/en/docs/api)):
 
@@ -1097,6 +1172,10 @@ public void Reserve(Prefab prefab, int count);
 
 Pre-size the table `prefab`'s instances go to, and the entity storage, so the next `count` [`World.Instantiate`](/en/docs/reference/world#instantiate) calls never grow them: a wave of spawns pays its growth before the tick. Instances whose groups put them in another table ([`World.GroupBy`](/en/docs/reference/world#groupby)) grow that one. For a prefab with members, every member's table. O(components) plus one growth. Owner thread only.
 
+**Exceptions**
+
+- `ArgumentOutOfRangeException`: `count` is negative, or its instances would pass the most entities a world holds.
+
 **Complexity** ([API table](/en/docs/api)):
 
 - `world.Reserve<T1..Tn>(count)`: O(n), plus one growth
@@ -1118,7 +1197,7 @@ public void Reserve<T1, T2, T3, T4, T5, T6, T7, T8, T9>(int count) where T1 : st
 
 One overload per number of components, 1 to 9 (generated from one template); this is the text of the two-component one.
 
-Pre-size the table of entities with exactly `T1, T2` and the entity storage, so the next `count` `CreateEntity` / `CreateEntities` calls with these components never grow them: a start-up or a wave of spawns pays its growth once, before the loop. Entities whose groups put them in another table ([`World.GroupBy`](/en/docs/reference/world#groupby)) grow that one; components added later move entities to other tables, which grow on their own. O(2) plus one growth. Owner thread only (see docs/content/guide/threading.md).
+Pre-size the table of entities with exactly `T1, T2` and the entity storage, so the next `count` `CreateEntity` / `CreateEntities` calls with these components never grow them: a start-up or a wave of spawns pays its growth once, before the loop. Entities whose groups put them in another table ([`World.GroupBy`](/en/docs/reference/world#groupby)) grow that one; components added later move entities to other tables, which grow on their own. O(2) plus one growth. Owner thread only (see docs/content/guide/performance/threading.md).
 
 **Complexity** ([API table](/en/docs/api)):
 

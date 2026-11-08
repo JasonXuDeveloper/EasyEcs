@@ -22,46 +22,46 @@ major or minor version that needs code changes? The
   bookkeeping and hands out a `SystemHandle` (`Enabled`, `Error`, `RunCount`, `LastRunTick`, `Stats`, `Name`, `Type`)
   from `AddSystem<T>()`, `System<T>()`, `TryGetSystem<T>(out …)` and `world.Systems`; `HasSystem<T>()` is new. The
   generated code of an assembly's systems is one switch, run in one call per stretch of the schedule, with no
-  virtual call and no object per system. See [systems](/en/docs/guide/systems) and the
+  virtual call and no object per system. See [systems](/en/docs/guide/basics/systems) and the
   [decision](/en/docs/decisions#d102-systems-are-ref-structs).
-- Analyzer rules for systems: [EECS074](/en/docs/guide/analyzer#eecs074) (`[EcsSystem]` on a type that is no ref
-  struct, with a code fix), [EECS075](/en/docs/guide/analyzer#eecs075) (an instance member, with a code fix),
-  [EECS076](/en/docs/guide/analyzer#eecs076) (a hook no signature fits) and
-  [EECS077](/en/docs/guide/analyzer#eecs077) (a type that is no system given to `AddSystem<T>` and the other system
+- Analyzer rules for systems: [EECS074](/en/docs/guide/help/analyzer#eecs074) (`[EcsSystem]` on a type that is no ref
+  struct, with a code fix), [EECS075](/en/docs/guide/help/analyzer#eecs075) (an instance member, with a code fix),
+  [EECS076](/en/docs/guide/help/analyzer#eecs076) (a hook no signature fits) and
+  [EECS077](/en/docs/guide/help/analyzer#eecs077) (a type that is no system given to `AddSystem<T>` and the other system
   APIs). A code fix on CS0246 rewrites a 4.7 class system as an `[EcsSystem]` ref struct
-  ([analyzer](/en/docs/guide/analyzer#migration-fix)).
+  ([analyzer](/en/docs/guide/help/analyzer#migration-fix)).
 - The IDE no longer reports `[ForEach]`, `[EntityMethod]` and hook methods as unused: a suppressor in the package hides
   IDE0051 and IDE0052 on them, and the attributes carry JetBrains `[MeansImplicitUse]` for Rider and ReSharper. See
-  [unused-member warnings](/en/docs/guide/analyzer#never-used).
+  [unused-member warnings](/en/docs/guide/help/analyzer#never-used).
 - A generic system closed in another assembly (`AddSystem<Regen<Health>>()` in the game, `Regen<T>` in a library) is
   registered by the assembly that names it, so it runs under Native AOT without code made at run time. See
-  [systems](/en/docs/guide/systems#generic-systems) and the
+  [systems](/en/docs/guide/basics/systems#generic-systems) and the
   [decision](/en/docs/decisions#d20-generic-systems-register-the-closed-types-their-assembly-names).
 - A `DynamicBuffer` of an enum (`DynamicBuffer<Block>`) gets the same generated members as one of a struct:
   `chunk.Block`, `HasBlock`, `WriteBlock()`, `GetOrAddBlock()`, `RemoveBlock()` and the prefab's `SetBlock(…)`. See
-  [dynamic buffers](/en/docs/guide/dynamic-buffers).
+  [dynamic buffers](/en/docs/guide/data/dynamic-buffers).
 - `DynamicBuffer<T>.MaxPooledLength` sets, per element type, the longest list a destroyed or removed buffer gives back
   to the pool (4 KB of elements by default). Raise it for large buffers that come and go, such as the blocks
   of chunks loaded and unloaded around players, and each new buffer reuses a dead one's list instead of allocating. See
-  [dynamic buffers](/en/docs/guide/dynamic-buffers#pool).
-- Analyzer rule [EECS053](/en/docs/guide/analyzer#eecs053) (warning, with a code fix): a `[ForEach]` method that takes
+  [dynamic buffers](/en/docs/guide/data/dynamic-buffers#pool).
+- Analyzer rule [EECS053](/en/docs/guide/help/analyzer#eecs053) (warning, with a code fix): a `[ForEach]` method that takes
   a tracked component (`ITracked`, `DynamicBuffer<T>`) by `ref` and leaves it unwritten on some path (an early
   `return`, a write inside an `if`) stamps every row it visits, so `[Changed<T>]` systems see rows it never changed.
   The fix takes it as a `Mut<T>` (writes `x.Write()`, reads `x.Value`), which stamps only the rows written.
 - `buffer.SetCount(n)` sets the number of elements of a `DynamicBuffer<T>`, the added ones `default`, and returns the
   span to write, so a whole buffer is written in place instead of filled on the stack and copied in with `AddRange`.
-  See [dynamic buffers](/en/docs/guide/dynamic-buffers#set-count).
+  See [dynamic buffers](/en/docs/guide/data/dynamic-buffers#set-count).
 - `ReadOnlyMaybe<T>`, a `[ForEach]` parameter of a component the entity may lack that the method only reads: `Value` is
   `ref readonly`, a tracked component is never stamped, and an indexed component may be taken (EECS015 accepts it, a
   `Maybe<T>` of one is still an error). A `Maybe<T>` converts to it. See
-  [systems](/en/docs/guide/systems#read-only-maybe).
+  [systems](/en/docs/guide/basics/systems#read-only-maybe).
 - `world.SaveEntitiesWithout(output, ids, set)` saves a group of entities with every component but those of a
   `ComponentSet`: the data they compute again after a load stays out of the save. See
-  [migration and unloading](/en/docs/guide/migration-and-unload#save-entities-without).
+  [migration and unloading](/en/docs/guide/saves/migration-and-unload#save-entities-without).
 - `DynamicBuffer<T>.FillPool(lists)` fills the buffer pool of `T` with that many empty lists of
   `MaxPooledLength` elements at start-up, so the buffers of the entities a world grows to (chunks around players) take a
   list instead of allocating one while the server runs. See
-  [dynamic buffers](/en/docs/guide/dynamic-buffers#pool).
+  [dynamic buffers](/en/docs/guide/data/dynamic-buffers#pool).
 
 - A `[ForEach]` method written for one row runs as a SIMD loop when its components hold 1 to 4 numbers of one type
   (`float`, `double`, `int`, `uint`, `long`, `ulong`): the generator writes a `Vector<T>` loop from the method's body,
@@ -69,13 +69,13 @@ major or minor version that needs code changes? The
   }`) is split into one vector per field by deinterleaving loads and interleaving stores (AVX2 at 256 bits, permutes
   at 512; without them the rows run one at a time). The results are the same bit for bit, and a method that does not
   qualify runs row by row as before; nothing to change in code. See
-  [vector loops](/en/docs/guide/systems#vector-loops) and the
+  [vector loops](/en/docs/guide/basics/systems#vector-loops) and the
   [decision](/en/docs/decisions#d68-vector-loops-without-opting-in).
-- Analyzer rule [EECS055](/en/docs/guide/analyzer#eecs055) (suggestion) names why a `[ForEach]` method over numbers
+- Analyzer rule [EECS055](/en/docs/guide/help/analyzer#eecs055) (suggestion) names why a `[ForEach]` method over numbers
   got no vector loop ("component Body has 5 fields", "lane types float and double differ in size"), as Burst's inspector does.
-  `[ForEach(SimdMode = SimdMode.Require)]` makes that an error ([EECS056](/en/docs/guide/analyzer#eecs056)), so a hot
+  `[ForEach(SimdMode = SimdMode.Require)]` makes that an error ([EECS056](/en/docs/guide/help/analyzer#eecs056)), so a hot
   loop cannot lose its vectors unnoticed; `SimdMode.Off` keeps a method scalar without the message. See
-  [vector loops](/en/docs/guide/systems#vector-loops).
+  [vector loops](/en/docs/guide/basics/systems#vector-loops).
 - Vector loops take more methods ([decision](/en/docs/decisions#d90-vector-loops-reach)): parallel `[ForEach]`
   methods (each chunk's runs); `Maybe<T>` parameters (a lane mask of the rows that have `T`); components of `byte`,
   `sbyte`, `short` and `ushort` (64 or 32 rows per vector, each operation proven to give the method's bits, the
@@ -93,17 +93,17 @@ major or minor version that needs code changes? The
   implements `IReduction<T>` (`Identity`, `Combine`). Each chunk of a parallel pass, or the pass on one thread, adds
   into its own partial result, with no lock or atomic per row; the partial results are combined in chunk order and
   replace `T`. Integer results are exact; a float result is the same on any thread count for a fixed `ChunkRows`.
-  Analyzer rule [EECS057](/en/docs/guide/analyzer#eecs057) rejects a second write of `T` in the same pass. See
-  [reductions](/en/docs/guide/threading#reductions) and the [decision](/en/docs/decisions#d69-reductions).
+  Analyzer rule [EECS057](/en/docs/guide/help/analyzer#eecs057) rejects a second write of `T` in the same pass. See
+  [reductions](/en/docs/guide/performance/threading#reductions) and the [decision](/en/docs/decisions#d69-reductions).
 - `Scratch<T>`, a `[ForEach]` parameter: the method's working memory on the running thread (OpenMP's
   `threadprivate`), one `T` per method and thread, never reset, so a list a row fills is allocated once per thread
-  (`scratch.Value ??= new()`). Analyzer rule [EECS058](/en/docs/guide/analyzer#eecs058) rejects storing what it
-  holds into a component or a singleton. See [scratch](/en/docs/guide/threading#scratch) and the
+  (`scratch.Value ??= new()`). Analyzer rule [EECS058](/en/docs/guide/help/analyzer#eecs058) rejects storing what it
+  holds into a component or a singleton. See [scratch](/en/docs/guide/performance/threading#scratch) and the
   [decision](/en/docs/decisions#d74-scratch).
 - `Lookup<T>`, a `[ForEach]` parameter that reads component `T` of any entity as it was before the pass
   (`lookup[id]`, `Read`, `Has`; `TryFind`, `Find`, `Count` by key for an indexed `T`), in parallel methods too. The
-  system is a reader of `T`; rule [EECS059](/en/docs/guide/analyzer#eecs059) rejects a method that also writes `T`.
-  See [lookups](/en/docs/guide/threading#lookups) and the [decision](/en/docs/decisions#d75-lookup).
+  system is a reader of `T`; rule [EECS059](/en/docs/guide/help/analyzer#eecs059) rejects a method that also writes `T`.
+  See [lookups](/en/docs/guide/performance/threading#lookups) and the [decision](/en/docs/decisions#d75-lookup).
 - `Tile<TCell, TTile>`, a `[ForEach]` parameter over a grid cut into tiles: `TTile` implements `ITile<TKey>` (its
   shape, its key, the key beside it across a face) and the entity holds a `DynamicBuffer<TCell>`. The generator finds
   the neighbors, declares the reads and keeps the method parallel; `Pad` copies the tile with its neighbors' edges
@@ -111,116 +111,116 @@ major or minor version that needs code changes? The
   around. The shape sets the halo's width (`Halo`, the ghost width of MPI), which neighbors it reads
   (`Neighborhood`: faces, edges, corners, for 9- and 27-point stencils) and what it holds where there is none
   (`Boundary`: fill, clamp, mirror), and `ChangedEdges` / `Facing` let quiet tiles sleep and wake the ones beside the edges that changed. Rule
-  [EECS059](/en/docs/guide/analyzer#eecs059) also rejects a tile beside a write of its cell buffer,
-  [EECS072](/en/docs/guide/analyzer#eecs072) a shape whose halo is wider than the tile and
-  [EECS073](/en/docs/guide/analyzer#eecs073) two tiles of the same cells in one method. See
-  [shade a grid](/en/docs/guide/grids) and the [decision](/en/docs/decisions#d77-tiles).
+  [EECS059](/en/docs/guide/help/analyzer#eecs059) also rejects a tile beside a write of its cell buffer,
+  [EECS072](/en/docs/guide/help/analyzer#eecs072) a shape whose halo is wider than the tile and
+  [EECS073](/en/docs/guide/help/analyzer#eecs073) two tiles of the same cells in one method. See
+  [shade a grid](/en/docs/guide/performance/grids) and the [decision](/en/docs/decisions#d77-tiles).
 - `world.ForEachBatchParallel<T1..Tn, TJob>(ref job, filter, chunkRows)`: an `IForEachBatch` job over the runs of
   rows of each chunk, on several threads. See
-  [queries](/en/docs/guide/queries#on-several-threads-foreachparallel-and-foreachentityparallel).
+  [queries](/en/docs/guide/basics/queries#on-several-threads-foreachparallel-and-foreachentityparallel).
 - `Emit<T>`, a `[ForEach]` parameter taken by value for records a pass produces (hits for a later system to apply,
   the packets of an area of interest): `hits.Add(new Hit(target, power))` appends to the chunk's own list, with no lock
   and no atomic, and the lists are appended to singleton `Emitted<T>` in chunk order when the pass ends, so the
   records come out in row order on any number of threads. Passes append; the system that applies the records clears
-  them. Rule [EECS070](/en/docs/guide/analyzer#eecs070) rejects a method that also reads `Emitted<T>` or emits one
+  them. Rule [EECS070](/en/docs/guide/help/analyzer#eecs070) rejects a method that also reads `Emitted<T>` or emits one
   type twice. See the [decision](/en/docs/decisions#d78-emit).
 - `EntityRandom`, deterministic random numbers for `[ForEach]` methods, parallel ones included: a singleton holding a
   seed and a tick, and pure functions of (seed, entity, tick, stream): `Bits`, `Float`, `Range` (int and float) and
-  `Chance`. Rule [EECS071](/en/docs/guide/analyzer#eecs071) (warning, with a code fix to `EntityRandom`) reports
+  `Chance`. Rule [EECS071](/en/docs/guide/help/analyzer#eecs071) (warning, with a code fix to `EntityRandom`) reports
   `Random.Shared` and `new Random()` in a `[ForEach]` method. See the
   [decision](/en/docs/decisions#d79-entity-random).
 - `world.ParallelFor(count, ref job)` runs an `IForRange` job over a range of indexes, and
   `world.ParallelFor(ref buffer, ref job)` an `IForSpan<T>` job over the elements of a list (an `Emitted<T>`'s
   records), on the world's runner with its chunks; EECS060 and EECS061 cover their jobs. See the
   [decision](/en/docs/decisions#d80-parallel-for).
-- Analyzer rule [EECS060](/en/docs/guide/analyzer#eecs060) (warning): a parallel `[ForEach]` method or the `Execute`
+- Analyzer rule [EECS060](/en/docs/guide/help/analyzer#eecs060) (warning): a parallel `[ForEach]` method or the `Execute`
   of a job run by `ForEachParallel`, `ForEachEntityParallel` or `ForEachBatchParallel` writes memory every thread
   shares (a static field, an object a context parameter or a job's field refers to): the writes race. Rule
-  [EECS061](/en/docs/guide/analyzer#eecs061) (warning, with a code fix): a parallel job's field read after the call,
+  [EECS061](/en/docs/guide/help/analyzer#eecs061) (warning, with a code fix): a parallel job's field read after the call,
   which ran a copy per chunk and merged nothing back (a job that implements `Merges` itself is left out); the fix runs
   the job on one thread (`ForEach`, `ForEachEntity`, `ForEachBatch`).
 - `IDirectIndexed<TKey>`: a unique component whose keys map onto a bounded range of slots (grid cells, chunks around
   the players, small ids) declares `static int Slots` and `static int SlotOf(TKey key)`; its index keeps a slot array
   beside the hash, so `Get`, `TryGet` and the uniqueness check of a write read one array entry. Keys out of range or
   in a taken slot are found through the hash, which still serves `Find`, `Count` and the ordered walks. See
-  [direct-mapped keys](/en/docs/guide/indexes-and-relations#direct-index) and the
+  [direct-mapped keys](/en/docs/guide/data/indexes-and-relations#direct-index) and the
   [decision](/en/docs/decisions#d71-direct-index).
 - `world.CollectIds<T1..Tn>(span, filter)` writes the ids of the matching entities into a span, in query order, until
   it is full, and returns how many: a bounded batch (the first requests of a tick) for `DestroyEntities`,
   `SaveEntities` or a loop that changes structure. Allocation-free. See
-  [queries](/en/docs/guide/queries#collect-ids).
+  [queries](/en/docs/guide/basics/queries#collect-ids).
 - `world.UpdateCount<TGroup>()`: the number of `Update<TGroup>()` calls so far, the count the group's
-  `UpdateInterval`s are taken from. See [systems](/en/docs/guide/systems#system-groups).
-- Code fixes for [EECS027](/en/docs/guide/analyzer#eecs027) (takes the looked-up component or singleton as a
-  parameter) and [EECS054](/en/docs/guide/analyzer#eecs054) (removes `ChunkRows`).
-- Analyzer rule [EECS067](/en/docs/guide/analyzer#eecs067) also suggests `[Group]` for a hand-written `IGroup.Group`
+  `UpdateInterval`s are taken from. See [systems](/en/docs/guide/basics/systems#system-groups).
+- Code fixes for [EECS027](/en/docs/guide/help/analyzer#eecs027) (takes the looked-up component or singleton as a
+  parameter) and [EECS054](/en/docs/guide/help/analyzer#eecs054) (removes `ChunkRows`).
+- Analyzer rule [EECS067](/en/docs/guide/help/analyzer#eecs067) also suggests `[Group]` for a hand-written `IGroup.Group`
   that returns an `int` member (or an enum of `int` cast to `int`), and its code fix declares it on that member.
 - `[ForEach(Parallel = true, ChunkRows = n)]` sets the rows a thread of a parallel method takes at a time (rounded up
   to 64; `chunkRows:` on `world.ForEachParallel` and the other parallel calls). By default a chunk holds at least
   1,024 rows, 4,096 when the method writes a tracked component, so a few hundred heavy rows ran on one thread; now they
   spread over all of them, also when they write tracked components. Analyzer rule
-  [EECS054](/en/docs/guide/analyzer#eecs054) rejects a negative count and `ChunkRows` without `Parallel`. See
-  [threading](/en/docs/guide/threading#chunk-rows) and the [decision](/en/docs/decisions#d67-chunk-rows).
+  [EECS054](/en/docs/guide/help/analyzer#eecs054) rejects a negative count and `ChunkRows` without `Parallel`. See
+  [threading](/en/docs/guide/performance/threading#chunk-rows) and the [decision](/en/docs/decisions#d67-chunk-rows).
 
 - `[EntityMethod]` on a static method runs it on one entity: the generator writes the job `entity.Run` runs (its `ref`
   parameters the `WriteMask`, its filter attributes the filter) and an entry point named like the method that takes
   the entity and the method's other values and returns whether it ran (`Requests.TakeHit(unit, damage)`). Analyzer rule
-  [EECS080](/en/docs/guide/analyzer#eecs080) (suggestion, with a code fix) finds a hand-written one-entity job and
-  converts it with its calls; [EECS081](/en/docs/guide/analyzer#eecs081) rejects a method that cannot run on one
-  entity. See [queries](/en/docs/guide/queries#run-on-one-entity).
+  [EECS080](/en/docs/guide/help/analyzer#eecs080) (suggestion, with a code fix) finds a hand-written one-entity job and
+  converts it with its calls; [EECS081](/en/docs/guide/help/analyzer#eecs081) rejects a method that cannot run on one
+  entity. See [queries](/en/docs/guide/basics/queries#run-on-one-entity).
 - `entity.Run<T1..Tn, TJob>(ref job, in filter, since)` runs a job with `since` as the filter's tick: the test of
   `filter.Since(since)` without a copy of the filter, so a `static readonly` filter serves every call. The entry point
   of an `[EntityMethod, Changed<T>]` method passes its filter this way. See the [API](/en/docs/api#queries).
 - `[ForEach, Consume]` destroys exactly the rows a pass visited when it ends, for event and command entities handled
   once: in bulk (a `DestroyAll` of the method's filter) after a method without structural changes, row by row after
-  one that may make them. Analyzer rule [EECS084](/en/docs/guide/analyzer#eecs084) (suggestion, with a code fix)
-  finds a method that ends with `entity.Destroy()`; [EECS085](/en/docs/guide/analyzer#eecs085) rejects `[Consume]`
-  without `[ForEach]` or with `Slices`. See [systems](/en/docs/guide/systems#consume).
+  one that may make them. Analyzer rule [EECS084](/en/docs/guide/help/analyzer#eecs084) (suggestion, with a code fix)
+  finds a method that ends with `entity.Destroy()`; [EECS085](/en/docs/guide/help/analyzer#eecs085) rejects `[Consume]`
+  without `[ForEach]` or with `Slices`. See [systems](/en/docs/guide/basics/systems#consume).
 - `[UpdateInterval(n, Phase = p)]` declares a system's cadence; the generator writes it into the system's
-  code ([EECS083](/en/docs/guide/analyzer#eecs083) rejects an interval below 1 or a phase outside 0 to n - 1).
-  See [systems](/en/docs/guide/systems#update-interval).
+  code ([EECS083](/en/docs/guide/help/analyzer#eecs083) rejects an interval below 1 or a phase outside 0 to n - 1).
+  See [systems](/en/docs/guide/basics/systems#update-interval).
 - Analyzer rules that point a `[ForEach]` method to the parameter that does its work per chunk:
-  [EECS086](/en/docs/guide/analyzer#eecs086) (suggestion), a singleton that a system resets each update and the method
+  [EECS086](/en/docs/guide/help/analyzer#eecs086) (suggestion), a singleton that a system resets each update and the method
   accumulates by `ref`, to `ref Reduce<T>` and the `[Sum]` / `[Min]` / ... attributes it needs;
-  [EECS087](/en/docs/guide/analyzer#eecs087) (warning), a `World` parameter used only to read other entities, to
-  `Lookup<T>`; [EECS089](/en/docs/guide/analyzer#eecs089) (suggestion), records added to a singleton's list, to
-  `Emit<T>`. [EECS088](/en/docs/guide/analyzer#eecs088) (warning, with a code fix) reports two `EntityRandom` draws of
+  [EECS087](/en/docs/guide/help/analyzer#eecs087) (warning), a `World` parameter used only to read other entities, to
+  `Lookup<T>`; [EECS089](/en/docs/guide/help/analyzer#eecs089) (suggestion), records added to a singleton's list, to
+  `Emit<T>`. [EECS088](/en/docs/guide/help/analyzer#eecs088) (warning, with a code fix) reports two `EntityRandom` draws of
   one stream for the same entity, or a draw in a loop that does not vary its stream. See the
   [decision](/en/docs/decisions#d97-hand-written-parameters).
 
 - Declaration attributes: what a component or singleton is, written once on its type, and the generator writes the
   rest ([decision](/en/docs/decisions#d101-declaration-attributes)). `[Sum]`, `[Product]`, `[Min]`, `[Max]`, `[All]` and
   `[Any]` on the fields of a partial struct declare a reduction: the generator writes its `Identity` and `Combine`
-  (see [reductions](/en/docs/guide/threading#reductions)). A reduction of `[Sum]`, `[Min]` and `[Max]` fields gets a
+  (see [reductions](/en/docs/guide/performance/threading#reductions)). A reduction of `[Sum]`, `[Min]` and `[Max]` fields gets a
   vector loop under the same rules as a hand-written `Combine` (a float sum needs `FloatMode.Fast`); a `[Product]`,
-  `[All]` or `[Any]` field keeps the method row by row, and [EECS055](/en/docs/guide/analyzer#eecs055) names it (see
-  [vector loops](/en/docs/guide/systems#vector-loops)). `[IndexKey]` or `[UniqueKey]` on a member (or `[IndexKey]` on
+  `[All]` or `[Any]` field keeps the method row by row, and [EECS055](/en/docs/guide/help/analyzer#eecs055) names it (see
+  [vector loops](/en/docs/guide/basics/systems#vector-loops)). `[IndexKey]` or `[UniqueKey]` on a member (or `[IndexKey]` on
   the type, for the value itself) and `[Group]` on an `int` or enum member declare an index key or a group, as an
   explicit `Key` or `Group` that `ToString()` does not print:
   `public partial record struct Account([UniqueKey] int Id) : IComponent;` (see
-  [indexes](/en/docs/guide/indexes-and-relations) and [groups](/en/docs/guide/groups)). `[GroupBy]`,
+  [indexes](/en/docs/guide/data/indexes-and-relations) and [groups](/en/docs/guide/data/groups)). `[GroupBy]`,
   `[WhenTargetDestroyed(policy)]` and `[NotSaved]` declare a world's setup on the type, and every world applies it
   from its first table holding the type: its grouping, what destroying a target does to the links to it, and a
   component or singleton that no save holds (runtime state that needs no Nino formatter). A world's own `GroupBy` or
   `WhenTargetDestroyed` call still wins.
-- Analyzer rules for the declarations: [EECS062](/en/docs/guide/analyzer#eecs062) (a type, or a type around it, that
-  is not partial; with a code fix), [EECS063](/en/docs/guide/analyzer#eecs063) (`Identity` or `Combine` written beside
-  the attributes), [EECS064](/en/docs/guide/analyzer#eecs064) (a field no attribute combines),
-  [EECS065](/en/docs/guide/analyzer#eecs065) and [EECS067](/en/docs/guide/analyzer#eecs067) (suggestions, with code
+- Analyzer rules for the declarations: [EECS062](/en/docs/guide/help/analyzer#eecs062) (a type, or a type around it, that
+  is not partial; with a code fix), [EECS063](/en/docs/guide/help/analyzer#eecs063) (`Identity` or `Combine` written beside
+  the attributes), [EECS064](/en/docs/guide/help/analyzer#eecs064) (a field no attribute combines),
+  [EECS065](/en/docs/guide/help/analyzer#eecs065) and [EECS067](/en/docs/guide/help/analyzer#eecs067) (suggestions, with code
   fixes: a reduction or a key written by hand that the attributes declare),
-  [EECS066](/en/docs/guide/analyzer#eecs066) (warning, with code fixes: an `Identity` that is not the identity of its
-  `Combine`, so the result depends on the thread count), [EECS068](/en/docs/guide/analyzer#eecs068) (a setup attribute
-  on a type it does not fit) and [EECS069](/en/docs/guide/analyzer#eecs069) (a managed component or singleton without a
-  Nino formatter, with code fixes to `[NinoType]` or `[NotSaved]`). [EECS036](/en/docs/guide/analyzer#eecs036) also
-  reports keys and groups the attributes declare wrongly, and [EECS043](/en/docs/guide/analyzer#eecs043) gains a fix
+  [EECS066](/en/docs/guide/help/analyzer#eecs066) (warning, with code fixes: an `Identity` that is not the identity of its
+  `Combine`, so the result depends on the thread count), [EECS068](/en/docs/guide/help/analyzer#eecs068) (a setup attribute
+  on a type it does not fit) and [EECS069](/en/docs/guide/help/analyzer#eecs069) (a managed component or singleton without a
+  Nino formatter, with code fixes to `[NinoType]` or `[NotSaved]`). [EECS036](/en/docs/guide/help/analyzer#eecs036) also
+  reports keys and groups the attributes declare wrongly, and [EECS043](/en/docs/guide/help/analyzer#eecs043) gains a fix
   to `[IndexKey]`.
 - `entity.GetOrAdd(in value)` and `world.GetOrAddSingleton(in value)` add the component or singleton with that value
   when it is missing and hand out the existing one otherwise; the generator writes `GetOrAddX(…)` with the
   constructor's arguments. `prefab.SetAbsent<T>()` gives a recipe a column for `T` without the component, so adding
-  it to an instance later flips a presence bit instead of moving the row. [EECS033](/en/docs/guide/analyzer#eecs033)
+  it to an instance later flips a presence bit instead of moving the row. [EECS033](/en/docs/guide/help/analyzer#eecs033)
   also reports `if (e.X.F != v) e.SetX(v)` as `e.SetXIfChanged(v)`, and `GetOrAdd(new X(a))` as `GetOrAddX(a)`, with
-  their fixes. See [entities and components](/en/docs/guide/entities-and-components) and
-  [prefabs](/en/docs/guide/prefabs).
+  their fixes. See [entities and components](/en/docs/guide/basics/entities-and-components) and
+  [prefabs](/en/docs/guide/basics/prefabs).
 - `world.ForEachMasked<T1..Tn, TJob>(ref job, filter)` runs an `IForEachMasked` job: a batch job that also takes a word
   of 64 rows of which only some pass, whole, with the passing rows as bits, instead of one run per stretch of passing
   rows. It is what a vector loop compiles to. `Lanes.Compact(source, mask, destination)` writes the elements a lane
@@ -233,13 +233,13 @@ major or minor version that needs code changes? The
   update no longer zeroes a 192-byte filter on every call (twice with `MeasureSystems`).
 - A `Mut<T>` of a run of rows refers to the change-tick column its job looks up once per run (`MutColumn`): a write
   stamps its row with no lookup of the world's tick, the column or its arrays. See
-  [change tracking](/en/docs/guide/change-tracking).
+  [change tracking](/en/docs/guide/changes/change-tracking).
 - The entry point of an `[EntityMethod, Changed<T>]` method runs its static filter with the tick beside it instead of a
   copy of the filter per call.
 - A tile job keeps the neighbors it finds in a field of the job: no 216-byte local cleared on every row before
-  `TileNeighbors.Of` clears it again. See [grids](/en/docs/guide/grids#generated).
+  `TileNeighbors.Of` clears it again. See [grids](/en/docs/guide/performance/grids#generated).
 - A vector loop loads only the columns it reads or stores: a component taken only to select rows costs no load. See
-  [vector loops](/en/docs/guide/systems#vector-loops).
+  [vector loops](/en/docs/guide/basics/systems#vector-loops).
 
 - A pass of a generated `[ForEach]` job finds its query by the job's type instead of comparing filters: the filter of
   a generated method is a constant, so the world keeps the match per job type. A hand-written job opts in with
@@ -257,41 +257,41 @@ major or minor version that needs code changes? The
   ([decision](/en/docs/decisions#d95-generator-per-edit)).
 - The buffer pool is shared across threads: each thread keeps a few lists and trades the rest in batches with a pool
   every thread takes from, so the lists the owner thread gets back from destroyed buffers serve the first writes of a
-  parallel `[ForEach]`, which used to allocate. See [dynamic buffers](/en/docs/guide/dynamic-buffers#pool).
+  parallel `[ForEach]`, which used to allocate. See [dynamic buffers](/en/docs/guide/data/dynamic-buffers#pool).
 - An empty buffer of a prefab (`SetBuffer<T>()` with no elements) gives its instances no list: their first element
   takes one from the pool instead of growing a new one.
 - `LoadEntities` hands each loaded entity the list its buffer was read into, instead of copying it into another.
 - `buffer.TrimExcess()` on an empty buffer gives its list back to the pool: the buffer holds no list, and the next first
   write of any buffer of `T` reuses it, so scratch buffers used only while an entity is active hold no memory in
-  between. See [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs).
+  between. See [dynamic buffers](/en/docs/guide/data/dynamic-buffers#what-it-costs).
 
 - `world.Reserve(prefab, n)` and `Reserve<T1..Tn>(n)` also reserve what the entities bring beside their rows: the
   keys of their indexed components and, for entities with cleanup components, the table they wait in once destroyed.
   The list of free ids and an index's per-entity records grow with the entity records (`EnsureEntityCapacity`
   included) instead of one destroyed or indexed entity at a time, so a world that reserved its peak allocates nothing to
-  reach it. See [prefabs](/en/docs/guide/prefabs#reserve).
-- A unique index ([`IUniqueIndexed<TKey>`](/en/docs/guide/indexes-and-relations)) keeps each key's entity in the
+  reach it. See [prefabs](/en/docs/guide/basics/prefabs#reserve).
+- A unique index ([`IUniqueIndexed<TKey>`](/en/docs/guide/data/indexes-and-relations)) keeps each key's entity in the
   key's own record instead of an array per key: no array allocated per key, and `Get` / `TryGet` read one record
   ([decision](/en/docs/decisions#d71-direct-index)).
 - `SetAll` writes a 64-row word whose rows all match with one fill instead of row by row (partial words and indexed
-  components keep the loop). See [bulk operations](/en/docs/guide/bulk#what-it-costs) and the
+  components keep the loop). See [bulk operations](/en/docs/guide/changes/bulk#what-it-costs) and the
   [decision](/en/docs/decisions#d72-setall-whole-words).
 - `MoveEntities` is about 1.2x faster: the step that lands each run of rows is no longer inlined into it, which keeps
   its loops over the ids lean ([decision](/en/docs/decisions#d136-arrive-rows-not-inlined)).
 
 ### Changes that need code changes [#v4-8-0-breaking]
 
-- Analyzer rule [EECS027](/en/docs/guide/analyzer#eecs027) also reports per-row lookups of indexed components
+- Analyzer rule [EECS027](/en/docs/guide/help/analyzer#eecs027) also reports per-row lookups of indexed components
   through the visited `Entity`; take an `in` parameter, or a `ReadOnlyMaybe<T>` when some entities lack it. A build
   that treats warnings as errors sees it: see the [migration guide](/en/docs/migration#v4-8-analyzer).
-- Analyzer rule [EECS030](/en/docs/guide/analyzer#eecs030) also reports a `[ForEach]` method whose whole body is one
+- Analyzer rule [EECS030](/en/docs/guide/help/analyzer#eecs030) also reports a `[ForEach]` method whose whole body is one
   structural change of its entity, the same for every row (`[ForEach, With<Dead>] static void Bury(Entity e) =>
   e.Destroy();`): one bulk call in an `OnUpdate` method (`world.DestroyAll<Dead>()`) changes each table at once
   ([migration guide](/en/docs/migration#v4-8-analyzer)).
-- The new warnings [EECS060](/en/docs/guide/analyzer#eecs060) and [EECS061](/en/docs/guide/analyzer#eecs061) report
+- The new warnings [EECS060](/en/docs/guide/help/analyzer#eecs060) and [EECS061](/en/docs/guide/help/analyzer#eecs061) report
   parallel code that races on shared memory or reads a job field the pass never wrote back; a total becomes a
   `Reduce<T>` parameter ([migration guide](/en/docs/migration#v4-8-analyzer)).
-- The new warning [EECS071](/en/docs/guide/analyzer#eecs071) reports `Random.Shared` and `new Random()` in `[ForEach]`
+- The new warning [EECS071](/en/docs/guide/help/analyzer#eecs071) reports `Random.Shared` and `new Random()` in `[ForEach]`
   methods; its fix draws from an `EntityRandom` singleton ([migration guide](/en/docs/migration#v4-8-analyzer)).
 
 - The `EcsSystem` base class is removed: a system is an `[EcsSystem]` ref struct of static methods, its hooks are
@@ -338,57 +338,57 @@ major or minor version that needs code changes? The
 - `Mut<T>`, a `[ForEach]` parameter of a component the method writes on some rows only: `Value` reads, `Write()` and
   `SetIfChanged(value)` stamp the row they write, so `[Changed<T>]` readers visit only the rows whose value changed.
   `entity.SetIfChanged(value)` and the generated `SetHealthIfChanged(…)` skip an equal value outside a pass. See
-  [change tracking](/en/docs/guide/change-tracking).
+  [change tracking](/en/docs/guide/changes/change-tracking).
 - `[ChangedAny<T1..Tn>]` / `[RemovedAny<T1..Tn>]` and `QueryFilter.ChangedAny<T1..Tn>(since)` / `RemovedAny`: rows
   where at least one of 2 to 9 tracked components was written, or lost. One filter kept in a field serves every
-  client with `filter.Since(ack)`. See [change tracking](/en/docs/guide/change-tracking).
+  client with `filter.Since(ack)`. See [change tracking](/en/docs/guide/changes/change-tracking).
 - `WorldOptions.DestroyLogCapacity` and `world.DestroyedSince(since, into, out count)`: the entities destroyed since a reader's
   tick, for replicating despawns to clients that acknowledge at different ticks; false (resynchronize) when the reader
-  is older than the log (`DestroyLogOldestTick`). See [change tracking](/en/docs/guide/change-tracking).
+  is older than the log (`DestroyLogOldestTick`). See [change tracking](/en/docs/guide/changes/change-tracking).
 - `IUniqueIndexed<TKey>`: a key that names one entity, found with `index.Get(key)` / `TryGet(key, out e)`; every write
   that would give a second entity a taken key throws before it changes anything. See
-  [indexes and relations](/en/docs/guide/indexes-and-relations).
+  [indexes and relations](/en/docs/guide/data/indexes-and-relations).
 - `index.Find(key).Count`, `world.Children(parent).Count` and, for a relation, `relations.Find(target).Count`: how many
   entities had the key (or links pointed at the target) when found, in O(1), so a buffer is sized without walking the
   matches twice. `index.KeyCount` and `relations.TargetCount` count the distinct keys (or targets) in O(1). See
-  [indexes and relations](/en/docs/guide/indexes-and-relations#value-indexes).
+  [indexes and relations](/en/docs/guide/data/indexes-and-relations#value-indexes).
 - `world.Descendants(root).AddTo(ids, includeRoot)` appends a subtree to a `List<EntityId>`, each parent before its
   children: the ids `MoveEntities` and `SaveEntities` take, without a collecting loop. See
-  [hierarchy](/en/docs/guide/hierarchy#moving).
+  [hierarchy](/en/docs/guide/data/hierarchy#moving).
 - `world.Instantiate(prefab, in c1 … in cn)` and `Instantiate(prefab, entities, in c1 … in cn)`: an instance with up
   to nine components of its own (a parent, a position, an owner) in one row copy. The keys of unique components, the
-  given ones and the prefab's, are checked before any entity is created. See [prefabs](/en/docs/guide/prefabs).
+  given ones and the prefab's, are checked before any entity is created. See [prefabs](/en/docs/guide/basics/prefabs).
 - `world.TrimExcess()` gives back the memory a peak left: empty tables go, the others shrink, the buffers of saves,
-  loads and migrations are released. See [debugging and diagnostics](/en/docs/guide/diagnostics).
+  loads and migrations are released. See [debugging and diagnostics](/en/docs/guide/production/diagnostics).
 - `[ForEach(Slices = N)]` spreads a method's rows over N runs of its system; `QueryFilter.Slice(index, of)` does it
-  for a struct job, and `EcsSystem.RunCount` says which run is current. See [systems](/en/docs/guide/systems).
+  for a struct job, and `EcsSystem.RunCount` says which run is current. See [systems](/en/docs/guide/basics/systems).
 - `SystemStats` records the bytes each run allocated (`LastAllocated`, `TotalAllocated`) and the entities its
   `[ForEach]` methods visited (`LastEntities`, `TotalEntities`); `world.DescribeSchedule()` describes the stages, the
   waits and the pairs only registration orders, as text or a mermaid flowchart. See
-  [debugging and diagnostics](/en/docs/guide/diagnostics).
+  [debugging and diagnostics](/en/docs/guide/production/diagnostics).
 - Restart saves: `world.SaveWithout(output, in exclude)` leaves the components and singletons of a `ComponentSet` out,
   `world.LoadKeeping(input, in keep, markWritten)` keeps the singletons the new process set, and
-  `ComponentSet.WithSingleton<T>()` / `With(Type)` name singletons. See [restart](/en/docs/guide/saves#restart).
-- The analyzer: [EECS035](/en/docs/guide/analyzer#eecs035) rejects an invalid `Slices` (below 1, or with a
-  `Changed` / `Removed` filter); [EECS036](/en/docs/guide/analyzer#eecs036) a unique component that cannot be indexed by
-  its key (an `EntityId` key, or a second index key); [EECS031](/en/docs/guide/analyzer#eecs031) covers a loop of
-  `Instantiate` calls with the same values; [EECS033](/en/docs/guide/analyzer#eecs033) suggests the generated
-  `SetXIfChanged(…)`; code fixes now also cover [EECS007](/en/docs/guide/analyzer#eecs007) (`readonly`),
-  [EECS015](/en/docs/guide/analyzer#eecs015), [EECS017](/en/docs/guide/analyzer#eecs017) (`EntityId`),
-  EECS018 and [EECS025](/en/docs/guide/analyzer#eecs025) (`in T` for a `Mut<T>`).
+  `ComponentSet.WithSingleton<T>()` / `With(Type)` name singletons. See [restart](/en/docs/guide/saves/saves#restart).
+- The analyzer: [EECS035](/en/docs/guide/help/analyzer#eecs035) rejects an invalid `Slices` (below 1, or with a
+  `Changed` / `Removed` filter); [EECS036](/en/docs/guide/help/analyzer#eecs036) a unique component that cannot be indexed by
+  its key (an `EntityId` key, or a second index key); [EECS031](/en/docs/guide/help/analyzer#eecs031) covers a loop of
+  `Instantiate` calls with the same values; [EECS033](/en/docs/guide/help/analyzer#eecs033) suggests the generated
+  `SetXIfChanged(…)`; code fixes now also cover [EECS007](/en/docs/guide/help/analyzer#eecs007) (`readonly`),
+  [EECS015](/en/docs/guide/help/analyzer#eecs015), [EECS017](/en/docs/guide/help/analyzer#eecs017) (`EntityId`),
+  EECS018 and [EECS025](/en/docs/guide/help/analyzer#eecs025) (`in T` for a `Mut<T>`).
 - `SaveEntities(output, a.Id, b.Id)` and `bag.AddRange(x, y)` take the values directly (`params` spans, built on the
-  stack). See [migration](/en/docs/guide/migration-and-unload#save-entities).
+  stack). See [migration](/en/docs/guide/saves/migration-and-unload#save-entities).
 - `world.Read<T1..Tn>(filter)` walks the rows of a query to read them: its items are `ref readonly` and stamp nothing,
   so a `[Changed<T>]` reader does not see a row as written because a tool or a request handler read it. `Query` stamps
-  the rows of tracked components it visits, as before. See [queries](/en/docs/guide/queries#read).
+  the rows of tracked components it visits, as before. See [queries](/en/docs/guide/basics/queries#read).
 - `world.DestroyEntities(ids)` destroys a list of ids with one pass through the structural gate and one cascade;
-  stale ids and repeats are skipped. See [structural changes](/en/docs/guide/structural-changes#bulk).
+  stale ids and repeats are skipped. See [structural changes](/en/docs/guide/changes/structural-changes#bulk).
 - `ChildOf` and `Retired` have generated members like your own components: `entity.ChildOf`, `HasChildOf`,
   `TryGetChildOf`, `SetChildOf(parent)`, `SetChildOfIfChanged(parent)`, `RemoveChildOf()`, `world.ChildOfIndex`, the
-  prefab writers, and `entity.IsRetired`. See [hierarchy](/en/docs/guide/hierarchy#reparent).
+  prefab writers, and `entity.IsRetired`. See [hierarchy](/en/docs/guide/data/hierarchy#reparent).
 - A `[ForEach]` method that uses its `Entity` only as an identity (`Id`, `Version`, `IsAlive`, `==`, an `EntityId`)
   no longer makes its system run alone: the system is scheduled by its other parameters. See
-  [systems](/en/docs/guide/systems).
+  [systems](/en/docs/guide/basics/systems).
 
 ### Performance [#v4-7-0-performance]
 
@@ -426,13 +426,13 @@ major or minor version that needs code changes? The
   [migration guide](/en/docs/migration#v4-7-generated-classes).
 - `AddSingleton<T>()` throws `InvalidOperationException` when the world has `T` already, instead of resetting it to
   `default`; reset a singleton with `world.SetX(…)`. See the [migration guide](/en/docs/migration#v4-7-add-singleton).
-- New analyzer errors ([EECS040](/en/docs/guide/analyzer#eecs040) to [EECS045](/en/docs/guide/analyzer#eecs045),
-  [EECS048](/en/docs/guide/analyzer#eecs048) to [EECS051](/en/docs/guide/analyzer#eecs051), and
-  [EECS036](/en/docs/guide/analyzer#eecs036) for a component with two index keys) reject code that throws or cannot
+- New analyzer errors ([EECS040](/en/docs/guide/help/analyzer#eecs040) to [EECS045](/en/docs/guide/help/analyzer#eecs045),
+  [EECS048](/en/docs/guide/help/analyzer#eecs048) to [EECS051](/en/docs/guide/help/analyzer#eecs051), and
+  [EECS036](/en/docs/guide/help/analyzer#eecs036) for a component with two index keys) reject code that throws or cannot
   work: among them `Disable` of a cleanup component or `ChildOf`, filters no entity passes, a second `InGroup` in one
-  filter and `world.Update()` inside a query loop. New warnings ([EECS037](/en/docs/guide/analyzer#eecs037),
-  [EECS038](/en/docs/guide/analyzer#eecs038), [EECS046](/en/docs/guide/analyzer#eecs046),
-  [EECS047](/en/docs/guide/analyzer#eecs047), [EECS052](/en/docs/guide/analyzer#eecs052)) report lost writes, stamps of
+  filter and `world.Update()` inside a query loop. New warnings ([EECS037](/en/docs/guide/help/analyzer#eecs037),
+  [EECS038](/en/docs/guide/help/analyzer#eecs038), [EECS046](/en/docs/guide/help/analyzer#eecs046),
+  [EECS047](/en/docs/guide/help/analyzer#eecs047), [EECS052](/en/docs/guide/help/analyzer#eecs052)) report lost writes, stamps of
   loops that only read, refs used after a structural change and a `Set` right after a creation. See the
   [migration guide](/en/docs/migration#v4-7-analyzer).
 
@@ -471,44 +471,44 @@ major or minor version that needs code changes? The
   caller spinning forever, and run one chunk (or system) twice: a helper thread still finishing the last pass could
   claim an item of the next one when the next one had more. Sliced parallel passes, whose chunk count changes from run
   to run, hit it within seconds. A pass now closes the last one's claims before it starts. See
-  [threading](/en/docs/guide/threading#parallel-foreach-methods).
+  [threading](/en/docs/guide/performance/threading#parallel-foreach-methods).
 - A parallel `[ForEach]` that writes a tracked component could lose change stamps: two chunks inside one 4,096-row
   block raced on the block's change summary, so a `[Changed<T>]` reader could skip rows that were written. Such passes
   now cut their chunks at multiples of 4,096 rows. See
   [decision D48](/en/docs/decisions#d48-parallel-tracked-chunks).
 - After `RemoveTypes` dropped tables, a `Capture(into)` into an older snapshot, or a later `Load`, could reuse the
   copy of another table (other columns). A copy is now reused only for its own table. See
-  [snapshots](/en/docs/guide/snapshots).
+  [snapshots](/en/docs/guide/saves/snapshots).
 - `entity.GetOrAdd<T>()` of an indexed component that the entity lacked did not tell the value index, so `Find` and
   `Count` missed the entity until its next `Set`; the default value's key is now indexed. See
-  [indexes and relations](/en/docs/guide/indexes-and-relations).
+  [indexes and relations](/en/docs/guide/data/indexes-and-relations).
 - `MoveEntities` copied a retired entity (kept alive for its cleanup components) into the target world and
   counted it as moved, while it stayed in the source: it existed twice. Such entities are now skipped like stale ids.
-  See [migration](/en/docs/guide/migration-and-unload#move-entities).
+  See [migration](/en/docs/guide/saves/migration-and-unload#move-entities).
 - `MoveEntities` of an entity holding cleanup components copied them to the new entity too, while the original kept
   them to be released, so the resource was released twice. Cleanup components now stay behind only. See
-  [migration](/en/docs/guide/migration-and-unload#move-entities).
+  [migration](/en/docs/guide/saves/migration-and-unload#move-entities).
 - `SetAll` without a filter naming `Retired` reached retired entities (kept alive for their cleanup
   components), giving them the component and bringing them back into queries. They are now left out. See
-  [bulk changes](/en/docs/guide/bulk).
+  [bulk changes](/en/docs/guide/changes/bulk).
 - `Clone()` of a retired entity (kept alive for its cleanup components) made another such entity, with a copy
   of the cleanup components; it now throws `InvalidOperationException`. See
-  [cleanup components](/en/docs/guide/cleanup-and-disable#cleanup-components).
+  [cleanup components](/en/docs/guide/changes/cleanup-and-disable#cleanup-components).
 - Destroying an entity that holds cleanup components counted the loss of its other components as removals, so
   `[Removed<T>]` methods and `Removed<T>(since)` filters visited it, while a destroyed entity without cleanup components
   is never visited. Retiring an entity is no longer a removal; the destroy log reports it once it is freed. See
-  [removal detection](/en/docs/guide/change-tracking#removal-detection).
+  [removal detection](/en/docs/guide/changes/change-tracking#removal-detection).
 - `LoadEntitiesInto` accepted the same entity twice in its targets, the second saved entity overwriting the first; it now
-  throws `ArgumentException`. See [migration](/en/docs/guide/migration-and-unload#records).
+  throws `ArgumentException`. See [migration](/en/docs/guide/saves/migration-and-unload#records).
 - `world.Instantiate(prefab)` of a prefab with members threw inside a query loop or a system (`Snapshots cannot be
   captured or restored while a query iterates`), though a prefab without members could be instantiated there. A
   group's copies are new rows like any other now, so a spawner system can instantiate it. See
-  [prefabs](/en/docs/guide/prefabs).
+  [prefabs](/en/docs/guide/basics/prefabs).
 - The calls that must wait for the end of a pass (`Capture`, `Restore`, `Save`, `SaveWithout`, `SaveEntities`,
   `SaveEntitiesWith`, `Load`, `LoadKeeping`, `LoadEntities`, `LoadEntitiesInto`, `MoveEntities`, `GroupBy`,
   `RemoveTypes`, `TrimExcess`) refused with one message about
   snapshots, or with a message of their own: each now names itself (`MoveEntities cannot run while a query or system
-  iterates the world`). See [troubleshooting](/en/docs/guide/troubleshooting#during-a-pass).
+  iterates the world`). See [troubleshooting](/en/docs/guide/help/troubleshooting#during-a-pass).
 
 ## 4.6.0 [#v4-6-0]
 
@@ -516,10 +516,10 @@ major or minor version that needs code changes? The
 
 - `world.Load(input, markWritten: false)` loads a whole save without change ticks: no loaded row counts as written
   or removed, also for systems added after the load, so a restart that resumes a saved world does not send every
-  record again. See [restart](/en/docs/guide/saves#restart).
+  record again. See [restart](/en/docs/guide/saves/saves#restart).
 - `world.AddSystem<T>(changesFromNow: true)` (and `AddSystem(system, changesFromNow: true)`) starts a system at the
   current tick: the first run of its `[Changed<T>]` and `[Removed<T>]` methods visits only what is written or removed
-  after the call. See [ticks](/en/docs/guide/change-tracking#ticks).
+  after the call. See [ticks](/en/docs/guide/changes/change-tracking#ticks).
 
 ### Fixes [#v4-6-0-fixes]
 
@@ -535,29 +535,29 @@ major or minor version that needs code changes? The
   is stale or lacks a component, and `entity.Run(ref job, filter)` also when a `QueryFilter` (`With`, `Without`,
   `WithAny`, `Changed`, `Removed`, a group) rejects it. The job's `Writes` stamp change ticks as in a pass, its `ref`
   parameters stay valid across its own structural changes, and its writes reach the moved row even when it throws.
-  See [`entity.Run`](/en/docs/guide/queries#run-on-one-entity).
+  See [`entity.Run`](/en/docs/guide/basics/queries#run-on-one-entity).
 - A system group can filter through interfaces: `IGroupWith<T>` / `IGroupWithout<T>` on the group, or on an interface
   it implements, act as `[With<T>]` / `[Without<T>]`. A generic interface gives each type its own group
   (`IActorGroup<TActor> : IGroupWith<Inbox<TActor>>`), which attributes cannot express. See
-  [group filters](/en/docs/guide/systems#group-filters).
+  [group filters](/en/docs/guide/basics/systems#group-filters).
 - `world.Descendants(root)` walks a whole subtree, depth first, allocation-free once warm: collect a group with every
-  level of children before moving or saving it. See [list them](/en/docs/guide/hierarchy#children).
+  level of children before moving or saving it. See [list them](/en/docs/guide/data/hierarchy#children).
 - `world.LoadEntitiesInto(input, entities, markWritten: false)` restores a record without counting it as a change, so
   `[Changed<T>]` savers and replicators do not send it back; that holds for a value it replaces too, such as a
   prefab's default. See
-  [a record of what persists](/en/docs/guide/migration-and-unload#records).
+  [a record of what persists](/en/docs/guide/saves/migration-and-unload#records).
 - The EasyEcs package brings Nino's generator: a `[NinoType]` component gets its formatter with no other package
   reference, so a project can drop its `Nino.Generator` reference (a kept one must not be older than the Nino of EasyEcs). See
-  [declare the components](/en/docs/guide/saves#declare).
-- The analyzer treats `entity.Run` as a structural call: [EECS010](/en/docs/guide/analyzer#eecs010) rejects it in a
-  parallel `[ForEach]` method, [EECS013](/en/docs/guide/analyzer#eecs013) and
-  [EECS014](/en/docs/guide/analyzer#eecs014) check it like `Set`.
+  [declare the components](/en/docs/guide/saves/saves#declare).
+- The analyzer treats `entity.Run` as a structural call: [EECS010](/en/docs/guide/help/analyzer#eecs010) rejects it in a
+  parallel `[ForEach]` method, [EECS013](/en/docs/guide/help/analyzer#eecs013) and
+  [EECS014](/en/docs/guide/help/analyzer#eecs014) check it like `Set`.
 
 ### Fixes [#v4-5-0-fixes]
 
 - The analyzer treats `world.LoadEntitiesInto` as a structural call, like `LoadEntities`: it was missing from the
-  members [EECS010](/en/docs/guide/analyzer#eecs010), [EECS013](/en/docs/guide/analyzer#eecs013) and
-  [EECS014](/en/docs/guide/analyzer#eecs014) check, so a call in a parallel `[ForEach]` method, in a method that
+  members [EECS010](/en/docs/guide/help/analyzer#eecs010), [EECS013](/en/docs/guide/help/analyzer#eecs013) and
+  [EECS014](/en/docs/guide/help/analyzer#eecs014) check, so a call in a parallel `[ForEach]` method, in a method that
   promises no structural change or on another thread compiled without an error.
 
 ## 4.4.0 [#v4-4-0]
@@ -567,23 +567,23 @@ major or minor version that needs code changes? The
 - `world.SaveEntities(output, ids, set)` saves only the components of a `ComponentSet`
   (`ComponentSet.Create().With<Bank>()`, or `With(typeof(Bank))` for types learned at run time): a record of what
   persists, without the runtime components around it, which then need no Nino formatter. See
-  [a record of what persists](/en/docs/guide/migration-and-unload#records).
+  [a record of what persists](/en/docs/guide/saves/migration-and-unload#records).
 - `world.LoadEntitiesInto(input, entities)` loads such a save onto entities that exist already: the i-th saved
   entity's components are added to or replace those of the i-th entity, each entity moving table at most once, with
   indexes, groups, change tracking and `EntityId` fields following. See
-  [a record of what persists](/en/docs/guide/migration-and-unload#records).
+  [a record of what persists](/en/docs/guide/saves/migration-and-unload#records).
 - A component renamed or moved to another namespace keeps its saves with `[NinoFormerName("Old.Name")]`: saves
-  record types by their Nino type id. See [when the code changed](/en/docs/guide/saves#versioning).
+  record types by their Nino type id. See [when the code changed](/en/docs/guide/saves/saves#versioning).
 - An unmanaged `[NinoType]` component is written by its Nino formatter, so a `VersionTolerant` or `Keyed` one may gain
-  members between builds and still load its old rows. See [when the code changed](/en/docs/guide/saves#versioning).
+  members between builds and still load its old rows. See [when the code changed](/en/docs/guide/saves/saves#versioning).
 - A refused load names the cause and the fix: raw rows against a formatter, a changed size or layout, two types of the
-  process sharing an id. See [why a save does not load](/en/docs/guide/troubleshooting#save-refused).
+  process sharing an id. See [why a save does not load](/en/docs/guide/help/troubleshooting#save-refused).
 
 ### Performance [#v4-4-0-performance]
 
 - A `DynamicBuffer<T>` that dies (its entity destroyed, the component removed) hands its emptied list to the next
   buffer of its element type the thread creates: entities that come and go with buffers allocate nothing once warm.
-  See [dynamic buffers](/en/docs/guide/dynamic-buffers#what-it-costs) and
+  See [dynamic buffers](/en/docs/guide/data/dynamic-buffers#what-it-costs) and
   [decision D32](/en/docs/decisions#d32-the-lists-of-dead-buffers-are-pooled-per-thread).
 
 ### Changes that need code changes [#v4-4-0-breaking]
@@ -597,7 +597,7 @@ major or minor version that needs code changes? The
 
 ### Fixes [#v4-4-0-fixes]
 
-- [EECS033](/en/docs/guide/analyzer#eecs033) no longer suggests a generated member the receiver does not have
+- [EECS033](/en/docs/guide/help/analyzer#eecs033) no longer suggests a generated member the receiver does not have
   (`entity.Read<ChildOf>()` was told to become `entity.ChildOf`, a member of query items, which does not compile).
 
 ## 4.3.0 [#v4-3-0]
@@ -605,22 +605,22 @@ major or minor version that needs code changes? The
 ### New [#v4-3-0-new]
 
 - Performance rules in the analyzer, for code that works but does more than it needs. Warnings, for code that costs:
-  [EECS025](/en/docs/guide/analyzer#eecs025) a `ref` / `Span<T>` parameter, `Get<T>()` or `WriteX()` that only
-  reads, [EECS026](/en/docs/guide/analyzer#eecs026) a `[ForEach]` parameter the method does not use,
-  [EECS027](/en/docs/guide/analyzer#eecs027) a component or singleton looked up through the visited `Entity` or the
-  `World` on every row, [EECS028](/en/docs/guide/analyzer#eecs028) an allocation in a `[ForEach]` method or
+  [EECS025](/en/docs/guide/help/analyzer#eecs025) a `ref` / `Span<T>` parameter, `Get<T>()` or `WriteX()` that only
+  reads, [EECS026](/en/docs/guide/help/analyzer#eecs026) a `[ForEach]` parameter the method does not use,
+  [EECS027](/en/docs/guide/help/analyzer#eecs027) a component or singleton looked up through the visited `Entity` or the
+  `World` on every row, [EECS028](/en/docs/guide/help/analyzer#eecs028) an allocation in a `[ForEach]` method or
   `OnUpdate`, EECS029 an instance `[ForEach]` method that uses nothing of its
-  system, [EECS030](/en/docs/guide/analyzer#eecs030) a structural change entity by entity over a query,
-  [EECS031](/en/docs/guide/analyzer#eecs031) entities created one by one in a counted loop,
-  [EECS032](/en/docs/guide/analyzer#eecs032) `Count() > 0` instead of `Any()` and counting or filtering in a loop.
-  Suggestion (Info), for the same cost written shorter: [EECS033](/en/docs/guide/analyzer#eecs033) a generic call
-  with a generated member of the same meaning (`entity.Get<Position>()` as `entity.Position`). Error: [EECS034](/en/docs/guide/analyzer#eecs034) a system that
+  system, [EECS030](/en/docs/guide/help/analyzer#eecs030) a structural change entity by entity over a query,
+  [EECS031](/en/docs/guide/help/analyzer#eecs031) entities created one by one in a counted loop,
+  [EECS032](/en/docs/guide/help/analyzer#eecs032) `Count() > 0` instead of `Any()` and counting or filtering in a loop.
+  Suggestion (Info), for the same cost written shorter: [EECS033](/en/docs/guide/help/analyzer#eecs033) a generic call
+  with a generated member of the same meaning (`entity.Get<Position>()` as `entity.Position`). Error: [EECS034](/en/docs/guide/help/analyzer#eecs034) a system that
   calls `World.Update()`. Why each rule is in and the ones left out:
   [decision D29](/en/docs/decisions#d29-performance-rules-only-where-the-cost-is-measured-and-the-fix-does-the-same).
 - Code fixes for the new rules where the change is mechanical: `in`, `ReadOnlySpan<T>`, `Read<T>()`, `[With<T>]`,
   `static`, the bulk call (`SetAll`, `RemoveAll`, `DisableAll`, `EnableAll`, `DestroyEntities`), `CreateEntities` or
   `EnsureCapacity`, `Any` / `Count`, and the generated member. Each is offered only when the result compiles.
-- Every analyzer diagnostic links its section of the [analyzer rules](/en/docs/guide/analyzer) page.
+- Every analyzer diagnostic links its section of the [analyzer rules](/en/docs/guide/help/analyzer) page.
 
 ### Changes that need code changes [#v4-3-0-breaking]
 
@@ -635,7 +635,7 @@ major or minor version that needs code changes? The
 - `world.EnsureCapacity<T1, …, Tn>(count)` pre-sizes the table of exactly those components and the entity storage,
   so the next `count` `CreateEntity` / `CreateEntities` calls with them never grow either (Friflo's
   `archetype.EnsureCapacity`, Arch's `EnsureCapacity(signature, n)`). See
-  [structural changes](/en/docs/guide/structural-changes#bulk).
+  [structural changes](/en/docs/guide/changes/structural-changes#bulk).
 
 ### Performance [#v4-2-0-performance]
 
@@ -651,7 +651,7 @@ major or minor version that needs code changes? The
   like `world.X` and `GetSingleton<T>()` (it used to add the default value); `world.SingletonRef<T>()` throws the same
   way. Add the singleton where the world is built, before the first `Update()`: `world.SetClock(…)` or
   `world.AddSingleton<Clock>()`, or `world.GetOrAddClock()` where the default is right. See
-  [singletons](/en/docs/guide/singletons#in-systems) and the
+  [singletons](/en/docs/guide/basics/singletons#in-systems) and the
   [migration guide](/en/docs/migration#v4-1-to-v4-2).
 
 ### Fixes [#v4-2-0-fixes]
@@ -659,7 +659,7 @@ major or minor version that needs code changes? The
 - A `[ForEach]` method with a parameter named `owner` no longer fails to build with CS0100 in generated code.
 - `world.EnsureCapacity(prefab, count)` called while a query or `[ForEach]` pass walks the table it grows no longer
   leaves the pass writing to the old columns for the rest of the table. See
-  [structural changes](/en/docs/guide/structural-changes#refs-across-a-change).
+  [structural changes](/en/docs/guide/changes/structural-changes#refs-across-a-change).
 
 ## 4.1.0 [#v4-1-0]
 
@@ -670,44 +670,44 @@ major or minor version that needs code changes? The
   data. See [architecture](/en/docs/architecture).
 - Immediate structural changes with stricter iteration: a pass visits each entity at most once, and `ref` writes of a
   `[ForEach]` method survive the body's own structural changes. See
-  [structural changes](/en/docs/guide/structural-changes).
+  [structural changes](/en/docs/guide/changes/structural-changes).
 - Batch `[ForEach]` methods taking `Span<T>` / `ReadOnlySpan<T>` (whole runs of rows, with an `EntitySpan`), and
   `[ForEach(Parallel = true)]` to split one method's rows over threads without allocating. See
-  [systems](/en/docs/guide/systems) and [threading](/en/docs/guide/threading).
+  [systems](/en/docs/guide/basics/systems) and [threading](/en/docs/guide/performance/threading).
 - Static `[ForEach]` methods outside systems, generic systems and runners, filters on system groups, `Maybe<T>`
-  parameters, `UpdatePhase`, and systems need no `partial`. See [systems](/en/docs/guide/systems).
+  parameters, `UpdatePhase`, and systems need no `partial`. See [systems](/en/docs/guide/basics/systems).
 - Ordering by dependency with `[UpdateBefore<T>]` / `[UpdateAfter<T>]`; errors as data with
   `SystemErrorPolicy.Disable` and `system.Error`; per-system timing with `WorldOptions.MeasureSystems` and
-  `system.Stats`. See [systems](/en/docs/guide/systems).
+  `system.Stats`. See [systems](/en/docs/guide/basics/systems).
 - Change tracking (`ITrackChanges`, `[Changed<T>]`, `QueryFilter.Changed<T>(since)`) and removal detection
-  (`[Removed<T>]`, `QueryFilter.Removed<T>(since)`). See [change tracking](/en/docs/guide/change-tracking).
+  (`[Removed<T>]`, `QueryFilter.Removed<T>(since)`). See [change tracking](/en/docs/guide/changes/change-tracking).
 - Generated members for every component, tag, singleton, index, buffer and query shape: `hero.Position.X += 1`,
   `hero.SetVelocity(1, 0)`, `hero.SetDead()`, `world.Battle.Tick++`, `world.ZoneIndex.Find(3)`, `item.Position`,
-  `prefab.SetLoot(…)`. See [entities and components](/en/docs/guide/entities-and-components).
+  `prefab.SetLoot(…)`. See [entities and components](/en/docs/guide/basics/entities-and-components).
 - Prefabs (`new Prefab()`, derived prefabs, groups with `AddMember`), `world.Instantiate`, `EnsureCapacity` and
-  `entity.Clone()`. See [prefabs](/en/docs/guide/prefabs).
+  `entity.Clone()`. See [prefabs](/en/docs/guide/basics/prefabs).
 - `DynamicBuffer<T>`: a list per entity held as a tracked component. See
-  [dynamic buffers](/en/docs/guide/dynamic-buffers).
+  [dynamic buffers](/en/docs/guide/data/dynamic-buffers).
 - Value indexes (`IIndexed<TKey>`, `world.Index<T, TKey>()`), ordered walks (`Range`, `Ascending`), relations
   (`IRelation` buffers) and target policies (`WhenTargetDestroyed`). See
-  [indexes and relations](/en/docs/guide/indexes-and-relations).
-- Hierarchies: `ChildOf(EntityId Parent)`, children, destroy cascades. See [hierarchy](/en/docs/guide/hierarchy).
+  [indexes and relations](/en/docs/guide/data/indexes-and-relations).
+- Hierarchies: `ChildOf(EntityId Parent)`, children, destroy cascades. See [hierarchy](/en/docs/guide/data/hierarchy).
 - `GroupBy<T>()` splits tables by a value, so a query for one zone walks only its tables. See
-  [groups](/en/docs/guide/groups).
+  [groups](/en/docs/guide/data/groups).
 - `entity.Disable<T>()` / `Enable<T>()` and cleanup components (`ICleanupComponent`). See
-  [cleanup and disable](/en/docs/guide/cleanup-and-disable).
+  [cleanup and disable](/en/docs/guide/changes/cleanup-and-disable).
 - Bulk `SetAll` / `RemoveAll` / `DisableAll` / `EnableAll`, and `CreateEntities` / `DestroyEntities`. See
-  [bulk changes](/en/docs/guide/bulk).
-- Snapshots: `world.Capture()` / `world.Restore(snapshot)`. See [snapshots](/en/docs/guide/snapshots).
-- Saves: `world.Save` / `Load` through Nino. See [saves](/en/docs/guide/saves).
+  [bulk changes](/en/docs/guide/changes/bulk).
+- Snapshots: `world.Capture()` / `world.Restore(snapshot)`. See [snapshots](/en/docs/guide/saves/snapshots).
+- Saves: `world.Save` / `Load` through Nino. See [saves](/en/docs/guide/saves/saves).
 - `SaveEntities` / `LoadEntities` / `MoveEntities` hand a group of entities to another world or process, and
   `world.RemoveTypes(assembly)` takes a plugin's types out of a world so its `AssemblyLoadContext` can unload. See
-  [migration and unload](/en/docs/guide/migration-and-unload).
+  [migration and unload](/en/docs/guide/saves/migration-and-unload).
 - `WithAny<T>` filters, `entity.Read<T>()` and `entity.TryGetRef<T>(out found)`. See
-  [queries](/en/docs/guide/queries).
+  [queries](/en/docs/guide/basics/queries).
 - `world.Describe()`, `entity.Describe()` and a debugger view of entities. See [API](/en/docs/api).
 - Analyzer rules up to EECS024 and code fixes for them, bundled in the package. See
-  [analyzer](/en/docs/guide/analyzer).
+  [analyzer](/en/docs/guide/help/analyzer).
 - Templates: `dotnet new install EasyEcs.Templates`. See [getting started](/en/docs/getting-started).
 
 ### Performance [#v4-1-0-performance]
@@ -747,14 +747,14 @@ Every step is in the
 - `IForEach` jobs receive only the components: take the entity through `IForEachEntity`.
 - `Query` results are ref structs: no `await` in the loop, no storing items in fields, lambdas or LINQ.
 - Structural changes belong to the world's owner thread; one made inside a parallel stage or a parallel `[ForEach]`
-  throws `InvalidOperationException`. See [threading](/en/docs/guide/threading).
+  throws `InvalidOperationException`. See [threading](/en/docs/guide/performance/threading).
 - EECS007 (state in a system) and EECS008 (a system referencing a system) are errors; they were warnings in
   4.0. Move the state into a component or singleton, and let systems communicate through data.
 - `QueryEnumerator.Count` and `IsEmpty` are gone: call `world.Count<…>(filter)` / `world.Any<…>(filter)`.
 - `UpdateInterval` and `UpdatePhase` should return constants: EECS018 warns when they do not.
 - Refs into a table can be invalidated by structural changes of other entities; iteration order follows table rows;
   `AddSingleton` resets an existing singleton in place; stale handles answer `Has` / `TryGet` with false. See
-  [refs and await](/en/docs/guide/refs-and-await).
+  [refs and await](/en/docs/guide/changes/refs-and-await).
 
 ### Fixes [#v4-1-0-fixes]
 
@@ -767,9 +767,9 @@ Every step is in the
 ### New [#v4-0-1-new]
 
 - `WorldOptions.Parallel` runs systems side by side when their generated read/write sets do not conflict, with the
-  same result as running them in order. See [threading](/en/docs/guide/threading).
+  same result as running them in order. See [threading](/en/docs/guide/performance/threading).
 - A `[ForEach]` method may take no component when a `[With<T>]` names what to query:
-  `[ForEach, With<Dead>] static void Remove(Entity e)`. See [systems](/en/docs/guide/systems).
+  `[ForEach, With<Dead>] static void Remove(Entity e)`. See [systems](/en/docs/guide/basics/systems).
 
 ## 4.0.0 [#v4-0-0]
 

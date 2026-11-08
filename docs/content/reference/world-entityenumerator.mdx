@@ -12,7 +12,7 @@ public struct EntityEnumerator
 
 Nested in [`World`](/en/docs/reference/world).
 
-Enumerates alive entities in id order; ids beyond the capacity captured at start are not visited.
+Enumerates alive entities in id order; ids beyond the capacity captured at start are not visited. Entities destroyed during the walk are skipped, also after the records grew (the current records are read).
 
 ## Properties
 

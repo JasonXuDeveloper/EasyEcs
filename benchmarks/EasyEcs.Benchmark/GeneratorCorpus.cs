@@ -52,10 +52,12 @@ public static class GeneratorCorpus
 
     /// <summary>
     /// The analyzer's diagnostics of the generated compilation that the corpus must not have (none: it is written as users
-    /// should), but EECS055: the methods over components of several fields stay scalar, and the message says so.
+    /// should), but EECS055's inherent reasons (Info): a method that stays scalar for a reason in the algorithm itself
+    /// (a call into another assembly, a read of another row's buffer) has nothing to fix, and the message says why. An
+    /// EECS055 the user can fix is a Warning and counts.
     /// </summary>
     public static Diagnostic[] Findings(Compilation generated) => generated.WithAnalyzers(EasyEcsAnalyzer.All).GetAnalyzerDiagnosticsAsync().Result
-        .Where(d => d.Severity >= DiagnosticSeverity.Info && d.Id != "EECS055").ToArray();
+        .Where(d => d.Severity >= DiagnosticSeverity.Info && !(d.Id == "EECS055" && d.Severity == DiagnosticSeverity.Info)).ToArray();
 
     /// <summary>One module of a game: components, a buffer element, systems with [ForEach] methods and a query loop.</summary>
     public static string Module(int m, bool oneNamespace)

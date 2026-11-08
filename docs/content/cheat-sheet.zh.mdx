@@ -32,30 +32,30 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 
 | 声明 | 含义 | 指南 |
 | --- | --- | --- |
-| `struct X : IComponent` | 每个实体一份的数据，每种类型一列 | [实体与组件](/zh/docs/guide/entities-and-components) |
-| 没有字段的 `struct X : IComponent` | 标签：用于过滤的“是或否”状态 | [实体与组件](/zh/docs/guide/entities-and-components) |
-| `struct X : ISingletonComponent` | 每个 World 一份 | [单例](/zh/docs/guide/singletons) |
-| `: ITracked` | 每行记录最后一次写入和移除的 tick | [变更追踪](/zh/docs/guide/change-tracking) |
-| `partial` 结构体的成员（或结构体本身：整个值）标 `[LookupKey]` | 通过 `world.Index<T, TKey>()` 按值查找；生成器写出 `IIndexed<TKey>` 和它的 `Key`（由多个成员组成的键手写 `IIndexed<TKey>`） | [索引与关系](/zh/docs/guide/indexes-and-relations) |
-| 成员（或结构体）标 `[UniqueKey]` | 一个键只对应一个实体（`IUniqueIndexed<TKey>`）：`index.Get(key)`；会让第二个实体拿到这个键的写入直接抛异常 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
-| `: IDirectMapped<TKey>` 加 `Key`、`static Slots`、`static SlotOf(key)` | 能映射到有界槽位（网格格子）的唯一键：`Get` / `TryGet` 读一个数组元素 | [直接映射的键](/zh/docs/guide/indexes-and-relations#direct-index) |
-| `[LookupKey] EntityId` | 指向一个实体的链接，可以从目标反查 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
-| `: IRelation` 加 `Target` | 每个实体多条链接，存放在缓冲里 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
-| `int`（或 `int` 枚举）成员标 `[Group]`；结构体标 `[GroupBy]` | 按值拆表（`IGroup`）：有 `[GroupBy]` 时每个 World 都拆，否则在 `world.GroupBy<T>()` 之后 | [分组](/zh/docs/guide/groups) |
-| 关系或以 `EntityId` 为键的组件标 `[WhenTargetDestroyed(policy)]` | 目标被销毁时指向它的链接怎么处理，每个 World 都一样 | [目标销毁策略](/zh/docs/guide/indexes-and-relations#target-policies) |
-| `partial` 单例的字段标 `[Sum]` / `[Product]` / `[Min]` / `[Max]` / `[All]` / `[Any]` | 归约：生成器为 `ref Reduce<T>` 写出 `IReduction<T>`（`Identity`、`Combine`） | [归约](/zh/docs/guide/threading#reductions) |
-| `[NotSaved]` | 任何存档都不包含的运行时状态（连接、缓存）；不需要 Nino 格式化器 | [存档](/zh/docs/guide/saves#not-saved) |
-| 瓦片组件上的 `: ITile<TKey>`（`Width`、`Depth`、`Key`、`Beside`） | 网格瓦片：格子存在 `DynamicBuffer<TCell>` 里，`Tile<TCell, TTile>` 的邻居由生成器查找 | [网格瓦片](/zh/docs/guide/grids) |
-| `: ICleanupComponent` | `Destroy` 之后仍保留：其他组件被移除，实体带上 `Retired` 标签，直到系统移除最后一个清理组件 | [清理与禁用](/zh/docs/guide/cleanup-and-disable) |
-| `Disabled<T>` | `T` 被禁用期间实体带着的标签：查询它就能找到被暂停的实体 | [清理与禁用](/zh/docs/guide/cleanup-and-disable) |
-| `DynamicBuffer<T>` | 每个实体一个列表，每次写入都被追踪 | [动态缓冲](/zh/docs/guide/dynamic-buffers) |
-| `ChildOf(EntityId Parent)` | 内置的层级链接 | [层级](/zh/docs/guide/hierarchy) |
-| `struct G : ISystemGroup` | 有自己节奏的一组系统 | [系统](/zh/docs/guide/systems) |
-| 分组（或它实现的接口）上的 `: ISystemGroupWith<T>` / `ISystemGroupWithout<T>` | 分组里的系统只访问有 / 没有 `T` 的实体；一个泛型接口就能给每种 actor 类型各配一个带过滤的分组 | [系统](/zh/docs/guide/systems#group-filters) |
-| `class S<T> : EcsSystem` | 泛型系统：每个闭合类型（`S<Position>`）都是一个独立的系统 | [系统](/zh/docs/guide/systems#generic-systems) |
+| `struct X : IComponent` | 每个实体一份的数据，每种类型一列 | [实体与组件](/zh/docs/guide/basics/entities-and-components) |
+| 没有字段的 `struct X : IComponent` | 标签：用于过滤的“是或否”状态 | [实体与组件](/zh/docs/guide/basics/entities-and-components) |
+| `struct X : ISingletonComponent` | 每个 World 一份 | [单例](/zh/docs/guide/basics/singletons) |
+| `: ITracked` | 每行记录最后一次写入和移除的 tick | [变更追踪](/zh/docs/guide/changes/change-tracking) |
+| `partial` 结构体的成员（或结构体本身：整个值）标 `[LookupKey]` | 通过 `world.Index<T, TKey>()` 按值查找；生成器写出 `IIndexed<TKey>` 和它的 `Key`（由多个成员组成的键手写 `IIndexed<TKey>`） | [索引与关系](/zh/docs/guide/data/indexes-and-relations) |
+| 成员（或结构体）标 `[UniqueKey]` | 一个键只对应一个实体（`IUniqueIndexed<TKey>`）：`index.Get(key)`；会让第二个实体拿到这个键的写入直接抛异常 | [索引与关系](/zh/docs/guide/data/indexes-and-relations) |
+| `: IDirectMapped<TKey>` 加 `Key`、`static Slots`、`static SlotOf(key)` | 能映射到有界槽位（网格格子）的唯一键：`Get` / `TryGet` 读一个数组元素 | [直接映射的键](/zh/docs/guide/data/indexes-and-relations#direct-index) |
+| `[LookupKey] EntityId` | 指向一个实体的链接，可以从目标反查 | [索引与关系](/zh/docs/guide/data/indexes-and-relations) |
+| `: IRelation` 加 `Target` | 每个实体多条链接，存放在缓冲里 | [索引与关系](/zh/docs/guide/data/indexes-and-relations) |
+| `int`（或 `int` 枚举）成员标 `[Group]`；结构体标 `[GroupBy]` | 按值拆表（`IGroup`）：有 `[GroupBy]` 时每个 World 都拆，否则在 `world.GroupBy<T>()` 之后 | [分组](/zh/docs/guide/data/groups) |
+| 关系或以 `EntityId` 为键的组件标 `[WhenTargetDestroyed(policy)]` | 目标被销毁时指向它的链接怎么处理，每个 World 都一样 | [目标销毁策略](/zh/docs/guide/data/indexes-and-relations#target-policies) |
+| `partial` 单例的字段标 `[Sum]` / `[Product]` / `[Min]` / `[Max]` / `[All]` / `[Any]` | 归约：生成器为 `ref Reduce<T>` 写出 `IReduction<T>`（`Identity`、`Combine`） | [归约](/zh/docs/guide/performance/threading#reductions) |
+| `[NotSaved]` | 任何存档都不包含的运行时状态（连接、缓存）；不需要 Nino 格式化器 | [存档](/zh/docs/guide/saves/saves#not-saved) |
+| 瓦片组件上的 `: ITile<TKey>`（`Width`、`Depth`、`Key`、`Beside`） | 网格瓦片：格子存在 `DynamicBuffer<TCell>` 里，`Tile<TCell, TTile>` 的邻居由生成器查找 | [网格瓦片](/zh/docs/guide/performance/grids) |
+| `: ICleanupComponent` | `Destroy` 之后仍保留：其他组件被移除，实体带上 `Retired` 标签，直到系统移除最后一个清理组件 | [清理与禁用](/zh/docs/guide/changes/cleanup-and-disable) |
+| `Disabled<T>` | `T` 被禁用期间实体带着的标签：查询它就能找到被暂停的实体 | [清理与禁用](/zh/docs/guide/changes/cleanup-and-disable) |
+| `DynamicBuffer<T>` | 每个实体一个列表，每次写入都被追踪 | [动态缓冲](/zh/docs/guide/data/dynamic-buffers) |
+| `ChildOf(EntityId Parent)` | 内置的层级链接 | [层级](/zh/docs/guide/data/hierarchy) |
+| `struct G : ISystemGroup` | 有自己节奏的一组系统 | [系统](/zh/docs/guide/basics/systems) |
+| 分组（或它实现的接口）上的 `: ISystemGroupWith<T>` / `ISystemGroupWithout<T>` | 分组里的系统只访问有 / 没有 `T` 的实体；一个泛型接口就能给每种 actor 类型各配一个带过滤的分组 | [系统](/zh/docs/guide/basics/systems#group-filters) |
+| `class S<T> : EcsSystem` | 泛型系统：每个闭合类型（`S<Position>`）都是一个独立的系统 | [系统](/zh/docs/guide/basics/systems#generic-systems) |
 
-组件必须是结构体（[EECS006](/zh/docs/guide/analyzer#eecs006)）。指向实体的链接存 `EntityId`，不要存 `Entity`
-（[EECS017](/zh/docs/guide/analyzer#eecs017)）。
+组件必须是结构体（[EECS006](/zh/docs/guide/help/analyzer#eecs006)）。指向实体的链接存 `EntityId`，不要存 `Entity`
+（[EECS017](/zh/docs/guide/help/analyzer#eecs017)）。
 
 ## World [#world]
 
@@ -75,8 +75,8 @@ public record struct Config(int MaxPlayers) : ISingletonComponent;
 | `world.DescribeTables()` | 表、列、行数和字节数，供工具使用 |
 | `world.DescribeSchedule()` | 每个分组的阶段、每个系统读写什么、为什么要等、哪些系统对只靠注册顺序；`ToString()` / `ToMermaid()` |
 | `world.TrimExcess()` | 峰值过后、空闲时删掉空表并缩小其他表 |
-| `world.ParallelFor(count, ref job)` / `ParallelFor(ref buffer, ref job)` | 在 World 的执行器上分块运行：`IForRange` job 遍历下标，`IForSpan<T>` job 遍历 `DynamicBuffer<T>` 的元素（[ParallelFor](/zh/docs/guide/threading#parallel-for)） |
-| `world.SetEntityRandom(Seed: s)` | `EntityRandom` 的种子；每次 `Update()` 推进它的 tick：每个数都是（种子、实体、tick、流）的函数（[EntityRandom](/zh/docs/guide/threading#entity-random)） |
+| `world.ParallelFor(count, ref job)` / `ParallelFor(ref buffer, ref job)` | 在 World 的执行器上分块运行：`IForRange` job 遍历下标，`IForSpan<T>` job 遍历 `DynamicBuffer<T>` 的元素（[ParallelFor](/zh/docs/guide/performance/threading#parallel-for)） |
+| `world.SetEntityRandom(Seed: s)` | `EntityRandom` 的种子；每次 `Update()` 推进它的 tick：每个数都是（种子、实体、tick、流）的函数（[EntityRandom](/zh/docs/guide/performance/threading#entity-random)） |
 | `world.DestroyedSince(since, into, out count)` / `DestroyLogOldestTick` | 开了 `WorldOptions.DestroyLogCapacity` 时，某个 tick 以来销毁的实体；返回 `false` 表示读取方比日志还旧 |
 
 ```csharp
@@ -134,7 +134,7 @@ public static class Requests
 bool applied = Requests.TakeHit(unit, 30);           // false：实体不在或没有 Health
 ```
 
-`ref` 在下一次结构变更之前有效，跨 `await` 一律无效（[ref 与 await](/zh/docs/guide/refs-and-await)）。
+`ref` 在下一次结构变更之前有效，跨 `await` 一律无效（[ref 与 await](/zh/docs/guide/changes/refs-and-await)）。
 
 ## 生成成员 [#generated-members]
 
@@ -162,7 +162,7 @@ bool rewritten = unit.SetHealthIfChanged(80);       // false：值已经是 80�
 bool dead = unit.IsDead;
 ```
 
-指南：[实体与组件](/zh/docs/guide/entities-and-components)。
+指南：[实体与组件](/zh/docs/guide/basics/entities-and-components)。
 
 ## 系统与 [ForEach] [#systems]
 
@@ -181,28 +181,28 @@ public ref struct MovementSystem
 
 静态、逐实体、组件有 1 到 4 个同样大小的数值（`float`、`int`……）的方法，生成器还会给它写一个向量循环（CPU 支持 AVX-512 时用 `Vector512`，
 之后用 `Vector<T>`），结果逐位相同
-（[向量循环](/zh/docs/guide/systems#vector-loops)）。这个方法就有：每个组件两个 `float`。方法没得到循环时
-[EECS055](/zh/docs/guide/analyzer#eecs055) 会说明原因，`world.DescribeSchedule()` 里的 `SystemInfo.Loops` 列出每个方法得到的循环。
+（[向量循环](/zh/docs/guide/basics/systems#vector-loops)）。这个方法就有：每个组件两个 `float`。方法没得到循环时
+[EECS055](/zh/docs/guide/help/analyzer#eecs055) 会说明原因，`world.DescribeSchedule()` 里的 `SystemInfo.Loops` 列出每个方法得到的循环。
 
 ### [ForEach] 参数 [#foreach-parameters]
 
 | 参数 | 含义 | 说明 |
 | --- | --- | --- |
 | `ref T` | 方法要写的组件 | 1 到 9 个组件；对变更追踪算写入 |
-| `in T` | 方法只读的组件 | 不算写入（经 `in` 写入由 [EECS011](/zh/docs/guide/analyzer#eecs011) 拦下） |
-| `Span<T>` / `ReadOnlySpan<T>` | 一段连续的 `T` 行（批量方法） | 不能和逐实体参数混用（[EECS009](/zh/docs/guide/analyzer#eecs009)） |
+| `in T` | 方法只读的组件 | 不算写入（经 `in` 写入由 [EECS011](/zh/docs/guide/help/analyzer#eecs011) 拦下） |
+| `Span<T>` / `ReadOnlySpan<T>` | 一段连续的 `T` 行（批量方法） | 不能和逐实体参数混用（[EECS009](/zh/docs/guide/help/analyzer#eecs009)） |
 | `ref S` / `in S` | 单例 | 每次遍历解析一次；没添加时抛异常 |
 | `Entity` | 当前实体 | 做结构变更时用 |
 | `World` | 当前 World | 在静态方法里创建实体时用 |
 | `EntitySpan` | 批量方法这一段行对应的实体 | 仅批量方法 |
 | `Maybe<T>` | 实体可能没有的组件 | `HasValue`、`Value` |
 | `ReadOnlyMaybe<T>` | 同上，只读（带索引的组件也行） | `HasValue`、`Value`（`ref readonly`） |
-| `Scratch<T>` | 方法在当前线程上的工作内存，在行之间保留 | `Value`（`ref T`，起初是 `default`：`scratch.Value ??= new()`）；每行清空；不要把它持有的东西存起来（[临时空间](/zh/docs/guide/threading#scratch)、[EECS058](/zh/docs/guide/analyzer#eecs058)） |
-| `Lookup<T>` | 只读地读取任意实体在这一遍之前的 `T`；并行也能用 | `lookup[id]`（`ReadOnlyMaybe<T>`）、`Read(id)`、`Has(id)`；按键 `TryFind`、`Find`、`Count`（[查找](/zh/docs/guide/threading#lookups)、[EECS059](/zh/docs/guide/analyzer#eecs059)） |
-| `ref Reduce<T>` | 对所有行求总数，结果放进单例 `T : IReduction<T>` | 必须按 `ref` 传入（否则 EECS002）；`Value` 字段是这一块的部分结果；合并后的结果替换 `T`（[归约](/zh/docs/guide/threading#reductions)、[EECS057](/zh/docs/guide/analyzer#eecs057)） |
-| `Emit<T>` | 这一遍追加的记录，按值传入：`Add(record)` / `AddRange(records)` | 这一遍结束时按行的顺序并入单例 `Emitted<T>`（`Items`，一个 `DynamicBuffer<T>`）；之后的系统处理并清空它们（[Emit](/zh/docs/guide/threading#emit)、[EECS070](/zh/docs/guide/analyzer#eecs070)） |
-| `in EntityRandom` | 确定性随机数的单例 | `random.Float(entity.Id, stream)`、`Range`、`Chance`、`Bits`：线程数不同结果也一样（[EntityRandom](/zh/docs/guide/threading#entity-random)、[EECS071](/zh/docs/guide/analyzer#eecs071)） |
-| `Tile<TCell, TTile>` | 网格瓦片的格子，连同邻居的边 | `tile.ExchangeHalo()`，再用 `Rows` 和 `At(row).Load128`；可并行（[网格瓦片](/zh/docs/guide/grids)） |
+| `Scratch<T>` | 方法在当前线程上的工作内存，在行之间保留 | `Value`（`ref T`，起初是 `default`：`scratch.Value ??= new()`）；每行清空；不要把它持有的东西存起来（[临时空间](/zh/docs/guide/performance/threading#scratch)、[EECS058](/zh/docs/guide/help/analyzer#eecs058)） |
+| `Lookup<T>` | 只读地读取任意实体在这一遍之前的 `T`；并行也能用 | `lookup[id]`（`ReadOnlyMaybe<T>`）、`Read(id)`、`Has(id)`；按键 `TryFind`、`Find`、`Count`（[查找](/zh/docs/guide/performance/threading#lookups)、[EECS059](/zh/docs/guide/help/analyzer#eecs059)） |
+| `ref Reduce<T>` | 对所有行求总数，结果放进单例 `T : IReduction<T>` | 必须按 `ref` 传入（否则 EECS002）；`Value` 字段是这一块的部分结果；合并后的结果替换 `T`（[归约](/zh/docs/guide/performance/threading#reductions)、[EECS057](/zh/docs/guide/help/analyzer#eecs057)） |
+| `Emit<T>` | 这一遍追加的记录，按值传入：`Add(record)` / `AddRange(records)` | 这一遍结束时按行的顺序并入单例 `Emitted<T>`（`Items`，一个 `DynamicBuffer<T>`）；之后的系统处理并清空它们（[Emit](/zh/docs/guide/performance/threading#emit)、[EECS070](/zh/docs/guide/help/analyzer#eecs070)） |
+| `in EntityRandom` | 确定性随机数的单例 | `random.Float(entity.Id, stream)`、`Range`、`Chance`、`Bits`：线程数不同结果也一样（[EntityRandom](/zh/docs/guide/performance/threading#entity-random)、[EECS071](/zh/docs/guide/help/analyzer#eecs071)） |
+| `Tile<TCell, TTile>` | 网格瓦片的格子，连同邻居的边 | `tile.ExchangeHalo()`，再用 `Rows` 和 `At(row).Load128`；可并行（[网格瓦片](/zh/docs/guide/performance/grids)） |
 | `Mut<T>` | 方法只在部分行上写的组件 | `Value` 只读；`Write()` 和改了值的 `SetIfChanged(value)` 才给这一行打 tick；对调度器来说算写入 |
 | 其他任意类型（系统之外） | 调用方传给入口方法的值 | `ref int count`、`in Settings s` |
 
@@ -210,20 +210,20 @@ public ref struct MovementSystem
 
 | 特性 | 用在 | 作用 |
 | --- | --- | --- |
-| `[ForEach]` / `[ForEach(Parallel = true)]` | 方法 | 方法就是循环；`Parallel` 把行分给多个线程（[EECS010](/zh/docs/guide/analyzer#eecs010)） |
-| `[ForEach(Parallel = true, ChunkSize = n)]` | 方法 | 线程每次领 `n` 行（OpenMP 的 `schedule(dynamic, n)`）：适合几百行重活（[块大小](/zh/docs/guide/threading#chunk-rows)、[EECS054](/zh/docs/guide/analyzer#eecs054)） |
-| `[ForEach(SimdMode = SimdMode.Require)]` | 方法 | 方法必须得到向量循环，否则构建报错（[EECS056](/zh/docs/guide/analyzer#eecs056)）；`SimdMode.Off` 保持标量，不再有 [EECS055](/zh/docs/guide/analyzer#eecs055) |
-| `[ForEach(FloatMode = FloatMode.Fast)]` | 方法 | 向量循环里的 `Sin`、`Cos`、`Exp`、`Log`、`Log2`、`Hypot` 改用 .NET 的向量近似，浮点 `Reduce<T>` 求和按通道相加；`Exact`（默认）让结果和方法逐位相同（[FloatMode](/zh/docs/guide/systems#float-mode)） |
-| `[ForEach, Consume]` | 方法 | 这一遍结束时销毁它访问过的行：事件、命令（[Consume](/zh/docs/guide/systems#consume)、[EECS084](/zh/docs/guide/analyzer#eecs084)） |
-| `[EntityMethod]` | 静态方法 | 通过生成的入口方法 `Owner.Method(entity, values)` 在一个实体上运行（[单个实体](/zh/docs/guide/queries#run-on-one-entity)、[EECS080](/zh/docs/guide/analyzer#eecs080)） |
-| `[ForEach(Slices = N)]` | 方法 | 每次运行只访问一片，约 1/N 的行：每 N 次运行每行一次（不能和 `Changed` / `Removed` 一起用：[EECS035](/zh/docs/guide/analyzer#eecs035)） |
+| `[ForEach]` / `[ForEach(Parallel = true)]` | 方法 | 方法就是循环；`Parallel` 把行分给多个线程（[EECS010](/zh/docs/guide/help/analyzer#eecs010)） |
+| `[ForEach(Parallel = true, ChunkSize = n)]` | 方法 | 线程每次领 `n` 行（OpenMP 的 `schedule(dynamic, n)`）：适合几百行重活（[块大小](/zh/docs/guide/performance/threading#chunk-rows)、[EECS054](/zh/docs/guide/help/analyzer#eecs054)） |
+| `[ForEach(SimdMode = SimdMode.Require)]` | 方法 | 方法必须得到向量循环，否则构建报错（[EECS056](/zh/docs/guide/help/analyzer#eecs056)）；`SimdMode.Off` 保持标量，不再有 [EECS055](/zh/docs/guide/help/analyzer#eecs055) |
+| `[ForEach(FloatMode = FloatMode.Fast)]` | 方法 | 向量循环里的 `Sin`、`Cos`、`Exp`、`Log`、`Log2`、`Hypot` 改用 .NET 的向量近似，浮点 `Reduce<T>` 求和按通道相加；`Exact`（默认）让结果和方法逐位相同（[FloatMode](/zh/docs/guide/basics/systems#float-mode)） |
+| `[ForEach, Consume]` | 方法 | 这一遍结束时销毁它访问过的行：事件、命令（[Consume](/zh/docs/guide/basics/systems#consume)、[EECS084](/zh/docs/guide/help/analyzer#eecs084)） |
+| `[EntityMethod]` | 静态方法 | 通过生成的入口方法 `Owner.Method(entity, values)` 在一个实体上运行（[单个实体](/zh/docs/guide/basics/queries#run-on-one-entity)、[EECS080](/zh/docs/guide/help/analyzer#eecs080)） |
+| `[ForEach(Slices = N)]` | 方法 | 每次运行只访问一片，约 1/N 的行：每 N 次运行每行一次（不能和 `Changed` / `Removed` 一起用：[EECS035](/zh/docs/guide/help/analyzer#eecs035)） |
 | `[With<T>]` | 方法、系统分组 | 要求有 `T`，但不作为参数传入 |
 | `[Without<T>]` | 方法、系统分组 | 排除有 `T` 的实体 |
 | `[WithAny<A, B>]` | 方法、系统分组 | 至少有其中一个 |
 | `[Changed<T>]` | 方法 | 系统上次执行后、被追踪的 `T` 被写过的行 |
 | `[Removed<T>]` | 方法 | 系统上次执行后失去了被追踪 `T` 的实体 |
 | `[ChangedAny<A, B>]` / `[RemovedAny<A, B>]` | 方法 | 2 到 9 个被追踪组件里至少有一个被写过、或被移除的行 |
-| `[UpdateBefore<S>]` / `[UpdateAfter<S>]` | 系统 | 排序（成环由 [EECS019](/zh/docs/guide/analyzer#eecs019) 拒绝） |
+| `[UpdateBefore<S>]` / `[UpdateAfter<S>]` | 系统 | 排序（成环由 [EECS019](/zh/docs/guide/help/analyzer#eecs019) 拒绝） |
 | `[UpdateInGroup<G>]` | 系统 | 只在 `world.Update<G>()` 时执行 |
 
 ```csharp
@@ -240,7 +240,7 @@ public ref struct DecaySystem
 ```
 
 `[Changed<T>]` 和 `[Removed<T>]` 只能写在方法上。系统分组上可以写 `[With<T>]`、`[Without<T>]`、`[WithAny<T1, T2>]`
-（写在其他结构体上由 [EECS023](/zh/docs/guide/analyzer#eecs023) 报错），也可以实现 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`。
+（写在其他结构体上由 [EECS023](/zh/docs/guide/help/analyzer#eecs023) 报错），也可以实现 `ISystemGroupWith<T>` / `ISystemGroupWithout<T>`。
 泛型分组接口只能用后者，因为特性里不能写类型参数：
 
 ```csharp
@@ -262,8 +262,8 @@ public struct Shop : IActorGroup<Shop>;             // [UpdateInGroup<Shop>] 的
 | `RunCount` | 本次之前已经运行的次数（分帧方法访问第 `RunCount % N` 片） |
 | `Stats` | 打开 `MeasureSystems` 后的 `Runs`、`LastTime`、`TotalTime`、`AverageTime`、`LastAllocated` / `TotalAllocated`（字节）、`LastEntities` / `TotalEntities`（遍历开始时匹配的实体数） |
 
-系统不保存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)），也从不引用别的系统
-（[EECS008](/zh/docs/guide/analyzer#eecs008)）。指南：[系统](/zh/docs/guide/systems)。
+系统不保存状态（[EECS007](/zh/docs/guide/help/analyzer#eecs007)），也从不引用别的系统
+（[EECS008](/zh/docs/guide/help/analyzer#eecs008)）。指南：[系统](/zh/docs/guide/basics/systems)。
 
 ## 查询与过滤 [#queries]
 
@@ -302,7 +302,7 @@ bool anyDead = world.Any<Dead>();
 | `.Slice(index, of)` | 每张表 `of` 片里的第 `index` 片，只用于 `ForEach` 系列调用 |
 | `.InGroup<T>(group)` | 分组组件的某一组 |
 
-指南：[查询与过滤](/zh/docs/guide/queries)。
+指南：[查询与过滤](/zh/docs/guide/basics/queries)。
 
 ## 单例 [#singletons]
 
@@ -318,7 +318,7 @@ world.SetClock(0);                                  // 生成成员：没有就�
 world.Clock.Tick++;
 ```
 
-指南：[单例](/zh/docs/guide/singletons)。
+指南：[单例](/zh/docs/guide/basics/singletons)。
 
 ## 变更追踪 [#change-tracking]
 
@@ -365,7 +365,7 @@ var gone = new EntityId[4096];
 if (!replicated.DestroyedSince(seen, gone, out int goneCount)) { /* 比日志还旧：全量下发 */ }
 ```
 
-指南：[变更追踪](/zh/docs/guide/change-tracking)，完整的写入清单见[什么算写入](/zh/docs/guide/change-tracking#what-counts-as-a-write)。
+指南：[变更追踪](/zh/docs/guide/changes/change-tracking)，完整的写入清单见[什么算写入](/zh/docs/guide/changes/change-tracking#what-counts-as-a-write)。
 
 ## 索引、关系、层级、分组 [#indexes]
 
@@ -398,8 +398,8 @@ var account = world.CreateEntity(new Account(42));
 Entity holder = world.AccountIndex.Get(42);        // 就是它；再来一个 Account(42) 会抛异常
 ```
 
-被索引和分组的组件只能用 `Set` 写，不能经 `ref` 写（[EECS015](/zh/docs/guide/analyzer#eecs015)），也不能在 `foreach` 遍历它们的索引时写（[EECS042](/zh/docs/guide/analyzer#eecs042)）。指南：
-[索引与关系](/zh/docs/guide/indexes-and-relations)、[层级](/zh/docs/guide/hierarchy)、[分组](/zh/docs/guide/groups)。
+被索引和分组的组件只能用 `Set` 写，不能经 `ref` 写（[EECS015](/zh/docs/guide/help/analyzer#eecs015)），也不能在 `foreach` 遍历它们的索引时写（[EECS042](/zh/docs/guide/help/analyzer#eecs042)）。指南：
+[索引与关系](/zh/docs/guide/data/indexes-and-relations)、[层级](/zh/docs/guide/data/hierarchy)、[分组](/zh/docs/guide/data/groups)。
 
 ## 预制体与批量操作 [#prefabs-and-bulk]
 
@@ -410,10 +410,10 @@ Entity holder = world.AccountIndex.Get(42);        // 就是它；再来一个 A
 | `prefab.SetBuffer(items)` | 每个实例各拿一份拷贝的 `DynamicBuffer<T>` |
 | `world.Instantiate(prefab)` / `Instantiate(prefab, span)` | 一个实体，或者一次遍历刷出一整波 |
 | `world.Instantiate(prefab, a, b, …)` / `Instantiate(prefab, span, a, b, …)` | 同上，外加最多 9 个自己的组件，覆盖或补充预制体里的值：只拷贝一次行 |
-| `prefab.SetAbsent<T>()` | 给 `T` 留一列但不带这个组件：之后给实例加上 `T` 只翻一个存在位，行不搬（[SetAbsent](/zh/docs/guide/prefabs#set-absent)） |
+| `prefab.SetAbsent<T>()` | 给 `T` 留一列但不带这个组件：之后给实例加上 `T` 只翻一个存在位，行不搬（[SetAbsent](/zh/docs/guide/basics/prefabs#set-absent)） |
 | `world.CreateEntities(span, a, b, …)` | 一波取值相同的实体 |
 | `world.DestroyAll<T…>(filter)` | 销毁所有匹配的实体，返回数量 |
-| `world.CollectIds<T1..Tn>(span, filter)` | 按查询顺序把前几个匹配实体的 id 写进 `span`，写满为止；返回数量（[有上限的一批](/zh/docs/guide/queries#collect-ids)） |
+| `world.CollectIds<T1..Tn>(span, filter)` | 按查询顺序把前几个匹配实体的 id 写进 `span`，写满为止；返回数量（[有上限的一批](/zh/docs/guide/basics/queries#collect-ids)） |
 | `world.DestroyEntities(ids)` | 一次销毁一组 id，返回数量 |
 | `world.SetAll(value, filter)` / `RemoveAll<T>(filter)` | 给所有匹配的实体设置或移除一个组件；过滤条件里没写 `Retired` 时，`SetAll` 跳过带 `Retired` 标签的实体 |
 | `world.DisableAll<T>(filter)` / `EnableAll<T>(filter)` | 给所有匹配的实体禁用或启用一个组件 |
@@ -427,7 +427,7 @@ world.SetAll(new Velocity(0, 0), QueryFilter.Create().With<Health>());
 world.DestroyAll<Dead>();
 ```
 
-指南：[预制体](/zh/docs/guide/prefabs)、[批量操作](/zh/docs/guide/bulk)。
+指南：[预制体](/zh/docs/guide/basics/prefabs)、[批量操作](/zh/docs/guide/changes/bulk)。
 
 ## 动态缓冲 [#dynamic-buffers]
 
@@ -442,7 +442,7 @@ world.DestroyAll<Dead>();
 | `EnsureCapacity(n)` / `TrimExcess()` | 已知数量时先扩容一次，或者把内存还回去 |
 | `AsSpan()` | 元素的 `Span<T>`，用来原地写 |
 | `SetCount(n)` | 设置元素个数（新增的是 `default`），返回 span，原地写整个缓冲 |
-| `DynamicBuffer<T>.MaxPooledLength = n`（静态） | 死掉的 `T` 缓冲最多把多长的列表还给池，启动时设一次（[缓冲池](/zh/docs/guide/dynamic-buffers#pool)） |
+| `DynamicBuffer<T>.MaxPooledLength = n`（静态） | 死掉的 `T` 缓冲最多把多长的列表还给池，启动时设一次（[缓冲池](/zh/docs/guide/data/dynamic-buffers#pool)） |
 | `DynamicBuffer<T>.FillPool(n)`（静态） | 启动时、设好 `MaxPooledLength` 之后，往池里放 `n` 个空列表 |
 
 ```csharp
@@ -453,7 +453,7 @@ loot.Add(new Loot(7));
 loot.RemoveAtSwapBack(0);
 ```
 
-指南：[动态缓冲](/zh/docs/guide/dynamic-buffers)。
+指南：[动态缓冲](/zh/docs/guide/data/dynamic-buffers)。
 
 ## 快照、存档、迁移 [#persistence]
 
@@ -496,7 +496,7 @@ next.SetConfig(64);                                 // 新版本的配置
 next.LoadKeeping(restart.WrittenSpan, NewConfig, markWritten: false);   // Config 保持刚设的值
 ```
 
-指南：[快照](/zh/docs/guide/snapshots)、[存档](/zh/docs/guide/saves)、[迁移与卸载](/zh/docs/guide/migration-and-unload#records)。
+指南：[快照](/zh/docs/guide/saves/snapshots)、[存档](/zh/docs/guide/saves/saves)、[迁移与卸载](/zh/docs/guide/saves/migration-and-unload#records)。
 
 ## World 选项 [#world-options]
 
@@ -513,10 +513,10 @@ next.LoadKeeping(restart.WrittenSpan, NewConfig, markWritten: false);   // Confi
 using var server = new World(new WorldOptions { ParallelSystems = true, SystemErrors = SystemErrorPolicy.Disable });
 ```
 
-指南：[多线程与并行](/zh/docs/guide/threading)。
+指南：[多线程与并行](/zh/docs/guide/performance/threading)。
 
-放进服务器里跑、检查它的行为：[托管](/zh/docs/guide/hosting)、[测试系统](/zh/docs/guide/testing)、
-[调试与诊断](/zh/docs/guide/diagnostics)。
+放进服务器里跑、检查它的行为：[托管](/zh/docs/guide/production/hosting)、[测试系统](/zh/docs/guide/production/testing)、
+[调试与诊断](/zh/docs/guide/production/diagnostics)。
 
 ## 相关页面 [#related]
 

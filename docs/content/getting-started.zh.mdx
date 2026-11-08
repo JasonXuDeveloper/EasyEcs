@@ -55,7 +55,7 @@ public record struct Burning(int Ticks) : IComponent;   // 一个会来也会走
 public struct Dead : IComponent;                        // 标签：没有字段
 ```
 
-组件必须是结构体，写成类会在编译时报 [EECS006](/zh/docs/guide/analyzer#eecs006)。组件要小，系统分开读的数据就拆开放：
+组件必须是结构体，写成类会在编译时报 [EECS006](/zh/docs/guide/help/analyzer#eecs006)。组件要小，系统分开读的数据就拆开放：
 一次遍历只加载它用到的列。
 
 </Step>
@@ -77,7 +77,7 @@ for (int i = 0; i < units.Length; i += 10) units[i].SetBurning(40);   // 每十�
 
 `CreateEntities` 把一整波实体一次放进最终的表；`world.CreateEntity(a, b, …)` 用同样的方式创建单个实体。`Entity` 是一个句柄。
 `Destroy()` 之后 id 会回收复用，句柄上的版本号保证旧句柄永远碰不到复用这个 id 的新实体。详见
-[实体与组件](/zh/docs/guide/entities-and-components)。
+[实体与组件](/zh/docs/guide/basics/entities-and-components)。
 
 </Step>
 <Step>
@@ -98,7 +98,7 @@ scout.RemoveBurning();                       // 移除：实体的行保留
 ```
 
 增删组件属于**结构变更**。它立即生效，在哪里调用都行，系统遍历到一半也可以。`ref` 在下一次结构变更之前有效，跨 `await` 一律无效
-（[ref 与 await](/zh/docs/guide/refs-and-await)）。
+（[ref 与 await](/zh/docs/guide/changes/refs-and-await)）。
 
 </Step>
 <Step>
@@ -118,7 +118,7 @@ foreach (var item in world.Query<Position>(alive))
     front = MathF.Max(front, item.Position.X);          // 元素给出 ref；item.Entity 是句柄
 ```
 
-查询不分配内存。详见[查询与过滤](/zh/docs/guide/queries)，里面还有最快的临时遍历方式：结构体 job。
+查询不分配内存。详见[查询与过滤](/zh/docs/guide/basics/queries)，里面还有最快的临时遍历方式：结构体 job。
 
 </Step>
 <Step>
@@ -151,14 +151,14 @@ public ref struct BurnSystem
 ```
 
 生成器把每个方法编译成结构体 job，JIT 把它内联到行循环里：每个实体既没有委托调用，也没有虚调用。`ref` 和 `in` 同时告诉调度器
-系统碰了哪些数据，[并行系统](/zh/docs/guide/threading)靠的就是这个。详见[系统](/zh/docs/guide/systems)。
+系统碰了哪些数据，[并行系统](/zh/docs/guide/performance/threading)靠的就是这个。详见[系统](/zh/docs/guide/basics/systems)。
 
 </Step>
 <Step>
 
 ### 用单例保存 World 级状态 [#singletons]
 
-系统自己不保存状态（[EECS007](/zh/docs/guide/analyzer#eecs007)）。整个 World 只有一份的数据，比如时钟、比分，放进**单例**：
+系统自己不保存状态（[EECS007](/zh/docs/guide/help/analyzer#eecs007)）。整个 World 只有一份的数据，比如时钟、比分，放进**单例**：
 一个实现 `ISingletonComponent` 的结构体。加到 `Components.cs`：
 
 ```csharp title="Components.cs"
@@ -176,14 +176,14 @@ public ref struct ClockSystem
 }
 ```
 
-详见[单例](/zh/docs/guide/singletons)。
+详见[单例](/zh/docs/guide/basics/singletons)。
 
 </Step>
 <Step>
 
 ### 响应状态、给系统排序 [#order-systems]
 
-系统之间从不互相调用（[EECS008](/zh/docs/guide/analyzer#eecs008)），只通过数据协作。死亡系统写下一个状态，也就是 `Dead` 标签；
+系统之间从不互相调用（[EECS008](/zh/docs/guide/help/analyzer#eecs008)），只通过数据协作。死亡系统写下一个状态，也就是 `Dead` 标签；
 尸体系统响应这个状态，死亡系统根本不知道它存在。`[UpdateAfter<T>]` 按数据流给它们排序。加到 `Systems.cs`：
 
 ```csharp title="Systems.cs"
@@ -427,20 +427,20 @@ Console.WriteLine($"the scout is at {scout.Position.X}, the others at {units[2].
 
 | 想要 | 读这篇 |
 | --- | --- |
-| 把程序整理成真实项目：目录、一个文件一个系统、测试 | [项目结构](/zh/docs/guide/project-structure) |
+| 把程序整理成真实项目：目录、一个文件一个系统、测试 | [项目结构](/zh/docs/guide/basics/project-structure) |
 | 把功能设计成数据加上各司其职的系统 | [ECS 设计原则](/zh/docs/ecs-principles) |
-| 只把变了的、没了的东西发给客户端 | [变更追踪](/zh/docs/guide/change-tracking) |
-| 按配方刷出各种单位 | [预制体](/zh/docs/guide/prefabs) |
-| 按名字找玩家、找某人拥有的物品 | [索引与关系](/zh/docs/guide/indexes-and-relations) |
-| 给每个单位一个列表（背包、路径） | [动态缓冲](/zh/docs/guide/dynamic-buffers) |
-| 用满每个核 | [多线程与并行](/zh/docs/guide/threading) |
-| 存下 World，重启后再加载 | [存档](/zh/docs/guide/saves) |
-| 在 ASP.NET Core 或 Worker Service 里运行 World | [在 .NET 服务器里托管](/zh/docs/guide/hosting) |
-| 测试每个系统和整个 tick | [测试系统](/zh/docs/guide/testing) |
+| 只把变了的、没了的东西发给客户端 | [变更追踪](/zh/docs/guide/changes/change-tracking) |
+| 按配方刷出各种单位 | [预制体](/zh/docs/guide/basics/prefabs) |
+| 按名字找玩家、找某人拥有的物品 | [索引与关系](/zh/docs/guide/data/indexes-and-relations) |
+| 给每个单位一个列表（背包、路径） | [动态缓冲](/zh/docs/guide/data/dynamic-buffers) |
+| 用满每个核 | [多线程与并行](/zh/docs/guide/performance/threading) |
+| 存下 World，重启后再加载 | [存档](/zh/docs/guide/saves/saves) |
+| 在 ASP.NET Core 或 Worker Service 里运行 World | [在 .NET 服务器里托管](/zh/docs/guide/production/hosting) |
+| 测试每个系统和整个 tick | [测试系统](/zh/docs/guide/production/testing) |
 | 一页看完所有 API | [速查表](/zh/docs/cheat-sheet) |
 
 <Cards>
-  <Card title="项目结构" href="/zh/docs/guide/project-structure">
+  <Card title="项目结构" href="/zh/docs/guide/basics/project-structure">
     把同样的程序整理成项目：目录、一个文件一个系统、宿主和测试。
   </Card>
   <Card title="功能一览" href="/zh/docs/features">

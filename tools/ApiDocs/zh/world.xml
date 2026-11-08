@@ -95,22 +95,22 @@
   <member name="M:EasyEcs.World.Count``2(EasyEcs.QueryFilter@)" source="0d5d4fca0e1d">
     <summary>同时拥有 <c>T1, T2</c> 的存活实体数量。O(匹配的原型数)，需要逐行检测的表再加 O(行数 / 64)。</summary>
   </member>
-  <member name="M:EasyEcs.World.CreateEntities``2(System.Span{EasyEcs.Entity},``0@,``1@)" source="5172671c4d15">
+  <member name="M:EasyEcs.World.CreateEntities``2(System.Span{EasyEcs.Entity},``0@,``1@)" source="5bb75e67e638">
     <summary>
       创建 <c>entities.Length</c> 个带 2 个组件的实体（每个实体的值都一样），直接放进最终的原型，并把句柄写进
       <paramref name="entities" />。整批只过一次结构闸门，表最多扩容一次：O(数量 × 2)。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
+      （见<see href="/zh/docs/guide/performance/threading">多线程与并行</see>）。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.CreateEntity" source="90176613439e">
+  <member name="M:EasyEcs.World.CreateEntity" source="badff6b90f06">
     <summary>
-      创建一个没有组件的实体。均摊 O(1)。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
+      创建一个没有组件的实体。均摊 O(1)。只能在所有者线程调用（见<see href="/zh/docs/guide/performance/threading">多线程与并行</see>）。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.CreateEntity``2(``0@,``1@)" source="de28b17e3931">
+  <member name="M:EasyEcs.World.CreateEntity``2(``0@,``1@)" source="bb66f632c509">
     <summary>
       创建一个带 2 个组件的实体，直接放进最终的原型（中途不搬行）。均摊 O(2)。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
+      （见<see href="/zh/docs/guide/performance/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.DescribeTables" source="9cbe4fd505c8">
@@ -119,10 +119,10 @@
       任何线程都能调用（正在变更的表可能读到一半）。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.DestroyAll``2(EasyEcs.QueryFilter@)" source="d186184a7d2f">
+  <member name="M:EasyEcs.World.DestroyAll``2(EasyEcs.QueryFilter@)" source="f9e1435ecff7">
     <summary>
       销毁所有同时拥有 <c>T1, T2</c>（并匹配 <paramref name="filter" />）的存活实体，返回销毁的数量。只过一次结构闸门：
-      O(匹配的原型数 + 行数)。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
+      O(匹配的原型数 + 行数)。只能在所有者线程调用（见<see href="/zh/docs/guide/performance/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.DisableAll``1(EasyEcs.QueryFilter@)" source="9aa4775b72ed">
@@ -155,12 +155,12 @@
     </summary>
     <exception cref="T:System.ArgumentOutOfRangeException"><paramref name="count" /> 为负数，或者这些实例会超出一个 World 能容纳的实体数。</exception>
   </member>
-  <member name="M:EasyEcs.World.Reserve``2(System.Int32)" source="8708299b293c">
+  <member name="M:EasyEcs.World.Reserve``2(System.Int32)" source="dfdbaaa5ce80">
     <summary>
       预先扩好正好有 <c>T1, T2</c> 的实体所在的表和实体存储，接下来 <paramref name="count" /> 次带这些组件的
       <c>CreateEntity</c> / <c>CreateEntities</c> 都不会再扩容：启动或一波刷怪的扩容开销在循环之前一次付掉。分组
       （<see cref="M:EasyEcs.World.GroupBy``1" />）把实体放进别的表时，扩的是那张表；之后再加组件会把实体搬到别的表，那些表照常自己扩容。
-      O(2) 加一次扩容。只能在所有者线程调用（见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
+      O(2) 加一次扩容。只能在所有者线程调用（见<see href="/zh/docs/guide/performance/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.EnsureEntityCapacity(System.Int32)" source="9fdc082705de">
@@ -220,12 +220,12 @@
       来不及先检查）。
     </summary>
   </member>
-  <member name="M:EasyEcs.World.Instantiate(EasyEcs.Prefab)" source="a3072de20f2a">
+  <member name="M:EasyEcs.World.Instantiate(EasyEcs.Prefab)" source="bd35cb54c665">
     <summary>
       创建一个实体，带上 <paramref name="prefab" /> 每个组件的副本。值原样复制：<see cref="T:EasyEcs.DynamicBuffer`1" />
       拿到自己的一份列表，索引收录新实体，被追踪组件算作刚刚写入。O(组件数)：一次行复制，第一个实例之后不再查找表。
       带成员的预制体会创建所有成员，返回传入的那个预制体对应的实体（O(成员数 × 组件数)）。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
+      （见<see href="/zh/docs/guide/performance/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.Instantiate(EasyEcs.Prefab,System.Span{EasyEcs.Entity})" source="18e7b388f5be">
@@ -458,13 +458,13 @@
     <exception cref="T:System.InvalidOperationException">日志关闭（<see cref="P:EasyEcs.WorldOptions.DestroyLogCapacity" /> 为 0）。</exception>
     <exception cref="T:System.ObjectDisposedException">World 已经释放。</exception>
   </member>
-  <member name="M:EasyEcs.World.Instantiate``2(EasyEcs.Prefab,``0@,``1@)" source="7d08c46cfb0b">
+  <member name="M:EasyEcs.World.Instantiate``2(EasyEcs.Prefab,``0@,``1@)" source="0563193d6760">
     <summary>
       同时给出 2 个组件的 <see cref="M:EasyEcs.World.Instantiate(EasyEcs.Prefab)" />：先复制 <paramref name="prefab" /> 的每个组件，再写入给出的值
       （覆盖预制体的值，被禁用的组件像 <c>Set</c> 一样启用），实体直接放进两者合起来的那张表（没有中间的移动，一次行复制）。
       被追踪组件算作刚刚写入，索引和分组收录这些值，给出的 <see cref="T:EasyEcs.ChildOf" /> 链入层级。均摊 O(组件数)，表存在之后零分配。
       带成员的预制体会创建所有成员，并把这些组件设到传入的那个预制体对应的实体上（它多一次行移动）。只能在所有者线程调用
-      （见<see href="/zh/docs/guide/threading">多线程与并行</see>）。
+      （见<see href="/zh/docs/guide/performance/threading">多线程与并行</see>）。
     </summary>
   </member>
   <member name="M:EasyEcs.World.Instantiate``2(EasyEcs.Prefab,System.Span{EasyEcs.Entity},``0@,``1@)" source="79c32601355c">
@@ -558,6 +558,17 @@
   <member name="M:EasyEcs.World.ForEachBatchParallel``3(``2@,EasyEcs.QueryFilter@,System.Int32)" source="40b4e9fcda62">
     <summary>
       多线程版的 <see cref="M:EasyEcs.World.ForEachBatch``3(``2@,EasyEcs.QueryFilter@)" />：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多
+      <see cref="F:EasyEcs.World.MaxChunkRows" /> 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 <paramref name="chunkSize" /> 向上取整到 64：
+      <c>[ForEach(Parallel = true, ChunkSize = n)]</c>），由调用线程和最多
+      <see cref="P:EasyEcs.WorldOptions.MaxDegreeOfParallelism" /> - 1 个辅助线程同时执行，每个线程用自己的一份
+      <paramref name="job" /> 副本（job 存在字段里的状态不会合并回来，除非 job 做合并：<c>Merges</c>，即 <c>Reduce&lt;T&gt;</c>；这时每块一份、大小等于 job 字段的副本保存在一个每次调用复用的数组里，按块的顺序合并）。job 不能做结构变更，也不能写别的行会读的数据
+      （单例、其他实体）；调用期间也不能有别的代码改动 World。行不够两块，或者执行器正忙，就在调用线程上执行。
+      每种 job 类型第一次调用之后零分配。
+    </summary>
+  </member>
+  <member name="M:EasyEcs.World.ForEachMaskedParallel``3(``2@,EasyEcs.QueryFilter@,System.Int32)" source="0e3138409f53">
+    <summary>
+      多线程版的 <see cref="M:EasyEcs.World.ForEachMasked``3(``2@,EasyEcs.QueryFilter@)" />：匹配的行切成块（行数是 64 的倍数：在一次调用测得行开销之前，每个线程大约四块，最多
       <see cref="F:EasyEcs.World.MaxChunkRows" /> 行；之后行很重时每块约 25 µs，遍历很短时块更少；会合并结果的任务固定切 16 块，与线程数和开销无关，结果因此不随线程变化；或者把 <paramref name="chunkSize" /> 向上取整到 64：
       <c>[ForEach(Parallel = true, ChunkSize = n)]</c>），由调用线程和最多
       <see cref="P:EasyEcs.WorldOptions.MaxDegreeOfParallelism" /> - 1 个辅助线程同时执行，每个线程用自己的一份
@@ -775,5 +786,3 @@
     <exception cref="T:System.InvalidOperationException">生成器没有编译这处调用（EECS095 说明原因）。</exception>
   </member>
 </doc>
-
-

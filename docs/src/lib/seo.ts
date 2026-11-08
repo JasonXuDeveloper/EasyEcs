@@ -23,12 +23,12 @@ import {
 
 const otherLocale = (lang: Locale): Locale => (lang === 'zh' ? 'en' : 'zh');
 
-/** The social card of a page: /og/en/docs/guide/queries.png, /og/zh.png */
+/** The social card of a page: /og/en/docs/guide/basics/queries.png, /og/zh.png */
 export function ogImagePath(url: string) {
   return `/og${url}.png`;
 }
 
-/** The Markdown copy of a docs page, for LLMs: /en/docs/guide/queries.md */
+/** The Markdown copy of a docs page, for LLMs: /en/docs/guide/basics/queries.md */
 export function markdownPath(url: string) {
   return `${url}.md`;
 }

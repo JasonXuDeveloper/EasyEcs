@@ -90,7 +90,7 @@ models read once for the generator and the analyzer (`Parts.cs`, `Prefabs.cs`, `
 
 The Core's folder names, plus `Generator/` (generated text, parts, views, prefab declarations) and `Analyzer/`
 (the rules, the code fixes, the suppressor). The root keeps `Fixtures.cs` (shared by all), `AllocationTests.cs`
-(linked from `guide/prefabs.mdx:342` / `.zh.mdx:315`, and cross-cutting), `BattleServerTests.cs` (linked from
+(linked from `guide/basics/prefabs.mdx:342` / `.zh.mdx:315`, and cross-cutting), `BattleServerTests.cs` (linked from
 `example.mdx:16` / `.zh.mdx:15`) and `LocalityTests.cs` (goes with `benchmarks/.../Locality/` when L2 ships).
 
 ### 2.4 `benchmarks/EasyEcs.Benchmark` (67 files at the root today: 8 stay, 59 in 16 folders)
@@ -143,7 +143,7 @@ same tools commit.
 | DocCheck | `tools/DocCheck/Program.cs:17` | reads `docs/content` and `README.md`; compiles against the built assemblies |
 | ApiDocs | `tools/ApiDocs/Program.cs:18-20` | reads EasyEcs.Core's assembly and XML docs; zh entries are keyed by doc id (`tools/ApiDocs/zh/*.xml`) |
 | Docs includes | `docs/content/**` `<include>`: `benchmarks/EasyEcs.Benchmark/BattleServer.cs` (example.mdx:97-296, 21 regions, and .zh), `samples/VoxelServer/**`, `demo/EasyEcs.Demo/**` | none of them moves |
-| GitHub URLs in pages | example(.zh).mdx:14,16 (BattleServer.cs, BattleServerTests.cs), migrate-from-{arch,friflo,defaultecs}(.zh).mdx:11-16 (WorldSimulation.cs, *Simulation.cs), comparison(.zh).mdx:24-26, guide/prefabs.mdx:342 / .zh.mdx:315 (AllocationTests.cs) | those files stay |
+| GitHub URLs in pages | example(.zh).mdx:14,16 (BattleServer.cs, BattleServerTests.cs), migrate-from-{arch,friflo,defaultecs}(.zh).mdx:11-16 (WorldSimulation.cs, *Simulation.cs), comparison(.zh).mdx:24-26, guide/basics/prefabs.mdx:342 / .zh.mdx:315 (AllocationTests.cs) | those files stay |
 | Docs naming files without a path | decisions.mdx:1977 (`Flow.cs`), :3575 (`HandSimd.cs`), why-fast.mdx:75 (`EntityMeta.cs`) | names unchanged |
 | Scripts | `tools/bench.sh` (class names, project dirs), `tools/inlining.sh` + `tools/Inlining/Program.cs:11-14` (types), `docs/scripts/sync-benchmarks.ts:235` (Comparison csproj), `docs/scripts/build-demo.sh:14`, `.github/scripts/check-sample.sh` (sample dirs), `lint-links.ts` (does not check GitHub URLs) | no path into the moved folders |
 | Templates | `templates/EasyEcs.Templates.csproj` (`content\**`) | unrelated |

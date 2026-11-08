@@ -1,0 +1,280 @@
+---
+title: Bulk changes
+seoTitle: "Bulk component changes in C# ECS: SetAll and RemoveAll"
+description: Set, remove, disable or enable one component on every entity a filter selects in one pass, for round resets, zone-wide statuses and waves, with 0 B allocated.
+icon: Layers
+---
+
+A round ends and every fighter is stunned; the stun lifts from everyone; a zone freezes; a wave of monsters spawns and
+is later cleared. Written entity by entity, each of these is a loop of structural changes. `SetAll`, `RemoveAll`,
+`DisableAll` and `EnableAll` change one component on every entity a filter selects in one pass through the structural
+gate, a whole 64-row word at a time where they can, with the same results as the loop: tracked components count as
+written, indexes and groups follow.
+
+## When to use it [#when-to-use-it]
+
+<Callout type="idea" title="Use it for">
+  The same change on many entities at once: round resets, a status applied to or lifted from a whole team or zone,
+  pausing a component everywhere (`DisableAll`), spawning and clearing waves (`CreateEntities`, `DestroyAll`, `DestroyEntities(ids)`).
+</Callout>
+
+<Callout type="warn" title="Skip it for">
+  Changes whose value depends on each entity (damage from each unit's armor): that is a `[ForEach]` system writing
+  through `ref`. A handful of entities you already hold: `Set` on each is as fast.
+</Callout>
+
+## How to use it [#how-to-use-it]
+
+### Set and remove on every match [#set-all]
+
+`SetAll(value, filter)` gives every matching entity the component, added or replaced; `RemoveAll<T>(filter)` removes
+it from every match that has it. Both return how many entities they changed.
+
+```csharp
+public record struct Fighter(int Team) : IComponent;
+public record struct Stun(int Ticks) : IComponent;
+public record struct Regen(int PerTick) : IComponent;
+
+public static class Rounds
+{
+    public static readonly QueryFilter Fighters = QueryFilter.Create().With<Fighter>();
+}
+```
+
+```csharp
+var fighters = new Entity[1_000];
+world.CreateEntities(fighters, new Fighter(1), new Health(100), new Regen(2));
+
+int stunned = world.SetAll(new Stun(3), Rounds.Fighters);   // the round ends: everyone is stunned // [!code highlight]
+int lifted = world.RemoveAll<Stun>();                        // the stun lifts from everyone
+```
+
+Without a filter, `RemoveAll<T>()` takes `T` from every entity that has it, and `SetAll` gives it to every alive entity,
+so name what to select (`With<Fighter>()`). Any `QueryFilter` works, including `Without`, `WithAny`, `Changed` and
+[`InGroup`](/en/docs/guide/data/groups).
+
+`Destroy` on an entity that holds [cleanup components](/en/docs/guide/changes/cleanup-and-disable#cleanup-components) retires
+it: it stays alive, tagged `Retired`, until they are released. `SetAll` leaves such entities out, so a bulk write never brings
+one back, unless the filter names the tag (`With<Retired>()`). `RemoveAll` reaches them: removing their cleanup
+components is how they are released.
+
+### Disable and enable on every match [#disable-all]
+
+`DisableAll<T>(filter)` and `EnableAll<T>(filter)` are [`Disable<T>()`](/en/docs/guide/changes/cleanup-and-disable#disable-a-component) and [`Enable<T>()`](/en/docs/guide/changes/cleanup-and-disable#disable-a-component)
+on every match: values are kept and given back.
+
+```csharp
+int paused = world.DisableAll<Regen>(Rounds.Fighters);     // pause systems that require Regen
+int resumed = world.EnableAll<Regen>();                    // restore the kept Regen(2) value
+```
+
+Disabling regeneration leaves `Health` available to damage and display systems. The [full example](/en/docs/guide/changes/bulk#full-example) below runs a regeneration system and checks that health stays unchanged while paused, then rises again after resuming.
+
+### Spawn and clear waves [#spawn-and-clear]
+
+The structural counterparts for whole entities create a wave with one set of values and destroy every match:
+
+```csharp
+public record struct Shot(int Damage) : IComponent;
+```
+
+```csharp
+var volley = new Entity[10_000];
+world.CreateEntities(volley, new Shot(5), new Position(0, 0));   // one table, rows placed at once
+int cleared = world.DestroyAll<Shot>();                          // every shot, in one pass
+```
+
+`world.Instantiate(prefab, span)` spawns a wave from a [prefab](/en/docs/guide/basics/prefabs).
+
+### What the bulk calls keep [#semantics]
+
+| | `SetAll` | `RemoveAll` | `DisableAll` | `EnableAll` |
+| --- | --- | --- | --- | --- |
+| [Change tracking](/en/docs/guide/changes/change-tracking) | a write per row | a removal per row (tracked `T`) | a removal per row | a write per row |
+| [Indexes](/en/docs/guide/data/indexes-and-relations) | re-indexed | unlinked | unlinked | re-linked |
+| [Groups](/en/docs/guide/data/groups) | moved to the value's group | | | |
+| On a disabled `T` | replaced: enabled, with the new value | | | |
+| [Cleanup components](/en/docs/guide/changes/cleanup-and-disable#cleanup-components) | | the last one frees a retired entity | refused (throws) | |
+
+All four are structural changes of the owner thread: call them between updates, from a system's `OnUpdate`, or from a
+`[ForEach]` method that takes an `Entity` or the `World` (a method that takes neither promises no structural change).
+
+## Full example [#full-example]
+
+A round of a fight: 1,000 fighters are stunned and released, their regeneration paused for a cutscene and resumed,
+then a volley of shots is spawned and cleared, each with one call. A system heals the fighters that are neither
+stunned nor paused. Put the files in a console project that references EasyEcs (`dotnet add package EasyEcs`) and run
+it with `dotnet run`.
+
+<Accordions>
+<Accordion title="Components.cs">
+
+```csharp title="Components.cs" doccheck=example
+using EasyEcs;
+
+public record struct Fighter(int Team) : IComponent;
+
+public record struct Health(int Value) : IComponent;
+
+// Health regained per update. A cutscene pauses it with DisableAll.
+public record struct Regen(int PerTick) : IComponent;
+
+// A stunned fighter does not regenerate.
+public record struct Stun(int Ticks) : IComponent;
+
+public record struct Shot(int Damage) : IComponent;
+```
+
+</Accordion>
+<Accordion title="Systems.cs">
+
+```csharp title="Systems.cs" doccheck=example
+using EasyEcs;
+
+// Fighters that are not stunned regain health. A disabled Regen is hidden, so it pauses too.
+[EcsSystem]
+public ref struct RegenerateSystem
+{
+    [ForEach, Without<Stun>]
+    static void Heal(ref Health health, in Regen regen)
+    {
+        health.Value += regen.PerTick;
+    }
+}
+```
+
+</Accordion>
+<Accordion title="Filters.cs">
+
+```csharp title="Filters.cs" doccheck=example
+using EasyEcs;
+
+public static class Rounds
+{
+    // Filters are values: build them once and keep them in fields.
+    public static readonly QueryFilter Fighters = QueryFilter.Create().With<Fighter>();
+}
+```
+
+</Accordion>
+<Accordion title="Program.cs">
+
+```csharp title="Program.cs" doccheck=example
+using EasyEcs;
+
+using var world = new World();
+world.AddSystem<RegenerateSystem>();
+
+// One call creates the whole roster in one table.
+var fighters = new Entity[1_000];
+world.CreateEntities(fighters, new Fighter(1), new Health(100), new Regen(2));
+Entity first = fighters[0];
+
+// The round ends: every fighter is stunned, in one pass.
+int stunned = world.SetAll(new Stun(3), Rounds.Fighters);
+world.Update();
+Console.WriteLine($"stunned {stunned}: health {first.Health.Value}");
+
+// The stun lifts from everyone.
+int lifted = world.RemoveAll<Stun>(Rounds.Fighters);
+world.Update();
+Console.WriteLine($"lifted {lifted}: health {first.Health.Value}");
+
+// A cutscene: regeneration pauses everywhere and keeps its values.
+int paused = world.DisableAll<Regen>(Rounds.Fighters);
+world.Update();
+Console.WriteLine($"paused {paused}: health {first.Health.Value}");
+
+// The cutscene ends: every kept value comes back.
+int resumed = world.EnableAll<Regen>(Rounds.Fighters);
+world.Update();
+Console.WriteLine($"resumed {resumed}: health {first.Health.Value}");
+
+// SetAll on a disabled component replaces it: enabled again, with the new value.
+world.DisableAll<Regen>(Rounds.Fighters);
+world.SetAll(new Regen(5), Rounds.Fighters);
+world.Update();
+int stillPaused = world.Count<Disabled<Regen>>();
+Console.WriteLine($"set while paused: health {first.Health.Value}, still paused {stillPaused}");
+
+// A volley is spawned in one call and cleared in one pass.
+var volley = new Entity[10_000];
+world.CreateEntities(volley, new Shot(5));
+int cleared = world.DestroyAll<Shot>();
+Console.WriteLine($"shots cleared: {cleared}, entities left: {world.EntityCount}");
+```
+
+</Accordion>
+</Accordions>
+
+It prints:
+
+```text
+stunned 1000: health 100
+lifted 1000: health 102
+paused 1000: health 102
+resumed 1000: health 104
+set while paused: health 109, still paused 0
+shots cleared: 10000, entities left: 1000
+```
+
+The stunned update heals nobody (100), the paused one neither (102 stays 102). `SetAll` on the paused `Regen` gives
+it back with the new value at once: the next update heals 5, and no `Disabled<Regen>` is left.
+
+## How to use it fast [#how-to-use-it-fast]
+
+- **Let the column stay.** After the first round, the stun's column stays in the fighters' table: `SetAll` and
+  `RemoveAll` then flip presence bits, 64 rows per word, and no row moves.
+- **Keep the filter in a `static readonly` field**, like any hot filter.
+- **One call instead of a loop.** The bulk call enters the structural gate once and works table by table.
+
+A round reset of 100,000 fighters (stun everyone, lift it) and a status disabled and enabled for all of them, in bulk
+and entity by entity (`BulkBenchmark`):
+
+<BenchTable bench="BulkBenchmark" />
+
+## What it costs [#what-it-costs]
+
+- **Time:** O(matching tables + rows). Rows that already have the column are a presence-bit flip; an entity that
+  lacks the column moves once, to the table that has it.
+- **Allocation:** 0 B once the target tables exist.
+- **`SetAll` fills whole words:** a 64-row word whose rows all match gets the value in one fill; a partial word, and
+  an indexed component (the index sees each write), are written row by row.
+- **`SetAll` counts first:** a moved row can be visited again in its new table, so the count is taken before the
+  change.
+
+## Pitfalls [#pitfalls]
+
+| Mistake | What happens | Caught by |
+| --- | --- | --- |
+| A bulk call inside a `[ForEach]` method without `Entity` or `World` | A structural change the pass did not plan for | [EECS013](/en/docs/guide/help/analyzer#eecs013) |
+| A bulk call from another thread | Races with the owner thread | [EECS014](/en/docs/guide/help/analyzer#eecs014) |
+| `DisableAll` of a cleanup component or `ChildOf` | `InvalidOperationException` | [EECS048](/en/docs/guide/help/analyzer#eecs048) |
+| `SetAll` with a value that should differ per entity | Every entity gets the same value | Use a `[ForEach]` system |
+| `Set` / `Remove` entity by entity over a query | The same result, one structural change per entity | [EECS030](/en/docs/guide/help/analyzer#eecs030) |
+| `CreateEntity` or `Instantiate(prefab)` in a counted loop | One creation per entity instead of one per wave | [EECS031](/en/docs/guide/help/analyzer#eecs031): `CreateEntities`, `Instantiate(prefab, span)` |
+
+## Compared with other libraries [#compared]
+
+Friflo applies an `EntityBatch` to a query's entities, Arch adds or removes by query (whole tables move), and
+DefaultEcs changes entities one by one. The same round reset of 100,000 fighters:
+
+<BenchChart bench="BulkChangeComparison" title="Stun 100,000 fighters, then lift the stun from everyone" />
+
+And a volley of 10,000 shots spawned beside 100,000 fighters, then cleared:
+
+<BenchChart bench="BulkSpawnComparison" title="Spawn 10,000 shots, then destroy them all" />
+
+## Related [#related]
+
+<Cards>
+  <Card title="Cleanup and disable" href="/en/docs/guide/changes/cleanup-and-disable">
+    `Disable<T>()` on one entity, cleanup components.
+  </Card>
+  <Card title="Structural changes" href="/en/docs/guide/changes/structural-changes">
+    What a structural change is, and when it applies.
+  </Card>
+  <Card title="Queries and filters" href="/en/docs/guide/basics/queries">
+    The `QueryFilter` every bulk call takes.
+  </Card>
+</Cards>
