@@ -2762,3 +2762,32 @@ No user-visible change (the one core change was reverted), so no changelog, migr
   entity at a time" -> SimdMode.Off), en and zh. `runtime.ts` keeps `MotionMs(bool)` (its parameter is now
   `vectorized`). README line 23 links `demo/EasyEcs.Demo/Systems/MovementBatchSystem.cs` (deleted): link
   `MovementSystem.cs` and say the generator writes the loop. docs/AGENTS.md "Live demo" names the `Batched` group.
+- **guide/lambda-passes.mdx + zh, guide/fusion.mdx + zh, decisions (the fusion record) + zh: lambda passes share a
+  walk.** Two or more `world.ForEach` / `ForEachParallel` calls written as consecutive statements of one block, on the
+  same World local or parameter, whose value arguments are names of the first call's values (locals or parameters
+  held by value), run as one walk under the same rule as `[ForEach]` methods (`Fusion.Problem`: the same filter, no
+  structural change, no change filter, no singleton written by two of them, all parallel or none). Below
+  `SystemCode.FusedRows` rows each runs on its own. Not fused: a statement between, another World, a value the first
+  call does not pass or that is not a name, a body run through its delegate. The interceptor of the first call runs
+  them all; the others' interceptors are left with the comment "the walk of the lambda pass before it ran this one".
+  LambdaFusionBenchmark numbers: see the backlog item.
+- **guide/vector-loops (math) + zh, decisions D127 + zh: `Pow` of floats by any exponent** under `FloatMode.Fast`
+  (`LaneMath.Pow`: `Exp(y * Log(x))` in doubles through .NET's vector Exp / Log, within 2 ulps; lanes with x <= 0, an
+  infinite x or y, or NaN run the method). D127's "Not lowered" list loses "`Pow` by other exponents" (of floats);
+  `Math.Pow` of doubles keeps its reason. Atan2 / Asin: owner-review.md.
+- **decisions D90 + zh, roadmap + zh, guide/vector-loops + zh: masked words in parallel methods, `Maybe<T>` in
+  parallel methods and of narrow lanes, masked words of narrow lanes.** D90's "Masked words of narrow lanes run the
+  method" goes (Interleaved.Lanes8 / Lanes16: a word's bits spread into byte / short lanes), and so does EECS055's
+  "optional columns have vector loops of 4- and 8-byte lanes". A parallel method's chunks walk masked words
+  (`World.ForEachMaskedParallel`; the schedule line "in parallel chunks, masked words vector"), and a parallel method
+  takes `Maybe<T>`. A structural change under a condition of byte or short lanes now marks rows in the vector loop
+  (guide/structural-changes: drop "narrow lanes keep the method scalar"; records of narrow lanes still do). Wide
+  components' masked words still run the method (owner-review.md). Roadmap: drop the done forms of D90's item.
+- **DocCheck: 16 problems already on fda40ab (feat-inner-loops' tip), unchanged on this branch.** guide/analyzer (en +
+  zh, 4 each): `Replica(int Health, bool Burning)` makes `Out` / `Lit` / `Send` warn EECS055 (the bool among 2 fields);
+  `Replica(bool Burning)` fixes it (`Health` is never read). guide/grids (en + zh, 4 each): `Sleep` warns EECS055 on
+  `LifeChange.Changed` / `Change.Changed` (move the bool into `Stepped(bool Changed)`, written by `Step`, read by
+  `Sleep` and the full example's `Commit`, created with the plate); `Diffuse` and `Spread` warn EECS103 (the
+  hand-written stencils the page shows before the cell method: mark the fences `doccheck=expect-EECS103` or show the
+  cell method first). The bool splits were applied to both languages on this branch and reverted, to keep guide
+  pages to the docs pass.

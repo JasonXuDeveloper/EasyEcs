@@ -440,9 +440,17 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       (Tile stencils, `HandStencil`) and WP6c (element loops, `HandSimd.Loops`), WP7's FireDamage (the method for one
       row) and VoxelServer's Sunlit / InWater split, WP8 (e) (a bool used alone: fixable split advice, deferred past a
       later parameter's inherent reason), (f) (equal NEON tables shared), (h) (`Interleaved.LoadTail`'s copy through
-      ThreadSetup). In measurement: (d) the blank fill of a cell pass's gaps (a zero gap scanned instead of written).
-      Left: lambda fusion; (a) a `Columns<TTile>` cell; (b) masked AVX-512 tails; (g) the roadmap's vector-loop forms;
-      the rest of WP8's scan (Dig and Gone keep their World reason); the demo's batch Move (the owner's call).
+      ThreadSetup). On feat-inner-loops-rest (2026-11-08, not merged): (d) the blank fill kept (TileLayers 1 thread
+      701 vs 764 µs, 4 threads 292 vs 351, other cell cases within noise); lambda fusion (consecutive lambda passes
+      as one walk: LambdaFusion Fused / Apart 0.51 at 1M, 0.48 at 1M parallel, 0.58 at 8M parallel, equal at 10k);
+      (g) masked words in parallel chunks, Maybe<T> in parallel methods and of byte / short lanes, masked words of
+      narrow lanes, narrow structural marks, Pow (VectorForms, head against base, µs: MaskedParallel 16.5 vs 85,
+      MaybeParallel 14.6 vs 107 (base: the method), MaskedNarrow 18.8 vs 106, MaybeNarrow 9.4 vs 188, MarkNarrow
+      19.0 vs 204, Pow 265 vs 673); BattleServer and WorldSimulation within noise of the base. Dropped with their
+      causes in owner-review.md: (b) masked AVX-512 tails (slower at every short length: the helper's call), Atan2 /
+      Asin (no .NET vector form, D127), wide rows' masked words (Kernel.Wide.cs is the halos branch's); WP8's Dig and
+      Gone inherent. Done earlier: the demo's batch Move. Left: (a) a `Columns<TTile>` cell (after the halos branch:
+      its files are Tile.cs, TileSteps.cs, SystemGenerator.Cells.cs); the demo bundle rebuild after the merge.
 - [ ] **Generated text cleanup** (`generated-text.md`, ranked; one agent, SystemGenerator owner, after lookup gathers):
       1 `GeneratedTextTests` guard first (fails on today's output, allow-list shrinks as each step lands);
       2 alias block (-20 % text, IL identical); 3 fusion files run the systems' jobs (-76 % fusion output);
@@ -555,7 +563,7 @@ The VoxelServer plan was refreshed read-only (`voxel-rewrite.md`, Finish step 2a
       reports at the outermost with `Reserve(outer * inner)` (three levels and more); a constant product below the
       small count is not reported, a loop that destroys the rows of its body stops the climb. Tests: nested positive,
       three levels, constant product, churn negative, code fix.
-- [ ] Follow-ups: lambda passes do not fuse (lambda + structural change and lambda + view get vector loops on feat-inner-loops).
+- [ ] Follow-ups: lambda passes fuse on feat-inner-loops-rest (lambda + structural change and lambda + view get vector loops on feat-inner-loops).
 - [ ] **From the published roadmap** (`docs/content/roadmap.mdx` "Planned", checked against this file 2026-10-26):
       push halos for grid neighbors (a chunk hands its edges to its neighbors' halos when they change, D73; with
       WP5 / WP5b, `feature` + `audit-vector-loops`); the vector-loop forms left for later (masked words in parallel
