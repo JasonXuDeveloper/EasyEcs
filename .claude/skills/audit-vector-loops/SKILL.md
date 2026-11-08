@@ -188,8 +188,13 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   part of every per-chunk result and of the marked rows: a pass hands its job the rows in table order (the masked walk
   hands a run of whole words to the job before the word after it, `MaskedRuns`), and a test of a vector form with a
   structural change or a record compares the order of the rows against its scalar twin, in tables with presence holes
-  (StructuralLoopTests.AMaskedWordAfterARunKeepsTheRowOrder). `EntityRandom` has no vector form yet (64-bit Mix lanes: `docs/plans/backlog.md` G5): its draws keep
-  the method scalar.
+  (StructuralLoopTests.AMaskedWordAfterARunKeepsTheRowOrder). `EntityRandom` draws of the row's entity
+  (`random.X(entity.Id, stream, ...)` and the static form over a uniform seed and tick, the stream uniform) are lanes
+  (Kernel/Kernel.Random.cs over Core's `RandomLanes`: the ids read as 8-byte lanes from the run's slots, the hash in
+  64-bit lanes, narrowed to the method's lanes): `Bits` in 8-byte lanes, `Float` / `Chance` / `Range(float)` /
+  `Range(int)` in 4-byte ones; an int `Range` whose bounds are not constants bails the lanes where max < min (the
+  method throws there). Proof: EntityRandomTests bit for bit against SimdMode.Off (holes, versions above 1, parallel
+  chunks); a draw of another entity or a varying stream keeps its reason.
 - **Conditions**: `if` / `else` chains, nested ifs, early `return` (a mask of rows still running), ternaries, `&&`,
   `||`, `!`, comparisons across fields of several components and singletons, `Math.Min` / `Max` / `Abs` / `Clamp`,
   the saturating and narrow-lane idioms. `++` / `--` used as a value (`if (--t.Ticks <= 0)`, a timer; `Kernel.Step`):

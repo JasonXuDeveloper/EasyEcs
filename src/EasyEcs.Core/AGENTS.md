@@ -354,6 +354,13 @@ VectorLoops/Interleaved.cs      the deinterleaving loads / interleaving stores o
 VectorLoops/LaneMath.cs         lane functions of generated vector loops .NET has no vector form of: the quotient of
                                 int / uint lanes through doubles (exact), FloatMode.Fast's Log10 / Sinh / Cosh / Tanh / Pow of floats;
                                 each at Vector<T>, Vector512 and Vector128 (with AVX: 4 lanes as one Vector256 of doubles)
+VectorLoops/LaneMath.PerLane.cs LaneMath.PerLane: math with no vector form (or none bit-exact) called once per lane inside a
+                                vector loop, each lane the scalar function's bits (Of<TFunction, TVector>, one struct per function)
+VectorLoops/RandomLanes.cs      EntityRandom's draws in generated vector loops: the run's ids read as 8-byte lanes in
+                                place (Ids; a partial vector's copied), EntityRandom's hash in 64-bit lanes, Bits / Float /
+                                Range at Vector512, Vector256 and Vector128 (TVector picks), bit for bit with the scalar draw
+VectorLoops/TableLanes.cs       a uniform table of up to 16 values read at a lane index: Load (a column of the elements' field
+                                into the vectors it fills, once per run), Pick (VPERMD over 16 or 8, a shuffle per vector of 4)
 VectorLoops/Lanes.cs            Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress,
                                 AVX2 permutation table, 128-bit byte shuffle: NEON TBL / PSHUFB, picked at run time), for
                                 batch methods, Emit and CollectIds; Lanes.Selection: a mask to row numbers over it (the one

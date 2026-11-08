@@ -255,7 +255,15 @@ Kernel/Kernel.cs    a per-entity [ForEach] method as a Vector<T> loop (enums as 
                     wins from its arms' masks, the lanes no arm matches sent to the method; a switch statement's
                     sections under the lanes their first matching label takes, the default section's wherever
                     it stands), their reasons (a subject no lane holds, a list pattern, a switch over a call on
-                    a struct: the split), and the inliner's lowering of a switch statement that returns
+                    a struct: the split), and the inliner's lowering of a switch statement that returns;
+                    Kernel/Kernel.Random.cs: EntityRandom draws of the row's entity (Bits, Float, Chance, Range; the
+                    instance form and the static one over a uniform seed and tick, a uniform stream) as RandomLanes calls
+                    of the loop's width, an int Range's lanes with max < min sent to the method;
+                    Kernel/Kernel.Tables.cs: a uniform [InlineArray] of at most 16 elements of 4-byte lanes read at an
+                    int of the row (a column per field loaded once per run, TableLanes.Pick per read, an index outside
+                    sent to the method);
+                    Kernel/Kernel.PerLane.cs: math with no vector form (or none bit-exact) as LaneMath.PerLane calls,
+                    behind the gate of PerLaneWork vector operations per call (SimdMode.Require opens it)
 Kernel/Recorder.cs  what this assembly records for the generators of assemblies referencing it (source output,
                     one file per source file): [assembly: ConstructorFields] per public constructor
                     of a public struct (the member each parameter sets, or the reason), [assembly: InlineBody]
