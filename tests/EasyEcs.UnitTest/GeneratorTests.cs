@@ -349,7 +349,9 @@ public class GeneratorTests
         Assert.That(generated.Contains("global::EasyEcs.IForEachMasked<") && generated.Contains("ulong pass, "), Is.EqualTo(vectorized), generated); // a parallel method walks masked words too (ForEachMaskedParallel)
         if (parallel && vectorized) Assert.That(generated, Does.Contain("world.ForEachMaskedParallel<"), generated);
 
-        // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop.
+        // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop, except
+        // where the wide gate alone kept its rows (the Five cases): Require opens the forms the gate refuses.
+        if (!vectorized && members.Contains("ref Five ")) return;
         string required = members.Replace("[ForEach]", "[ForEach(SimdMode = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(SimdMode = SimdMode.Require, Parallel").Replace("[ForEach(FloatMode", "[ForEach(SimdMode = SimdMode.Require, FloatMode");
         var errors = Diagnose(Components, Lanes, $"[EcsSystem] public ref struct S {{ {required} }}").Result;
         Assert.That(errors.Contains("EECS056"), Is.EqualTo(!vectorized), string.Join(", ", errors));
@@ -493,7 +495,6 @@ public class GeneratorTests
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.Clone(); }", "it calls 'e.Clone()': a vector loop applies one Set, Remove, Disable, Enable or Destroy of one component to the rows it marks")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(Entity e, in F f) { if (f.V < 0) e.SetH(1); if (f.V > 5) System.Console.WriteLine(); }", "it calls Console.WriteLine, which is defined in another assembly, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, which cannot change structure during the pass; move that branch into a [ForEach] method of its own")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require, Parallel = true)] static void A(ref F f, in B8 b) => f.V++;", "lane types byte and float differ in size: a vector loop takes lanes of one size and of twice that size, not 4 times; widen the byte to 2-byte lanes, or split the method so each takes lanes of one size")]
-    [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref Five t) => t.A++;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, Scratch<int> s) => f.V += s.Value;", "it takes a Scratch<Int32>: working memory a row at a time, not one per lane")]
     [TestCase("public struct Aim : IComponent { public EntityId Target; } [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in Aim a, Lookup<D> d) { if (d.Has(a.Target)) f.V = 1; }", "it reads Lookup<D>, whose fields are not all lanes of 4 bytes (float, int, uint): a vector loop gathers only those")]
     [TestCase("[ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in Link l, Lookup<Owned> o) { if (o.TryFind(l.Target, out var e)) f.V = 1; }", "it probes an index ('o.TryFind(l.Target, out var e)'): a key probe has no vector form; a vector loop reads other entities only at an EntityId")]
@@ -664,7 +665,7 @@ public class GeneratorTests
     public void AWideComponentsLanesAreGatheredByPermutesAndTableLookups()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Unit u) => u.Speed = System.MathF.Max(u.Speed * 0.5f - 1, 0); }"),
+            "[EcsSystem] public ref struct S { [ForEach] static void A(ref Unit u) => u.Speed = System.MathF.Max(u.Speed * 0.5f - 1, 0); }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -687,7 +688,7 @@ public class GeneratorTests
     public void AWideComponentsHeavyMathTakesAvx2sPermutes()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Unit u) => u.Speed = System.MathF.Sqrt(System.MathF.Abs(u.Speed * 0.5f - 1)); }"),
+            "[EcsSystem] public ref struct S { [ForEach] static void A(ref Unit u) => u.Speed = System.MathF.Sqrt(System.MathF.Abs(u.Speed * 0.5f - 1)); }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -704,7 +705,7 @@ public class GeneratorTests
     public void AWideComponentOfEightByteWordsIsGatheredByEightLanePermutes()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Probe p) { p.X = p.X - p.P * 0.25 + System.Math.Sqrt(System.Math.Abs(p.Q)); p.Q = System.Math.Min(p.Q + p.X * p.P, 10) * 0.5 - p.Q / 3; } }"),
+            "[EcsSystem] public ref struct S { [ForEach] static void A(ref Probe p) { p.X = p.X - p.P * 0.25 + System.Math.Sqrt(System.Math.Abs(p.Q)); p.Q = System.Math.Min(p.Q + p.X * p.P, 10) * 0.5 - p.Q / 3; } }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
@@ -715,6 +716,25 @@ public class GeneratorTests
             .And.Contain("A: vector (Vector512 or Vector<double> of 256 bits)"), generated);
     }
 
+    // SimdMode.Require opens the wide forms the gate refuses (as it asks for a Lookup's gathers, D131): the gate's
+    // reason under Auto, every form under Require, which KernelBenchmark's Brake pair measures.
+    [Test]
+    public void ARequiredWideComponentTakesTheFormsTheGateRefuses()
+    {
+        string Generated(string attribute)
+        {
+            Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+                $"[EcsSystem] public ref struct S {{ {attribute} static void A(ref Five t) => t.A++; }}"), out var output, out _);
+            Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+            return output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        }
+        Assert.That(Analyze([Components, Lanes, "[EcsSystem] public ref struct S { [ForEach] static void A(ref Five t) => t.A++; }"]).Result
+            .Where(d => d.Id == "EECS055").Select(d => d.GetMessage()).Single(), Does.EndWith("component Five has 5 fields (a vector loop splits up to 4), and gathering the 1 field it uses takes 9 permutes per 16 rows, more than its 1 vector operation gains; it uses 1 of Five's 5 fields (A): move it into a component of its own (a component of one field gets a vector loop)"));
+        Assert.That(Generated("[ForEach]"), Does.Not.Contain("PermuteVar16x32x2(").And.Not.Contain("IsWideAccelerated"));
+        Assert.That(Generated("[ForEach(SimdMode = SimdMode.Require)]"), Does.Contain("PermuteVar16x32x2(")
+            .And.Contain("__Interleaved.IsWideAccelerated"));
+    }
+
     // A form that does not pay is not written: 16 words a row put each field of a 128-bit vector's 4 rows in 4 vectors,
     // and the table lookups cost more than the method's operations gain at 4 lanes, while AVX-512's permutes pay (two
     // fields: a third would take its loop past the locals a runner inlines, ScalarLoopsNameTheirReason).
@@ -722,7 +742,7 @@ public class GeneratorTests
     public void AWideFormThatDoesNotPayIsLeftOut()
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
-            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref Sixteen r, in G g) { r.F0 = r.F0 - r.F15 * g.Pull; r.F15 = System.MathF.Min(r.F15 + r.F0, 10) * 0.5f + g.Pull * g.Pull; } }"),
+            "[EcsSystem] public ref struct S { [ForEach] static void A(ref Sixteen r, in G g) { r.F0 = r.F0 - r.F15 * g.Pull; r.F15 = System.MathF.Min(r.F15 + r.F0, 10) * 0.5f + g.Pull * g.Pull; } }"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);

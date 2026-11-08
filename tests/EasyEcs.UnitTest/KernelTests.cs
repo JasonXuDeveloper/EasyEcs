@@ -897,6 +897,14 @@ public static class WideKernels
         r.Q = MathF.Min(r.Q + r.X, 10) * 0.5f + l.Value * l.Value;
     }
 
+    // Brake with every wide form opened where the gate refuses some (ARM64's table lookups): SimdMode.Require.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void BrakeForced(ref Rig8 r, in Level l)
+    {
+        r.X = r.X - r.P * l.Value;
+        r.Q = MathF.Min(r.Q + r.X, 10) * 0.5f + l.Value * l.Value;
+    }
+
     [ForEach]
     internal static void Haul(ref Rig16 r, in Level l)
     {
@@ -1361,6 +1369,10 @@ public class KernelTests
             WideKernels.Coast, (ref Slim s, ref Level l) => WideKernels.Coast(ref s, in l));
         Check(count, (r, i) => new Rig8(NextFloat(r, i), 1, 2, NextFloat(r, i + 1), 4, 5, 6, NextFloat(r, i + 2)), NextLevel,
             WideKernels.Brake, (ref Rig8 g, ref Level l) => WideKernels.Brake(ref g, in l));
+        Check(count, (r, i) => new Rig8(NextFloat(r, i), 1, 2, NextFloat(r, i + 1), 4, 5, 6, NextFloat(r, i + 2)), NextLevel,
+            WideKernels.BrakeForced, (ref Rig8 g, ref Level l) => WideKernels.BrakeForced(ref g, in l));
+        CheckHoles(count, i => i % 3 == 1, (r, i) => new Rig8(NextFloat(r, i), 1, 2, NextFloat(r, i + 1), 4, 5, 6, NextFloat(r, i + 2)), NextLevel,
+            WideKernels.BrakeForced, (ref Rig8 g, ref Level l) => WideKernels.BrakeForced(ref g, in l));
         Check(count, (r, i) => new Rig16(NextFloat(r, i), 1, 2, 3, 4, NextFloat(r, i + 1), 6, 7, 8, 9, 10, 11, 12, 13, 14, NextFloat(r, i + 2)), NextLevel,
             WideKernels.Haul, (ref Rig16 g, ref Level l) => WideKernels.Haul(ref g, in l));
         CheckHoles(count, i => i % 5 == 3, (r, i) => new Rig16(NextFloat(r, i), 1, 2, 3, 4, NextFloat(r, i + 1), 6, 7, 8, 9, 10, 11, 12, 13, 14, NextFloat(r, i + 2)), NextLevel,
