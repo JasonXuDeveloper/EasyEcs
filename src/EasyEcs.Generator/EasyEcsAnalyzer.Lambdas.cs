@@ -42,6 +42,17 @@ public static partial class EasyEcsAnalyzer
         "qualifies). This lambda takes components of plain values but misses one of those: the message names the first.",
         helpLinkUri: Help("EECS097"));
 
+    public static readonly DiagnosticDescriptor ElementLoopJob = new("EECS133", "An IForSpan job that is one loop over its elements",
+        "This ParallelFor's job {0} is one loop over its chunk, which runs one element at a time: as a lambda pass, world.ParallelFor(ref items, values..., static (ref {1} item, ...) => ...), the generator writes the job with a vector loop over each chunk",
+        Category, DiagnosticSeverity.Warning, true,
+        "world.ParallelFor(ref items, ref job) runs an IForSpan<T> job's Execute on each chunk of a buffer's elements. A job " +
+        "whose Execute is one plain loop over its chunk (foreach (ref T x in items), or for (int i = 0; i < items.Length; " +
+        "i++) reading items[i]) computes the method for one element on each: the lambda pass world.ParallelFor(ref items, " +
+        "values..., static (ref T item, ...) => ...) is that method, and the generator writes its job with a vector loop over " +
+        "each chunk (the element's fields as lanes), on the same runner. Reported only when the rewritten call gets that " +
+        "loop; the fix writes it: the job's fields the loop reads become the values before the lambda, their initializers " +
+        "at the call, and the job's declaration goes.", helpLinkUri: Help("EECS133"));
+
     /// <summary>EECS095's property: the values a capturing lambda reads, passed before it by the fix (names, comma-separated).</summary>
     public const string CapturedValues = "CapturedValues";
 
@@ -51,6 +62,16 @@ public static partial class EasyEcsAnalyzer
     private static void AnalyzeLambdaPass(OperationAnalysisContext context)
     {
         var invocation = (IInvocationOperation)context.Operation;
+        // EECS133: a ParallelFor job that is one element loop, whose lambda pass gets a vector loop (LambdaPass.FromJob checks
+        // the rewrite in a copy of the compilation). The fix replaces the call and removes the job's declaration.
+        if (invocation.TargetMethod is { Name: LambdaPass.ParallelFor, TypeArguments.Length: 2 } forSpan && LambdaPass.FromJob(invocation, context.CancellationToken) is { } rewrite)
+        {
+            var properties = ImmutableDictionary<string, string?>.Empty.Add("Title", "Write the job as a lambda pass")
+                .Add("Replace", rewrite.Text).Add("Remove", "");
+            context.ReportDiagnostic(Diagnostic.Create(ElementLoopJob, invocation.Syntax.GetLocation(), new[] { rewrite.Declaration.GetLocation() }, properties,
+                forSpan.TypeArguments[1].Name, forSpan.TypeArguments[0].ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)));
+            return;
+        }
         if (invocation.TargetMethod.Name is not (LambdaPass.ForEach or LambdaPass.ForEachParallel or LambdaPass.ParallelFor) || LambdaPass.Read(invocation) is not { } call
             || invocation.SemanticModel is not { } model)
             return;
@@ -120,7 +141,7 @@ public static partial class EasyEcsAnalyzer
 public sealed class LambdaPassAnalyzer : EasyEcsAnalyzer.Area
 {
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics { get; } = ImmutableArray.Create(
-        EasyEcsAnalyzer.BadLambdaPass, EasyEcsAnalyzer.DelegateLambdaPass, EasyEcsAnalyzer.ScalarLambdaPass,
+        EasyEcsAnalyzer.BadLambdaPass, EasyEcsAnalyzer.DelegateLambdaPass, EasyEcsAnalyzer.ScalarLambdaPass, EasyEcsAnalyzer.ElementLoopJob,
         EasyEcsAnalyzer.NeverMatches);
 
     protected override void Register(AnalysisContext context) => EasyEcsAnalyzer.InitializeLambdas(context);

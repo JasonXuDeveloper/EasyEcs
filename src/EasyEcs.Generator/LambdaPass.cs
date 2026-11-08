@@ -300,4 +300,174 @@ internal static class LambdaPass
         var span = location.GetLineSpan();
         return $"{System.IO.Path.GetFileName(span.Path)}({span.StartLinePosition.Line + 1},{span.StartLinePosition.Character + 1})";
     }
+
+    // ---------------- an IForSpan job that is one element loop, as the lambda pass (EECS133) ----------------
+
+    /// <summary>
+    /// <c>world.ParallelFor(ref items, ref job)</c> written as the lambda pass the generator gives a vector loop:
+    /// <paramref name="Text"/> replaces the call, and <paramref name="Declaration"/>, the job's declaration right before
+    /// it, goes.
+    /// </summary>
+    public sealed record JobRewrite(string Text, LocalDeclarationStatementSyntax Declaration);
+
+    /// <summary>
+    /// The lambda pass a ParallelFor over a buffer's elements with an <c>IForSpan&lt;T&gt;</c> job becomes, or null
+    /// unless the rewrite is mechanical and gets a vector loop: the job is a struct of this compilation built in the
+    /// statement right before the call (<c>var job = new J { F = e };</c>, the local used nowhere else), its Execute is one
+    /// loop over its chunk (<c>foreach (ref T x in items)</c>, or <c>for (int i = 0; i &lt; items.Length; i++)</c> reading
+    /// the chunk only at <c>items[i]</c>, <c>start</c> unused), reading the job's fields without writing them or using the
+    /// job otherwise. The fields it reads become the lambda's values (their initializers at the call, <c>default</c> for
+    /// the others), its loop's body the lambda's; the rewritten call, bound in a copy of the compilation, must be one the
+    /// generator compiles (<see cref="Problem"/>, <see cref="Unreachable(Call, SemanticModel, System.Threading.CancellationToken)"/>)
+    /// with a vector loop (<see cref="Kernel.VectorizeElements"/>), as HandSimd's forms are checked.
+    /// </summary>
+    public static JobRewrite? FromJob(IInvocationOperation operation, System.Threading.CancellationToken ct)
+    {
+        var target = operation.TargetMethod;
+        if (target is not { Name: ParallelFor, TypeArguments.Length: 2, Parameters.Length: 3 } || target.Parameters[1].RefKind != RefKind.Ref
+            || !Symbols.Named(target.ContainingType, Symbols.World) || operation.SemanticModel is not { } model
+            || operation.Syntax is not InvocationExpressionSyntax { ArgumentList.Arguments.Count: 2 } invocation
+            || invocation.Parent is not ExpressionStatementSyntax { Parent: BlockSyntax block } statement)
+            return null;
+        var (element, job) = (target.TypeArguments[0], target.TypeArguments[1] as INamedTypeSymbol);
+        // The job's local, declared by the statement right before the call and named nowhere else.
+        int at = block.Statements.IndexOf(statement);
+        if (operation.Arguments.FirstOrDefault(a => a.Parameter?.Ordinal == 1)?.Value is not ILocalReferenceOperation { Local: var local }
+            || job is not { TypeKind: TypeKind.Struct, IsGenericType: false } || at < 1
+            || block.Statements[at - 1] is not LocalDeclarationStatementSyntax { Declaration.Variables: [{ Initializer.Value: var created } declarator] } declaration
+            || !SymbolEqualityComparer.Default.Equals(model.GetDeclaredSymbol(declarator, ct), local)
+            || block.DescendantNodes().OfType<IdentifierNameSyntax>().Count(n => n.Identifier.ValueText == local.Name
+                && SymbolEqualityComparer.Default.Equals(model.GetSymbolInfo(n, ct).Symbol, local)) != 1)
+            return null;
+        var initialized = new Dictionary<string, ExpressionSyntax>();
+        switch (created)
+        {
+            case BaseObjectCreationExpressionSyntax { ArgumentList.Arguments.Count: > 0 }: return null;
+            case BaseObjectCreationExpressionSyntax creation:
+                foreach (var e in creation.Initializer?.Expressions ?? default)
+                {
+                    if (e is not AssignmentExpressionSyntax { Left: IdentifierNameSyntax field, Right: var value }) return null;
+                    initialized[field.Identifier.ValueText] = value;
+                }
+                break;
+            case DefaultExpressionSyntax or LiteralExpressionSyntax { RawKind: (int)SyntaxKind.DefaultLiteralExpression }: break;
+            default: return null;
+        }
+        // Execute: one loop over the chunk.
+        var execute = job.GetMembers("Execute").OfType<IMethodSymbol>().SingleOrDefault(m => m.Parameters.Length == 2);
+        if (execute is not { DeclaringSyntaxReferences: [var reference] } || reference.GetSyntax(ct) is not MethodDeclarationSyntax { Body.Statements: [var loop] } method
+            || job.DeclaringSyntaxReferences.Length != 1)
+            return null;
+        var jobModel = model.Compilation.GetSemanticModel(method.SyntaxTree);
+        var (startParameter, items) = (execute.Parameters[0], execute.Parameters[1]);
+        string elementName;
+        StatementSyntax body;
+        var replace = new Dictionary<SyntaxNode, string>();
+        if (loop is ForEachStatementSyntax { Expression: IdentifierNameSyntax over } each
+            && SymbolEqualityComparer.Default.Equals(jobModel.GetSymbolInfo(over, ct).Symbol, items))
+            (elementName, body) = (each.Identifier.ValueText, each.Statement);
+        else if (loop is ForStatementSyntax
+                 {
+                     Declaration.Variables: [{ Initializer.Value: LiteralExpressionSyntax { Token.ValueText: "0" } } counter],
+                     Condition: BinaryExpressionSyntax { RawKind: (int)SyntaxKind.LessThanExpression, Left: IdentifierNameSyntax tested, Right: MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax bounded, Name.Identifier.ValueText: "Length" } },
+                     Incrementors: [PostfixUnaryExpressionSyntax or PrefixUnaryExpressionSyntax],
+                 } walk
+                 && tested.Identifier.ValueText == counter.Identifier.ValueText && SymbolEqualityComparer.Default.Equals(jobModel.GetSymbolInfo(bounded, ct).Symbol, items))
+        {
+            var index = jobModel.GetDeclaredSymbol(counter, ct);
+            body = walk.Statement;
+            elementName = Fresh("item", body, null);
+            foreach (var name in body.DescendantNodes().OfType<IdentifierNameSyntax>().Where(n => SymbolEqualityComparer.Default.Equals(jobModel.GetSymbolInfo(n, ct).Symbol, index)))
+            {
+                if (name.Parent is not ArgumentSyntax { Parent: BracketedArgumentListSyntax { Arguments.Count: 1, Parent: ElementAccessExpressionSyntax { Expression: IdentifierNameSyntax indexed } access } }
+                    || !SymbolEqualityComparer.Default.Equals(jobModel.GetSymbolInfo(indexed, ct).Symbol, items))
+                    return null; // the counter as a value, or the index of something else
+                replace[access] = elementName;
+            }
+        }
+        else return null;
+        // What else the body names: the chunk only through the loop, never the start; the job's fields read, never written.
+        var reads = new List<IFieldSymbol>();
+        foreach (var node in body.DescendantNodesAndSelf())
+        {
+            // A jump leaves the loop or Execute (break, return), or needs the loop (continue): the lambda's body is one
+            // element, where each means something else or does not compile.
+            if (node is ThisExpressionSyntax or BaseExpressionSyntax or ReturnStatementSyntax or BreakStatementSyntax
+                or ContinueStatementSyntax or GotoStatementSyntax or YieldStatementSyntax) return null;
+            if (node is not IdentifierNameSyntax name || replace.Keys.Any(r => r.Span.Contains(name.Span))) continue;
+            var symbol = jobModel.GetSymbolInfo(name, ct).Symbol;
+            if (SymbolEqualityComparer.Default.Equals(symbol, items) || SymbolEqualityComparer.Default.Equals(symbol, startParameter)) return null;
+            if (symbol is IMethodSymbol or IPropertySymbol { IsStatic: false } && SymbolEqualityComparer.Default.Equals(symbol.ContainingType, job)) return null;
+            if (symbol is not IFieldSymbol { IsStatic: false } field || !SymbolEqualityComparer.Default.Equals(field.ContainingType, job)) continue;
+            if (jobModel.GetOperation(name, ct) is { } use && Uses.MayWrite(use)) return null;
+            if (field.DeclaringSyntaxReferences.Any(r => r.GetSyntax(ct) is VariableDeclaratorSyntax { Initializer: not null })) return null;
+            if (!reads.Contains(field, SymbolEqualityComparer.Default)) reads.Add(field);
+        }
+        if (reads.Count > ArityGenerator.MaxLambdaValues || initialized.Keys.Any(k => !reads.Any(f => f.Name == k) && !IsPure(initialized[k]))) return null;
+        // The lambda: the element by ref, then each field read as a value, named after it.
+        var taken = new HashSet<string> { elementName };
+        var parameters = new List<string> { $"ref {element.ToMinimalDisplayString(model, invocation.SpanStart)} {elementName}" };
+        var values = new List<string>();
+        foreach (var field in reads)
+        {
+            string name = Fresh(char.ToLowerInvariant(field.Name[0]) + field.Name.Substring(1), body, taken);
+            taken.Add(name);
+            string type = field.Type.ToMinimalDisplayString(model, invocation.SpanStart);
+            parameters.Add($"{type} {name}");
+            values.Add(initialized.TryGetValue(field.Name, out var value) ? value.WithoutTrivia().ToString() : $"default({type})");
+            foreach (var use in body.DescendantNodes().OfType<IdentifierNameSyntax>().Where(n => SymbolEqualityComparer.Default.Equals(jobModel.GetSymbolInfo(n, ct).Symbol, field)))
+                replace[use] = name;
+        }
+        string lambdaBody = Reindent(body.ReplaceNodes(replace.Keys, (old, _) => SyntaxFactory.IdentifierName(replace[old]).WithTriviaFrom(old)), statement);
+        var receiver = ((MemberAccessExpressionSyntax)invocation.Expression).Expression.WithoutTrivia();
+        string text = $"{receiver}.ParallelFor({invocation.ArgumentList.Arguments[0].WithoutTrivia()}{string.Concat(values.Select(v => ", " + v))}, static ({string.Join(", ", parameters)}) => {lambdaBody})";
+
+        // The check: the call rewritten in a copy of the compilation is a lambda pass with a vector loop.
+        var tree = invocation.SyntaxTree;
+        var root = tree.GetRoot(ct);
+        var annotation = new SyntaxAnnotation();
+        if (SyntaxFactory.ParseExpression(text) is not InvocationExpressionSyntax rewritten || rewritten.ContainsDiagnostics) return null;
+        var newRoot = root.TrackNodes(invocation, declaration);
+        newRoot = newRoot.ReplaceNode(newRoot.GetCurrentNode(invocation)!, rewritten.WithAdditionalAnnotations(annotation));
+        newRoot = newRoot.RemoveNode(newRoot.GetCurrentNode(declaration)!, SyntaxRemoveOptions.KeepNoTrivia)!;
+        var copy = model.Compilation.ReplaceSyntaxTree(tree, tree.WithRootAndOptions(newRoot, tree.Options));
+        var newTree = copy.SyntaxTrees.First(t => t.FilePath == tree.FilePath && t.GetRoot(ct).GetAnnotatedNodes(annotation).Any());
+        var copyModel = copy.GetSemanticModel(newTree);
+        var placed = newTree.GetRoot(ct).GetAnnotatedNodes(annotation).First();
+        if (copyModel.GetDiagnostics(placed.Span, ct).Any(d => d.Severity == DiagnosticSeverity.Error)) return null;
+        if (copyModel.GetOperation(placed, ct) is not IInvocationOperation call
+            || Read(call) is not { Function: not null, Lambda: not null } pass || Problem(pass, copyModel, ct, out _) != null || Unreachable(pass, copyModel, ct) != null
+            || Kernel.VectorizeElements(pass.Lambda, pass.Function, copyModel, ct, out _) == null)
+            return null;
+        return new JobRewrite(text, declaration);
+
+        // A name the body does not use yet.
+        static string Fresh(string name, SyntaxNode body, HashSet<string>? taken)
+        {
+            var used = new HashSet<string>(body.DescendantTokens().Where(t => t.IsKind(SyntaxKind.IdentifierToken)).Select(t => t.ValueText));
+            string fresh = name;
+            for (int k = 2; used.Contains(fresh) || taken?.Contains(fresh) == true || SyntaxFacts.GetKeywordKind(fresh) != SyntaxKind.None; k++) fresh = name + k.ToString(CultureInfo.InvariantCulture);
+            return fresh;
+        }
+    }
+
+    /// <summary>An initializer whose value the rewrite may drop (a field the loop never reads): a literal, a name or a member access.</summary>
+    private static bool IsPure(ExpressionSyntax value) => value is LiteralExpressionSyntax or IdentifierNameSyntax or MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax };
+
+    /// <summary>
+    /// <paramref name="body"/> (a block, or one statement made a block) as the lambda's body at <paramref name="at"/>'s
+    /// indentation: its lines moved by the difference between its own indentation and the statement's.
+    /// </summary>
+    private static string Reindent(StatementSyntax body, StatementSyntax at)
+    {
+        string Indent(SyntaxNode node) => string.Concat(node.GetLeadingTrivia().Reverse().TakeWhile(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).Select(t => t.ToFullString()));
+        string target = Indent(at);
+        if (body is not BlockSyntax block)
+            return "{ " + body.WithoutTrivia() + " }";
+        string own = string.Concat(block.OpenBraceToken.LeadingTrivia.Reverse().TakeWhile(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).Select(t => t.ToFullString()));
+        var lines = block.WithoutTrivia().ToFullString().Replace("\r\n", "\n").Split('\n');
+        for (int i = 1; i < lines.Length; i++)
+            lines[i] = lines[i].StartsWith(own, System.StringComparison.Ordinal) ? target + lines[i].Substring(own.Length) : lines[i];
+        return string.Join("\n", lines);
+    }
 }
