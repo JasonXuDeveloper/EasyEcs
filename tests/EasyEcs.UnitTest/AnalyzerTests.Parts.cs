@@ -104,4 +104,13 @@ public partial class AnalyzerTests
     public async Task AnAccumulatedKeptRowFitsItsSetup() =>
         Assert.That((await GeneratorTests.Analyze(["[Accumulate] public partial record struct Rec(EntityId Who, [MinBy] int Score) : ISingletonComponent;"]))
             .Where(d => d.Id.StartsWith("EECS") || d.Severity == DiagnosticSeverity.Error), Is.Empty);
+
+    // Each setup attribute on a type it fits: no EECS068.
+    [TestCase("public partial record struct Z([GroupBy] int Id) : IComponent;")]
+    [TestCase("[WhenTargetDestroyed(TargetPolicy.Remove)] public partial record struct W([LookupKey] EntityId Id) : IComponent;")]
+    [TestCase("[NotSaved] public record struct N(int O) : IComponent;")]
+    [TestCase("[NotSaved] public record struct N(int O) : ISingletonComponent;")]
+    [TestCase("[Accumulate, Sum] public partial record struct A(int N) : ISingletonComponent;")]
+    public async Task AWorldSetupOnATypeItFitsIsNotReported(string source) =>
+        Assert.That((await Analyze([source])).Where(d => d.Id == "EECS068" || d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
 }

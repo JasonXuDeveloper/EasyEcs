@@ -1109,6 +1109,88 @@ public class GeneratorTests
         Assert.That(GeneratorCorpus.Findings(generated).Select(d => d.ToString()), Is.Empty);
     }
 
+    /// <summary>
+    /// The samples, the template and the live demo compile with the generators' output, and the analyzer has nothing to
+    /// say about them, Info included (a build shows no Info): they are what users copy, so they are written as users
+    /// should. The projects are compiled as their .csproj builds them (implicit usings, nullable, a referenced project
+    /// as a reference); the Godot sample is left out, its code needs the Godot SDK.
+    /// </summary>
+    [TestCase("samples/HelloWorld"), TestCase("samples/GameLoop"), TestCase("samples/SaveLoad"), TestCase("samples/MultiWorld")]
+    [TestCase("samples/Actors"), TestCase("samples/VoxelServer"), TestCase("samples/HotReload/HotReload.Contracts")]
+    [TestCase("samples/HotReload/HotReload.Plugin", "samples/HotReload/HotReload.Contracts")]
+    [TestCase("samples/HotReload/HotReload.Host", "samples/HotReload/HotReload.Contracts")]
+    [TestCase("templates/EasyEcs.Templates/content/easyecs"), TestCase("demo/EasyEcs.Demo")]
+    public void SamplesAreClean(string project, params string[] references)
+    {
+        var findings = SampleFindings(project, [], references);
+        var known = KnownSampleFindings.Where(k => k.File.StartsWith(project + "/", System.StringComparison.Ordinal)).ToArray();
+        bool Known(string finding, (string File, string Id, string Item) k) => finding.StartsWith(k.File + "(", System.StringComparison.Ordinal) && finding.Contains(" " + k.Id + ":");
+        Assert.That(findings.Where(f => !known.Any(k => Known(f, k))), Is.Empty);
+        foreach (var k in known)
+            Assert.That(findings.Any(f => Known(f, k)), $"{k.File} no longer reports {k.Id}: remove it from KnownSampleFindings ({k.Item})");
+    }
+
+    // The tracked exceptions, each with the backlog item that removes it (audit-analyzer: never a filter exception but a
+    // tracked, temporary one). The test fails when one stops reporting, so the list cannot go stale.
+    static readonly (string File, string Id, string Item)[] KnownSampleFindings =
+    [
+        ("samples/Actors/Host/Storage.cs", "EECS109", "A2: Storage.Save as a [Drain] method, or EECS109 Info with its reason"),
+        ("samples/VoxelServer/Systems/Replication.cs", "EECS109", "A2: SendPackets as a [Drain] method"),
+        ("samples/VoxelServer/Systems/Replication.cs", "EECS086", "A2: the exemplar pass's [Accumulate] totals"),
+        ("samples/VoxelServer/Systems/Zombies.cs", "EECS107", "A2's exemplar pass: Pick as a pair method"),
+    ];
+
+    // The negative control: a method the analyzer reports, put into a sample, is found (the walk of the sample's files,
+    // the generators and the analyzer all ran).
+    [Test]
+    public void SamplesAreCleanFindsAMistake() =>
+        Assert.That(SampleFindings("samples/HelloWorld", ["""
+            public struct Dent : EasyEcs.IComponent { public int V; }
+            [EasyEcs.EcsSystem] public ref struct DentSystem { [EasyEcs.ForEach] static void Read(ref Dent d) { _ = d.V; } }
+            """], []), Has.Some.StartsWith("File").And.Some.Contains("EECS025"));
+
+    /// <summary>The analyzer's findings over the project at <paramref name="project"/> (a path from the repository's root) and <paramref name="extra"/> sources.</summary>
+    static string[] SampleFindings(string project, string[] extra, string[] references)
+    {
+        var refs = SampleReferences.AddRange(references.Select(r => SampleCompilation(r, [], SampleReferences).ToMetadataReference()));
+        var compilation = SampleCompilation(project, extra, refs);
+        CSharpGeneratorDriver.Create([new ArityGenerator().AsSourceGenerator(), new SystemGenerator().AsSourceGenerator(), new ComponentGenerator().AsSourceGenerator(),
+                new PartGenerator().AsSourceGenerator(), new ViewGenerator().AsSourceGenerator(), new PrefabGenerator().AsSourceGenerator()], parseOptions: Parse)
+            .RunGeneratorsAndUpdateCompilation(compilation, out var generated, out _);
+        return [.. generated.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()),
+            .. GeneratorCorpus.Findings(generated).Select(d => d.ToString())];
+    }
+
+    // The framework, EasyEcs.Core and what it brings to a project that references it (Nino, for saves).
+    static readonly ImmutableArray<MetadataReference> SampleReferences = GeneratorCorpus.References().AddRange(
+        System.IO.Directory.GetFiles(System.IO.Path.GetDirectoryName(typeof(World).Assembly.Location)!, "Nino*.dll")
+            .Select(p => (MetadataReference)MetadataReference.CreateFromFile(p)));
+
+    // A sample project's files as its .csproj compiles them: every .cs below it but obj/, bin/ and the folders of
+    // projects of their own (a .csproj below it), the implicit usings of the SDK, an executable when it has Program.cs.
+    static CSharpCompilation SampleCompilation(string project, string[] extra, ImmutableArray<MetadataReference> references)
+    {
+        var root = new System.IO.DirectoryInfo(TestContext.CurrentContext.TestDirectory);
+        while (!System.IO.File.Exists(System.IO.Path.Combine(root.FullName, "EasyEcs.slnx"))) root = root.Parent!;
+        string dir = System.IO.Path.Combine(root.FullName, project);
+        var nested = System.IO.Directory.GetFiles(dir, "*.csproj", System.IO.SearchOption.AllDirectories)
+            .Select(System.IO.Path.GetDirectoryName).Where(d => d != dir).ToArray();
+        var files = System.IO.Directory.GetFiles(dir, "*.cs", System.IO.SearchOption.AllDirectories)
+            .Where(f => !f.Contains($"{System.IO.Path.DirectorySeparatorChar}obj{System.IO.Path.DirectorySeparatorChar}")
+                && !f.Contains($"{System.IO.Path.DirectorySeparatorChar}bin{System.IO.Path.DirectorySeparatorChar}")
+                && !nested.Any(n => f.StartsWith(n + System.IO.Path.DirectorySeparatorChar)))
+            .OrderBy(f => f, System.StringComparer.Ordinal).ToArray();
+        const string usings = "global using System; global using System.Collections.Generic; global using System.IO; global using System.Linq;"
+            + " global using System.Net.Http; global using System.Threading; global using System.Threading.Tasks;";
+        var trees = files.Select(f => CSharpSyntaxTree.ParseText(System.IO.File.ReadAllText(f), Parse, path: System.IO.Path.GetRelativePath(root.FullName, f)))
+            .Append(CSharpSyntaxTree.ParseText(usings, Parse, path: "GlobalUsings.g.cs"))
+            .Concat(extra.Select((s, i) => CSharpSyntaxTree.ParseText(s, Parse, path: $"File{i}.cs")));
+        bool exe = files.Any(f => System.IO.Path.GetFileName(f) == "Program.cs");
+        return CSharpCompilation.Create(System.IO.Path.GetFileName(dir), trees, references,
+            new CSharpCompilationOptions(exe ? OutputKind.ConsoleApplication : OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true,
+                nullableContextOptions: NullableContextOptions.Enable));
+    }
+
     // Skipped by the generator == reported: a method the analyzer rejects gets no job.
     [TestCase("[ForEach(Slices = 0)] static void A(ref P p) { }")]                                    // EECS035
     [TestCase("[ForEach(ChunkSize = 64)] static void A(ref P p) { }")]                                // EECS054: not parallel

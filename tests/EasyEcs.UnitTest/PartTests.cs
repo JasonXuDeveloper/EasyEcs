@@ -102,6 +102,7 @@ public partial class PartTests
     [TestCase("file partial struct Census : ISingletonComponent { [Sum] public int Alive; }", "EECS062")]
     [TestCase("public partial struct Census : ISingletonComponent { [Sum] public int Alive; public static Census Identity => default; }", "EECS063")]
     [TestCase("public partial struct Census : ISingletonComponent { [Sum] public int Alive; public static Census Combine(Census a, Census b) => a; }", "EECS063")]
+    [TestCase("public partial class Outer { public partial struct Census : ISingletonComponent { [Sum] public int Alive; public static Census Identity => default; } }", "EECS063")] // nested
     [TestCase("public partial struct Census : ISingletonComponent { [Sum] public int Alive; public int Dead; }", "EECS064")]               // no attribute
     [TestCase("public partial struct Census : ISingletonComponent { [Sum] public bool Alive; }", "EECS064")]                            // a bool summed
     [TestCase("public partial struct Census : ISingletonComponent { [Any] public int Alive; }", "EECS064")]                             // an int or-ed
@@ -155,6 +156,10 @@ public partial class PartTests
         "public partial struct M : global::EasyEcs.IIndexed<int>", "int global::EasyEcs.IIndexed<int>.Key => N;")]
     [TestCase("public partial struct M : IComponent { int n; [LookupKey] public int Doubled => n * 2; }",
         "public partial struct M : global::EasyEcs.IIndexed<int>", "int global::EasyEcs.IIndexed<int>.Key => Doubled;")]  // a computed member, named
+    [TestCase("public partial record struct K([LookupKey] EntityId Key) : IComponent;",
+        "public partial record struct K : global::EasyEcs.IIndexed<global::EasyEcs.EntityId>", "IIndexed<global::EasyEcs.EntityId>.Key => Key;")] // the key named Key
+    [TestCase("public partial struct K : IComponent { [UniqueKey] public int Key { get; set; } }",
+        "public partial struct K : global::EasyEcs.IUniqueIndexed<int>", "IIndexed<int>.Key => Key;")]                       // a property named Key
     [TestCase("public partial struct R : IComponent, IIndexed<EntityId> { [LookupKey] public EntityId Target; }",
         "public partial struct R\n", "EntityId global::EasyEcs.IIndexed<global::EasyEcs.EntityId>.Key")]                        // the user's interface brings it
     [TestCase("public partial struct U : IComponent, IIndexed<int> { [UniqueKey] public int N; }",
@@ -447,6 +452,15 @@ public partial class PartTests
     }
 
     /// <summary>A shape member written by hand and set by [Tile]: EECS124 at the member (the part, and with it ITile, is not written).</summary>
+    // EECS104's edges kept: a radix key alone, three float axes, a vector, an interval and margin in range.
+    [TestCase("public partial struct O : IComponent { [OrderBy] public int A; }")]
+    [TestCase("public partial struct O : IComponent { [OrderBy] public long A; }")]
+    [TestCase("public partial struct O : IComponent { public float X, Y, Z; [OrderBy(nameof(X), nameof(Y), nameof(Z))] public int A; }")]
+    [TestCase("public partial struct O : IComponent { public System.Numerics.Vector3 V; [OrderBy(nameof(V))] public int A; }")]
+    [TestCase("public partial struct O : IComponent { [OrderBy(Interval = 1, Margin = 0)] public int A; }")]
+    public async Task OrdersThePartKeepsAreNotReported(string source) =>
+        Assert.That(await Ids(source), Does.Not.Contain("EECS104"));
+
     [Test]
     public async Task AShapeMemberWrittenTwiceIsReported()
     {

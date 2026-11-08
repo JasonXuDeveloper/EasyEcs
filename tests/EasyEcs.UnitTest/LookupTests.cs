@@ -60,7 +60,7 @@ public class LookupTests
             found.Followers = follows.Count(found.Id);
     }
 
-    /// <summary>The lookup reaches TryFind through a helper: the method has no index for it.</summary>
+    /// <summary>The lookup reaches TryFind through a helper of its own type: the pass builds the index for it.</summary>
     [EcsSystem]
     public ref struct FindThroughHelper
     {
@@ -68,6 +68,21 @@ public class LookupTests
         static void Find(ref Found found, Lookup<Follows> follows) => found.Followers = Has(follows, found.Id) ? 1 : 0;
 
         private static bool Has(Lookup<Follows> follows, EntityId target) => follows.TryFind(target, out _);
+    }
+
+    /// <summary>The lookup reaches TryFind through a method of another type, which the generator does not read: no index.</summary>
+    [EcsSystem]
+    public ref struct FindThroughAnotherType
+    {
+#pragma warning disable EECS132 // the throw this test checks
+        [ForEach]
+        static void Find(ref Found found, Lookup<Follows> follows) => found.Followers = FollowFinder.Has(follows, found.Id) ? 1 : 0;
+#pragma warning restore EECS132
+    }
+
+    private static class FollowFinder
+    {
+        public static bool Has(Lookup<Follows> follows, EntityId target) => follows.TryFind(target, out _);
     }
 
     [Test]
@@ -308,8 +323,21 @@ public class LookupTests
     {
         using var world = new World();
         world.CreateEntity(new Found());
-        world.AddSystem<FindThroughHelper>();
+        world.AddSystem<FindThroughAnotherType>();
         Assert.Throws<InvalidOperationException>(() => world.Update());
+    }
+
+    // Locality phase 0's pitfall: a key probe in a helper of the method's own type threw "index not prepared".
+    [Test]
+    public void AKeyLookupThroughAHelperOfItsTypeFinds()
+    {
+        using var world = new World();
+        var leader = world.CreateEntity(new Found());
+        leader.Found = new Found(leader.Id, 0);
+        world.CreateEntity(new Follows(leader.Id));
+        world.AddSystem<FindThroughHelper>();
+        world.Update();
+        Assert.That(leader.Found.Followers, Is.EqualTo(1));
     }
 
     [Test]

@@ -174,6 +174,8 @@ public class FormTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(System.Span<P> p, ref Peak k) => k.High += p.Length; }")]          // a batch
     [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(in P p, ref Peak k, in Peak last) => k.High += p.V; }")]          // another access
     [TestCase("public static class H { [EntityMethod] static void A(in P p, ref Peak k) => k.High += p.V; }")]                          // one entity
+    [TestCase("[EcsSystem] public ref struct S { [ForEach, Consume] static void A(in Link l, ref Peak k, World w) { if (w.TryGetEntity(l.Target, out var t)) { t.Destroy(); k.High++; } } }")] // structural: one thread anyway
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, in P p, ref Peak k) { k.High += p.V; if (p.V < 0) e.Destroy(); } }")] // the row's own entity
     public async Task OtherSingletonWritesAreLeftAlone(string source) =>
         Assert.That(await Hand(source, "EECS086"), Is.Empty);
 

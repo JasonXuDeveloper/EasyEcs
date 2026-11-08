@@ -302,6 +302,36 @@ public class CodeFixTests
     [TestCase("EECS017", "Store its EntityId",
         "public struct Target : IComponent { public Entity Of; }\npublic static class U { public static bool F(Entity e, Entity other) { e.Set(new Target { Of = other }); return e.Read<Target>().Of.Id == other.Id; } }",
         "public struct Target : IComponent { public EntityId Of; }")]
+    [TestCase("EECS035", "Remove Slices",
+        "[EcsSystem] public ref struct S { [ForEach(Slices = 0)] static void A(ref P p) => p.V++; }",
+        "[ForEach] static void A(ref P p)")]
+    [TestCase("EECS035", "Remove Slices",
+        "[EcsSystem] public ref struct S { [ForEach(Slices = 2), Changed<T>] static void A(in T t, ref P p) => p.V = t.V; }",
+        "[ForEach, Changed<T>] static void A")]
+    [TestCase("EECS118", "Remove MaxRows",
+        "[EcsSystem] public ref struct S { [ForEach(MaxRows = 4, Parallel = true)] static void A(ref P p) => p.V++; }",
+        "[ForEach(Parallel = true)] static void A")]
+    [TestCase("EECS118", "Remove MaxRows",
+        "[EcsSystem] public ref struct S { [ForEach(MaxRows = -1)] static void A(ref P p) => p.V++; }",
+        "[ForEach] static void A")]
+    [TestCase("EECS024", "Move it into the type as a static method",
+        "[EcsSystem] public ref struct S\n{\n    static void OnUpdate(World world)\n    {\n        [ForEach] static void Grow(ref P p) => p.V++;\n    }\n}",
+        "    static void OnUpdate(World world)\n    {\n    }\n    [ForEach] static void Grow(ref P p) => p.V++;\n}")]
+    [TestCase("EECS024", "Move it into the type as a static method",
+        "public static class U { public static void M() { [EntityMethod] void Bump(ref P p, int by) => p.V += by; } }",
+        "[EntityMethod] static void Bump(ref P p, int by) => p.V += by;")]
+    [TestCase("EECS129", "Take it with GetOrAddClock()",
+        "public static class U { public static void F(World w) { w.AddSingleton<Clock>(); w.AddSingleton<Clock>().Ticks = 2; } }",
+        "{ w.AddSingleton<Clock>(); w.GetOrAddClock().Ticks = 2; }")]
+    [TestCase("EECS129", "Take it with GetOrAddClock()",
+        "[EcsSystem] public ref struct S { static void OnUpdate(World world) => world.AddSingleton<Clock>(); }",
+        "static void OnUpdate(World world) => world.GetOrAddClock(); }")]
+    [TestCase("EECS131", "Clear it at the start of the row",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<System.Collections.Generic.List<int>> s)\n    {\n        var list = s.Value ??= new();\n        for (int i = 0; i < p.V; i++) list.Add(i);\n        p.V = list.Count;\n    }\n}",
+        "        var list = s.Value ??= new();\n        list.Clear();\n        for (int i = 0; i < p.V; i++) list.Add(i);\n")]
+    [TestCase("EECS131", "Clear it at the start of the row",
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Scratch<System.Collections.Generic.List<int>> s)\n    {\n        s.Value ??= new();\n        s.Value.Add(p.V);\n        p.V = s.Value.Count;\n    }\n}",
+        "        s.Value ??= new();\n        s.Value?.Clear();\n        s.Value.Add(p.V);\n")]
     [TestCase("EECS043", "Implement it explicitly",
         "public readonly record struct Shop(long Id) : IComponent, IIndexed<Shop> { public Shop Key => this; }",
         "{ Shop IIndexed<Shop>.Key => this; }")]
@@ -676,6 +706,10 @@ public class CodeFixTests
     [TestCase("EECS116", AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct Step { [ForEach] static void A(Tile<byte, G> t, Mut<DynamicBuffer<NB>> next) { t.ExchangeHalo(); var into = next.Write().AsSpan(); var also = next.Write().AsSpan(); foreach (var row in t.Rows()) into[row.Index] = also[0]; } }" + "\n[EcsSystem] public ref struct Commit { [ForEach] static void A(in DynamicBuffer<NB> next, Mut<DynamicBuffer<byte>> cells) => next.AsReadOnlySpan().CopyTo(System.Runtime.InteropServices.MemoryMarshal.Cast<byte, NB>(cells.Write().AsSpan())); }")] // the buffer twice
     [TestCase("EECS117", AnalyzerTests.TileParts + "\n[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, N> t) { t.ExchangeHalo(); foreach (var row in t.Rows()) { var c = t.At(row); var into = t.Write(row); "
                          + "for (int x = 0; x < 4; x++) into[x] = (byte)System.Math.Min(c[x, 0, 0], c[x - 1, 0, 0] + 1); } } }")] // a key with a string: no colors
+    [TestCase("EECS024", "public static class U { public static void M(int k) { [ForEach] void Local(ref P p) => p.V += k; } }")]                 // it captures k
+    [TestCase("EECS024", "public static class U { public static void M() { [ForEach] static void Local(ref P p) => p.V++; } static void Local() { } }")] // the name is taken
+    [TestCase("EECS024", "public class C { public void M() { [ForEach] static void Local(ref P p) => p.V++; } }")]                                 // no type for a [ForEach] method
+    [TestCase("EECS129", "public static class U { public static void F(World w) { w.AddSingleton<Clock>(); w.AddSingleton<Clock>(); } }", "Take it with GetOrAddSingleton<Clock>()")]
     public async Task OffersNoFixThatBreaksTheCode(string id, string source, string only = null)
     {
         var document = Document(Data + source);
@@ -893,6 +927,25 @@ public class CodeFixTests
         var text = (await fixedDocument.GetTextAsync()).ToString();
         Assert.That(text, Does.Contain("w.SetEntityRandom(1);"));
         Assert.That((await fixedDocument.Project.GetCompilationAsync())!.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, text);
+    }
+
+    // A [ForEach] method called by its bare name inside its own type binds to the method itself (CS7036 with two
+    // components, CS1620 with one ref component): the fix qualifies the call by the type, where it binds to the generated entry point.
+    [TestCase("public static partial class Crowd { [ForEach] public static void Separate(ref P p, in Q q) => p.V += q.V; public static void Run(World w) => Separate(w); }", "CS7036")]
+    [TestCase("public static partial class Crowd { [ForEach] public static void Separate(ref P p) => p.V++; public static void Run(World w) { Separate(w); } }", "CS1620")]
+    public async Task QualifiesABareCallOfAnEntryPoint(string source, string id)
+    {
+        var document = Document(Data + source, generate: true);
+        var compiled = (await document.Project.GetCompilationAsync())!.GetDiagnostics();
+        var actions = new List<CodeAction>();
+        foreach (var diagnostic in compiled.Where(d => d.Id == id).Take(1))
+            await new EasyEcsCodeFixes().RegisterCodeFixesAsync(new CodeFixContext(document, diagnostic, (a, _) => actions.Add(a), CancellationToken.None));
+        Assert.That(actions.Select(a => a.Title), Is.EqualTo(new[] { "Call its entry point: Crowd.Separate" }), string.Join("\n", compiled));
+        var operation = (await actions[0].GetOperationsAsync(CancellationToken.None)).OfType<ApplyChangesOperation>().Single();
+        var text = (await operation.ChangedSolution.GetDocument(document.Id)!.GetTextAsync()).ToString();
+        Assert.That(text, Does.Contain("Crowd.Separate(w)"));
+        Assert.That((await operation.ChangedSolution.GetDocument(document.Id)!.Project.GetCompilationAsync())!.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, text);
     }
 
     // Two fixes of one kind in a row: the second runs on the tree the first rewrote (a marker the first left there

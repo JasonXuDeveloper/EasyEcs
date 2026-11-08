@@ -436,6 +436,7 @@ public class MaxRowsTests
     [TestCase("[EcsSystem] public ref struct S { [ForEach(MaxRows = 4, Slices = 2)] static void A(ref P p) { } }", "it visits a slice of its rows")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(MaxRows = 4), Changed<T>] static void A(ref P p) { } }", "selects rows by change tick")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(MaxRows = 4, SimdMode = SimdMode.Require)] static void A(ref P p) { } }", "SimdMode.Require")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(MaxRows = 4, FusionMode = FusionMode.Require)] static void A(ref P p) { } }", "FusionMode.Require: the collected rows run apart from any walk: drop MaxRows or FusionMode.Require")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(MaxRows = 4)] static void A(System.Span<P> p) { } }", "a run of rows")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(MaxRows = 4)] static void A(ref P p, Maybe<Q> q) { } }", "a Maybe")]
     [TestCase("[EcsSystem] public ref struct S { [ForEach(MaxRows = 4)] static void A(Mut<T> t) { } }", "a Mut")]

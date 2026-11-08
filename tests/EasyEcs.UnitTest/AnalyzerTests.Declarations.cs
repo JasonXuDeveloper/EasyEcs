@@ -403,6 +403,21 @@ public partial class AnalyzerTests
         Assert.That(diagnostics, Is.Empty);
     }
 
+    // A runner method whose own parameters are its entry point's (its components given by filters) hides the entry point
+    // only where it is accessible: a private one is invisible outside its type, where callers bind the entry point.
+    [Test]
+    public void APrivateRunnerMethodDoesNotCollideWithItsOwnEntryPoint()
+    {
+        Assert.That(Diagnose(Components, """
+            public static partial class R { [ForEach, With<P>] static void Tick(World w, int n) { } }
+            public static class Use { public static void Run(World w) => R.Tick(w, 3); }
+            """).Result, Is.Empty);
+        Assert.That(Diagnose(Components, "public static partial class R { [ForEach, With<P>] public static void Tick(World w, int n) { } }").Result,
+            Is.EqualTo(new[] { "EECS021" }));
+        Assert.That(Diagnose(Components, "public static partial class R { [ForEach, With<P>] internal static void Tick(World w, int n) { } }").Result,
+            Is.EqualTo(new[] { "EECS021" }));
+    }
+
     [Test]
     public void OverloadedRunnersWithOneEntryPointAreReported()
     {
@@ -442,4 +457,22 @@ public partial class AnalyzerTests
         Assert.That(await off.GetAnalyzerDiagnosticsAsync(), Is.Empty);
         Assert.That((await off.GetAnalyzerTelemetryInfoAsync(reporting[0], default)).OperationActionsCount, Is.Zero, "the analyzer did not run");
     }
+
+    private const string Sum = "public struct Sum : ISingletonComponent, IReduction<Sum> { public int N; public static Sum Identity => default; public static Sum Combine(Sum a, Sum b) => new() { N = a.N + b.N }; } ";
+
+    // Rules with few cases, at their edges (audit-analyzer: generic, partial and nested types, ref locals): each reports
+    // its own id once.
+    [TestCase("[EcsSystem] public ref struct S<X> where X : struct, IComponent { [ForEach] static void A<T>(ref X x) { } }", "EECS004")]   // a generic system's generic method
+    [TestCase("public struct Bag : IComponent { public int[] Items; } [EcsSystem] public ref struct S { [ForEach] static void A(ref Bag bag, Scratch<int[]> work) { ref var w = ref work.Value; w ??= new int[8]; bag.Items = w; } }", "EECS058")] // through a ref local
+    [TestCase(Sum + "public static partial class R { [ForEach] static void A(in P p, ref Reduce<Sum> a, ref Sum s) { a.Value.N += p.V; s.N++; } }", "EECS057")] // a partial runner
+    [TestCase(Sum + "public partial class Outer { [EcsSystem] public ref partial struct S { [ForEach] static void A(in P p, ref Reduce<Sum> a, ref Reduce<Sum> b) { a.Value.N += p.V; b.Value.N++; } } }", "EECS057")] // nested, partial
+    [TestCase("public record struct H(int V); [EcsSystem] public ref struct S<X> where X : struct, IComponent { [ForEach] static void A(in X x, Emit<H> a, Emit<H> b) { a.Add(new H(1)); b.Add(new H(2)); } }", "EECS070")] // a generic system
+    public async Task ThinRulesReportAtTheirEdges(string source, string id) => await AssertReports(id, Components, source);
+
+    [TestCase("public static partial class R { [ForEach] public static void A<X>(ref P p) where X : struct { } }")]                      // a runner's generic method: its caller gives X
+    [TestCase("[EcsSystem] public ref struct S<X> where X : struct, IComponent { [ForEach] static void A(ref X x) { } }")]               // a generic system
+    [TestCase("public struct Bag : IComponent { public int[] Items; } [EcsSystem] public ref struct S { [ForEach] static void A(ref Bag bag, Scratch<int[]> work) { work.Value ??= new int[8]; work.Value[0] = bag.Items.Length; } }")] // scratch used locally
+    [TestCase("public record struct H(int V); public record struct I(int V); [EcsSystem] public ref struct S { [ForEach] static void A(in P p, Emit<H> a, Emit<I> b) { a.Add(new H(1)); b.Add(new I(2)); } }")] // two record types
+    [TestCase(Sum + "[EcsSystem] public ref partial struct S { [ForEach] static void A(in P p, ref Reduce<Sum> a) => a.Value.N += p.V; }")] // one reduction
+    public async Task ThinRulesLeaveTheirEdgesAlone(string source) => await AssertClean(Components, source);
 }
