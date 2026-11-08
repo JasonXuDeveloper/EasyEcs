@@ -89,7 +89,7 @@ internal static class TileWalk
 /// </summary>
 /// <typeparam name="TCell">The cell.</typeparam>
 /// <typeparam name="TTile">The tile's shape.</typeparam>
-/// <typeparam name="TGrid">The grid's tile component (<typeparamref name="TTile"/> itself, unless the shape is <see cref="Columns{TTile}"/> of it).</typeparam>
+/// <typeparam name="TGrid">The grid's tile component (<typeparamref name="TTile"/> itself, unless the shape is <see cref="Ground{TTile}"/> of it).</typeparam>
 /// <typeparam name="TKey">The grid's key.</typeparam>
 /// <typeparam name="TColors">
 /// The method's colors, generated per method (its type keys the state in each world): one for a Jacobi step.

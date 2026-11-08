@@ -165,7 +165,7 @@ public struct TileNeighbors
 
     /// <summary>
     /// The neighbors of <paramref name="entity"/> in grid <typeparamref name="TGrid"/> of shape
-    /// <typeparamref name="TShape"/>'s faces and neighborhood (the grid's component, or <see cref="Columns{TTile}"/> of
+    /// <typeparamref name="TShape"/>'s faces and neighborhood (the grid's component, or <see cref="Ground{TTile}"/> of
     /// it), found in <paramref name="index"/> (its built value index, <see cref="LookupExtensions.Prepared{T, TKey}"/>):
     /// one index lookup per neighbor. Generated code calls this; compiled on its own, for the shape.
     /// </summary>
@@ -374,7 +374,7 @@ internal struct TileSources<TCell>
 /// Valid for the call it is passed to (a ref struct).
 /// </summary>
 /// <typeparam name="TCell">The cell: the element of the entity's <c>DynamicBuffer&lt;TCell&gt;</c>.</typeparam>
-/// <typeparam name="TTile">The tile's shape: the component that places the entity in the grid, or <see cref="Columns{TTile}"/> of it.</typeparam>
+/// <typeparam name="TTile">The tile's shape: the component that places the entity in the grid, or <see cref="Ground{TTile}"/> of it.</typeparam>
 public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
 {
     private readonly Entity _entity;
@@ -1022,13 +1022,13 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
 }
 
 /// <summary>
-/// The columns of a tile: a tile of one layer, Width × Depth, on the grid of <typeparamref name="TTile"/> (a tile of
+/// The ground of a tile: a tile of one layer, Width × Depth, on the grid of <typeparamref name="TTile"/> (a tile of
 /// several layers), with its sides as faces, its halo, neighborhood and boundary. A second field on the same entities
-/// and keys: <c>Tile&lt;Scent, Columns&lt;Chunk&gt;&gt;</c> is a chunk's ground beside the
+/// and keys: <c>Tile&lt;Scent, Ground&lt;Chunk&gt;&gt;</c> is a chunk's ground beside the
 /// <c>Tile&lt;Water, Chunk&gt;</c> of its blocks, its cells a <c>DynamicBuffer&lt;Scent&gt;</c> of Width × Depth.
 /// </summary>
 /// <typeparam name="TTile">The grid's tile component.</typeparam>
-public readonly struct Columns<TTile> : ITileShape where TTile : struct, ITileShape
+public readonly struct Ground<TTile> : ITileShape where TTile : struct, ITileShape
 {
     /// <inheritdoc cref="ITileShape.Width"/>
     public static int Width => TTile.Width;
@@ -1289,10 +1289,10 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
     /// <paramref name="step"/> is not 1 to Width.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public TileColumnWalk<TCell, TTile> Columns(int step)
+    public TileColumns<TCell, TTile> Columns(int step)
     {
         if ((uint)(step - 1) >= (uint)TTile.Width) TileLayout.ThrowStep(step);
-        return new TileColumnWalk<TCell, TTile>(ref _at, step);
+        return new TileColumns<TCell, TTile>(ref _at, step);
     }
 
     /// <summary>
@@ -1325,13 +1325,13 @@ public readonly ref struct TileCursor<TCell, TTile> where TCell : unmanaged wher
 /// </summary>
 /// <typeparam name="TCell">The cell.</typeparam>
 /// <typeparam name="TTile">The tile's component and shape.</typeparam>
-public ref struct TileColumnWalk<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
+public ref struct TileColumns<TCell, TTile> where TCell : unmanaged where TTile : struct, ITileShape
 {
     private readonly ref TCell _row;
     private readonly int _step, _last;
     private int _x;
 
-    internal TileColumnWalk(ref TCell row, int step)
+    internal TileColumns(ref TCell row, int step)
     {
         _row = ref row;
         _step = step;
@@ -1340,7 +1340,7 @@ public ref struct TileColumnWalk<TCell, TTile> where TCell : unmanaged where TTi
     }
 
     /// <summary>Itself: <c>foreach</c> walks it.</summary>
-    public readonly TileColumnWalk<TCell, TTile> GetEnumerator() => this;
+    public readonly TileColumns<TCell, TTile> GetEnumerator() => this;
 
     /// <summary>The column the walk is at.</summary>
     public readonly Cursor Current

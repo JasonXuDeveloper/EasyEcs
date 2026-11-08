@@ -591,7 +591,7 @@ public partial class TileTests
         }
     }
 
-    // A 2D tile over a 3D grid: the ground's heat (Columns<Chunk>) beside the chunk's rocks (a 3D tile), one key.
+    // A 2D tile over a 3D grid: the ground's heat (Ground<Chunk>) beside the chunk's rocks (a 3D tile), one key.
 
     public record struct RockChunk(TilePos Pos) : IComponent, ITile<TilePos>
     {
@@ -609,7 +609,7 @@ public partial class TileTests
     public ref struct GroundHeatSystem
     {
         [ForEach(Parallel = true, ChunkSize = 2)]
-        static void Diffuse(ref Tile<Heat, Columns<RockChunk>> heat, Tile<Rock, RockChunk> rocks)
+        static void Diffuse(ref Tile<Heat, Ground<RockChunk>> heat, Tile<Rock, RockChunk> rocks)
         {
             heat.ExchangeHalo();
             rocks.ExchangeHalo(3, 3, mask: false);

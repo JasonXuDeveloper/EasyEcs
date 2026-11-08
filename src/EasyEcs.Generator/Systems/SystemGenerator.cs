@@ -1272,7 +1272,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <param name="Grid">A Tile's tile component (its key is <paramref name="Key"/>), else "".</param>
     /// <param name="Fields">A view's component fields, in declaration order (empty for any other parameter).</param>
     /// <param name="Accumulates">A Reduce&lt;T&gt; of a singleton declared [Accumulate]: the pass's result is combined into the world's value.</param>
-    /// <param name="Shape">A Tile's shape (its grid's component, or Columns&lt;T&gt; of it), else "".</param>
+    /// <param name="Shape">A Tile's shape (its grid's component, or Ground&lt;T&gt; of it), else "".</param>
     /// <param name="Colors">
     /// A stepping tile's (<c>ref Tile</c>) colors: "" for Jacobi; for [GaussSeidel], the parity of the key's sum and
     /// the bits of its fields' parities, as expressions over <c>key</c>, then the field count ("sum;bits;n").

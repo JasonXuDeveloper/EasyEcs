@@ -1515,7 +1515,7 @@ public partial class TileTests
     public ref struct MineralReadSystem
     {
         [ForEach] static void Read(Tile<Mineral, MineralChunk> minerals, ref MineralProbe probe) => probe.Value += minerals.Cells.Length;
-        [ForEach] static void ReadTop(Tile<Mineral, Columns<MineralChunk>> top, ref MineralProbe probe) => probe.Value -= top.Cells.Length;
+        [ForEach] static void ReadTop(Tile<Mineral, Ground<MineralChunk>> top, ref MineralProbe probe) => probe.Value -= top.Cells.Length;
     }
 
     public struct MineralProbe : IComponent { public int Value; }
@@ -1525,7 +1525,7 @@ public partial class TileTests
     {
         // Nothing ran the system: the generated module initializer raised the pool when the assembly loaded.
         Assert.That(DynamicBuffer<Mineral>.MaxPooledLength, Is.EqualTo(32 * 32 * 8));
-        TileCells.Pool<Mineral, Columns<MineralChunk>>(); // a smaller shape never lowers it
+        TileCells.Pool<Mineral, Ground<MineralChunk>>(); // a smaller shape never lowers it
         Assert.That(DynamicBuffer<Mineral>.MaxPooledLength, Is.EqualTo(32 * 32 * 8));
 
         // FillPool then hands out lists of a whole chunk.

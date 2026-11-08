@@ -83,13 +83,13 @@ Entities/Prefab.cs            a recipe of component values outside any world (on
 
 ```
 Grids/Tile.cs               grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
-                            Columns<TTile> (a 2D tile of a 3D grid's key), Tile<TCell, TTile> (a [ForEach] parameter:
+                            Ground<TTile> (a 2D tile of a 3D grid's key), Tile<TCell, TTile> (a [ForEach] parameter:
                             up to 26 neighbors found by generated code, TileNeighbors; TileCells.Pool: the pool of a
                             tile's cell buffers sized from its shape when the assembly loads), ExchangeHalo into the thread's
                             TileFrame (a texture padded with the halo, a row mask per layer, the state of the tile it
                             steps), Rows (TZCNT walk; First / Last / LayerOf / RowsOf: the same walk as plain loops for generated code), At / the indexer, Write (a stepped tile's row; JacobiNext: its checks once per tile for generated code), Sweep / ColdStart (a [GaussSeidel]
                             step's sweep count, its cells started from a value: TileFrame.ColdStart), TileCursor.Load128 / 256 / 512,
-                            TileCursor.Columns (TileColumnWalk and its Cursor: a row's columns, loads at constant
+                            TileCursor.Columns (TileColumns and its Cursor: a row's columns, loads at constant
                             offsets of the column and Store into the row the step writes, checked once for the walk),
                             ChangedEdges / Facing (sleeping tiles written by hand); Plane (a 2D cell pass's halo read
                             in place, out of line as the exchange) and TileLayout.Any (its row masks without a copy)
