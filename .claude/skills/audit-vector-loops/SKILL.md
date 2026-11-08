@@ -43,7 +43,9 @@ form to it):
 
 | Form | x86 | ARM64 today | ARM64 path to add |
 |---|---|---|---|
-| Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`), `Lanes.Bits`, `Emit.AddLanes` | vector | vector (`Vector<T>` is 128-bit) | none needed |
+| Plain vector loop (`Vector<T>`, Vector512 block where AVX-512), masked tail, narrow and mixed lanes, math lowerings (`LaneMath`, `LaneMath.PerLane`), `Lanes.Bits`, `Emit.AddLanes` | vector | vector (`Vector<T>` is 128-bit) | none needed |
+| EntityRandom draws (`RandomLanes`: six 8-byte multiplies per lane, `RandomLanes.IsAccelerated` = vectors of 256 bits and up) | vector (AVX2, AVX-512; rows under SSE alone) | rows (two lanes of emulated multiplies per 128 bits lose to the scalar draw: EntityRandomBenchmark under `DOTNET_EnableAVX=0`) | owner's M4 run of EntityRandomBenchmark to confirm the gate |
+| Tables at a lane index (`TableLanes.Pick`: AVX-512 / AVX2 VPERMD, `Vector128.Shuffle`) | vector | vector (`Vector128.Shuffle`: TBL) | owner's M4 run of KernelBenchmark SteerTable |
 | Components of several fields, `Vector2/3/4` (`Interleaved`: AVX2 / AVX-512 shuffles, NEON LD2-4 / ST2-4) | vector | vector | none needed |
 | Narrow lanes' masks of a word (`Interleaved.Lanes8` / `Lanes16`: the word's bits spread by a multiply per ulong) | vector | vector (`Vector<T>` of 128 bits: 2 ulongs) | none needed |
 | Wide components (`Kernel.Wide`: AVX-512 two-source permutes; ARM64 NEON TBL / TBX, `Interleaved.Pick` / `PickInto`) | vector on AVX-512 | vector where its own gate pays ("(Vector512 only)" otherwise) | M4 numbers to check the gate's cost model |
@@ -188,8 +190,15 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   part of every per-chunk result and of the marked rows: a pass hands its job the rows in table order (the masked walk
   hands a run of whole words to the job before the word after it, `MaskedRuns`), and a test of a vector form with a
   structural change or a record compares the order of the rows against its scalar twin, in tables with presence holes
-  (StructuralLoopTests.AMaskedWordAfterARunKeepsTheRowOrder). `EntityRandom` has no vector form yet (64-bit Mix lanes: `docs/plans/backlog.md` G5): its draws keep
-  the method scalar.
+  (StructuralLoopTests.AMaskedWordAfterARunKeepsTheRowOrder). `EntityRandom` draws of the row's entity
+  (`random.X(entity.Id, stream, ...)` and the static form over a uniform seed and tick, the stream uniform) are lanes
+  (Kernel/Kernel.Random.cs over Core's `RandomLanes`: the ids read as 8-byte lanes from the run's slots, the hash in
+  64-bit lanes, narrowed to the method's lanes): `Bits` in 8-byte lanes, `Float` / `Chance` / `Range(float)` /
+  `Range(int)` in 4-byte ones; an int `Range` whose bounds are not constants bails the lanes where max < min (the
+  method throws there). The loop runs where vectors hold 256 bits or more (`Code.Draws`, `RandomLanes.IsAccelerated`):
+  at 128 bits two lanes of emulated 64-bit multiplies were 1.25 times as slow as the scalar draw (EntityRandomBenchmark
+  under `DOTNET_EnableAVX=0`), at 256 already faster. Proof: EntityRandomTests bit for bit against SimdMode.Off (holes,
+  versions above 1, parallel chunks); a draw of another entity or a varying stream keeps its reason.
 - **Conditions**: `if` / `else` chains, nested ifs, early `return` (a mask of rows still running), ternaries, `&&`,
   `||`, `!`, comparisons across fields of several components and singletons, `Math.Min` / `Max` / `Abs` / `Clamp`,
   the saturating and narrow-lane idioms. `++` / `--` used as a value (`if (--t.Ticks <= 0)`, a timer; `Kernel.Step`):
@@ -246,8 +255,18 @@ changes nothing and cannot fail:
   precision (`LaneMath`; `Log2(x) * c` was 3.4 ulps off, `Pow(x, -2)` is `(1 / x)^2`: `1 / (x * x)` broke the bound
   where `x * x` is subnormal). The exhaustive sweeps (`LaneMathTests`, category `Exhaustive`) take about 8 minutes in
   Release on 4 cores and far longer in Debug: run them with `-c Release` after any change to a lowering (D127). Never:
-  functions .NET has no vector form for, written as our own polynomials (`Atan2`, `Cbrt`, general `Pow`). Uniform
-  arguments already need none of this: the scalar call runs once per pass.
+  functions .NET has no vector form for, written as our own polynomials (`Atan2`, `Cbrt`, general `Pow`). Instead
+  they, and the approximate ones without FloatMode.Fast, run once per lane inside the loop (`LaneMath.PerLane`,
+  Kernel/Kernel.PerLane.cs: the scalar function's bits) when the body does at least `Kernel.PerLaneWork` vector
+  operations per call (the gate; `SimdMode.Require` opens it; KernelBenchmark's Aim / Bearing / Sway pairs set the
+  number); a lighter body stays as written and its reason names the functions and the fix. Uniform arguments already
+  need none of this: the scalar call runs once per pass.
+- **Tables at a lane index**: a uniform `[InlineArray]` of at most 16 elements of 4-byte lanes read at an int of the
+  row (`waypoints.Points[goal.Waypoint]`, Kernel/Kernel.Tables.cs): a column per field loaded once per run
+  (`TableLanes.Load`, a setup line), one permute per vector of the column per read (`TableLanes.Pick`: VPERMD over 16
+  or 8 values, `Vector128.Shuffle` per vector of 4: PSHUFB / TBL), the lanes whose index is outside the table sent
+  to the method (it throws). Proof: InlineArrayTests bit for bit and the throwing index, KernelBenchmark SteerTable,
+  BattleServer's Steer. More than 16 elements, 8-byte lanes or an element of mixed sizes keep the reason.
 
 ## Reasons users can fix
 

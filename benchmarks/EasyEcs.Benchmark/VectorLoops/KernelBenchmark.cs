@@ -15,7 +15,10 @@ namespace EasyEcs.Benchmark;
 /// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data; <c>StepHelpers</c> is the
 /// same method written through helpers it calls, inlined into its vector loop: Kernel.Inlining.cs); <c>Integrate</c> and
 /// <c>Count</c> stream memory (one float multiply-add, one int increment per row); <c>Expire</c> is a timer (<c>--</c> as the
-/// value tested) and <c>Survey</c> running totals kept in a singleton taken by ref, each against its twin with
+/// value tested), <c>Survey</c> running totals kept in a singleton taken by ref, <c>SteerTable</c> a singleton's table of
+/// eight waypoints read at the row's index (BattleServer's Steer: a permute per field) and <c>Aim</c> / <c>Bearing</c> /
+/// <c>Sway</c> math with no vector form called once per lane (an Atan2 alone, which the gate keeps as written and
+/// <c>AimForced</c> opens; an Atan2 among a direction's arithmetic; a Sin without FloatMode.Fast), each against its twin with
 /// SimdMode.Off. <c>Move2</c> / <c>Move3</c> /
 /// <c>Move4</c> (a position of 2, 3 or 4 floats moved by a velocity: each field alike, a flat loop over the columns' lanes;
 /// <c>Move2HandCast</c> is the same by hand, the columns cast to floats; <c>Push</c> is Move2 assigned whole, <c>Move2Gaps</c>
@@ -54,7 +57,7 @@ public partial class KernelBenchmark
 {
     [Params(1_000, 100_000)] public int Entities;
 
-    private World _world, _ratios, _fields, _fragments, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger, _rigs;
+    private World _world, _ratios, _fields, _fragments, _gaps, _holes, _halves, _pixels, _vectors, _calm, _hot, _craft, _ledger, _rigs, _steer;
 
     [GlobalSetup]
     public void Setup()
@@ -94,6 +97,14 @@ public partial class KernelBenchmark
                 new Mass { Value = (float)random.NextDouble() * 5 });
             if (i % 3 == 0) rig.Remove<Mass>();
         }
+
+        _steer = new World(new WorldOptions { InitialEntityCapacity = Entities });
+        ref var route = ref _steer.GetOrAddRoute8();
+        for (int k = 0; k < 8; k++) route.Points[k] = new Waypoint(k * 40 - 160, (k * 37 % 11) * 20 - 100);
+        _steer.Reserve<Spot, Leg, Heading, Facing>(Entities);
+        for (int i = 0; i < Entities; i++)
+            _steer.CreateEntity(new Spot((float)random.NextDouble() * 400 - 200, (float)random.NextDouble() * 400 - 200), new Leg(random.Next(8)),
+                new Heading((float)random.NextDouble() * 2 - 1, (float)random.NextDouble() * 2 - 1), new Facing());
 
         _pixels = new World(new WorldOptions { InitialEntityCapacity = Entities });
         _pixels.Reserve<Lum, Glow>(Entities);
@@ -239,6 +250,7 @@ public partial class KernelBenchmark
         _calm.Dispose();
         _hot.Dispose();
         _ledger.Dispose();
+        _steer.Dispose();
     }
 
     [Benchmark(Baseline = true)]
@@ -708,6 +720,45 @@ public partial class KernelBenchmark
     [Benchmark]
     public void SurveyGenerated() => Kernels.Survey(_world);
 
+    [Benchmark]
+    public void SteerTableScalar() => Kernels.SteerTableRows(_steer);
+
+    [Benchmark]
+    public void SteerTableGenerated() => Kernels.SteerTable(_steer);
+
+    [Benchmark]
+    public void AimScalar() => Kernels.AimRows(_steer);
+
+    [Benchmark]
+    public void AimGenerated() => Kernels.Aim(_steer);
+
+    [Benchmark]
+    public void AimForced() => Kernels.AimForced(_steer);
+
+    [Benchmark]
+    public void BearingScalar() => Kernels.BearingRows(_steer);
+
+    [Benchmark]
+    public void BearingGenerated() => Kernels.Bearing(_steer);
+
+    [Benchmark]
+    public void SwayScalar() => Kernels.SwayRows(_steer);
+
+    [Benchmark]
+    public void SwayGenerated() => Kernels.Sway(_steer);
+
+    public record struct Facing(float Angle) : IComponent;
+    public record struct Spot(float X, float Y) : IComponent;
+    public record struct Leg(int Waypoint) : IComponent;
+    public record struct Heading(float X, float Y) : IComponent;
+    public record struct Waypoint(float X, float Y);
+
+    /// <summary>Eight waypoints every NPC picks from by its leg: BattleServer's Steer.</summary>
+    public struct Route8 : ISingletonComponent { public Waypoints8 Points; }
+
+    [InlineArray(8)]
+    public struct Waypoints8 { private Waypoint _first; }
+
     public record struct Window(float Min, float Max) : ISingletonComponent;
 
     /// <summary>Running totals a [ForEach] method keeps in a singleton taken by ref: a count, a long sum, a maximum.</summary>
@@ -1160,6 +1211,59 @@ public partial class KernelBenchmark
             if (heat.Value > 50f) census.Hot++;
             census.Sum += ticks.Value;
             census.Peak = Math.Max(census.Peak, ticks.Value);
+        }
+
+        // Math with no vector form called once per lane (LaneMath.PerLane): Aim is the call alone (the gate keeps it as
+        // written; Forced opens it), Bearing an Atan2 among a direction's arithmetic, Sway a Sin without FloatMode.Fast.
+        [ForEach]
+        internal static void Aim(in Heading h, ref Facing f) => f = new Facing(MathF.Atan2(h.Y, h.X));
+
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void AimForced(in Heading h, ref Facing f) => f = new Facing(MathF.Atan2(h.Y, h.X));
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void AimRows(in Heading h, ref Facing f) => f = new Facing(MathF.Atan2(h.Y, h.X));
+
+        [ForEach]
+        internal static void Bearing(in Spot p, in Heading h, ref Facing f) => BearingRow(in p, in h, ref f);
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void BearingRows(in Spot p, in Heading h, ref Facing f) => BearingRow(in p, in h, ref f);
+
+        private static void BearingRow(in Spot p, in Heading h, ref Facing f)
+        {
+            float length = MathF.Sqrt(h.X * h.X + h.Y * h.Y) + 1e-3f;
+            float nx = h.X / length, ny = h.Y / length;
+            float px = p.X * 0.01f - nx, py = p.Y * 0.01f - ny;
+            float turn = (nx * px + ny * py) * 0.25f + MathF.Max(px, py) - MathF.Min(nx, ny);
+            f = new Facing(MathF.Atan2(py, px) * 0.5f + turn * turn - MathF.Abs(nx - ny) * 0.125f);
+        }
+
+        [ForEach]
+        internal static void Sway(in Spot p, in Heading h, ref Facing f) => SwayRow(in p, in h, ref f);
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void SwayRows(in Spot p, in Heading h, ref Facing f) => SwayRow(in p, in h, ref f);
+
+        private static void SwayRow(in Spot p, in Heading h, ref Facing f)
+        {
+            float phase = p.X * 0.05f + p.Y * 0.03f + h.X * 2;
+            float amplitude = MathF.Abs(h.Y) * 0.5f + 0.25f, bias = MathF.Max(p.X, p.Y) * 0.001f - MathF.Min(h.X, h.Y);
+            f = new Facing(MathF.Sin(phase) * amplitude + bias * bias - phase * 0.125f + MathF.Sqrt(amplitude + 1));
+        }
+
+        // A singleton's table of 8 waypoints read at the row's leg (BattleServer's Steer): one permute per field (Kernel.Tables.cs).
+        [ForEach]
+        internal static void SteerTable(in Spot p, in Leg leg, ref Heading v, in Route8 route) => SteerRow(in p, in leg, ref v, in route);
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void SteerTableRows(in Spot p, in Leg leg, ref Heading v, in Route8 route) => SteerRow(in p, in leg, ref v, in route);
+
+        private static void SteerRow(in Spot p, in Leg leg, ref Heading v, in Route8 route)
+        {
+            var target = route.Points[leg.Waypoint];
+            float dx = target.X - p.X, dy = target.Y - p.Y, length = MathF.Sqrt(dx * dx + dy * dy) + 1;
+            v = new Heading(dx / length * 2, dy / length * 2);
         }
 
         [ForEach(SimdMode = SimdMode.Off)]

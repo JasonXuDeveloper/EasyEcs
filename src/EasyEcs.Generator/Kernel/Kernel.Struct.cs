@@ -73,6 +73,8 @@ internal sealed partial class Kernel
             case IPropertyReferenceOperation { Property.Name: "Value", Instance: IParameterReferenceOperation { Parameter: var p } } when _optionals.TryGetValue(p, out var o):
                 Guard(o.Index); // m.Value whole: the rows must have it, as for a field of it
                 return Enumerable.Range(0, paths.Length).Select(f => _flat < 0 ? $"__q{o.Index}_{f}" : null).ToArray();
+            case IInlineArrayAccessOperation access when TableRead(access) is { } picked: // a table at a lane index: Kernel.Tables.cs
+                return picked;
             case IFieldReferenceOperation or IPropertyReferenceOperation or IParameterReferenceOperation when IsUniform(op):
             {
                 // a singleton's or a value's struct: each lane broadcast once per run

@@ -27,9 +27,9 @@ public sealed class ViewGenerator : IIncrementalGenerator
 
     /// <summary>
     /// A field of a view: its name, its component, whether the view writes it (<c>Get</c>, else <c>Read</c>), and whether
-    /// it is a <c>Mut&lt;T&gt;</c> (over the unstamped value: its writes stamp).
+    /// it is a <c>Mut&lt;T&gt;</c> (over the unstamped value: its writes stamp), and whether its component is tracked.
     /// </summary>
-    private sealed record FieldModel(string Name, string Component, bool Writes, bool Mut);
+    private sealed record FieldModel(string Name, string Component, bool Writes, bool Mut, bool Tracked);
 
     private sealed record ViewModel(string Namespace, string HintName, string FullName, string Name, string Class, bool IsPublic,
         EquatableArray<FieldModel> Fields)
@@ -40,7 +40,8 @@ public sealed class ViewGenerator : IIncrementalGenerator
             return new ViewModel(type.ContainingNamespace.IsGlobalNamespace ? "" : type.ContainingNamespace.ToDisplayString(),
                 Symbols.HintName(type), type.ToDisplayString(Symbols.Fqn), type.Name, Symbols.FlatName(type) + ComponentGenerator.Classes.Members,
                 Symbols.IsPublic(type), new EquatableArray<FieldModel>(Views.Fields(type)
-                    .Select(f => new FieldModel(Code.Escape(f.Symbol.Name), f.Component.ToDisplayString(Symbols.Fqn), f.Writes, f.Mut)).ToArray()));
+                    .Select(f => new FieldModel(Code.Escape(f.Symbol.Name), f.Component.ToDisplayString(Symbols.Fqn), f.Writes, f.Mut,
+                        Symbols.Implements(f.Component, Symbols.TrackChanges))).ToArray()));
         }
     }
 
@@ -53,7 +54,15 @@ public sealed class ViewGenerator : IIncrementalGenerator
         string build = $"new {t} {{ {string.Join(", ", m.Fields.Select(f => f.Mut
             ? $"{f.Name} = new global::EasyEcs.Mut<{f.Component}>(ref global::System.Runtime.CompilerServices.Unsafe.AsRef(in @this.Read<{f.Component}>()), @this)"
             : $"{f.Name} = ref @this.{(f.Writes ? "Get" : "Read")}<{f.Component}>()"))} }}";
-        string has = string.Join(" && ", m.Fields.Select(f => $"@this.Has<{f.Component}>()"));
+        // TryGetX finds each component once (Entity.RefOrNull: no stamp), then builds the view from what it found; a ref
+        // field of a tracked component is taken through Get, which stamps it as AsX does, once every component is there.
+        var found = new StringBuilder();
+        for (int i = 0; i < m.Fields.Length; i++)
+            found.Append($"            ref {m.Fields[i].Component} __c{i} = ref @this.RefOrNull<{m.Fields[i].Component}>();\n");
+        string missing = string.Join(" || ", m.Fields.Select((f, i) => $"global::System.Runtime.CompilerServices.Unsafe.IsNullRef(ref __c{i})"));
+        string fromFound = $"new {t} {{ {string.Join(", ", m.Fields.Select((f, i) => f.Mut
+            ? $"{f.Name} = new global::EasyEcs.Mut<{f.Component}>(ref __c{i}, @this)"
+            : f.Writes && f.Tracked ? $"{f.Name} = ref @this.Get<{f.Component}>()" : $"{f.Name} = ref __c{i}"))} }}";
         string tracked = m.Fields.Any(f => f.Writes && !f.Mut)
             ? " The tracked components of its <c>ref</c> fields are stamped as changed, as <c>Get</c> stamps them; its <c>Mut</c> fields stamp when written."
             : m.Fields.Any(f => f.Mut) ? " Its <c>Mut</c> fields stamp the tracked components they write." : "";
@@ -64,8 +73,9 @@ public sealed class ViewGenerator : IIncrementalGenerator
         sb.Append($"        public {t} As{m.Name}() => {build};\n\n");
         sb.Append($"        /// <summary>The view <see cref=\"{cref}\"/> over the entity's components if it has every one (else false and a default view).{tracked} O({m.Fields.Length}). Owner thread only.</summary>\n");
         sb.Append($"        public bool TryGet{m.Name}(out {t} view)\n        {{\n");
-        sb.Append($"            if (!({has}))\n            {{\n                view = default;\n                return false;\n            }}\n\n");
-        sb.Append($"            view = {build};\n            return true;\n        }}\n");
+        sb.Append(found);
+        sb.Append($"            if ({missing})\n            {{\n                view = default;\n                return false;\n            }}\n\n");
+        sb.Append($"            view = {fromFound};\n            return true;\n        }}\n");
         sb.Append("    }\n}\n");
         return sb.ToString();
     }

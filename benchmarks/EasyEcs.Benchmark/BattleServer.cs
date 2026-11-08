@@ -106,9 +106,9 @@ public ref struct PlanningSystem                                          // whe
 [EcsSystem]
 public ref struct SteeringSystem                                          // heavy per-entity math: on all cores
 {
-    // Row by row: the waypoint is read by index (a gather), which a vector loop does not take, and the generator would
-    // say so (EECS055); Off keeps the method scalar without the message
-    [ForEach(Parallel = true, SimdMode = SimdMode.Off), With<Npc>, Without<Dead>, Without<Frozen>]
+    // Written for one row, run as a vector loop: the waypoint table is a singleton of 8 points, so a vector of goals
+    // picks its points with one permute per field (an index outside the table runs the method, which throws)
+    [ForEach(Parallel = true), With<Npc>, Without<Dead>, Without<Frozen>]
     static void Steer(in Position p, in Goal goal, ref Velocity v, in Waypoints waypoints)
     {
         var target = waypoints.Points[goal.Waypoint];
@@ -167,7 +167,9 @@ public ref struct CombatSystem                                            // dam
 [EcsSystem]
 public ref struct StatusSystem
 {
-    [ForEach, Without<Dead>]                                                  // the units that attacked this tick
+    // Row by row: a roll applies one of three structural changes (a fire, a frost and two disables), and a vector loop
+    // applies one change after the pass; Off keeps the method scalar without the message (EECS055)
+    [ForEach(SimdMode = SimdMode.Off), Without<Dead>]                         // the units that attacked this tick
     static void Afflict(Entity unit, in Attack attack, in EntityRandom random)
     {
         if (attack.Cooldown != attack.Interval) return;                      // CombatSystem just reset it

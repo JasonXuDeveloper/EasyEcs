@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.Intrinsics;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -174,6 +175,135 @@ public class EntityRandomTests
         Assert.That(EntityRandom.Range(7, default, 0, 0, int.MinValue, int.MaxValue), Is.InRange(int.MinValue, int.MaxValue - 1));
         Assert.That(EntityRandom.Range(7, default, 0, 0, -1f, 1f), Is.InRange(-1f, 1f));
         Assert.Throws<ArgumentOutOfRangeException>(() => EntityRandom.Range(7, default, 0, 0, 2, 1));
+    }
+
+    public record struct Fraction(float Value) : IComponent;
+    public record struct Die(int Value) : IComponent;
+    public record struct Hit(int Value) : IComponent;
+    public record struct Spread(float Value) : IComponent;
+    public record struct Noise(ulong Value) : IComponent;
+    public struct Lacks : IComponent;
+
+    /// <summary>The draws a vector loop takes, written for one row (<see cref="DrawsAsLanes"/>).</summary>
+    [EcsSystem]
+    public ref struct LaneDraws
+    {
+        [ForEach]
+        static void Floats(ref Fraction f, ref Spread s, Entity entity, in EntityRandom random)
+        {
+            f.Value = random.Float(entity.Id, 0);
+            s.Value = random.Range(entity.Id, 1, -s.Value, s.Value + 1);
+        }
+
+        [ForEach]
+        static void Ints(ref Die d, ref Hit h, Entity entity, in EntityRandom random)
+        {
+            d.Value = random.Range(entity.Id, 2, -3, 1000);
+            h.Value = random.Chance(entity.Id, 3, 0.3f) ? 1 : 0;
+        }
+
+        [ForEach, Without<Lacks>]
+        static void Static(ref Fraction f, Entity entity, in EntityRandom random) =>
+            f.Value += EntityRandom.Float(random.Seed ^ 99, entity.Id, random.Tick + 5, 4);
+
+        [ForEach]
+        static void Bits(ref Noise n, Entity entity, in EntityRandom random) => n.Value = random.Bits(entity.Id, 5);
+    }
+
+    /// <summary><see cref="LaneDraws"/> row by row.</summary>
+    [EcsSystem]
+    public ref struct RowDraws
+    {
+        [ForEach(SimdMode = SimdMode.Off)]
+        static void Floats(ref Fraction f, ref Spread s, Entity entity, in EntityRandom random)
+        {
+            f.Value = random.Float(entity.Id, 0);
+            s.Value = random.Range(entity.Id, 1, -s.Value, s.Value + 1);
+        }
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        static void Ints(ref Die d, ref Hit h, Entity entity, in EntityRandom random)
+        {
+            d.Value = random.Range(entity.Id, 2, -3, 1000);
+            h.Value = random.Chance(entity.Id, 3, 0.3f) ? 1 : 0;
+        }
+
+        [ForEach(SimdMode = SimdMode.Off), Without<Lacks>]
+        static void Static(ref Fraction f, Entity entity, in EntityRandom random) =>
+            f.Value += EntityRandom.Float(random.Seed ^ 99, entity.Id, random.Tick + 5, 4);
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        static void Bits(ref Noise n, Entity entity, in EntityRandom random) => n.Value = random.Bits(entity.Id, 5);
+    }
+
+    /// <summary>A parallel draw with its row twin: chunks of masked words, ids of every version.</summary>
+    [EcsSystem]
+    public ref struct ParallelLaneDraws
+    {
+        [ForEach(Parallel = true, ChunkSize = 64), Without<Lacks>]
+        static void Roll(ref Die d, Entity entity, in EntityRandom random) => d.Value = random.Range(entity.Id, 6, 0, 6);
+    }
+
+    [EcsSystem]
+    public ref struct ParallelRowDraws
+    {
+        [ForEach(Parallel = true, ChunkSize = 64, SimdMode = SimdMode.Off), Without<Lacks>]
+        static void Roll(ref Die d, Entity entity, in EntityRandom random) => d.Value = random.Range(entity.Id, 6, 0, 6);
+    }
+
+    private static (float, float, int, int, ulong)[] Draws<TSystem>(int count, int threads) where TSystem : struct, allows ref struct
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var entities = new Entity[count];
+        world.CreateEntities(entities, new Fraction(), new Spread(2.5f), new Die(), new Hit(), new Noise());
+        // Versions above 1 (destroyed and made again), holes of a filter (masked words), rows of other tables.
+        for (int i = 0; i < count; i += 3) entities[i].Destroy();
+        for (int i = 0; i < count; i += 3) entities[i] = world.CreateEntity(new Fraction(), new Spread(i % 7), new Die(), new Hit(), new Noise());
+        for (int i = 1; i < count; i += 5) entities[i].Set(new Lacks());
+        world.SetEntityRandom(Seed: 0xC0FFEE);
+        world.AddSystem<TSystem>();
+        world.Update();
+        world.Update();
+        return entities.Select(e => (e.Get<Fraction>().Value, e.Get<Spread>().Value, e.Get<Die>().Value, e.Get<Hit>().Value, e.Get<Noise>().Value)).ToArray();
+    }
+
+    [TestCase(1)]
+    [TestCase(15)]
+    [TestCase(37)]
+    [TestCase(1000)]
+    public void DrawsAsLanes(int count)
+    {
+        Assert.That(Draws<LaneDraws>(count, 1), Is.EqualTo(Draws<RowDraws>(count, 1)));
+        foreach (int threads in new[] { 1, 4 })
+            Assert.That(Draws<ParallelLaneDraws>(count, threads), Is.EqualTo(Draws<ParallelRowDraws>(count, 1)), $"{threads} threads");
+    }
+
+    [Test]
+    public void DrawsGetVectorLoops()
+    {
+        using var world = new World();
+        world.AddSystem<LaneDraws>();
+        world.AddSystem<ParallelLaneDraws>();
+        // Below 256 bits (SSE, NEON) two 8-byte lanes of emulated multiplies lose to the scalar draw: the rows run the method.
+        bool rows = !Vector512.IsHardwareAccelerated && !RandomLanes.IsAccelerated;
+        foreach (var system in world.DescribeSchedule().Groups[0].Stages.SelectMany(s => s.Systems))
+            foreach (var loop in system.Loops)
+            {
+                Assert.That(loop, Does.Contain(": vector").And.Contain("EntityRandom draws (vectors of 256 bits and up)"), loop);
+                Assert.That(loop.Contains("; rows on this hardware"), Is.EqualTo(rows), loop);
+            }
+    }
+
+    [Test]
+    public void DrawsAsLanesDoNotAllocate()
+    {
+        using var world = new World();
+        var entities = new Entity[1000];
+        world.CreateEntities(entities, new Fraction(), new Spread(1), new Die(), new Hit(), new Noise());
+        world.SetEntityRandom(Seed: 3);
+        world.AddSystem<LaneDraws>();
+        Allocations.WarmUp(() => world.Update(), 20);
+        Assert.That(Allocations.Of(() => world.Update()), Is.Zero);
     }
 
     [Test]

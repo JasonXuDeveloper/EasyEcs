@@ -89,6 +89,12 @@ internal sealed partial class Kernel
         public bool Gathers { get; init; }
 
         /// <summary>
+        /// The loop draws EntityRandom numbers (Kernel.Random.cs): six 8-byte multiplies per lane, which pay at 256 bits
+        /// and up; it runs where <c>RandomLanes.IsAccelerated</c> (the Vector512 loop where <c>IsAccelerated512</c>).
+        /// </summary>
+        public bool Draws { get; init; }
+
+        /// <summary>
         /// The reductions' accumulators that carry a chain from one vector to the next as long as a floating-point add,
         /// Min or Max (3-4 cycles, against 1 for integers), as <c>name|op</c> (<c>__a1_0|+</c>, <c>__a2_1|Min</c>):
         /// the loop over whole vectors runs two vectors per iteration into two sets of them, which halves the chain
@@ -329,6 +335,53 @@ internal sealed partial class Kernel
         }
 
         private static readonly Regex Declared = new(@"(?m)^var (__w\d+) = [^\n]*;\n");
+
+        /// <summary>
+        /// Turns the one statement <c>{name} |= x;</c> of each text into its declaration <c>var {name} = x;</c>, or, where x
+        /// is a local no later line writes, drops it and names x where the text names {name}; false (nothing changed) when
+        /// either text ORs into it more or less than once, or the statement is not on a line of its own at the start (a
+        /// nested block would scope the declaration). The caller appends the lines reading {name} first.
+        /// </summary>
+        public bool DeclareOnce(string name)
+        {
+            string or = name + " |= ";
+            string all = _all.ToString(), masked = _masked.ToString();
+            if (Count(all, or) != 1 || Count(masked, or) != 1) return false;
+            int a = all.IndexOf(or, System.StringComparison.Ordinal), m = masked.IndexOf(or, System.StringComparison.Ordinal);
+            if (a > 0 && all[a - 1] != '\n' || m > 0 && masked[m - 1] != '\n') return false;
+            Swap(_all, DeclaredIn(all, a, name, or));
+            Swap(_masked, DeclaredIn(masked, m, name, or));
+            return true;
+        }
+
+        /// <summary><see cref="DeclareOnce"/> in one text, whose statement starts at <paramref name="at"/>.</summary>
+        private static string DeclaredIn(string text, int at, string name, string or)
+        {
+            if (Alias(text, at + or.Length) is not { } source) return text.Substring(0, at) + "var " + name + " = " + text.Substring(at + or.Length);
+            // name |= x; of a plain local nothing writes after: the local itself, without a second name
+            int end = text.IndexOf('\n', at) + 1;
+            return text.Substring(0, at) + new Regex($@"\b{name}\b").Replace(text.Substring(end), source);
+        }
+
+        /// <summary>
+        /// The local the statement at <paramref name="at"/> ORs in when it is a plain name no later line writes, else null.
+        /// </summary>
+        private static string? Alias(string text, int at)
+        {
+            int end = text.IndexOf(";\n", at, System.StringComparison.Ordinal);
+            if (end < 0) return null;
+            string value = text.Substring(at, end - at);
+            if (!Identifier.IsMatch(value)) return null;
+            return new Regex($@"\b{value}\s*[|&^+\-*/]?=[^=]").IsMatch(text.Substring(end)) ? null : value;
+        }
+
+        private static readonly Regex Identifier = new(@"^[A-Za-z_][A-Za-z0-9_]*$");
+
+        private static void Swap(System.Text.StringBuilder sb, string text)
+        {
+            sb.Clear();
+            sb.Append(text);
+        }
 
         private static int Count(string text, string part)
         {
@@ -1212,6 +1265,7 @@ internal sealed partial class Kernel
         var flat = Flat(kernel, root, () => Make(false));
         if (flatOnly != null && flat == null) throw FlatOnly();
         kernel.FitUnrolled(kernel._setup.ToString() + prologue + read + hold + kernel._body + stores, kernel._components.Count);
+        kernel.GatePerLane(kernel._body.ToString(), Symbols.Simd(lane.Declaration ?? lane.Method) == Symbols.SimdRequire); // Kernel.PerLane.cs
         // Narrow lanes have no shuffles: a component of several fields takes the flat loop or none.
         if (kernel._narrow && flat == null && kernel._components.FirstOrDefault(c => c.Value.Fields.Length > 1 && !kernel._doubled.Contains(c.Value.Index)) is { Key: { } narrow, Value.Fields: { } several })
         {
@@ -1241,6 +1295,7 @@ internal sealed partial class Kernel
             VectorTail = kernel._change != null || kernel._emits.Values.Any(e => e.Added),
             Written = new EquatableArray<int>(kernel._written.OrderBy(k => k).ToArray()),
             Gathers = kernel._lookups.Count > 0,
+            Draws = kernel._draws,
             Prefetched = new EquatableArray<int>(kernel._prefetched.OrderBy(i => i).ToArray()),
             Streamed = new(kernel._bails || kernel._lookups.Count > 0 || kernel._wideOf.Count > 0 || kernel._change != null || kernel._emits.Count > 0 || kernel._reductions.Count > 0 || kernel._optionals.Count > 0
                 ? [] : WriteOnly(prologue + read + hold + kernel._body, kernel._written.Where(k => kernel._components.Values.First(c => c.Index == k).Fields.Length == 1))),
@@ -2435,6 +2490,8 @@ internal sealed partial class Kernel
             return Broadcast(scalar, op.Type!);
         }
         if (PairExpr(op) is { } pair) return pair;
+        if (op is IInvocationOperation invocation && RandomDraw(invocation) is { } draw) return draw; // Kernel.Random.cs
+        if (op is IInlineArrayAccessOperation or IFieldReferenceOperation { Instance: IInlineArrayAccessOperation } && TableLane(op) is { } picked) return picked; // Kernel.Tables.cs
         if (UsesEntity(op)) throw EntityUse(op);
 
         switch (op)
@@ -2766,6 +2823,7 @@ internal sealed partial class Kernel
         }
         if (!IsLane(type) || !m.Parameters.All(p => IsLane(p.Type))) throw Not(call);
         string Arg(int i) => Expr(call.Arguments.First(a => a.Parameter?.Ordinal == i).Value);
+        if (PerLaneCall(call) is { } perLane) return perLane; // Kernel.PerLane.cs
         bool single = m.Parameters.Length == 1, isFloat = IsFloat(type);
         switch (m.Name)
         {

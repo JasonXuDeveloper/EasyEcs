@@ -134,6 +134,21 @@ public static class ArrayKernels
         }
         aim.Index = next;
     }
+
+    // A value's table read at an index of the row (Kernel.Tables.cs): one permute per field and vector of the table.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Pull(ref Here h, in Aimed aim, in Route route)
+    {
+        var target = route.Points[aim.Index];
+        float dx = target.X - h.X, dy = target.Y - h.Y;
+        h.X = dx * 0.5f + route.Points[aim.Index & 3].Y;
+        h.Y = dy - target.X;
+    }
+
+    // Tables of 4, 8 and 16 floats at int lanes: 1 to 4 vectors of the table at each width.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Pick(ref Level l, in Rank r, Bands4 four, Bands eight, Bands16 sixteen) =>
+        l.Value = l.Value * four[r.Value & 3] + eight[r.Value & 7] - sixteen[r.Value];
 }
 
 /// <summary>Methods of <see cref="ArrayKernels"/> in a system, so the schedule names the loops they get.</summary>
@@ -252,6 +267,61 @@ public class InlineArrayTests
         route.Points[5] = new Stop { X = float.NaN, Y = 0 };
         KernelTests.CheckHoles(count, hole, (r, i) => new Here { X = KernelTests.NextFloat(r, i), Y = (float)Math.Round(KernelTests.NextFloat(r, i + 1)) },
             (r, i) => new Aimed { Index = r.Next() }, w => ArrayKernels.Nearest(w, route), (ref Here h, ref Aimed a) => ArrayKernels.Nearest(in h, ref a, in route));
+    }
+
+    private static (Route, Bands4, Bands, Bands16) Tables()
+    {
+        var route = new Route();
+        for (int k = 0; k < 8; k++) route.Points[k] = new Stop { X = k * 3 - 10, Y = k % 3 == 0 ? float.NaN : -k * 0.25f };
+        var (four, eight, sixteen) = (new Bands4(), new Bands(), new Bands16());
+        for (int k = 0; k < 4; k++) four[k] = k - 1.5f;
+        for (int k = 0; k < 8; k++) eight[k] = k == 6 ? float.NegativeInfinity : k * k;
+        for (int k = 0; k < 16; k++) sixteen[k] = k == 9 ? -0f : 100 - k * 7.5f;
+        return (route, four, eight, sixteen);
+    }
+
+    /// <summary>
+    /// A uniform table read at an index of the row (a struct's fields, tables of 4, 8 and 16 floats) against the method
+    /// row by row, bit for bit, every index of the table, with rows lacking a component (masked words).
+    /// </summary>
+    [TestCaseSource(nameof(Cases))]
+    public void TablesReadAtALaneIndexMatchTheMethodBitForBit(string pattern, int count)
+    {
+        var hole = Patterns.First(h => h.Name == pattern).Hole;
+        var (route, four, eight, sixteen) = Tables();
+        KernelTests.CheckHoles(count, hole, (r, i) => new Here { X = KernelTests.NextFloat(r, i), Y = KernelTests.NextFloat(r, i + 1) },
+            (r, i) => new Aimed { Index = r.Next(0, 8) }, w => ArrayKernels.Pull(w, route), (ref Here h, ref Aimed a) => ArrayKernels.Pull(ref h, in a, in route));
+        KernelTests.CheckHoles(count, hole, (r, i) => new Level { Value = KernelTests.NextFloat(r, i) }, (r, i) => new Rank { Value = r.Next(0, 16) },
+            w => ArrayKernels.Pick(w, four, eight, sixteen), (ref Level l, ref Rank r) => ArrayKernels.Pick(ref l, in r, four, eight, sixteen));
+    }
+
+    /// <summary>
+    /// An index outside the table throws as the method does, wherever the row sits in its vector (the vector's rows run
+    /// the method), and the rows before it are written as the method writes them.
+    /// </summary>
+    [TestCase(-1, 0)]
+    [TestCase(16, 5)]
+    [TestCase(int.MinValue, 13)]
+    [TestCase(1 << 20, 63)]
+    public void AnIndexOutsideTheTableThrowsAsTheMethodDoes(int index, int at)
+    {
+        var (_, four, eight, sixteen) = Tables();
+        using var world = new World();
+        var entities = new Entity[100];
+        var levels = new Level[entities.Length];
+        var ranks = new Rank[entities.Length];
+        for (int i = 0; i < entities.Length; i++)
+        {
+            (levels[i], ranks[i]) = (new Level { Value = i }, new Rank { Value = i == at ? index : i % 16 });
+            entities[i] = world.CreateEntity(levels[i], ranks[i]);
+        }
+        Assert.Throws<IndexOutOfRangeException>(() => ArrayKernels.Pick(world, four, eight, sixteen));
+        Assert.Throws<IndexOutOfRangeException>(() => ArrayKernels.Pick(ref levels[at], in ranks[at], four, eight, sixteen));
+        for (int i = 0; i < at; i++)
+        {
+            ArrayKernels.Pick(ref levels[i], in ranks[i], four, eight, sixteen);
+            Assert.That(entities[i].Read<Level>().Value, Is.EqualTo(levels[i].Value), $"row {i}");
+        }
     }
 
     /// <summary>The parallel flat loop at 1 and 4 threads ends bit for bit where the method row by row does.</summary>

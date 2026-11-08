@@ -173,12 +173,17 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         // The using directives the copies of methods with element loops need for their extension calls.
         foreach (var u in model.Methods.Where(m => m.Elements is { Body.Length: > 0 }).SelectMany(m => m.Elements!.Usings).Distinct().OrderBy(u => u, System.StringComparer.Ordinal))
             sb.Append(u).Append('\n');
+        // A non-generic system's jobs are the assembly's (a fused pair of systems runs them: AddFusion), named after it and
+        // called __ForEach in this file as every other type's file-local class is.
+        bool shared = SharesJobs(model);
+        if (shared) sb.Append($"using __ForEach = {JobsOf(owner)};\n");
         sb.Append('\n');
         if (owner.Namespace.Length > 0) sb.Append("namespace ").Append(owner.Namespace).Append(";\n\n");
         if (model.One || !owner.IsSystem) EmitPasses(sb, model);
 
         // Generic over the owner's type parameters (a generic system or runner type): one instantiation per closed type.
-        sb.Append($"file static class __ForEach{owner.TypeParameters}{owner.Constraints}\n{{\n");
+        if (shared) sb.Append($"[global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]\ninternal static class {JobsName(owner)}\n{{\n");
+        else sb.Append($"file static class __ForEach{owner.TypeParameters}{owner.Constraints}\n{{\n");
         for (int i = 0; i < model.Methods.Length; i++)
         {
             EmitAccessor(sb, owner, model.Methods[i], i);
@@ -217,6 +222,18 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
     /// <summary>The code struct of a system (<c>__Movement_SystemCode</c>), public for a public generic system, whose closed types other assemblies' sets name.</summary>
     private static string CodeTypeName(OwnerModel owner) => $"__{owner.FlatName}_SystemCode";
+
+    /// <summary>
+    /// Whether the jobs of <paramref name="model"/> are the assembly's (<see cref="JobsName"/>), not its file's: a
+    /// non-generic system's, which a fused pair of systems may run (<see cref="AddFusion"/>).
+    /// </summary>
+    private static bool SharesJobs(UpdateModel model) => model.Owner.IsSystem && !model.One && model.Owner.TypeParameters.Length == 0;
+
+    /// <summary>The class holding a non-generic system's jobs, accessors and filters (<see cref="SharesJobs"/>).</summary>
+    private static string JobsName(OwnerModel owner) => $"__{owner.FlatName}_Jobs";
+
+    /// <summary><see cref="JobsName"/> as another file names it.</summary>
+    private static string JobsOf(OwnerModel owner) => $"global::{(owner.Namespace.Length > 0 ? owner.Namespace + "." : "")}{JobsName(owner)}";
 
     /// <summary>The code struct as a set names it, closed over the system's own type parameters.</summary>
     private static string CodeName(OwnerModel owner) =>
@@ -1482,6 +1499,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 parts.Add(simd.Wide512 || simd.Wide256 ? simd.Wide128 ? "wide component (permutes, table lookups)" : "wide component (permutes)" : "wide component (table lookups)");
             }
             if (simd.Gathers) parts.Add("gathers (Lookup<T>)");
+            if (simd.Draws) parts.Add("EntityRandom draws (vectors of 256 bits and up)");
             if (simd.Prefetched.Length > 0) parts.Add("lookups prefetched past the last-level cache");
             if (simd.Streams) parts.Add("write-only columns streamed past the last-level cache");
             if (Parallel) parts.Add("in parallel chunks");

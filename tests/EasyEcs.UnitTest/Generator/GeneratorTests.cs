@@ -351,7 +351,8 @@ public class GeneratorTests
 
         // Skipped means reported: the same method with SimdMode.Require is an error exactly when it got no loop, except
         // where the wide gate alone kept its rows (the Five cases): Require opens the forms the gate refuses.
-        if (!vectorized && members.Contains("ref Five ")) return;
+        // Nor where the per-lane gate kept them (Kernel.PerLane.cs: math with no vector form in a light body).
+        if (!vectorized && (members.Contains("ref Five ") || members.Contains("MathF.Cos(") || members.Contains("MathF.Atan2("))) return;
         string required = members.Replace("[ForEach]", "[ForEach(SimdMode = SimdMode.Require)]").Replace("[ForEach(Parallel", "[ForEach(SimdMode = SimdMode.Require, Parallel").Replace("[ForEach(FloatMode", "[ForEach(SimdMode = SimdMode.Require, FloatMode");
         var errors = Diagnose(Components, Lanes, $"[EcsSystem] public ref struct S {{ {required} }}").Result;
         Assert.That(errors.Contains("EECS056"), Is.EqualTo(!vectorized), string.Join(", ", errors));
@@ -411,14 +412,14 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref P p, ref Reduce<Count> c) { c.Value.N += p.V; p.V = c.Value.N; }", "it reads 'c.Value.N', a partial result the lanes of a vector loop hold in parts")]
     [TestCase("[ForEach(Parallel = true)] static void A(ref Five t) => t.A = t.B;", "component Five has 5 fields (a vector loop splits up to 4), and gathering the 2 fields it uses takes 11 permutes per 16 rows, for no vector operation; it uses 2 of Five's 5 fields (A, B): split them into a component of their own (a component of 2 fields gets a vector loop)", true)] // parallel too
     [TestCase("[ForEach] static void A(ref F f, Maybe<D> d) { if (d.HasValue) f.V++; }", "lane types float and double differ in size")]
-    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Sin(f.V);", "MathF.Sin is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Sin(f.V);", "MathF.Sin has no vector form bit for bit, and the rest of the body is too light for a vector loop calling it once per lane to pay (0 vector operations, 8 per call needed): set FloatMode = FloatMode.Fast (vector forms within a few ulps), or SimdMode = SimdMode.Require")]
     [TestCase("[ForEach] static void A(ref D d) => d.V = double.Hypot(d.V, 1);", "Double.Hypot is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
-    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", "MathF.Atan2 has no vector form in .NET 10")]
-    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref D d) => d.V = System.Math.Pow(d.V, 5);", "Math.Pow of doubles has no vector form in .NET 10 but by a constant 0, 1, 2, 3, 4, -1, -2 or 0.5")]
-    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 5);", "MathF.Pow is not bit-exact in vector form except by 0 and 1: set FloatMode = FloatMode.Fast")]
-    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 2);", "MathF.Pow is not bit-exact in vector form except by 0 and 1: set FloatMode = FloatMode.Fast")]
-    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Tanh(f.V);", "MathF.Tanh is not bit-exact in vector form: set FloatMode = FloatMode.Fast")]
-    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref D d) => d.V = System.Math.Tanh(d.V);", "Math.Tanh has no vector form in .NET 10")]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", "MathF.Atan2 has no vector form in .NET 10, and the rest of the body is too light for a vector loop calling it once per lane to pay (0 vector operations, 8 per call needed): set SimdMode = SimdMode.Require to take the loop anyway")]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref D d) => d.V = System.Math.Pow(d.V, 5);", "Math.Pow has no vector form in .NET 10, and the rest of the body is too light for a vector loop calling it once per lane to pay (0 vector operations, 8 per call needed): set SimdMode = SimdMode.Require to take the loop anyway")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 5);", "MathF.Pow has no vector form bit for bit, and the rest of the body is too light for a vector loop calling it once per lane to pay (0 vector operations, 8 per call needed): set FloatMode = FloatMode.Fast (vector forms within a few ulps), or SimdMode = SimdMode.Require")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Pow(f.V, 2);", "MathF.Pow has no vector form bit for bit, and the rest of the body is too light for a vector loop calling it once per lane to pay (0 vector operations, 8 per call needed): set FloatMode = FloatMode.Fast (vector forms within a few ulps), or SimdMode = SimdMode.Require")]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Tanh(f.V);", "MathF.Tanh has no vector form bit for bit, and the rest of the body is too light for a vector loop calling it once per lane to pay (0 vector operations, 8 per call needed): set FloatMode = FloatMode.Fast (vector forms within a few ulps), or SimdMode = SimdMode.Require")]
+    [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref D d) => d.V = System.Math.Tanh(d.V);", "Math.Tanh has no vector form in .NET 10, and the rest of the body is too light for a vector loop calling it once per lane to pay (0 vector operations, 8 per call needed): set SimdMode = SimdMode.Require to take the loop anyway")]
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)System.Math.Min(b.V - c.V, 10);", "'(byte)System.Math.Min(b.V - c.V, 10)' keeps the low bits of an int the vector loop cannot compute in 8-bit lanes (it may leave [0, 255] and [-128, 127])")]
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)((b.V * c.V) >> 8);", "the shift '(b.V * c.V) >> 8' needs bits of an int that 8-bit lanes do not hold")]
     [TestCase("[ForEach] static void A(ref B8 b, in C8 c) => b.V = (byte)(b.V << c.V);", "the shift 'b.V << c.V' is by a count that is not a constant")]
@@ -2882,7 +2883,7 @@ public class GeneratorTests
         {
             var type = metadata.GetTypeDefinition(handle);
             var owner = type.GetDeclaringType();
-            if (owner.IsNil || !metadata.GetString(metadata.GetTypeDefinition(owner).Name).EndsWith("__ForEach")) continue;
+            if (owner.IsNil || metadata.GetString(metadata.GetTypeDefinition(owner).Name) is not { } name || !(name.EndsWith("__ForEach") || name.EndsWith("_Jobs"))) continue;
             foreach (var m in type.GetMethods())
             {
                 var method = metadata.GetMethodDefinition(m);

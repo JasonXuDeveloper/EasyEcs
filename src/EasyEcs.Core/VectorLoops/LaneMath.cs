@@ -19,7 +19,7 @@ namespace EasyEcs;
 /// the method, and their rows run the method itself.
 /// </remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public static class LaneMath
+public static partial class LaneMath
 {
     /// <summary>x / y per lane, truncated toward zero; no lane of <paramref name="y"/> is 0, none is -1 where x is int.MinValue.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

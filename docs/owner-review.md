@@ -139,3 +139,49 @@ write the step as a cell method (Cell<TCell, TTile>), whose rows get vector loop
 
 What would change the verdict: a stencil a cell method cannot express (writing its own tile at other cells than the
 row's, or reading cells at offsets computed per row) that users write with the indexer in a hot pass.
+
+## Doc comments per arity as `inheritdoc`: not done (feat-lane4-rest, backlog G18, 2026-11-08)
+
+**Proposed by** generated-text.md: the arity variants ArityGenerator writes (World.Queries, World.Lambdas) repeat the
+same XML doc comment per arity; `/// <inheritdoc cref="..."/>` pointing at one variant would shorten the text.
+
+**Why not.** The text is not generated in users' builds: it is EasyEcs.Core's own source, compiled once into the
+package, so the saving is only in our build (World.Queries carries 220,842 bytes of doc comments, World.Lambdas
+19,165) and in no user's keystroke. What the comments feed is the public surface: IntelliSense reads the package's XML
+file, where `inheritdoc` is resolved only by tools that support it (the compiler writes it through, VS resolves it,
+some editors show the bare tag), and tools/docs/ApiDocs would have to resolve it and keep a Chinese entry per arity
+in step with the variant it points to. The cost lands on users and on the API reference for a size win nobody sees.
+What ships instead: ComponentGenerator's members and the view's `TryGetX` (the parts users' builds generate) got
+their text shortened (the alias block, one lookup).
+
+What would change the verdict: ApiDocs resolving `inheritdoc` itself (one zh entry for a family) and the compiler's
+XML output resolving it for every editor, or doc comments showing up in a profile of the package's build.
+
+## The rest of the generated-text cleanups (G17): not done beyond the marks (feat-lane4-rest, 2026-11-08)
+
+**Proposed by** generated-text.md step 5: hoisted scalar setup, `this.v0`, pair broadcasts, struct-local aliases,
+dead narrow temps, unused masks, `ids, 0`, discards for unused fields, the identity copies, one body per width.
+
+**Why not.** The Tier1 listings read for this branch (the runners of the draws and halves programs) show the JIT
+dropping locals never read, forwarding identity copies and hoisting invariant broadcasts, so these change the C#
+text, not the machine code, while each needs its own printer path and test. The one with machine-code weight, the structural
+change's mark (`var __d0 = Zero` then `|=`), shipped (361fbeb: StructuralLoopBenchmark level or better at 0 B, see the
+backlog). GeneratedTextTests keeps counting the rest, so a regression shows.
+
+What would change the verdict: a Tier1 listing where one of them survives (a copy or a broadcast the JIT keeps in a
+loop), or the generator's own time on these lines showing in GeneratorBenchmark.
+
+## Changing the ClosedSystems stage: not done (feat-lane4-rest, backlog G11 9c, 2026-11-08)
+
+**Proposed by** generator.md 9c: `ClosedSystems` (the syntax provider that finds closed generic systems named by
+AddSystem<G<P>>, [UpdateAfter<G<P>>] and the other system APIs) runs on every keystroke; measure it before changing it.
+
+**Why not.** Measured with GeneratorBenchmark, the stage on against its predicate returning false (the corpus names no
+closed generic system, so the output is the same), three BenchmarkDotNet runs per side: the ranges overlap and the
+sign of the difference changes between runs and between the benchmark's two namespace variants (EditMethodBody
+506-626 ms with the stage against 475-595 ms without), and the allocation is the same to 0.15 MB. Its predicate is a type test per node of the edited tree and its transform
+binds only a generic name inside a system API's type arguments; nothing in it shows above the benchmark's noise, so
+there is nothing to buy with a change (the backlog item has the numbers).
+
+What would change the verdict: a corpus whose files name many closed generic systems (the transform then binds each
+on every edit of its file), measured with this stage's tracked step.

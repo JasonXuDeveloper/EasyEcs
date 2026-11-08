@@ -22,13 +22,13 @@ public class GeneratedTextTests
     /// <summary>The most of each kind the output may hold (the counts at the last cleanup).</summary>
     private static readonly Dictionary<string, int> Budget = new()
     {
-        ["global:: outside using directives"] = 101_440,
+        ["global:: outside using directives"] = 85_849,
         ["parentheses around a literal, a name or parentheses"] = 333,
         ["identity copies"] = 108,
-        ["locals never read"] = 4_572,
-        ["a mark zeroed then OR-ed once"] = 1_308,
+        ["locals never read"] = 4_564,
+        ["a mark zeroed then OR-ed once"] = 0,
         ["empty methods"] = 1,
-        ["constants created in a method"] = 6_042,
+        ["constants created in a method"] = 6_028,
     };
 
     [Test]
