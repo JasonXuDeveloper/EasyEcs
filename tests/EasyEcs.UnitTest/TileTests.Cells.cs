@@ -357,6 +357,32 @@ public partial class TileTests
         }
     }
 
+    // The rows outside the layers are blank (zeros) after a pass, and a later pass reads them before it writes: one
+    // written between the passes is found and cleared, so the cells still equal the unbounded pass's.
+    [TestCase(1)]
+    [TestCase(4)]
+    public void AGapWrittenBetweenPassesIsBlankAgain(int threads)
+    {
+        var (bounded, whole, columns) = LayeredColumns(threads);
+        using (bounded)
+        using (whole)
+        {
+            bounded.Update();
+            whole.Update();
+            foreach (var (a, _) in columns)
+            {
+                var next = a.Get<DynamicBuffer<NextHeat>>().AsSpan();
+                next[0] = new NextHeat(-7);                // layer 0: outside every column's layers but x = 3's
+                next[next.Length - 1] = new NextHeat(-7);  // the last layer
+            }
+            bounded.Update();
+            whole.Update();
+            foreach (var (a, b) in columns)
+                Assert.That(MemoryMarshal.AsBytes(a.Read<DynamicBuffer<NextHeat>>().AsReadOnlySpan()).SequenceEqual(MemoryMarshal.AsBytes(b.Read<DynamicBuffer<NextHeat>>().AsReadOnlySpan())), Is.True,
+                    $"column {a.Read<PlaceColumn>().Pos}");
+        }
+    }
+
     [Test]
     public void LayersAllocateNothing()
     {

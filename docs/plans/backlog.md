@@ -41,7 +41,12 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
 
 ## Running (worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **`feat-inner-loops`** (`inner-loops.md`; Kernel*.cs, SystemGenerator.Loops/Elements/Cells/Lambdas.cs,
+- [x] **`feat-inner-loops`** merged 2026-11-08 (head fda40ab: WP1, WP4, WP5b (b), WP6b, WP6c, WP7 FireDamage and the
+      Sunlit / InWater split, WP8 (e), (f), (h), (d) committed, `Vector2/3/4.Clamp` as a vector loop: ClampVector
+      4.1-5.6x, 0 B; gate: 0 warnings, tests in three modes, DocCheck, ApiDocs, agents, VoxelServer; ViewBenchmark Lambda
+      90.6 -> 24.5 us at 100k, the other rows equal). What is left runs on **`feat-inner-loops-rest`** (from fda40ab):
+      (d)'s measurement, lambda fusion, (b), (g) without Clamp, WP8's rest (Dig, Gone, Play), the demo's batch Move,
+      then (a). The original item follows. (`inner-loops.md`; Kernel*.cs, SystemGenerator.Loops/Elements/Cells/Lambdas.cs,
       LambdaPass.cs, HandSimd.cs, the analyzer's Lambdas / Views / Forms areas). 25 commits past f9faa23: WP1 lanes and
       unrolling, EECS099 for two parameters, counted sums as popcount, lambda + structural, lambda + view, WP4's
       `ParallelFor` lambda over a buffer (aef32bb, LightLambda / HeavyLambda). Left on it: WP4's rest (then the

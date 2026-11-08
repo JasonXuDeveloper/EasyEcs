@@ -97,7 +97,10 @@ SystemGenerator.Lambdas.cs   lambda passes: world.ForEach / ForEachParallel(valu
                              EasyEcs.Generated) running the job a [ForEach] method with the lambda's parameters and body
                              gets (body copied with names qualified and constants inlined; the static delegate per
                              row where it cannot be: EECS096); its calls and the tile loads are bound after their syntax
-                             provider (SystemGenerator.BoundLater), so an IDE that skips their output never binds them
+                             provider (SystemGenerator.BoundLater), so an IDE that skips their output never binds them;
+                             world.ParallelFor(ref items, values..., static (ref T item, ...) => ...) -> an IForSpan<T>
+                             job (EmitBufferJob) whose chunk loop is the vector loop of the element as one column
+                             (Kernel.VectorizeElements)
 SystemGenerator.TileLoads.cs tile loads checked once per loop: c.Load128 / Load256 / Load512 / LoadVector(x + k, dy, dz) in a
                              proven column loop -> an interceptor per loop and offset (one file per source file in
                              EasyEcs.Generated, implementation output): Covers, the loop's first and last column against
@@ -119,7 +122,8 @@ PrefabGenerator.cs           [Prefab] -> a part of the struct: static readonly P
 LambdaPass.cs                what a lambda pass call is, read once for the generator and the analyzer: Read (the call,
                              its values, lambda, filters; a change filter's tick first), Problem (EECS095's reason and
                              the captured values), Unreachable (EECS096's reason, through BodyCopy), IsStable, Discards
-                             (an expression lambda's dropped value)
+                             (an expression lambda's dropped value); ParallelFor's element (Call.Element) and its
+                             rules (BufferProblem)
 BodyCopy.cs                  user code copied into a generated file (a lambda pass's body, a method with element loops):
                              Copy (names of types, namespaces and static members qualified, constants as their values,
                              statements a caller replaces), Usings (the directives extension calls need), Unreachable /
@@ -176,6 +180,12 @@ Kernel.cs                    a per-entity [ForEach] method as a Vector<T> loop (
                              component of one field as 1-byte lanes read as a mask; Kernel.Vectorize: the loop, or the
                              reason EECS055 / EECS056 report, as a ScalarReason: fixable or inherent; a lambda pass's
                              body through the same Translate, with its Lane);
+                             Kernel.Unrolled.cs: loops of a constant trip count of at most 16 steps (a for from a
+                             constant by 1 to a constant, a foreach over an inline array) translated step after step,
+                             the counter a constant per step, each step's names those of the first; an [InlineArray]
+                             field as one lane per element (Paths), read at a constant or the counter; a component of
+                             more than 4 lanes holding one takes only the flat loop (Code.FlatOnly: its masked words run
+                             the method); the reasons a loop stays scalar and the 32 locals the JIT inlines (FitUnrolled);
                              Kernel.Narrow.cs: byte / sbyte / short / ushort lanes (int values followed as low bits and an interval, saturating idioms, the wrapping or saturated chain nothing reads dropped: Body.Prune; a cell's X exact while the row fits the lanes: Code.IndexTop, which the pass checks); Kernel.Struct.cs:
                              struct values (Vector2/3/4 fields, new T(...), with) as one vector per lane;
                              Kernel.Wide.cs: components of up to 16 words, two forms each emitted where it pays (its
@@ -265,7 +275,14 @@ EasyEcsAnalyzer.Forms.cs     EECS080-085, EECS103, EECS108-109 and EECS119 (rows
 HandSimd.cs                  EECS103's detection, read once for the analyzer and its code fix: a batch [ForEach]
                              method whose body is a hand-written vector loop (prelude of streams and broadcasts, one
                              loop by 1 or by Count, lane-wise operations, a scalar tail) rewritten as the method for one
-                             row (PerRow), which must bind in a copy of the compilation and get Kernel.Vectorize's loop
+                             row (PerRow), which must bind in a copy of the compilation and get Kernel.Vectorize's loop;
+                             v3, a vector loop written by hand over a span inside a method (Loops: the segment and the
+                             plain loop replacing it, kept when Kernel.ElementLoops gives that loop its vector form);
+                             Rewritten: the copy-of-the-compilation check every form shares
+HandStencil.cs               EECS103 v2: a Tile [ForEach] method's stencil of cursor loads (halo, Cast of the out buffer,
+                             a Rows loop of x += lanes, loads at x + dx, CopyTo into the row) as the cell method
+                             (Cell<TCell, TTile>, out TOut: a neighbor per load), kept when Kernel.CellFormOf gives it a
+                             row loop in a copy of the compilation; the fix is v1's PerRow
 EasyEcsAnalyzer.Parameters.cs  EECS086, EECS087, EECS089: a [ForEach] method doing by hand what a parameter does per
                              chunk (a singleton reset by system code and accumulated row by row: Reduce<T>, reported
                              at the end of the compilation; other entities read through the World: Lookup<T>; records
@@ -322,5 +339,5 @@ Recorded.cs                  those facts read back per referenced assembly (cach
 Symbols.cs                   symbol checks shared by generator and analyzer
 Code.cs                      tiny string helpers for the generators' templates (List, Lines, TypeParams)
 EquatableArray.cs            array with value equality (generator models cache between edits)
-Polyfills.cs                 IsExternalInit for netstandard2.0 (records); do not delete
+Polyfills.cs                 IsExternalInit (records) and System.Index (list patterns) for netstandard2.0; do not delete
 ```

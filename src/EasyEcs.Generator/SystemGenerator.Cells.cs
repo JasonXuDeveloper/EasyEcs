@@ -228,31 +228,35 @@ public sealed partial class SystemGenerator
                 // runs the method on zeros).
                 bool once = passed.Count == 0 && results.Count == 0;
                 string F(int j) => once ? $"{AccessorPrefix}__Blank.F{j}" : $"__f{j}";
-                string nonzero = once ? $"{AccessorPrefix}__Blank.Nonzero" : "__nonzero";
-                string zero = step >= 0
-                    ? $"    {nonzero} = global::System.MemoryExtensions.IndexOfAnyExcept({Marshal}.AsBytes(new global::System.ReadOnlySpan<{OutName(step)}>(in {F(step)})), (byte)0) >= 0;\n" : "";
+                // Whether out j's blank value holds a byte other than zero: a zero one is skipped where the gap already
+                // holds zeros (a ranged pass's rows outside its layers, every pass after the first), so the pass reads
+                // those rows instead of writing them; a stepped tile's rows are zero once swapped in.
+                string Nonzero(int j) => once ? $"{AccessorPrefix}__Blank.Nonzero{j}" : $"__nonzero{j}";
+                string NonzeroOf(int j, string value) =>
+                    $"global::System.MemoryExtensions.IndexOfAnyExcept({Marshal}.AsBytes(new global::System.ReadOnlySpan<{OutName(j)}>(in {value})), (byte)0) >= 0";
+                string zero = string.Concat(outputs.Select((_, j) => $"    {Nonzero(j)} = {NonzeroOf(j, F(j))};\n"));
                 string blank = once ? "" : $"if (!__blank)\n{{\n    {Call(k => $"{At(k)}.Blank", j => $"__f{j}", "__spare")};\n{zero}    __blank = true;\n}}\n";
                 if (once)
                 {
                     var fields = new StringBuilder();
-                    for (int j = 0; j < outputs.Count; j++) fields.Append($"        internal static readonly {OutName(j)} F{j};\n");
-                    if (step >= 0) fields.Append("        internal static readonly bool Nonzero;\n");
+                    for (int j = 0; j < outputs.Count; j++) fields.Append($"        internal static readonly {OutName(j)} F{j};\n        internal static readonly bool Nonzero{j};\n");
                     constants = $"    /// <summary>What the method computes on Cell.Blank: the cells of the rows the walk skips.</summary>\n"
                         + $"    private static class {AccessorPrefix}__Blank\n    {{\n{fields}\n        static {AccessorPrefix}__Blank()\n        {{\n"
                         + $"            {Call(k => $"{At(k)}.Blank", j => $"F{j}").Replace(self, "default")};\n"
-                        + (step >= 0 ? $"            Nonzero = global::System.MemoryExtensions.IndexOfAnyExcept({Marshal}.AsBytes(new global::System.ReadOnlySpan<{OutName(step)}>(in F{step})), (byte)0) >= 0;\n" : "")
+                        + string.Concat(outputs.Select((_, j) => $"            Nonzero{j} = {NonzeroOf(j, $"F{j}")};\n"))
                         + "        }\n    }\n\n";
                 }
                 string Fill(string from, string to) => string.Concat(outputs.Select((_, j) => j == step
-                    ? $"    if ({nonzero})\n        for (int __r = {from} / {at}.Width; __r < {to} / {at}.Width; __r++)\n"
+                    ? $"    if ({Nonzero(j)})\n        for (int __r = {from} / {at}.Width; __r < {to} / {at}.Width; __r++)\n"
                       + $"            __tile0.Write(new global::EasyEcs.TileRow<{shape}>(__r / {at}.Depth, __r % {at}.Depth)).Fill({F(j)});\n"
-                    : $"    __into{j}.Slice({from}, {to} - {from}).Fill({F(j)});\n"));
+                    : $"    {{\n        var __gap = __into{j}.Slice({from}, {to} - {from});\n"
+                      + $"        if ({Nonzero(j)}) __gap.Fill({F(j)});\n"
+                      + $"        else if (global::System.MemoryExtensions.IndexOfAnyExcept({Marshal}.AsBytes(__gap), (byte)0) >= 0) __gap.Clear();\n    }}\n"));
                 body.Append("int __done = 0;\n");
                 if (!once)
                 {
                     body.Append("bool __blank = false;\n");
-                    if (step >= 0) body.Append("bool __nonzero = false;\n");
-                    for (int j = 0; j < outputs.Count; j++) body.Append($"{OutName(j)} __f{j} = default;\n");
+                    for (int j = 0; j < outputs.Count; j++) body.Append($"{OutName(j)} __f{j} = default;\nbool __nonzero{j} = false;\n");
                 }
                 // The walk of Rows as plain loops, in its order: a word of rows per layer, a trailing-zero count per row.
                 // Bounded by the layers: the exchange and the walk of those, none when they are empty.

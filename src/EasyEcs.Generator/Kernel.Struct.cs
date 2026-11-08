@@ -31,9 +31,12 @@ internal sealed partial class Kernel
         && (ns is { Name: "Numerics", ContainingNamespace: { Name: "System", ContainingNamespace.IsGlobalNamespace: true } }
             || ns is { Name: "Godot", ContainingNamespace.IsGlobalNamespace: true });
 
-    /// <summary>A struct of lanes of this kernel's size: its lane paths, or null.</summary>
+    /// <summary>
+    /// A struct of lanes of this kernel's size: its lane paths, or null. A struct holding an inline array is not one: its elements are read one at a time (Kernel.Unrolled.cs), and
+    /// whole values of it are not followed lane by lane.
+    /// </summary>
     private IFieldSymbol[][]? StructPaths(ITypeSymbol? type) =>
-        TryPaths(type) is { } paths && paths.All(p => IsLane(p[p.Length - 1].Type)) ? paths : null;
+        TryPaths(type) is { } paths && paths.All(p => IsLane(p[p.Length - 1].Type)) && !IsInlineArray(type) && !paths.Any(p => p.Any(f => IsInlineArray(f.Type))) ? paths : null;
 
     /// <summary>Lane f of component k: in a flat loop the field it translates is lane 0, the others are left out.</summary>
     private string? ComponentLane(int index, int f) =>
@@ -270,6 +273,11 @@ internal sealed partial class Kernel
             {
                 var (a, b) = (StructOf(Arg(0)), StructOf(Arg(1)));
                 return Each(paths.Length, f => $"{V}.{m.Name}({a[f]}, {b[f]})");
+            }
+            case "Clamp" when m.Parameters.Length == 3: // Min(Max(value, min), max), the order Vector2 / 3 / 4.Clamp takes
+            {
+                var (a, lo, hi) = (StructOf(Arg(0)), StructOf(Arg(1)), StructOf(Arg(2)));
+                return Each(paths.Length, f => $"{V}.Min({V}.Max({a[f]}, {lo[f]}), {hi[f]})");
             }
             case "Abs" or "SquareRoot" when m.Parameters.Length == 1:
             {

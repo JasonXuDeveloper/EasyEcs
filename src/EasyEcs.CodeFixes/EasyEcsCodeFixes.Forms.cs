@@ -511,6 +511,19 @@ public sealed partial class EasyEcsCodeFixes
     }
 
     /// <summary>
+    /// EECS103 on an element loop: the hand-written vector loop and its scalar loop (the span the analyzer gave) replaced
+    /// by the plain loop it wrote; null when the properties do not hold a span of this document.
+    /// </summary>
+    private static Document? ElementLoop(Document document, SyntaxNode root, System.Collections.Immutable.ImmutableDictionary<string, string?> props)
+    {
+        if (!props.TryGetValue("LoopStart", out var start) || !int.TryParse(start, out int from)
+            || !props.TryGetValue("LoopEnd", out var end) || !int.TryParse(end, out int to)
+            || !props.TryGetValue("LoopText", out var text) || text == null || from < 0 || to > root.FullSpan.End || from > to) return null;
+        var source = root.GetText();
+        return document.WithText(source.WithChanges(new Microsoft.CodeAnalysis.Text.TextChange(Microsoft.CodeAnalysis.Text.TextSpan.FromBounds(from, to), text)));
+    }
+
+    /// <summary>
     /// EECS103: the method with the parameters and statements of the method for one row the analyzer wrote (attributes,
     /// modifiers, name and comments kept): one statement as an expression body, several as a block; null when the
     /// properties do not parse.

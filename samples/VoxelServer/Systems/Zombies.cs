@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Runtime.InteropServices;
 using EasyEcs;
 
 namespace VoxelServer;
@@ -151,19 +150,20 @@ public ref struct ZombieAttackSystem
 // A zombie under the open sky by day catches fire, as in Minecraft: no block above it and no water at its feet. It
 // looks every Rules.BurnEvery ticks, the cadence of the fire's damage, so a zombie catches fire before it is first
 // hurt, and not at all at night. The look reads the chunks around each zombie (the height map, the water) through
-// lookups and writes the zombie's Exposure: a parallel pass. Catching fire is a presence flip of Burning, in the zombie
+// lookups and writes the zombie's Sunlit and InWater: a parallel pass. Catching fire is a presence flip of Burning, in the zombie
 // prefab, so the zombie stays in its table: the next system, on one thread, a comparison per zombie.
 [EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
 public ref struct ZombieExposureSystem
 {
     [ForEach(Parallel = true), With<Zombie>]
-    static void Look(in Position position, in Clock clock, ref Exposure exposure, Lookup<Chunk> chunks,
+    static void Look(in Position position, in Clock clock, ref Sunlit sunlit, ref InWater inWater, Lookup<Chunk> chunks,
         Lookup<DynamicBuffer<Fluid>> water, Lookup<DynamicBuffer<Surface>> surface)
     {
         var feet = Terrain.Cell(position.Value);
         var near = new Nearby(chunks, water: water, surface: surface);
         bool wet = near.Water(feet) > 0;
-        exposure = new Exposure(Sunlit: !wet && !Rules.IsNight(clock) && near.UnderSky(feet), InWater: wet);
+        sunlit = new Sunlit(!wet && !Rules.IsNight(clock) && near.UnderSky(feet));
+        inWater = new InWater(wet);
     }
 }
 
@@ -171,46 +171,36 @@ public ref struct ZombieExposureSystem
 public ref struct SunlightSystem
 {
     [ForEach, With<Zombie>]
-    static void Expose(Entity zombie, in Exposure exposure, in Clock clock)
+    static void Expose(Entity zombie, in Sunlit sunlit, in Clock clock)
     {
-        if (exposure.Sunlit) zombie.SetBurning(clock.Tick + Rules.BurnFor);
+        if (sunlit.Value) zombie.SetBurning(clock.Tick + Rules.BurnFor);
     }
 }
 // #endregion sunlight
 
 // #region burn
-// Every Rules.BurnEvery ticks the fire hurts: a batch method over the Health column of the burning zombies, 8 rows per
-// instruction with Vector<int> (4 on Arm; the JIT does not vectorize the loop by itself, and integer lanes give the
-// same result on every machine). The cadence is the system's ([UpdateInterval]), not a branch per tick: Health is
-// tracked, and a batch method writing it stamps its whole run, so it is written only on the ticks that hurt and the
-// death systems ([Changed<Health>]) find nothing to do on the others. Putting the fire out is a structural change,
-// which a batch method may not make (its spans point into the table), so it is the next system's job.
+// Every Rules.BurnEvery ticks the fire hurts: a method for one row, which the generator runs as a vector loop over the
+// Health column of the burning zombies, 8 rows per instruction with Vector<int> (4 on Arm; integer lanes give the same
+// result on every machine). The cadence is the system's ([UpdateInterval]), not a branch per tick: Health is tracked,
+// and the pass writing it stamps its rows, so it is written only on the ticks that hurt and the death systems
+// ([Changed<Health>]) find nothing to do on the others. Putting the fire out is a structural change of other rows, at
+// another condition, so it is the next system's job.
 [EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
 public ref struct FireDamageSystem
 {
-    // EECS103: this hand-written loop is what the generator writes from `health.Value--`; the sample keeps it until its
-    // rewrite to the method for one row (docs/plans/inner-loops.md, WP7).
-#pragma warning disable EECS103
     [ForEach, With<Burning>]
-    static void Hurt(Span<Health> health)
-    {
-        var points = MemoryMarshal.Cast<Health, int>(health);
-        var lanes = MemoryMarshal.Cast<int, Vector<int>>(points);
-        for (int i = 0; i < lanes.Length; i++) lanes[i] -= Vector<int>.One;
-        for (int i = lanes.Length * Vector<int>.Count; i < points.Length; i++) points[i]--;   // the rows left over
-    }
-#pragma warning restore EECS103
+    static void Hurt(ref Health health) => health.Value--;
 }
 
-// Puts out the fires that burned down, and those of the zombies that walked into water (their Exposure): it visits only
+// Puts out the fires that burned down, and those of the zombies that walked into water (InWater): it visits only
 // the burning, at the fire's own cadence.
 [EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
 public ref struct ExtinguishSystem
 {
     [ForEach]
-    static void Out(Entity zombie, in Burning fire, in Exposure exposure, in Clock clock)
+    static void Out(Entity zombie, in Burning fire, in InWater inWater, in Clock clock)
     {
-        if (clock.Tick >= fire.Until || exposure.InWater) zombie.RemoveBurning();
+        if (clock.Tick >= fire.Until || inWater.Value) zombie.RemoveBurning();
     }
 }
 // #endregion burn

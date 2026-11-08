@@ -170,7 +170,10 @@ public sealed partial class EasyEcsCodeFixes : CodeFixProvider
                 case "EECS103" when kind == "PerRow" && node.FirstAncestorOrSelf<MethodDeclarationSyntax>() is { } method
                                     && PerRow(root, method, diagnostic.Properties) is { } perRow
                                     && !await HasCallers(context.Document, null, context.CancellationToken, method).ConfigureAwait(false):
-                    Register(context, diagnostic, "Write the method for one row", root, method, perRow);
+                    Register(context, diagnostic, diagnostic.Properties.ContainsKey("PerRowCell") ? "Write the method for one cell" : "Write the method for one row", root, method, perRow);
+                    break;
+                case "EECS103" when kind == "ElementLoop" && ElementLoop(context.Document, root, diagnostic.Properties) is { } plain:
+                    context.RegisterCodeFix(CodeAction.Create("Write the plain loop", _ => Task.FromResult(plain), diagnostic.Id + "ElementLoop"), diagnostic);
                     break;
                 case "EECS091" or "EECS055" when kind == "Split":
                     if (await Split(context.Document, diagnostic, context.CancellationToken).ConfigureAwait(false) is { } split)

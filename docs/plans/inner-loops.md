@@ -410,6 +410,19 @@ reason (splitting it out helps only a method that does not read it, so not a War
 TileBenchmark's `CachedSystem.Find` reads one), and Kernel.Wide's layout refuses it as it refuses a fixed buffer
 (otherwise the wide form took it and its runtime layout check sent every row to the method, with no message). Next:
 the lanes themselves (below).
+Step 2 shipped (feat-inner-loops, 2026-11-04, bf4e92b..fc4c14e): an inline array of 4 / 8 / 16 lane-type elements
+is that many lanes of its component, and a `for` over it with a constant trip count is unrolled into the row loop
+(lanes = rows, element by element; Kernel.Unrolled.cs). Not built: the wide form per element (Kernel.Wide's layout and
+LayoutCheck name members, so an element needs an index step that form does not have; the row form covers the
+benchmark shapes). Two causes found on the way: an argmin's deconstruction `(best, at) = (d, k)` came as a tuple
+conversion to the targets' names, which the kernel did not read as a write of each lane, so it became a cold branch
+and Nearest ran slower than scalar (0d34eaf); with it vectorized, the masked loop of the unrolled body passed the
+JIT's 32 inlined locals, so the masked words of such a body now run the method (`Code.MaskedScalar`, "masked words
+scalar" in the schedule) while the whole words keep the vector loop (fc4c14e). EECS099 also reports two parameters
+(or a view's two fields) taking one component (d479d13), which the tests tripped on. InlineArrayBenchmark (s40,
+AVX-512, 0 B): Spectrum 1k 5,542 -> 662 ns (by hand 1,188), 100k 754 -> 247 us (by hand 244); Mix 1k 1,276 -> 408 ns,
+100k 162 -> 75 us; Nearest 1k 9,342 -> 1,496 ns, 100k 2.26 ms -> 152 us. Generated text of the other benchmarks
+unchanged.
 - Tests: `KernelTests.InlineArrayElementsMatchTheMethodBitForBit` (Lengths; 4/8/16 elements; flat, interleaved, wide); `UnrolledLoopsKeepLoopCarriedLocals` (argmin, running sum); uniform inline arrays (Waypoints); a regression test for the single-lane `Paths` bug; EECS055 reasons (N > 16, variable bound); 0 B.
 - Benchmarks: `KernelBenchmark` new `SpectrumScalar/Generated/HandWritten` (component of 8 floats, 1k/100k) and `NearestScalar/Generated` (8 waypoints, argmin).
 - Regression: `CycleHolesGenerated`, `WorldSimulationBenchmark`, `BattleServerBenchmark`.
@@ -452,6 +465,16 @@ rest of this entry is the plan as written.
 - Risk: proof gaps. Prefer scalar with a reason over a guess.
 
 **WP4: the `ParallelFor` lambda over a buffer.**
+Shipped (feat-inner-loops, 2026-11-07, aef32bb..4b4aeef; the owner chose the name: a `ParallelFor` overload taking the
+lambda): `world.ParallelFor(ref items, values..., static (ref T item, V v) => …)`, 0..4 values, generated as
+`ArityGenerator.Lambdas()`'s other overloads. The interceptor fills an `IForSpan<T>` job's fields and calls
+`World.ParallelFor(ref items, ref job)`; its Execute is the vector loop of the element as one column
+(`Kernel.VectorizeElements`: the element loop's lane, `Streams` = the element parameter), then the elements left
+through the copied body. EECS095 for a lambda without the element first, values of another type or by ref,
+attributes, structural changes; EECS097 for a body left scalar. The crefs naming the job overloads now give their
+parameters (CS0419 otherwise). ParallelForBenchmark (s44, two rounds, 0 B everywhere): Light 10k hand job 7.8-8.3 us,
+lambda 1.96-2.03 us; Light 100k 34-35 -> 16.6-17.0 us; Heavy 10k 40-45 -> 12.1-13.2 us; Heavy 100k 322-375 ->
+76-91 us (the inner `for (k < 8)` unrolled, eight Vector512.Sqrt). The rest of this entry is the plan as written.
 - Tests: `ParallelForTests` (equivalence 1 vs 4 threads, chunk edges at 1,024 multiples, 0 B, EECS095/096/097 on the new call).
 - Benchmark: `ParallelForBenchmark` gains `LightLambda` and `HeavyLambda` against `LightParallelFor`/`HeavyParallelFor` (hand jobs, scalar) and `*Serial`.
 - Risk: low; the lambda infrastructure and the IForSpan runner exist.
@@ -622,6 +645,18 @@ WP5b design (decided 2026-11-01, from what Flow.cs needs):
   the 0.2-0.3 ms (b) leaves, so even (b) fixed the port stays above Flow as written. TickBenchmark could not decide
   either way: the base alone moved 45.8-58.8 ms at 50 players between rounds (its 1,600 ticks per process end mid
   tier-up), while the probe's water differs by about 0.15 ms per 100 ticks.
+
+  (b) shipped (feat-inner-loops, 2898dcf..057cf5b): `s += cond ? 1 : 0`, `cond ? 0 : 1`, `if (cond) s++` / `s += 1`
+  are counts. Same-width lanes subtract the condition's mask from the accumulator; a field twice the lane width counts
+  the mask's set lanes (CountWhereAllBitsSet) into an int, folded with the field. The popcount was tried first on
+  same-width lanes and was slower: Tier1 materializes an all-ones vector (vpternlogd -1) and a vpcmpeqd, kmovw,
+  popcnt and a sign extension (cdqe) each iteration, 16 instructions against 15 for the subtract (loopbound
+  CycleJob12). Integer accumulators the body never names are no longer started or folded. Numbers (s38-s40, 0 B):
+  Cycle 1k 282-300 -> 178-206 ns, CycleHoles 1k 1,936-1,972 -> 353-399 ns, CycleHoles 100k 177-195 -> 34-43 us;
+  TileTally Cell 1 thread 1,074 -> 928-1,069 us, 4 threads 488-512 -> 376-455 us. Cycle 100k is level (head
+  17.4 / 20.9 us, base 19.6 / 20.2 us): the pass streams 1.2 MB of columns in about 20 us, more than twice its compute
+  bound (6,250 iterations of about 4 cycles), so it is bandwidth-bound and the saved instruction does not show.
+  Hand against Cell in TileTally is still cheaper (Hand pops a whole row's mask once).
 
 **WP6: EECS103 and its code fix.**
 - WP6a (v1, batch casts): shipped (D134).

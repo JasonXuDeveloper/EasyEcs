@@ -201,6 +201,8 @@ public class GeneratorTests
         public struct H : IComponent { public float V; }
         public struct Two : IComponent { public float A, B; }
         public record struct Duo(float A, float B) : IComponent;
+        public struct Push : IComponent { public float A, B; }
+        public record struct Duet(float A, float B) : IComponent;
         public struct Five : IComponent { public float A, B, C, D, E; }
         public struct Mixed : IComponent { public float A; public int B; }
         public struct D : IComponent { public double V; }
@@ -362,7 +364,7 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f) => f.V = Take(ref f) + 1; static float Take(ref F f) { f.V++; return f.V; }", "it calls S.Take, which changes its arguments or its entity, inside an expression: call it in a statement of its own (var r = ...;)", true)] // and none for Take: EECS055 is for [ForEach] methods only
     [TestCase("[ForEach] static void A(ref F f) => f.V = R.Scaled(f.V); } public static class R { static readonly float Scale = 2; public static float Scaled(float x) => x * Scale;", "it calls R.Scaled, whose body names private field 'float R.Scale' of R, which code outside its type (or file) cannot reach: make it internal", true)]
     [TestCase("[ForEach] static void A(ref F f) => f.V = Log(f.V) * 2; static float Log(float x) { System.Console.WriteLine(x); return x; }", "it calls S.Log, which calls Console.WriteLine")]
-    [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 2; i++) f.V++; }", "'for (int i = 0; i < 2; i++) f.V++;' is not supported")]
+    [TestCase("[ForEach] static void A(ref F f) { for (int i = 0; i < 20; i++) f.V++; }", "loop 'for (int i = 0; i < 20; i++)' runs 20 steps: a vector loop runs a loop of the method for one row as its steps one after another, for loops of constant bounds and at most 16 steps")]
     // A switch over a call on a struct the loop cannot inline (VoxelServer's 'new Nearby(...).Trail(x, z) switch'): the call goes into a pass of its own.
     [TestCase("public readonly struct Near(int v) { public int Dir(int x) { int d = v; for (int i = 0; i < x; i++) d++; return d; } } [ForEach] static void A(ref P p, in Q q) => p.V = new Near(q.V).Dir(1) switch { 1 => 2, _ => 3 };",
         "it switches over a call on struct Near ('new Near(q.V).Dir(1)'), which runs row by row: call Near.Dir in a [ForEach] method of its own that stores the result in a component, and switch over that field here", true)]
@@ -380,8 +382,8 @@ public class GeneratorTests
         "pattern 'object o' declares 'o' as a object, which no vector lane holds: name the value it tests, or a field of it, instead")]
     [TestCase("[ForEach] static void A(Entity e, ref P p) { switch (p.V) { case 1: p.V = 2; goto case 2; case 2: p.V++; break; } if (p.V < 0) e.SetH(1); }",
         "it jumps from one switch section to another ('goto case 2;'): a vector loop runs each section on its own lanes, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, which cannot change structure during the pass; move that branch into a [ForEach] method of its own", true)]
-    [TestCase("[ForEach] static void A(Entity e, ref P p) { switch (p.V) { case 1: for (int i = 0; i < 2; i++) p.V++; break; } if (p.V < 0) e.SetH(1); }",
-        "'for (int i = 0; i < 2; i++) p.V++;' is not supported, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, which cannot change structure during the pass; move that branch into a [ForEach] method of its own", true)]
+    [TestCase("[ForEach] static void A(Entity e, ref P p) { switch (p.V) { case 1: for (int i = 0; i < 20; i++) p.V++; break; } if (p.V < 0) e.SetH(1); }",
+        "loop 'for (int i = 0; i < 20; i++)' runs 20 steps: a vector loop runs a loop of the method for one row as its steps one after another, for loops of constant bounds and at most 16 steps, in a branch of a method that changes structure: a vector loop sends such a branch's rows to the method, which cannot change structure during the pass; move that branch into a [ForEach] method of its own", true)]
     [TestCase("[ForEach] static void A(ref F f, in H h) => h.V.ToString();", "it calls Single.ToString, which is defined in another assembly")]
     [TestCase("[ForEach] static void A(in B8 b, ref C8 c) { float d = b.V; c.V = (byte)d; }", "local 'd' is a float, not a lane type of 1 or 2 bytes")]
     [TestCase("[ForEach] static void A(in P p, ref Purse u) => u.Sum = p.V + 1L;", "it writes 'u.Sum', which is neither a local nor the lane of a component taken by ref")] // the write, not the conversion of its value
@@ -414,6 +416,10 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref Sixteen r, in G g) { r.F0 = r.F0 - r.F7 * g.Pull; r.F15 = System.MathF.Min(r.F15 + r.F0, 10) * 0.5f + g.Pull * g.Pull; }", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 3 fields it uses declares 33 locals per 16 rows, past the 32 a job's loop may declare to be inlined; it uses 3 of Sixteen's 16 fields (F0, F7, F15): split them into a component of their own (a component of 3 fields gets a vector loop)", true)]
     [TestCase("[ForEach] static void A(ref Sixteen r, in G g) => r.F0 = r.F0 * g.Pull + r.F3 * r.F6 - r.F9 * r.F12 + r.F3 * g.Pull - r.F6 * r.F9 + r.F12;", "component Sixteen has 16 fields (a vector loop splits up to 4), and gathering the 5 fields it uses declares 33 locals per 16 rows, past the 32 a job's loop may declare to be inlined", false)]
     [TestCase("[ForEach] static void A(ref Unit u) { if (u.Alive) u.Hp--; }", "field Unit.Alive is a bool among 4 fields: a vector loop takes a bool in a component of its own (one byte per row)")]
+    // A bool the method uses alone (VoxelServer's Body and Exposure): moving it out is the rewrite, which the split fix makes.
+    [TestCase("public record struct Body(bool OnGround, bool Blocked) : IComponent; [ForEach] static void A(ref F f, in Body b) { if (b.OnGround) f.V = 0; }", "field Body.OnGround is a bool among 2 fields: a vector loop takes a bool in a component of its own (one byte per row); it uses 1 of Body's 2 fields (OnGround): move it into a component of its own (a component of one field gets a vector loop)", true)]
+    [TestCase("public record struct Body(bool OnGround, bool Blocked) : IComponent; [ForEach(Parallel = true)] static void A(ref F f, in Body b, Maybe<H> h) { if (b.OnGround && h.HasValue) f.V = 0; }", "it takes a Maybe<H> and runs in parallel: an optional column has a vector loop on one thread", false)]   // a later parameter's reason wins over the split
+    [TestCase("public record struct Body(bool OnGround, bool Blocked) : IComponent; [ForEach] static void A(ref F f, in Body b) { if (b.OnGround && b.Blocked) f.V = 0; }", "field Body.OnGround is a bool among 2 fields: a vector loop takes a bool in a component of its own (one byte per row)", false)]   // two bools: still a bool among fields
     [TestCase("[ForEach] static void A(ref Px p, in B8 b) => p.R = (byte)(p.R + b.V);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field; it uses 1 of Px's 2 fields (R): move it into a component of its own (a component of one field gets a vector loop)", true)]
     [TestCase("[ForEach] static void A(ref Px p) => p.R = (byte)(p.R + p.G);", "component Px has 2 fields of byte: a vector loop splits fields of 4 or 8 bytes, and takes narrower ones only when the method does the same to each field")]
     [TestCase("[ForEach] static void A(ref F f, in Pos p) => f.V = System.Numerics.Vector2.Dot(p.Value, p.Value);", "Vector2.Dot adds the fields of a vector together, in an order not proven to be the scalar code's")]
@@ -425,7 +431,13 @@ public class GeneratorTests
         "it reduces into Low, which keeps the row with the lowest V ([MinBy]): a vector loop does not keep a row by its key yet, so the method runs row by row")]
     [TestCase("[ForEach] static void A(Entity e, ref F f) => f.V = e.Id.Index;", "it uses the Entity in 'e.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>)", true)]
     [TestCase("public record struct Wide2(int A, long B); static Wide2 At(float v) => new((int)v, 1); [ForEach] static void A(ref F f) { var c = At(f.V); f.V = c.A; }", "local 'c' is a S.Wide2, not a lane type of 4 or 8 bytes")] // the helper's new(...) keeps its type in 'var c'
-    [TestCase("[System.Runtime.CompilerServices.InlineArray(4)] public struct Quad { private float _q; } public struct Held : IComponent { public float V; public Quad Q; } [ForEach] static void A(ref Held h) => h.V += 1;", "field Held.Q is an inline array (Quad), which a vector loop does not read")] // as many values as its length, never one lane
+    [TestCase("[System.Runtime.CompilerServices.InlineArray(4)] public struct Quad { private float _q; } public struct Held : IComponent { public float V; public Quad Q; } [ForEach] static void A(ref Held h) => h.V += 1;", "component Held holds an inline array and has 5 lanes: a vector loop splits up to 4 fields of a row, and takes more only when the method does the same to each lane (a flat loop); it uses 1 of Held's fields (V) and not the array: move it into a component of its own (a component of one field gets a vector loop)", true)] // as many values as its length, never one lane
+    [TestCase("[System.Runtime.CompilerServices.InlineArray(8)] public struct Ids { private EntityId _e; } public struct Around : IComponent { public Ids Of; } public struct Seen : IComponent { public EntityId Id; } [ForEach] static void A(in Around a, ref Seen s) => s.Id = a.Of[1];", "component Around holds an inline array and has 16 lanes: a vector loop splits up to 4 fields of a row, and takes more only when the method does the same to each lane (a flat loop)", false)] // what the row loop could not read: the reason is the component's
+    [TestCase("[System.Runtime.CompilerServices.InlineArray(4)] public struct Quad { private float _q; } public struct Held : IComponent { public Quad Q; } [ForEach] static void A(ref Held h, in H x) { for (int k = 0; k < (int)x.V; k++) h.Q[k] += 1; }", "loop 'for (int k = 0; k < (int)x.V; k++)' does not compare its counter 'k' with < or <= to a constant: a vector loop runs a loop of the method for one row as its steps one after another, for loops of constant bounds and at most 16 steps")]
+    [TestCase("public struct Many : IComponent { public float V; } [ForEach] static void A(ref Many m) { for (int k = 0; k < 17; k++) m.V += k; }", "loop 'for (int k = 0; k < 17; k++)' runs 17 steps: a vector loop runs a loop of the method for one row as its steps one after another, for loops of constant bounds and at most 16 steps")]
+    [TestCase("[System.Runtime.CompilerServices.InlineArray(4)] public struct Quad { private float _q; } public struct Held : IComponent { public Quad Q; } [ForEach] static void A(ref Held h, in P q) => h.Q[q.V] += 1;", "it reads 'h.Q[q.V]' at an index that is not a constant: a vector loop reads an inline array's elements at constants or the counter of a loop of constant bounds of at most 16 steps")]
+    [TestCase("[System.Runtime.CompilerServices.InlineArray(4)] public struct Quad { private float _q; } public struct Held : IComponent { public Quad Q; } [ForEach] static void A(ref Held h) { for (int k = 0; k < 4; k++) { if (h.Q[k] > 1) break; h.Q[k] += 1; } }", "loop 'for (int k = 0; k < 4; k++)' leaves an iteration early ('break;'): a vector loop runs every step of a loop of the method for one row; write the rest of the step under an if")]
+    [TestCase("[System.Runtime.CompilerServices.InlineArray(17)] public struct Long17 { private float _q; } public struct Held : IComponent { public Long17 Q; } [ForEach] static void A(ref Held h) => h.Q[0] += 1;", "field Held.Q is an inline array of 17 elements: a vector loop reads one of at most 16 as lanes")]
     public void ScalarLoopsNameTheirReason(string members, string reason, bool fixable = false)
     {
         var diagnostics = Analyze([Components, Lanes, $"public static partial class S {{ {members} }}"]).Result.Where(d => d.Id == "EECS055").ToArray();
@@ -494,19 +506,19 @@ public class GeneratorTests
     }
 
     // Each field alike (field i of every component to field i, the same operations): the columns as flat lanes.
-    [TestCase("[ForEach] static void A(ref Two t, in Two u) { t.A += u.A * 2; t.B += u.B * 2; }", true)]
+    [TestCase("[ForEach] static void A(ref Two t, in Push u) { t.A += u.A * 2; t.B += u.B * 2; }", true)]
     [TestCase("[ForEach] static void A(ref Two t, in G g) { if (t.A > 1) t.A = 0; if (t.B > 1) t.B = 0; t.A -= g.Pull; t.B -= g.Pull; }", true)]
-    [TestCase("[ForEach] static void A(ref Two t, in Two u) { t.A += u.A * 2; t.B += u.B * 3; }", false)]   // other operations
-    [TestCase("[ForEach] static void A(ref Two t, in Two u) { t.A += u.B; t.B += u.A; }", false)]          // field A from B
-    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t.A += u.A;", false)]                      // B left alone
-    [TestCase("[ForEach] static void A(ref Two t, in Two u) { float d = u.A; t.A += d; t.B += u.B; }", false)] // a local
+    [TestCase("[ForEach] static void A(ref Two t, in Push u) { t.A += u.A * 2; t.B += u.B * 3; }", false)]   // other operations
+    [TestCase("[ForEach] static void A(ref Two t, in Push u) { t.A += u.B; t.B += u.A; }", false)]          // field A from B
+    [TestCase("[ForEach] static void A(ref Two t, in Push u) => t.A += u.A;", false)]                      // B left alone
+    [TestCase("[ForEach] static void A(ref Two t, in Push u) { float d = u.A; t.A += d; t.B += u.B; }", false)] // a local
     [TestCase("[ForEach] static void A(ref Two t, in F f) { t.A += f.V; t.B += f.V; }", false)]            // one field and two
     [TestCase("[ForEach] static void A(ref Mixed m) { m.A += 1; m.B += 1; }", false)]                       // float and int
-    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.A + u.A, B = t.B + u.B };", true)] // whole, field by field
-    [TestCase("[ForEach] static void A(ref Duo t, in Duo u) => t = new Duo(t.A + u.A, t.B + u.B);", true)]               // a record's constructor
-    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.B + u.A, B = t.A + u.B };", false)] // whole, fields swapped
-    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.A + u.A, B = t.B * u.B };", false)] // whole, other operations
-    [TestCase("[ForEach] static void A(ref Two t, in Two u) => t = new Two { A = t.A + u.B, B = t.B + u.B };", false)] // whole, one field twice
+    [TestCase("[ForEach] static void A(ref Two t, in Push u) => t = new Two { A = t.A + u.A, B = t.B + u.B };", true)] // whole, field by field
+    [TestCase("[ForEach] static void A(ref Duo t, in Duet u) => t = new Duo(t.A + u.A, t.B + u.B);", true)]               // a record's constructor
+    [TestCase("[ForEach] static void A(ref Two t, in Push u) => t = new Two { A = t.B + u.A, B = t.A + u.B };", false)] // whole, fields swapped
+    [TestCase("[ForEach] static void A(ref Two t, in Push u) => t = new Two { A = t.A + u.A, B = t.B * u.B };", false)] // whole, other operations
+    [TestCase("[ForEach] static void A(ref Two t, in Push u) => t = new Two { A = t.A + u.B, B = t.B + u.B };", false)] // whole, one field twice
     public void ComponentsWhoseFieldsMatchAreFlatLanes(string members, bool flat)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"[EcsSystem] public ref struct S {{ {members} }}"),
@@ -712,13 +724,15 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         int walk = generated.IndexOf("var __walk =", System.StringComparison.Ordinal), result = generated.IndexOf("__res0.Write() =", System.StringComparison.Ordinal);
-        int start = generated.IndexOf("var __a3q_0_0 = global::System.Runtime.Intrinsics.Vector128.Create<ushort>(__id3q.Wet);", System.StringComparison.Ordinal);
-        int fold = generated.IndexOf("Vector128.Sum(__a3q_0_0)", System.StringComparison.Ordinal);
+        // Wet counts the lanes of a condition: a scalar counter of their popcounts, no vector of 0 / 1 (Kernel.Counts).
+        int start = generated.IndexOf("var __a3q_0c = 0;", System.StringComparison.Ordinal);
+        int fold = generated.IndexOf("x3.Value.Wet = unchecked((ushort)(x3.Value.Wet + __a3q_0c));", System.StringComparison.Ordinal);
+        Assert.That(generated, Does.Contain("__a3q_0c += global::System.Runtime.Intrinsics.Vector128.CountWhereAllBitsSet(").And.Not.Contain("__a3q_0_0"), generated);
         Assert.That(walk, Is.GreaterThan(0), generated);
         Assert.That(start, Is.GreaterThan(0).And.LessThan(walk), generated);  // started once, before the walk
         Assert.That(fold, Is.GreaterThan(walk).And.LessThan(result), generated); // folded once, after it
         // one fold per pass (the halo read in place and the texture's: two passes in the text)
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"Vector128\.Sum\(__a3q_0_0\)").Count,
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"\+ __a3q_0c\)").Count,
             Is.EqualTo(System.Text.RegularExpressions.Regex.Matches(generated, @"__res0\.Write\(\) =").Count), generated);
     }
 

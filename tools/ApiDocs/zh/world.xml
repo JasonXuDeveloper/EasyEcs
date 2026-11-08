@@ -742,4 +742,38 @@
     <exception cref="T:System.ArgumentException"><paramref name="target" /> 就是本 World，<paramref name="components" /> 含有单例类型，或 <typeparamref name="TTag" /> 是唯一组件。</exception>
     <exception cref="T:System.InvalidOperationException">被复制的实体有一个唯一键（<see cref="T:EasyEcs.IUniqueIndexed`1" />），而 <paramref name="target" /> 里已有实体持有它：什么都不复制。</exception>
   </member>
+
+
+  <member name="M:EasyEcs.World.ParallelFor``1(EasyEcs.DynamicBuffer{``0}@,System.Delegate)" source="68c06dcf85bb">
+    <summary>
+      对 <paramref name="items" /> 的每个元素执行 <paramref name="body" />（一个静态 lambda），元素切成块，由多个线程执行，和
+      <see cref="M:EasyEcs.World.ParallelFor``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" /> 执行 job 的方式一样：
+      <c>world.ParallelFor(ref hits.Items, static (ref Hit hit) =&gt; hit.Amount += 1)</c>。
+      lambda 先以 <c>ref</c>（或 <c>in</c>）接收元素，再按顺序接收它前面传入的值。EasyEcs 生成器把每处调用编译成一个
+      <see cref="T:EasyEcs.IForSpan`1" /> job，方法体符合条件时（和 [ForEach] 方法的条件一样），它对一块元素的循环是向量循环，
+      所以每种 job 第一次调用之后零分配。方法体不能改变 World 的结构，也不能写别的元素要读的数据。只能在所有者线程上调用。
+    </summary>
+    <typeparam name="T">元素类型。</typeparam>
+    <param name="items">这些元素，原地写入（单例的 buffer、<see cref="T:EasyEcs.Emitted`1" /> 的记录）。</param>
+    <param name="body">写在调用处的静态 lambda。</param>
+    <exception cref="T:System.InvalidOperationException">生成器没有编译这处调用（EECS095 说明原因）。</exception>
+  </member>
+  <member name="M:EasyEcs.World.ParallelFor``2(EasyEcs.DynamicBuffer{``0}@,``1,System.Delegate)" source="5d4f952b09e4">
+    <summary>
+      对 <paramref name="items" /> 的每个元素执行 <paramref name="body" />（一个静态 lambda），元素切成块，由多个线程执行，和
+      <see cref="M:EasyEcs.World.ParallelFor``2(EasyEcs.DynamicBuffer{``0}@,``1@,System.Int32)" /> 执行 job 的方式一样：
+      <c>world.ParallelFor(ref hits.Items, keep, static (ref Hit hit, float keep) =&gt; hit.Amount *= keep)</c>。
+      lambda 先以 <c>ref</c>（或 <c>in</c>）接收元素，再按顺序接收它前面传入的值。EasyEcs 生成器把每处调用编译成一个
+      <see cref="T:EasyEcs.IForSpan`1" /> job，方法体符合条件时（和 [ForEach] 方法的条件一样），它对一块元素的循环是向量循环，
+      所以每种 job 第一次调用之后零分配。方法体不能改变 World 的结构，也不能写别的元素要读的数据。只能在所有者线程上调用。
+    </summary>
+    <typeparam name="T">元素类型。</typeparam>
+    <typeparam name="TValue1"><paramref name="value1" /> 的类型。</typeparam>
+    <param name="items">这些元素，原地写入（单例的 buffer、<see cref="T:EasyEcs.Emitted`1" /> 的记录）。</param>
+    <param name="value1">lambda 前面的第一个值，调用期间存在 job 里：对应 lambda 在元素之后的参数。</param>
+    <param name="body">写在调用处的静态 lambda。</param>
+    <exception cref="T:System.InvalidOperationException">生成器没有编译这处调用（EECS095 说明原因）。</exception>
+  </member>
 </doc>
+
+

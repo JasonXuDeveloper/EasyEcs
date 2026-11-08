@@ -9,7 +9,9 @@ namespace EasyEcs.Benchmark;
 /// at a time (SimdMode.Off: a per-row Set during the pass); <c>Vector</c> the generated vector loop, which marks the
 /// passing rows and sets the tag on them in bulk after the pass; <c>CommandBuffer</c> the hand-written deferral (the
 /// passing ids recorded, then a Set per id); <c>SetAll</c> the bound of a bulk change whose rows are already known (a
-/// tag kept on them, <c>world.SetAll</c> over it): no condition evaluated. Steady state allocates 0 bytes.
+/// tag kept on them, <c>world.SetAll</c> over it): no condition evaluated. <c>Lambda</c> is <c>Vector</c>'s method as a
+/// lambda pass (the same vector loop and marked rows; before, a lambda pass that changes structure ran row by row, as
+/// <c>Scalar</c>). Steady state allocates 0 bytes.
 /// </summary>
 [MemoryDiagnoser]
 public class StructuralLoopBenchmark
@@ -39,6 +41,7 @@ public class StructuralLoopBenchmark
         {
             Scalar();
             Vector();
+            Lambda();
             CommandBuffer();
             SetAll();
         }
@@ -58,6 +61,16 @@ public class StructuralLoopBenchmark
     public int Vector()
     {
         Falls.Fall(_world);
+        return _world.RemoveAll<Down>(in _down);
+    }
+
+    [Benchmark]
+    public int Lambda()
+    {
+        _world.ForEach([Without<Down>] static (Entity unit, in Health health, in Cutoff cutoff) =>
+        {
+            if (health.Value < cutoff.Value) unit.Set(new Down());
+        });
         return _world.RemoveAll<Down>(in _down);
     }
 

@@ -51,7 +51,8 @@ internal sealed partial class Kernel
     private readonly Dictionary<IParameterSymbol, WideLayout> _wideOf = new(SymbolEqualityComparer.Default);
     private readonly StringBuilder _statics = new();
     private readonly StringBuilder _tables128 = new();
-    private int _permutes, _lookups128;
+    private readonly Dictionary<string, string> _tableNames128 = new();
+    private int _permutes;
     // The 128-bit form's cost per 4 rows: the registers its table lookups read, its whole-vector loads and stores.
     private int _registers, _moves128, _usedLanes, _writtenLanes;
     private bool _wide512, _wide128; // the forms that pay (Gate)
@@ -87,7 +88,7 @@ internal sealed partial class Kernel
                 access.Add(parent.Member);
                 at = parent;
             }
-            if (!fields || path.Count == 0 || !IsLaneType(at.Type))
+            if (!fields || path.Count == 0 || !(IsLaneType(at.Type) || IsBool(at.Type))) // a bool field is a use the split advice can move out
             {
                 whole.Add(p);
                 continue;
@@ -309,14 +310,18 @@ internal sealed partial class Kernel
     }
 
     /// <summary>
-    /// A table lookup's byte indexes (255: the byte kept, TBX): a static of the job, built once; its cost, the
-    /// <paramref name="registers"/> of the table it reads, counted for the gate.
+    /// A table lookup's byte indexes (255: the byte kept, TBX): a static of the job, built once and shared by every
+    /// lookup with the same bytes; its cost, the <paramref name="registers"/> of the table it reads, counted per lookup
+    /// for the gate.
     /// </summary>
     private string Table128(int[] bytes, int registers)
     {
-        string name = $"__y{_lookups128++}";
-        _tables128.Append($"private static readonly global::System.Runtime.Intrinsics.Vector128<byte> {name} = global::System.Runtime.Intrinsics.Vector128.Create((byte){string.Join(", ", bytes)});\n");
         _registers += registers;
+        string values = string.Join(", ", bytes);
+        if (_tableNames128.TryGetValue(values, out var name)) return name;
+        name = $"__y{_tableNames128.Count}";
+        _tableNames128.Add(values, name);
+        _tables128.Append($"private static readonly global::System.Runtime.Intrinsics.Vector128<byte> {name} = global::System.Runtime.Intrinsics.Vector128.Create((byte){values});\n");
         return name;
     }
 
@@ -602,8 +607,11 @@ internal sealed partial class Kernel
             || named.GetAttributes().Any(a => a.AttributeClass?.Name == "StructLayoutAttribute"))
             return "";
         int all = Layout(named, 0, out _, out _)?.Count ?? 0;
-        if (used.Length == 0 || used.Length > MaxFields || used.Length * 2 > all
-            || used.Any(u => !IsLaneType(u[u.Length - 1].Type) || SizeOf(u[u.Length - 1].Type) != SizeOf(used[0][used[0].Length - 1].Type)))
+        // A bool moves out alone: a component of one bool is a byte column the loop reads as a mask; two bools together
+        // would still be a bool among fields.
+        bool flags = used.Any(u => IsBool(u[u.Length - 1].Type));
+        if (used.Length == 0 || used.Length > MaxFields || used.Length * 2 > all || flags && used.Length != 1
+            || used.Any(u => !(IsLaneType(u[u.Length - 1].Type) || IsBool(u[u.Length - 1].Type)) || SizeOf(u[u.Length - 1].Type) != SizeOf(used[0][used[0].Length - 1].Type)))
             return "";
         string names = string.Join(", ", used.Select(u => string.Join(".", u.Select(Symbols.MemberName))));
         return used.Length == 1

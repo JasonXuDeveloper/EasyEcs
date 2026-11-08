@@ -3249,3 +3249,88 @@ declares `ITile<TKey>` and writes no `Beside` now gets one inferred (it was CS05
   keep a capture incremental; adding or removing a component (presence) does not.
 - [ ] **Benchmarks for the site** (bench.json, if the docs pass shows them): `BulkCaptureBenchmark`,
   `PairGroupsBenchmark`, `IntrospectionBenchmark.Entities` are new (A/B-only so far).
+
+## feat-inner-loops (merged 2026-11-08): WP1 lanes, counted sums, lambda forms, EECS103 v3, D133 / D77 / WP4 drafts
+
+- **guide/systems.mdx + zh (vector loops: what becomes a vector loop):** a component holding an `[InlineArray]` of
+  4 / 8 / 16 elements (float, int, ...) is read as that many lanes, and a `for` over it with a constant trip count is
+  unrolled into the row loop (lanes = rows, element by element): Spectrum / Mix / Nearest of InlineArrayBenchmark as
+  the "You write / The generator writes" example. What stays scalar, with EECS055's reason: more than 16 elements, a
+  bound that is not a constant, an element index that is not the loop's. A body whose masked loop would pass the
+  JIT's 32 inlined locals runs its masked words through the method (the schedule says "masked words scalar"); the
+  whole words keep the vector loop. Also in the "Costs" table: the unrolled body grows with the elements.
+- **guide/systems.mdx + zh (reductions):** `sum += cond ? 1 : 0`, `if (cond) sum++` / `sum += 1` (and `cond ? 0 : 1`)
+  are counts: the lanes subtract the condition's mask (same width) or count it into an int (a field twice the
+  width: `long` over 4-byte lanes), folded once. Numbers: KernelBenchmark CycleHoles / Cycle, TileTallyBenchmark Cell.
+- **guide/analyzer.mdx + zh (EECS099):** also reported when two parameters of one method (or a view's two fields)
+  take the same component: they would alias one row. The message names both.
+- **guide/analyzer.mdx + zh (EECS055):** a component only the flat loop can take (an inline array read through an
+  index the row loop does not unroll) names itself as the reason, whatever else the row loop tripped on.
+- **guide/lambdas (or the lambda pass section of guide/systems) + zh:** a lambda pass changing structure under a
+  condition (`if (hp.V <= 0) e.Add<Dead>()`), and a lambda pass taking a `[View]`, get the vector loop the method
+  gets (the view's members inlined; EECS097 says why when it stays scalar). Numbers: StructuralLoopBenchmark Lambda,
+  ViewBenchmark Lambda. Remove "lambda + structural change" and "lambda + view" from any list of forms that stay
+  scalar (roadmap "Vector loops: forms left for later", the lambda page's limits).
+- **guide/parallel (ParallelFor) + zh, api.mdx + zh:** `world.ParallelFor(ref items, values..., static (ref T item, V
+  v) => …)` (WP4): the lambda takes the element by ref or in, then the values before it; the generator compiles it
+  into an IForSpan<T> job whose chunk loop is a vector loop where the body qualifies; complexity O(n / threads), 0 B
+  after the first call per job. "You write / The generator writes" from ParallelForBenchmark's LightLambda. EECS095's
+  ParallelFor reasons in analyzer.mdx; numbers: ParallelForBenchmark Light / Heavy Lambda against the hand-written
+  jobs (inner-loops.md WP4). Changelog (New) + README "What's new": "ParallelFor takes a lambda over a list's
+  elements, compiled into a vector loop".
+- **Changelog (New) + README "What's new":** "Inline array components and constant-trip loops over them run as
+  vector loops"; "Counts (`sum += cond ? 1 : 0`) are mask arithmetic"; "Lambda passes that change structure or
+  take a view get vector loops". Changelog (Analyzer): EECS099's new case.
+- **decisions.mdx + zh:** a record "Inline array elements as lanes, constant loops unrolled" (why lanes = rows and
+  not a wide form per element: Kernel.Wide's layout and LayoutCheck name members, an element would need an index
+  step the wide form does not have; the numbers: InlineArrayBenchmark); a record "A count is the mask, subtracted"
+  (why not CountWhereAllBitsSet / popcount on same-width lanes: Tier1 materializes the all-ones vector and a
+  sign extension each iteration, 15 vs 16 instructions and slower at 1k; doubled fields keep the popcount into an
+  int counter).
+- **samples/voxel-server.mdx + zh (WP7 and WP8 (e) of the inner-loops plan):** `FireDamageSystem.Hurt` is now the
+  method for one row (`static void Hurt(ref Health health) => health.Value--;`), which the generator runs as a vector
+  loop; the page's burn paragraph (en :370, "a batch method stamps the whole run it writes") and the SIMD list's third
+  shape (en :392-395, "A [batch method] gets a run of rows as spans, and `Vector<int>` changes 8 of them...", the
+  zh counterparts) describe the old hand-written batch form: say "the pass writing it stamps its rows" and "a method
+  for one row; the generator writes the vector loop (8 per instruction with Vector<int>, 4 on Arm)", and drop "so the
+  method does it". `Exposure(bool Sunlit, bool InWater)` is split into `Sunlit(bool Value)` and `InWater(bool Value)`,
+  so SunlightSystem and ExtinguishSystem get vector loops (a bool among other fields keeps a method scalar); the page
+  names neither, but its Sunlight tab text should say each flag is a byte column of its own.
+- **guide/vector-loops + guide/analyzers (EECS055) + zh:** a bool among a component's fields is now a fixable reason
+  when the method uses that bool alone: the message advises moving it into a component of its own and the split code
+  fix offers it; two bools used together stay Info (Body in VoxelServer's FakeClients.Play).
+- **guide/analyzers (EECS103) + zh (v3, WP6c):** EECS103 also reports a vector loop written by hand over a span inside
+  a [ForEach] method (`MemoryMarshal.Cast` to `Vector<T>`, or `new Vector<T>(span.Slice(i))` stepping by Count, then
+  `for (; i < s.Length; i++)` for the rest) when the plain loop `for (int i = 0; i < s.Length; i++) ...` gets the
+  generator's element loop in a copy of the compilation; the code fix "Write the plain loop" replaces the segment
+  (uniform locals the loop reads stay above it). Full example: AnalyzerTests.Forms HandWrittenElementLoops.
+- **Decision D133 (draft, en; WP7):** *`Cell<TCell, TTile>` is the stencil form; the generator writes the row loop.*
+  A `[ForEach]` method taking a cell of a tile and an out value (of a buffer, or of the cell's own type for a step in
+  place) says what one cell becomes; the generator reads the body as an element loop over each row of the padded tile
+  (every constant offset a stream, X / Y / Z the index's lanes) and translates it with the vector-loop core, inline
+  in one NoInlining pass per method, every width behind constant guards, the skipped rows filled with what the method
+  computes on `Cell.Blank`. Why: one form for every stencil (blur, wave, Life, flows), exact against the scalar method,
+  reaching the hand-written `Load128` loop (TileStencilBenchmark Blur9_Cell, Laplacian_Cell; TileActive Cell against
+  AlwaysOn). Considered: a `Cell` per row (no gain over the element loop), f(0) = 0 for skipped rows (wrong with a
+  constant term), a routine per width (over the 32 locals the JIT inlines for Life), a double-buffered cell component
+  (the step form, `out TCell`, swaps the tile's two buffers instead). EECS103 v2 reports a hand-written Tile stencil
+  with this form. D77's record becomes the history-free statement below.
+- **Decision D133 (draft, zh):** *`Cell<TCell, TTile>` 是模板的写法；行循环由生成器写。* 带瓦片格子和 out 值（写入缓冲区，或格子
+  自身类型、原地步进）的 `[ForEach]` 方法说明一个格子变成什么；生成器把方法体读作带光环瓦片每一行上的元素循环（每个常量偏移一条流，
+  X / Y / Z 是下标的通道），用向量循环核心翻译，内联在每个方法一个的 NoInlining 遍历里，每种宽度由常量条件选择，跳过的行填入方法在
+  `Cell.Blank` 上算出的值。原因：一种写法覆盖所有模板（模糊、波动、生命游戏、流动），结果与标量方法逐位相同，速度达到手写的
+  `Load128` 循环。考虑过：每行一个 `Cell`、跳过的行假设 f(0) = 0、每种宽度一个函数、双缓冲格子组件（步进写法 `out TCell` 交换瓦片的两块
+  缓冲区代替它）。EECS103 v2 把手写的 Tile 模板报告为这种写法。D77 改写为下面的当前结论。
+- **Decision D77 (rewrite, en+zh):** keep only what is true now: "Stencils are written one cell at a time (D133); a
+  Tile method with `Load128` rows stays for what a cell cannot say (a range of rows `Pad(from, to)`, a summary per
+  row before WP5b's per-tile results)". Drop the objections now answered (they move into D133's considered list) and
+  the temporal blocking / separable kernels entries stay in "Dropped" with their reason.
+- **Decision for WP4 (draft, en; next free number):** *A `ParallelFor` over a buffer takes a lambda.*
+  `world.ParallelFor(ref buffer, values..., static (ref T item, V v) => ...)` is intercepted like the other lambda
+  passes: an `IForSpan<T>` job whose chunk is an element loop (vector form when T is a lane struct, the scalar tail
+  calling the lambda's copy), values passed before the lambda (no capture, EECS095), a structural change refused
+  (its chunks run on several threads). Why: the hand-written `IForSpan` job was the only form, and it stays scalar.
+  Numbers (ParallelForBenchmark, 0 B): Light 10k 7.8-8.3 us by hand against 1.96-2.03 with the lambda; Light 100k
+  34-35 against 16.6-17.0; Heavy 10k 40-45 against 12.1-13.2; Heavy 100k 322-375 against 76-91. Considered: intercepting
+  hand-written jobs (dropped: D63/D18 allow interceptors for lambda passes only), a `ParallelFor(count, ...)` over
+  arrays (no use beyond buffers, D80).

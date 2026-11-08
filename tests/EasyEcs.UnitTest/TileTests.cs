@@ -1135,11 +1135,15 @@ public partial class TileTests
     [EcsSystem]
     public ref struct SleepSystem
     {
+        // EECS055: Changed alone would get a vector loop as a component of its own; the step writes both fields in one
+        // value, as the voxel server's water does, and this pass runs once per plate.
+#pragma warning disable EECS055
         [ForEach, With<Awake>]
         static void Sleep(Entity plate, in HeatChange change)
         {
             if (!change.Changed) plate.RemoveAwake();
         }
+#pragma warning restore EECS055
     }
 
     [EcsSystem]

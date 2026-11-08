@@ -183,6 +183,28 @@ public class WorkersTests
         ThreadSetup.Forget(static type => type == typeof(Reloaded));
     }
 
+    /// <summary>The rows of a vector loop's last vector (Interleaved.LoadTail): a type of its own, so its first copy is made here.</summary>
+    private struct TailRow
+    {
+        public float A, B;
+    }
+
+    [Test]
+    public void AVectorLoopsTailCopyIsSetUpOnEveryThread()
+    {
+        var rows = new[] { new TailRow { A = 1, B = 2 }, new TailRow { A = 3, B = 4 }, new TailRow { A = 5, B = 6 } };
+        Interleaved.LoadTail(ref rows[0], 3); // the first copy of the type: a ThreadSetup step for every thread
+        long allocated = -1;
+        var thread = new Thread(() =>
+        {
+            ThreadSetup.CatchUp(); // as a helper thread does before it runs a chunk
+            allocated = Allocations.Of(() => Interleaved.LoadTail(ref rows[0], 3));
+        });
+        thread.Start();
+        thread.Join();
+        Assert.That(allocated, Is.Zero);
+    }
+
     [Test]
     public void AHelperRunningAMethodForTheFirstTimeAllocatesNothing()
     {

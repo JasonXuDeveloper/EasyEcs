@@ -34,14 +34,37 @@ internal sealed partial class Kernel
             reason = "it is a partial method that takes a view";
             return null;
         }
+        return Desugar(method, syntax, syntax.ParameterList, syntax.Body, syntax.ExpressionBody?.Expression, syntax, model, ct, out reason);
+    }
 
+    /// <summary>
+    /// The desugared form of a lambda pass taking views: as a method's, the local function bound in the body of the
+    /// method the call is in (its parameters' types bind there as in the lambda); or null with the reason.
+    /// </summary>
+    private static (IMethodSymbol Method, IOperation Body, SemanticModel Model)? Desugar(IMethodSymbol lambda,
+        ParenthesizedLambdaExpressionSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct, out string? reason)
+    {
+        if (syntax.FirstAncestorOrSelf<MethodDeclarationSyntax>() is not { } host || host.Body == null && host.ExpressionBody == null)
+        {
+            reason = "it takes a view outside a method's body, where its members cannot be inlined";
+            return null;
+        }
+        return Desugar(lambda, syntax, syntax.ParameterList, syntax.Block, syntax.ExpressionBody, host, model, ct, out reason);
+    }
+
+    private static (IMethodSymbol Method, IOperation Body, SemanticModel Model)? Desugar(IMethodSymbol method, SyntaxNode syntax,
+        ParameterListSyntax parameters, BlockSyntax? block, ExpressionSyntax? expression, MethodDeclarationSyntax host, SemanticModel model,
+        System.Threading.CancellationToken ct, out string? reason)
+    {
+        reason = null;
         var used = new HashSet<string>(syntax.DescendantTokens().Where(t => t.IsKind(SyntaxKind.IdentifierToken)).Select(t => t.ValueText));
         var inliner = new Inliner(used, method, model.Compilation, ct);
-        inliner.Callees.Offer(model, syntax);
+        inliner.Callees.Offer(model, host);
         var added = new List<ParameterSyntax>();
+        bool outside = method.MethodKind == MethodKind.AnonymousFunction || Symbols.IsRunner(method);
         foreach (var p in method.Parameters)
         {
-            if (Symbols.Classify(p, Symbols.IsRunner(method)) != Symbols.ParamKind.View) continue;
+            if (Symbols.Classify(p, outside) != Symbols.ParamKind.View) continue;
             foreach (var field in Views.Fields((INamedTypeSymbol)p.Type))
             {
                 if (field.Mut)
@@ -59,8 +82,7 @@ internal sealed partial class Kernel
         }
 
         var pass = inliner.Method(model);
-        BlockSyntax? body = syntax.Body != null ? pass.Body(syntax.Body)
-            : syntax.ExpressionBody != null ? Block(pass.Arrow(syntax.ExpressionBody.Expression, null)) : null;
+        BlockSyntax? body = block != null ? pass.Body(block) : expression != null ? Block(pass.Arrow(expression, null)) : null;
         if (body == null || inliner.Reason != null)
         {
             reason = inliner.Reason ?? "a view is used in a way the vector loop cannot follow";
@@ -69,13 +91,13 @@ internal sealed partial class Kernel
 
         body = inliner.WithAccessors(Inliner.WithoutInlinedLocalFunctions(body));
 
-        // The method's parameters as written (their types bind where they did) and the view fields after them.
+        // The parameters as written (their types bind where they did) and the view fields after them.
         var function = LocalFunctionStatement(PredefinedType(Token(SyntaxKind.VoidKeyword)), Identifier(inliner.Fresh("__Desugared")))
             .WithModifiers(TokenList(Token(SyntaxKind.StaticKeyword)))
-            .WithParameterList(syntax.ParameterList.AddParameters(added.ToArray()))
+            .WithParameterList(parameters.WithParameters(SeparatedList(parameters.Parameters.Select(q => q.WithAttributeLists(default))).AddRange(added)))
             .WithBody(body);
-        var replaced = syntax.WithExpressionBody(null).WithSemicolonToken(default).WithBody(Block(function));
-        int position = syntax.Body?.SpanStart ?? syntax.ExpressionBody!.SpanStart;
+        var replaced = host.WithExpressionBody(null).WithSemicolonToken(default).WithBody(Block(function));
+        int position = host.Body?.SpanStart ?? host.ExpressionBody!.SpanStart;
         if (!model.TryGetSpeculativeSemanticModelForMethodBody(position, replaced, out var speculative) || speculative == null
             || replaced.Body!.Statements[0] is not LocalFunctionStatementSyntax declared
             || speculative.GetDeclaredSymbol(declared, ct) is not IMethodSymbol desugared

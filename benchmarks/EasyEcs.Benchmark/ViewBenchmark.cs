@@ -7,7 +7,8 @@ namespace EasyEcs.Benchmark;
 /// [ForEach] method taking <c>ref Position, in Velocity</c>; <c>View</c> takes a <c>[View] Mover</c> over the same two
 /// components and calls its <c>Step</c>; both get the vector loop, and their <c>Scalar</c> twins are the same methods
 /// with <c>SimdMode.Off</c>. <c>EntityRefs</c> / <c>EntityView</c> step 1,000 single entities through
-/// <c>Get</c> / <c>Read</c> against <c>entity.AsMover()</c>. 0 bytes every way.
+/// <c>Get</c> / <c>Read</c> against <c>entity.AsMover()</c>. <c>Lambda</c> is <c>View</c> as a lambda pass
+/// (<c>world.ForEach(static (Mover m) =&gt; m.Step(dt))</c>), which gets the same vector loop. 0 bytes every way.
 /// </summary>
 [MemoryDiagnoser]
 public class ViewBenchmark
@@ -24,7 +25,7 @@ public class ViewBenchmark
         _world.AddSingleton<Clock>() = new Clock(0.016f);
         _entities = new Entity[Movers];
         _world.CreateEntities(_entities, new Position(), new Velocity(1f, 0.5f));
-        Refs(); View(); RefsScalar(); ViewScalar(); EntityRefs(); EntityView();
+        Refs(); View(); RefsScalar(); ViewScalar(); Lambda(); EntityRefs(); EntityView();
     }
 
     [GlobalCleanup]
@@ -41,6 +42,9 @@ public class ViewBenchmark
 
     [Benchmark]
     public void ViewScalar() => Motion.ByViewScalar(_world);
+
+    [Benchmark]
+    public void Lambda() => _world.ForEach(static (Mover mover) => mover.Step(0.016f));
 
     [Benchmark]
     public float EntityRefs()

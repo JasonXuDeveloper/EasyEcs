@@ -80,10 +80,91 @@ internal static class HandSimd
     }
 
     /// <summary>
+    /// A vector loop written by hand over a method's spans of lanes (EECS103 v3): the statements of a block it takes
+    /// (<paramref name="Segment"/>: an optional <c>int i = 0;</c>, the guarded or plain vector loop, and the scalar loop
+    /// for the elements left) and the plain loop over the elements that replaces them (<paramref name="Replacement"/>),
+    /// which the generator turns into its own vector loop (Kernel.Loops.cs).
+    /// </summary>
+    public sealed record ElementLoop(Microsoft.CodeAnalysis.Text.TextSpan Segment, string Replacement)
+    {
+        /// <summary>The plain loop on one line, for a message.</summary>
+        public string Summary(int max = 200)
+        {
+            string text = System.Text.RegularExpressions.Regex.Replace(Replacement, @"\s+", " ").Trim();
+            return text.Length <= max ? text : text.Substring(0, max - 3) + "...";
+        }
+    }
+
+    /// <summary>
+    /// The vector loops written by hand over spans of lanes in a [ForEach] method's blocks (a buffer's span scaled with
+    /// <c>Vector&lt;float&gt;</c>, then a scalar loop for the rest), each with the plain loop that replaces it, reported only
+    /// when the generator's element loop takes that plain loop in a copy of the compilation.
+    /// </summary>
+    public static List<ElementLoop> Loops(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
+    {
+        var found = new List<ElementLoop>();
+        if (!MayBe(syntax) || !Symbols.IsForEach(method) || Symbols.IsEntityMethod(method) || Symbols.Simd(method) == Symbols.SimdOff
+            || Symbols.IsGenerated(method) || !method.IsStatic || method.IsGenericMethod
+            || method.PartialDefinitionPart != null || method.PartialImplementationPart != null) return found;
+        foreach (var block in syntax.Body!.DescendantNodesAndSelf(n => n is not (AnonymousFunctionExpressionSyntax or LocalFunctionStatementSyntax)).OfType<BlockSyntax>())
+        {
+            var list = block.Statements;
+            for (int j = 0; j < list.Count; j++)
+            {
+                if (list[j] is not (IfStatementSyntax or ForStatementSyntax) || !NamesVector(list[j])) continue;
+                // the scalar loop for the elements left: `for (; i < s.Length; i++)` right after
+                if (j + 1 >= list.Count || list[j + 1] is not ForStatementSyntax { Declaration: null, Initializers.Count: 0 } rest || NamesVector(rest)) continue;
+                int start = j > 0 && list[j - 1] is LocalDeclarationStatementSyntax { Declaration.Variables.Count: 1 } zero
+                            && zero.Declaration.Variables[0].Initializer?.Value is LiteralExpressionSyntax { Token.ValueText: "0" } ? j - 1 : j;
+                ElementLoop? loop;
+                try
+                {
+                    loop = new Reader(method, syntax, model, ct).ReadLoop(list, start, j, rest);
+                }
+                catch (NotHand)
+                {
+                    continue;
+                }
+
+                if (Vectorizes(syntax, model, loop, ct)) found.Add(loop);
+                j++;
+            }
+        }
+
+        return found;
+    }
+
+    private static bool NamesVector(SyntaxNode node) => node.DescendantTokens().Any(t => t.IsKind(SyntaxKind.IdentifierToken)
+        && t.ValueText is "Vector" or "Vector64" or "Vector128" or "Vector256" or "Vector512");
+
+    /// <summary>The plain loop, put in the hand-written loop's place in a copy of the compilation, gets the generator's element loop.</summary>
+    private static bool Vectorizes(MethodDeclarationSyntax syntax, SemanticModel model, ElementLoop loop, System.Threading.CancellationToken ct)
+    {
+        var tree = syntax.SyntaxTree;
+        var text = tree.GetText(ct);
+        var copy = tree.WithChangedText(text.Replace(loop.Segment, loop.Replacement));
+        var copyModel = model.Compilation.ReplaceSyntaxTree(tree, copy).GetSemanticModel(copy);
+        var root = copy.GetRoot(ct);
+        if (root.FindToken(syntax.Identifier.SpanStart).Parent?.FirstAncestorOrSelf<MethodDeclarationSyntax>() is not { Body: { } body } copySyntax
+            || copyModel.GetDeclaredSymbol(copySyntax, ct) is not { } copyMethod
+            || copyModel.GetDiagnostics(copySyntax.Span, ct).Any(d => d.Severity == DiagnosticSeverity.Error)) return false;
+        int at = loop.Segment.Start + loop.Replacement.IndexOf("for (", System.StringComparison.Ordinal);
+        return Kernel.ElementLoops(copyMethod, body, copyModel, ct).Any(l => l.Loop.SpanStart == at && l.Vector != null);
+    }
+
+    /// <summary>
     /// Whether <paramref name="form"/>, in place of the method in a copy of the compilation, compiles and gets the
     /// generator's vector loop (the method's attributes kept: its SimdMode and FloatMode decide).
     /// </summary>
-    private static bool Vectorizes(MethodDeclarationSyntax syntax, SemanticModel model, PerRow form, System.Threading.CancellationToken ct)
+    private static bool Vectorizes(MethodDeclarationSyntax syntax, SemanticModel model, PerRow form, System.Threading.CancellationToken ct) =>
+        Rewritten(syntax, model, form, ct, static (method, syntax, model, ct) => Kernel.Vectorize(method, syntax, model, static (_, _) => "", ct, out Kernel.ScalarReason? _) != null);
+
+    /// <summary>
+    /// Whether <paramref name="form"/>, in place of the method in a copy of the compilation, compiles without errors and
+    /// passes <paramref name="gets"/> there (the generator's form for it: a vector loop, a cell's row loop).
+    /// </summary>
+    internal static bool Rewritten(MethodDeclarationSyntax syntax, SemanticModel model, PerRow form, System.Threading.CancellationToken ct,
+        System.Func<IMethodSymbol, MethodDeclarationSyntax, SemanticModel, System.Threading.CancellationToken, bool> gets)
     {
         var parameters = SyntaxFactory.ParseParameterList("(" + form.Parameters + ")");
         if (SyntaxFactory.ParseStatement("{\n" + string.Join("\n", form.Statements) + "\n}") is not BlockSyntax block
@@ -97,16 +178,21 @@ internal static class HandSimd
         var copySyntax = copy.GetRoot(ct).GetAnnotatedNodes(annotation).OfType<MethodDeclarationSyntax>().First();
         if (copyModel.GetDeclaredSymbol(copySyntax, ct) is not { } copyMethod
             || copyModel.GetDiagnostics(copySyntax.Span, ct).Any(d => d.Severity == DiagnosticSeverity.Error)) return false;
-        return Kernel.Vectorize(copyMethod, copySyntax, copyModel, static (_, _) => "", ct, out Kernel.ScalarReason? _) != null;
+        return gets(copyMethod, copySyntax, copyModel, ct);
     }
 
     /// <summary>The body is not a hand-written vector loop this rule rewrites.</summary>
     private sealed class NotHand : System.Exception;
 
-    /// <summary>A component span of the method: the component, its lane fields (by name, in memory order), its row parameter.</summary>
-    private sealed class Row(IParameterSymbol span, INamedTypeSymbol component, bool readOnly)
+    /// <summary>
+    /// A span the loop walks: a component span parameter of a batch method (the component, its lane fields by name, in
+    /// memory order), or, for an element loop (<see cref="Loops"/>), a span parameter or local whose element is a lane
+    /// (<see cref="Element"/>: each lane is an element, written <c>s[i]</c>).
+    /// </summary>
+    private sealed class Row(ISymbol span, INamedTypeSymbol component, bool readOnly, bool element = false)
     {
-        public IParameterSymbol Span { get; } = span;
+        public ISymbol Span { get; } = span;
+        public bool Element { get; } = element;
         public INamedTypeSymbol Component { get; } = component;
         public bool ReadOnly { get; } = readOnly;
         public string[]? Fields;
@@ -132,7 +218,7 @@ internal static class HandSimd
 
     private sealed class Reader(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
     {
-        private readonly Dictionary<IParameterSymbol, Row> _rows = new(SymbolEqualityComparer.Default);
+        private readonly Dictionary<ISymbol, Row> _rows = new(SymbolEqualityComparer.Default);
         private readonly HashSet<IParameterSymbol> _uniformParams = new(SymbolEqualityComparer.Default);
         private readonly Dictionary<ILocalSymbol, Stream> _streams = new(SymbolEqualityComparer.Default);
         private readonly Dictionary<ILocalSymbol, Uniform> _uniforms = new(SymbolEqualityComparer.Default);
@@ -147,6 +233,10 @@ internal static class HandSimd
         private INamedTypeSymbol? _vector; // the loop's vector type (definition), from its bound or step
         private int _laneSize, _fields;
         private string[] _suffixes = [];
+        private bool _elements;                  // an element loop (ReadLoop): spans of lanes, the method's values uniform
+        private Microsoft.CodeAnalysis.Text.TextSpan _segment; // its statements, which the plain loop replaces
+        private Row? _boundRow;                  // the span whose length bounds it
+        private string _at = "";                 // the plain loop's index, in an element's text (s[i])
 
         private static NotHand No() => new();
 
@@ -177,9 +267,93 @@ internal static class HandSimd
             return Assemble();
         }
 
+        /// <summary>Lane k of a row as the scalar loop writes it: field k of the component, or the element itself.</summary>
+        private string At(Row row, int k) => row.Element ? $"{row.Name}[{_at}]" : $"{row.Name}.{row.Fields![k]}";
+
+        /// <summary>
+        /// The row of a span: a component span parameter (<see cref="Read"/>), or in an element loop any span of lanes
+        /// declared before the loop's statements (a parameter or a local), made on its first use.
+        /// </summary>
+        private Row? RowOf(IOperation op)
+        {
+            ISymbol? symbol = Strip(op) switch
+            {
+                IParameterReferenceOperation { Parameter: var p } => p,
+                ILocalReferenceOperation { Local: var l } when _elements && !_streams.ContainsKey(l) && !_uniforms.ContainsKey(l) && !Inside(l) => l,
+                _ => null,
+            };
+            if (symbol == null) return null;
+            if (_rows.TryGetValue(symbol, out var row)) return row;
+            var type = symbol is IParameterSymbol parameter ? parameter.Type : ((ILocalSymbol)symbol).Type;
+            if (!_elements || symbol is IParameterSymbol { RefKind: not (RefKind.None or RefKind.In) } || type is not INamedTypeSymbol { IsGenericType: true } span
+                || !(Symbols.Named(span.ConstructedFrom, "System.Span<T>") || Symbols.Named(span.ConstructedFrom, "System.ReadOnlySpan<T>"))
+                || span.TypeArguments[0] is not INamedTypeSymbol element || !IsLane(element)) return null;
+            // An element row is one lane per element (s[i]) from the start: Layout counts it before the body reads it.
+            return _rows[symbol] = new Row(symbol, element, Symbols.Named(span.ConstructedFrom, "System.ReadOnlySpan<T>"), true) { Name = symbol.Name, Fields = [""], Lane = element };
+        }
+
+        /// <summary>A local declared in the element loop's statements (its index, the hand-written loop's own locals).</summary>
+        private bool Inside(ILocalSymbol local) =>
+            local.DeclaringSyntaxReferences.FirstOrDefault() is { } reference && _segment.Contains(reference.Span);
+
+        /// <summary>
+        /// The hand-written loop of statements <paramref name="start"/>..<paramref name="loop"/> of <paramref name="list"/>
+        /// (an optional <c>int i = 0;</c>, then the guarded or plain vector loop) and <paramref name="rest"/>, the scalar
+        /// loop for the elements left, as the plain loop over the elements: its uniform locals, then one statement per
+        /// vector statement with each lane an element (<c>s[i]</c>).
+        /// </summary>
+        public ElementLoop ReadLoop(SyntaxList<StatementSyntax> list, int start, int loop, ForStatementSyntax rest)
+        {
+            _elements = true;
+            _segment = Microsoft.CodeAnalysis.Text.TextSpan.FromBounds(list[start].SpanStart, rest.Span.End);
+            Walk(list.Skip(start).Take(loop - start + 1), true);
+            if (_loop == null || _rows.Count > 0 && _rows.Values.Any(r => !r.Element)) throw No();
+            Loop(_loop);
+            CheckTail();
+            if (_boundRow == null) throw No();
+
+            // The scalar loop counts the same span from where the vector loop stopped: `for (; i < s.Length; i++)`.
+            if (Op(rest.Condition ?? throw No()) is not IBinaryOperation { OperatorKind: BinaryOperatorKind.LessThan, LeftOperand: var left, RightOperand: var right }
+                || Strip(left) is not ILocalReferenceOperation { Local: var index } || !Inside(index)
+                || Strip(right) is not IPropertyReferenceOperation { Property.Name: "Length", Instance: { } of } || RowOf(of) != _boundRow
+                || rest.Incrementors.Count != 1 || Op(rest.Incrementors[0]) is not IIncrementOrDecrementOperation { Kind: OperationKind.Increment, Target: var stepped }
+                || !(Strip(stepped) is ILocalReferenceOperation { Local: var counted } && SymbolEqualityComparer.Default.Equals(counted, index))) throw No();
+            _at = index.Name;
+
+            var prelude = new List<string>();
+            foreach (var l in _order)
+                if (_uniforms.TryGetValue(l, out var u) && u.Used)
+                {
+                    if (_zeroes.Contains(l)) throw No(); // the vector loop reads the index as a value
+                    prelude.Add(u.Statement);
+                }
+            _loopLocals.Clear();
+            foreach (var row in _rows.Values) row.Written = false;
+            var statements = new List<string>();
+            var body = _loop.Statement is BlockSyntax block ? (IEnumerable<StatementSyntax>)block.Statements : [_loop.Statement];
+            foreach (var statement in body) Statement(Op(statement), statements);
+            if (statements.Count == 0) throw No();
+
+            // Indented as the replaced statements are; the first line takes the segment's own position.
+            string indent = list[start].GetLeadingTrivia().LastOrDefault(t => t.IsKind(SyntaxKind.WhitespaceTrivia)).ToFullString();
+            string eol = list[start].SyntaxTree.GetRoot(ct).DescendantTrivia().FirstOrDefault(t => t.IsKind(SyntaxKind.EndOfLineTrivia)).ToFullString() is { Length: > 0 } e ? e : "\n";
+            var text = new StringBuilder();
+            foreach (var line in prelude) text.Append(line).Append(eol).Append(indent);
+            text.Append($"for (int {_at} = 0; {_at} < {_boundRow.Name}.Length; {_at}++)");
+            if (statements.Count == 1) text.Append(' ').Append(statements[0]);
+            else
+            {
+                text.Append(eol).Append(indent).Append('{');
+                foreach (var line in statements) text.Append(eol).Append(indent).Append("    ").Append(line);
+                text.Append(eol).Append(indent).Append('}');
+            }
+
+            return new ElementLoop(_segment, text.ToString());
+        }
+
         // ---------------- the shape: prelude, loop, tail ----------------
 
-        private void Walk(SyntaxList<StatementSyntax> statements, bool top)
+        private void Walk(IEnumerable<StatementSyntax> statements, bool top)
         {
             foreach (var statement in statements)
             {
@@ -234,7 +408,7 @@ internal static class HandSimd
                     while (target is IFieldReferenceOperation { Instance: not null, Field.IsStatic: false }
                            or IPropertyReferenceOperation { Instance.Type.IsValueType: true, Property.IsIndexer: false })
                         target = ((IMemberReferenceOperation)target).Instance!;
-                    if (target is ILocalReferenceOperation { Local: var local } && !_uniforms.ContainsKey(local)
+                    if (target is ILocalReferenceOperation { Local: var local } && (_elements ? Inside(local) && (_zeroes.Contains(local) || !_uniforms.ContainsKey(local)) : !_uniforms.ContainsKey(local))
                         || target is IPropertyReferenceOperation { Property.IsIndexer: true, Instance.Type: INamedTypeSymbol span } && Symbols.SpanElement(span) != null)
                         continue;
                     throw No();
@@ -313,7 +487,7 @@ internal static class HandSimd
                 || !Symbols.Named(call.TargetMethod.ContainingType, "System.Runtime.InteropServices.MemoryMarshal")) return null;
             return Strip(call.Arguments[0].Value) switch
             {
-                IParameterReferenceOperation { Parameter: var p } when _rows.TryGetValue(p, out var row) => (row, null),
+                var o when RowOf(o) is { } row => (row, null),
                 ILocalReferenceOperation { Local: var l } when _streams.TryGetValue(l, out var stream) => (null, stream),
                 _ => null,
             };
@@ -330,8 +504,7 @@ internal static class HandSimd
             var vector = IsVector(to) ? (INamedTypeSymbol)to : null;
             switch (Strip(call.Arguments[0].Value))
             {
-                case IParameterReferenceOperation { Parameter: var p } when _rows.TryGetValue(p, out var row)
-                                                                          && SymbolEqualityComparer.Default.Equals(cast.TypeArguments[0], row.Component):
+                case var o when RowOf(o) is { } row && SymbolEqualityComparer.Default.Equals(cast.TypeArguments[0], row.Component):
                     return Lanes(row, lane, vector, false);
                 case ILocalReferenceOperation { Local: var l } when _streams.TryGetValue(l, out var source) && source is { Vector: null, Ref: false }
                                                                    && vector != null && SymbolEqualityComparer.Default.Equals(source.Lane, lane):
@@ -344,7 +517,13 @@ internal static class HandSimd
         /// <summary>A stream of <paramref name="lane"/> over <paramref name="row"/>: every field of its component is a <paramref name="lane"/>.</summary>
         private Stream Lanes(Row row, ITypeSymbol lane, INamedTypeSymbol? vector, bool byRef)
         {
-            if (row.Fields == null)
+            if (row.Element)
+            {
+                if (!SymbolEqualityComparer.Default.Equals(row.Component, lane)) throw No(); // an element viewed as other lanes
+                row.Fields = [""];
+                row.Lane = lane;
+            }
+            else if (row.Fields == null)
             {
                 if (row.Component.GetAttributes().Any(a => Symbols.Named(a.AttributeClass, "System.Runtime.InteropServices.StructLayoutAttribute")
                                                            || Symbols.Named(a.AttributeClass, "System.Runtime.CompilerServices.InlineArrayAttribute")))
@@ -398,7 +577,7 @@ internal static class HandSimd
             Step(step);
             Bound(bound);
 
-            var body = loop.Statement is BlockSyntax block ? block.Statements : new SyntaxList<StatementSyntax>(loop.Statement);
+            var body = loop.Statement is BlockSyntax block ? (IEnumerable<StatementSyntax>)block.Statements : [loop.Statement];
             var ops = body.Select(s => model.GetOperation(s, ct) ?? throw No()).ToList();
             Layout(ops);
             var result = new List<string>();
@@ -434,6 +613,7 @@ internal static class HandSimd
                 if (compare.OperatorKind != BinaryOperatorKind.LessThan || !IsIndex(compare.LeftOperand)
                     || Strip(compare.RightOperand) is not IPropertyReferenceOperation { Property.Name: "Length", Instance: ILocalReferenceOperation { Local: var l } }
                     || !_streams.TryGetValue(l, out var stream) || stream.Vector == null) throw No();
+                _boundRow = stream.Row;
                 _vector = stream.Vector.OriginalDefinition;
                 Size(stream.Vector);
                 return;
@@ -454,6 +634,7 @@ internal static class HandSimd
             else if (length is IPropertyReferenceOperation { Property.Name: "Length", Instance: { } instance }) length = instance;
             else throw No();
             _boundOf = LengthOf(length) ?? throw No();
+            _boundRow = _boundOf switch { Stream counted => counted.Row, Row whole => whole, _ => null };
         }
 
         /// <summary>The lanes a length counts: a scalar stream's, or a span parameter's (rows: one lane each, checked by <see cref="Layout"/>).</summary>
@@ -462,7 +643,7 @@ internal static class HandSimd
         private object? LengthOf(IOperation of) => Strip(of) switch
         {
             ILocalReferenceOperation { Local: var l } when _streams.TryGetValue(l, out var s) && s is { Vector: null, Ref: false } => s,
-            IParameterReferenceOperation { Parameter: var p } when _rows.TryGetValue(p, out var row) => row,
+            var o when RowOf(o) is { } row => row,
             _ => null,
         };
 
@@ -499,6 +680,12 @@ internal static class HandSimd
                         _fields = f;
                     }
 
+            // The spans an element loop reads by Slice are element rows, not streams: one lane each.
+            if (_elements && _rows.Values.Any(r => r.Element))
+            {
+                if (_fields > 1) throw No();
+                _fields = 1;
+            }
             if (_fields == 0 || (_fields & (_fields - 1)) != 0) throw No();
             int bytes = Symbols.Named(_vector, "System.Runtime.Intrinsics.Vector64<T>") ? 8
                 : Symbols.Named(_vector, "System.Runtime.Intrinsics.Vector256<T>") ? 32
@@ -509,8 +696,8 @@ internal static class HandSimd
             if (_boundOf is Row { Fields: null }) throw No();
 
             // The suffixes of a vector local's per-field names: the fields of the first component read.
-            var first = _streams.Values.First(s => s.Row.Fields!.Length == _fields).Row;
-            _suffixes = _fields == 1 ? [""] : first.Fields!.Select(f => char.ToUpperInvariant(f[0]) + f.Substring(1)).ToArray();
+            _suffixes = _fields == 1 ? [""]
+                : _streams.Values.First(s => s.Row.Fields!.Length == _fields).Row.Fields!.Select(f => char.ToUpperInvariant(f[0]) + f.Substring(1)).ToArray();
         }
 
         // ---------------- statements ----------------
@@ -554,7 +741,7 @@ internal static class HandSimd
                 case IInvocationOperation call when Store(call) is var (value, row):
                     row.Written = true;
                     if (row.ReadOnly) throw No();
-                    return $"{row.Name}.{row.Fields![k]} = {Expr(value, k).Text};";
+                    return $"{At(row, k)} = {Expr(value, k).Text};";
                 default:
                     throw No();
             }
@@ -589,7 +776,7 @@ internal static class HandSimd
                 case IPropertyReferenceOperation { Property.IsIndexer: true } element when Element(element) is { } row:
                     if (row.ReadOnly) throw No();
                     row.Written = true;
-                    return $"{row.Name}.{row.Fields![k]}";
+                    return $"{At(row, k)}";
                 default:
                     throw No(); // a uniform written in the loop is an accumulator across vectors: another order than per row
             }
@@ -606,14 +793,19 @@ internal static class HandSimd
             return stream.Row;
         }
 
-        /// <summary><c>s.Slice(i)</c> or <c>s.Slice(i, Count)</c> of a scalar stream: the stream.</summary>
+        /// <summary>
+        /// <c>s.Slice(i)</c> or <c>s.Slice(i, Count)</c> of a scalar stream (or, in an element loop, of a span of lanes declared
+        /// before it: its element row): the stream.
+        /// </summary>
         private Stream? Slice(IOperation op)
         {
             if (Strip(op) is not IInvocationOperation { TargetMethod.Name: "Slice", Instance: { } instance } slice
-                || Symbols.SpanElement(instance.Type!) == null
-                || Strip(instance) is not ILocalReferenceOperation { Local: var l } || !_streams.TryGetValue(l, out var stream)
-                || stream.Vector != null || stream.Ref || slice.Arguments.Length is not (1 or 2) || !IsIndex(slice.Arguments[0].Value)
+                || Symbols.SpanElement(instance.Type!) == null || slice.Arguments.Length is not (1 or 2) || !IsIndex(slice.Arguments[0].Value)
                 || slice.Arguments.Length == 2 && !SymbolEqualityComparer.Default.Equals(CountOf(slice.Arguments[1].Value), _vector)) return null;
+            Stream? stream = null;
+            if (Strip(instance) is ILocalReferenceOperation { Local: var l } && _streams.TryGetValue(l, out var declared)) stream = declared;
+            else if (_elements && RowOf(instance) is { Element: true } row) stream = new Stream(row, row.Component, null, false);
+            if (stream == null || stream.Vector != null || stream.Ref) return null;
             stream.Row.Used = true;
             return stream;
         }
@@ -640,7 +832,7 @@ internal static class HandSimd
                 case IPropertyReferenceOperation { Instance: null, Property.Name: var name }:
                     return Constant(name, lane);
                 case IPropertyReferenceOperation { Property.IsIndexer: true } element when Element(element) is { } row:
-                    return ($"{row.Name}.{row.Fields![k]}", Primary);
+                    return ($"{At(row, k)}", Primary);
                 case IObjectCreationOperation { Arguments.Length: 1 } creation:
                     return Load(creation.Arguments[0].Value, lane, k);
                 case IInvocationOperation call when IsVectorClass(call.TargetMethod.ContainingType):
@@ -675,7 +867,7 @@ internal static class HandSimd
                 case ("LoadUnsafe", 2) when _byCount && Strip(args[0]) is ILocalReferenceOperation { Local: var l } && _streams.TryGetValue(l, out var r)
                                             && r.Ref && IsIndex(args[1]):
                     r.Row.Used = true;
-                    return ($"{r.Row.Name}.{r.Row.Fields![k]}", Primary);
+                    return ($"{At(r.Row, k)}", Primary);
                 case ("Add", 2): return Binary("+", Expr(args[0], k), Expr(args[1], k));
                 case ("Subtract", 2): return Binary("-", Expr(args[0], k), Expr(args[1], k));
                 case ("Multiply", 2): return Binary("*", Expr(args[0], k), Expr(args[1], k));
@@ -710,7 +902,7 @@ internal static class HandSimd
         /// <summary>A vector from a span (a load: field k of the row) or from one scalar (a broadcast: the scalar).</summary>
         private (string, int) Load(IOperation argument, ITypeSymbol lane, int k)
         {
-            if (Slice(argument) is { } stream && _byCount) return ($"{stream.Row.Name}.{stream.Row.Fields![k]}", Primary);
+            if (Slice(argument) is { } stream && _byCount) return ($"{At(stream.Row, k)}", Primary);
             var reads = new List<ILocalSymbol>();
             if (Broadcast1(argument, lane, reads) is null) throw No();
             foreach (var l in reads) Use(_uniforms[l]);
@@ -831,10 +1023,12 @@ internal static class HandSimd
                 case IConversionOperation { OperatorMethod: null } c:
                     return IsUniform(c.Operand, reads);
                 case IParameterReferenceOperation { Parameter: var p }:
-                    return _uniformParams.Contains(p);
+                    return _uniformParams.Contains(p) || _elements && !_rows.ContainsKey(p) && !p.Type.IsRefLikeType; // a row's value in an element loop
                 case ILocalReferenceOperation { Local: var l } when _uniforms.ContainsKey(l):
                     reads.Add(l);
                     return true;
+                case ILocalReferenceOperation { Local: var l } when _elements && !Inside(l) && !_rows.ContainsKey(l) && !l.Type.IsRefLikeType && !l.IsRef:
+                    return true; // a local of the method before the loop, which the loop does not write
                 case IFieldReferenceOperation { Field: var f, Instance: var instance }:
                     return f.IsStatic ? f.IsReadOnly || f.IsConst : instance != null && IsUniform(instance, reads);
                 case IPropertyReferenceOperation { Property: { IsStatic: false, IsIndexer: false } property, Instance: { } instance }
@@ -910,7 +1104,7 @@ internal static class HandSimd
                 if (_uniforms.TryGetValue(l, out var u) && u.Used) statements.Add(u.Statement);
             _loopLocals.Clear();
             foreach (var row in _rows.Values) row.Written = false;
-            var body = _loop.Statement is BlockSyntax block ? block.Statements : new SyntaxList<StatementSyntax>(_loop.Statement);
+            var body = _loop.Statement is BlockSyntax block ? (IEnumerable<StatementSyntax>)block.Statements : [_loop.Statement];
             foreach (var statement in body) Statement(model.GetOperation(statement, ct)!, statements);
             return new PerRow(string.Join(", ", parameters), statements.ToArray());
         }

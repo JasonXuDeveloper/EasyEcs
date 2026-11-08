@@ -3,7 +3,7 @@ using System;
 namespace EasyEcs;
 
 /// <summary>
-/// A job over a range of indexes, run in chunks by <see cref="World.ParallelFor{TJob}"/> (Kokkos' <c>RangePolicy</c>,
+/// A job over a range of indexes, run in chunks by <see cref="World.ParallelFor{TJob}(int, ref TJob, int)"/> (Kokkos' <c>RangePolicy</c>,
 /// Unity's <c>IJobParallelForBatch</c>): each call gets one chunk.
 /// </summary>
 public interface IForRange
@@ -13,7 +13,7 @@ public interface IForRange
 }
 
 /// <summary>
-/// A job over the elements of a list, run in chunks by <see cref="World.ParallelFor{T, TJob}"/>: each call gets one
+/// A job over the elements of a list, run in chunks by <see cref="World.ParallelFor{T, TJob}(ref DynamicBuffer{T}, ref TJob, int)"/>: each call gets one
 /// chunk's elements, writable.
 /// </summary>
 /// <typeparam name="T">The element.</typeparam>
@@ -49,7 +49,7 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// <see cref="ParallelFor{TJob}"/> over the elements of <paramref name="items"/> (an <see cref="Emitted{T}"/>
+    /// <see cref="ParallelFor{TJob}(int, ref TJob, int)"/> over the elements of <paramref name="items"/> (an <see cref="Emitted{T}"/>
     /// singleton's records, a buffer of a singleton): each chunk gets its elements as a span, which it may write. The
     /// list must not change while the call runs. The records of an <see cref="Emitted{T}"/> that parallel passes left in
     /// their chunks' lists are run where they are, in order, not joined first: a chunk that spans two of those lists
@@ -67,7 +67,7 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// <see cref="ParallelFor{TJob}"/> in chunks of exactly <paramref name="size"/> indexes, for heavy items that are no
+    /// <see cref="ParallelFor{TJob}(int, ref TJob, int)"/> in chunks of exactly <paramref name="size"/> indexes, for heavy items that are no
     /// rows of a table (no presence-bit word to keep whole): a stepping tile pass's woken tiles
     /// (<see cref="TileSteps{TCell, TTile, TGrid, TKey, TColors}.StepWokenParallel{TJob}"/>), where chunks of 64 tiles
     /// would leave most threads idle.

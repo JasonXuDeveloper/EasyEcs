@@ -97,8 +97,8 @@ internal static class Views
     public static bool IsValid(ITypeSymbol? type) => IsView(type) && Problem((INamedTypeSymbol)type!) == null;
 
     /// <summary>
-    /// Why the components a method takes through its views collide (EECS099), or null: a component reached through a view
-    /// and through another view or a component parameter (a <c>ref</c> / <c>in</c> component, a span, a <c>Mut</c>, a
+    /// Why the components a method takes collide (EECS099), or null: a component reached through two component parameters,
+    /// or through a view and another view or a component parameter (a <c>ref</c> / <c>in</c> component, a span, a <c>Mut</c>, a
     /// <c>Maybe</c>) is two refs to one column, and a pass queries each component once.
     /// </summary>
     public static (IParameterSymbol Parameter, string Text)? Overlap(IMethodSymbol method)
@@ -107,8 +107,10 @@ internal static class Views
         foreach (var p in method.Parameters)
         {
             if (Symbols.Classify(p) == Symbols.ParamKind.View) continue;
-            if ((Symbols.QueriedComponent(p) ?? Symbols.MaybeElement(p.Type)) is { } component && !owners.ContainsKey(component))
-                owners[component] = $"parameter '{p.Name}'";
+            if ((Symbols.QueriedComponent(p) ?? Symbols.MaybeElement(p.Type)) is not { } component) continue;
+            if (owners.TryGetValue(component, out var first))
+                return (p, $"reaches {component.Name} through parameter '{p.Name}' and {first}: both are refs to the row's one {component.Name}, so a write through one changes what the other reads; take it once");
+            owners[component] = $"parameter '{p.Name}'";
         }
 
         foreach (var p in method.Parameters)

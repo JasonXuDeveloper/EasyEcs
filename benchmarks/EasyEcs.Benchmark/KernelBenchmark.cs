@@ -564,6 +564,16 @@ public partial class KernelBenchmark
     public void MoveVectorGenerated() => Kernels.MoveVector(_vectors);
 
     [Benchmark]
+    public void ClampVectorScalar()
+    {
+        var job = new ClampVectorRows();
+        _vectors.ForEach<Pos2D, Vel2D, ClampVectorRows>(ref job);
+    }
+
+    [Benchmark]
+    public void ClampVectorGenerated() => Kernels.ClampVector(_vectors);
+
+    [Benchmark]
     public void SteerScalar()
     {
         var job = new SteerRows { Pull = _craft.Pull };
@@ -809,6 +819,12 @@ public partial class KernelBenchmark
     {
         public Pull Pull;
         public void Execute(ref Pos2D place, ref Vel2D motion) => Kernels.MoveVector(ref place, in motion, in Pull);
+        static int IForEach<Pos2D, Vel2D>.WriteMask => 1;
+    }
+
+    private struct ClampVectorRows : IForEach<Pos2D, Vel2D>, INoStructuralChanges
+    {
+        public void Execute(ref Pos2D place, ref Vel2D motion) => Kernels.ClampVector(ref place, in motion);
         static int IForEach<Pos2D, Vel2D>.WriteMask => 1;
     }
 
@@ -1086,6 +1102,11 @@ public partial class KernelBenchmark
         [ForEach(SimdMode = SimdMode.Require)]
         internal static void MoveVector(ref Pos2D place, in Vel2D motion, in Pull pull) =>
             place = new Pos2D(place.Value + motion.Value * pull.Value);
+
+        // Vector2.Clamp: Min(Max(value, min), max) lane by lane, the order Vector2.Clamp takes.
+        [ForEach(SimdMode = SimdMode.Require)]
+        internal static void ClampVector(ref Pos2D place, in Vel2D motion) =>
+            place = new Pos2D(Vector2.Clamp(place.Value, -motion.Value, motion.Value));
 
         // 3 of a wide component's 12 fields: gathered by permutes into lanes (AVX-512), a few dependent operations each.
         [ForEach(SimdMode = SimdMode.Require)]

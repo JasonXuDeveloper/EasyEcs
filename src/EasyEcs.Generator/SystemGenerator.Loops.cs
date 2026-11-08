@@ -249,6 +249,7 @@ public sealed partial class SystemGenerator
         if (simd == null) return null;
         var widths = new List<string>();
         if (simd.Flat != null) widths.Add($"{Vector}.IsHardwareAccelerated");
+        if (simd.FlatOnly) return widths[0];
         if (simd.Wide == null || simd.Wide512) widths.Add(Wide(Hardware(simd), simd.Wide == null ? null : ""));
         if (simd.Wide == null || simd.Wide128) widths.Add(Narrow(Hardware(simd), simd.Wide == null ? null : ""));
         return string.Join(" || ", widths.Distinct().Select(w => w.Contains(" && ") && widths.Count > 1 ? $"({w})" : w));

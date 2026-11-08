@@ -8,7 +8,9 @@ namespace EasyEcs.Benchmark;
 /// The records a parallel pass emitted, processed in place (an <see cref="Emitted{T}"/> singleton's list): a light
 /// step per record (scale an amount) and a heavy one (a few square roots), with <see cref="World.ParallelFor{T, TJob}"/>
 /// on the world's runner, against a plain loop on one thread and <c>Parallel.For</c> over the same chunks with a
-/// static delegate over static state (no closure: the best a user writes without the runner).
+/// static delegate over static state (no closure: the best a user writes without the runner). <c>LightLambda</c> /
+/// <c>HeavyLambda</c> are the same steps as a lambda (<c>world.ParallelFor(ref items, keep, static (ref Hit hit, float
+/// keep) =&gt; …)</c>), which the generator compiles into the job with a vector loop over each chunk's records.
 /// </summary>
 [MemoryDiagnoser]
 public class ParallelForBenchmark
@@ -57,6 +59,10 @@ public class ParallelForBenchmark
     }
 
     [Benchmark]
+    public void LightLambda() =>
+        _world.ParallelFor(ref _world.GetSingleton<Emitted<Hit>>().Items, 0.999f, static (ref Hit hit, float keep) => hit.Amount = hit.Amount * keep + 1);
+
+    [Benchmark]
     public void LightDotNetParallelFor() => Parallel.For(0, (s_count + s_chunk - 1) / s_chunk, LightChunk);
 
     [Benchmark]
@@ -68,6 +74,15 @@ public class ParallelForBenchmark
         var job = new HeavyJob();
         _world.ParallelFor(ref _world.GetSingleton<Emitted<Hit>>().Items, ref job);
     }
+
+    [Benchmark]
+    public void HeavyLambda() =>
+        _world.ParallelFor(ref _world.GetSingleton<Emitted<Hit>>().Items, static (ref Hit hit) =>
+        {
+            float a = hit.Amount;
+            for (int k = 0; k < 8; k++) a = MathF.Sqrt(a * a + k);
+            hit.Amount = a * 0.5f;
+        });
 
     [Benchmark]
     public void HeavyDotNetParallelFor() => Parallel.For(0, (s_count + s_chunk - 1) / s_chunk, HeavyChunk);

@@ -186,6 +186,15 @@ public partial record struct Tallies : ISingletonComponent
     [Max] public int High;
 }
 
+/// <summary>Counts of rows under conditions (a scalar of popcounts per field), and one field also summed (both kept).</summary>
+public partial record struct Counts : ISingletonComponent
+{
+    [Sum] public int Positive;
+    [Sum] public int NotPositive;
+    [Sum] public long Odd;
+    [Sum] public int Mixed;
+}
+
 /// <summary>Extent declared by attributes.</summary>
 public partial record struct Reach : ISingletonComponent
 {
@@ -211,6 +220,17 @@ public static class ReduceKernels
         if (rank.Value > 0) tallies.Value.Sum += rank.Value;
         tallies.Value.Low = Math.Min(tallies.Value.Low, rank.Value);
         tallies.Value.High = Math.Max(rank.Value, tallies.Value.High);
+    }
+
+    // 1 added on the lanes of a condition, in each form a method writes it: the popcount of the condition's mask.
+    [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Counted(in Rank rank, ref Reduce<Counts> counts)
+    {
+        counts.Value.Positive += rank.Value > 0 ? 1 : 0;
+        counts.Value.NotPositive += rank.Value > 0 ? 0 : 1;
+        if ((rank.Value & 1) != 0) counts.Value.Odd++;
+        if (rank.Value > 5) counts.Value.Mixed += 1;
+        counts.Value.Mixed += rank.Value;
     }
 
     [ForEach(SimdMode = SimdMode.Require)]
@@ -701,6 +721,9 @@ public static class StructKernels
     }
 
     [ForEach(SimdMode = SimdMode.Require)]
+    internal static void Hold(ref Place2 position, in Pace2 bound) => position = new Place2(Vector2.Clamp(position.Value, -bound.Value, bound.Value));
+
+    [ForEach(SimdMode = SimdMode.Require)]
     internal static void Swap(ref Plain2 a) => a = new Plain2(a.Y, a.X);
 
     [ForEach(SimdMode = SimdMode.Require)]
@@ -1026,13 +1049,13 @@ public static class NarrowKernels
 public class KernelTests
 {
     /// <summary>The lengths that cut a vector short or leave a tail, at both vector widths, and a long run.</summary>
-    private static readonly int[] Lengths = [0, 1, Vector<float>.Count - 1, Vector<float>.Count, Vector<float>.Count + 1,
+    internal static readonly int[] Lengths = [0, 1, Vector<float>.Count - 1, Vector<float>.Count, Vector<float>.Count + 1,
         Vector512<float>.Count - 1, Vector512<float>.Count + 1, Vector<double>.Count + 1, 2 * Vector<float>.Count, 3 * Vector512<float>.Count + 1, 1000];
 
     private static readonly float[] Special = [float.NaN, -0f, 0f, 1f, -1f, 2f, 3f, 0.5f, 2.5f, -2.5f, float.PositiveInfinity, float.NegativeInfinity, 1e-30f, float.MaxValue,
         2147483648f, -2147483904f, 4294967296f, 3e9f, -3e9f, float.Epsilon];
 
-    private static float NextFloat(Random random, int i) => i % 5 == 0 ? Special[random.Next(Special.Length)] : (float)(random.NextDouble() * 20 - 10);
+    internal static float NextFloat(Random random, int i) => i % 5 == 0 ? Special[random.Next(Special.Length)] : (float)(random.NextDouble() * 20 - 10);
 
     private static double NextDouble(Random random, int i) =>
         i % 7 == 0 ? new[] { double.NaN, -0d, 1e11, -1e11, double.NegativeInfinity, 9.3e18, 1.9e19, -9.3e18, 2.5 }[random.Next(9)] : random.NextDouble() * 200 - 100;
@@ -1051,6 +1074,14 @@ public class KernelTests
     private static bool Same<T>(in T a, in T b) where T : struct
     {
         if (MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in a)).SequenceEqual(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in b)))) return true;
+        if (Floats(typeof(T))) // inline arrays of floats (InlineArrayTests): lane by lane, any NaN equal to any NaN
+        {
+            var x = MemoryMarshal.Cast<byte, float>(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in a)));
+            var y = MemoryMarshal.Cast<byte, float>(MemoryMarshal.AsBytes(new ReadOnlySpan<T>(in b)));
+            for (int k = 0; k < x.Length; k++)
+                if (float.IsNaN(x[k]) ? !float.IsNaN(y[k]) : BitConverter.SingleToInt32Bits(x[k]) != BitConverter.SingleToInt32Bits(y[k])) return false;
+            return true;
+        }
         foreach (var field in typeof(T).GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic))
         {
             object x = field.GetValue(a)!, y = field.GetValue(b)!;
@@ -1063,6 +1094,16 @@ public class KernelTests
             if (!same) return false;
         }
         return true;
+    }
+
+    /// <summary>A struct holding an inline array whose every value is a float (no padding: its bytes are floats).</summary>
+    private static bool Floats(Type type, bool inline = false)
+    {
+        if (type == typeof(float)) return inline;
+        if (!type.IsValueType || type.IsPrimitive || type.IsEnum) return false;
+        inline |= type.IsDefined(typeof(System.Runtime.CompilerServices.InlineArrayAttribute), false);
+        var fields = type.GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+        return fields.Length > 0 && fields.All(f => Floats(f.FieldType, inline)) && (inline || fields.Any(f => f.FieldType != typeof(float)));
     }
 
     /// <summary>Components of <paramref name="count"/> entities in two tables, the generated loop, and the method itself per row.</summary>
@@ -1097,7 +1138,7 @@ public class KernelTests
         }
     }
 
-    private delegate void ScalarRow<T1, T2>(ref T1 a, ref T2 b);
+    internal delegate void ScalarRow<T1, T2>(ref T1 a, ref T2 b);
 
     private static Vector2 NextVector2(Random r, int i) => new(NextFloat(r, i), NextFloat(r, i + 1));
     private static Vector3 NextVector3(Random r, int i) => new(NextFloat(r, i), NextFloat(r, i + 1), NextFloat(r, i + 2));
@@ -1121,6 +1162,9 @@ public class KernelTests
         }
         Check(count, (r, i) => new Place2(NextVector2(r, i) * 2), (r, i) => new Pace2(NextVector2(r, i + 2)), StructKernels.Bounce,
             (ref Place2 p, ref Pace2 v) => StructKernels.Bounce(ref p, ref v));
+        // Clamp with min above max on the rows of a negative bound, NaN and the zeros among the values.
+        Check(count, (r, i) => new Place2(NextVector2(r, i) * 2), (r, i) => new Pace2(NextVector2(r, i + 2)), StructKernels.Hold,
+            (ref Place2 p, ref Pace2 v) => StructKernels.Hold(ref p, in v));
         Check(count, (r, i) => new Plain2(NextFloat(r, i), NextFloat(r, i + 1)), (r, i) => new Heat(), StructKernels.Swap,
             (ref Plain2 a, ref Heat _) => StructKernels.Swap(ref a));
         Check(count, (r, i) => new Body3 { P = NextVector3(r, i), M = NextFloat(r, i + 3) }, (r, i) => new Pace3(NextVector3(r, i + 4)), StructKernels.Weigh,
@@ -1482,7 +1526,7 @@ public class KernelTests
         ("one per 300 rows", i => i % 300 != 7), // words without a passing row between them: skipped
     ];
 
-    private static readonly int[] HoleCounts = [1, 8, 17, 64, 65, 130, 1000];
+    internal static readonly int[] HoleCounts = [1, 8, 17, 64, 65, 130, 1000];
 
     private static System.Collections.Generic.IEnumerable<TestCaseData> HoleCases() =>
         from hole in Holes from count in HoleCounts select new TestCaseData(hole.Name, count);
@@ -1620,7 +1664,7 @@ public class KernelTests
     /// <see cref="Check{T1, T2}"/> over one table whose rows in <paramref name="hole"/> lack one of the two components
     /// (the first for odd rows, the second for even ones): the method runs on the rows that have both.
     /// </summary>
-    private static void CheckHoles<T1, T2>(int count, Func<int, bool> hole, Func<Random, int, T1> make1, Func<Random, int, T2> make2,
+    internal static void CheckHoles<T1, T2>(int count, Func<int, bool> hole, Func<Random, int, T1> make1, Func<Random, int, T2> make2,
         Action<World> generated, ScalarRow<T1, T2> scalar)
         where T1 : struct, IComponent where T2 : struct, IComponent
     {
@@ -1700,6 +1744,11 @@ public class KernelTests
             ReduceKernels.Tallies(world);
             Assert.That(world.GetSingleton<Tallies>(), Is.EqualTo(tallies.Value), "Tallies");
             Assert.That((tallies.Value.Count, tallies.Value.Sum, tallies.Value.Low, tallies.Value.High), Is.EqualTo((headcount.Value.Count, headcount.Value.Sum, headcount.Value.Low, headcount.Value.High)), "Tallies is Count");
+
+            var counts = new Reduce<Counts> { Value = Counts.Identity };
+            foreach (int i in order) if (!hole(i)) ReduceKernels.Counted(in ranks[i], ref counts);
+            ReduceKernels.Counted(world);
+            Assert.That(world.GetSingleton<Counts>(), Is.EqualTo(counts.Value), "Counted");
 
             headcount = new Reduce<Headcount> { Value = Headcount.Identity };
             foreach (int i in order) if (!hole(i)) ReduceKernels.Tally(ref ranks[i], ref headcount);

@@ -76,9 +76,37 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     """);
             }
 
+        // ParallelFor over a buffer's elements: the lambda takes the element by ref (or in) and the values before it.
+        for (int n = 0; n <= MaxLambdaValues; n++)
+        {
+            string tps = "<T" + string.Concat(Enumerable.Range(1, n).Select(i => $", TValue{i}")) + ">";
+            string values = string.Concat(Enumerable.Range(1, n).Select(i => $"TValue{i} value{i}, "));
+            string typeDocs = string.Concat(Enumerable.Range(1, n).Select(i => $"\n    /// <typeparam name=\"TValue{i}\">The type of <paramref name=\"value{i}\"/>.</typeparam>"));
+            string valueDocs = string.Concat(Enumerable.Range(1, n).Select(i =>
+                $"\n    /// <param name=\"value{i}\">The {Ordinal(i)} value before the lambda, held by its job for the call: the lambda's {(i == 1 ? "parameter after the element" : $"{Ordinal(i)} parameter after the element")}.</param>"));
+            sb.Append($$"""
+                    /// <summary>
+                    /// Runs <paramref name="body"/>, a static lambda, for every element of <paramref name="items"/>, the elements split into
+                    /// chunks run on several threads as <see cref="ParallelFor{T, TJob}(ref DynamicBuffer{T}, ref TJob, int)"/> runs a job:
+                    /// <c>world.ParallelFor(ref hits.Items{{(n == 0 ? "" : ", keep")}}, static (ref Hit hit{{(n == 0 ? "" : ", float keep")}}) =&gt; hit.Amount{{(n == 0 ? " += 1" : " *= keep")}})</c>.
+                    /// The lambda takes the element by <c>ref</c> (or <c>in</c>) and then the values before it, in order. The EasyEcs
+                    /// generator compiles each call into an <see cref="IForSpan{T}"/> job whose loop over a chunk's elements is a vector
+                    /// loop where the body qualifies (as a [ForEach] method's), so the call allocates nothing after the first per job.
+                    /// The body must not change the world's structure nor write what another element reads. Owner thread only.
+                    /// </summary>
+                    /// <typeparam name="T">The element.</typeparam>{{typeDocs}}
+                    /// <param name="items">The elements, written in place (a buffer of a singleton, an <see cref="Emitted{T}"/>'s records).</param>{{valueDocs}}
+                    /// <param name="body">A static lambda written at the call.</param>
+                    /// <exception cref="InvalidOperationException">The generator did not compile this call (EECS095 says why).</exception>
+                    public void ParallelFor{{tps}}(ref DynamicBuffer<T> items, {{values}}Delegate body) => throw NotCompiled();
+
+
+                """);
+        }
+
         sb.Append("""
                 private static InvalidOperationException NotCompiled() => new(
-                    "World.ForEach / ForEachParallel(lambda) runs the job the EasyEcs generator writes at each call: this call has none (EECS095 says why).");
+                    "World.ForEach / ForEachParallel / ParallelFor(lambda) runs the job the EasyEcs generator writes at each call: this call has none (EECS095 says why).");
             }
 
             """);

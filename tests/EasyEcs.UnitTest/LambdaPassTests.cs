@@ -183,6 +183,17 @@ public class LambdaPassTests
         Assert.That(code, Does.Contain("Vector512"), code);
     }
 
+    // A structural change under a condition, as a [ForEach] method's: the vector loop marks the rows, the change is
+    // applied to them when the pass ends, and hardware without the vectors runs the method's own job row by row.
+    [Test]
+    public void AStructuralChangeUnderAConditionGetsAVectorLoop()
+    {
+        var (code, errors) = Generate("public static class Run { public static void F(World world, int n) => world.ForEach(n, [Without<Q>] static (Entity e, in P p, int n) => { if (p.V > n) e.Set(new Q()); }); }");
+        Assert.That(errors, Is.Empty, code);
+        Assert.That(code, Does.Contain("Vector512").And.Contain("if (__ForEach.LambdaJob0.Vectorizes)").And.Contain("job.d0.SetAll(job.v0); // the rows the pass marked")
+            .And.Contain("LambdaJob0Rows"), code);
+    }
+
     [Test]
     public void AChangeFilterTakesItsTickFirst()
     {

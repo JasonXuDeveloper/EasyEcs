@@ -252,14 +252,18 @@ is classified once, in Kernel, as:
   blocks the loop and what to write instead. Typical: a condition with a call or a lookup ("split it into its own
   `[ForEach]` method: a vector pass sets a tag, a second pass over the tagged rows does the scalar part"), too many
   branches for one loop (split by tag or by group), a per-row lookup (`Lookup<T>` hoisted or a component copied in), a
-  component of too many fields (split the component), a mixed type the loop cannot widen;
+  component of too many fields (split the component), a bool among other fields that the method uses alone (move it
+  into a component of its own: a byte column the loop reads as a mask; two bools used together stay a bool among
+  fields), a mixed type the loop cannot widen. A split advice is fixable only when no later parameter keeps the method
+  scalar: Kernel's parameter loop holds it until the parameters are read, and an inherent reason of a later one (a
+  parallel Maybe<T>, the World) wins;
 - **inherent** (not reported, or Info): the algorithm needs scalar work (a call into user code whose result decides
   the row; an element loop leaving early, or writing the method's variables other than as sums, Mins or Maxes).
 
 The owner's rule: plain code that a small rewrite would turn into a vector loop must warn. When in doubt, a reason
 is fixable; a reason stays inherent only when no rewrite of the method keeps its meaning and vectorizes. A fixable
 reason whose rewrite is mechanical gets a code fix (`audit-analyzer`). Hand-written SIMD the plain form would
-generate warns too (EECS103).
+generate warns too (EECS103: batch loops, loops over spans inside a method, and Tile stencils, `audit-analyzer`).
 
 Reason strings are stable and specific; tests pin them. Rank the reasons by how often they appear over `samples/`,
 `BattleServer.cs`, `WorldSimulation.cs`, templates and the docs examples: the most frequent fixable reason is the next

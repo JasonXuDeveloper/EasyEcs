@@ -24,12 +24,13 @@ public static partial class EasyEcsAnalyzer
         "them in an initializer), each component once, at most nine; an indexed component is 'ref readonly'. The generators skip a view that breaks this: [ForEach] methods taking it get no job, and AsX / TryGetX are not written.",
         helpLinkUri: Help("EECS098"));
 
-    public static readonly DiagnosticDescriptor ViewOverlap = new("EECS099", "A component reached twice through views",
+    public static readonly DiagnosticDescriptor ViewOverlap = new("EECS099", "A component reached twice",
         "{0} {1}",
         Category, DiagnosticSeverity.Error, true,
         "A pass queries each component once, and its views and component parameters are refs into that one column. A " +
         "component reached through a view and through another view or a parameter would be two refs to one value, one of " +
-        "them perhaps read-only while the other writes. Take it once: through the view, or through a parameter while no " +
+        "them perhaps read-only while the other writes. Two component parameters of one type are the same: a write through " +
+        "the 'ref' one changes what the 'in' one reads. Take it once: through the view, or through a parameter while no " +
         "view covers it.",
         helpLinkUri: Help("EECS099"));
 

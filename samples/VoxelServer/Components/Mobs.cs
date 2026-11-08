@@ -26,8 +26,11 @@ public record struct Burning(long Until) : IComponent;
 // What a zombie's surroundings do to it, looked at every Rules.BurnEvery ticks (ZombieExposureSystem): by day under the
 // open sky and out of the water, the sun sets it on fire (SunlightSystem); in water, its fire goes out
 // (ExtinguishSystem). The look is the costly part, reads of the chunks around the zombie, and runs on several threads;
-// catching fire and putting it out are presence flips, the cheap part, after it.
-public record struct Exposure(bool Sunlit, bool InWater) : IComponent;
+// catching fire and putting it out are presence flips, the cheap part, after it. Each flag is a component of its own:
+// a column of one byte per zombie, which the system reading it takes as a vector loop's mask (a bool among other
+// fields would keep that system scalar, EECS055).
+public record struct Sunlit(bool Value) : IComponent;
+public record struct InWater(bool Value) : IComponent;
 
 // A stack of dug blocks lying on the ground, for any player who walks over it.
 public record struct Item(Block Kind, int Count) : IComponent;
