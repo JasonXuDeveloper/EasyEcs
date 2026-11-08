@@ -77,10 +77,10 @@ public class BattleServerTests
             int sent = server.Battle.Replicated;
             server.World.Update<Replication>();                               // nothing changed since the send
             Assert.That(server.Battle.Replicated, Is.EqualTo(sent));
-            foreach (var item in server.World.Read<Health, Replica>())      // every client copy is current
+            foreach (var item in server.World.Read<Health, Replica, FireReplica>())  // every client copy is current
             {
                 Assert.That(item.Replica.Health, Is.EqualTo(item.Health.Value));
-                Assert.That(item.Component2.Burning, Is.EqualTo(item.Entity.Has<Burning>()));  // fires lit and gone out
+                Assert.That(item.Component3.Burning, Is.EqualTo(item.Entity.Has<Burning>()));  // fires lit and gone out
                 if (item.Entity.TryGet<Goal>(out var goal)) Assert.That(item.Component2.Waypoint, Is.EqualTo(goal.Waypoint));
             }
         }
