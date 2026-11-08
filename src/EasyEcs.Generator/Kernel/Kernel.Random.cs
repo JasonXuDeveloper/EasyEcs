@@ -14,6 +14,8 @@ namespace EasyEcs.Generator;
 /// </summary>
 internal sealed partial class Kernel
 {
+    private bool _draws; // the loop draws: it runs where RandomLanes.IsAccelerated (Code.Draws)
+
     /// <summary>The lanes of an EntityRandom draw, or null when <paramref name="call"/> is no draw (a reason when it is one the loop cannot take).</summary>
     private string? RandomDraw(IInvocationOperation call)
     {
@@ -39,7 +41,10 @@ internal sealed partial class Kernel
         var stream = Arg(streamAt);
         if (!IsUniform(stream))
             throw FixableReason($"its draw's stream '{Text(stream)}' varies by row: give each call site a constant stream (0, 1, 2, ...)");
+        // a flat loop's lanes are the fields of rows, not rows: the loop over rows draws
+        if (_flat >= 0) throw new Unsupported("it draws EntityRandom numbers, one per row, in a loop over fields");
         string draw = $"{source}, in entities, {Row}, {Scalar(stream)}";
+        _draws = true;
         var type = m.ReturnType;
         switch (m.Name)
         {

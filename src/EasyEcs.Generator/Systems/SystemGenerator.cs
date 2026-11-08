@@ -1499,6 +1499,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 parts.Add(simd.Wide512 || simd.Wide256 ? simd.Wide128 ? "wide component (permutes, table lookups)" : "wide component (permutes)" : "wide component (table lookups)");
             }
             if (simd.Gathers) parts.Add("gathers (Lookup<T>)");
+            if (simd.Draws) parts.Add("EntityRandom draws (vectors of 256 bits and up)");
             if (simd.Prefetched.Length > 0) parts.Add("lookups prefetched past the last-level cache");
             if (simd.Streams) parts.Add("write-only columns streamed past the last-level cache");
             if (Parallel) parts.Add("in parallel chunks");

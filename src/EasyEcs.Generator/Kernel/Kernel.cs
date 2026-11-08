@@ -89,6 +89,12 @@ internal sealed partial class Kernel
         public bool Gathers { get; init; }
 
         /// <summary>
+        /// The loop draws EntityRandom numbers (Kernel.Random.cs): six 8-byte multiplies per lane, which pay at 256 bits
+        /// and up; it runs where <c>RandomLanes.IsAccelerated</c> (the Vector512 loop where <c>IsAccelerated512</c>).
+        /// </summary>
+        public bool Draws { get; init; }
+
+        /// <summary>
         /// The reductions' accumulators that carry a chain from one vector to the next as long as a floating-point add,
         /// Min or Max (3-4 cycles, against 1 for integers), as <c>name|op</c> (<c>__a1_0|+</c>, <c>__a2_1|Min</c>):
         /// the loop over whole vectors runs two vectors per iteration into two sets of them, which halves the chain
@@ -1289,6 +1295,7 @@ internal sealed partial class Kernel
             VectorTail = kernel._change != null || kernel._emits.Values.Any(e => e.Added),
             Written = new EquatableArray<int>(kernel._written.OrderBy(k => k).ToArray()),
             Gathers = kernel._lookups.Count > 0,
+            Draws = kernel._draws,
             Prefetched = new EquatableArray<int>(kernel._prefetched.OrderBy(i => i).ToArray()),
             Streamed = new(kernel._bails || kernel._lookups.Count > 0 || kernel._wideOf.Count > 0 || kernel._change != null || kernel._emits.Count > 0 || kernel._reductions.Count > 0 || kernel._optionals.Count > 0
                 ? [] : WriteOnly(prologue + read + hold + kernel._body, kernel._written.Where(k => kernel._components.Values.First(c => c.Index == k).Fields.Length == 1))),

@@ -224,6 +224,9 @@ public sealed partial class SystemGenerator
         if (simd.Wide != null) needs += WideGuard;
         // Other entities' fields are AVX2 gathers (Kernel.Lookups.cs): without them, every row runs the method.
         if (simd.Gathers) needs += " && global::EasyEcs.LookupLanes.IsAccelerated";
+        // EntityRandom draws multiply 8-byte lanes, emulated below AVX-512: two lanes per 128 bits lose to the scalar
+        // draw (EntityRandomBenchmark under DOTNET_EnableAVX=0), so a Vector<T> of 128 bits leaves the rows to the method.
+        if (simd.Draws) needs += $" && global::EasyEcs.RandomLanes.{Accelerated}";
         return $"{Kernel.V}.IsHardwareAccelerated{needs}";
     }
 

@@ -25,6 +25,24 @@ public static class RandomLanes
 {
     private const ulong Mix1 = 0xBF58476D1CE4E5B9, Mix2 = 0x94D049BB133111EB;
 
+    /// <summary>
+    /// Whether a <c>Vector&lt;T&gt;</c> loop draws as lanes on this hardware: vectors of 256 bits or more. A draw is six
+    /// 8-byte multiplies per lane, which only AVX-512 has as one instruction; at 128 bits (SSE, NEON) two lanes of
+    /// emulated multiplies lose to the scalar draw, so a generated loop leaves its rows to the method.
+    /// </summary>
+    public static bool IsAccelerated
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Vector.IsHardwareAccelerated && Vector<byte>.Count >= 32;
+    }
+
+    /// <summary>Whether a <c>Vector512&lt;T&gt;</c> loop draws as lanes on this hardware.</summary>
+    public static bool IsAccelerated512
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Vector512.IsHardwareAccelerated;
+    }
+
     /// <summary>Floats in [0, 1) of the rows <paramref name="row"/> on: <see cref="EntityRandom.Float(EntityId, uint)"/> per lane.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static TVector Float<TVector>(in EntityRandom random, in EntitySpan entities, nint row, uint stream) =>
