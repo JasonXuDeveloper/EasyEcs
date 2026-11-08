@@ -728,18 +728,19 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             ulong range = RowFilter.RowMask(w, count) & (ulong.MaxValue << at); // shift is mod 64
                             ulong bits = rows.Word(archetype, w) & range;
                             if (tombstones && bits != 0) bits &= AliveRows(ref Unsafe.Add(ref slots, w << 6), Math.Min(64, count - (w << 6)));
-                            if (bits == range)
+                            // A word that does not continue the pending run ends it, before the word goes to the job: the
+                            // job sees the rows in table order (the rows it marks, the records it emits and its partial
+                            // results follow that order, as the method's own would).
+                            bool whole = bits == range;
+                            if (end > start && (!whole || end != at))
                             {
-                                if (end != at)
-                                {
-                                    if (end > start)
-                                    {
-                {{BatchRun(n, "                    ", "start", "end - start")}}
-                                    }
+                                MaskedRun<{{tps}}, TJob>(ref job, archetype, start, end - start, {{bits}});
+                                start = end;
+                            }
 
-                                    start = at;
-                                }
-
+                            if (whole)
+                            {
+                                if (end != at) start = at;
                                 end = Math.Min((w + 1) << 6, count);
                                 continue;
                             }
@@ -750,24 +751,28 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 continue;
                             }
 
-                            // The pending run first: the job sees the rows in table order (the rows it marks, the
-                            // records it emits and its partial results follow that order, as the method's own would).
-                            if (end > start)
-                            {
-                {{BatchRun(n, "                ", "start", "end - start")}}
-                                start = end;
-                            }
-
                             int low = (w << 6) + BitOperations.TrailingZeroCount(bits), high = (w << 6) + 64 - BitOperations.LeadingZeroCount(bits);
                             ulong passing = bits >> (low & 63);
                 {{StampWord(n, "            ", "w", "bits")}}
                             job.Execute(new EntitySpan(this, archetype, low, ref Unsafe.Add(ref slots, low), high - low), passing, {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, low), high - low)")}});
                         }
 
-                        if (end > start)
-                        {
-                {{BatchRun(n, "            ", "start", "end - start")}}
-                        }
+                        if (end > start) MaskedRun<{{tps}}, TJob>(ref job, archetype, start, end - start, {{bits}});
+                    }
+
+                    /// <summary>
+                    /// A run of whole words of <c>MaskedRuns</c>: the job's loop over rows that all pass. Out of line, so the
+                    /// walk over words holds only its own state (with the job inlined at each run, the masked words'
+                    /// loop paid for it: LateHolesBenchmark.Step); a call per run of words is nothing beside its rows.
+                    /// </summary>
+                    [MethodImpl(MethodImplOptions.NoInlining)]
+                    private void MaskedRun<{{tps}}, TJob>(ref TJob job, Archetype archetype, int start, int length, {{List(n, i => $"ushort b{i}")}})
+                {{cons}}
+                        where TJob : struct, IForEachMasked<{{tps}}>, allows ref struct
+                    {
+                        ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
+                {{Lines(n, i => $"        ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
+                {{BatchRun(n, "        ", "start", "length")}}
                     }
 
                     /// <summary>A chunk of a parallel masked pass: <c>MaskedRuns</c> in a table whose rows must be tested, else its runs.</summary>
