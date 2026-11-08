@@ -633,6 +633,12 @@ public partial class KernelBenchmark
     public void ExpireGenerated() => Kernels.Expire(_world);
 
     [Benchmark]
+    public void CoolScalar() => Kernels.CoolRows(_world);
+
+    [Benchmark]
+    public void CoolGenerated() => Kernels.Cool(_world);
+
+    [Benchmark]
     public void SurveyScalar() => Kernels.SurveyRows(_world);
 
     [Benchmark]
@@ -1001,12 +1007,38 @@ public partial class KernelBenchmark
         [ForEach]
         internal static void Count(ref Ticks ticks) => ticks.Value++;
 
-        // A timer: -- as the value tested, the row reset when it runs out (a third of the rows each pass at 1k).
+        // A timer: -- as the value tested, the row reset when it runs out (a third of the rows each pass at 1k). Written in
+        // the method, as users write it: through a helper the inliner already hoists the step out of the condition.
         [ForEach]
-        internal static void Expire(ref Ticks ticks, ref Heat heat) => ExpireRow(ref ticks, ref heat);
+        internal static void Expire(ref Ticks ticks, ref Heat heat)
+        {
+            if (--ticks.Value <= 0)
+            {
+                ticks.Value = 3;
+                heat.Value *= 0.5f;
+            }
+        }
 
         [ForEach(SimdMode = SimdMode.Off)]
         internal static void ExpireRows(ref Ticks ticks, ref Heat heat) => ExpireRow(ref ticks, ref heat);
+
+        // The timer beside math a row's lanes do faster than the row (a square root): what the step's vector loop buys
+        // where the light timer above is bound by memory either way.
+        [ForEach]
+        internal static void Cool(ref Ticks ticks, ref Heat heat)
+        {
+            if (--ticks.Value <= 0) ticks.Value = 3;
+            heat.Value = MathF.Sqrt(heat.Value * heat.Value + 1f) * 0.5f;
+        }
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void CoolRows(ref Ticks ticks, ref Heat heat) => CoolRow(ref ticks, ref heat);
+
+        private static void CoolRow(ref Ticks ticks, ref Heat heat)
+        {
+            if (--ticks.Value <= 0) ticks.Value = 3;
+            heat.Value = MathF.Sqrt(heat.Value * heat.Value + 1f) * 0.5f;
+        }
 
         private static void ExpireRow(ref Ticks ticks, ref Heat heat)
         {
@@ -1017,9 +1049,14 @@ public partial class KernelBenchmark
             }
         }
 
-        // Running totals of a singleton taken by ref: the lanes fold into it once per run.
+        // Running totals of a singleton taken by ref: the lanes fold into it once per run (written in the method, as above).
         [ForEach]
-        internal static void Survey(in Heat heat, in Ticks ticks, ref Census census) => SurveyRow(in heat, in ticks, ref census);
+        internal static void Survey(in Heat heat, in Ticks ticks, ref Census census)
+        {
+            if (heat.Value > 50f) census.Hot++;
+            census.Sum += ticks.Value;
+            census.Peak = Math.Max(census.Peak, ticks.Value);
+        }
 
         [ForEach(SimdMode = SimdMode.Off)]
         internal static void SurveyRows(in Heat heat, in Ticks ticks, ref Census census) => SurveyRow(in heat, in ticks, ref census);
