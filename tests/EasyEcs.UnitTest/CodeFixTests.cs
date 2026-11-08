@@ -577,6 +577,10 @@ public class CodeFixTests
         + "foreach (var o in world.Query<Spot, Drift>()) { if (o.Entity.Id.Index <= self.Id.Index) continue; float dx = p.X - o.Component1.X; "
         + "if (dx * dx >= 1) continue; f.X += dx; o.Component2.X -= dx; } } }",
         "static void A(in Spot p, ref Drift f, [Neighbor] in Spot spot, [Neighbor] ref Drift drift) {\n    float dx = p.X - spot.X; if (dx * dx >= 1) return; f.X += dx; drift.X -= dx;\n}")]
+    [TestCase("EECS133", "Write the job as a lambda pass",                                                                 // the job's field read as a value
+        "public struct Scale : IForSpan<float> { public float By; public void Execute(int start, System.Span<float> items) { foreach (ref float x in items) x *= By; } }\n"
+        + "public static class U { public static void F(World w, ref DynamicBuffer<float> b, float k)\n    {\n        var j = new Scale { By = k };\n        w.ParallelFor(ref b, ref j);\n    }\n}",
+        "    {\n        w.ParallelFor(ref b, k, static (ref float x, float by) => { x *= by; });\n    }")]
     public async Task FixesTheDiagnostic(string id, string title, string source, string expected)
     {
         var document = Document(Data + source, generate: string.CompareOrdinal(id, "EECS025") >= 0);

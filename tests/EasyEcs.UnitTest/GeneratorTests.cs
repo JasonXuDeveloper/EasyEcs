@@ -678,7 +678,7 @@ public class GeneratorTests
             .And.Contain("var __c1_0 = __Interleaved.Pick(__v1_0, __v1_1, __v1_2, __y0);")
             .And.Contain("__v1_1 = __Interleaved.PickInto(__v1_1, __c1_0, __y2);")
             .And.Contain("__V128.Create((byte)0, 1, 2, 3, 12, 13, 14, 15, 24, 25, 26, 27, 36, 37, 38, 39);")
-            .And.Contain("A: vector (Vector512 or Vector<float> of 128 bits), wide component (permutes, table lookups), masked words scalar")
+            .And.Contain("A: vector (Vector512 or Vector<float> of 128 bits), wide component (permutes, table lookups), masked words vector")
             .And.Not.Contain("IsWide256").And.Not.Contain("Permute256"), generated); // light math: AVX2's permutes cost more than its lanes gain
     }
 
@@ -696,7 +696,7 @@ public class GeneratorTests
             .And.Contain("__Interleaved.Permute256(__v1_0, __v1_1, __V256.Create(")
             .And.Contain("__Interleaved.Merge256(")
             .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2(")
-            .And.Contain("A: vector (Vector512 or Vector<float> of 256 or 128 bits), wide component (permutes, table lookups), masked words scalar"), generated);
+            .And.Contain("A: vector (Vector512 or Vector<float> of 256 or 128 bits), wide component (permutes, table lookups), masked words vector"), generated);
     }
 
     // 8-byte words (doubles beside longs): the layout checked in longs, AVX-512's 8-lane permutes, and AVX2's permutes
@@ -737,7 +737,8 @@ public class GeneratorTests
 
     // A form that does not pay is not written: 16 words a row put each field of a 128-bit vector's 4 rows in 4 vectors,
     // and the table lookups cost more than the method's operations gain at 4 lanes, while AVX-512's permutes pay (two
-    // fields: a third would take its loop past the locals a runner inlines, ScalarLoopsNameTheirReason).
+    // fields: a third would take its loop past the locals a runner inlines, ScalarLoopsNameTheirReason; its masked words,
+    // which also hold the passing lanes, would pass them too and run the method).
     [Test]
     public void AWideFormThatDoesNotPayIsLeftOut()
     {

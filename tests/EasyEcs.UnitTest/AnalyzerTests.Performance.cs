@@ -389,4 +389,24 @@ public partial class AnalyzerTests
         Assert.That(found.Count(d => d.Id == reported), Is.EqualTo(1), string.Join("\n", found.Select(d => d.Id + " " + d.GetMessage())));
         Assert.That(found.Where(d => d.Id == deferring).Select(d => d.GetMessage()), Is.Empty);
     }
+
+    // EECS133: a ParallelFor job that is one loop over its chunk, whose lambda pass gets a vector loop (LambdaPass.FromJob).
+    [TestCase("public struct Scale : IForSpan<float> { public float By; public void Execute(int start, System.Span<float> items) { foreach (ref float x in items) x *= By; } } U var j = new Scale { By = k }; w.ParallelFor(ref b, ref j); } }", 1)]
+    [TestCase("public struct Half : IForSpan<float> { public void Execute(int start, System.Span<float> items) { for (int i = 0; i < items.Length; i++) items[i] = items[i] * 0.5f + 1; } } U var j = new Half(); w.ParallelFor(ref b, ref j); } }", 1)]
+    [TestCase("public struct Scale : IForSpan<float> { public float By, Unused; public void Execute(int start, System.Span<float> items) { foreach (ref float x in items) x *= By; } } U var j = new Scale(); w.ParallelFor(ref b, ref j); } }", 1)] // By's default
+    [TestCase("public struct At : IForSpan<float> { public void Execute(int start, System.Span<float> items) { for (int i = 0; i < items.Length; i++) items[i] = start + i; } } U var j = new At(); w.ParallelFor(ref b, ref j); } }", 0)] // the chunk's start
+    [TestCase("public struct Sum : IForSpan<float> { public float Total; public void Execute(int start, System.Span<float> items) { foreach (var x in items) Total += x; } } U var j = new Sum(); w.ParallelFor(ref b, ref j); } }", 0)] // writes the job
+    [TestCase("public struct Scale : IForSpan<float> { public float By; public void Execute(int start, System.Span<float> items) { foreach (ref float x in items) x *= By; } } U var j = new Scale { By = k }; w.ParallelFor(ref b, ref j); k = j.By; } }", 0)] // the job read after
+    [TestCase("public struct Scale : IForSpan<float> { public float By; public void Execute(int start, System.Span<float> items) { foreach (ref float x in items) x *= By; } } U var j = new Scale { By = k }; k++; w.ParallelFor(ref b, ref j); } }", 0)] // built apart from the call
+    [TestCase("public struct Stop : IForSpan<float> { public void Execute(int start, System.Span<float> items) { foreach (ref float x in items) { if (x < 0) break; x = 1; } } } U var j = new Stop(); w.ParallelFor(ref b, ref j); } }", 0)] // a break leaves the loop
+    [TestCase("public struct Stop : IForSpan<float> { public void Execute(int start, System.Span<float> items) { foreach (ref float x in items) { if (x < 0) return; x = 1; } } } U var j = new Stop(); w.ParallelFor(ref b, ref j); } }", 0)] // a return leaves Execute
+    [TestCase("public struct Skip : IForSpan<float> { public void Execute(int start, System.Span<float> items) { foreach (ref float x in items) { if (x < 0) continue; x = 1; } } } U var j = new Skip(); w.ParallelFor(ref b, ref j); } }", 0)] // a continue needs the loop
+    [TestCase("public struct Two : IForSpan<float> { public void Execute(int start, System.Span<float> items) { foreach (ref float x in items) x++; items[0] = 1; } } U var j = new Two(); w.ParallelFor(ref b, ref j); } }", 0)] // more than the loop
+    public async Task AnIForSpanJobOfOneElementLoopIsALambdaPass(string source, int reported)
+    {
+        source = source.Replace("} U ", "} " + "public static class U { public static void F(World w, ref DynamicBuffer<float> b, float k) { ");
+        var found = await GeneratorTests.Analyze([Components, Extra, source]);
+        Assert.That(found.Count(d => d.Id == "EECS133"), Is.EqualTo(reported), string.Join("\n", found.Select(d => d.Id + " " + d.GetMessage())));
+        Assert.That(found.Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+    }
 }

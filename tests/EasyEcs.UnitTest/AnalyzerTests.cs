@@ -59,7 +59,7 @@ public partial class AnalyzerTests
     // that shows a rule often writes one by hand. EECS086's suggestion for a total (Info: a counter like Clock.Ticks++)
     // is left to FormTests.
     private static bool IsPerformance(string id) => string.CompareOrdinal(id, "EECS025") >= 0 && string.CompareOrdinal(id, "EECS033") <= 0
-        || id is "EECS039" or "EECS046" or "EECS052" or "EECS053" or "EECS065" or "EECS086" or "EECS087" or "EECS089";
+        || id is "EECS039" or "EECS046" or "EECS052" or "EECS053" or "EECS065" or "EECS086" or "EECS087" or "EECS089" or "EECS133";
 
     /// <summary>Every EasyEcs diagnostic but EECS055 and EECS120 (why a loop runs scalar or checked: asserted by <see cref="GeneratorTests.ScalarLoopsNameTheirReason"/> and AnalyzerTests.Tiles).</summary>
     internal static async Task<Diagnostic[]> All(string source) => (await Analyze([Components, Extra, source])).Where(d => d.Id.StartsWith("EECS") && d.Id is not ("EECS055" or "EECS120" or "EECS067" or "EECS069" or "EECS093") || d.Severity == DiagnosticSeverity.Error).OrderBy(d => d.Location.SourceSpan.Start).ToArray();
