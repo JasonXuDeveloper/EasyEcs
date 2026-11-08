@@ -1075,9 +1075,9 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
                 for (int k = 1; k <= components.Length; k++)
                     sb.Append($"{indent}ref {components[k - 1]} r{k} = ref global::System.Runtime.InteropServices.MemoryMarshal.GetReference(c{k});\n");
                 sb.Append($"{indent}nint rows = {(components.Length > 0 ? "c1.Length" : "entities.Length")};\n");
-                // A wide component's masked words run the method (its write-back stores whole vectors of rows), and so do
-                // those of one only a flat loop takes. Narrow lanes take their lane masks from Interleaved.Lanes8 / Lanes16.
-                if (method.Simd is { Wide: not null } or { FlatOnly: true } or { MaskedScalar: true } && masked) sb.Append($"{indent}nint i = 0;\n");
+                // The masked words of a component only a flat loop takes run the method, and so do those whose loop
+                // declares more locals than the JIT inlines. Narrow lanes take their lane masks from Interleaved.Lanes8 / Lanes16.
+                if (method.Simd is { FlatOnly: true } or { MaskedScalar: true } && masked) sb.Append($"{indent}nint i = 0;\n");
                 else if (method.Simd is { } simd) EmitLoops(sb, loops, simd, components, indent, call, masked, rows, scope, start);
                 if (method.Simd is { VectorTail: true }) { } // the tail took the last rows
                 else if (method.IsChaseTwin) EmitChases(sb, method, indent, call);
@@ -1485,7 +1485,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             if (simd.Prefetched.Length > 0) parts.Add("lookups prefetched past the last-level cache");
             if (simd.Streams) parts.Add("write-only columns streamed past the last-level cache");
             if (Parallel) parts.Add("in parallel chunks");
-            parts.Add(simd.Wide != null || simd.FlatOnly || simd.MaskedScalar ? "masked words scalar" : "masked words vector");
+            parts.Add(simd.FlatOnly || simd.MaskedScalar ? "masked words scalar" : "masked words vector");
             if (simd.Cold != null) parts.Add($"cold branch ({simd.Cold})");
             foreach (var write in simd.StructuralChanges) parts.Add($"{write.Replace("global::", "")} after the pass, on the rows it marks");
             if (simd.VectorTail) parts.Add("last rows through a copy");

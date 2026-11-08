@@ -282,10 +282,18 @@ internal sealed partial class Kernel
     /// Whether the masked words' loop of an unrolled body, <paramref name="text"/>, declares no more locals than the JIT
     /// inlines: its broadcasts of constants are locals before the loop (unlike the loop over whole vectors, which takes
     /// them in place) and it holds the word's passing lanes. Past the budget its masked words run the method (the job's
-    /// runner would call the loop per word), while the loop over whole vectors keeps the vectors.
+    /// runner would call the loop per word), while the loop over whole vectors keeps the vectors. A wide component's
+    /// masked loop is counted per form it takes (each width's lines alone, Kernel.Wide.cs): a row of many words loads
+    /// that many vectors, and the passing lanes come on top of them.
     /// </summary>
-    private bool MaskedFits(string text, int columns) =>
-        !_unrolled || SystemGenerator.Locals(text) + columns + 2 <= SystemGenerator.InlinedLocals;
+    private bool MaskedFits(string text, int columns)
+    {
+        int limit = SystemGenerator.InlinedLocals - columns - 2;
+        if (_wideOf.Count > 0)
+            return new[] { (_wide512, Mark512), (_wide256, Mark256), (_wide128, Mark128) }.All(w => !w.Item1
+                || SystemGenerator.Locals(string.Join("\n", text.Split('\n').Where(l => !new[] { Mark512, Mark256, Mark128 }.Any(m => m != w.Item2 && l.Contains(m))))) <= limit);
+        return !_unrolled || SystemGenerator.Locals(text) <= limit;
+    }
 
     private void FitUnrolled(string text, int columns)
     {

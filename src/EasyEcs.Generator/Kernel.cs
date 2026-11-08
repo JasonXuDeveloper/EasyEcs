@@ -62,7 +62,7 @@ internal sealed partial class Kernel
     /// a vector with a lane that takes it runs the method), or null.</param>
     /// <param name="Wide">
     /// A component is wide (Kernel.Wide.cs): the job's layout checks the loop also needs (<c>__layout1 &amp;&amp; ...</c>),
-    /// in the forms that pay (<see cref="Code.Wide512"/>, <see cref="Code.Wide128"/>; masked words run the method); else null.
+    /// in the forms that pay (<see cref="Code.Wide512"/>, <see cref="Code.Wide128"/>; masked words too, their lanes kept where rows do not pass); else null.
     /// </param>
     /// <param name="Statics">The job's static members: the permutes' and table lookups' indexes and the layout checks.</param>
     internal sealed record Code(EquatableArray<string> Columns, string Setup, string Body, string Stores, string MaskedBody,
@@ -1053,10 +1053,15 @@ internal sealed partial class Kernel
         foreach (var (p, (index, fields, _)) in kernel._components.Where(c => kernel._written.Contains(c.Value.Index)).OrderBy(c => c.Value.Index).Select(c => (c.Key, c.Value)))
         {
             string column = Column(fields[0].Type);
-            // A wide component's masked words run the method (SystemGenerator): only the loop's stores.
+            // A wide component's write-back, the same in a masked word: its lanes' writes kept the rows that do not pass
+            // (Kernel.Write), so each vector of rows is stored whole, those rows' words as loaded. Written once: the
+            // gate counts its moves.
             if (kernel._wideOf.TryGetValue(p, out var wide))
             {
-                kernel.WideStores(index, wide, column, stores);
+                var back = new StringBuilder();
+                kernel.WideStores(index, wide, column, back);
+                stores.Append(back);
+                masked.Append(back);
                 continue;
             }
             if (flatOnly?.Contains(index) == true) continue; // only the flat loop writes it
