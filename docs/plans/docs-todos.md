@@ -3658,6 +3658,13 @@ names.
 - [ ] **Changelog, Performance (+ zh):** EntityRandom draws, tables read at a row's index and math with no vector form
   get vector loops; a fusion file no longer copies its systems' jobs. **Changelog, Fixes:** the masked walk of a
   parallel pass over a job with two widths of masked loops no longer runs past the inliner's budget (a call per word).
+- [ ] **guide/vector-loops (determinism, FloatMode) + zh: which NaN a result is.** A vector loop's results are the
+  method's bits, with one exception: where an operation meets two NaNs of different signs or payloads (an infinity
+  minus an infinity beside a NaN through Abs), the result keeps one of them, and which one is the JIT's choice of
+  operand order, not the C# text's. The method itself changes it between its tiers (DoubleAngles in LaneMathTests at
+  an infinite input: Tier0 `vaddsd xmm0, xmm0, xmm1` with the Min first, Tier1 `vaddsd xmm9, xmm7, xmm9` with the
+  Abs term first, the Vector256 loop `vaddpd ymm2, ymm2, ymm3` with the Min first). Results are NaN where the method's
+  are; code that reads a NaN's sign or payload should not rely on it, vector loop or not.
 - [ ] **zh XML** (`tools/docs/ApiDocs/zh`): none (`RandomLanes`, `TableLanes`, `LaneMath.PerLane` and
   `Entity.RefOrNull` are EditorBrowsable never, which ApiDocs leaves out).
 
