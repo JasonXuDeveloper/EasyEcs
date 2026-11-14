@@ -1277,6 +1277,151 @@ public partial class TileTests
         }
     }
 
+    // ---------------- the ground of a tall tile: Cell<TCell, Ground<TTile>> ----------------
+
+    /// <summary>Heat spreading over the ground of the rock chunks (8 x 8 under 4 layers), stepped in place: a cross stencil (its halo read in place).</summary>
+    [EcsSystem]
+    public ref struct CellGroundCrossSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(Cell<Heat, Ground<RockChunk>> w, out Heat next) =>
+            next = new(w.Value.T + (w[-1, 0, 0].T + w[1, 0, 0].T + w[0, 0, -1].T + w[0, 0, 1].T - 4 * w.Value.T) * 0.2f);
+    }
+
+    /// <summary><see cref="CellGroundCrossSystem"/> as written, cell by cell.</summary>
+    [EcsSystem]
+    public ref struct CellGroundCrossByCellSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2, SimdMode = SimdMode.Off)]
+        static void Step(Cell<Heat, Ground<RockChunk>> w, out Heat next) =>
+            next = new(w.Value.T + (w[-1, 0, 0].T + w[1, 0, 0].T + w[0, 0, -1].T + w[0, 0, 1].T - 4 * w.Value.T) * 0.2f);
+    }
+
+    /// <summary><see cref="CellGroundCrossSystem"/> written by hand: the ground stepped by ref, each row's columns walked with Load128 and Store.</summary>
+    [EcsSystem]
+    public ref struct HandGroundCrossSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(ref Tile<Heat, Ground<RockChunk>> heat)
+        {
+            heat.ExchangeHalo();
+            foreach (var row in heat.Rows(TileStencil.Layer))
+            {
+                var into = heat.Write(row);
+                foreach (var col in heat.At(row).Columns(4))
+                {
+                    var here = col.Load128<float>();
+                    col.Store(here + (col.Load128<float>(-1) + col.Load128<float>(1) + col.Load128<float>(0, 0, -1) + col.Load128<float>(0, 0, 1) - 4f * here) * 0.2f, into);
+                }
+            }
+        }
+    }
+
+    /// <summary>A box blur of the ground into its own buffer (its halo copied).</summary>
+    [EcsSystem]
+    public ref struct CellGroundBoxSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(Cell<Heat, Ground<RockChunk>> w, out NextHeat next) =>
+            next = new((w[-1, 0, -1].T + w[0, 0, -1].T + w[1, 0, -1].T
+            + w[-1, 0, 0].T + w.Value.T + w[1, 0, 0].T
+            + w[-1, 0, 1].T + w[0, 0, 1].T + w[1, 0, 1].T) * (1f / 9));
+    }
+
+    /// <summary>A 3 x 3 square of chunks with a hole in its middle, heat on some ground cells, the rocks' 256 cells beside the ground's 64.</summary>
+    private static Dictionary<TilePos, Entity> GroundChunks(World world)
+    {
+        var chunks = new Dictionary<TilePos, Entity>();
+        var random = new Random(23);
+        foreach (var place in Box(3, 1, 3, new TilePos(1, 0, 1)))
+        {
+            var chunk = world.CreateEntity(new RockChunk(place));
+            var heat = chunk.GetOrAdd<DynamicBuffer<Heat>>().SetCount(64);
+            if (place.X != 2) // a quiet column of chunks: rows the walk skips
+                for (int i = 0; i < 6; i++) heat[random.Next(64)] = new Heat(random.Next(1, 1000));
+            chunk.GetOrAdd<DynamicBuffer<NextHeat>>().SetCount(64);
+            chunk.GetOrAdd<DynamicBuffer<Rock>>().SetCount(256);
+            chunks.Add(place, chunk);
+        }
+        return chunks;
+    }
+
+    /// <summary>The ground of the whole square at (x, z): zero outside it and in the hole.</summary>
+    private static float GroundAt(Dictionary<TilePos, Entity> chunks, int x, int z) =>
+        x < 0 || z < 0 || !chunks.TryGetValue(new TilePos(x / 8, 0, z / 8), out var chunk) ? 0 : chunk.Read<DynamicBuffer<Heat>>()[z % 8 * 8 + x % 8].T;
+
+    [TestCase(1)]
+    [TestCase(4)]
+    public void ACellOfTheGroundStepsAsTheWholeGroundAndTheWalkByHand(int threads)
+    {
+        using var cells = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        using var byCell = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        using var hand = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var (a, b, c) = (GroundChunks(cells), GroundChunks(byCell), GroundChunks(hand));
+        cells.AddSystem<CellGroundCrossSystem>();
+        byCell.AddSystem<CellGroundCrossByCellSystem>();
+        hand.AddSystem<HandGroundCrossSystem>();
+        Assert.That(cells.DescribeSchedule().ToString(), Does.Contain("cells of 'w': vector (").And.Contain("steps the tile of 'w'"));
+        Assert.That(byCell.DescribeSchedule().ToString(), Does.Contain("cells of 'w': scalar ("));
+        for (int step = 0; step < 12; step++)
+        {
+            var expected = new float[24, 24];
+            for (int z = 0; z < 24; z++)
+            for (int x = 0; x < 24; x++)
+            {
+                float here = GroundAt(a, x, z);
+                expected[x, z] = here + (GroundAt(a, x - 1, z) + GroundAt(a, x + 1, z) + GroundAt(a, x, z - 1) + GroundAt(a, x, z + 1) - 4 * here) * 0.2f;
+            }
+            cells.Update();
+            byCell.Update();
+            hand.Update();
+            foreach (var (place, chunk) in a)
+            {
+                var got = chunk.Read<DynamicBuffer<Heat>>().AsReadOnlySpan();
+                Assert.That(got.SequenceEqual(b[place].Read<DynamicBuffer<Heat>>().AsReadOnlySpan()), Is.True, $"step {step}, chunk {place}: as written");
+                Assert.That(got.SequenceEqual(c[place].Read<DynamicBuffer<Heat>>().AsReadOnlySpan()), Is.True, $"step {step}, chunk {place}: by hand");
+                for (int z = 0; z < 8; z++)
+                for (int x = 0; x < 8; x++)
+                    Assert.That(got[z * 8 + x].T, Is.EqualTo(expected[place.X * 8 + x, place.Z * 8 + z]), $"step {step}, chunk {place}, cell ({x}, {z})");
+            }
+        }
+    }
+
+    [TestCase(1)]
+    [TestCase(4)]
+    public void ABoxOfTheGroundIsTheBlurOfTheWholeGround(int threads)
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var chunks = GroundChunks(world);
+        world.AddSystem<CellGroundBoxSystem>();
+        world.Update();
+        Assert.That(world.DescribeSchedule().ToString(), Does.Contain("cells of 'w': vector (").And.Not.Contain("read in place"));
+        foreach (var (place, chunk) in chunks)
+        {
+            var next = chunk.Read<DynamicBuffer<NextHeat>>().AsReadOnlySpan();
+            for (int z = 0; z < 8; z++)
+            for (int x = 0; x < 8; x++)
+            {
+                int gx = place.X * 8 + x, gz = place.Z * 8 + z;
+                float expected = (GroundAt(chunks, gx - 1, gz - 1) + GroundAt(chunks, gx, gz - 1) + GroundAt(chunks, gx + 1, gz - 1)
+                    + GroundAt(chunks, gx - 1, gz) + GroundAt(chunks, gx, gz) + GroundAt(chunks, gx + 1, gz)
+                    + GroundAt(chunks, gx - 1, gz + 1) + GroundAt(chunks, gx, gz + 1) + GroundAt(chunks, gx + 1, gz + 1)) * (1f / 9);
+                Assert.That(next[z * 8 + x].T, Is.EqualTo(expected), $"chunk {place}, cell ({x}, {z})");
+            }
+        }
+    }
+
+    [Test]
+    public void CellsOfTheGroundAllocateNothing()
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
+        GroundChunks(world);
+        world.AddSystem<CellGroundCrossSystem>();
+        world.AddSystem<CellGroundBoxSystem>();
+        Allocations.WarmUp(world.Update, 50);
+        Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) world.Update(); }), Is.Zero);
+    }
+
     [Test]
     public void CellsAllocateNothing()
     {

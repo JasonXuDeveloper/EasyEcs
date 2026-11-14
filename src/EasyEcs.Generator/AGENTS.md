@@ -90,7 +90,9 @@ Analyzer/HandSimd.cs                     EECS103's detection, read once for the 
 Analyzer/HandStencil.cs                  EECS103 v2: a Tile [ForEach] method's stencil of cursor loads (halo, Cast of the out buffer,
                                          a Rows loop of x += lanes, loads at x + dx, CopyTo into the row) as the cell method
                                          (Cell<TCell, TTile>, out TOut: a neighbor per load), kept when Kernel.CellFormOf gives it a
-                                         row loop in a copy of the compilation; the fix is v1's PerRow
+                                         row loop in a copy of the compilation; a ref tile stepped by a walk of Columns(lanes)
+                                         and col.Store as the cell step (out TCell), when its value is +0 on blank cells; a
+                                         Ground<TTile>'s literal width read from TTile; the fix is v1's PerRow
 Analyzer/EasyEcsAnalyzer.Parameters.cs   EECS086, EECS087, EECS089, EECS128: a [ForEach] method doing by hand what a parameter does per
                                          chunk (a singleton reset by system code and accumulated row by row: Reduce<T>, reported
                                          at the end of the compilation; other entities read through the World: Lookup<T>; records

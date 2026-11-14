@@ -387,7 +387,10 @@ public partial class AnalyzerTests
         public record struct NW(float T);
         """;
 
-    /// <summary>The stencils EECS103 v2 reports: a blur of one CopyTo at a literal width, a wave with vector locals stepping by Count.</summary>
+    /// <summary>
+    /// The stencils EECS103 v2 reports: a blur of one CopyTo at a literal width, a wave with vector locals stepping by
+    /// Count, a ground's blur at its tile's literal width, and a ground stepped by ref, its columns walked with Store.
+    /// </summary>
     internal static readonly string[] HandWrittenStencils =
     [
         """
@@ -428,6 +431,42 @@ public partial class AnalyzerTests
             }
         }
         """,
+        """
+        [EcsSystem] public ref struct S
+        {
+            [ForEach]
+            static void Blur(Tile<Warm, Ground<G>> warm, Mut<DynamicBuffer<NW>> next)
+            {
+                warm.ExchangeHalo();
+                var into = MemoryMarshal.Cast<NW, float>(next.Write().AsSpan());
+                foreach (var row in warm.Rows())
+                {
+                    var c = warm.At(row);
+                    for (int x = 0; x < 4; x += 4)
+                        ((c.Load128<float>(x, 0, -1) + c.Load128<float>(x) + c.Load128<float>(x, 0, 1)) * (1f / 3)).CopyTo(into.Slice(row.Index + x));
+                }
+            }
+        }
+        """,
+        """
+        [EcsSystem] public ref struct S
+        {
+            [ForEach]
+            static void Spread(ref Tile<Warm, Ground<G>> warm)
+            {
+                warm.ExchangeHalo();
+                foreach (var row in warm.Rows())
+                {
+                    var into = warm.Write(row);
+                    foreach (var col in warm.At(row).Columns(4))
+                    {
+                        var here = col.Load128<float>();
+                        col.Store(here + (col.Load128<float>(-1) + col.Load128<float>(1) - 2f * here) * 0.25f, into);
+                    }
+                }
+            }
+        }
+        """,
     ];
 
     [TestCaseSource(nameof(HandWrittenStencils))]
@@ -457,6 +496,24 @@ public partial class AnalyzerTests
         string source = Usings + "[EcsSystem] public ref struct S { " + attribute + " static void Blur(Tile<Warm, G> warm, Mut<DynamicBuffer<NW>> next) { " + halo
                         + " var into = MemoryMarshal.Cast<NW, float>(next.Write().AsSpan()); foreach (var row in warm.Rows()) { var c = warm.At(row); "
                         + $"for (int x = 0; {bound}; x += 4) ({value}).CopyTo(into.Slice(row.Index + x)); }} }} }}";
+        Assert.That((await Diagnose(GeneratorTests.Components, TileParts, Stencils, source)).Where(id => id.StartsWith("CS")), Is.Empty, "the case compiles");
+        Assert.That(await Count("EECS103", GeneratorTests.Components, TileParts, Stencils, source), Is.Zero);
+    }
+
+    // A stepped walk of columns left alone: no vector loop of the generator's, [GaussSeidel] (sweeps in place), a value
+    // that is not +0 on the blank rows the step leaves zero (a constant term, a negation, a negative factor: -0), a step
+    // of other lanes than the loads', a store into another row.
+    [TestCase("[ForEach(SimdMode = SimdMode.Off)]", "col.Load128<float>(-1) + col.Load128<float>(1)", "Columns(4)", "into")]
+    [TestCase("[ForEach, GaussSeidel]", "col.Load128<float>(-1) + col.Load128<float>(1)", "Columns(4)", "into")]
+    [TestCase("[ForEach]", "col.Load128<float>(-1) + col.Load128<float>(1) + Vector128.Create(1f)", "Columns(4)", "into")]
+    [TestCase("[ForEach]", "-col.Load128<float>(-1) + col.Load128<float>(1)", "Columns(4)", "into")]
+    [TestCase("[ForEach]", "(col.Load128<float>(-1) + col.Load128<float>(1)) * -0.5f", "Columns(4)", "into")]
+    [TestCase("[ForEach]", "col.Load128<float>(-1) + col.Load128<float>(1)", "Columns(2)", "into")]
+    [TestCase("[ForEach]", "col.Load128<float>(-1) + col.Load128<float>(1)", "Columns(4)", "warm.Write(new TileRow<Ground<G>>(0, 0))")]
+    public async Task HandWrittenStencilStepLeavesAlone(string attribute, string value, string columns, string into)
+    {
+        string source = Usings + "[EcsSystem] public ref struct S { " + attribute + " static void Spread(ref Tile<Warm, Ground<G>> warm) { warm.ExchangeHalo(); "
+                        + $"foreach (var row in warm.Rows()) {{ var into = warm.Write(row); foreach (var col in warm.At(row).{columns}) col.Store({value}, {into}); }} }} }}";
         Assert.That((await Diagnose(GeneratorTests.Components, TileParts, Stencils, source)).Where(id => id.StartsWith("CS")), Is.Empty, "the case compiles");
         Assert.That(await Count("EECS103", GeneratorTests.Components, TileParts, Stencils, source), Is.Zero);
     }
