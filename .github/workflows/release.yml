@@ -54,7 +54,10 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # both runtimes the library targets; global.json picks the SDK (11)
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Build and test the bumped version
         run: |
@@ -89,7 +92,10 @@ jobs:
 
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # both runtimes the library targets; global.json picks the SDK (11)
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Pack
         run: |
