@@ -1,10 +1,13 @@
 /**
  * The benchmark charts, built from src/lib/benchmarks.ts (src/data/bench.json).
  * Loaded lazily by ./index.tsx so visx is only downloaded on pages that show
- * a chart. EasyEcs is drawn in the accent, every other library in grey.
+ * a chart. EasyEcs is drawn in the accent, every other library in grey. Each
+ * runtime that has numbers (.NET 10, .NET 11) gets its own bar in every row,
+ * side by side, the later runtime in a lighter shade of the same colour; a
+ * runtime with no number for a row has no bar there.
  */
 import { useI18n } from 'fumadocs-ui/contexts/i18n';
-import { comparisonTable } from '@/components/bench-data';
+import { comparisonTable, peerTable } from '@/components/bench-data';
 import {
   type ComparisonQuery,
   comparison,
@@ -13,11 +16,18 @@ import {
   formatRatio,
   formatTime,
   libraryName,
+  measuredRuntimes,
   peerLabel,
   peers,
+  primaryRuntime,
+  type RuntimeId,
   sourceLine,
 } from '@/lib/benchmarks';
-import { featureComparison, type Tier } from '@/lib/feature-comparison';
+import {
+  featureComparison,
+  featureOn,
+  type Tier,
+} from '@/lib/feature-comparison';
 import type { Locale } from '@/lib/i18n';
 import { docsVersion } from '@/lib/site';
 import { BarChart, type ChartRow, type ChartSeries } from './bar-chart';
@@ -25,6 +35,29 @@ import { BarChart, type ChartRow, type ChartSeries } from './bar-chart';
 function useLang(lang?: Locale): Locale {
   const { locale } = useI18n();
   return lang ?? (locale === 'zh' ? 'zh' : 'en');
+}
+
+/** More than one runtime has numbers: each series splits into one bar per runtime */
+const split = measuredRuntimes.length > 1;
+
+/** The key of a series' bar on one runtime ("ours@net11.0"; the series' own key on one runtime) */
+const at = (key: string, runtime: RuntimeId) =>
+  split ? `${key}@${runtime}` : key;
+
+/**
+ * Each series as one series per runtime that has numbers: the same colour, a
+ * lighter shade for the later runtime, the runtime in the label
+ */
+function perRuntime(series: ChartSeries[]): ChartSeries[] {
+  if (!split) return series;
+  return series.flatMap((s) =>
+    measuredRuntimes.map((r, i) => ({
+      key: at(s.key, r.id),
+      label: `${s.label} (${r.label})`,
+      color:
+        i === 0 ? s.color : `color-mix(in oklab, ${s.color} 55%, transparent)`,
+    })),
+  );
 }
 
 function seriesFor(zh: boolean) {
@@ -55,6 +88,7 @@ export function PeerChart({
   const zh = useLang(lang) === 'zh';
   const s = seriesFor(zh);
   const list = peers(entities);
+  const on = measuredRuntimes.map((r) => ({ r, list: peers(entities, r.id) }));
   const count = Number(entities).toLocaleString('en-US');
   return (
     <BarChart
@@ -69,14 +103,18 @@ export function PeerChart({
           ? '同一个模拟移植到每个库的最快写法，并在 setup 中校验结果一致。越短越快；标签为相对 EasyEcs 的耗时倍数和每个 tick 的分配。'
           : "The same simulation ported to each library's fast path, with identical results checked in setup. Shorter is faster; the badge is the time relative to EasyEcs and the memory allocated per tick."
       }
-      series={[s.ours, s.other]}
+      series={perRuntime([s.ours, s.other])}
       rows={list.map((p) => ({
         label: peerLabel(p.method, docsVersion),
-        values: p.ours ? { ours: p.row.meanNs } : { other: p.row.meanNs },
-        text: {
-          ours: formatTime(p.row.meanNs),
-          other: formatTime(p.row.meanNs),
-        },
+        // A bar per runtime that measured this library
+        ...barsOf((r) => {
+          const row = on
+            .find((o) => o.r.id === r)
+            ?.list.find((x) => x.method === p.method)?.row;
+          return row
+            ? { key: p.ours ? 'ours' : 'other', ns: row.meanNs }
+            : undefined;
+        }),
         badge: {
           text: `${p.ours || p.row.ratio === null ? '' : `${formatRatio(p.row.ratio)} · `}${formatBytes(p.row.allocatedBytes)}${zh ? ' / tick' : ' per tick'}`,
           tone: p.row.allocatedBytes === 0 ? 'win' : 'par',
@@ -93,15 +131,7 @@ export function PeerChart({
       footnotes={[sourceLine(zh)]}
       table={{
         caption: zh ? '数据表' : 'Data table',
-        head: zh
-          ? ['库', '耗时', '对比 EasyEcs', '分配']
-          : ['Library', 'Time', 'vs EasyEcs', 'Allocated'],
-        rows: list.map((p) => [
-          peerLabel(p.method, docsVersion),
-          formatTime(p.row.meanNs),
-          p.row.ratio === null ? '—' : formatRatio(p.row.ratio),
-          formatBytes(p.row.allocatedBytes),
-        ]),
+        ...peerTable(entities, zh, docsVersion),
       }}
     />
   );
@@ -159,13 +189,19 @@ export function LeadChart({
           ? '每一项都在 Friflo.Engine.ECS、Arch、DefaultEcs 里用各自惯用的写法做同样的事，并在 setup 中校验结果一致。条形为最快的其他库耗时除以 EasyEcs 耗时（对数坐标）。'
           : "Each comparison does the same work in Friflo.Engine.ECS, Arch and DefaultEcs, each library's own idiomatic way, with identical results checked in setup. A bar is the fastest other library's time over EasyEcs' time (log scale).")
       }
-      series={[s.ours]}
+      series={perRuntime([s.ours])}
       rows={items.map((item) => {
         const next = item.versus;
+        const bars = barsOf(
+          (r) => {
+            const same = r === primaryRuntime ? item : featureOn(item, r);
+            return same ? { key: 'ours', ns: same.ratio } : undefined;
+          },
+          (v) => `${formatRatio(v)} · ${next.library}`,
+        );
         return {
           label: item.label[locale],
-          values: { ours: item.ratio },
-          text: { ours: `${formatRatio(item.ratio)} · ${next.library}` },
+          ...bars,
           detail: `EasyEcs ${formatTime(item.ours.meanNs)}, ${libraryName(next.library)} ${formatTime(next.row.meanNs)}`,
         };
       })}
@@ -243,6 +279,17 @@ export function BenchChart({
   const s = seriesFor(zh);
   const query = { bench, params: params ?? param, methods };
   const { rows, varying, grouped, own } = comparison(query);
+  // The same rows on each runtime that has numbers
+  const on = measuredRuntimes.map((r) => ({
+    r: r.id,
+    rows: comparison({ ...query, runtime: r.id }).rows,
+  }));
+  const rowKey = (row: { method: string; params: Record<string, string> }) =>
+    `${row.method} ${JSON.stringify(row.params)}`;
+  const sameOn = (runtime: RuntimeId, item: (typeof rows)[number]) =>
+    on
+      .find((o) => o.r === runtime)
+      ?.rows.find((x) => rowKey(x.row) === rowKey(item.row));
   const heading =
     title ??
     `${bench.split('.').pop()}${query.params ? ` (${query.params})` : ''}`;
@@ -276,10 +323,14 @@ export function BenchChart({
         chartRows.push(row);
       }
       const key = keyOf(item.library);
-      row.values[key] = item.row.meanNs;
-      // Each bar: its time and its allocations
-      row.text[key] =
-        `${formatTime(item.row.meanNs)} · ${formatBytes(item.row.allocatedBytes)}`;
+      for (const { r } of on) {
+        const same = sameOn(r, item);
+        if (!same) continue;
+        // Each bar: its time and its allocations
+        row.values[at(key, r)] = same.row.meanNs;
+        row.text[at(key, r)] =
+          `${formatTime(same.row.meanNs)} · ${formatBytes(same.row.allocatedBytes)}`;
+      }
       if (!item.ours && item.vsOurs !== null) {
         // The badge: each peer's time relative to EasyEcs for this case
         const ratio = `${libraryName(item.library)} ${formatRatio(item.vsOurs)}`;
@@ -297,13 +348,12 @@ export function BenchChart({
     for (const item of rows) {
       chartRows.push({
         label: comparisonLabel(item, varying),
-        values: item.ours
-          ? { ours: item.row.meanNs }
-          : { other: item.row.meanNs },
-        text: {
-          ours: formatTime(item.row.meanNs),
-          other: formatTime(item.row.meanNs),
-        },
+        ...barsOf((r) => {
+          const same = sameOn(r, item);
+          return same
+            ? { key: item.ours ? 'ours' : 'other', ns: same.row.meanNs }
+            : undefined;
+        }),
         // The badge: time relative to EasyEcs' baseline and allocations
         badge: {
           text:
@@ -323,7 +373,7 @@ export function BenchChart({
       id={chartId}
       title={heading}
       subtitle={subtitle}
-      series={series}
+      series={perRuntime(series)}
       rows={chartRows}
       axisLabel={zh ? '耗时（越短越快）' : 'Time (shorter is faster)'}
       tickFormat={formatTime}
@@ -334,4 +384,24 @@ export function BenchChart({
       }}
     />
   );
+}
+
+/**
+ * A row's bars, one per runtime that has numbers: `bar` gives the series key
+ * and the value on a runtime, or undefined where that runtime has no number
+ * (no bar, never an estimate)
+ */
+function barsOf(
+  bar: (runtime: RuntimeId) => { key: string; ns: number } | undefined,
+  format: (value: number) => string = formatTime,
+): Pick<ChartRow, 'values' | 'text'> {
+  const values: ChartRow['values'] = {};
+  const text: ChartRow['text'] = {};
+  for (const r of measuredRuntimes) {
+    const b = bar(r.id);
+    if (!b) continue;
+    values[at(b.key, r.id)] = b.ns;
+    text[at(b.key, r.id)] = format(b.ns);
+  }
+  return { values, text };
 }

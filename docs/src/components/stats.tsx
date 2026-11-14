@@ -21,16 +21,21 @@ import type { ReactNode } from 'react';
 import { type Bar, Bars } from '@/components/bars';
 import { Count } from '@/components/count';
 import {
+  benchNumber,
   benchValue,
   formatRatio,
   formatTime,
   libraryName,
+  primaryRuntime,
+  type RuntimeId,
+  runtimes,
 } from '@/lib/benchmarks';
 import { cn } from '@/lib/cn';
 import {
   type FeatureResult,
   featureComparison,
   featureCounts,
+  featureOn,
 } from '@/lib/feature-comparison';
 import type { Locale } from '@/lib/i18n';
 
@@ -60,6 +65,30 @@ interface StatData {
   unit?: string;
   note?: ReactNode;
   lead?: FeatureResult;
+  /**
+   * The same figure on the other runtimes that have it, beside this one (the
+   * primary runtime's): ".NET 10; .NET 11: 1.10 ms"; none when no other
+   * runtime has a number yet
+   */
+  alt?: string;
+}
+
+const primaryLabel = runtimes.find((r) => r.id === primaryRuntime)?.label;
+
+/** The figure on the other runtimes, or undefined when none has it */
+function altLine(
+  zh: boolean,
+  figure: (runtime: RuntimeId) => string | undefined,
+): string | undefined {
+  const others = runtimes.flatMap((r) => {
+    if (r.id === primaryRuntime) return [];
+    const text = figure(r.id);
+    return text ? [zh ? `${r.label}：${text}` : `${r.label}: ${text}`] : [];
+  });
+  if (others.length === 0) return undefined;
+  return zh
+    ? `${primaryLabel}；${others.join('；')}`
+    : `${primaryLabel}; ${others.join('; ')}`;
 }
 
 /** "1.68 ms" -> "1.68" and "ms"; "30×" stays whole (the sign belongs to the figure) */
@@ -92,6 +121,10 @@ export function statData(props: StatProps, lang: Locale): StatData {
           ? `EasyEcs ${formatTime(item.ours.meanNs)}，${other} ${formatTime(item.versus.row.meanNs)}`
           : `EasyEcs ${formatTime(item.ours.meanNs)}, ${other} ${formatTime(item.versus.row.meanNs)}`),
       lead: item,
+      alt: altLine(zh, (r) => {
+        const same = featureOn(item, r);
+        return same ? formatRatio(same.ratio) : undefined;
+      }),
     };
   }
   if (props.count) {
@@ -101,6 +134,11 @@ export function statData(props: StatProps, lang: Locale): StatData {
       value: String(counts[props.count]),
       unit: props.of ? `/ ${counts[props.of]}` : undefined,
       note: props.children,
+      alt: altLine(zh, (r) => {
+        const on = featureCounts(props.library, r);
+        if (on.total === 0 || !props.count) return undefined;
+        return `${on[props.count]}${props.of ? ` / ${on[props.of]}` : ''}`;
+      }),
     };
   }
   if (!props.k) throw new Error('<Stat> needs k, lead or count');
@@ -108,6 +146,9 @@ export function statData(props: StatProps, lang: Locale): StatData {
     label: props.label ?? '',
     ...split(benchValue(props.k)),
     note: props.children,
+    alt: altLine(zh, (r) =>
+      props.k ? benchNumber(props.k, r)?.text : undefined,
+    ),
   };
 }
 
@@ -175,6 +216,11 @@ export function Stat(props: StatProps) {
           <p className="text-sm text-fd-muted-foreground">{data.label}</p>
         )}
         <Figure value={data.value} unit={data.unit} hero={props.hero} />
+        {data.alt && (
+          <p className="text-xs text-fd-muted-foreground tabular-nums">
+            {data.alt}
+          </p>
+        )}
       </div>
       {(data.note || (props.hero && data.lead)) && (
         <div className="flex min-w-0 flex-col gap-3 text-sm leading-snug text-pretty text-fd-muted-foreground">

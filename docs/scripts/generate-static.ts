@@ -7,7 +7,12 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type * as PageTree from 'fumadocs-core/page-tree';
-import { benchNumber, formatRatio, sourceLine } from '../src/lib/benchmarks';
+import {
+  benchNumber,
+  formatRatio,
+  primaryRuntime,
+  sourceLine,
+} from '../src/lib/benchmarks';
 import {
   featureComparison,
   featureCounts,
@@ -285,7 +290,7 @@ const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
       ...(features.total ? [featureFact('en')] : []),
       ...(oneWorld
         ? [
-            `Performance: one server tick of 9 systems over 100,000 entities takes ${oneWorld.text}${oneWorldAlloc ? ` and allocates ${oneWorldAlloc.text}` : ''} (${sourceLine(false)}) See [Performance](${siteUrl}/en/docs/performance.md).`,
+            `Performance: one server tick of 9 systems over 100,000 entities takes ${oneWorld.text}${oneWorldAlloc ? ` and allocates ${oneWorldAlloc.text}` : ''} (${sourceLine(false, primaryRuntime)}) See [Performance](${siteUrl}/en/docs/performance.md).`,
           ]
         : []),
       ...(hasPeers
@@ -313,7 +318,7 @@ const llmsCopy: Record<Locale, { facts: string[]; optional: string[] }> = {
       ...(features.total ? [featureFact('zh')] : []),
       ...(oneWorld
         ? [
-            `性能：10 万实体、9 个系统的一个服务器 tick 耗时 ${oneWorld.text}${oneWorldAlloc ? `，分配 ${oneWorldAlloc.text}` : ''}（${sourceLine(true)}）参见[性能](${siteUrl}/zh/docs/performance.md)。`,
+            `性能：10 万实体、9 个系统的一个服务器 tick 耗时 ${oneWorld.text}${oneWorldAlloc ? `，分配 ${oneWorldAlloc.text}` : ''}（${sourceLine(true, primaryRuntime)}）参见[性能](${siteUrl}/zh/docs/performance.md)。`,
           ]
         : []),
       ...(hasPeers

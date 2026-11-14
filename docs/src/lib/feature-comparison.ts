@@ -7,7 +7,13 @@
  * <FeatureComparison /> and <LeadChart />, the home page, the social cards
  * and llms.txt.
  */
-import { type BenchRow, benchRows, splitMethod } from './benchmarks';
+import {
+  type BenchRow,
+  benchRows,
+  primaryRuntime,
+  type RuntimeId,
+  splitMethod,
+} from './benchmarks';
 import type { Locale } from './i18n';
 
 type Text = Record<Locale, string>;
@@ -505,8 +511,8 @@ interface Measured {
   rivals: Rival[];
 }
 
-function measure(m: Matchup): Measured | undefined {
-  const rows = benchRows(m.bench, m.params);
+function measure(m: Matchup, runtime: RuntimeId): Measured | undefined {
+  const rows = benchRows(m.bench, m.params, runtime);
   const ours = fastest(
     rows.filter((r) =>
       m.ours ? m.ours.includes(r.method) : libraryOf(r) === 'EasyEcs',
@@ -548,12 +554,24 @@ function against(
   };
 }
 
-const measured = matchups.flatMap((m) => measure(m) ?? []);
-
 const byLead = (a: FeatureResult, b: FeatureResult) => b.ratio - a.ratio;
 
-/** Against the fastest other library */
-const all = measured.map((m) => against(m, m.rivals[0])).sort(byLead);
+/** Each runtime's comparisons, measured once */
+const cache = new Map<
+  RuntimeId,
+  { measured: Measured[]; all: FeatureResult[] }
+>();
+function onRuntime(runtime: RuntimeId) {
+  let entry = cache.get(runtime);
+  if (!entry) {
+    const measured = matchups.flatMap((m) => measure(m, runtime) ?? []);
+    // Against the fastest other library
+    const all = measured.map((m) => against(m, m.rivals[0])).sort(byLead);
+    entry = { measured, all };
+    cache.set(runtime, entry);
+  }
+  return entry;
+}
 
 /**
  * Every head-to-head comparison, the biggest lead first, or those of one
@@ -565,7 +583,9 @@ const all = measured.map((m) => against(m, m.rivals[0])).sort(byLead);
 export function featureComparison(
   tier?: Tier,
   library?: string,
+  runtime: RuntimeId = primaryRuntime,
 ): FeatureResult[] {
+  const { measured, all } = onRuntime(runtime);
   const results = library
     ? measured
         .flatMap((m) => {
@@ -583,8 +603,11 @@ export function featureComparison(
  * and how many each tier holds; against the fastest other library, or
  * against `library`
  */
-export function featureCounts(library?: string) {
-  const results = featureComparison(undefined, library);
+export function featureCounts(
+  library?: string,
+  runtime: RuntimeId = primaryRuntime,
+) {
+  const results = featureComparison(undefined, library, runtime);
   const count = (test: (r: FeatureResult) => boolean) =>
     results.filter(test).length;
   return {
@@ -596,4 +619,20 @@ export function featureCounts(library?: string) {
     close: count((r) => r.tier === 'close'),
     behind: count((r) => r.tier === 'behind'),
   };
+}
+
+/**
+ * The same comparison on another runtime, against the same library: the row
+ * a table shows beside `item`, or undefined when that runtime has no numbers
+ * for it (an empty cell, never a guess)
+ */
+export function featureOn(
+  item: FeatureResult,
+  runtime: RuntimeId,
+): FeatureResult | undefined {
+  const m = onRuntime(runtime).measured.find(
+    (x) => x.matchup.label.en === item.label.en,
+  );
+  const versus = m?.rivals.find((r) => r.library === item.versus.library);
+  return m && versus ? against(m, versus) : undefined;
 }
