@@ -103,7 +103,22 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       j. the 512-bit and `Vector<T>` bodies are the same text with another prefix (the largest duplication, about
          half of every vector job): #172's "one body per width" needs a width-generic helper the JIT specializes;
          try it on one job, Tier1 equal or it stays.
-- [ ] **`feat-ground-cells`** (inner-loops leftover (a)): the first run was lost the same way before reporting.
+- [x] **`feat-ground-cells`** merged 2026-11-14. (inner-loops leftover (a), from fc26ea4): the first run was lost the same way before
+      reporting; `Cell<TCell, Ground<TTile>>` already ran through the cell pass (no core or
+      generator change was needed: the shape is any ITileShape); proved by TileTests.Cells.cs (2a12b41: a cross stepping
+      the ground in place, bit for bit against the whole ground, SimdMode.Off and the column walk by hand, also with
+      AVX-512 and AVX off; a box blur; 0 B). EECS103 v2 extended (d77b4f2, tests de0a617): a `ref Tile` stepped by a walk of
+      `Columns(lanes)` and `col.Store` as the cell step (`out TCell`), only when its value is +0 on blank cells; a
+      `Ground<TTile>`'s literal width read from TTile. TileGroundBenchmark (1daf18e; Ground<Chunk> of 16 x 16 x 8 chunks
+      stepped in place, us, 0 B everywhere; Cell / Hand512 (Columns(16), Load512) / Hand (Columns(4), Load128) / Off):
+      Cross 1 thread 32: 421 / 442 / 1,218 / 623; 512: 198 / 214 / 402 / 239 ms; 4 threads 32: 247 / 262 / 611 / 335;
+      512: 78.7 / 81.2 / 156 / 94.3 ms. Box 1 thread 32: 401 / 491 / 505 / 742; 512: 221 / 240 / 274 / 276 ms; 4 threads
+      32: 271 / 301 / 302 / 381; 512: 84.2 / 96.8 / 90.9 / 96.6 ms. The cell is at or below every hand-written walk in all
+      eight (Cross against Hand512 within the error, about 10 % on this shared machine). Head against base is the same code:
+      the branch changes no generator or core path the pass runs (only the analyzer). VoxelServer has no
+      `Ground<TTile>` (its Ground is a [Tile] of its own) and its scent step is a Gauss-Seidel scan, not a stencil the
+      form covers: nothing rewritten. Not built (owner-review.md): a ground cell sampling a layer of its 3D tile (a
+      public form for the owner). Docs: docs-todos "feat-ground-cells".
 - [x] **`feat-lane5-renames`** merged 2026-11-08: R1-R6 (tests 4237 + 1 skipped: R4 deleted 17, R3 added 3; DocCheck 28 at
       base and head). Left: the internal `World.ChunkRows(...)` and `PairHalves.ChunkRows` follow `MaxChunkSize` as
       `ChunkSize`, after feat-lane1-core merges (it edits World.Parallel.cs).
@@ -133,7 +148,7 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       `generator.md` "WP8" lists the candidates: `--x`, a singleton field written, narrow integer division by a
       constant, lane sizes that differ); lambda passes fused (Fusion.cs, SystemGenerator.Fusion.cs); and the extra
       items:
-      a. a cell method over a `Ground<TTile>` tile (was "a `Columns<TTile>` cell", inner-loops.md WP5);
+      a. a cell method over a `Ground<TTile>` tile (was "a `Columns<TTile>` cell", inner-loops.md WP5): `feat-ground-cells`;
       b. masked AVX-512 tails for element loops (inner-loops.md section 6: try where runs are mostly tail);
       c. WP7: HeightMap done; FireDamage per row (drop the `#pragma EECS103`, Zombies.cs:193), TileBenchmark cell
          cases, and the demo: the owner chose (2026-11-07) to rewrite `MovementBatchSystem.Move` (and

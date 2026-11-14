@@ -185,3 +185,21 @@ there is nothing to buy with a change (the backlog item has the numbers).
 
 What would change the verdict: a corpus whose files name many closed generic systems (the transform then binds each
 on every edit of its file), measured with this stage's tracked step.
+
+## A ground cell sampling its tile's layer: not built (feat-ground-cells, 2026-11-14)
+
+**Proposed by** the inner-loops leftover (a): a cell method over a `Ground<TTile>` tile. The plain form (every cell of the
+ground's shape) already ran and now has its tests and TileGroundBenchmark (the backlog item has the numbers). What a
+ground is for, though, is a second field beside the 3D tile's cells, and its stencils read that tile too:
+`GroundHeatSystem` (TileTests.Steps.cs) spreads heat over `Ground<RockChunk>` except where the chunk's top layer is
+rock, reading `rocks[x, 3, row.Z]`.
+
+**Why not.** A cell method's inputs must share one shape (Symbols.StepProblem, EECS115: "cells of different tiles"),
+because each input is a stream at a constant offset from the driver's cell and their rows line up. A ground row and
+a row of the 3D tile line up in x and z, but the sampled layer is an absolute layer of the other shape (3), not an
+offset within its halo: `Cell<Rock, RockChunk>` has no way to say it, and its exchange would copy every layer of the
+3D tile for one. It needs a public form (a layer pick on the sampled cell, or an attribute naming the layer) and
+the exchange of one layer of another shape: an API for the owner to choose.
+
+What would change the verdict: the owner choosing that form; then Kernel.CellFormOf reads the pick as a stream
+of the other tile's row at that layer, and the pass exchanges that layer alone (`ExchangeHalo(layer, layer)`).

@@ -3715,3 +3715,22 @@ lines of getting-started, index, faq and samples/godot (en + zh). For the docs p
       refuses reports of another SDK or runtime, so the next `tools/perf/bench.sh ... --sync` (SDK 11 now) needs a full
       `--site --sync --fresh` run. Which runtime the site shows is the owner's call (asked with package A); the
       performance page then says which runtime its numbers are from.
+
+## feat-ground-cells (inner-loops leftover (a): a cell method over a `Ground<TTile>` tile)
+
+No new public API: `Cell<TCell, Ground<TTile>>` already ran through the cell pass (the shape is any `ITileShape`); this
+branch proves it (TileTests.Cells.cs: a cross stepping the ground in place against the whole ground, SimdMode.Off and
+the column walk by hand, bit for bit; a box blur; 0 B) and measures it (TileGroundBenchmark). EECS103 v2 (HandStencil)
+now also reports a `ref Tile` stepped by a walk of `Columns(lanes)` with `col.Store` (fix: the cell step, `out TCell`)
+when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width from TTile.
+
+- guide/performance/grids.mdx + .zh (wherever `Ground<TTile>` and cell methods are taught, with the cell pages of the
+  feat-inner-loops section): a ground's field as cells, `Cell<Scent, Ground<Chunk>>` with `out Scent` stepping it; the
+  offsets' dy is 0 (one layer); what it costs against the walk by hand: `<BenchTable>` of `TileGroundBenchmark`
+  (Cross_Cell / Box_Cell against Cross_Hand512 / Box_Hand512 and SimdMode.Off) once the class is synced.
+- guide/help/analyzer.mdx + .zh, EECS103: the stepped walk of columns as a third v2 shape (the code and the fix's
+  result); why a value that is not +0 on blank cells keeps the hand-written form (the step leaves skipped rows zero,
+  the cell step writes them with the method's blank value; -0 from a negative factor included).
+- reference: regenerate after the descriptor's text change (EECS103's description names the stepped walk).
+- Not built (owner-review.md "A ground cell sampling its tile's layer"): a ground cell method that also reads a layer
+  of the 3D tile's cells (`GroundHeatSystem`'s rocks): cells of two shapes in one method.

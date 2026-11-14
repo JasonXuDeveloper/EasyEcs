@@ -130,7 +130,8 @@ Grids/TileTests.Cells.cs  cell methods (Cell<TCell, TTile>) against the whole gr
                           pass (empty, clamped, 1 and 4 threads, 0 B), SimdMode.Off, an offset past the halo, the
                           schedule, 1 and 4 threads, 0 B; the halo read in place by cross stencils bit for bit
                           against the copy (box stencils copying it), the loads of PlaneLoads at every i and dx of each
-                          width
+                          width; cells of a ground (Cell<TCell, Ground<TTile>>): a cross stepping in place against the
+                          whole ground, the method as written and the column walk by hand, bit for bit, a box blur, 0 B
 Grids/TileTests.Halos.cs  kept neighbors (TileNeighborCache) of a by-value Life on a torus of quiet plates against
                           the whole torus, on 1 and 4 threads, through cells written from outside, removed and
                           given back, a plate destroyed and made again, every plate's kept neighbors read, 0 B

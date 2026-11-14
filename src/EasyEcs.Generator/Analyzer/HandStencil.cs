@@ -10,7 +10,9 @@ namespace EasyEcs.Generator;
 /// A Tile [ForEach] method whose body is a stencil written by hand with the cursor's vector loads (EECS103 v2), read as
 /// the cell method that computes the same cells: <c>Cell&lt;TCell, TTile&gt;</c> and <c>out TOut</c>, each load a
 /// neighbor <c>t[dx, dy, dz]</c>, each vector local a scalar one. Reported only when the cell method gets the
-/// generator's row loop in a copy of the compilation (Kernel.CellFormOf), the rule HandSimd keeps.
+/// generator's row loop in a copy of the compilation (Kernel.CellFormOf), the rule HandSimd keeps. A tile stepped by
+/// hand (<c>ref Tile</c>, its columns walked with <c>Columns(step)</c> and each vector stored with <c>col.Store</c>,
+/// the walk a ground's field is written with) becomes the cell method stepping it: <c>out TCell</c>.
 /// </summary>
 /// <remarks>
 /// What qualifies (anything else leaves the method alone): a <c>Tile&lt;TCell, TTile&gt;</c> parameter (by value) and a
@@ -20,19 +22,28 @@ namespace EasyEcs.Generator;
 /// loop's statements vector locals and one <c>v.CopyTo(into.Slice(row.Index + x))</c>, its expressions loads at
 /// <c>x + dx</c> and constant dy, dz, + - * /, negation, constants and broadcasts. A summary per row, a range of rows
 /// (<c>ExchangeHalo(from, to)</c>) or a comparison keeps the hand-written form.
+/// <para>
+/// The stepped form: one <c>ref Tile&lt;TCell, TTile&gt;</c> parameter, nothing else, no [GaussSeidel]; a body of an
+/// optional <c>t.ExchangeHalo()</c> and <c>foreach (var row in t.Rows(...)) { var into = t.Write(row); foreach (var col
+/// in t.At(row).Columns(lanes)) ... }</c>, the walk's statements vector locals and one <c>col.Store(v, into)</c>, its
+/// loads at constant offsets of the column. The rows the walk skips are zero once the step swaps its buffer in, and
+/// the cell step writes them with what the method computes on blank cells when that is not zero: so the value must
+/// be +0 wherever every load is (sums and differences of such values, products with one of them or with a constant
+/// that is not negative, quotients of one by a positive constant; no negation, no constant term).
+/// </para>
 /// </remarks>
 internal static class HandStencil
 {
     /// <summary>The syntactic prefilter: an attributed method whose body calls a cursor load and CopyTo.</summary>
     public static bool MayBe(MethodDeclarationSyntax syntax)
     {
-        if (syntax.Body is not { } body || syntax.AttributeLists.Count == 0 || syntax.ParameterList.Parameters.Count != 2) return false;
+        if (syntax.Body is not { } body || syntax.AttributeLists.Count == 0 || syntax.ParameterList.Parameters.Count is not (1 or 2)) return false;
         bool load = false, copy = false;
         foreach (var token in body.DescendantTokens())
             if (token.IsKind(SyntaxKind.IdentifierToken))
             {
                 load |= token.ValueText is "Load128" or "Load256" or "Load512" or "LoadVector";
-                copy |= token.ValueText == "CopyTo";
+                copy |= token.ValueText is "CopyTo" or "Store";
             }
         return load && copy;
     }
@@ -76,7 +87,8 @@ internal static class HandStencil
     private sealed class Reader(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
     {
         private IParameterSymbol _tile = null!;
-        private ILocalSymbol _cursor = null!, _index = null!;
+        private ILocalSymbol _cursor = null!;
+        private ILocalSymbol? _index; // null in a walk of columns: the loads' dx are constants of the column
         private ITypeSymbol _lane = null!;
         private string _cellField = "", _load = "";
         private readonly HashSet<ILocalSymbol> _locals = new(SymbolEqualityComparer.Default);
@@ -85,6 +97,10 @@ internal static class HandStencil
 
         public HandSimd.PerRow? Read()
         {
+            // A tile stepped by hand, its columns walked: the cell method stepping it.
+            if (method.Parameters is [{ RefKind: RefKind.Ref } byRef] && byRef.Type is INamedTypeSymbol { IsGenericType: true } steppedType
+                && Symbols.Named(steppedType.ConstructedFrom, "EasyEcs.Tile<TCell, TTile>") && !Symbols.IsGaussSeidel(method)) return ReadColumns(byRef);
+
             // The parameters: the tile and the buffer it writes.
             IParameterSymbol? tile = null, next = null;
             foreach (var p in method.Parameters)
@@ -164,6 +180,117 @@ internal static class HandStencil
                 result.ToArray());
         }
 
+        /// <summary>
+        /// The stepped form: <c>foreach (var row in t.Rows(...)) { var into = t.Write(row); foreach (var col in
+        /// t.At(row).Columns(lanes)) { ...; col.Store(v, into); } }</c> as <c>Cell&lt;TCell, TTile&gt; t, out TCell next</c>.
+        /// </summary>
+        private HandSimd.PerRow ReadColumns(IParameterSymbol tile)
+        {
+            _tile = tile;
+            var tileType = (INamedTypeSymbol)tile.Type;
+            var cell = tileType.TypeArguments[0];
+            var statements = syntax.Body!.Statements;
+            int at = 0;
+            if (statements.Count > 0 && statements[0] is ExpressionStatementSyntax { Expression: InvocationExpressionSyntax { ArgumentList.Arguments.Count: 0 } refresh }
+                && model.GetSymbolInfo(refresh, ct).Symbol is IMethodSymbol { Name: "ExchangeHalo" } && Is(Receiver(refresh), tile)) at++;
+            // foreach (var row in t.Rows(...)) { var into = t.Write(row); foreach (var col in t.At(row).Columns(step)) ... }
+            if (statements.Count != at + 1
+                || statements[at] is not ForEachStatementSyntax { Expression: InvocationExpressionSyntax rows, Statement: BlockSyntax { Statements: [LocalDeclarationStatementSyntax written, ForEachStatementSyntax walk] } } each
+                || model.GetSymbolInfo(rows, ct).Symbol is not IMethodSymbol { Name: "Rows" } || !Is(Receiver(rows), tile)
+                || model.GetDeclaredSymbol(each, ct) is not { } row
+                || written.Declaration.Variables is not [{ Initializer.Value: InvocationExpressionSyntax write } intoDeclarator]
+                || model.GetSymbolInfo(write, ct).Symbol is not IMethodSymbol { Name: "Write" } || !Is(Receiver(write), tile)
+                || write.ArgumentList.Arguments is not [{ Expression: var writtenRow }] || !Is(writtenRow, row)
+                || model.GetDeclaredSymbol(intoDeclarator, ct) is not ILocalSymbol into
+                || walk.Expression is not InvocationExpressionSyntax { ArgumentList.Arguments: [{ Expression: var step }] } columns
+                || model.GetSymbolInfo(columns, ct).Symbol is not IMethodSymbol { Name: "Columns" } || Receiver(columns) is not InvocationExpressionSyntax atRow
+                || model.GetSymbolInfo(atRow, ct).Symbol is not IMethodSymbol { Name: "At" } || !Is(Receiver(atRow), tile)
+                || atRow.ArgumentList.Arguments is not [{ Expression: var rowArgument }] || !Is(rowArgument, row)
+                || model.GetDeclaredSymbol(walk, ct) is not ILocalSymbol column) throw No();
+            _cursor = column;
+            // The lane: the type the first load of the column reads (each load is checked against it), one field of the cell.
+            _lane = walk.Statement.DescendantNodes().OfType<InvocationExpressionSyntax>()
+                .Where(call => Receiver(call) is { } receiver && Is(receiver, column))
+                .Select(call => model.GetSymbolInfo(call, ct).Symbol is IMethodSymbol { Name: "Load128" or "Load256" or "Load512" or "LoadVector", TypeArguments: [var lane] } ? lane : null)
+                .FirstOrDefault(lane => lane != null) ?? throw No();
+            if (!IsLane(_lane)) throw No();
+            _cellField = OneField(cell, _lane) ?? throw No();
+
+            var body = walk.Statement is BlockSyntax block ? (IEnumerable<StatementSyntax>)block.Statements : [walk.Statement];
+            var result = new List<string>();
+            var zeros = new HashSet<ILocalSymbol>(SymbolEqualityComparer.Default); // the locals that are +0 on blank cells
+            ExpressionSyntax? stored = null;
+            foreach (var statement in body)
+            {
+                if (stored != null) throw No(); // the store comes last
+                switch (statement)
+                {
+                    case LocalDeclarationStatementSyntax { Declaration.Variables: [{ Initializer.Value: var init } declarator] }
+                        when model.GetDeclaredSymbol(declarator, ct) is ILocalSymbol local:
+                        result.Add($"{LaneName()} {declarator.Identifier.ValueText} = {Expr(init)};");
+                        _locals.Add(local);
+                        if (Blank(init, zeros)) zeros.Add(local);
+                        break;
+                    // col.Store(v, into)
+                    case ExpressionStatementSyntax { Expression: InvocationExpressionSyntax { ArgumentList.Arguments: [{ Expression: var value }, { Expression: var target }] } store }
+                        when model.GetSymbolInfo(store, ct).Symbol is IMethodSymbol { Name: "Store" } && Is(Receiver(store), column) && Is(target, into):
+                        stored = value is ParenthesizedExpressionSyntax { Expression: var inner } ? inner : value;
+                        break;
+                    default:
+                        throw No();
+                }
+            }
+            if (stored == null) throw No();
+            string computed = Expr(stored);
+            if (step == null || !Steps(step) || !Blank(stored, zeros)) throw No();
+            string next = tile.Name == "next" ? "stepped" : "next";
+            result.Add($"{next} = {Make(cell, computed) ?? throw No()};");
+            var cellType = model.Compilation.GetTypeByMetadataName("EasyEcs.Cell`2")?.Construct(cell, tileType.TypeArguments[1]) ?? throw No();
+            int position = syntax.SpanStart;
+            return new HandSimd.PerRow($"{cellType.ToMinimalDisplayString(model, position)} {tile.Name}, out {cell.ToMinimalDisplayString(model, position)} {next}",
+                result.ToArray());
+        }
+
+        /// <summary>
+        /// Whether vector expression <paramref name="e"/> is +0 in every lane where every load reads +0 (the blank cells a
+        /// step leaves zero): loads, the locals of <paramref name="zeros"/>, their sums and differences, a product of one
+        /// with another or with a constant that is not negative, a quotient of one by a positive constant. Anything else
+        /// (a constant term, a negation, -0 from a negative factor) may not be.
+        /// </summary>
+        private bool Blank(ExpressionSyntax e, HashSet<ILocalSymbol> zeros)
+        {
+            switch (e)
+            {
+                case ParenthesizedExpressionSyntax p:
+                    return Blank(p.Expression, zeros);
+                case BinaryExpressionSyntax b when b.Kind() is SyntaxKind.AddExpression or SyntaxKind.SubtractExpression:
+                    return Blank(b.Left, zeros) && Blank(b.Right, zeros);
+                case BinaryExpressionSyntax b when b.IsKind(SyntaxKind.MultiplyExpression):
+                    return Blank(b.Left, zeros) && (Blank(b.Right, zeros) || Sign(b.Right) >= 0) || Blank(b.Right, zeros) && Sign(b.Left) >= 0;
+                case BinaryExpressionSyntax b when b.IsKind(SyntaxKind.DivideExpression):
+                    return Blank(b.Left, zeros) && Sign(b.Right) > 0;
+                case InvocationExpressionSyntax call when Receiver(call) is { } receiver && Is(receiver, _cursor):
+                    return true;
+                case IdentifierNameSyntax name when model.GetSymbolInfo(name, ct).Symbol is ILocalSymbol local:
+                    return zeros.Contains(local);
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>The sign of a constant factor (a scalar, or a broadcast of one): 1, 0 or -1; -2 when it is not a constant.</summary>
+        private int Sign(ExpressionSyntax e)
+        {
+            while (e is ParenthesizedExpressionSyntax p) e = p.Expression;
+            if (e is InvocationExpressionSyntax { ArgumentList.Arguments: [{ Expression: var broadcast }] } call
+                && model.GetSymbolInfo(call, ct).Symbol is IMethodSymbol { Name: "Create", IsStatic: true } create && Kernel.IsVectorType(create.ReturnType))
+                e = broadcast;
+            if (model.GetConstantValue(e, ct) is not { HasValue: true, Value: { } value }) return -2;
+            double d = System.Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+            // -0 counts as negative: +0 * -0 is -0
+            return double.IsNaN(d) ? -2 : d > 0 ? 1 : d < 0 || 1 / d < 0 ? -1 : 0;
+        }
+
         // ---------------- the loop's shape ----------------
 
         /// <summary>The bound covers the whole row: <c>TTile.Width</c> (a type parameter's or the shape's) or the shape's constant width.</summary>
@@ -178,6 +305,9 @@ internal static class HandStencil
         /// <summary>The width a tile shape declares as a constant (<c>static int ITileShape.Width =&gt; 16;</c>), else null.</summary>
         private static int? ShapeWidth(INamedTypeSymbol shape)
         {
+            // A ground's width is its tile's (Ground<TTile>.Width => TTile.Width).
+            if (shape.IsGenericType && Symbols.Named(shape.ConstructedFrom, "EasyEcs.Ground<TTile>") && shape.TypeArguments[0] is INamedTypeSymbol grid)
+                return ShapeWidth(grid);
             foreach (var member in shape.GetMembers().OfType<IPropertySymbol>())
                 if (member.Name.EndsWith("Width", System.StringComparison.Ordinal) && member.IsStatic)
                     foreach (var reference in member.DeclaringSyntaxReferences)
@@ -252,9 +382,11 @@ internal static class HandStencil
         {
             if (model.GetSymbolInfo(call, ct).Symbol is not IMethodSymbol { Name: ("Load128" or "Load256" or "Load512" or "LoadVector") and var name, TypeArguments: [var lane] }
                 || !SymbolEqualityComparer.Default.Equals(lane, _lane) || _load.Length > 0 && _load != name
-                || call.ArgumentList.Arguments is not { Count: >= 1 and <= 3 } args || args.Any(a => a.NameColon != null)) throw No();
+                || call.ArgumentList.Arguments is not { Count: <= 3 } args || args.Count == 0 && _index != null || args.Any(a => a.NameColon != null)) throw No();
             _load = name;
-            int dx = args[0].Expression switch
+            // A walk of columns loads at constant offsets of its column; a loop by x at x + dx.
+            int dx = _index == null ? args.Count == 0 ? 0 : model.GetConstantValue(args[0].Expression, ct) is { HasValue: true, Value: int column } ? column : throw No()
+                : args[0].Expression switch
             {
                 var only when Is(only, _index) => 0,
                 BinaryExpressionSyntax { RawKind: (int)SyntaxKind.AddExpression or (int)SyntaxKind.SubtractExpression } shifted when Is(shifted.Left, _index)

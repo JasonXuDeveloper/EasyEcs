@@ -1069,6 +1069,9 @@ public class CodeFixTests
     [TestCase(0, "    static void Blur(Cell<Warm, G> warm, out NW next) => next = new NW((warm[-1, 0, 0].T + warm.Value.T + warm[1, 0, 1].T) * (1f / 3));")]
     [TestCase(1, "    static void Wave(Cell<Warm, G> warm, out NW next)\n    {\n        float here = warm.Value.T;\n"
                  + "        float sum = warm[-1, 0, 0].T + warm[1, 0, 0].T - 2f * here;\n        next = new NW(here + sum * 0.25f);\n    }")]
+    [TestCase(2, "    static void Blur(Cell<Warm, Ground<G>> warm, out NW next) => next = new NW((warm[0, 0, -1].T + warm.Value.T + warm[0, 0, 1].T) * (1f / 3));")]
+    [TestCase(3, "    static void Spread(Cell<Warm, Ground<G>> warm, out Warm next)\n    {\n        float here = warm.Value.T;\n"
+                 + "        next = new Warm(here + (warm[-1, 0, 0].T + warm[1, 0, 0].T - 2f * here) * 0.25f);\n    }")]
     public async Task RewritesAHandWrittenStencil(int index, string expected)
     {
         var document = Document("using EasyEcs;\n" + AnalyzerTests.Usings + AnalyzerTests.TileParts + "\n" + AnalyzerTests.Stencils + "\n"
