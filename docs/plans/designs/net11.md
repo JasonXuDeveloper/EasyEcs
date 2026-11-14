@@ -61,7 +61,7 @@ Measured first: the headline worlds and the classes below on net11.0 against net
 | B7 | Runtime async (`<Features>runtime-async=on</Features>`) | EasyEcs.Core has no async method (checked: no `async`/`await` in src/EasyEcs.Core) | not applicable | runtime "Runtime Async" |
 | B8 | C# 15 labeled `break` / `continue` | the generator's `goto` exits of nested loops (flat loops, masked words); clarity only, the IL is the same branch | not a performance item; left to audit-generator | C# 15 |
 | B9 | C# 15 collection expression arguments (`[with(capacity: n), ..]`) | cold paths that size a list first | not a performance item on hot paths (they allocate nothing) | C# 15 |
-| B10 | C# 15 extension indexers | `world[entity]` or `entity[T]` style access | public API: the owner's question, not built | C# 15 |
+| B10 | C# 15 extension indexers | `world[entity]` or `entity[T]` style access | settled: not added (owner, L22): the generated members are already the short form, an indexer would be a second syntax for the same access (owner-review.md) | C# 15 |
 | B11 | C# 15 union types, closed hierarchies | none in an allocation-free ECS (unions of reference cases box) | not tried | C# 15 |
 | B12 | `BitArray.PopCount`, span constructors | none: EasyEcs keeps its own bit words | not tried | libraries "Collections" |
 | B13 | Span `Sort` with value-type comparers without boxing | `[OrderBy]` uses its own radix sort; any `Span.Sort` with a struct comparer in Core | grep Core for `Sort(`; measure where one runs per tick | perf (Sorting section) #116109 |

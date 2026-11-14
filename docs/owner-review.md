@@ -203,3 +203,15 @@ the exchange of one layer of another shape: an API for the owner to choose.
 
 What would change the verdict: the owner choosing that form; then Kernel.CellFormOf reads the pick as a stream
 of the other tile's row at that layer, and the pass exchanges that layer alone (`ExchangeHalo(layer, layer)`).
+
+## C# 15 extension indexers: not added (feat-net11, net11.md B10; owner, L22)
+
+**Proposed by** the .NET 11 research (docs/plans/designs/net11.md, B10): C# 15 lets an `extension` block declare an
+indexer, so access could read `world[entity]` or `entity[typeof-like key]` beside the generated members.
+
+**Why not.** The owner decided (ledger L22): the generated members (`entity.Health`, `world.Score`) are already the
+short form of every access, and an indexer would be a second syntax for the same thing, with no speed to gain (both
+inline to the same column access). It changes the public API, so it was asked, not built.
+
+What would change the verdict: an access the generated members cannot name (a key only known at run time, such as a
+component chosen by data), where an indexer would be the only short form.
