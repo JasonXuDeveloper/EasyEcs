@@ -1,0 +1,56 @@
+name: Benchmarks
+
+# Run manually: Actions -> Benchmarks -> Run workflow. One job per runtime (net10.0, net11.0), in parallel, each running
+# tools/perf/bench.sh on a GitHub-hosted runner and uploading the BenchmarkDotNet reports as an artifact
+# (benchmarks-<tfm>). Nothing is committed: hosted runners are shared machines whose speed varies from run to run, so
+# their numbers are a check of both runtimes, not the site's published numbers unless the owner decides so
+# (docs/plans/docs-todos.md, feat-net11). To feed a run's reports to the site's numbers, on a clone:
+#   gh run download <run id> -n benchmarks-net11.0 -D /tmp/bench-net11.0      # <tfm>/results and done/<tfm>/*.log
+#   (cd docs && BENCH_RESULTS=/tmp/bench-net11.0/net11.0/results bun scripts/sync-benchmarks.ts --runtime net11.0 --merge)
+# The merge is refused when the machine or the SDK differs from the runtime's committed numbers (sync-benchmarks.ts);
+# --partial writes them as that runtime's whole set instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      classes:
+        description: "Benchmark classes, space-separated (BulkBenchmark Features.RemovalComparison), or --site for every class the site shows"
+        required: true
+        default: "--site"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [ net10.0, net11.0 ]
+    name: bench (${{ matrix.framework }})
+    # A full --site run takes hours; GitHub stops a job at 6 h
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          # both runtimes the library targets; global.json picks the SDK (11)
+          dotnet-version: |
+            10.0.x
+            11.0.x
+      - name: Run the benchmarks on ${{ matrix.framework }} (tools/perf/bench.sh)
+        env:
+          CLASSES: ${{ inputs.classes }}
+        # word splitting of CLASSES is wanted: one argument per class
+        run: tools/perf/bench.sh $CLASSES --framework ${{ matrix.framework }}
+      - name: Upload the reports (results/ for sync-benchmarks.ts, the logs per class)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmarks-${{ matrix.framework }}
+          path: |
+            BenchmarkDotNet.Artifacts/${{ matrix.framework }}/results
+            BenchmarkDotNet.Artifacts/done/${{ matrix.framework }}/*.log
+          if-no-files-found: warn
