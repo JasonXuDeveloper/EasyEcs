@@ -41,10 +41,32 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
 
 ## Running (worktrees under `.claude/worktrees/`; merge with the `audit` triage checks)
 
-- [ ] **`feat-lane4-rest`** (from 3315196, 2026-11-08): first the CI inlining failure (`ParallelHeavyJob11::__MaskedLoop`
-      over the inliner budget after the wide masked words), then G5, G7, G8, G11 9c, G15, G17, G18.
-- [ ] **`feat-lane1-core`** (from 3315196): C0, C11, C15-C18, then C12-C14 (ArityGenerator's enumerator templates
-      only), C19 last.
+- [x] **`feat-lane4-rest`** merged 2026-11-09 (691ae22): the inlining fix (`MaskedRuns` out of line), G5, G7, G8, G15,
+      G17, G18, G11 9c measured; G7's NaN sign is the JIT's choice (evidence in the test's comment).
+- [ ] **`feat-lane1-core`**: the first run (from 3315196) was **lost with its container on 2026-11-09** before any
+      push; only its interim reports survive. Rule since then: a lane hands back per item, each item is gated,
+      merged and pushed before the next. What the lost run found (to rebuild or to record, not to re-research):
+      - C11 dropped: both variants lose (Runner 1000 10.3 -> 16.4 us, ChunkSize Light 100k 18.1 -> 22.2 us,
+        SumParallelReduce 6.0 -> 8.1 us): noise in "summed thread time x the last probe's ratio" sends passes to runs
+        alone, and costs taken from runs alone cut light passes into fewer, longer chunks. One variant (base chunk
+        sizing, probes alone decide) was never measured.
+      - C12 keep: QueryTick 0.46-0.52x of base; untracked queries equal base's generated code. Rebuild.
+      - C13 dropped: the Tier1 listing shows the walk state round-tripping through the stack per row in base and
+        head; the id load is not on that chain, and the mode test lengthens the loop (QueryWrite 1.21x).
+      - C14 keep: LateHoles Move2 0.79-0.84x, Move3 0.82-0.92x, Step 100k 0.86-0.89x, 0 B. Rebuild.
+      - C15 dropped: CleanupBenchmark 105.6 -> 133.5 us; the release pass tests all 10k rows' bits and every freed
+        entity leaves a hole the pass end fills from the tail (destroy 53 -> 29 us, release 32 -> 76 us).
+      - C16 unconfirmed: store step fine (FullCopy Grow 0.95-0.97x), ColdCreate PerEntity 1.14-1.33x on a noisy
+        round; needs a quiet round and, if real, the cause (the explicit tail clear touching pages).
+      - C17 not built: the cost is per visited row (21-37 ns), which a log still pays; the summary scan it would
+        replace costs about 28 ns.
+      - C18: Fibonacci top-half hashing under the dictionary's prime modulus put 600 lattice keys into 266 of 631
+        buckets (LookupUnique 2.07x); folding the product's halves gives about 380. The fold was never measured.
+      - C19: built (NativeColumns + NativeBlocks, `tools/native/mimalloc.sh` pinned to v2.1.7 / 8c532c32, CI on
+        runner labels already in use: the package carries linux-x64's library, other runtimes keep the pinned heap);
+        prototype 0.14-0.70x of pinned for allocate-fill-free; `GC.AddMemoryPressure` dropped (it starts gen2
+        collections). Rebuild and measure.
+- [ ] **`feat-ground-cells`** (inner-loops leftover (a)): the first run was lost the same way before reporting.
 - [x] **`feat-lane5-renames`** merged 2026-11-08: R1-R6 (tests 4237 + 1 skipped: R4 deleted 17, R3 added 3; DocCheck 28 at
       base and head). Left: the internal `World.ChunkRows(...)` and `PairHalves.ChunkRows` follow `MaxChunkSize` as
       `ChunkSize`, after feat-lane1-core merges (it edits World.Parallel.cs).
