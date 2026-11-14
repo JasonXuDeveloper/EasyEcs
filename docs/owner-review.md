@@ -241,3 +241,25 @@ in all. Nothing to buy.
 
 What would change the verdict: a `Removed<T>` pass over a very large table with few removals, where the scan of the
 word summaries (not the visited rows) dominates, measured with RemovalComparison at that shape.
+
+## A batch pass's tested tables out of line (C14): not shipped (feat-lane1-core, 2026-11-14)
+
+**Proposed by** the lane 1 core plan (backlog C14, the frame split of `World.Masked` / `Batches`): run a table whose
+rows must be tested out of line (a NoInlining walk per table or chunk), so the job's loop inlines under that walk's own
+budget and the pass over tables keeps only the lean loop of a table whose rows all pass.
+
+**Why not.** The masked half is in the base already: the first lane 1 run measured it from 3315196, before 42b8e9d
+("Run a masked pass's walk over words out of line") made `MaskedRuns` NoInlining, and its LateHoles gain (Move2
+0.79-0.84x, Move3 0.82-0.92x, Step 100k 0.86-0.89x) is that commit's. The rebuild ran the batch half
+(`ForEachBatchRuns`' tested loop as a NoInlining `TestedRuns`) against fc26ea4, default job, two interleaved rounds:
+the batch passes over tested tables are a wash (KernelBenchmark CycleHolesScalar 1,000: base 5,533 / 5,973 ns, head
+5,660 / 5,978 ns; 100,000: 614 / 586 us against 635 / 585 us; OptionalScalar 100,000: 152 / 146 us against 139 / 141
+us; 1,000: 1,347 / 1,477 ns against 1,420 / 1,447 ns), all 0 B. LateHoles read slower on head in both rounds (Move2
+1,000: 335 / 339 ns against 453 / 400 ns) on a machine at load 5-13 from other agents' runs, but its Tier1 code is the
+same: `Masked` 2,126 bytes on both sides, `MaskedRuns` 2,289 against 2,291 and 2,722 against 2,709, instruction for
+instruction apart from addresses (listings from the benchmark process, `--dev`), and a base `--dev` run read
+Move2 1,000 at 387 ns, inside head's range. So the gap is process placement, not code, and the batch half buys nothing.
+
+What would change the verdict: a batch job whose loop runs past the inliner's budget of `Batches` (two widths of
+loops, or lookups, as LookupGatherBenchmark's ParallelHeavy did for masked passes before 42b8e9d), seen as a call per
+run in `tools/perf/inlining.sh`; then the same split pays and is measured on that job.
