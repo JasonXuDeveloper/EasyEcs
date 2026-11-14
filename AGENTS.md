@@ -7,7 +7,7 @@ Allocation-free archetype ECS for .NET 10 and later: game servers, Godot 4 games
 
 ```bash
 dotnet build                                                   # whole solution
-dotnet test                                                    # NUnit
+dotnet test                                                    # NUnit, on .NET 10 and .NET 11 (L27)
 dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'            # all benchmarks
 dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset
 tools/perf/bench.sh BulkBenchmark Features.RemovalComparison --sync   # classes, resumable, merged into the site's numbers
@@ -42,11 +42,12 @@ adding or changing one (CI runs `tools/agents.sh --check`).
 | [`tests/`](tests/AGENTS.md) | adding or changing a test, or finding where a feature is tested |
 <!-- agents-index:end -->
 
-`global.json` requires the .NET 10 SDK 10.0.403 or later (`rollForward: latestFeature`; 10.0.402 brings an ILCompiler with
-a known advisory, which fails the AOT check's restore with NU1903). Every project targets `net10.0`: a later runtime
-runs the package as it is, and .NET 11 measured level with .NET 10 (docs/plans/designs/net11.md; owner, L25, L26).
-Code the generator writes must still compile and match the method bit for bit on a later runtime: `verify` has the
-manual pre-release check that builds and tests once against the newest .NET.
+`global.json` requires the .NET 11 SDK 11.0.100 or later (`rollForward: latestFeature`), which builds every project; the
+.NET 10 runtime runs them. Every project targets `net10.0`: a later runtime runs the package as it is, and .NET 11
+measured level with .NET 10 (docs/plans/designs/net11.md; owner, L25, L26). The one exception is the unit tests
+(`net10.0;net11.0`, owner L27): a .NET 11 project compiles the generated code against .NET 11's reference assemblies and
+runs it there, so the tests do both, and CI runs them as a matrix over the two runtimes. Code the generator writes
+compiles and matches the method bit for bit on both.
 
 ## Layout
 

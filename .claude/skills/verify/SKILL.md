@@ -10,7 +10,7 @@ metadata:
 ```bash
 export PATH=$PATH:/root/.dotnet:/root/.dotnet/tools:/root/.bun/bin DOTNET_ROOT=/root/.dotnet   # cloud sessions
 dotnet build -c Release                          # 0 warnings (warnings are treated as real problems)
-dotnet test                                      # all NUnit tests, generator caching and allocation tests included
+dotnet test                                      # all NUnit tests on .NET 10 and .NET 11 (L27), generator caching and allocation tests included
 dotnet run -c Release --project tools/docs/DocCheck   # every C# fence of the docs compiles: "0 problems"
 dotnet run --project tools/docs/ApiDocs               # reference pages + Chinese entries: "0 problem(s)"
 (cd docs && bun run check && bun run build)      # links, anchors, icons, zh terms; SEO and search expectations
@@ -43,12 +43,6 @@ dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o <scratch>/aot && <sc
 - A failure that comes and goes: reproduce it first (a steady-state check 10 or more times) before bisecting, or the
   bisect blames an innocent commit; a generator merge is proven innocent by diffing its generated code against the
   parent's (VoxelServer's allocation, 2026-10-27, blamed feat-views; the cause was copy-on-write lists after a restore).
-- Before a release, by hand (CI builds and tests on .NET 10 only, L25): build and test once against the newest .NET
-  release (today .NET 11), so generated code that a newer runtime or its reference assemblies would break shows up
-  before users meet it: `dotnet build -c Release -p:TargetFramework=net11.0 tests/EasyEcs.UnitTest` with that SDK
-  selected (a scratch copy of the tree whose `global.json` names it), then `dotnet test` the same way. The two .NET 11 fixes
-  of the generator (Kernel.Tables' `table[..]`, the runtime's vector `DegreesToRadians`) were found exactly so
-  (docs/plans/designs/net11.md).
 - Before a release (owner, L17: the site's numbers come from CI): dispatch the `Benchmarks` workflow on the final code
   with `--site` (`gh workflow run benchmarks.yml -f classes=--site`, a few hours), then `tools/perf/sync-ci.sh <run id>`:
   it downloads the artifact and makes its reports the whole set (`sync-benchmarks --replace`, so a new SDK or runner

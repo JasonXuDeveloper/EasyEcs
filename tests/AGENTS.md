@@ -3,6 +3,9 @@
 > Read when: adding or changing a test, or finding where a feature is tested.
 
 NUnit unit tests and the Native AOT check. Every bug fix adds a regression test (`feature`).
+The unit tests target `net10.0;net11.0` (owner, L27): they reference the net10.0 library from both, as a .NET 11
+project does, so `dotnet test` runs every test on both runtimes (CI: a matrix job per runtime). The AOT check and
+its library are net10.0.
 
 When you add, rename or delete a file here, update its line
 (`tools/agents.sh --check`, run by CI and `verify`, fails on a file missing from it).
