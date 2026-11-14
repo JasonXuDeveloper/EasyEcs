@@ -1,17 +1,19 @@
 # EasyEcs
 
-Allocation-free archetype ECS for .NET 10: game servers, Godot 4 games (`samples/Godot`), simulations, real-time backends. Library: `EasyEcs.Core` (targets `net10.0` only),
-published to NuGet as `EasyEcs`. Public API and code comments are in English.
+Allocation-free archetype ECS for .NET 10 and .NET 11: game servers, Godot 4 games (`samples/Godot`), simulations, real-time backends. Library: `EasyEcs.Core` (targets
+`net10.0` and `net11.0`), published to NuGet as `EasyEcs`. Public API and code comments are in English.
 
 ## Commands
 
 ```bash
 dotnet build                                                   # whole solution
-dotnet test                                                    # NUnit
-dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'            # all benchmarks
-dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset
+dotnet test                                                    # NUnit, on net10.0 and net11.0 (both runtimes)
+dotnet run -c Release -f net10.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*'            # all benchmarks
+dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset, on .NET 11
+dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*' --frameworks net10.0,net11.0  # one runtime against the other
 tools/perf/bench.sh BulkBenchmark Features.RemovalComparison --sync   # classes, resumable, merged into the site's numbers
 tools/perf/bench.sh --site --sync                                   # every class the site shows (before a release)
+tools/perf/bench.sh BulkBenchmark --framework net11.0               # on .NET 11 (default net10.0, the site's runtime)
 ```
 
 A full run takes hours: run what a change touches (`audit-perf` has the method: A/B, lock, quiet machine) and merge
@@ -41,13 +43,21 @@ adding or changing one (CI runs `tools/agents.sh --check`).
 | [`tests/`](tests/AGENTS.md) | adding or changing a test, or finding where a feature is tested |
 <!-- agents-index:end -->
 
-`global.json` requires the .NET 10 SDK 10.0.403 or later (`rollForward: latestFeature`; 10.0.402 brings an ILCompiler with
-a known advisory, which fails the AOT check's restore with NU1903).
+`global.json` requires the .NET 11 SDK 11.0.100 or later (`rollForward: latestFeature`), which builds both target frameworks;
+running the tests and benchmarks of both needs the .NET 10 runtime too (the SDK brings only its own).
+
+**Two runtimes.** The libraries, the tests, the AOT check and the benchmarks (with the tools over them, Inlining and
+LoopBound) target `net10.0;net11.0`, so both runtimes are tested and measured (`tools/build.sh` and the perf scripts
+take `FRAMEWORK=net11.0`, `tools/perf/bench.sh` `--framework`). Applications target one runtime: the samples, DocCheck and
+ApiDocs `net11.0` (the SDK's own runtime, so a clone with the SDK alone runs them), the Godot sample and the live demo
+`net10.0` (the LTS: Godot's .NET support, the demo's Mono AOT workload `wasm-tools-net10`); the template's
+`--framework` defaults to `net10.0`, which either SDK builds. Code for one runtime goes under `#if NET11_0_OR_GREATER`
+with the net10.0 path unchanged, and generated code compiles on both.
 
 ## Layout
 
 ```
-src/EasyEcs.Core/              net10.0 library, namespace EasyEcs, in folders by concern named as the guide names them:
+src/EasyEcs.Core/              net10.0 and net11.0 library, namespace EasyEcs, in folders by concern named as the guide names them:
                                World.cs and WorldOptions.cs at the root, Components/, Diagnostics/, Entities/, Grids/,
                                Indexes/, Lookups/, OrderedTables/, Parallel/, Parameters/, Queries/, Relations/, Saves/,
                                Storage/, Systems/, VectorLoops/ (file map: src/EasyEcs.Core/AGENTS.md)

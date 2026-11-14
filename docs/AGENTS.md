@@ -158,8 +158,8 @@ scripts/                 chromium.ts (a headless Chromium for mermaid), git-hist
   (`src/components/demo/`): the runtime loads only on that page, every frame calls `Step(dt)` once and draws the
   frame array straight from the WebAssembly memory. The page includes the demo's C# files, so they are what runs.
 - Cloudflare builds with Bun only, so the published runtime is committed in `public/demo/_framework`. After changing
-  the demo or EasyEcs.Core: `bun run demo:build` (`scripts/build-demo.sh`: installs the `wasm-tools` workload when
-  missing, then `dotnet publish` with Mono AOT, the IL compiled ahead of time to WebAssembly with 128-bit SIMD,
+  the demo or EasyEcs.Core: `bun run demo:build` (`scripts/build-demo.sh`: installs the `wasm-tools-net10` workload
+  when missing (the demo targets net10.0), then `dotnet publish` with Mono AOT, the IL compiled ahead of time to WebAssembly with 128-bit SIMD,
   trimmed, invariant globalization), check the page, commit `public/demo` (with `public/demo/source.sha256`, the hash
   of the sources it was built from: CI fails when `scripts/demo-source.sh` gives another, after any change to
   EasyEcs.Core, the generator, the demo or `Directory.Build.props`). Browsers do not run CoreCLR yet (CoreCLR

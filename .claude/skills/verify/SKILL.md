@@ -10,7 +10,7 @@ metadata:
 ```bash
 export PATH=$PATH:/root/.dotnet:/root/.dotnet/tools:/root/.bun/bin DOTNET_ROOT=/root/.dotnet   # cloud sessions
 dotnet build -c Release                          # 0 warnings (warnings are treated as real problems)
-dotnet test                                      # all NUnit tests, generator caching and allocation tests included
+dotnet test                                      # all NUnit tests on net10.0 and net11.0, generator caching and allocation tests included
 dotnet run -c Release --project tools/docs/DocCheck   # every C# fence of the docs compiles: "0 problems"
 dotnet run --project tools/docs/ApiDocs               # reference pages + Chinese entries: "0 problem(s)"
 (cd docs && bun run check && bun run build)      # links, anchors, icons, zh terms; SEO and search expectations
@@ -19,7 +19,9 @@ dotnet run --no-build -c Release --project samples/GameLoop -- --ticks 30
 bash templates/smoke.sh                          # dotnet new templates pack, build, run, test
 tools/agents.sh --check                          # AGENTS.md indexes current, CLAUDE.md = @AGENTS.md, every source file in its map
 npx -y skills add . --list                       # lists only `easyecs`: every development skill has metadata.internal: true
-dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o <scratch>/aot && <scratch>/aot/EasyEcs.Aot   # no AOT warning, checks pass
+dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -f net10.0 -o <scratch>/aot10 && <scratch>/aot10/EasyEcs.Aot   # no AOT warning, checks pass
+dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -f net11.0 -o <scratch>/aot11 && <scratch>/aot11/EasyEcs.Aot   # and on .NET 11
+FRAMEWORK=net10.0 tools/perf/inlining.sh && FRAMEWORK=net11.0 tools/perf/inlining.sh   # every generated job inlined, on both JITs
 ```
 
 - `samples/Godot` runs only where a Godot .NET editor is installed (CI: `check-sample.sh samples/Godot --ticks 120`

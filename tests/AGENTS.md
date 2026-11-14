@@ -3,6 +3,8 @@
 > Read when: adding or changing a test, or finding where a feature is tested.
 
 NUnit unit tests and the Native AOT check. Every bug fix adds a regression test (`feature`).
+The unit tests, the AOT check and its library target `net10.0;net11.0`: `dotnet test` runs every test on both runtimes,
+and the AOT check is published per runtime (`dotnet publish tests/EasyEcs.Aot -r linux-x64 -f net11.0`).
 
 When you add, rename or delete a file here, update its line
 (`tools/agents.sh --check`, run by CI and `verify`, fails on a file missing from it).
@@ -40,7 +42,7 @@ LocalityTests.cs      the phase 0 prototypes of docs/plans/designs/locality.md a
                       (benchmarks/EasyEcs.Benchmark/Locality linked): each against its plain form, 0 B per
                       tick
 VoxelServerTests.cs   the sample's zombies: around a wall and a pit by the scent, stuck walking the straight
-                      line; the field's values
+                      line; the field's values (net11.0 only: the sample is an application on that runtime)
 ```
 
 ## Analyzer/
