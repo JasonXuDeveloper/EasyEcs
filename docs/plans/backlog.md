@@ -108,6 +108,13 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       j. the 512-bit and `Vector<T>` bodies are the same text with another prefix (the largest duplication, about
          half of every vector job): #172's "one body per width" needs a width-generic helper the JIT specializes;
          try it on one job, Tier1 equal or it stays.
+- [ ] **`feat-net10-only`** (owner, L25, L26): undo feat-net11's second target. Core, tests, AOT check, benchmarks,
+      plugin, tools, samples and the template target `net10.0` only; `global.json` back to the .NET 10 SDK; CI and
+      release install .NET 10 only (the per-runtime matrices go, the Benchmarks workflow runs one runtime);
+      `bench.json` and the site back to one runtime, `sync-benchmarks --replace` and `tools/perf/sync-ci.sh` kept for
+      L17; BenchmarkConfig's .NET 11 toolchain workaround and `--frameworks` go. Kept: Kernel.Tables' `table[..]` and
+      the runtime's `DegreesToRadians` vector form (a .NET 11 project compiles and matches bit for bit), `net11.md` as
+      the record of what was measured, a decision record in docs-todos. Docs and instructions say ".NET 10 and later".
 - [ ] **`feat-interleaved-256`** (found by feat-net11's B1): a two-source permute (`vpermt2ps`,
       `Avx512F.VL.PermuteVar8x32x2`) in `Interleaved`'s 256-bit loads and stores, behind `Avx512F.VL`: the path x64
       AVX-512 machines run by default (`Vector<T>` stays 256 bits there), 4 shuffles a pair of fields today. Both
