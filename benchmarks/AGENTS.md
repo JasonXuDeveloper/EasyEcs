@@ -6,7 +6,9 @@ BenchmarkDotNet only; the method (A/B, lock, quiet machine) is `audit-perf`, the
 `EasyEcs.Benchmark/BenchmarkConfig.cs` (default for decisions and the site; `--dev` while developing).
 The projects target `net10.0;net11.0`: `dotnet run -f net11.0` measures .NET 11 (the host's runtime), and
 `--frameworks net10.0,net11.0` runs each case on both in one process, to compare the runtimes (`tools/perf/bench.sh`
-takes `--framework`; the site's numbers come from one runtime, net10.0).
+takes `--framework`). The site keeps numbers per runtime and shows them side by side: `tools/perf/bench.sh --site
+--framework <tfm> --sync` refreshes one runtime's set (docs/AGENTS.md, Benchmarks); the CI workflow `Benchmarks` runs
+both runtimes in parallel on hosted runners and uploads the reports.
 
 When you add, rename or delete a file here, update its line
 (`tools/agents.sh --check`, run by CI and `verify`, fails on a file missing from it).

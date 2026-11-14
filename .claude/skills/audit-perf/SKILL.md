@@ -62,7 +62,8 @@ its own worktree.
    a feature of one runtime goes under `#if NET11_0_OR_GREATER` with the net10.0 path unchanged, is kept only as a
    win at 0 B on net11.0 against the same code without it, and the generated code compiles on both. What the runtime
    alone gives is measured with `--frameworks net10.0,net11.0` (BenchmarkConfig: one job per runtime, interleaved
-   in one process); a single runtime with `dotnet run -f net11.0` or `tools/perf/bench.sh --framework net11.0`; the
+   in one process); a single runtime with `dotnet run -f net11.0` or `tools/perf/bench.sh --framework net11.0` (the
+   site keeps both runtimes' numbers, each synced into its own set: docs/AGENTS.md, Benchmarks); the
    JIT's listing of either with `FRAMEWORK=net11.0 tools/perf/jitdisasm.sh` (tools/build.sh).
 4. **The runtime's own overhead**: what a system costs per update apart from its rows (`SystemDispatchBenchmark`),
    what a pass costs per table and per word (`SparseBenchmark`), per chunk (`ParallelPassBenchmark`), per stage

@@ -13,7 +13,7 @@ dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --fil
 dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*' --frameworks net10.0,net11.0  # one runtime against the other
 tools/perf/bench.sh BulkBenchmark Features.RemovalComparison --sync   # classes, resumable, merged into the site's numbers
 tools/perf/bench.sh --site --sync                                   # every class the site shows (before a release)
-tools/perf/bench.sh BulkBenchmark --framework net11.0               # on .NET 11 (default net10.0, the site's runtime)
+tools/perf/bench.sh --site --framework net11.0 --sync              # on .NET 11 (default net10.0): the site keeps both runtimes' numbers
 ```
 
 A full run takes hours: run what a change touches (`audit-perf` has the method: A/B, lock, quiet machine) and merge
