@@ -3741,3 +3741,6 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
   not its words" (stamping a word ahead was the faster form on paper and was refused: a loop that breaks would report
   rows it never visited to `Changed<T>` passes; the exact form got the win: QueryTick about 0.5-0.6x, numbers in the
   backlog's C12).
+- decisions.mdx + .zh (dropped, with numbers; text in owner-review.md): C18 integer tuple keys hashed by their bytes
+  through a comparer (the dictionary's interface calls to a given comparer cost more than the hash saves). Roadmap
+  "Dropped" names it.

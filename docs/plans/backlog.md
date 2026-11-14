@@ -337,8 +337,11 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
 - [x] **C17. P7: `Removed<T>` from a log of removals** (`perf.md` P7, low). Files: Archetype.cs, a log file, Query.cs.
       Proof: RemovalComparison, removal writers' cost. **Not built** (owner-review.md: the cost is per visited row,
       which a log still pays).
-- [ ] **C18. P8: integer tuple keys hashed by bytes** (`perf.md` P8, low). Files: ValueIndex.cs. Proof:
+- [x] **C18. P8: integer tuple keys hashed by bytes** (`perf.md` P8, low). Files: ValueIndex.cs. Proof:
       IndexBenchmark LookupUnique, ValueQueryComparison, IndexComparison.
+      **Not shipped** (feat-lane1-core rerun, owner-review.md): LookupUnique 2.4-3.4x slower (base 82.9 / 67.2 us, head
+      204.7 / 225.4 us) with the fold's buckets as good as random (380 of 631); the cause is the comparer's interface
+      dispatch in `Dictionary.FindValue` (two `call [r11]` per probe against direct `ValueTuple` calls).
 - [ ] **C19. The core's unmanaged columns on mimalloc** (owner, 2026-11-07: option (b); `native-columns.md`), last in
       the lane and after Finish 1b's move: columns off `Array`, Dispose and a finalizer, `GC.AddMemoryPressure`, the
       NuGet `runtimes/` binaries and the pinned-heap fallback. Proof: `native-columns.md` section 4 (nothing slower,

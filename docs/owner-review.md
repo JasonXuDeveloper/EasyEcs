@@ -307,3 +307,25 @@ fork the code.
 
 What would change the verdict: B1, a JIT lowering of Unzip on AVX2 shorter than shufps + vpermpd; B2, the owner's M4
 numbers for ARM64, where the masks are static readonly fields a folded constant could replace.
+
+## Integer tuple keys hashed by their bytes (C18): not shipped (feat-lane1-core, 2026-11-14)
+
+**Proposed by** the lane 1 core plan (backlog C18, P8, low): a value index whose key is a tuple of integers of one
+size (`(int, int)`, `(long, long, long)`) hashes and compares the key's bytes through its own comparer
+(`TupleKeyComparer`: each 8 bytes added to a running value times the golden ratio's 64-bit constant, the product's
+halves folded), instead of `ValueTuple`'s `HashCode.Combine`.
+
+**Why not.** Measured slower, default job against c9518a2, net10.0, 0 B on both sides: IndexBenchmark LookupUnique (8,192
+lookups of 600 grid keys) base 82.9 / 67.2 us, head 204.7 / 225.4 us; LookupGrid (whose misses fall back to the same
+index) 27.4 / 27.1 against 50.5 / 62.5 us; the other cases level. The fold is not the cause: it puts the 600 keys into
+380 of 631 buckets, as a random hash would (387), where the lost run's high half alone gave 266. A second build with
+straight-line code for keys up to 16 bytes (no loop) measured the same (LookupUnique 83.1 against 195.6 us). The cause is
+the comparer itself: the Tier1 `Dictionary<(int, int), IndexHead>.FindValue` calls a comparer it is given through
+interface dispatch (`call [r11]` stubs for `GetHashCode` and `Equals`, compiled with synthesized PGO, so no guarded
+devirtualization), while with no comparer it calls `ValueTuple<int, int>.GetHashCode` and `Equals` directly. Two
+dispatches per probe cost more than the cheaper hash saves.
+
+What would change the verdict: a key whose default hash collides badly (where fewer probes would pay for the
+dispatch), or a dictionary keyed by a wrapper struct whose own `GetHashCode` is the byte hash (the default comparer's
+direct calls kept), which changes `ValueIndex`'s dictionary type for those keys; or a runtime that devirtualizes a
+sealed comparer in `FindValue`.
