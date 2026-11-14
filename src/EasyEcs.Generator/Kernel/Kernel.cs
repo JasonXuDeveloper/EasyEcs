@@ -403,11 +403,13 @@ internal sealed partial class Kernel
     /// A statement over the lanes it is computed for (<see cref="LiveLanes"/> in <paramref name="statement"/>): the lanes
     /// <paramref name="active"/> holds (null: every lane) of a whole vector, and of them the rows that pass
     /// (<c>__pass</c>) in a masked word. Written in place rather than kept in a local, since every local counts towards
-    /// the 32 a runner inlines (<see cref="SystemGenerator.InlinedLocals"/>). Every lane and-ed with a mask is the mask:
-    /// <c>(__lanes &amp; m)</c> is written <c>(m)</c> there.
+    /// the 32 a runner inlines (<see cref="SystemGenerator.InlinedLocals"/>). Every lane of a whole vector stays written
+    /// <c>AllBitsSet</c> in a bail's test (<c>(AllBitsSet &amp; m) != Zero</c>), though the JIT folds the and: written
+    /// <c>m != Zero</c>, the test moved after the division it guards in KernelBenchmark's Share (the same instructions),
+    /// which measured about 10 % slower at 1,000 rows (feat-generated-text-2; GeneratedTextTests counts these).
     /// </summary>
     private void Live(string? active, string statement) => _body.Append(
-        active == null ? statement.Replace($"({LiveLanes} & ", "(").Replace(LiveLanes, $"{Vec(_mask)}.AllBitsSet") : statement.Replace(LiveLanes, active),
+        statement.Replace(LiveLanes, active ?? $"{Vec(_mask)}.AllBitsSet"),
         statement.Replace(LiveLanes, active == null ? "__pass" : $"(__pass & {active})"));
 
     /// <summary>The lane type of masks of lanes of <paramref name="size"/> bytes.</summary>
