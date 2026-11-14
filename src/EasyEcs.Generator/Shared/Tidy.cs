@@ -18,13 +18,13 @@ internal static class Tidy
     // ---------------- aliases ----------------
 
     /// <summary>The attributes generated code names (an attribute's alias names its class, which ends in Attribute).</summary>
-    private static readonly HashSet<string> Attributes = new(StringComparer.Ordinal)
-    {
+    private static readonly string[] Attributes =
+    [
         "global::System.ComponentModel.EditorBrowsable", "global::System.Runtime.CompilerServices.UnsafeAccessor",
         "global::System.Runtime.CompilerServices.UnsafeAccessorType", "global::System.Runtime.CompilerServices.InterceptsLocation",
         "global::System.CodeDom.Compiler.GeneratedCode", "global::System.Runtime.CompilerServices.ModuleInitializer",
         "global::System.AttributeUsage", "global::System.Runtime.CompilerServices.SkipLocalsInit",
-    };
+    ];
 
     /// <summary>Types generated code names only as the left side of a member (an enum's values in attribute arguments).</summary>
     private static readonly string[] Seeds =
@@ -34,14 +34,14 @@ internal static class Tidy
     ];
 
     /// <summary>Words that follow an expression, not a type's name (<c>global::E.A or global::E.B</c>).</summary>
-    private static readonly HashSet<string> AfterExpression = new(StringComparer.Ordinal)
-    {
+    private static readonly string[] AfterExpression =
+    [
         "and", "or", "not", "is", "as", "when", "switch", "with", "in", "into", "on", "equals", "by", "ascending", "descending",
-    };
+    ];
 
     /// <summary>A type declaration's head or a constraint, whose names after the colon are types.</summary>
     private static readonly Regex Declaration = new(
-        @"^\s*(?:(?:public|internal|private|protected|static|readonly|ref|partial|sealed|abstract|unsafe|file|new)\s+)*(?:class|struct|interface|record)\b|^\s*where\s",
+        @"\G\s*(?:(?:public|internal|private|protected|static|readonly|ref|partial|sealed|abstract|unsafe|file|new)\s+)*(?:class|struct|interface|record)\b|\G\s*where\s",
         RegexOptions.CultureInvariant);
 
     /// <summary>A qualified name: where it starts, where its dotted identifiers end, and where its type arguments end (-1: none).</summary>
@@ -56,60 +56,44 @@ internal static class Tidy
     /// one alias of its own when its arguments are all qualified. An alias of a namespace taken for a type would still
     /// be right: only a name of a member must never get one, and a member is never in those positions.
     /// </summary>
-    public static string Types(string text, SortedDictionary<string, string> aliases)
+    public static List<(int Start, int End, string Alias)> Types(string text, SortedDictionary<string, string> aliases)
     {
+        var edits = new List<(int Start, int End, string Alias)>();
         var names = new List<Name>();
-        var types = new HashSet<string>(Seeds, StringComparer.Ordinal);
-        var closed = new Dictionary<string, int>(StringComparer.Ordinal);
-        var reserved = new HashSet<string>(aliases.Keys, StringComparer.Ordinal);
+        var spans = new Spans(text);
+        var types = new HashSet<Span>(spans);
+        var closed = new Dictionary<Span, int>(spans);
+        var reserved = new HashSet<string>(aliases.Keys, StringComparer.Ordinal); // and every __ name of the text (Used)
         var existing = new Dictionary<string, string>(StringComparer.Ordinal); // target -> alias written by the template
         foreach (var pair in aliases) existing[pair.Value] = pair.Key;
-        int n = text.Length;
-        for (int i = 0; i < n;)
+        // the template's own alias directives (using __ForEach = ...;)
+        for (int u = text.StartsWith("using __", StringComparison.Ordinal) ? 0 : text.IndexOf("\nusing __", StringComparison.Ordinal); u >= 0;
+             u = text.IndexOf("\nusing __", u + 1, StringComparison.Ordinal))
         {
-            if (LineStart(text, i) is var skipped && skipped != i)
-            {
-                Existing(text, i, skipped, existing, reserved);
-                i = skipped;
-                continue;
-            }
-            int s = SkipLiteral(text, i);
-            if (s != i)
-            {
-                i = s;
-                continue;
-            }
-            char c = text[i];
-            if (!IsStart(c))
-            {
-                i++;
-                continue;
-            }
-            int e = IdentifierEnd(text, i);
-            if (c == '_' && e - i > 2 && text[i + 1] == '_') reserved.Add(text.Substring(i, e - i));
-            if (e - i == 6 && string.CompareOrdinal(text, i, "global", 0, 6) == 0 && e + 1 < n && text[e] == ':' && text[e + 1] == ':'
-                && (i == 0 || !IsPart(text[i - 1]) && text[i - 1] != '.') && Parse(text, i) is { } name)
-            {
-                names.Add(name);
-                Classify(text, name, types, closed);
-                i = e + 2;
-                continue;
-            }
-            i = e;
+            int from = text[u] == '\n' ? u + 1 : u, to = text.IndexOf('\n', from);
+            Existing(text, from, to < 0 ? text.Length : to, existing, reserved);
         }
-        if (names.Count == 0) return text;
+        // each global:: name in code (IndexOf finds them; a line's comment, string or directive leaves one out)
+        for (int i = text.IndexOf("global::", StringComparison.Ordinal); i >= 0; i = text.IndexOf("global::", i + 8, StringComparison.Ordinal))
+        {
+            if (i > 0 && (IsPart(text[i - 1]) || text[i - 1] == '.') || !InCode(text, i) || Parse(text, i) is not { } name) continue;
+            names.Add(name);
+            Classify(text, name, types, closed);
+        }
+        if (names.Count == 0) return edits;
 
         // What each name becomes: a closed generic's alias, else its longest prefix known as a type.
-        var edits = new List<(int Start, int End, string Target)>();
-        var uses = new Dictionary<string, int>(StringComparer.Ordinal);
+        var targets = new List<(int Start, int End, Span Target, bool Attribute)>();
+        var uses = new Dictionary<(Span, bool), int>(new SpansOrAttribute(spans));
         int skipUntil = 0;
         foreach (var name in names)
         {
             if (name.Start < skipUntil) continue;
-            string? target = null;
+            Span? target = null;
+            bool attribute = false;
             int end = 0;
-            if (name.GenericEnd > 0 && Usage(text, name) && text.Substring(name.Start, name.GenericEnd - name.Start) is var whole
-                && closed.TryGetValue(whole, out int count) && (count >= 2 || existing.ContainsKey(whole)) && Qualified(text, name.End + 1, name.GenericEnd - 1))
+            if (name.GenericEnd > 0 && Usage(text, name) && new Span(name.Start, name.GenericEnd - name.Start) is var whole
+                && closed.TryGetValue(whole, out int count) && (count >= 2 || existing.ContainsKey(spans.Text(whole))) && Qualified(text, name.End + 1, name.GenericEnd - 1))
             {
                 target = whole;
                 end = name.GenericEnd;
@@ -117,9 +101,10 @@ internal static class Tidy
             }
             else
             {
-                if (name.GenericEnd < 0 && IsAttribute(text, name) && Attributes.Contains(Chain(text, name)))
+                if (name.GenericEnd < 0 && IsAttribute(text, name) && IsAny(text, name.Start, name.End, Attributes))
                 {
-                    target = Chain(text, name) + "Attribute";
+                    target = new Span(name.Start, name.End - name.Start);
+                    attribute = true;
                     end = name.End;
                 }
                 else
@@ -127,43 +112,118 @@ internal static class Tidy
                     {
                         if (k == name.End && name.GenericEnd > 0) continue; // a generic type is not its non-generic namesake
                         if (k < 0) break;
-                        string prefix = text.Substring(name.Start, k - name.Start);
-                        if (!types.Contains(prefix)) continue;
+                        var prefix = new Span(name.Start, k - name.Start);
+                        if (!types.Contains(prefix) && !IsAny(text, name.Start, k, Seeds)) continue;
                         target = prefix;
                         end = k;
                         break;
                     }
             }
-            if (target == null) continue;
-            edits.Add((name.Start, end, target));
-            uses[target] = uses.TryGetValue(target, out int u) ? u + 1 : 1;
+            if (target is not { } t) continue;
+            targets.Add((name.Start, end, t, attribute));
+            uses[(t, attribute)] = uses.TryGetValue((t, attribute), out int u) ? u + 1 : 1;
         }
 
-        // An alias for each target named twice or more (or that already has one); names the file does not use
-        var alias = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var pair in uses.OrderBy(p => p.Key, StringComparer.Ordinal))
+        // An alias for each target named twice or more (or that already has one); names the file does not use. The
+        // targets' text is copied only here, once each.
+        var alias = new Dictionary<(Span, bool), string>(uses.Comparer);
+        HashSet<int>? named = null;
+        foreach (var (key, count, target) in uses.Select(p => (p.Key, p.Value, spans.Text(p.Key.Item1) + (p.Key.Item2 ? "Attribute" : "")))
+                     .OrderBy(p => p.Item3, StringComparer.Ordinal))
         {
-            if (existing.TryGetValue(pair.Key, out var had))
+            if (existing.TryGetValue(target, out var had))
             {
-                alias[pair.Key] = had;
+                alias[key] = had;
                 continue;
             }
-            if (pair.Value < 2) continue;
-            string chosen = AliasOf(pair.Key, reserved);
+            if (count < 2) continue;
+            string chosen = AliasOf(target, reserved, text, named ??= Named(text));
             reserved.Add(chosen);
-            alias[pair.Key] = chosen;
-            aliases[chosen] = pair.Key;
+            alias[key] = chosen;
+            aliases[chosen] = target;
         }
-        if (alias.Count == 0) return text;
-        var sb = new StringBuilder(text.Length);
         int at = 0;
-        foreach (var (start, end, target) in edits)
+        foreach (var (start, end, target, attribute) in targets)
         {
-            if (!alias.TryGetValue(target, out var a) || start < at) continue;
-            sb.Append(text, at, start - at).Append(a);
+            if (!alias.TryGetValue((target, attribute), out var a) || start < at) continue;
+            edits.Add((start, end, a));
             at = end;
         }
-        return sb.Append(text, at, n - at).ToString();
+        return edits;
+    }
+
+    /// <summary>A range of the file's text: a name compared by its characters, copied only when it becomes an alias's target.</summary>
+    private readonly record struct Span(int Start, int Length);
+
+    /// <summary>Equality of <see cref="Span"/>s of one text by their characters.</summary>
+    private sealed class Spans(string text) : IEqualityComparer<Span>
+    {
+        public string Text(Span s) => text.Substring(s.Start, s.Length);
+
+        public bool Equals(Span a, Span b) => a.Length == b.Length && string.CompareOrdinal(text, a.Start, text, b.Start, a.Length) == 0;
+
+        public int GetHashCode(Span s) => Hash(text, s.Start, s.Length);
+    }
+
+    /// <summary><see cref="Spans"/> with the attribute flag (an attribute's target is its class, the name plus "Attribute").</summary>
+    private sealed class SpansOrAttribute(Spans spans) : IEqualityComparer<(Span, bool)>
+    {
+        public bool Equals((Span, bool) a, (Span, bool) b) => a.Item2 == b.Item2 && spans.Equals(a.Item1, b.Item1);
+
+        public int GetHashCode((Span, bool) s) => spans.GetHashCode(s.Item1) ^ (s.Item2 ? 1 : 0);
+    }
+
+    /// <summary>
+    /// <paramref name="text"/> with <paramref name="edits"/> (ranges written as another text, in order) applied and the
+    /// characters at <paramref name="dropped"/> (in order) left out, from <paramref name="from"/> on, appended to
+    /// <paramref name="sb"/>: one copy of the file for both passes.
+    /// </summary>
+    public static void Write(StringBuilder sb, string text, int from, List<(int Start, int End, string Alias)> edits, List<int> dropped)
+    {
+        int at = from, e = 0, d = 0;
+        while (e < edits.Count || d < dropped.Count)
+        {
+            bool edit = e < edits.Count && (d >= dropped.Count || edits[e].Start < dropped[d]);
+            if (edit)
+            {
+                var (start, end, alias) = edits[e++];
+                if (start < at) continue;
+                sb.Append(text, at, start - at).Append(alias);
+                at = end;
+            }
+            else
+            {
+                int k = dropped[d++];
+                if (k < at) continue; // inside an edit's range
+                sb.Append(text, at, k - at);
+                at = k + 1;
+            }
+        }
+        sb.Append(text, at, text.Length - at);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="at"/> is code: not in a using directive or a preprocessor line, nor after a line comment or
+    /// inside a string or character literal of its line. Generated code puts no block comment or multi-line literal
+    /// around a qualified name, so the line alone decides.
+    /// </summary>
+    private static bool InCode(string text, int at)
+    {
+        int k = at == 0 ? 0 : text.LastIndexOf('\n', at - 1) + 1;
+        while (k < at && text[k] is ' ' or '\t' or '\uFEFF') k++;
+        if (k < at && text[k] == '#' || string.CompareOrdinal(text, k, "using ", 0, 6) == 0) return false;
+        for (; k < at; k++)
+        {
+            char c = text[k];
+            if (c == '/' && k + 1 < at && text[k + 1] == '/') return false;
+            if (c is '"' or '\'')
+            {
+                int end = SkipLiteral(text, k);
+                if (end > at) return false;
+                k = end - 1;
+            }
+        }
+        return true;
     }
 
     /// <summary>The name of a qualified name at <paramref name="i"/> (its <c>global::</c>), or null when no identifier follows.</summary>
@@ -177,58 +237,55 @@ internal static class Tidy
     }
 
     /// <summary>Records what <paramref name="name"/>'s position proves: the name or its left side a type, or a closed generic type.</summary>
-    private static void Classify(string text, Name name, HashSet<string> types, Dictionary<string, int> closed)
+    private static void Classify(string text, Name name, HashSet<Span> types, Dictionary<Span, int> closed)
     {
         int after = name.GenericEnd > 0 ? name.GenericEnd : name.End;
         char next = after < text.Length ? text[after] : '\0';
-        string prevWord = WordBefore(text, name.Start, out char prev);
+        bool afterNew = WordBefore(text, name.Start, "new", out char prev);
         if (name.GenericEnd > 0)
         {
-            if (next == '(' && prevWord != "new") Left(text, name, types); // a generic method's type
+            if (next == '(' && !afterNew) Left(text, name, types); // a generic method's type
             else
             {
-                string whole = text.Substring(name.Start, name.GenericEnd - name.Start);
+                var whole = new Span(name.Start, name.GenericEnd - name.Start);
                 closed[whole] = closed.TryGetValue(whole, out int c) ? c + 1 : 1;
             }
             return;
         }
-        string chain = Chain(text, name);
+        var chain = new Span(name.Start, name.End - name.Start);
         if (next == '(')
         {
-            if (prevWord == "new") types.Add(chain);
+            if (afterNew) types.Add(chain);
             else if (!IsAttribute(text, name)) Left(text, name, types); // a member called: its left side is a type
             return;
         }
         if (IsAttribute(text, name)) return;
         bool type = next == '>' || name.Start > 0 && text[name.Start - 1] == '<'
             || next == '[' && after + 1 < text.Length && text[after + 1] == ']'
-            || prev == '(' && prevWord is "typeof" or "default" or "sizeof";
+            || prev == '(' && (WordBefore(text, name.Start, "typeof", out _) || WordBefore(text, name.Start, "default", out _) || WordBefore(text, name.Start, "sizeof", out _));
         if (!type && next == ' ' && after + 1 < text.Length && IsStart(text[after + 1]))
-            type = !AfterExpression.Contains(text.Substring(after + 1, IdentifierEnd(text, after + 1) - after - 1));
+            type = !IsAny(text, after + 1, IdentifierEnd(text, after + 1), AfterExpression);
         if (!type && next is ',' or '\n' or '\r' or ' ' or '{')
         {
             int line = text.LastIndexOf('\n', name.Start) + 1;
-            string head = text.Substring(line, name.Start - line);
-            type = head.Contains(" : ") && Declaration.IsMatch(head);
+            type = text.IndexOf(" : ", line, name.Start - line, StringComparison.Ordinal) >= 0 && Declaration.IsMatch(text, line);
         }
         if (type) types.Add(chain);
     }
 
     /// <summary>The left side of <paramref name="name"/>'s last dot, a type (the name is a member of it).</summary>
-    private static void Left(string text, Name name, HashSet<string> types)
+    private static void Left(string text, Name name, HashSet<Span> types)
     {
         int dot = text.LastIndexOf('.', name.End - 1, name.End - name.Start - 8);
-        if (dot > name.Start + 8) types.Add(text.Substring(name.Start, dot - name.Start));
+        if (dot > name.Start + 8) types.Add(new Span(name.Start, dot - name.Start));
     }
 
     /// <summary>Whether the closed generic <paramref name="name"/> is used as a type, not called as a generic method.</summary>
     private static bool Usage(string text, Name name) =>
-        !(name.GenericEnd < text.Length && text[name.GenericEnd] == '(' && WordBefore(text, name.Start, out _) != "new");
+        !(name.GenericEnd < text.Length && text[name.GenericEnd] == '(' && !WordBefore(text, name.Start, "new", out _));
 
     /// <summary>Whether <paramref name="name"/> names an attribute (<c>[global::X(</c>, <c>[global::X]</c>).</summary>
     private static bool IsAttribute(string text, Name name) => name.Start > 0 && text[name.Start - 1] == '[';
-
-    private static string Chain(string text, Name name) => text.Substring(name.Start, name.End - name.Start);
 
     /// <summary>
     /// Whether the type arguments in <paramref name="text"/>[<paramref name="from"/>, <paramref name="to"/>) are all
@@ -244,29 +301,37 @@ internal static class Tidy
                 continue;
             }
             int e = IdentifierEnd(text, i);
-            string word = text.Substring(i, e - i);
-            if (word == "global" && e + 1 < to && text[e] == ':')
+            if (e - i == 6 && string.CompareOrdinal(text, i, "global", 0, 6) == 0 && e + 1 < to && text[e] == ':')
             {
                 i = e + 2;
                 // the dotted identifiers after it
                 while (i < to && (IsPart(text[i]) || text[i] == '.')) i++;
                 continue;
             }
-            if (!Keywords.Contains(word)) return false;
+            if (!IsAny(text, i, e, Keywords)) return false;
             i = e;
         }
         return true;
     }
 
-    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
-    {
+    private static readonly string[] Keywords =
+    [
         "bool", "byte", "sbyte", "short", "ushort", "int", "uint", "long", "ulong", "nint", "nuint", "float", "double", "decimal", "char",
         "string", "object",
-    };
+    ];
+
+    /// <summary>Whether <paramref name="text"/>[<paramref name="from"/>, <paramref name="to"/>) is one of <paramref name="words"/>.</summary>
+    private static bool IsAny(string text, int from, int to, string[] words)
+    {
+        foreach (var word in words)
+            if (word.Length == to - from && string.CompareOrdinal(text, from, word, 0, word.Length) == 0) return true;
+        return false;
+    }
 
     /// <summary>An alias for <paramref name="target"/> the file does not use: <c>__Heat</c>, else with its outer name or arguments, else numbered.</summary>
-    private static string AliasOf(string target, HashSet<string> reserved)
+    private static string AliasOf(string target, HashSet<string> reserved, string text, HashSet<int> named)
     {
+        bool Taken(string name) => reserved.Contains(name) || named.Contains(Hash(name, 0, name.Length)) && Used(text, name);
         int open = target.IndexOf('<');
         string chain = open < 0 ? target : target.Substring(0, open);
         string[] segments = chain.Substring(8).Split('.');
@@ -275,11 +340,44 @@ internal static class Tidy
         // a closed generic by its arguments too (__IForEachBatch_P3_V3), so two of one file read apart
         string first = open < 0 ? "__" + simple
             : "__" + simple + "_" + string.Join("_", Regex.Matches(target.Substring(open), @"[\w@]+(?=\s*[,>\[?])").Cast<Match>().Select(m => m.Value.TrimStart('@')));
-        if (!reserved.Contains(first)) return first;
+        if (!Taken(first)) return first;
         string second = open < 0 && segments.Length > 1 ? "__" + segments[segments.Length - 2].TrimStart('@') + "_" + simple : first;
-        if (!reserved.Contains(second)) return second;
+        if (!Taken(second)) return second;
         for (int k = 2; ; k++)
-            if (!reserved.Contains(second + k)) return second + k;
+            if (!Taken(second + k)) return second + k;
+    }
+
+    /// <summary>The hashes of the <c>__</c> names <paramref name="text"/> holds: an alias candidate whose hash is not among them is free.</summary>
+    private static HashSet<int> Named(string text)
+    {
+        var named = new HashSet<int>();
+        for (int at = text.IndexOf("__", StringComparison.Ordinal); at >= 0; at = text.IndexOf("__", at + 2, StringComparison.Ordinal))
+        {
+            if (at > 0 && IsPart(text[at - 1])) continue;
+            int end = IdentifierEnd(text, at);
+            named.Add(Hash(text, at, end - at));
+            at = end - 2;
+        }
+        return named;
+    }
+
+    /// <summary>FNV-1a over <paramref name="text"/>[<paramref name="from"/>, + <paramref name="length"/>).</summary>
+    private static int Hash(string text, int from, int length)
+    {
+        unchecked
+        {
+            int hash = (int)2166136261;
+            for (int i = from; i < from + length; i++) hash = (hash ^ text[i]) * 16777619;
+            return hash;
+        }
+    }
+
+    /// <summary>Whether <paramref name="text"/> names <paramref name="name"/> as a whole identifier.</summary>
+    private static bool Used(string text, string name)
+    {
+        for (int at = text.IndexOf(name, StringComparison.Ordinal); at >= 0; at = text.IndexOf(name, at + 1, StringComparison.Ordinal))
+            if ((at == 0 || !IsPart(text[at - 1])) && (at + name.Length >= text.Length || !IsPart(text[at + name.Length]))) return true;
+        return false;
     }
 
     /// <summary>The using alias directives the template wrote (<c>using __ForEach = global::...;</c>), between <paramref name="from"/> and <paramref name="to"/>.</summary>
@@ -308,82 +406,121 @@ internal static class Tidy
     /// not know (<c>x is T</c>), a negative operand of a binary operator (<c>a - (-1)</c>), and any pair at a line's start
     /// or end.
     /// </summary>
-    public static string Parentheses(string text)
+    public static List<int> Parentheses(string text)
     {
-        var match = new Dictionary<int, int>();
-        var closes = new Dictionary<int, int>(); // a ')' -> its '('
-        var opens = new List<int>();
+        var pairs = new Pairs();
         var stack = new Stack<int>();
         int n = text.Length;
-        for (int i = 0; i < n;)
+        for (int i = Preprocessor(text, 0); i < n;)
         {
-            int s = i == 0 || text[i - 1] == '\n' ? Preprocessor(text, i) : i;
-            if (s == i) s = SkipLiteral(text, i);
+            i = text.IndexOfAny(Brackets, i);
+            if (i < 0) break;
+            char c = text[i];
+            if (c == '\n')
+            {
+                i = Preprocessor(text, i + 1);
+                continue;
+            }
+            int s = SkipLiteral(text, i);
             if (s != i)
             {
                 i = s;
                 continue;
             }
-            char c = text[i];
-            if (c is '(' or '[')
-            {
-                stack.Push(i);
-                if (c == '(') opens.Add(i);
-            }
-            else if (c is ')' or ']' && stack.Count > 0)
-            {
-                int open = stack.Pop();
-                match[open] = i;
-                closes[i] = open;
-            }
+            if (c is '(' or '[') stack.Push(pairs.Open(i));
+            else if (c is ')' or ']' && stack.Count > 0) pairs.Close(stack.Pop(), i);
             i++;
         }
-        var removed = new HashSet<int>();
-        foreach (int open in opens)
-        {
-            if (!match.TryGetValue(open, out int close) || text[close] != ')') continue;
-            if (Removable(text, open, close, match, closes, removed))
+        for (int k = 0; k < pairs.Count; k++)
+            if (text[pairs.OpenAt(k)] == '(' && pairs.CloseOf(k) is var close and > 0 && text[close] == ')' && Removable(text, pairs.OpenAt(k), close, pairs))
+                pairs.Remove(k);
+        var dropped = new List<int>();
+        for (int k = 0; k < pairs.Count; k++)
+            if (pairs.Removed(k))
             {
-                removed.Add(open);
-                removed.Add(close);
+                dropped.Add(pairs.OpenAt(k));
+                dropped.Add(pairs.CloseOf(k));
             }
-        }
-        if (removed.Count == 0) return text;
-        var sorted = removed.ToArray();
-        Array.Sort(sorted);
-        var sb = new StringBuilder(n);
-        int at = 0;
-        foreach (int k in sorted)
+        dropped.Sort();
+        return dropped;
+    }
+
+    /// <summary>What the bracket scan stops at: brackets, the starts of literals and comments, a line's end (a directive may follow).</summary>
+    private static readonly char[] Brackets = ['(', ')', '[', ']', '"', '\'', '/', '\n'];
+
+    /// <summary>
+    /// The text's bracket pairs, '(' and '[', in the order they open: where each closes, which are removed. Lookups by
+    /// position are binary searches over the opens and the closes, both ascending as the scan meets them.
+    /// </summary>
+    private sealed class Pairs
+    {
+        private readonly List<int> _opens = [], _closeOf = [], _closes = [], _openOf = [];
+        private readonly List<bool> _removed = [];
+
+        public int Count => _opens.Count;
+
+        public int Open(int at)
         {
-            sb.Append(text, at, k - at);
-            at = k + 1;
+            _opens.Add(at);
+            _closeOf.Add(-1);
+            _removed.Add(false);
+            return _opens.Count - 1;
         }
-        return sb.Append(text, at, n - at).ToString();
+
+        public void Close(int pair, int at)
+        {
+            _closeOf[pair] = at;
+            _closes.Add(at);
+            _openOf.Add(pair);
+        }
+
+        public int OpenAt(int pair) => _opens[pair];
+
+        public int CloseOf(int pair) => _closeOf[pair];
+
+        public bool Removed(int pair) => _removed[pair];
+
+        public void Remove(int pair) => _removed[pair] = true;
+
+        /// <summary>Where the bracket opening at <paramref name="at"/> closes, or -1.</summary>
+        public int Match(int at) => _opens.BinarySearch(at) is var k and >= 0 ? _closeOf[k] : -1;
+
+        /// <summary>The pair whose bracket closes at <paramref name="at"/>, or -1.</summary>
+        public int PairClosingAt(int at) => _closes.BinarySearch(at) is var k and >= 0 ? _openOf[k] : -1;
+
+        /// <summary>Whether the bracket at <paramref name="at"/> belongs to a removed pair.</summary>
+        public bool IsRemoved(string text, int at)
+        {
+            char c = text[at];
+            if (c is '(' or '[') return _opens.BinarySearch(at) is var k and >= 0 && _removed[k];
+            if (c is ')' or ']') return PairClosingAt(at) is var p and >= 0 && _removed[p];
+            return false;
+        }
     }
 
     /// <summary>Whether the pair (<paramref name="open"/>, <paramref name="close"/>) can go, its neighbors read past the pairs already removed.</summary>
-    private static bool Removable(string text, int open, int close, Dictionary<int, int> match, Dictionary<int, int> closes, HashSet<int> removed)
+    private static bool Removable(string text, int open, int close, Pairs pairs)
     {
         int left = open - 1;
-        while (left >= 0 && (text[left] is ' ' or '\t' || removed.Contains(left))) left--;
+        while (left >= 0 && (text[left] is ' ' or '\t' || pairs.IsRemoved(text, left))) left--;
         int right = close + 1;
-        while (right < text.Length && (text[right] is ' ' or '\t' || removed.Contains(right))) right++;
+        while (right < text.Length && (text[right] is ' ' or '\t' || pairs.IsRemoved(text, right))) right++;
         if (left < 0 || right >= text.Length) return false;
-        var inner = Inner(text, open + 1, close, match);
+        var inner = Inner(text, open + 1, close, pairs);
         if (inner.Unknown) return false;
 
         char l = text[left];
         // a literal or a name cast to a keyword type: (byte)(2)
         if (l == ')')
-            return left == open - 1 && closes.TryGetValue(left, out int castOpen) && !removed.Contains(castOpen)
-                && Keywords.Contains(text.Substring(castOpen + 1, left - castOpen - 1)) && inner.Precedence == Primary && !inner.Unary;
+            return left == open - 1 && pairs.PairClosingAt(left) is var cast and >= 0 && !pairs.Removed(cast)
+                && IsAny(text, pairs.OpenAt(cast) + 1, left, Keywords) && inner.Precedence == Primary && !inner.Unary;
         int need; // the precedence the inner expression must reach
         bool binaryLeft = false;
         if (IsPart(l))
         {
             int k = left;
             while (k >= 0 && IsPart(text[k])) k--;
-            if (text.Substring(k + 1, left - k) != "return") return false; // a call, or a statement's parentheses
+            if (left - k != 6 || string.CompareOrdinal(text, k + 1, "return", 0, 6) != 0) return false; // a call, or a statement's parentheses
             need = 2;
         }
         else if (l is '(' or '[' or ',' or ';' or '{' or '}') need = 2;
@@ -442,7 +579,7 @@ internal static class Tidy
         return inner == outer;
     }
 
-    private static Expression Inner(string text, int from, int to, Dictionary<int, int> match)
+    private static Expression Inner(string text, int from, int to, Pairs pairs)
     {
         int precedence = Primary, operands = 0;
         string? loosest = null;
@@ -466,7 +603,8 @@ internal static class Tidy
             }
             if (c is '(' or '[')
             {
-                if (!match.TryGetValue(i, out int end) || end >= to || c == '[' && expectOperand) return Unknown;
+                int end = pairs.Match(i);
+                if (end < 0 || end >= to || c == '[' && expectOperand) return Unknown;
                 if (expectOperand)
                 {
                     // (T)x: a cast, still before its operand; (a + b) an operand
@@ -502,7 +640,7 @@ internal static class Tidy
             }
             if (OperatorChars.IndexOf(c) < 0) return Unknown; // braces, a comma, ...
             int opEnd = OperatorEnd(text, i, to);
-            string op = text.Substring(i, opEnd - i);
+            string op = Token(text, i, opEnd);
             i = opEnd;
             if (expectOperand)
             {
@@ -564,12 +702,23 @@ internal static class Tidy
     {
         start = at;
         if (OperatorChars.IndexOf(text[at]) < 0) return null;
-        if (forward) return text.Substring(at, OperatorEnd(text, at, text.Length) - at);
+        if (forward) return Token(text, at, OperatorEnd(text, at, text.Length));
         int k = at;
         while (k > 0 && OperatorChars.IndexOf(text[k - 1]) >= 0) k--;
         start = k;
-        return OperatorEnd(text, k, at + 1) == at + 1 ? text.Substring(k, at - k + 1) : null;
+        return OperatorEnd(text, k, at + 1) == at + 1 ? Token(text, k, at + 1) : null;
     }
+
+    /// <summary>The operator token <paramref name="text"/>[<paramref name="from"/>, <paramref name="to"/>), one of the strings above (no copy).</summary>
+    private static string Token(string text, int from, int to)
+    {
+        if (to - from == 1) return Singles[OperatorChars.IndexOf(text[from])];
+        foreach (var op in Operators)
+            if (op.Length == to - from && string.CompareOrdinal(text, from, op, 0, op.Length) == 0) return op;
+        return text.Substring(from, to - from);
+    }
+
+    private static readonly string[] Singles = [.. OperatorChars.Select(c => c.ToString())];
 
     private static readonly string[] Operators =
     [
@@ -610,9 +759,9 @@ internal static class Tidy
 
     // ---------------- tokens ----------------
 
-    private static bool IsStart(char c) => char.IsLetter(c) || c == '_' || c == '@';
+    private static bool IsStart(char c) => (uint)((c | 0x20) - 'a') < 26 || c == '_' || c == '@' || c > 127 && char.IsLetter(c);
 
-    private static bool IsPart(char c) => char.IsLetterOrDigit(c) || c == '_' || c == '@';
+    private static bool IsPart(char c) => (uint)((c | 0x20) - 'a') < 26 || (uint)(c - '0') < 10 || c == '_' || c == '@' || c > 127 && char.IsLetterOrDigit(c);
 
     private static int IdentifierEnd(string text, int i)
     {
@@ -622,15 +771,15 @@ internal static class Tidy
     }
 
     /// <summary>The word before <paramref name="i"/> (spaces skipped), or "" when the token there is not a word (<paramref name="prev"/>: its last character).</summary>
-    private static string WordBefore(string text, int i, out char prev)
+    private static bool WordBefore(string text, int i, string word, out char prev)
     {
         int k = i - 1;
         while (k >= 0 && text[k] is ' ' or '\t') k--;
         prev = k >= 0 ? text[k] : '\0';
-        if (k < 0 || !IsPart(text[k])) return "";
+        if (k < 0 || !IsPart(text[k])) return false;
         int end = k + 1;
         while (k >= 0 && IsPart(text[k])) k--;
-        return text.Substring(k + 1, end - k - 1);
+        return end - k - 1 == word.Length && string.CompareOrdinal(text, k + 1, word, 0, word.Length) == 0;
     }
 
     /// <summary>The end of the type arguments opened at <paramref name="i"/> (after their <c>&gt;</c>), or -1 when they are not type arguments.</summary>
@@ -650,30 +799,14 @@ internal static class Tidy
         return -1;
     }
 
-    /// <summary>
-    /// Where the line at <paramref name="i"/> ends when it is a using directive or a preprocessor line (and
-    /// <paramref name="i"/> starts a line), else <paramref name="i"/>.
-    /// </summary>
+    /// <summary>Where the line at <paramref name="i"/> ends when it is a preprocessor line, else <paramref name="i"/>.</summary>
     private static int Preprocessor(string text, int i)
     {
         int k = i;
-        while (k < text.Length && text[k] is ' ' or '\t' or '﻿') k++;
+        while (k < text.Length && text[k] is ' ' or '\t' or '\uFEFF') k++;
         if (k >= text.Length || text[k] != '#') return i;
         int end = text.IndexOf('\n', k);
         return end < 0 ? text.Length : end + 1;
-    }
-
-    private static int LineStart(string text, int i)
-    {
-        if (i > 0 && text[i - 1] != '\n') return i;
-        int k = i;
-        while (k < text.Length && text[k] is ' ' or '\t' or '﻿') k++;
-        if (k < text.Length && (text[k] == '#' || string.CompareOrdinal(text, k, "using ", 0, 6) == 0))
-        {
-            int end = text.IndexOf('\n', k);
-            return end < 0 ? text.Length : end + 1;
-        }
-        return i;
     }
 
     /// <summary>Where the comment, string or character literal at <paramref name="i"/> ends, or <paramref name="i"/> when none starts there.</summary>

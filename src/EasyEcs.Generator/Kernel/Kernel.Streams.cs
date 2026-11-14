@@ -91,12 +91,11 @@ internal sealed partial class Kernel
         foreach (var unloaded in Regex.Matches(body, @"(?m)^var (__c\d+_0(?:_[01])?) = default\([^\n]*\);\n").Cast<Match>().Reverse())
         {
             string name = unloaded.Groups[1].Value;
-            var next = Regex.Match(body.Substring(unloaded.Index + unloaded.Length), $@"\b{name}\b");
-            if (!next.Success) continue;
-            int at = unloaded.Index + unloaded.Length + next.Index;
+            int at = Generator.Code.Word(body, name, unloaded.Index + unloaded.Length);
+            if (at < 0) continue;
             int line = body.LastIndexOf('\n', at - 1) + 1, end = body.IndexOf('\n', at);
             string write = body.Substring(line, (end < 0 ? body.Length : end) - line);
-            if (line != at || !write.StartsWith(name + " = ", System.StringComparison.Ordinal) || Regex.IsMatch(write.Substring(name.Length + 3), $@"\b{name}\b"))
+            if (line != at || !write.StartsWith(name + " = ", System.StringComparison.Ordinal) || Generator.Code.Word(write, name, name.Length + 3) >= 0)
                 continue;
             body = body.Insert(at, "var ").Remove(unloaded.Index, unloaded.Length);
         }

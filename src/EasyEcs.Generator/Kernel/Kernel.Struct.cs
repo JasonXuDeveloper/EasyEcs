@@ -358,7 +358,7 @@ internal sealed partial class Kernel
 
     /// <summary>Whether the expression <paramref name="text"/> names any of <paramref name="names"/> (null entries skipped).</summary>
     private static bool ReadsAny(string text, IEnumerable<string?> names) =>
-        names.Any(n => n != null && System.Text.RegularExpressions.Regex.IsMatch(text, $@"(?<![\w]){System.Text.RegularExpressions.Regex.Escape(n)}(?![\w])"));
+        names.Any(n => n != null && Generator.Code.Word(text, n) >= 0);
 
     /// <summary>Whether <paramref name="text"/> is one name (a lane, a local), not an expression.</summary>
     private static bool IsName(string text) => text.Length > 0 && (char.IsLetter(text[0]) || text[0] == '_') && text.All(c => char.IsLetterOrDigit(c) || c == '_');

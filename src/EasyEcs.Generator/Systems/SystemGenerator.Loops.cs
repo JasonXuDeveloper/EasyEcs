@@ -141,7 +141,7 @@ public sealed partial class SystemGenerator
         foreach (var group in PassAs.Matches(text).Cast<Match>().GroupBy(m => m.Value).Where(g => g.Count() >= 2))
         {
             string name = "__pass" + LaneSuffix(group.First().Groups[1].Value);
-            if (Regex.IsMatch(text, $@"\b{name}\b")) continue;
+            if (Code.Word(text, name) >= 0) continue;
             declared.Append($"{indent}var {name} = {group.Key};\n");
             text = text.Replace(group.Key, name);
         }
@@ -184,10 +184,11 @@ public sealed partial class SystemGenerator
         foreach (var held in Held.Matches(body).Cast<Match>().Reverse())
         {
             string name = held.Groups[1].Value;
-            var uses = Regex.Matches(body, $@"\b{name}\b");
+            // the declaration, then its one use before the loop, and none after
+            int declared = Code.Word(body, name, held.Index), use = Code.Word(body, name, declared + name.Length);
             int loop = body.IndexOf("for (", held.Index, System.StringComparison.Ordinal);
-            if (uses.Count != 2 || loop >= 0 && uses[1].Index > loop) continue;
-            body = body.Remove(uses[1].Index, name.Length).Insert(uses[1].Index, held.Groups[2].Value).Remove(held.Index, held.Length);
+            if (use < 0 || Code.Word(body, name, use + name.Length) >= 0 || loop >= 0 && use > loop) continue;
+            body = body.Remove(use, name.Length).Insert(use, held.Groups[2].Value).Remove(held.Index, held.Length);
         }
         return body;
     }

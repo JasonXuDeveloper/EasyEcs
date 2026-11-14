@@ -2591,7 +2591,12 @@ internal sealed partial class Kernel
 
     /// <summary>A uniform scalar of <paramref name="type"/>, broadcast once per run (before the loop); an enum's as its integer.</summary>
     private string Broadcast(string scalar, ITypeSymbol type) =>
-        Broadcast(IsEnum(type) && !System.Text.RegularExpressions.Regex.IsMatch(scalar, $@"^\(\({System.Text.RegularExpressions.Regex.Escape(Elem(type))}\)\([^()]*\)\)$") ? $"(({Elem(type)})({scalar}))" : scalar, Elem(type)); // a literal is cast already
+        Broadcast(IsEnum(type) && !IsCastLiteral(scalar, Elem(type)) ? $"(({Elem(type)})({scalar}))" : scalar, Elem(type));
+
+    /// <summary>Whether <paramref name="scalar"/> is a literal cast to <paramref name="element"/> already (<c>((byte)(2))</c>, <see cref="Literal"/>).</summary>
+    private static bool IsCastLiteral(string scalar, string element) =>
+        scalar.StartsWith("((" + element + ")(", System.StringComparison.Ordinal) && scalar.EndsWith("))", System.StringComparison.Ordinal)
+        && scalar.IndexOfAny(['(', ')'], element.Length + 4) == scalar.Length - 2;
 
     /// <summary>A uniform scalar broadcast to lanes of <paramref name="element"/> (a fully qualified C# type).</summary>
     private string Broadcast(string scalar, string element)
