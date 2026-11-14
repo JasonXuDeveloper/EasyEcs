@@ -15,8 +15,8 @@
 # flock -o, so a build server left behind does not keep it). --sync merges the reports into the runtime's numbers in
 # docs/src/data/bench.json (sync-benchmarks --runtime <tfm> --merge, refused when the machine or the SDK differs from
 # that runtime's committed numbers): the classes run replace theirs, the others stay, and the rows that moved (15 %, or
-# their allocation) are listed. Reports from elsewhere (the CI benchmark workflow's artifacts) are merged the same way:
-#   (cd docs && BENCH_RESULTS=<download>/net11.0/results bun scripts/sync-benchmarks.ts --runtime net11.0 --merge)
+# their allocation) are listed (tools/perf/moved.py). The site's published numbers come from the CI Benchmarks workflow
+# (owner, ledger L17), which runs this script per runtime; tools/perf/sync-ci.sh <run id> syncs its reports.
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 art=$root/BenchmarkDotNet.Artifacts
@@ -99,21 +99,6 @@ if [ $sync = 1 ]; then
   cp docs/src/data/bench.json "$before"
   (cd docs && BENCH_RESULTS="$art/$framework/results" bun scripts/sync-benchmarks.ts --runtime "$framework" --merge)
   # What moved: a row 15 % slower or faster, or allocating differently, is checked before it is published.
-  python3 - "$before" docs/src/data/bench.json "$framework" <<'PY'
-import json, sys
-old, new = (json.load(open(f))["runtimes"].get(sys.argv[3], {}).get("benchmarks", {}) for f in sys.argv[1:3])
-key = lambda r: (r["method"], tuple(sorted(r["params"].items())))
-for cls, entry in new.items():
-    rows = {key(r): r for r in old.get(cls, {}).get("rows", [])}
-    for r in entry["rows"]:
-        o = rows.get(key(r))
-        if o is None or not o["meanNs"]: continue
-        d = r["meanNs"] / o["meanNs"] - 1
-        alloc = o["allocatedBytes"] != r["allocatedBytes"]
-        if abs(d) > 0.15 or alloc:
-            params = ",".join(f"{k}={v}" for k, v in key(r)[1])
-            print(f"  {cls}.{r['method']}({params}) {o['meanNs']:.0f} -> {r['meanNs']:.0f} ns {d:+.0%}"
-                  + (f", {o['allocatedBytes']} -> {r['allocatedBytes']} B" if alloc else ""))
-PY
+  python3 -I tools/perf/moved.py "$before" docs/src/data/bench.json "$framework"
   rm -f "$before"
 fi
