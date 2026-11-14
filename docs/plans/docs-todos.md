@@ -3678,55 +3678,36 @@ names.
 - `lint:search`: the en "ChunkRows" query must find `guide/performance/threading` (the expectation was updated with the
   move; re-run once the build passes).
 
-## feat-net11 (ledger L14: net10.0 and net11.0)
+## feat-net11 and feat-net10-only (ledger L14, L16, L17, L21, L25, L26, L27: one target, net10.0)
 
-Package A (compatibility) changed the projects, CI, AGENTS.md files, skills, README and the install / requirements
-lines of getting-started, index, faq and samples/godot (en + zh). For the docs pass:
+feat-net11 added `net11.0` beside `net10.0` and measured .NET 11; no .NET 11 API made EasyEcs faster or shorter and the
+runtime alone measured level, so the owner kept one target (L25) and one runtime on the site (L26); feat-net10-only
+undid the second target. What stays for users: two generator fixes and ".NET 10 and later". For the docs pass:
 
-- [ ] **Changelog** (4.8 or the version it ships in, `### New`): "EasyEcs targets `net10.0` and `net11.0`: the package
-      carries both builds, NuGet picks the one of your project." Link getting-started.
-- [ ] **Changelog `### Fixes`** (the same version): on .NET 11 a `[ForEach]` method reading a uniform `[InlineArray]`
-      table at a row's index (Kernel.Tables) failed to compile (CS9164); and `float.DegreesToRadians` /
-      `RadiansToDegrees` in a vector loop are now the runtime's own vector form, which rounds as the scalar call does on
-      either runtime (.NET 11 computes the float form in double and the double form as a correctly rounded three-limb
-      product, so the old `(x * Pi) / 180` lanes differed from the method's on .NET 11).
-- [ ] **Migration** (`migration.mdx` + zh): no code changes for users; a note in the section of that version that the
-      template's `--framework` (`-f net11.0`) picks .NET 11 and that a project moving to net11.0 may see float results of
-      `DegreesToRadians` / `RadiansToDegrees` change in the last bit (.NET 11's own change, scalar and vector alike).
-- [ ] **README "What's new"**: .NET 11 support (both runtimes tested in CI, x64 and ARM64, Native AOT on both).
-- [ ] **Decision record** (replaces D15 ".NET 10 only" in place, AGENTS.md "Nothing stale"): EasyEcs targets the
-      supported .NET releases from 10 on (`net10.0;net11.0`); why both (10 is the LTS until 2028, 11 the STS with the
-      newer JIT); how runtime-specific code is kept (`#if NET11_0_OR_GREATER`, the net10.0 path unchanged, generated
-      code compiling on both); applications in the repository on one runtime (samples, DocCheck, ApiDocs: net11.0, the
-      SDK's own; Godot and the demo: net10.0); the template's default net10.0 (either SDK builds it); what the site's
-      numbers run on. D21 (".NET 10 features only where they measure") gets the .NET 11 items of
-      `docs/plans/designs/net11.md` (kept and dropped, with their numbers) once packages B+ finish.
-- [ ] **Pages still saying ".NET 10 only" or "needs .NET 10"** (the requirement, not history): `why-fast.mdx` (344:
-      ".NET 10 only", D15 link), `migrate-from-friflo.mdx` (20), `vs-defaultecs.mdx` (18, 39, 173, 184), `vs-friflo.mdx`
-      (19, 41, 220-221), `vs-arch.mdx` (12, 19, 41, 201, 208-209), `vs-unity-entities.mdx` (4, 10, 22, 141),
-      `faq.mdx` (13, 136), `what-is-ecs.mdx` (20, 244, 259), `roadmap.mdx` (28: "The floor is the .NET 10 SDK (C# 14,
-      Roslyn 5.0)" is still true for the generator; 33-38 Unity), `comparison.mdx`, `features.mdx`, the seoTitles of
-      `index.mdx` and `getting-started.mdx` ("for C# and .NET 10"), and each `.zh.mdx`. `guide/production/testing.mdx`
-      (374) shows a test csproj with `net10.0`: fine as an example, or say either. The public skill
-      (`skills/easyecs/SKILL.md` 3, 8, 230: ".NET 10, C# 14", "runtimes older than .NET 10").
-- [ ] **demo.mdx** (27) "a .NET 10 WebAssembly app" stays true (the demo targets net10.0, workload `wasm-tools-net10`
-      under the .NET 11 SDK).
-- [x] **The site's benchmark runtime** (owner, L16: both): `bench.json` keeps numbers per runtime and every table,
-      chart, named value and stat shows .NET 10 and .NET 11 side by side (package S); a runtime with no number is an
-      empty cell.
-- [ ] **The .NET 11 numbers**: the net10.0 set is today's (SDK 10.0.402, .NET 10.0.13). A `--merge` into a set is
-      refused when the SDK differs, so under SDK 11 each set needs a full `tools/perf/bench.sh --site --framework <tfm>
-      --sync --fresh` (net10.0 replaced, net11.0 added), on the machine the owner picks (next item).
-- [ ] **Where the published numbers come from (a question for the owner, through the coordinator)**: the `Benchmarks`
-      workflow runs `--site` per runtime in parallel on GitHub-hosted runners, which are shared machines whose speed
-      varies between runs and between the two jobs (other tenants, different CPU models behind one label), so its
-      numbers are noisier than the reference VM's and the two runtimes may land on different CPUs (the site's source
-      line then names a machine per runtime). Options: publish CI's (reproducible by anyone, noisy), or keep the
-      reference machine and use CI as a check.
-- [ ] **The performance page** says the site shows each benchmark on both runtimes and how to read a "—" (that
-      runtime has no number yet), en and zh; the API page's or performance page's note on BenchmarkDotNet's job.
-- [ ] **The home page's figures** quote the primary runtime (.NET 10) and its source line names only that runtime;
-      decide in the docs pass whether the hero shows both runtimes too (the Stat component's second line does).
+- [ ] **Decision record** (rewrites D15 ".NET 10 only" in place, AGENTS.md "Nothing stale"): EasyEcs targets `net10.0`
+      only and runs on .NET 10 and later. Why: .NET 11 was measured (docs/plans/designs/net11.md: every .NET 11 API
+      weighed from its listing equal to or slower than what EasyEcs writes; the headline worlds net11.0 against
+      net10.0 within error at 0 B, section 3 B0), so a second target would double CI and the site for nothing (L25,
+      L26). How a newer runtime stays safe: the unit tests target net10.0 and net11.0, referencing the net10.0 package
+      from both, and CI runs them on both runtimes (L27); building them for .NET 11 is how the two fixes below were found. D21 (".NET 10 features only where
+      they measure") gets the .NET 11 items of net11.md section 3 as one paragraph with the B0 numbers quoted (a
+      decision record may quote).
+- [ ] **Changelog `### Fixes`** (the version it ships in): a `[ForEach]` method reading a uniform `[InlineArray]` table
+      at a row's index (Kernel.Tables) no longer fails to compile in a project on .NET 11 (CS9164: .NET 11's
+      `MemoryMarshal.Cast` overloads); `float` / `double` `DegreesToRadians` and `RadiansToDegrees` in a vector loop are
+      the runtime's own vector form, so the lanes round as the scalar call does on every runtime (.NET 11 rounds them
+      differently from .NET 10). No migration entry: nothing to change in user code.
+- [ ] **The performance page** (en, zh), one sentence: the numbers are .NET 10's, and .NET 11 measured level with them
+      on the headline worlds (link the decision record).
+- [ ] **The site's numbers from CI** (L17): the performance page says they come from the Benchmarks workflow on a
+      GitHub-hosted runner (a shared machine; the source line names it) and links the workflow; the next sync is
+      `tools/perf/sync-ci.sh <run id>` of a `--site` run, which replaces the reference VM's set.
+- [ ] **Pages that say ".NET 10 only" or "needs .NET 10"** become ".NET 10 and later" where they state the requirement
+      (not history): `why-fast.mdx` (".NET 10 only", D15 link), `migrate-from-friflo.mdx`, `vs-defaultecs.mdx`,
+      `vs-friflo.mdx`, `vs-arch.mdx`, `vs-unity-entities.mdx`, `faq.mdx` (13, 136), `what-is-ecs.mdx`, `roadmap.mdx`
+      (Unity), `comparison.mdx`, `features.mdx`, the seoTitles of `index.mdx` and `getting-started.mdx`, each `.zh.mdx`,
+      and the public skill (`skills/easyecs/SKILL.md`: ".NET 10, C# 14", "runtimes older than .NET 10"). Already said
+      in package A's lines: README, getting-started, index, faq (38, 126), samples/godot.
 
 ## feat-ground-cells (inner-loops leftover (a): a cell method over a `Ground<TTile>` tile)
 
