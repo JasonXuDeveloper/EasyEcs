@@ -2889,14 +2889,10 @@ internal sealed partial class Kernel
             case "Clamp" when m.Parameters.Length == 3:
                 return Clamp(call, type);
             case "DegreesToRadians" or "RadiansToDegrees" when single && isFloat:
-            {
-                // float.DegreesToRadians is (x * Pi) / 180, and RadiansToDegrees (x * 180) / Pi: the same two IEEE
-                // operations per lane
-                bool toRadians = m.Name == "DegreesToRadians";
-                string pi = Broadcast(type.SpecialType == SpecialType.System_Single ? "float.Pi" : "double.Pi", type);
-                string half = Broadcast(Literal(System.Convert.ChangeType(180, ClrType(type), CultureInfo.InvariantCulture), type), type);
-                return toRadians ? $"(({Arg(0)} * {pi}) / {half})" : $"(({Arg(0)} * {half}) / {pi})";
-            }
+                // the vector form of the runtime the code runs on, which rounds as its scalar call does: .NET 10's is
+                // (x * Pi) / 180, .NET 11's float form x * (Pi / 180) in double and its double form a three-limb
+                // product (correctly rounded), so the formula is the runtime's to write, not ours
+                return $"{V}.{m.Name}({Arg(0)})";
             case "Sin" or "Cos" or "Exp" or "Log" or "Log2" when single && isFloat:
             case "Hypot" when m.Parameters.Length == 2 && isFloat:
                 // .NET's vector forms approximate within a few ulps (Vector.Exp(0) is 1 + 1 ulp): not the scalar
