@@ -622,7 +622,7 @@ public class GeneratorTests
             .And.Contain("var __q1_0 = __Vec.LoadUnsafe(ref __r1, (nuint)i & __z1);")
             .And.Not.Contain("__live"), generated);
         // One check, for the read outside the branch; none for the one under h.HasValue.
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= ~__has1 != __Vec_int.Zero;").Count, Is.EqualTo(1), generated);
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__Vec_int.AllBitsSet & ~__has1\) != __Vec_int.Zero;").Count, Is.EqualTo(1), generated);
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__pass & ~__has1\) != __Vec_int.Zero;").Count, Is.EqualTo(1), generated);
         Assert.That(generated, Does.Not.Contain("__bail |= (__pass & __m"), generated);
     }
