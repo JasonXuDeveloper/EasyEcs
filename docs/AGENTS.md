@@ -95,39 +95,23 @@ scripts/                 chromium.ts (a headless Chromium for mermaid), git-hist
 
 ## Benchmarks
 
-- `src/data/bench.json` is the only source of numbers, kept per runtime (`runtimes["net10.0"]`, `runtimes["net11.0"]`:
-  each with its `generatedAt`, machine `environment` and `benchmarks`; owner, ledger L16). `scripts/sync-benchmarks.ts`
-  writes it from every `*-report.csv` of `EasyEcs.Benchmark` and `EasyEcs.Comparison` (classes, [Params], mean, error,
-  ratio, allocations) and the machine from the `*-report-github.md` headers; each report goes into the set of the
-  runtime its header's `[Host]` line names, the other runtimes' sets stay as committed; peer versions come from the
-  comparison project's csproj.
-- Input: `BENCH_RESULTS`, else `../BenchmarkDotNet.Artifacts/results`; `--runtime <tfm>` takes only that runtime's
-  reports. A runtime's committed set is kept when the directory is missing (Cloudflare) or lacks classes that set has
-  (a filtered local run); `--replace` makes the reports the runtime's whole set whatever machine or SDK the committed
-  set came from (refused when they lack a class of that set, unless `--partial` too); `--partial` writes what the
-  directory holds; `--merge` replaces only the classes the directory holds and keeps the others, and adds a runtime
-  that has no numbers yet (refused when the machine or the SDK differs from that runtime's committed numbers).
+- `src/data/bench.json` is the only source of numbers. `scripts/sync-benchmarks.ts` writes it from every
+  `*-report.csv` of `EasyEcs.Benchmark` and `EasyEcs.Comparison` (classes, [Params], mean, error, ratio, allocations)
+  and the machine from the `*-report-github.md` headers; peer versions come from the comparison project's csproj.
+- Input: `BENCH_RESULTS`, else `../BenchmarkDotNet.Artifacts/results`. The committed file is kept when the directory is
+  missing (Cloudflare) or lacks classes the committed data has (a filtered local run); `--partial` overrides that,
+  `--merge` replaces only the classes the directory holds and keeps the others (refused for another machine), and
+  `--replace` makes the reports the whole set whatever machine or SDK the committed set came from (CI's run; it says
+  so when the machine changes, and it is refused when the reports lack a committed class unless `--partial` too).
 - **The site's numbers come from CI** (owner, ledger L17): the `Benchmarks` workflow (`.github/workflows/benchmarks.yml`,
-  `workflow_dispatch`, input `classes`, default `--site`) runs `tools/perf/bench.sh` per runtime in parallel on hosted
-  runners and uploads each runtime's reports (`benchmarks-<tfm>`). Then `tools/perf/sync-ci.sh <run id>` downloads both
-  artifacts (`gh run download`), makes each runtime's reports its whole set (`--replace`; `--merge` for a run of a few
-  classes, `--partial` to drop a class that failed) and lists the rows that moved (`tools/perf/moved.py`); check the
-  diff, commit the JSON. A new class enters the site's set once it has been run and synced. Hosted runners are shared:
-  the two jobs may run on different CPUs, and the source line then names each runtime's machine.
-- `tools/perf/bench.sh <classes> --framework <tfm> --sync` (`--site` for every class the site shows; default net10.0)
-  still runs the classes one process each, resumable, into `BenchmarkDotNet.Artifacts/<tfm>/results` and merges them
-  into that runtime's set, for a machine whose set it is (a measurement on the decision machine, `audit-perf`, is
-  compared there, not published).
-- The site shows the runtimes side by side wherever a number is shown (`src/lib/benchmarks.ts`: `runtimes`, every
-  accessor takes the runtime last): a column per runtime in tables (`comparisonTable`, `peerTable`, the feature table),
-  a bar per runtime in charts (a lighter shade for the later one), both values in a named number (`benchValues`) and
-  a stat's second line (`alt`) once both have one. A runtime with no number yet is an empty cell ("—") or no bar,
-  never a guess.
-- A number shown alone is quoted from the **headline runtime** (owner, ledger L21: `headlineRuntime`, .NET 11; per
-  class `headlineFor`, which falls back to .NET 10 while .NET 11 has no number for the class, so the home page never
-  shows "—"): the home page's headline copy, the social cards, `llms.txt`, a stat's figure, the order and tiers of the
-  feature comparison (and so the leads and counts the home page quotes) and the row order of a table. An accessor
-  called without a runtime gives that. `headlineSourceLine` names the runtimes those figures came from.
+  `workflow_dispatch`, input `classes`, default `--site`) runs `tools/perf/bench.sh` on a hosted runner and uploads the
+  reports (artifact `benchmarks`). Then `tools/perf/sync-ci.sh <run id>` downloads it (`gh run download`), makes its
+  reports the whole set (`--replace`; `--merge` for a run of a few classes, `--partial` to drop a class that failed) and
+  lists the rows that moved (`tools/perf/moved.py`); check the diff, commit the JSON. A new class enters the site's set
+  once it has been run and synced. Hosted runners are shared machines; the source line names the one the run had.
+- `tools/perf/bench.sh <classes> --sync` (`--site` for every class the site shows) still runs the classes one process
+  each, resumable, and merges them into the set, for a measurement on the decision machine (`audit-perf`), which is
+  compared there, not published.
 - Named numbers for prose are `keys` in `src/lib/benchmarks.ts`; charts and tables take a class
   (`Features.RemovalComparison`) and a [Params] filter.
 
@@ -182,8 +166,8 @@ scripts/                 chromium.ts (a headless Chromium for mermaid), git-hist
   (`src/components/demo/`): the runtime loads only on that page, every frame calls `Step(dt)` once and draws the
   frame array straight from the WebAssembly memory. The page includes the demo's C# files, so they are what runs.
 - Cloudflare builds with Bun only, so the published runtime is committed in `public/demo/_framework`. After changing
-  the demo or EasyEcs.Core: `bun run demo:build` (`scripts/build-demo.sh`: installs the `wasm-tools-net10` workload
-  when missing (the demo targets net10.0), then `dotnet publish` with Mono AOT, the IL compiled ahead of time to WebAssembly with 128-bit SIMD,
+  the demo or EasyEcs.Core: `bun run demo:build` (`scripts/build-demo.sh`: installs the `wasm-tools` workload when
+  missing, then `dotnet publish` with Mono AOT, the IL compiled ahead of time to WebAssembly with 128-bit SIMD,
   trimmed, invariant globalization), check the page, commit `public/demo` (with `public/demo/source.sha256`, the hash
   of the sources it was built from: CI fails when `scripts/demo-source.sh` gives another, after any change to
   EasyEcs.Core, the generator, the demo or `Directory.Build.props`). Browsers do not run CoreCLR yet (CoreCLR

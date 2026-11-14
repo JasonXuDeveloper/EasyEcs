@@ -1,20 +1,18 @@
 # EasyEcs
 
-Allocation-free archetype ECS for .NET 10 and .NET 11: game servers, Godot 4 games (`samples/Godot`), simulations, real-time backends. Library: `EasyEcs.Core` (targets
-`net10.0` and `net11.0`), published to NuGet as `EasyEcs`. Public API and code comments are in English.
+Allocation-free archetype ECS for .NET 10 and later: game servers, Godot 4 games (`samples/Godot`), simulations, real-time backends. Library: `EasyEcs.Core` (targets
+`net10.0` only, which runs on .NET 10 and later; owner, ledger L25), published to NuGet as `EasyEcs`. Public API and code comments are in English.
 
 ## Commands
 
 ```bash
 dotnet build                                                   # whole solution
-dotnet test                                                    # NUnit, on net10.0 and net11.0 (both runtimes)
-dotnet run -c Release -f net10.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*'            # all benchmarks
-dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset, on .NET 11
-dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*' --frameworks net10.0,net11.0  # one runtime against the other
+dotnet test                                                    # NUnit
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'            # all benchmarks
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset
 tools/perf/bench.sh BulkBenchmark Features.RemovalComparison --sync   # classes, resumable, merged into the site's numbers
 tools/perf/bench.sh --site --sync                                   # every class the site shows (before a release)
-tools/perf/bench.sh BulkBenchmark --framework net11.0              # on .NET 11 (default net10.0)
-gh workflow run benchmarks.yml -f classes=--site; tools/perf/sync-ci.sh <run id>   # the site's numbers, both runtimes, from CI (L17)
+gh workflow run benchmarks.yml -f classes=--site; tools/perf/sync-ci.sh <run id>   # the site's numbers, from CI (L17)
 ```
 
 A full run takes hours: run what a change touches (`audit-perf` has the method: A/B, lock, quiet machine) and merge
@@ -44,21 +42,16 @@ adding or changing one (CI runs `tools/agents.sh --check`).
 | [`tests/`](tests/AGENTS.md) | adding or changing a test, or finding where a feature is tested |
 <!-- agents-index:end -->
 
-`global.json` requires the .NET 11 SDK 11.0.100 or later (`rollForward: latestFeature`), which builds both target frameworks;
-running the tests and benchmarks of both needs the .NET 10 runtime too (the SDK brings only its own).
-
-**Two runtimes.** The libraries, the tests, the AOT check and the benchmarks (with the tools over them, Inlining and
-LoopBound) target `net10.0;net11.0`, so both runtimes are tested and measured (`tools/build.sh` and the perf scripts
-take `FRAMEWORK=net11.0`, `tools/perf/bench.sh` `--framework`). Applications target one runtime: the samples, DocCheck and
-ApiDocs `net11.0` (the SDK's own runtime, so a clone with the SDK alone runs them), the Godot sample and the live demo
-`net10.0` (the LTS: Godot's .NET support, the demo's Mono AOT workload `wasm-tools-net10`); the template's
-`--framework` defaults to `net10.0`, which either SDK builds. Code for one runtime goes under `#if NET11_0_OR_GREATER`
-with the net10.0 path unchanged, and generated code compiles on both.
+`global.json` requires the .NET 10 SDK 10.0.403 or later (`rollForward: latestFeature`; 10.0.402 brings an ILCompiler with
+a known advisory, which fails the AOT check's restore with NU1903). Every project targets `net10.0`: a later runtime
+runs the package as it is, and .NET 11 measured level with .NET 10 (docs/plans/designs/net11.md; owner, L25, L26).
+Code the generator writes must still compile and match the method bit for bit on a later runtime: `verify` has the
+manual pre-release check that builds and tests once against the newest .NET.
 
 ## Layout
 
 ```
-src/EasyEcs.Core/              net10.0 and net11.0 library, namespace EasyEcs, in folders by concern named as the guide names them:
+src/EasyEcs.Core/              net10.0 library, namespace EasyEcs, in folders by concern named as the guide names them:
                                World.cs and WorldOptions.cs at the root, Components/, Diagnostics/, Entities/, Grids/,
                                Indexes/, Lookups/, OrderedTables/, Parallel/, Parameters/, Queries/, Relations/, Saves/,
                                Storage/, Systems/, VectorLoops/ (file map: src/EasyEcs.Core/AGENTS.md)
@@ -119,8 +112,8 @@ skills/easyecs/                the public skill (`npx skills add JasonXuDevelope
                                lists only this one
 tools/perf/                    the performance tools. bench.sh: benchmark classes one BenchmarkDotNet process per class (resumable,
                                under a shared lock), merged into docs/src/data/bench.json (--sync); --site runs the classes the site shows.
-                               sync-ci.sh: the site's numbers from a run of the Benchmarks workflow (both runtimes' artifacts downloaded and
-                               synced); moved.py: the rows of a runtime that moved between two bench.json, for both.
+                               sync-ci.sh: the site's numbers from a run of the Benchmarks workflow (its artifact downloaded and synced);
+                               moved.py: the rows that moved between two bench.json, for both.
                                jitdisasm.sh: the Tier1 machine code of a [ForEach] method's job (DOTNET_JitDisasm), to check a vector loop: no
                                call in the loop body, no needless range check. loopbound.sh: where each vector loop of a benchmark class is
                                bound (ports, front end or a loop-carried chain): LoopBound/ runs its methods past Tier1 under DOTNET_JitDisasm,
