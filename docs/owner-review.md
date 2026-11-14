@@ -215,3 +215,17 @@ inline to the same column access). It changes the public API, so it was asked, n
 
 What would change the verdict: an access the generated members cannot name (a key only known at run time, such as a
 component chosen by data), where an indexer would be the only short form.
+
+## .NET 11's Unzip / Zip and CreateGeometricSequence in the vector loops: not used (feat-net11, net11.md B1, B2)
+
+**Proposed by** the .NET 11 research (docs/plans/designs/net11.md): the new portable lane APIs for the de-interleaving
+loads of `Interleaved` (B1) and the lane-bit masks (B2).
+
+**Why not** (net11.md section 3 has the listings). B1: on AVX2 `Vector256.UnzipEven` / `UnzipOdd` take 8 shuffles for
+a pair of fields where `Interleaved.Load2` takes 4; on AVX-512 they become `vpermt2ps`, which `Avx512F.VL` has offered
+since .NET 8 (a candidate for the Core lane on both runtimes, not a .NET 11 item); ARM64 already uses LD2 / LD3 / LD4.
+B2: `CreateGeometricSequence(1, 2)` folds to the same constant as the literals on x64, so a .NET 11 branch would only
+fork the code.
+
+What would change the verdict: B1, a JIT lowering of Unzip on AVX2 shorter than shufps + vpermpd; B2, the owner's M4
+numbers for ARM64, where the masks are static readonly fields a folded constant could replace.

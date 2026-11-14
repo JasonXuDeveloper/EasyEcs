@@ -68,6 +68,43 @@ Measured first: the headline worlds and the classes below on net11.0 against net
 | B14 | `Dictionary.Remove` for value-type keys, `HashSet` chain walk | Core's dictionaries on cold paths (type registry) only | not a hot path; not tried | perf #125884, #125893 |
 | B15 | SVE: `CreateWhile` variants, `Vector<T>` by reference for SVE, SVE2 narrowing | ARM64 tails as predicated loops | needs SVE hardware (CI's ARM64 runner reports none); recorded, not measured | runtime "Hardware intrinsics" |
 
+## 3. Results (package B)
+
+- **B1 Unzip / Zip: dropped, from the listings** (net11.0, Tier1 with `DOTNET_TieredCompilation=0`, a probe of a
+  2-field float column against `Interleaved.Load2`'s 256-bit form):
+  - On AVX2 without AVX-512 (`DOTNET_EnableAVX512=0`), `Vector256.UnzipEven(a, b)` / `UnzipOdd` lower to
+    `vextractf128` + two `vshufps` + `vinsertf128` per field: 8 shuffle-port instructions for the pair against
+    `Interleaved`'s 4 (`vshufps` + `vpermpd` per field). Slower by its instruction count, so no benchmark could keep it.
+  - On AVX-512 hardware they lower to `vpermt2ps ymm` with a table per field: 2 shuffles for the pair against 4. That
+    instruction is not .NET 11's: `Avx512F.VL.PermuteVar8x32x2` has existed since .NET 8, so the gain (if any) is a
+    256-bit two-source permute in `Interleaved` behind `Avx512F.VL.IsSupported`, on either runtime. This matters by
+    default: `Vector<T>` stays 256 bits on AVX-512 machines (this VM: `Vector<byte>.Count` 32), so the 256-bit form
+    is the one x64 servers run. Handed to the coordinator for the Core lane (Interleaved.cs is lane 1's file), not a
+    .NET 11 item.
+  - ARM64 already loads with `LD2` / `LD3` / `LD4` (one instruction de-interleaves), and 512 bits with `vpermt2ps`: the
+    portable APIs have nothing to replace there.
+  - What would change the verdict: a JIT that lowers Unzip to the two-source permute on AVX2 hardware in fewer
+    instructions than shufps + vpermpd (none exists: AVX2 has no two-source cross-lane permute).
+- **B2 CreateGeometricSequence: no change, from the listings.** `Vector.CreateGeometricSequence(1, 2)` folds to the
+  same 32-byte constant as `Interleaved.Masks`' literals (`vmovups ymm1, [reloc]`, identical code). Writing it under
+  `#if NET11_0_OR_GREATER` would fork the code for nothing on x64; the net10.0 path needs the width switch anyway.
+  ARM64 keeps its masks in static readonly fields (`Masks.Narrow`); a folded constant there could drop the class
+  initialization check, but an ARM64 change ships only with the owner's M4 numbers (audit-vector-loops).
+- **B3 float -> long inline conversions: runtime-only**, nothing to write; shows in the runtime-alone numbers.
+- **B4 saturating conversions: no form affected.** Kernel.Convert vectorizes conversions between lane types of one
+  size only (`Convert` returns null for float -> byte / short), so no generated loop narrows a float; the scalar
+  method's new saturation runs in the method itself on either runtime.
+- **B5 / B6 / B7 / B11 / B12 / B14 / B15**: not applicable (section 2 has why).
+- **B10**: settled, not added (owner, L22).
+- **B13 Span.Sort with value comparers: not applicable.** Core's sorts (`Pairs.cs`, `RowClusters.cs`,
+  `ValueIndex.cs`) use the default comparer (`Array.Sort(keys, ids, ...)`, `Comparer<TKey>.Default`), which #116109
+  does not change.
+- **Found on the way: BenchmarkDotNet 0.15.2 cannot name net11.0.** A job with
+  `CoreRuntime.CreateForNewVersion("net11.0")` fails its SDK validator (`GetRuntimeVersion not implemented for
+  NotRecognized`), so `--frameworks` makes the host's runtime the job without a runtime and names the older one
+  (`CoreRuntime.Core10_0`): the host must run the newest (`dotnet run -f net11.0`). `bench.sh --framework net11.0`
+  was never affected (the host's runtime is never validated).
+
 ## Order
 
 Package B: the runtime-alone comparison (section 1: WorldSimulationBenchmark, BattleServerBenchmark,
