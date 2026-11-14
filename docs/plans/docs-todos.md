@@ -3711,10 +3711,22 @@ lines of getting-started, index, faq and samples/godot (en + zh). For the docs p
       (`skills/easyecs/SKILL.md` 3, 8, 230: ".NET 10, C# 14", "runtimes older than .NET 10").
 - [ ] **demo.mdx** (27) "a .NET 10 WebAssembly app" stays true (the demo targets net10.0, workload `wasm-tools-net10`
       under the .NET 11 SDK).
-- [ ] **The site's benchmark runtime**: `bench.json` records .NET 10.0.13 and SDK 10.0.402; `sync-benchmarks --merge`
-      refuses reports of another SDK or runtime, so the next `tools/perf/bench.sh ... --sync` (SDK 11 now) needs a full
-      `--site --sync --fresh` run. Which runtime the site shows is the owner's call (asked with package A); the
-      performance page then says which runtime its numbers are from.
+- [x] **The site's benchmark runtime** (owner, L16: both): `bench.json` keeps numbers per runtime and every table,
+      chart, named value and stat shows .NET 10 and .NET 11 side by side (package S); a runtime with no number is an
+      empty cell.
+- [ ] **The .NET 11 numbers**: the net10.0 set is today's (SDK 10.0.402, .NET 10.0.13). A `--merge` into a set is
+      refused when the SDK differs, so under SDK 11 each set needs a full `tools/perf/bench.sh --site --framework <tfm>
+      --sync --fresh` (net10.0 replaced, net11.0 added), on the machine the owner picks (next item).
+- [ ] **Where the published numbers come from (a question for the owner, through the coordinator)**: the `Benchmarks`
+      workflow runs `--site` per runtime in parallel on GitHub-hosted runners, which are shared machines whose speed
+      varies between runs and between the two jobs (other tenants, different CPU models behind one label), so its
+      numbers are noisier than the reference VM's and the two runtimes may land on different CPUs (the site's source
+      line then names a machine per runtime). Options: publish CI's (reproducible by anyone, noisy), or keep the
+      reference machine and use CI as a check.
+- [ ] **The performance page** says the site shows each benchmark on both runtimes and how to read a "—" (that
+      runtime has no number yet), en and zh; the API page's or performance page's note on BenchmarkDotNet's job.
+- [ ] **The home page's figures** quote the primary runtime (.NET 10) and its source line names only that runtime;
+      decide in the docs pass whether the hero shows both runtimes too (the Stat component's second line does).
 
 ## feat-ground-cells (inner-loops leftover (a): a cell method over a `Ground<TTile>` tile)
 
