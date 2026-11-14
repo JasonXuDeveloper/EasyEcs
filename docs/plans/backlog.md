@@ -263,19 +263,26 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       ArityGenerator.cs (enumerator template), Query.cs. Proof: ChangeTrackingBenchmark QueryTick / Tick,
       MicroBenchmarks QueryIterate / QueryWrite (controls), tests of `[Changed<T>]` after a loop (full, break,
       structural change).
-- [ ] **C13. P4: the query enumerator skips the id load and tombstone test on tables without holes** (`perf.md` P4),
+- [x] **C13. P4: the query enumerator skips the id load and tombstone test on tables without holes** (`perf.md` P4),
       one branch with C12. Proof: MicroBenchmarks Query*, ToggleComponent, SparseBenchmark QueryTheFew; Tier1 listing.
-- [ ] **C14. The frame split of `World.Masked` / `Batches`** (#157's last row: the per-table preamble apart from the
+      **Dropped** (owner-review.md, the lost run's cause: the walk's state round-trips through the stack per row).
+- [x] **C14. The frame split of `World.Masked` / `Batches`** (#157's last row: the per-table preamble apart from the
       loop; ceiling about 5 ns of a 20 ns system): jitdisasm of `Masked` on Plain first. Files: ArityGenerator.cs
-      templates. Proof: SystemDispatchBenchmark, the #157 classes; keep or record.
-- [ ] **C15. P5: a retired entity flips bits in place** (`perf.md` P5): rows of a cleanup mask created in the table
+      templates. Proof: SystemDispatchBenchmark, the #157 classes; keep or record. **Not shipped** (feat-lane1-core
+      rerun, 69b493b, owner-review.md): the masked half is 42b8e9d, already in base (the lost run measured from before it);
+      the batch half (`TestedRuns` out of line) a wash at 0 B (CycleHolesScalar 1,000 base 5,533 / 5,973 ns, head
+      5,660 / 5,978 ns; OptionalScalar 100,000 152 / 146 against 139 / 141 us); LateHoles' Tier1 code the same on both
+      sides (`Masked` 2,126 bytes each), its head reading slower only under load 5-13.
+- [x] **C15. P5: a retired entity flips bits in place** (`perf.md` P5): rows of a cleanup mask created in the table
       with the `Retired` column. Files: World.cs, World.Archetypes.cs, World.Indexes.cs; D57 updated. Proof:
       CleanupBenchmark (106 -> ~60 us), DestroyLogBenchmark, a `Without<Retired>` reader case, the headline worlds equal.
+      **Dropped** (owner-review.md: 105.6 -> 133.5 us, the release pass tests every row and fills every hole).
 - [ ] **C16. P6: unsized resizes uninitialized** (`perf.md` P6), after `[PageFaultDiagnoser]` and Tier1 of `Resize`
       show the clear costs. Files: ComponentInfo.cs, Archetype.cs. Proof: ColdCreateComparison PerEntity,
       MicroBenchmarks CreateAddDestroy, PageFaultBenchmark Grow, FullCopyBenchmark Grow.
-- [ ] **C17. P7: `Removed<T>` from a log of removals** (`perf.md` P7, low). Files: Archetype.cs, a log file, Query.cs.
-      Proof: RemovalComparison, removal writers' cost.
+- [x] **C17. P7: `Removed<T>` from a log of removals** (`perf.md` P7, low). Files: Archetype.cs, a log file, Query.cs.
+      Proof: RemovalComparison, removal writers' cost. **Not built** (owner-review.md: the cost is per visited row,
+      which a log still pays).
 - [ ] **C18. P8: integer tuple keys hashed by bytes** (`perf.md` P8, low). Files: ValueIndex.cs. Proof:
       IndexBenchmark LookupUnique, ValueQueryComparison, IndexComparison.
 - [ ] **C19. The core's unmanaged columns on mimalloc** (owner, 2026-11-07: option (b); `native-columns.md`), last in

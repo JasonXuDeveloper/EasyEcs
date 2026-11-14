@@ -3746,3 +3746,11 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
 - reference: regenerate after the descriptor's text change (EECS103's description names the stepped walk).
 - Not built (owner-review.md "A ground cell sampling its tile's layer"): a ground cell method that also reads a layer
   of the 3D tile's cells (`GroundHeatSystem`'s rocks): cells of two shapes in one method.
+
+## feat-lane1-core (backlog Lane 1: C11-C19, the rerun)
+
+- decisions.mdx + .zh (dropped, with numbers; text in owner-review.md): C13 the enumerator's short path for tables
+  without holes (the walk's state round-trips through the stack per row; QueryWrite 1.21x), C15 retired entities'
+  bits flipped in place (CleanupBenchmark 105.6 -> 133.5 us), C17 `Removed<T>` from a log (the cost is per visited
+  row), C14's batch half (a wash; the masked half is 42b8e9d's record if it has one, else one line there). Roadmap
+  "Dropped" names them. C11 follows when package E has measured its last variant.
