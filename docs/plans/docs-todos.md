@@ -3741,3 +3741,21 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
   not its words" (stamping a word ahead was the faster form on paper and was refused: a loop that breaks would report
   rows it never visited to `Changed<T>` passes; the exact form got the win: QueryTick about 0.5-0.6x, numbers in the
   backlog's C12).
+
+## feat-interleaved-256 (from feat-net11's B1: two-source permutes in Interleaved's 256-bit forms)
+
+- changelog.mdx + .zh, "Performance": on AVX-512 machines whose runtime keeps Vector512 unaccelerated (Intel
+  Skylake-SP / X, Cascade Lake, Cooper Lake by default; .NET decides it per CPU:
+  https://devblogs.microsoft.com/dotnet/dotnet-8-hardware-intrinsics/), the vector loops' reads and writes of components
+  of two or four 4-byte fields take two-source permutes (vpermt2ps / vpermt2pd): fewer shuffles per row.
+- decisions.mdx + .zh: a record. Listings (tools/perf/loopbound.sh, REG=ymm, DOTNET_PreferredVectorBitWidth=256):
+  KernelBenchmark's Move2 masked loop 10.1 -> 8.1 cycles per vector on Ice Lake, 14.1 -> 8.1 on Skylake-SP; the flat
+  loops of Push / Move4 1.8 -> 1.6. Not taken: three fields (6 two-source permutes, all on port 5, 6.0 cycles against
+  3.0 for 3 permutes and 6 blends) and four 8-byte fields (8 shuffles either way, 8.0 cycles both, more
+  instructions). Numbers (DOTNET_PreferredVectorBitWidth=256, base 27baf410 against head, two interleaved rounds,
+  0 B everywhere; .NET 11 in process: BenchmarkDotNet 0.15 cannot build for a .NET 11 host): Move2GapsGenerated
+  0.86-1.00 at 1k rows, 0.92-0.98 at 100k; SlicesBenchmark (an Npc of four floats) 0.81-0.97 in most rows; the
+  headline worlds level within the run's noise (control rows without interleaved code moved +-15 % on this VM).
+  SlicesBenchmark's Update/1/Entity read 1.7x on .NET 11 in the two full rounds: only in the second in-process
+  launch after other classes (launch 1 of the same run 72-89 us against base 80-104); alone in its process
+  (--launchCount 3) 81.3 against 85.3 us. An artifact of in-process launches, not of the loop.

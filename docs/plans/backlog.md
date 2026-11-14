@@ -151,6 +151,10 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       `Avx512F.VL.PermuteVar8x32x2`) in `Interleaved`'s 256-bit loads and stores, behind `Avx512F.VL`: the path x64
       AVX-512 machines run by default (`Vector<T>` stays 256 bits there), 4 shuffles a pair of fields today. Both
       runtimes. Proof: KernelBenchmark's interleaved cases, the headline worlds, Tier1; DOTNET_EnableAVX512=0 unchanged.
+      Handed back on branch `feat-interleaved-256`: Load2 / Store2 and the 4-byte Load4 / Store4 take the permutes;
+      the path runs only where Vector512 is not accelerated (Skylake-SP / X, Cascade Lake, Cooper Lake by default, or
+      DOTNET_PreferredVectorBitWidth=256), so x64 machines from Ice Lake on keep their Vector512 loops. Load3 and the
+      8-byte Load4 keep their forms (llvm-mca: no better). Numbers and listings in docs-todos.
 - [ ] **`fix-allocation-tests-warmup`**: 0 B tests that fail once in many full-suite runs on a loaded machine and
       never alone: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate` (net11.0, AVX-512 off, gate of
       f2da0801) and `NeighborTests.APassOverListsAllocatesNothingOnceWarm` (net10.0, 336 B, lane 1's gate). Suspected:
