@@ -34,9 +34,11 @@ FRAMEWORK=net10.0 tools/perf/inlining.sh && FRAMEWORK=net11.0 tools/perf/inlinin
   (`audit-docs`, zh). Before a merge, read `git diff <base> -- docs/content`: no Chinese line replaced by English, no
   English page losing content or gaining Chinese or `/zh/` links, en and zh still saying the same.
 - Renamed a heading anchor? `bun run build` runs `lint:search`: update `docs/scripts/search-expectations.json`.
-- Changed a hot path? `tools/perf/bench.sh <classes> --sync`, and again with `--framework net11.0` (the site shows
-  both runtimes' numbers; its classes and WorldSimulation, BattleServer, the neighbors): `--sync` lists the rows of that
-  runtime that moved 15 % or allocate differently. Each slower row or new allocation is
+- Changed a hot path? Measure it with `tools/perf/bench.sh <classes>` and again with `--framework net11.0` (its
+  classes and WorldSimulation, BattleServer, the neighbors; the decision numbers come from one quiet machine, `audit-perf`),
+  and refresh the site's rows from CI: the `Benchmarks` workflow with those classes, then `tools/perf/sync-ci.sh <run id>
+  --merge` (owner, L17: the site's numbers come from CI), which lists the rows of each runtime that moved 15 % or
+  allocate differently. Each slower row or new allocation is
   run against `origin/master` (two rounds, the copy outside the repo) and fixed or explained before the numbers ship. Every BenchmarkDotNet run goes through `flock /tmp/bench.lock`;
   numbers taken while builds, tests or samples run outside the lock are noise (parallel rows swing by 2x): rerun them
   on a quiet machine.
@@ -44,8 +46,11 @@ FRAMEWORK=net10.0 tools/perf/inlining.sh && FRAMEWORK=net11.0 tools/perf/inlinin
 - A failure that comes and goes: reproduce it first (a steady-state check 10 or more times) before bisecting, or the
   bisect blames an innocent commit; a generator merge is proven innocent by diffing its generated code against the
   parent's (VoxelServer's allocation, 2026-10-27, blamed feat-views; the cause was copy-on-write lists after a restore).
-- Before a release: `tools/perf/bench.sh --site --sync` and `tools/perf/bench.sh --site --framework net11.0 --sync` on
-  the final code (every class the site shows, per runtime), the README
+- Before a release (owner, L17: the site's numbers come from CI): dispatch the `Benchmarks` workflow on the final
+  code with `--site` (`gh workflow run benchmarks.yml -f classes=--site`; both runtimes in parallel, a few hours), then
+  `tools/perf/sync-ci.sh <run id>`: it downloads both artifacts and makes each runtime's reports its whole set
+  (`sync-benchmarks --replace`, so a new SDK or runner CPU replaces the old set instead of being refused; a class that
+  failed in the run refuses the sync, `--partial` drops it); read the moved rows, commit `docs/src/data/bench.json`; the README
   numbers (headline, tables) from the new `bench.json`, changelog / README "What's new" / migration complete, the
   roadmap updated; the GitHub description's numbers are the owner's to change (say so).
 

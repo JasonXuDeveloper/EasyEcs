@@ -103,16 +103,21 @@ scripts/                 chromium.ts (a headless Chromium for mermaid), git-hist
   comparison project's csproj.
 - Input: `BENCH_RESULTS`, else `../BenchmarkDotNet.Artifacts/results`; `--runtime <tfm>` takes only that runtime's
   reports. A runtime's committed set is kept when the directory is missing (Cloudflare) or lacks classes that set has
-  (a filtered local run); `--partial` overrides that, `--merge` replaces only the classes the directory holds and keeps
-  the others, and adds a runtime that has no numbers yet (refused when the machine or the SDK differs from that
-  runtime's committed numbers).
-- After a run on the reference machine: `tools/perf/bench.sh <classes> --framework <tfm> --sync` (or
-  `--site --framework <tfm> --sync` for every class the site shows; default net10.0) runs the classes one process each,
-  resumable, into `BenchmarkDotNet.Artifacts/<tfm>/results`, and merges them into that runtime's set; check the diff,
-  commit the JSON. A new class enters the site's set once it has been run and merged. The CI workflow `Benchmarks`
-  (`.github/workflows/benchmarks.yml`, run by hand) runs bench.sh per runtime in parallel and uploads the reports
-  (`benchmarks-<tfm>`); its header has the two commands that merge them. Hosted runners are shared and noisy: whether
-  the published numbers come from CI or from a fixed machine is the owner's call (docs-todos, feat-net11).
+  (a filtered local run); `--replace` makes the reports the runtime's whole set whatever machine or SDK the committed
+  set came from (refused when they lack a class of that set, unless `--partial` too); `--partial` writes what the
+  directory holds; `--merge` replaces only the classes the directory holds and keeps the others, and adds a runtime
+  that has no numbers yet (refused when the machine or the SDK differs from that runtime's committed numbers).
+- **The site's numbers come from CI** (owner, ledger L17): the `Benchmarks` workflow (`.github/workflows/benchmarks.yml`,
+  `workflow_dispatch`, input `classes`, default `--site`) runs `tools/perf/bench.sh` per runtime in parallel on hosted
+  runners and uploads each runtime's reports (`benchmarks-<tfm>`). Then `tools/perf/sync-ci.sh <run id>` downloads both
+  artifacts (`gh run download`), makes each runtime's reports its whole set (`--replace`; `--merge` for a run of a few
+  classes, `--partial` to drop a class that failed) and lists the rows that moved (`tools/perf/moved.py`); check the
+  diff, commit the JSON. A new class enters the site's set once it has been run and synced. Hosted runners are shared:
+  the two jobs may run on different CPUs, and the source line then names each runtime's machine.
+- `tools/perf/bench.sh <classes> --framework <tfm> --sync` (`--site` for every class the site shows; default net10.0)
+  still runs the classes one process each, resumable, into `BenchmarkDotNet.Artifacts/<tfm>/results` and merges them
+  into that runtime's set, for a machine whose set it is (a measurement on the decision machine, `audit-perf`, is
+  compared there, not published).
 - The site shows the runtimes side by side wherever a number is shown (`src/lib/benchmarks.ts`: `runtimes`, every
   accessor takes the runtime last, default `primaryRuntime`): a column per runtime in tables (`comparisonTable`,
   `peerTable`, the feature table), a bar per runtime in charts (a lighter shade for the later one), both values in a
