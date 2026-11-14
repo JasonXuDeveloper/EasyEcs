@@ -119,11 +119,15 @@ scripts/                 chromium.ts (a headless Chromium for mermaid), git-hist
   into that runtime's set, for a machine whose set it is (a measurement on the decision machine, `audit-perf`, is
   compared there, not published).
 - The site shows the runtimes side by side wherever a number is shown (`src/lib/benchmarks.ts`: `runtimes`, every
-  accessor takes the runtime last, default `primaryRuntime`): a column per runtime in tables (`comparisonTable`,
-  `peerTable`, the feature table), a bar per runtime in charts (a lighter shade for the later one), both values in a
-  named number (`benchValues`) and a stat's second line (`alt`) once both have one. A runtime with no number yet is an
-  empty cell ("—") or no bar, never a guess. The home page's headline copy, the social cards and `llms.txt` quote the
-  primary runtime and say so (`sourceLine(zh, primaryRuntime)`).
+  accessor takes the runtime last): a column per runtime in tables (`comparisonTable`, `peerTable`, the feature table),
+  a bar per runtime in charts (a lighter shade for the later one), both values in a named number (`benchValues`) and
+  a stat's second line (`alt`) once both have one. A runtime with no number yet is an empty cell ("—") or no bar,
+  never a guess.
+- A number shown alone is quoted from the **headline runtime** (owner, ledger L21: `headlineRuntime`, .NET 11; per
+  class `headlineFor`, which falls back to .NET 10 while .NET 11 has no number for the class, so the home page never
+  shows "—"): the home page's headline copy, the social cards, `llms.txt`, a stat's figure, the order and tiers of the
+  feature comparison (and so the leads and counts the home page quotes) and the row order of a table. An accessor
+  called without a runtime gives that. `headlineSourceLine` names the runtimes those figures came from.
 - Named numbers for prose are `keys` in `src/lib/benchmarks.ts`; charts and tables take a class
   (`Features.RemovalComparison`) and a [Params] filter.
 
