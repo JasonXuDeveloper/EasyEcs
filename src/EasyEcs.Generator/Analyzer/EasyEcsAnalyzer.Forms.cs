@@ -90,7 +90,9 @@ public static partial class EasyEcsAnalyzer
         Category, DiagnosticSeverity.Warning, true,
         "A Tile method that walks its rows with the cursor's vector loads (Load128, Load256, Load512, LoadVector at x + dx " +
         "and constant dy, dz), combines them lane by lane and copies each vector into its out buffer computes one cell per " +
-        "lane. The generator writes that loop from the cell method (Cell<TCell, TTile> and 'out TOut'): the halo, every " +
+        "lane; so does a tile stepped by ref whose rows' columns are walked with Columns(lanes), loaded at constant " +
+        "offsets of the column and stored with col.Store. The generator writes that loop from the cell method " +
+        "(Cell<TCell, TTile> and 'out TOut', or 'out TCell' to step the tile): the halo, every " +
         "row at the widest vectors the hardware has, the rows nothing changes skipped, the same results bit for bit. The " +
         "fix writes it: each load a neighbor 't[dx, dy, dz]', each vector local a scalar one; it is offered only when the " +
         "generator gives the cell method its row loop.",

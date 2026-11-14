@@ -100,10 +100,18 @@ scripts/                 chromium.ts (a headless Chromium for mermaid), git-hist
   and the machine from the `*-report-github.md` headers; peer versions come from the comparison project's csproj.
 - Input: `BENCH_RESULTS`, else `../BenchmarkDotNet.Artifacts/results`. The committed file is kept when the directory is
   missing (Cloudflare) or lacks classes the committed data has (a filtered local run); `--partial` overrides that,
-  `--merge` replaces only the classes the directory holds and keeps the others (refused for another machine).
-- After a run on the reference machine: `tools/perf/bench.sh <classes> --sync` (or `--site --sync` for every class the site
-  shows) runs the classes one process each, resumable, and merges them (`--merge`); check the diff, commit the JSON.
-  A new class enters the site's set once it has been run and merged.
+  `--merge` replaces only the classes the directory holds and keeps the others (refused for another machine), and
+  `--replace` makes the reports the whole set whatever machine or SDK the committed set came from (CI's run; it says
+  so when the machine changes, and it is refused when the reports lack a committed class unless `--partial` too).
+- **The site's numbers come from CI** (owner, ledger L17): the `Benchmarks` workflow (`.github/workflows/benchmarks.yml`,
+  `workflow_dispatch`, input `classes`, default `--site`) runs `tools/perf/bench.sh` on a hosted runner and uploads the
+  reports (artifact `benchmarks`). Then `tools/perf/sync-ci.sh <run id>` downloads it (`gh run download`), makes its
+  reports the whole set (`--replace`; `--merge` for a run of a few classes, `--partial` to drop a class that failed) and
+  lists the rows that moved (`tools/perf/moved.py`); check the diff, commit the JSON. A new class enters the site's set
+  once it has been run and synced. Hosted runners are shared machines; the source line names the one the run had.
+- `tools/perf/bench.sh <classes> --sync` (`--site` for every class the site shows) still runs the classes one process
+  each, resumable, and merges them into the set, for a measurement on the decision machine (`audit-perf`), which is
+  compared there, not published.
 - Named numbers for prose are `keys` in `src/lib/benchmarks.ts`; charts and tables take a class
   (`Features.RemovalComparison`) and a [Params] filter.
 
@@ -159,7 +167,7 @@ scripts/                 chromium.ts (a headless Chromium for mermaid), git-hist
   frame array straight from the WebAssembly memory. The page includes the demo's C# files, so they are what runs.
 - Cloudflare builds with Bun only, so the published runtime is committed in `public/demo/_framework`. After changing
   the demo or EasyEcs.Core: `bun run demo:build` (`scripts/build-demo.sh`: installs the `wasm-tools-net10` workload
-  when missing (the demo targets net10.0), then `dotnet publish` with Mono AOT, the IL compiled ahead of time to WebAssembly with 128-bit SIMD,
+  when missing: the demo targets net10.0 and the repository's SDK is .NET 11's; then `dotnet publish` with Mono AOT, the IL compiled ahead of time to WebAssembly with 128-bit SIMD,
   trimmed, invariant globalization), check the page, commit `public/demo` (with `public/demo/source.sha256`, the hash
   of the sources it was built from: CI fails when `scripts/demo-source.sh` gives another, after any change to
   EasyEcs.Core, the generator, the demo or `Directory.Build.props`). Browsers do not run CoreCLR yet (CoreCLR

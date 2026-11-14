@@ -188,3 +188,125 @@ there is nothing to buy with a change (the backlog item has the numbers).
 
 What would change the verdict: a corpus whose files name many closed generic systems (the transform then binds each
 on every edit of its file), measured with this stage's tracked step.
+
+## A ground cell sampling its tile's layer: not built (feat-ground-cells, 2026-11-14)
+
+**Proposed by** the inner-loops leftover (a): a cell method over a `Ground<TTile>` tile. The plain form (every cell of the
+ground's shape) already ran and now has its tests and TileGroundBenchmark (the backlog item has the numbers). What a
+ground is for, though, is a second field beside the 3D tile's cells, and its stencils read that tile too:
+`GroundHeatSystem` (TileTests.Steps.cs) spreads heat over `Ground<RockChunk>` except where the chunk's top layer is
+rock, reading `rocks[x, 3, row.Z]`.
+
+**Why not.** A cell method's inputs must share one shape (Symbols.StepProblem, EECS115: "cells of different tiles"),
+because each input is a stream at a constant offset from the driver's cell and their rows line up. A ground row and
+a row of the 3D tile line up in x and z, but the sampled layer is an absolute layer of the other shape (3), not an
+offset within its halo: `Cell<Rock, RockChunk>` has no way to say it, and its exchange would copy every layer of the
+3D tile for one. It needs a public form (a layer pick on the sampled cell, or an attribute naming the layer) and
+the exchange of one layer of another shape: an API for the owner to choose.
+
+What would change the verdict: the owner choosing that form; then Kernel.CellFormOf reads the pick as a stream
+of the other tile's row at that layer, and the pass exchanges that layer alone (`ExchangeHalo(layer, layer)`).
+
+## The helpers' work estimate from runs alone (C11): dropped (feat-lane1-core, 2026-11-09)
+
+**Proposed by** the lane 1 core plan (backlog C11, P1): a parallel pass chose its helpers from "summed thread time x
+the last probe's ratio", which counts the helpers' own contention as work; the plan ran a probe alone every period
+while wide and learned the cost per item (`perItem`) from those alone runs only (P1b: a merge pass under the floor
+runs its 16 chunks on the caller).
+
+**Why not.** Both variants measured slower (the first lane 1 run, lost with its container on 2026-11-09; its numbers
+survive in the backlog): ParallelRunner 1000 10.3 -> 16.4 us, ChunkSize Light 100k 18.1 -> 22.2 us,
+SumParallelReduce 6.0 -> 8.1 us. The cause found: the noise of one probe's ratio sends passes to runs alone, and a
+cost taken from runs alone (no contention in it) is low, so light passes were cut into fewer, longer chunks and lost
+their helpers. One variant was not measured then: the base chunk sizing kept and the probes alone deciding the
+helpers (backlog C11; package E of the lane's rerun measures it and updates this entry).
+
+What would change the verdict: a probe whose ratio is stable over a few periods (a median of several alone runs, not
+the last one), measured on the same classes, or a machine whose helpers' contention dominates the summed thread time.
+
+## The query enumerator's short path for tables without holes (C13): dropped (feat-lane1-core, 2026-11-09)
+
+**Proposed by** the lane 1 core plan (backlog C13, P4): skip the id load and the tombstone test per row of the query
+enumerator in tables without holes, one mode test per table.
+
+**Why not.** The Tier1 listing of the enumerator's `MoveNext` (the first lane 1 run) shows the walk's state making a
+round trip through the stack every row, in base and in the change alike: the id load is not on that dependency chain,
+so skipping it buys nothing, and the mode test lengthens the loop (MicroBenchmarks QueryWrite 1.21x slower).
+
+What would change the verdict: an enumerator whose state stays in registers across `MoveNext` (a JIT that promotes the
+struct's fields of a `foreach` over a ref struct enumerator, or a different shape of the enumerator), after which the
+id load would be on the loop's critical path; check with `tools/perf/jitdisasm.sh` first.
+
+## A retired entity's bits flipped in place (C15): dropped (feat-lane1-core, 2026-11-09)
+
+**Proposed by** the lane 1 core plan (backlog C15, P5): create the rows of a cleanup mask in a table with the `Retired`
+column, so retiring an entity flips a presence bit in place instead of moving its row (CleanupBenchmark 106 -> about
+60 us expected).
+
+**Why not.** Measured slower (the first lane 1 run): CleanupBenchmark 105.6 -> 133.5 us. The cause found: the release
+pass tests all 10,000 rows' bits, and every freed entity leaves a hole that the pass's end fills from the table's tail;
+destroy fell 53 -> 29 us but release rose 32 -> 76 us.
+
+What would change the verdict: a release that walks only the retired rows (a list of them kept by the retire step, or
+the word summaries of the Retired column skipping words with none) and holes left for the next creations instead of
+filled at once; both are measured on CleanupBenchmark and DestroyLogBenchmark.
+
+## `Removed<T>` from a log of removals (C17): not built (feat-lane1-core, 2026-11-09)
+
+**Proposed by** the lane 1 core plan (backlog C17, P7, low): answer `Removed<T>` from a log of the removals instead of
+scanning the table's word summaries.
+
+**Why not.** Measured before building (the first lane 1 run): the cost of a `Removed<T>` pass is per visited row
+(21-37 ns), which a log still pays (it visits the same rows); the summary scan the log would replace costs about 28 ns
+in all. Nothing to buy.
+
+What would change the verdict: a `Removed<T>` pass over a very large table with few removals, where the scan of the
+word summaries (not the visited rows) dominates, measured with RemovalComparison at that shape.
+
+## A batch pass's tested tables out of line (C14): not shipped (feat-lane1-core, 2026-11-14)
+
+**Proposed by** the lane 1 core plan (backlog C14, the frame split of `World.Masked` / `Batches`): run a table whose
+rows must be tested out of line (a NoInlining walk per table or chunk), so the job's loop inlines under that walk's own
+budget and the pass over tables keeps only the lean loop of a table whose rows all pass.
+
+**Why not.** The masked half is in the base already: the first lane 1 run measured it from 3315196, before 42b8e9d
+("Run a masked pass's walk over words out of line") made `MaskedRuns` NoInlining, and its LateHoles gain (Move2
+0.79-0.84x, Move3 0.82-0.92x, Step 100k 0.86-0.89x) is that commit's. The rebuild ran the batch half
+(`ForEachBatchRuns`' tested loop as a NoInlining `TestedRuns`) against fc26ea4, default job, two interleaved rounds:
+the batch passes over tested tables are a wash (KernelBenchmark CycleHolesScalar 1,000: base 5,533 / 5,973 ns, head
+5,660 / 5,978 ns; 100,000: 614 / 586 us against 635 / 585 us; OptionalScalar 100,000: 152 / 146 us against 139 / 141
+us; 1,000: 1,347 / 1,477 ns against 1,420 / 1,447 ns), all 0 B. LateHoles read slower on head in both rounds (Move2
+1,000: 335 / 339 ns against 453 / 400 ns) on a machine at load 5-13 from other agents' runs, but its Tier1 code is the
+same: `Masked` 2,126 bytes on both sides, `MaskedRuns` 2,289 against 2,291 and 2,722 against 2,709, instruction for
+instruction apart from addresses (listings from the benchmark process, `--dev`), and a base `--dev` run read
+Move2 1,000 at 387 ns, inside head's range. So the gap is process placement, not code, and the batch half buys nothing.
+
+What would change the verdict: a batch job whose loop runs past the inliner's budget of `Batches` (two widths of
+loops, or lookups, as LookupGatherBenchmark's ParallelHeavy did for masked passes before 42b8e9d), seen as a call per
+run in `tools/perf/inlining.sh`; then the same split pays and is measured on that job.
+
+## C# 15 extension indexers: not added (feat-net11, net11.md B10; owner, L22)
+
+**Proposed by** the .NET 11 research (docs/plans/designs/net11.md, B10): C# 15 lets an `extension` block declare an
+indexer, so access could read `world[entity]` or `entity[typeof-like key]` beside the generated members.
+
+**Why not.** The owner decided (ledger L22): the generated members (`entity.Health`, `world.Score`) are already the
+short form of every access, and an indexer would be a second syntax for the same thing, with no speed to gain (both
+inline to the same column access). It changes the public API, so it was asked, not built.
+
+What would change the verdict: an access the generated members cannot name (a key only known at run time, such as a
+component chosen by data), where an indexer would be the only short form.
+
+## .NET 11's Unzip / Zip and CreateGeometricSequence in the vector loops: not used (feat-net11, net11.md B1, B2)
+
+**Proposed by** the .NET 11 research (docs/plans/designs/net11.md): the new portable lane APIs for the de-interleaving
+loads of `Interleaved` (B1) and the lane-bit masks (B2).
+
+**Why not** (net11.md section 3 has the listings). B1: on AVX2 `Vector256.UnzipEven` / `UnzipOdd` take 8 shuffles for
+a pair of fields where `Interleaved.Load2` takes 4; on AVX-512 they become `vpermt2ps`, which `Avx512F.VL` has offered
+since .NET 8 (a candidate for the Core lane on both runtimes, not a .NET 11 item); ARM64 already uses LD2 / LD3 / LD4.
+B2: `CreateGeometricSequence(1, 2)` folds to the same constant as the literals on x64, so a .NET 11 branch would only
+fork the code.
+
+What would change the verdict: B1, a JIT lowering of Unzip on AVX2 shorter than shufps + vpermpd; B2, the owner's M4
+numbers for ARM64, where the masks are static readonly fields a folded constant could replace.

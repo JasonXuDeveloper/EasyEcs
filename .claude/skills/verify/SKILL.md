@@ -10,7 +10,7 @@ metadata:
 ```bash
 export PATH=$PATH:/root/.dotnet:/root/.dotnet/tools:/root/.bun/bin DOTNET_ROOT=/root/.dotnet   # cloud sessions
 dotnet build -c Release                          # 0 warnings (warnings are treated as real problems)
-dotnet test                                      # all NUnit tests on net10.0 and net11.0, generator caching and allocation tests included
+dotnet test                                      # all NUnit tests on .NET 10 and .NET 11 (L27), generator caching and allocation tests included
 dotnet run -c Release --project tools/docs/DocCheck   # every C# fence of the docs compiles: "0 problems"
 dotnet run --project tools/docs/ApiDocs               # reference pages + Chinese entries: "0 problem(s)"
 (cd docs && bun run check && bun run build)      # links, anchors, icons, zh terms; SEO and search expectations
@@ -19,9 +19,7 @@ dotnet run --no-build -c Release --project samples/GameLoop -- --ticks 30
 bash templates/smoke.sh                          # dotnet new templates pack, build, run, test
 tools/agents.sh --check                          # AGENTS.md indexes current, CLAUDE.md = @AGENTS.md, every source file in its map
 npx -y skills add . --list                       # lists only `easyecs`: every development skill has metadata.internal: true
-dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -f net10.0 -o <scratch>/aot10 && <scratch>/aot10/EasyEcs.Aot   # no AOT warning, checks pass
-dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -f net11.0 -o <scratch>/aot11 && <scratch>/aot11/EasyEcs.Aot   # and on .NET 11
-FRAMEWORK=net10.0 tools/perf/inlining.sh && FRAMEWORK=net11.0 tools/perf/inlining.sh   # every generated job inlined, on both JITs
+dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o <scratch>/aot && <scratch>/aot/EasyEcs.Aot   # no AOT warning, checks pass
 ```
 
 - `samples/Godot` runs only where a Godot .NET editor is installed (CI: `check-sample.sh samples/Godot --ticks 120`
@@ -34,8 +32,10 @@ FRAMEWORK=net10.0 tools/perf/inlining.sh && FRAMEWORK=net11.0 tools/perf/inlinin
   (`audit-docs`, zh). Before a merge, read `git diff <base> -- docs/content`: no Chinese line replaced by English, no
   English page losing content or gaining Chinese or `/zh/` links, en and zh still saying the same.
 - Renamed a heading anchor? `bun run build` runs `lint:search`: update `docs/scripts/search-expectations.json`.
-- Changed a hot path? `tools/perf/bench.sh <classes> --sync` (its classes and WorldSimulation, BattleServer, the
-  neighbors): `--sync` lists the rows that moved 15 % or allocate differently. Each slower row or new allocation is
+- Changed a hot path? Measure it with `tools/perf/bench.sh <classes>` (its classes and WorldSimulation, BattleServer,
+  the neighbors; the decision numbers come from one quiet machine, `audit-perf`), and refresh the site's rows from CI
+  (owner, L17): the `Benchmarks` workflow with those classes, then `tools/perf/sync-ci.sh <run id> --merge`, which lists
+  the rows that moved 15 % or allocate differently. Each slower row or new allocation is
   run against `origin/master` (two rounds, the copy outside the repo) and fixed or explained before the numbers ship. Every BenchmarkDotNet run goes through `flock /tmp/bench.lock`;
   numbers taken while builds, tests or samples run outside the lock are noise (parallel rows swing by 2x): rerun them
   on a quiet machine.
@@ -43,7 +43,11 @@ FRAMEWORK=net10.0 tools/perf/inlining.sh && FRAMEWORK=net11.0 tools/perf/inlinin
 - A failure that comes and goes: reproduce it first (a steady-state check 10 or more times) before bisecting, or the
   bisect blames an innocent commit; a generator merge is proven innocent by diffing its generated code against the
   parent's (VoxelServer's allocation, 2026-10-27, blamed feat-views; the cause was copy-on-write lists after a restore).
-- Before a release: `tools/perf/bench.sh --site --sync` on the final code (every class the site shows), the README
+- Before a release (owner, L17: the site's numbers come from CI): dispatch the `Benchmarks` workflow on the final code
+  with `--site` (`gh workflow run benchmarks.yml -f classes=--site`, a few hours), then `tools/perf/sync-ci.sh <run id>`:
+  it downloads the artifact and makes its reports the whole set (`sync-benchmarks --replace`, so a new SDK or runner
+  CPU replaces the old set instead of being refused; a class that failed in the run refuses the sync, `--partial`
+  drops it); read the moved rows, commit `docs/src/data/bench.json`; the README
   numbers (headline, tables) from the new `bench.json`, changelog / README "What's new" / migration complete, the
   roadmap updated; the GitHub description's numbers are the owner's to change (say so).
 

@@ -345,6 +345,59 @@ public class ChangedTests
         Assert.That(world.Count<Armor>(changed), Is.EqualTo(10));             // a query's items hand out refs: written
     }
 
+    /// <summary>
+    /// A query stamps exactly the rows it visits, each before the loop's body sees it (the word's summaries noted once):
+    /// a full loop (in a table whose rows are tested, the passing ones only), a loop that leaves early (nothing after its
+    /// last row), a read of the changes inside the body (the rows so far, the current one included), and a loop making
+    /// structural changes (every row it visited after them too).
+    /// </summary>
+#pragma warning disable EECS046, EECS032 // the stamping of a query that only reads (and counts) is what this test covers
+    [Test]
+    public void QueryStampsTheRowsItVisits()
+    {
+        using var world = new World();
+        var entities = new Entity[200];
+        world.CreateEntities(entities, new Armor(1), new Seen());
+        for (int i = 0; i < entities.Length; i += 3) entities[i].Disable<Seen>(); // a presence bit off: rows tested
+        world.Update();
+        ulong mark = world.ChangeTick;
+        var changed = QueryFilter.Create().Changed<Armor>(mark);
+
+        int visited = 0;
+        foreach (var item in world.Query<Armor, Seen>()) visited++;
+        Assert.That(visited, Is.EqualTo(133));
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(visited)); // the passing rows of each word, no others
+        foreach (var item in world.Read<Armor>(changed)) Assert.That(item.Entity.Has<Seen>(), Is.True);
+
+        world.Update();
+        mark = world.ChangeTick;
+        changed = QueryFilter.Create().Changed<Armor>(mark);
+        var seen = new System.Collections.Generic.HashSet<Entity>();
+        foreach (var item in world.Query<Armor>())
+        {
+            seen.Add(item.Entity);
+            Assert.That(world.Count<Armor>(changed), Is.EqualTo(seen.Count)); // the current row is written already
+            if (seen.Count == 71) break;
+        }
+
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(71)); // the rows visited, none after the break
+        foreach (var item in world.Read<Armor>(changed)) Assert.That(seen, Does.Contain(item.Entity));
+
+        world.Update();
+        mark = world.ChangeTick;
+        changed = QueryFilter.Create().Changed<Armor>(mark);
+        visited = 0;
+        foreach (var item in world.Query<Armor>())
+        {
+            if (item.Entity == entities[5]) entities[150].Destroy(); // a structural change ahead of the walk
+            visited++;
+        }
+
+        Assert.That(visited, Is.EqualTo(199));
+        Assert.That(world.Count<Armor>(changed), Is.EqualTo(199)); // the tail row moved into the hole brought its stamp
+    }
+#pragma warning restore EECS046, EECS032
+
     [Test]
     public void TicksFollowEntitiesThatMove()
     {

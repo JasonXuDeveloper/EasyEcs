@@ -1,0 +1,48 @@
+name: Benchmarks
+
+# Run manually: Actions -> Benchmarks -> Run workflow. Runs tools/perf/bench.sh on a GitHub-hosted runner and uploads
+# the BenchmarkDotNet reports as an artifact (benchmarks: results/ and done/*.log). Its numbers are the site's (owner,
+# ledger L17): a run of --site before a release, then, on a clone, tools/perf/sync-ci.sh <run id> downloads the
+# artifact, makes its reports the whole set of docs/src/data/bench.json and lists the rows that moved; commit the JSON.
+# Nothing is committed by the workflow itself. Hosted runners are shared machines whose speed varies from run to run;
+# the site's source line names the machine.
+
+on:
+  workflow_dispatch:
+    inputs:
+      classes:
+        description: "Benchmark classes, space-separated (BulkBenchmark Features.RemovalComparison), or --site for every class the site shows"
+        required: true
+        default: "--site"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-26.04
+    # A full --site run takes hours; GitHub stops a job at 6 h
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          # the SDK global.json names (11) builds net10.0 and the unit tests' net11.0; .NET 10 runs the rest
+          dotnet-version: |
+            10.0.x
+            11.0.x
+      - name: Run the benchmarks (tools/perf/bench.sh)
+        env:
+          CLASSES: ${{ inputs.classes }}
+        # word splitting of CLASSES is wanted: one argument per class
+        run: tools/perf/bench.sh $CLASSES
+      - name: Upload the reports (results/ for sync-benchmarks.ts, the logs per class)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: benchmarks
+          path: |
+            BenchmarkDotNet.Artifacts/results
+            BenchmarkDotNet.Artifacts/done/*.log
+          if-no-files-found: warn

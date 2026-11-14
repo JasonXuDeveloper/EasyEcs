@@ -3678,43 +3678,87 @@ names.
 - `lint:search`: the en "ChunkRows" query must find `guide/performance/threading` (the expectation was updated with the
   move; re-run once the build passes).
 
-## feat-net11 (ledger L14: net10.0 and net11.0)
+## feat-net11 and feat-net10-only (ledger L14, L16, L17, L21, L25, L26, L27: one target, net10.0)
 
-Package A (compatibility) changed the projects, CI, AGENTS.md files, skills, README and the install / requirements
-lines of getting-started, index, faq and samples/godot (en + zh). For the docs pass:
+feat-net11 added `net11.0` beside `net10.0` and measured .NET 11; no .NET 11 API made EasyEcs faster or shorter and the
+runtime alone measured level, so the owner kept one target (L25) and one runtime on the site (L26); feat-net10-only
+undid the second target. What stays for users: two generator fixes and ".NET 10 and later". For the docs pass:
 
-- [ ] **Changelog** (4.8 or the version it ships in, `### New`): "EasyEcs targets `net10.0` and `net11.0`: the package
-      carries both builds, NuGet picks the one of your project." Link getting-started.
-- [ ] **Changelog `### Fixes`** (the same version): on .NET 11 a `[ForEach]` method reading a uniform `[InlineArray]`
-      table at a row's index (Kernel.Tables) failed to compile (CS9164); and `float.DegreesToRadians` /
-      `RadiansToDegrees` in a vector loop are now the runtime's own vector form, which rounds as the scalar call does on
-      either runtime (.NET 11 computes the float form in double and the double form as a correctly rounded three-limb
-      product, so the old `(x * Pi) / 180` lanes differed from the method's on .NET 11).
-- [ ] **Migration** (`migration.mdx` + zh): no code changes for users; a note in the section of that version that the
-      template's `--framework` (`-f net11.0`) picks .NET 11 and that a project moving to net11.0 may see float results of
-      `DegreesToRadians` / `RadiansToDegrees` change in the last bit (.NET 11's own change, scalar and vector alike).
-- [ ] **README "What's new"**: .NET 11 support (both runtimes tested in CI, x64 and ARM64, Native AOT on both).
-- [ ] **Decision record** (replaces D15 ".NET 10 only" in place, AGENTS.md "Nothing stale"): EasyEcs targets the
-      supported .NET releases from 10 on (`net10.0;net11.0`); why both (10 is the LTS until 2028, 11 the STS with the
-      newer JIT); how runtime-specific code is kept (`#if NET11_0_OR_GREATER`, the net10.0 path unchanged, generated
-      code compiling on both); applications in the repository on one runtime (samples, DocCheck, ApiDocs: net11.0, the
-      SDK's own; Godot and the demo: net10.0); the template's default net10.0 (either SDK builds it); what the site's
-      numbers run on. D21 (".NET 10 features only where they measure") gets the .NET 11 items of
-      `docs/plans/designs/net11.md` (kept and dropped, with their numbers) once packages B+ finish.
-- [ ] **Pages still saying ".NET 10 only" or "needs .NET 10"** (the requirement, not history): `why-fast.mdx` (344:
-      ".NET 10 only", D15 link), `migrate-from-friflo.mdx` (20), `vs-defaultecs.mdx` (18, 39, 173, 184), `vs-friflo.mdx`
-      (19, 41, 220-221), `vs-arch.mdx` (12, 19, 41, 201, 208-209), `vs-unity-entities.mdx` (4, 10, 22, 141),
-      `faq.mdx` (13, 136), `what-is-ecs.mdx` (20, 244, 259), `roadmap.mdx` (28: "The floor is the .NET 10 SDK (C# 14,
-      Roslyn 5.0)" is still true for the generator; 33-38 Unity), `comparison.mdx`, `features.mdx`, the seoTitles of
-      `index.mdx` and `getting-started.mdx` ("for C# and .NET 10"), and each `.zh.mdx`. `guide/production/testing.mdx`
-      (374) shows a test csproj with `net10.0`: fine as an example, or say either. The public skill
-      (`skills/easyecs/SKILL.md` 3, 8, 230: ".NET 10, C# 14", "runtimes older than .NET 10").
-- [ ] **demo.mdx** (27) "a .NET 10 WebAssembly app" stays true (the demo targets net10.0, workload `wasm-tools-net10`
-      under the .NET 11 SDK).
-- [ ] **The site's benchmark runtime**: `bench.json` records .NET 10.0.13 and SDK 10.0.402; `sync-benchmarks --merge`
-      refuses reports of another SDK or runtime, so the next `tools/perf/bench.sh ... --sync` (SDK 11 now) needs a full
-      `--site --sync --fresh` run. Which runtime the site shows is the owner's call (asked with package A); the
-      performance page then says which runtime its numbers are from.
+- [ ] **Decision record** (rewrites D15 ".NET 10 only" in place, AGENTS.md "Nothing stale"): EasyEcs targets `net10.0`
+      only and runs on .NET 10 and later. Why: .NET 11 was measured (docs/plans/designs/net11.md: every .NET 11 API
+      weighed from its listing equal to or slower than what EasyEcs writes; the headline worlds net11.0 against
+      net10.0 within error at 0 B, section 3 B0), so a second target would double CI and the site for nothing (L25,
+      L26). How a newer runtime stays safe: the unit tests target net10.0 and net11.0, referencing the net10.0 package
+      from both, and CI runs them on both runtimes (L27); building them for .NET 11 is how the two fixes below were found. D21 (".NET 10 features only where
+      they measure") gets the .NET 11 items of net11.md section 3 as one paragraph with the B0 numbers quoted (a
+      decision record may quote).
+- [ ] **Changelog `### Fixes`** (the version it ships in): a `[ForEach]` method reading a uniform `[InlineArray]` table
+      at a row's index (Kernel.Tables) no longer fails to compile in a project on .NET 11 (CS9164: .NET 11's
+      `MemoryMarshal.Cast` overloads); `float` / `double` `DegreesToRadians` and `RadiansToDegrees` in a vector loop are
+      the runtime's own vector form, so the lanes round as the scalar call does on every runtime (.NET 11 rounds them
+      differently from .NET 10). No migration entry: nothing to change in user code.
+- [ ] **The performance page** (en, zh), one sentence: the numbers are .NET 10's, and .NET 11 measured level with them
+      on the headline worlds (link the decision record).
+- [ ] **The site's numbers from CI** (L17): the performance page says they come from the Benchmarks workflow on a
+      GitHub-hosted runner (a shared machine; the source line names it) and links the workflow; the next sync is
+      `tools/perf/sync-ci.sh <run id>` of a `--site` run, which replaces the reference VM's set.
+- [ ] **Pages that say ".NET 10 only" or "needs .NET 10"** become ".NET 10 and later" where they state the requirement
+      (not history): `why-fast.mdx` (".NET 10 only", D15 link), `migrate-from-friflo.mdx`, `vs-defaultecs.mdx`,
+      `vs-friflo.mdx`, `vs-arch.mdx`, `vs-unity-entities.mdx`, `faq.mdx` (13, 136), `what-is-ecs.mdx`, `roadmap.mdx`
+      (Unity), `comparison.mdx`, `features.mdx`, the seoTitles of `index.mdx` and `getting-started.mdx`, each `.zh.mdx`,
+      and the public skill (`skills/easyecs/SKILL.md`: ".NET 10, C# 14", "runtimes older than .NET 10"). Already said
+      in package A's lines: README, getting-started, index, faq (38, 126), samples/godot.
+
+## feat-ground-cells (inner-loops leftover (a): a cell method over a `Ground<TTile>` tile)
+
+No new public API: `Cell<TCell, Ground<TTile>>` already ran through the cell pass (the shape is any `ITileShape`); this
+branch proves it (TileTests.Cells.cs: a cross stepping the ground in place against the whole ground, SimdMode.Off and
+the column walk by hand, bit for bit; a box blur; 0 B) and measures it (TileGroundBenchmark). EECS103 v2 (HandStencil)
+now also reports a `ref Tile` stepped by a walk of `Columns(lanes)` with `col.Store` (fix: the cell step, `out TCell`)
+when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width from TTile.
+
+- guide/performance/grids.mdx + .zh (wherever `Ground<TTile>` and cell methods are taught, with the cell pages of the
+  feat-inner-loops section): a ground's field as cells, `Cell<Scent, Ground<Chunk>>` with `out Scent` stepping it; the
+  offsets' dy is 0 (one layer); what it costs against the walk by hand: `<BenchTable>` of `TileGroundBenchmark`
+  (Cross_Cell / Box_Cell against Cross_Hand512 / Box_Hand512 and SimdMode.Off) once the class is synced.
+- guide/help/analyzer.mdx + .zh, EECS103: the stepped walk of columns as a third v2 shape (the code and the fix's
+  result); why a value that is not +0 on blank cells keeps the hand-written form (the step leaves skipped rows zero,
+  the cell step writes them with the method's blank value; -0 from a negative factor included).
+- reference: regenerate after the descriptor's text change (EECS103's description names the stepped walk).
+- Not built (owner-review.md "A ground cell sampling its tile's layer"): a ground cell method that also reads a layer
+  of the 3D tile's cells (`GroundHeatSystem`'s rocks): cells of two shapes in one method.
+
+## feat-lane1-core (backlog Lane 1: C11-C19, the rerun)
+
+- decisions.mdx + .zh (dropped, with numbers; text in owner-review.md): C13 the enumerator's short path for tables
+  without holes (the walk's state round-trips through the stack per row; QueryWrite 1.21x), C15 retired entities'
+  bits flipped in place (CleanupBenchmark 105.6 -> 133.5 us), C17 `Removed<T>` from a log (the cost is per visited
+  row), C14's batch half (a wash; the masked half is 42b8e9d's record if it has one, else one line there). Roadmap
+  "Dropped" names them. C11 follows when package E has measured its last variant.
+- changelog.mdx + .zh (coming version, `### Performance`): a query over tracked components (`world.Query<...>`) no
+  longer calls out per row to stamp it (C12); link guide/changes/change-tracking (what a query stamps: every row it
+  visits, before the loop's body sees it, unchanged). decisions.mdx + .zh: a record "a query stamps the rows it visits,
+  not its words" (stamping a word ahead was the faster form on paper and was refused: a loop that breaks would report
+  rows it never visited to `Changed<T>` passes; the exact form got the win: QueryTick about 0.5-0.6x, numbers in the
+  backlog's C12).
+
+## feat-interleaved-256 (from feat-net11's B1: two-source permutes in Interleaved's 256-bit forms)
+
+- changelog.mdx + .zh, "Performance": on AVX-512 machines whose runtime keeps Vector512 unaccelerated (Intel
+  Skylake-SP / X, Cascade Lake, Cooper Lake by default; .NET decides it per CPU:
+  https://devblogs.microsoft.com/dotnet/dotnet-8-hardware-intrinsics/), the vector loops' reads and writes of components
+  of two or four 4-byte fields take two-source permutes (vpermt2ps / vpermt2pd): fewer shuffles per row.
+- decisions.mdx + .zh: a record. Listings (tools/perf/loopbound.sh, REG=ymm, DOTNET_PreferredVectorBitWidth=256):
+  KernelBenchmark's Move2 masked loop 10.1 -> 8.1 cycles per vector on Ice Lake, 14.1 -> 8.1 on Skylake-SP; the flat
+  loops of Push / Move4 1.8 -> 1.6. Not taken: three fields (6 two-source permutes, all on port 5, 6.0 cycles against
+  3.0 for 3 permutes and 6 blends) and four 8-byte fields (8 shuffles either way, 8.0 cycles both, more
+  instructions). Numbers (DOTNET_PreferredVectorBitWidth=256, base 27baf410 against head, two interleaved rounds,
+  0 B everywhere; .NET 11 in process: BenchmarkDotNet 0.15 cannot build for a .NET 11 host): Move2GapsGenerated
+  0.86-1.00 at 1k rows, 0.92-0.98 at 100k; SlicesBenchmark (an Npc of four floats) 0.81-0.97 in most rows; the
+  headline worlds level within the run's noise (control rows without interleaved code moved +-15 % on this VM).
+  SlicesBenchmark's Update/1/Entity read 1.7x on .NET 11 in the two full rounds: only in the second in-process
+  launch after other classes (launch 1 of the same run 72-89 us against base 80-104); alone in its process
+  (--launchCount 3) 81.3 against 85.3 us. An artifact of in-process launches, not of the loop.
 
 ## feat-generated-text-2 (ledger L15: the generated text shortened)
 

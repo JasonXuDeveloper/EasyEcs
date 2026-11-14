@@ -12,8 +12,13 @@
  * with a few rows from another machine.
  *
  *   BENCH_RESULTS=/path/to/BenchmarkDotNet.Artifacts/results bun run sync:benchmarks
- *   bun scripts/sync-benchmarks.ts --dir <results> --out <bench.json> [--partial | --merge]
+ *   bun scripts/sync-benchmarks.ts --dir <results> --out <bench.json> [--replace | --partial | --merge]
  *
+ * `--replace` makes the reports the whole set, whatever machine or SDK the
+ * committed set came from, as the default does when they hold every committed
+ * class (the CI Benchmarks workflow's run, the site's source: owner, ledger
+ * L17, tools/perf/sync-ci.sh); it says so when the machine changes, and with
+ * `--partial` too it drops a class the run lacks.
  * `--partial` writes whatever the directory holds (for a first run, or when a
  * benchmark class was removed on purpose). `--merge` replaces the classes the
  * directory holds and keeps every other committed class (a run of new or
@@ -44,6 +49,7 @@ const dir =
 const out = arg('--out') ?? path.join(docsRoot, 'src/data/bench.json');
 const partial = process.argv.includes('--partial');
 const merge = process.argv.includes('--merge');
+const replace = process.argv.includes('--replace');
 
 /* ------------------------------------------------------------------ */
 /* Types (src/lib/benchmarks.ts reads the same shape)                  */
@@ -324,6 +330,15 @@ function main() {
     );
     return;
   }
+  if (
+    replace &&
+    committed &&
+    JSON.stringify([...environments.values()][0]) !==
+      JSON.stringify(committed.environment)
+  )
+    console.log(
+      `[bench] --replace: the numbers of ${committed.environment.cpu} (${committed.environment.runtime}, SDK ${committed.environment.sdk}) give way to the run's`,
+    );
   if (missing.length > 0 && !partial) {
     console.warn(
       `[bench] ${dir} lacks ${missing.length} benchmark class(es) of the committed data (${missing.join(', ')}): keeping ${path.relative(docsRoot, out)}. Pass --partial to write it anyway.`,

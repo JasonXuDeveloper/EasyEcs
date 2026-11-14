@@ -1,19 +1,18 @@
 # EasyEcs
 
-Allocation-free archetype ECS for .NET 10 and .NET 11: game servers, Godot 4 games (`samples/Godot`), simulations, real-time backends. Library: `EasyEcs.Core` (targets
-`net10.0` and `net11.0`), published to NuGet as `EasyEcs`. Public API and code comments are in English.
+Allocation-free archetype ECS for .NET 10 and later: game servers, Godot 4 games (`samples/Godot`), simulations, real-time backends. Library: `EasyEcs.Core` (targets
+`net10.0` only, which runs on .NET 10 and later; owner, ledger L25), published to NuGet as `EasyEcs`. Public API and code comments are in English.
 
 ## Commands
 
 ```bash
 dotnet build                                                   # whole solution
-dotnet test                                                    # NUnit, on net10.0 and net11.0 (both runtimes)
-dotnet run -c Release -f net10.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*'            # all benchmarks
-dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset, on .NET 11
-dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*' --frameworks net10.0,net11.0  # one runtime against the other
+dotnet test                                                    # NUnit, on .NET 10 and .NET 11 (L27)
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*'            # all benchmarks
+dotnet run -c Release --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*'    # a subset
 tools/perf/bench.sh BulkBenchmark Features.RemovalComparison --sync   # classes, resumable, merged into the site's numbers
 tools/perf/bench.sh --site --sync                                   # every class the site shows (before a release)
-tools/perf/bench.sh BulkBenchmark --framework net11.0               # on .NET 11 (default net10.0, the site's runtime)
+gh workflow run benchmarks.yml -f classes=--site; tools/perf/sync-ci.sh <run id>   # the site's numbers, from CI (L17)
 ```
 
 A full run takes hours: run what a change touches (`audit-perf` has the method: A/B, lock, quiet machine) and merge
@@ -43,21 +42,17 @@ adding or changing one (CI runs `tools/agents.sh --check`).
 | [`tests/`](tests/AGENTS.md) | adding or changing a test, or finding where a feature is tested |
 <!-- agents-index:end -->
 
-`global.json` requires the .NET 11 SDK 11.0.100 or later (`rollForward: latestFeature`), which builds both target frameworks;
-running the tests and benchmarks of both needs the .NET 10 runtime too (the SDK brings only its own).
-
-**Two runtimes.** The libraries, the tests, the AOT check and the benchmarks (with the tools over them, Inlining and
-LoopBound) target `net10.0;net11.0`, so both runtimes are tested and measured (`tools/build.sh` and the perf scripts
-take `FRAMEWORK=net11.0`, `tools/perf/bench.sh` `--framework`). Applications target one runtime: the samples, DocCheck and
-ApiDocs `net11.0` (the SDK's own runtime, so a clone with the SDK alone runs them), the Godot sample and the live demo
-`net10.0` (the LTS: Godot's .NET support, the demo's Mono AOT workload `wasm-tools-net10`); the template's
-`--framework` defaults to `net10.0`, which either SDK builds. Code for one runtime goes under `#if NET11_0_OR_GREATER`
-with the net10.0 path unchanged, and generated code compiles on both.
+`global.json` requires the .NET 11 SDK 11.0.100 or later (`rollForward: latestFeature`), which builds every project; the
+.NET 10 runtime runs them. Every project targets `net10.0`: a later runtime runs the package as it is, and .NET 11
+measured level with .NET 10 (docs/plans/designs/net11.md; owner, L25, L26). The one exception is the unit tests
+(`net10.0;net11.0`, owner L27): a .NET 11 project compiles the generated code against .NET 11's reference assemblies and
+runs it there, so the tests do both, and CI runs them as a matrix over the two runtimes. Code the generator writes
+compiles and matches the method bit for bit on both.
 
 ## Layout
 
 ```
-src/EasyEcs.Core/              net10.0 and net11.0 library, namespace EasyEcs, in folders by concern named as the guide names them:
+src/EasyEcs.Core/              net10.0 library, namespace EasyEcs, in folders by concern named as the guide names them:
                                World.cs and WorldOptions.cs at the root, Components/, Diagnostics/, Entities/, Grids/,
                                Indexes/, Lookups/, OrderedTables/, Parallel/, Parameters/, Queries/, Relations/, Saves/,
                                Storage/, Systems/, VectorLoops/ (file map: src/EasyEcs.Core/AGENTS.md)
@@ -118,6 +113,8 @@ skills/easyecs/                the public skill (`npx skills add JasonXuDevelope
                                lists only this one
 tools/perf/                    the performance tools. bench.sh: benchmark classes one BenchmarkDotNet process per class (resumable,
                                under a shared lock), merged into docs/src/data/bench.json (--sync); --site runs the classes the site shows.
+                               sync-ci.sh: the site's numbers from a run of the Benchmarks workflow (its artifact downloaded and synced);
+                               moved.py: the rows that moved between two bench.json, for both.
                                jitdisasm.sh: the Tier1 machine code of a [ForEach] method's job (DOTNET_JitDisasm), to check a vector loop: no
                                call in the loop body, no needless range check. loopbound.sh: where each vector loop of a benchmark class is
                                bound (ports, front end or a loop-carried chain): LoopBound/ runs its methods past Tier1 under DOTNET_JitDisasm,
@@ -166,7 +163,9 @@ owner has asked for once must be written where the next session will find it.
 - **Talking to the owner** (owner, 2026-10-27 / 2026-10-30: "用中文对话"; 2026-10-28: "需要我选的给我弹窗，需要我做的给我命令"):
   reply to the owner in Chinese (code, comments, commits and docs stay English); a choice that is the owner's is asked
   as a popup (the question tool) with the recommended option first; an action only the owner can take is given as the
-  exact command or dashboard step.
+  exact command or dashboard step. Every question that is the owner's is asked this way as soon as it is known
+  (owner, 2026-11-14: "需要我决定的问题也全部弹窗问我"), also one a lane has parked in `docs/owner-review.md` as the
+  owner's call: a note in a report is not a question.
 - **Pick each agent's model by its task** (owner, 2026-11-08: "根据任务决定用什么，机械活用 sonnet，高难度的再用 opus"):
   a subagent runs on the session's model unless its call names one, so every call names it. Sonnet for mechanical
   work whose steps the prompt spells out: renames, file maps and stale comments, CI and tool scripts, moving files,
