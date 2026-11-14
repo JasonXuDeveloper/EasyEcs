@@ -35,7 +35,7 @@ long-running .NET processes, servers above all. What backs it up, in the reposit
   generated API reference.
 - An analyzer that rejects the design mistakes an ECS makes easy (EECS002 to EECS089), with code fixes.
 
-What to weigh: it targets `net10.0` only, the API changes between minor versions while it matures (4.0 to 4.1 renamed
+What to weigh: it targets `net10.0` and `net11.0` only, the API changes between minor versions while it matures (4.0 to 4.1 renamed
 and removed a few members, in 4.2 reading a singleton that was never added throws, and 4.7 renamed a few calls so each name says what it
 does; the [migration guide](/en/docs/migration)
 lists each change), and the [changelog](/en/docs/changelog) shows what each release changed.
@@ -123,8 +123,8 @@ system switched off by `SystemErrorPolicy.Disable`. Read them on the owner threa
 ## Can I use EasyEcs with Unity or Godot? [#unity-godot]
 
 Godot, yes; Unity, not yet. A Godot 4 .NET project runs its C# on the .NET runtime the project targets, so set
-`<TargetFramework>net10.0</TargetFramework>` in its `.csproj` (projects made by older editors say `net8.0`), install
-the .NET 10 SDK and add the package; the generator and the analyzer work as in any other .NET project. The
+`<TargetFramework>net10.0</TargetFramework>` (or `net11.0`) in its `.csproj` (projects made by older editors say `net8.0`),
+install that .NET SDK and add the package; the generator and the analyzer work as in any other .NET project. The
 [Godot sample](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Godot) shows the shape: the scene's root node owns the world, calls `world.Update()` in
 `_PhysicsProcess` and draws every entity with one multimesh. CI runs it headless with Godot 4.7.2 on Linux, and its
 updates after the first allocate nothing. Godot's exports to other platforms use the runtime Godot ships for them and

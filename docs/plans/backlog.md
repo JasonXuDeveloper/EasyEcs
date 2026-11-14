@@ -68,6 +68,11 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
         collections). Rebuild and measure.
 - [ ] **`feat-net11`** (owner, 2026-11-14, ledger L14): `net11.0` beside `net10.0` in the package, tests, benchmarks,
       CI and docs; .NET 11's performance features tried one by one, each kept only as a measured win.
+      Running on branch `feat-net11` (from e83188c). Package A (compatibility) handed back: both targets build at 0
+      warnings and pass every test; two generator fixes .NET 11 needed (Kernel.Tables' `[..]`, DegreesToRadians as the
+      runtime's vector form). Next: package B, the research list `docs/plans/designs/net11.md` (runtime-alone numbers,
+      then B1 Unzip/Zip). Docs for the docs pass: docs-todos `feat-net11`. After the merges: rebuild the live demo
+      (its hash covers Core's csproj) and decide the site's benchmark runtime.
 - [ ] **`feat-generated-text-2`** (owner, 2026-11-14, ledger L15; starts when feat-ground-cells merges, both edit
       Kernel and SystemGenerator): read the generated files of the GeneratedTextTests corpora, the samples and the
       benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and

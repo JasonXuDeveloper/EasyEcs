@@ -7,6 +7,7 @@
 #   tools/perf/loopbound.sh <benchmark class> [rows=1000] [methods, comma separated]
 #   LISTING=out.asm tools/perf/loopbound.sh KernelBenchmark 1000 EnergyGenerated     # keep the listing
 #   CPUS=icelake-server,znver4,skylake REG=ymm tools/perf/loopbound.sh KernelBenchmark  # other models, the 256-bit loops
+#   FRAMEWORK=net11.0 tools/perf/loopbound.sh KernelBenchmark                    # .NET 11's JIT (default net10.0)
 set -euo pipefail
 if [ $# -lt 1 ]; then
   echo "usage: $0 <benchmark class> [rows] [methods]" >&2

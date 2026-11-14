@@ -28,8 +28,8 @@ godot --headless --path samples/Godot -- --ticks 120
 A Godot 4 .NET project like any other: [`project.godot`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/project.godot)
 and the scene [`Main.tscn`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/Main.tscn), whose
 root node is `Main`. The one line that matters is the target framework: Godot loads a C# project's assembly into the
-.NET runtime the project targets. A project made by an older editor says `net8.0`; change it to `net10.0` and
-install the .NET 10 SDK ([Unity and Godot](/en/docs/faq#unity-godot)). Nothing else is needed: the package's
+.NET runtime the project targets. A project made by an older editor says `net8.0`; change it to `net10.0` (or
+`net11.0`) and install that .NET SDK ([Unity and Godot](/en/docs/faq#unity-godot)). Nothing else is needed: the package's
 generator and analyzer run in `dotnet build` and in the editor's build alike.
 
 <include lang="xml" meta='title="Godot.csproj"'>../../../samples/Godot/Godot.csproj</include>

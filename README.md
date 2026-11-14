@@ -1,6 +1,6 @@
 # EasyEcs
 
-**EasyEcs is a high-performance archetype Entity Component System (ECS) for C# and .NET 10,
+**EasyEcs is a high-performance archetype Entity Component System (ECS) for C# and .NET 10 / 11,
 for anything that updates many entities every frame or tick: game servers, Godot 4 games, simulations and real-time
 backends.** It runs a [Minecraft-style server](https://ecs.xgamedev.net/en/docs/samples/voxel-server) (chunks, flowing
 water, zombies, replication) and a [Godot 4 game](https://ecs.xgamedev.net/en/docs/samples/godot) the same way. A warmed-up world of 100,000 entities runs nine simulation
@@ -14,7 +14,7 @@ DefaultEcs, EasyEcs leads in 24, is within measurement error in 11 and trails in
 [![NuGet](https://img.shields.io/nuget/v/EasyEcs?logo=nuget&color=004880)](https://www.nuget.org/packages/EasyEcs)
 [![Downloads](https://img.shields.io/nuget/dt/EasyEcs?logo=nuget)](https://www.nuget.org/packages/EasyEcs)
 [![CI](https://img.shields.io/github/actions/workflow/status/JasonXuDeveloper/EasyEcs/ci.yml?branch=master&logo=github&label=CI)](https://github.com/JasonXuDeveloper/EasyEcs/actions/workflows/ci.yml)
-[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet/10.0)
+[![.NET 10 | 11](https://img.shields.io/badge/.NET-10%20%7C%2011-512BD4?logo=dotnet)](https://dotnet.microsoft.com/download/dotnet)
 [![License: MIT](https://img.shields.io/github/license/JasonXuDeveloper/EasyEcs)](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/LICENSE)
 
 **Try it in your browser:** set the [live particle demo](https://ecs.xgamedev.net/en/docs/demo) to **100k**, then
@@ -40,7 +40,7 @@ plain arrays.
 [Details](https://ecs.xgamedev.net/docs/performance#benchmarks).</sub>
 
 ```bash
-dotnet add package EasyEcs        # net10.0 · source generator, analyzer and Nino included
+dotnet add package EasyEcs        # net10.0 and net11.0 · source generator, analyzer and Nino included
 ```
 
 ## Why EasyEcs
@@ -169,8 +169,8 @@ dynamic buffers, indexes, relations, snapshots, system groups, struct jobs) in o
 
 | Good fit | Probably not |
 |---|---|
-| Game servers and simulations on .NET 10: MMO maps and zones, AOI, combat, voxel worlds, grids of water or heat | Unity or other runtimes below .NET 10 (`net10.0` only; Unity support is [being evaluated](https://ecs.xgamedev.net/en/docs/roadmap#unity)) |
-| Godot 4 .NET games: the project targets `net10.0` ([sample](samples/Godot)) | |
+| Game servers and simulations on .NET 10 or 11: MMO maps and zones, AOI, combat, voxel worlds, grids of water or heat | Unity or other runtimes below .NET 10 (`net10.0` and `net11.0` only; Unity support is [being evaluated](https://ecs.xgamedev.net/en/docs/roadmap#unity)) |
+| Godot 4 .NET games: the project targets `net10.0` or `net11.0` ([sample](samples/Godot)) | |
 | Worlds where state flips constantly (buffs, deaths, spawns): structural changes are immediate and cheap | Code that needs structural changes recorded from many threads at once (use one owner thread and a queue) |
 | Long-running processes where GC pauses and unbounded growth matter | Code that wants objects with behavior, or systems calling each other |
 | One world per thread, many worlds per process; `ParallelSystems` for heavy independent systems | Many threads mutating one world's component values without coordination |
@@ -276,8 +276,8 @@ What each library has built in:
 | 0 B per tick | ✅ | ✅ | ❌ | ❌ |
 | Events | ❌ (state is data) | ✅ | ✅ | ✅ |
 | Serialization | ✅ `Save` / `Load` (Nino) | ✅ JSON | ❌ | ✅ text, binary |
-| Godot 4 (.NET) | ✅ net10.0 project | ✅ | ✅ | ✅ |
-| Unity / netstandard | ❌ net10.0 | ✅ | ✅ | ✅ |
+| Godot 4 (.NET) | ✅ net10.0 / net11.0 project | ✅ | ✅ | ✅ |
+| Unity / netstandard | ❌ net10.0 / net11.0 | ✅ | ✅ | ✅ |
 
 ## Documentation
 

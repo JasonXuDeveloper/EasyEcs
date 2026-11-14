@@ -7,6 +7,8 @@
 #
 #   tools/perf/jitdisasm.sh <project> <method pattern> [program arguments...]
 #   FULLOPTS=1 tools/perf/jitdisasm.sh samples/HelloWorld 'EasyEcs.World:Masked'
+#   FRAMEWORK=net11.0 tools/perf/jitdisasm.sh benchmarks/EasyEcs.Benchmark ...   a project of two target frameworks on .NET 11
+#                                                                             (default its first, net10.0; tools/build.sh)
 #
 # The program runs built in Release with DOTNET_JitDisasm set to the pattern and DOTNET_TC_CallCountingDelayMs=0, which
 # promotes a method to Tier1 as soon as it has run 30 times (a game loop does). For a program that runs it a few times

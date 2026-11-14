@@ -27,7 +27,7 @@ godot --headless --path samples/Godot -- --ticks 120
 就是普通的 Godot 4 .NET 项目：[`project.godot`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/project.godot)
 和场景 [`Main.tscn`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Godot/Main.tscn)，根节点是 `Main`。
 真正要改的只有目标框架这一行：Godot 把 C# 项目的程序集加载进项目指定的 .NET 运行时。旧版编辑器建的项目写的是 `net8.0`，
-改成 `net10.0` 并装好 .NET 10 SDK 即可（[Unity 和 Godot](/zh/docs/faq#unity-godot)）。别的都不用配：包里的生成器和分析器在
+改成 `net10.0`（或 `net11.0`）并装好对应的 .NET SDK 即可（[Unity 和 Godot](/zh/docs/faq#unity-godot)）。别的都不用配：包里的生成器和分析器在
 `dotnet build` 和编辑器的构建里一样运行。
 
 <include lang="xml" meta='title="Godot.csproj"'>../../../samples/Godot/Godot.csproj</include>

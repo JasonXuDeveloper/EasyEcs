@@ -30,7 +30,7 @@ EasyEcs 以 MIT 协议发布在 [NuGet](https://www.nuget.org/packages/EasyEcs) 
 - CI 会构建、测试、运行所有 sample 和 example，编译本文档里的 C# 代码片段，并检查自动生成的 API 参考是否最新。
 - 分析器会拒绝 ECS 里常见的设计错误（EECS002 到 EECS089），并提供代码修复。
 
-需要权衡的地方：它只面向 `net10.0`；在走向成熟的过程中，小版本之间 API 会有变化（4.0 到 4.1 改名、删除了几个成员，4.2 起读取没添加过的单例会抛异常，4.7 改了几个调用的名字，让名字说明调用做什么，
+需要权衡的地方：它只面向 `net10.0` 和 `net11.0`；在走向成熟的过程中，小版本之间 API 会有变化（4.0 到 4.1 改名、删除了几个成员，4.2 起读取没添加过的单例会抛异常，4.7 改了几个调用的名字，让名字说明调用做什么，
 [迁移指南](/zh/docs/migration)逐条列出）；每个版本改了什么见[更新日志](/zh/docs/changelog)。
 
 ## EasyEcs 会分配内存吗？ [#allocations]
@@ -98,7 +98,7 @@ World 发布的不可变状态。发给单个实体（一个 actor、一个玩�
 ## 能在 Unity 或 Godot 里用 EasyEcs 吗？ [#unity-godot]
 
 Godot 可以，Unity 暂时不行。Godot 4 的 .NET 项目在项目所面向的 .NET 运行时上跑 C#，所以把 `.csproj` 里的
-`<TargetFramework>` 设为 `net10.0`（旧版编辑器创建的项目写的是 `net8.0`），装好 .NET 10 SDK，再加上这个包即可；
+`<TargetFramework>` 设为 `net10.0` 或 `net11.0`（旧版编辑器创建的项目写的是 `net8.0`），装好对应的 .NET SDK，再加上这个包即可；
 生成器和分析器的工作方式与其他 .NET 项目一样。[Godot 示例](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/samples/Godot)演示了写法：场景的根节点持有 World，在 `_PhysicsProcess`
 里调用 `world.Update()`，用一个 multimesh 画出所有实体。CI 在 Linux 上用 Godot 4.7.2 无界面运行它，第一次之后的每次更新都不分配内存。
 Godot 导出到其他平台时用的是 Godot 为该平台自带的运行时，这部分没有测试。

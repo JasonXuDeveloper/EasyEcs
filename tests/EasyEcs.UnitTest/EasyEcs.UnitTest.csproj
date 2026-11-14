@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
+        <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
         <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
         <IsPackable>false</IsPackable>
@@ -37,12 +37,19 @@
         <!-- GeneratorBenchmark's corpus, checked clean once here (GeneratorTests.TheBenchmarkCorpusIsClean) -->
         <Compile Include="..\..\benchmarks\EasyEcs.Benchmark\GeneratorCorpus.cs" Link="GeneratorCorpus.cs"/>
         <EmbeddedResource Include="..\..\benchmarks\EasyEcs.Benchmark\BattleServer.cs" LogicalName="BattleServer.cs"/>
-        <!-- the VoxelServer sample's world, its zombies and their scent (VoxelServerTests) -->
-        <ProjectReference Include="..\..\samples\VoxelServer\VoxelServer.csproj"/>
         <!-- the phase 0 prototypes of docs/plans/designs/locality.md, checked against their plain forms (LocalityTests) -->
         <Compile Include="..\..\benchmarks\EasyEcs.Benchmark\Locality\*.cs" LinkBase="Locality"/>
         <!-- the generators, parse options and references every Roslyn host of the generators shares -->
         <Compile Include="..\..\tools\Shared\GeneratorHost.cs" Link="GeneratorHost.cs"/>
+    </ItemGroup>
+
+    <!-- the VoxelServer sample's world, its zombies and their scent (VoxelServerTests): a sample is an application on
+         one runtime (net11.0), so its test runs there -->
+    <ItemGroup Condition="'$(TargetFramework)' == 'net11.0'">
+        <ProjectReference Include="..\..\samples\VoxelServer\VoxelServer.csproj"/>
+    </ItemGroup>
+    <ItemGroup Condition="'$(TargetFramework)' != 'net11.0'">
+        <Compile Remove="VoxelServerTests.cs"/>
     </ItemGroup>
 
 </Project>

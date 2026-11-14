@@ -83,6 +83,9 @@ settles within one pass either way, so update counts come out equal.
 A test project that references a sample builds the sample's generated code: when hundreds of unrelated CS7036 /
 CS0122 errors appear, look for CS8785 first (a generator exception dropped every generated file).
 
+Every test passes on both target frameworks (`net10.0`, `net11.0`: `dotnet test` runs both); code for one runtime
+sits under `#if NET11_0_OR_GREATER` with the other path unchanged, and generated code compiles on both.
+
 Behaviour; a regression test that fails before each bug fix; edge cases (stale and recycled ids, empty tables, structural changes mid-pass, retired entities,
 exceptions mid-pass); the allocation test (0 B in steady state, measured through `Allocations.Of` or from `Allocations.Baseline()`,
 which wait for a running background collection first, never from a raw first read; D128); after a copy-on-write capture the first replay starts from different rows than every later one, so a steady-state

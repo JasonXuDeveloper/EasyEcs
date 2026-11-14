@@ -55,7 +55,9 @@ internal sealed partial class Kernel
             {
                 column = Temp("col");
                 _columns[key] = column;
-                _setup.Append($"var {column} = global::EasyEcs.TableLanes.Load<{Vec("int")}>(global::System.Runtime.InteropServices.MemoryMarshal.Cast<{elementType}, int>({table}), {offset}, {stride}, {length}); // once per run\n");
+                // the table as a range ([..]: a ReadOnlySpan of a ref readonly table): passed whole, .NET 11's
+                // MemoryMarshal.Cast overloads pick the Span one, to which a ref readonly table cannot convert (CS9164)
+                _setup.Append($"var {column} = global::EasyEcs.TableLanes.Load<{Vec("int")}>(global::System.Runtime.InteropServices.MemoryMarshal.Cast<{elementType}, int>({table}[..]), {offset}, {stride}, {length}); // once per run\n");
             }
             return As("int", Elem(type), $"global::EasyEcs.TableLanes.Pick(in {column}, {At(at)}, {length})");
         }

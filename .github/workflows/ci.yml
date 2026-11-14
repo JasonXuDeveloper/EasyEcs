@@ -16,15 +16,20 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # both runtimes the library targets; global.json picks the SDK (11)
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: Restore
         run: dotnet restore
       - name: Build
         run: dotnet build --no-restore --configuration Release
-      - name: Test
+      - name: Test (every test project on net10.0 and net11.0)
         run: dotnet test --no-build --configuration Release --verbosity normal
-      - name: Every generated job is inlined by its runner (tools/perf/inlining.sh; the JIT inlines no method of more than 32 IL locals)
-        run: tools/perf/inlining.sh --no-build
+      - name: Every generated job is inlined by its runner on both runtimes (tools/perf/inlining.sh; the JIT inlines no method of more than 32 IL locals)
+        run: |
+          FRAMEWORK=net10.0 tools/perf/inlining.sh --no-build
+          FRAMEWORK=net11.0 tools/perf/inlining.sh --no-build
       - name: Pack (verify the package builds)
         run: dotnet pack src/EasyEcs.Core/EasyEcs.Core.csproj --no-build --configuration Release --output artifacts
       - name: Run the samples (the deterministic ones must print their README's expected output)
@@ -39,8 +44,8 @@ jobs:
           .github/scripts/check-sample.sh samples/HotReload
           .github/scripts/check-sample.sh samples/Actors
           .github/scripts/check-sample.sh samples/VoxelServer
-      - name: Install the wasm-tools workload (the live demo is published with Mono AOT)
-        run: dotnet workload install wasm-tools
+      - name: Install the wasm-tools-net10 workload (the live demo targets net10.0 and is published with Mono AOT)
+        run: dotnet workload install wasm-tools-net10
       - name: Publish the docs site's live demo (demo/EasyEcs.Demo, WebAssembly, Mono AOT)
         run: dotnet publish demo/EasyEcs.Demo/EasyEcs.Demo.csproj -c Release -o artifacts/demo
       - name: API reference is up to date, in English and Chinese (tools/docs/ApiDocs)
@@ -60,7 +65,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # both runtimes the library targets; global.json picks the SDK (11)
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: Build
         run: dotnet build tests/EasyEcs.UnitTest --configuration Release
       - name: Test
@@ -69,8 +77,10 @@ jobs:
         run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --filter "Name=EveryVectorFormRunsAsAVectorLoopOnARM64" --logger "console;verbosity=detailed"
       - name: The prefetch this runner issues (SVE's PRFB where SVE is hardware; PrefetchTests ran its twins with the gate forced on)
         run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --filter "Name=ThePrefetchIsTheMachines" --logger "console;verbosity=detailed"
-      - name: Every generated job is inlined by its runner on ARM64 (tools/perf/inlining.sh)
-        run: tools/perf/inlining.sh
+      - name: Every generated job is inlined by its runner on ARM64, on both runtimes (tools/perf/inlining.sh)
+        run: |
+          FRAMEWORK=net10.0 tools/perf/inlining.sh
+          FRAMEWORK=net11.0 tools/perf/inlining.sh
 
   doc-snippets:
     runs-on: ubuntu-26.04
@@ -78,7 +88,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # both runtimes the library targets; global.json picks the SDK (11)
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: Agent instructions are indexed and complete (tools/agents.sh)
         run: tools/agents.sh --check
       - uses: actions/setup-node@v6
@@ -107,11 +120,18 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
-      - name: Publish the battle server with Native AOT (tracked components, saves; warnings are errors)
-        run: dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o artifacts/aot
-      - name: Run the native executable
-        run: artifacts/aot/EasyEcs.Aot
+          # both runtimes the library targets; global.json picks the SDK (11)
+          dotnet-version: |
+            10.0.x
+            11.0.x
+      - name: Publish the battle server with Native AOT on both runtimes (tracked components, saves; warnings are errors)
+        run: |
+          dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -f net10.0 -o artifacts/aot-net10.0
+          dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -f net11.0 -o artifacts/aot-net11.0
+      - name: Run the native executables
+        run: |
+          artifacts/aot-net10.0/EasyEcs.Aot
+          artifacts/aot-net11.0/EasyEcs.Aot
 
   godot:
     runs-on: ubuntu-26.04
@@ -121,7 +141,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # both runtimes the library targets; global.json picks the SDK (11)
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: Download the Godot .NET editor
         run: |
           name=Godot_v${GODOT_VERSION}-stable_mono_linux_x86_64
@@ -137,6 +160,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # both runtimes the library targets; global.json picks the SDK (11)
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: dotnet new easyecs from the packed templates, against the packed EasyEcs
         run: templates/smoke.sh

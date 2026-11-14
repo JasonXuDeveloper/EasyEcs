@@ -9,7 +9,8 @@ This tutorial builds a small simulation from an empty console project: a thousan
 on fire, the burning ones die and their corpses are removed, and a report prints once a second. Each step adds one
 concept, compiles and links to the guide page that covers it in depth. It takes about fifteen minutes.
 
-You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0). EasyEcs targets `net10.0` only.
+You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) or the [.NET 11 SDK](https://dotnet.microsoft.com/download/dotnet/11.0).
+EasyEcs targets `net10.0` and `net11.0`.
 
 ## Build it step by step [#steps]
 
@@ -35,7 +36,7 @@ no `partial` to write: everything lives in the `EasyEcs` namespace.
     ([templates](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates)).
   - Complete programs to read, from the smallest up:
     [the samples](/en/docs/samples), starting with HelloWorld.
-  - A Godot 4 .NET game: set `<TargetFramework>net10.0</TargetFramework>` in its `.csproj` and add the package;
+  - A Godot 4 .NET game: set `<TargetFramework>net10.0</TargetFramework>` (or `net11.0`) in its `.csproj` and add the package;
     the [Godot sample](/en/docs/samples/godot) steps a world per physics tick
     ([Unity and Godot](/en/docs/faq#unity-godot)).
 </Callout>

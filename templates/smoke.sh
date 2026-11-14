@@ -2,7 +2,7 @@
 # Smoke test of the dotnet new templates against this repository's EasyEcs, never nuget.org's:
 # packs EasyEcs and EasyEcs.Templates with a CI version into a local feed, installs the templates from that nupkg
 # into a private template hive, creates `easyecs --tests` and an `easyecs-system` in its Systems/ folder, builds,
-# runs and tests the result.
+# runs and tests the result; then the same project on the other target framework (`-f net11.0`).
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 work="$(mktemp -d)"
@@ -38,8 +38,16 @@ dotnet new easyecs -n SmokeServer --tests "${hive[@]}"
 grep -q "^namespace SmokeServer;" SmokeServer/Systems/RegenSystem.cs
 grep -q "public ref struct RegenSystem" SmokeServer/Systems/RegenSystem.cs
 grep -q "Version=\"$version\"" SmokeServer/SmokeServer.csproj
+grep -q "<TargetFramework>net10.0</TargetFramework>" SmokeServer/SmokeServer.csproj   # the default: the LTS
 dotnet build SmokeServer/SmokeServer.Tests/SmokeServer.Tests.csproj -c Release -warnaserror -nologo -v q
 dotnet run --project SmokeServer/SmokeServer.csproj -c Release --no-build -- --ticks 60 | tee run.txt
 grep -q "stopped after 60 ticks" run.txt
 dotnet test SmokeServer/SmokeServer.Tests/SmokeServer.Tests.csproj -c Release --no-build -nologo
+# -f net11.0: the project and its tests on .NET 11
+dotnet new easyecs -n SmokeServer11 -f net11.0 --tests "${hive[@]}"
+grep -q "<TargetFramework>net11.0</TargetFramework>" SmokeServer11/SmokeServer11.csproj
+grep -q "<TargetFramework>net11.0</TargetFramework>" SmokeServer11/SmokeServer11.Tests/SmokeServer11.Tests.csproj
+dotnet build SmokeServer11/SmokeServer11.Tests/SmokeServer11.Tests.csproj -c Release -warnaserror -nologo -v q
+dotnet run --project SmokeServer11/SmokeServer11.csproj -c Release --no-build -- --ticks 60 | grep -q "stopped after 60 ticks"
+dotnet test SmokeServer11/SmokeServer11.Tests/SmokeServer11.Tests.csproj -c Release --no-build -nologo
 echo "templates OK ($version)"

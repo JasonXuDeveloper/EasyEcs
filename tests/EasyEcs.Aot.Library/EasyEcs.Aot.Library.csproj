@@ -3,7 +3,7 @@
     <!-- A library's public generic system that EasyEcs.Aot closes over a component of its own: the library cannot name
          the closed type, so the generator of EasyEcs.Aot registers its code (no runtime code generation under AOT). -->
     <PropertyGroup>
-        <TargetFramework>net10.0</TargetFramework>
+        <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
         <IsPackable>false</IsPackable>
         <IsAotCompatible>true</IsAotCompatible>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>

@@ -18,6 +18,23 @@
     "type": "project"
   },
   "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "datatype": "choice",
+      "choices": [
+        {
+          "choice": "net10.0",
+          "description": "Target .NET 10 (LTS)."
+        },
+        {
+          "choice": "net11.0",
+          "description": "Target .NET 11 (needs the .NET 11 SDK)."
+        }
+      ],
+      "defaultValue": "net10.0",
+      "replaces": "net10.0",
+      "description": "The target framework of the project (and of its tests)."
+    },
     "tests": {
       "type": "parameter",
       "datatype": "bool",

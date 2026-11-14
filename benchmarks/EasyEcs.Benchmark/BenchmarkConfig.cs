@@ -1,5 +1,6 @@
 using System;
 using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Environments;
 using BenchmarkDotNet.Jobs;
 using Perfolizer.Horology;
 
@@ -17,6 +18,10 @@ namespace EasyEcs.Benchmark;
 /// and screening while developing; a result it shows is confirmed with the default job before it decides anything.</item>
 /// </list>
 /// A <c>--job</c> on the command line replaces either.
+/// <para>The runtime is the host's: the projects target net10.0 and net11.0, and <c>dotnet run --framework net11.0</c>
+/// measures .NET 11. <c>--frameworks net10.0,net11.0</c> runs the job once per runtime in one process instead, the
+/// runtimes interleaved per case, which is how one runtime is compared with the other (BenchmarkDotNet's own
+/// <c>--runtimes</c> knows no runtime newer than its release).</para>
 /// </summary>
 public static class BenchmarkConfig
 {
@@ -25,11 +30,24 @@ public static class BenchmarkConfig
     {
         bool dev = Array.IndexOf(args, "--dev") >= 0;
         if (dev) args = Array.FindAll(args, a => a != "--dev");
+        string[] frameworks = [];
+        int at = Array.IndexOf(args, "--frameworks");
+        if (at >= 0 && at + 1 < args.Length)
+        {
+            frameworks = args[at + 1].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            args = [.. args[..at], .. args[(at + 2)..]];
+        }
         var job = dev
             ? Job.Default.WithLaunchCount(1).WithWarmupCount(3).WithIterationCount(5)
                 .WithIterationTime(TimeInterval.FromMilliseconds(150)).WithId("Dev")
             : Job.Default.WithLaunchCount(2).WithWarmupCount(6).WithIterationCount(8)
                 .WithIterationTime(TimeInterval.FromMilliseconds(250));
-        return DefaultConfig.Instance.AddJob(job.WithEnvironmentVariable("DOTNET_TC_CallCountingDelayMs", "0").AsDefault());
+        job = job.WithEnvironmentVariable("DOTNET_TC_CallCountingDelayMs", "0");
+        if (frameworks.Length == 0) return DefaultConfig.Instance.AddJob(job.AsDefault());
+        var config = DefaultConfig.Instance;
+        foreach (string framework in frameworks)
+            config = config.AddJob(job.WithRuntime(CoreRuntime.CreateForNewVersion(framework, ".NET " + framework[3..]))
+                .WithId(framework));
+        return config;
     }
 }

@@ -304,7 +304,7 @@ public class GeneratorTests
     [TestCase("[ForEach(FloatMode = FloatMode.Fast)] static void A(ref D d) => d.V = System.Math.Log2(d.V) + double.Hypot(d.V, 2);", true)]
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Cos(f.V);", false)]                 // approximate: Exact
     [TestCase("[ForEach] static void A(ref F f, in G g) => f.V *= System.MathF.Sin(g.Pull);", true)]      // uniform: the scalar call
-    [TestCase("[ForEach] static void A(ref F f) => f.V = float.DegreesToRadians(f.V);", true)]            // (x * Pi) / 180: exact
+    [TestCase("[ForEach] static void A(ref F f) => f.V = float.DegreesToRadians(f.V);", true)]            // the runtime's vector form: exact
     [TestCase("[ForEach] static void A(ref F f) => f.V = System.MathF.Atan2(f.V, 1);", false)]            // no vector form
     [TestCase("[ForEach] static void A(ref F f, Maybe<H> h) { if (h.HasValue) f.V += h.Value.V; else f.V = 0; }", true)] // a lane mask
     [TestCase("[ForEach] static void A(ref F f, ReadOnlyMaybe<Two> t) => f.V = t.HasValue && t.Value.A > 0 ? t.Value.B : f.V;", true)]
@@ -820,7 +820,7 @@ public class GeneratorTests
     }
 
     // FloatMode.Fast: the vector approximations of .NET (Vector.Sin, Vector512.Sin) in both loops; degrees to radians as
-    // the scalar's two operations; a uniform call computed once by the scalar function.
+    // the runtime's vector form, which rounds as its scalar call does; a uniform call computed once by the scalar function.
     [Test]
     public void FastMathCallsTheVectorForms()
     {
@@ -831,7 +831,7 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated, Does.Contain("__Vec.Sin(__c1_0)").And.Contain("__V512.Sin(__c1_0)")
             .And.Contain("__Vec.Create<float>(global::System.MathF.Cos(__p1.Pull))")
-            .And.Contain("__Vec.Create<float>(float.Pi)").And.Contain("__Vec.Create<float>(180f)"), generated);
+            .And.Contain("__Vec.DegreesToRadians(__c1_0)").And.Contain("__V512.DegreesToRadians(__c1_0)"), generated);
     }
 
     // The Vector512 loop is the Vector<T> loop's text with the vector type's token replaced: user types named

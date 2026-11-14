@@ -1,6 +1,6 @@
 ---
 name: audit-perf
-description: "Look for the next performance win in EasyEcs - borrow from Burst, CUDA, stencil codes, OpenMP, MPI, OS schedulers, databases, HPC runtimes (Halide, Kokkos, TBB, Legion), LLM serving (vLLM) and newer .NET (10) features, find where the runtime or the generated code leaves speed on the table, and prove every change with BenchmarkDotNet. Use for a performance round, before a release, or when asked to \"optimize further\" or to research an idea. Triggers: \"faster\", \"optimize\", BenchmarkDotNet, A/B, regression, allocation, NativeMemory, mimalloc, roofline, memory-bound, compute-bound, bandwidth, arithmetic intensity, 性能, 优化, 更快, 基准, 研究一下, 带宽, 访存瓶颈, 计算瓶颈."
+description: "Look for the next performance win in EasyEcs - borrow from Burst, CUDA, stencil codes, OpenMP, MPI, OS schedulers, databases, HPC runtimes (Halide, Kokkos, TBB, Legion), LLM serving (vLLM) and newer .NET (10, 11) features, find where the runtime or the generated code leaves speed on the table, and prove every change with BenchmarkDotNet. Use for a performance round, before a release, or when asked to \"optimize further\" or to research an idea. Triggers: \"faster\", \"optimize\", BenchmarkDotNet, A/B, regression, allocation, NativeMemory, mimalloc, roofline, memory-bound, compute-bound, bandwidth, arithmetic intensity, 性能, 优化, 更快, 基准, 研究一下, 带宽, 访存瓶颈, 计算瓶颈."
 metadata:
   internal: true
 ---
@@ -58,6 +58,12 @@ its own worktree.
    `UnsafeAccessor` (keeps PGO: checked), `AlternateLookup`, `FrozenDictionary`, `System.Threading.Lock`, `ref struct`
    generics (`allows ref struct`), C# 14 extension members, Native AOT (`IlcInstructionSet`, D108), dynamic PGO and
    guarded devirtualization. Read the runtime's source before assuming a behavior (thread pool spin, GC modes).
+   **.NET 11** (the library targets both; `docs/plans/designs/net11.md` lists what 11 ships and what was tried):
+   a feature of one runtime goes under `#if NET11_0_OR_GREATER` with the net10.0 path unchanged, is kept only as a
+   win at 0 B on net11.0 against the same code without it, and the generated code compiles on both. What the runtime
+   alone gives is measured with `--frameworks net10.0,net11.0` (BenchmarkConfig: one job per runtime, interleaved
+   in one process); a single runtime with `dotnet run -f net11.0` or `tools/perf/bench.sh --framework net11.0`; the
+   JIT's listing of either with `FRAMEWORK=net11.0 tools/perf/jitdisasm.sh` (tools/build.sh).
 4. **The runtime's own overhead**: what a system costs per update apart from its rows (`SystemDispatchBenchmark`),
    what a pass costs per table and per word (`SparseBenchmark`), per chunk (`ParallelPassBenchmark`), per stage
    (`ParallelSystemsBenchmark`), per structural change (`OperationBenchmark`), per world (`MultiWorldBenchmark`).
@@ -264,7 +270,8 @@ its own worktree.
      run it with `--launchCount 6` in interleaved base / head rounds and compare the spread of the launches, and check
      the Tier1 listings and tiers (`DOTNET_JitDisasmSummary=1`) are the same (feat-later-memory: Step 100k "0.75x"
      was one fast base launch);
-   - Native AOT is measured by BenchmarkDotNet with `--runtimes nativeaot10.0` (one publish per case, minutes each:
+   - Native AOT is measured by BenchmarkDotNet with `--runtimes nativeaot10.0` (BenchmarkDotNet 0.15 knows no
+     `nativeaot11.0`; one publish per case, minutes each:
      filter to the methods the change touches); the JIT and AOT runs of one A/B go in one round, interleaved.
      BenchmarkDotNet 0.15 passes ILC 10 an instruction set it refuses ("Unrecognized instruction set sse") and its
      generated project ignores `Directory.Build.targets`: export `CustomAfterMicrosoftCommonTargets` naming a scratch
