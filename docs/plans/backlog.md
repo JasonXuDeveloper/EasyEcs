@@ -73,8 +73,19 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       runtime's vector form). Next: package B, the research list `docs/plans/designs/net11.md` (runtime-alone numbers,
       then B1 Unzip/Zip). Docs for the docs pass: docs-todos `feat-net11`. After the merges: rebuild the live demo
       (its hash covers Core's csproj) and decide the site's benchmark runtime.
-- [ ] **`feat-generated-text-2`** (owner, 2026-11-14, ledger L15; starts when feat-ground-cells merges, both edit
-      Kernel and SystemGenerator): read the generated files of the GeneratedTextTests corpora, the samples and the
+- [ ] **`feat-generated-text-2`** (owner, 2026-11-14, ledger L15): running on branch `feat-generated-text-2` (from
+      b95fb459 + feat-ground-cells). **Package A handed back** (a-h and what a read of the output added): `Tidy` (the
+      last pass of `Code.Aliased`) aliases every type a file names twice or more and drops the parentheses precedence
+      does not need (the benchmark assembly's 16,999 method bodies IL-identical); Kernel / Loops: no temp before a
+      store, `__passF` once per vector (not where it would split the job), single-use setup locals read in place, the
+      first loop from 0, the schedule line's repeated hardware term, `AllBitsSet & m`, `var __m = __has1`, a write-only
+      lane declared by its first write, `SetAll(default(T))` with no `v0` line, no `jN = new Job()` in fused jobs,
+      `this.` only where a column ref shares the name. Benchmark project's generated files 5,048,414 -> 4,509,703 bytes,
+      73,843 -> 77,236 lines (alias lines), 39,358 -> 18,687 `global::`; GeneratedTextTests corpus 12,310,172 ->
+      11,532,883 bytes, `global::` 85,849 -> 17,810, parentheses 333 -> 0, identity copies 108 -> 40. FullOpts listings
+      of 7 benchmark classes: 16 runners differ (instruction order, spills, the dropped `v0` store), BenchmarkDotNet
+      decides (docs-todos `feat-generated-text-2`). Next: package B (item i), then C (item j).
+      The original item: read the generated files of the GeneratedTextTests corpora, the samples and the
       benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and
       masks, repeated setup, `this.v0`, dead narrow temps: G17's rest in owner-review, now to do), remove each in the
       generator, add its count to GeneratedTextTests with a budget of 0; IL-changing ones proven level by Tier1 or

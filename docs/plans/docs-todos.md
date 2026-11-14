@@ -3715,3 +3715,23 @@ lines of getting-started, index, faq and samples/godot (en + zh). For the docs p
       refuses reports of another SDK or runtime, so the next `tools/perf/bench.sh ... --sync` (SDK 11 now) needs a full
       `--site --sync --fresh` run. Which runtime the site shows is the owner's call (asked with package A); the
       performance page then says which runtime its numbers are from.
+
+## feat-generated-text-2 (ledger L15: the generated text shortened)
+
+- [ ] **Decision record** (decisions.mdx + zh; extends D135's neighbor on generated text, or a new D): the generated
+      text is written as a reader would write it, with the IL unchanged where only the text changes: every type a
+      file names twice or more through a file-level alias (`Tidy.Types`: only where a name's position proves a type;
+      a closed generic of qualified arguments gets one of its own), parentheses only where precedence or a reader
+      needs them (`Tidy.Parentheses`: kept between operators of different kinds and around negative operands), no
+      temporary before a store unless a later write of the statement changes what it reads, a pass mask named once
+      per vector unless that local would split the job past 32 IL locals, a Set of the type's default with no field.
+      Numbers: the benchmark project's generated files 5,048,414 -> 4,509,703 bytes and 39,358 -> 18,687 `global::`;
+      the 16,999 method bodies of the benchmark assembly IL-identical for the aliases and parentheses; the
+      BenchmarkDotNet A/B of the IL-changing part (backlog `feat-generated-text-2`).
+- [ ] **Pages that show generated text "with the `global::` prefixes dropped"** (guide/basics/systems.mdx 650, 749;
+      guide/performance/threading.mdx 344, 635; guide/performance/grids.mdx 219; queries.mdx 295-301; each `.zh.mdx`):
+      the generated file now names types through `__`-aliases (`__Health`, `__Vec`, `__ForEach`) and without the
+      outer parentheses (`__c1_0 = __c1_0 + __c2_0;`, no `var __t = ...` before it). Refresh each excerpt from a build
+      with `-p:EmitCompilerGeneratedFiles=true`, and say "trimmed" instead of "global:: dropped".
+- [ ] **audit-generator's "The generated text"** already says what `Tidy` does (this branch); the public skill needs
+      nothing (users do not write generated text).
