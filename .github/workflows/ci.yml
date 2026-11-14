@@ -10,19 +10,42 @@ on:
   workflow_dispatch:
 
 jobs:
+  # The unit tests on both runtimes in parallel (owner, L27): the package targets net10.0, and a .NET 11 project
+  # compiles its generated code against .NET 11's reference assemblies and runs it there. The jobs below run once.
+  test:
+    runs-on: ubuntu-26.04
+    strategy:
+      fail-fast: false
+      matrix:
+        framework: [ net10.0, net11.0 ]
+    name: test (${{ matrix.framework }})
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          # the SDK global.json names (11) builds net10.0 and the unit tests' net11.0; .NET 10 runs the rest
+          dotnet-version: |
+            10.0.x
+            11.0.x
+      - name: Build
+        run: dotnet build tests/EasyEcs.UnitTest --configuration Release --framework ${{ matrix.framework }}
+      - name: Test
+        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --framework ${{ matrix.framework }} --verbosity normal
+
   build:
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # the SDK global.json names (11) builds net10.0 and the unit tests' net11.0; .NET 10 runs the rest
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: Restore
         run: dotnet restore
       - name: Build
         run: dotnet build --no-restore --configuration Release
-      - name: Test
-        run: dotnet test --no-build --configuration Release --verbosity normal
       - name: Every generated job is inlined by its runner (tools/perf/inlining.sh; the JIT inlines no method of more than 32 IL locals)
         run: tools/perf/inlining.sh --no-build
       - name: Pack (verify the package builds)
@@ -39,8 +62,8 @@ jobs:
           .github/scripts/check-sample.sh samples/HotReload
           .github/scripts/check-sample.sh samples/Actors
           .github/scripts/check-sample.sh samples/VoxelServer
-      - name: Install the wasm-tools workload (the live demo is published with Mono AOT)
-        run: dotnet workload install wasm-tools
+      - name: Install the wasm-tools-net10 workload (the live demo targets net10.0 and is published with Mono AOT)
+        run: dotnet workload install wasm-tools-net10
       - name: Publish the docs site's live demo (demo/EasyEcs.Demo, WebAssembly, Mono AOT)
         run: dotnet publish demo/EasyEcs.Demo/EasyEcs.Demo.csproj -c Release -o artifacts/demo
       - name: API reference is up to date, in English and Chinese (tools/docs/ApiDocs)
@@ -60,15 +83,18 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # the SDK global.json names (11) builds net10.0 and the unit tests' net11.0; .NET 10 runs the rest
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: Build
-        run: dotnet build tests/EasyEcs.UnitTest --configuration Release
-      - name: Test
-        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release
+        run: dotnet build tests/EasyEcs.UnitTest --configuration Release --framework net10.0
+      - name: Test (net10.0; the net11.0 tests run in the x64 matrix)
+        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --framework net10.0
       - name: The loop each [ForEach] method of the tests runs on ARM64 (a form left to rows says "rows on this hardware")
-        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --filter "Name=EveryVectorFormRunsAsAVectorLoopOnARM64" --logger "console;verbosity=detailed"
+        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --framework net10.0 --filter "Name=EveryVectorFormRunsAsAVectorLoopOnARM64" --logger "console;verbosity=detailed"
       - name: The prefetch this runner issues (SVE's PRFB where SVE is hardware; PrefetchTests ran its twins with the gate forced on)
-        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --filter "Name=ThePrefetchIsTheMachines" --logger "console;verbosity=detailed"
+        run: dotnet test tests/EasyEcs.UnitTest --no-build --configuration Release --framework net10.0 --filter "Name=ThePrefetchIsTheMachines" --logger "console;verbosity=detailed"
       - name: Every generated job is inlined by its runner on ARM64 (tools/perf/inlining.sh)
         run: tools/perf/inlining.sh
 
@@ -78,7 +104,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # the SDK global.json names (11) builds net10.0 and the unit tests' net11.0; .NET 10 runs the rest
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: Agent instructions are indexed and complete (tools/agents.sh)
         run: tools/agents.sh --check
       - uses: actions/setup-node@v6
@@ -107,7 +136,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # the SDK global.json names (11) builds net10.0 and the unit tests' net11.0; .NET 10 runs the rest
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: Publish the battle server with Native AOT (tracked components, saves; warnings are errors)
         run: dotnet publish tests/EasyEcs.Aot -c Release -r linux-x64 -o artifacts/aot
       - name: Run the native executable
@@ -121,7 +153,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # the SDK global.json names (11) builds net10.0 and the unit tests' net11.0; .NET 10 runs the rest
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: Download the Godot .NET editor
         run: |
           name=Godot_v${GODOT_VERSION}-stable_mono_linux_x86_64
@@ -137,6 +172,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: 10.0.x
+          # the SDK global.json names (11) builds net10.0 and the unit tests' net11.0; .NET 10 runs the rest
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - name: dotnet new easyecs from the packed templates, against the packed EasyEcs
         run: templates/smoke.sh
