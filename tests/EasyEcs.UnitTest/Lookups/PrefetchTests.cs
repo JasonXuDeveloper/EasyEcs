@@ -331,19 +331,19 @@ public class PrefetchTests
         const string add = "__Unsafe.Add";
 
         // The row form: the call site picks the twin past the L2 (its form's gate), today's job otherwise.
-        Assert.That(text, Does.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastL2(world))")
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("if (__Lookup_Spot.PrefetchesPastL2(world))")
             .And.Contain("new __ForEach.RowJob0Chases { World = world }").And.Contain("new __ForEach.RowJob0 { World = world }"));
         Assert.That(Job("RowJob0Chases"), Does.Contain($".Prefetch({add}(ref r2, i + 16).Target);").And.Contain($".PrefetchRow({add}(ref r2, i + 8).Target);")
             .And.Contain("if (rows > 16)"));
         Assert.That(Job("RowJob0"), Does.Not.Contain("Prefetch"));
         Assert.That(Job("SeenJob1Chases"), Does.Contain($".Prefetch({add}(ref r1, i + 16).Target);").And.Not.Contain(".PrefetchRow("));
         // The vector loop: per vector, behind the gate the job's initializer reads once per pass.
-        Assert.That(text, Does.Contain("f3 = global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastLastLevel(world)"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("f3 = global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastLastLevel(world)"));
         Assert.That(Job("VectorJob2"), Does.Contain("if (f3) __p3.PrefetchAhead(ref e2, 2, 1, i, rows, 16, "));
         Assert.That(text, Does.Not.Contain("WrittenJob3Chases"));
         Assert.That(Job("WrittenJob3"), Does.Not.Contain("Prefetch").And.Not.Contain("public bool f"));
         // A method sharing a walk with others (fusion) runs its twin in the walk's twin.
-        Assert.That(text, Does.Contain("PlainJob1Chases").And.Contain("Gathered_Plain_Fused0Chases"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("PlainJob1Chases").And.Contain("Gathered_Plain_Fused0Chases"));
     }
 
     /// <summary>
@@ -618,24 +618,24 @@ public class PrefetchTests
         string Job(string name) => text.Split("internal ref struct ").Single(j => j.StartsWith(name + " "));
 
         // Probes, of a key many entities share and of a unique key: the bucket 16 rows ahead, its entry 8 ahead.
-        Assert.That(text, Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Name, string>(world))"));
-        Assert.That(Job("SharedJob0Chases"), Does.Contain("PrefetchKey<global::Game.Name, string>(").And.Contain("i + 16).Name, 1);").And.Contain("i + 8).Name, 2);"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("if (__LookupExtensions.Probes<__Name, string>(world))"));
+        Assert.That(Job("SharedJob0Chases"), Does.Contain("PrefetchKey<__Name, string>(").And.Contain("i + 16).Name, 1);").And.Contain("i + 8).Name, 2);"));
         Assert.That(Job("UniqueJob1Chases"), Does.Contain("i + 16).Code, 1);").And.Contain("i + 8).Code, 2);").And.Not.Contain(", 3);"));
         // A chase per element of a buffer.
         Assert.That(Job("LinksJob2Chases"), Does.Contain("foreach (ref readonly var __link in "));
         // The parallel twin: a batch job over each chunk's runs of rows.
-        Assert.That(text, Does.Contain("WideJob3Chases").And.Contain("ForEachBatchParallel"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("WideJob3Chases").And.Contain("ForEachBatchParallel"));
         // The fused walk's twin, picked past the cache before today's walk.
-        Assert.That(text, Does.Contain("First_Second_Fused0Chases").And.Contain("FirstJob0Chases"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("First_Second_Fused0Chases").And.Contain("FirstJob0Chases"));
         // A gate per form: probes (in parallel too) and a vector loop's chases past the last level; the row form's chases
         // (a buffer's, in parallel, in a fused walk) past the L2.
-        Assert.That(text, Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Code, int>(world))")
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Code, int>(world))")
             .And.Contain("UniqueParallelJob4Chases"));
-        Assert.That(text, Does.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastL2(world))"), "the row form's chases");
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("if (__Lookup_Spot.PrefetchesPastL2(world))"), "the row form's chases");
         Assert.That(text, Does.Not.Contain("if (global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastLastLevel(world))"), "no row form on the last level's gate");
         // Lambda passes: the vector loop's gate in its job, the row form's twin picked at the interceptor.
-        Assert.That(text, Does.Contain("f2 = global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastLastLevel(__world)"));
-        Assert.That(text, Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Code, int>(__world))").And.Contain("LambdaJob1Chases"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("f2 = global::EasyEcs.Lookup<global::Game.Spot>.PrefetchesPastLastLevel(__world)"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("if (global::EasyEcs.LookupExtensions.Probes<global::Game.Code, int>(__world))").And.Contain("LambdaJob1Chases"));
     }
 
     /// <summary>The readers of the cache size on this machine's operating system, and their parsing.</summary>

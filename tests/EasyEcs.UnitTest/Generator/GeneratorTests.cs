@@ -118,39 +118,39 @@ public class GeneratorTests
         Assert.That(errors, Is.Empty);
     }
 
-    [TestCase("[ForEach] static void A(ref P p, in Q q, in Clock c) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "access.ReadSingleton<global::Clock>();")]
+    [TestCase("[ForEach] static void A(ref P p, in Q q, in Clock c) { }", "access.Write<__P>();", "access.Read<__Q>();", "access.ReadSingleton<global::Clock>();")]
     // An Entity used only as an identity (Id, Version, IsAlive, ==, an EntityId) reaches no component: scheduled by the rest.
-    [TestCase("[ForEach] static void A(Entity e, in P p) { }", "access.Read<global::P>();")]
-    [TestCase("[ForEach] static void A(Entity e, ref P p) { if (e.IsAlive && e != default && e.Version > 0) p.V = e.Id.Index; }", "access.Write<global::P>();", "INoStructuralChanges")]
-    [TestCase("[ForEach] static void A(Entity e, ref P p) { EntityId id = e; p.V = Index(e) + id.Index; } static int Index(EntityId id) => id.Index;", "access.Write<global::P>();", "INoStructuralChanges")]
+    [TestCase("[ForEach] static void A(Entity e, in P p) { }", "access.Read<__P>();")]
+    [TestCase("[ForEach] static void A(Entity e, ref P p) { if (e.IsAlive && e != default && e.Version > 0) p.V = e.Id.Index; }", "access.Write<__P>();", "INoStructuralChanges")]
+    [TestCase("[ForEach] static void A(Entity e, ref P p) { EntityId id = e; p.V = Index(e) + id.Index; } static int Index(EntityId id) => id.Index;", "access.Write<__P>();", "INoStructuralChanges")]
     [TestCase("[ForEach] static void A(Entity e, ref P p) => p.V = e.Has<Q>() ? 1 : 0;", "access.RunAlone();")]           // reads another table
     [TestCase("[ForEach] static void A(Entity e, ref P p) => p.V = e.Equals(default) ? 1 : 0;", "access.RunAlone();")]     // a call on it
     [TestCase("[ForEach] static void A(Entity e, ref P p) => p.V = Look(e); static int Look(Entity e) => 0;", "access.RunAlone();")] // the handle passed on
     [TestCase("[ForEach] static void A(Entity e, ref P p) => p.V = e.World.EntityCount;", "access.RunAlone();")]
-    [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<global::P>();", "access.Read<global::Q>();", "IForEachBatch<global::P, global::Q>")]
-    [TestCase("[ForEach, Changed<DynamicBuffer<int>>] static void A(in DynamicBuffer<int> b, ref P p) { }", ".Changed<global::EasyEcs.DynamicBuffer<int>>(0)", "access.Read<global::EasyEcs.DynamicBuffer<int>>();")]
-    [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<global::T>();", ".Changed<global::T>(0)", "Since(system.LastRunTick + 1)", "WriteMask => 1;")]
-    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Write<global::Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref __Unsafe.Add(")]
-    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value.V++; }", "access.Write<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]  // untracked: no stamp
-    [TestCase("[ForEach] static void A(ref P p, ReadOnlyMaybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<global::Q>();", "MaybeColumn<global::Q>(in entities, false)")]
-    [TestCase("[ForEach] static void A(ref P p, Maybe<T> t) { if (t.HasValue) t.Value = default; }", "access.Write<global::T>();", "MaybeColumn<global::T>(in entities, true)")]  // tracked: stamped
-    [TestCase("[ForEach] static void A(Mut<T> t, in P p) => t.SetIfChanged(new T { V = p.V });", "access.Write<global::T>();", "access.Read<global::P>();",
-        "IForEachBatch<global::T, global::P>", "new global::EasyEcs.Mut<global::T>(ref __Unsafe.Add(ref r1, i), in u0, (int)i)", "var u0 = global::EasyEcs.MutColumn.Of<global::T>(in entities);",
+    [TestCase("[ForEach] static void A(System.Span<P> p, System.ReadOnlySpan<Q> q) { }", "access.Write<__P>();", "access.Read<__Q>();", "IForEachBatch<global::P, global::Q>")]
+    [TestCase("[ForEach, Changed<DynamicBuffer<int>>] static void A(in DynamicBuffer<int> b, ref P p) { }", ".Changed<__DynamicBuffer_int>(0)", "access.Read<global::EasyEcs.DynamicBuffer<int>>();")]
+    [TestCase("[ForEach, Changed<T>] static void A(ref P p) { }", "access.Read<__T>();", ".Changed<global::T>(0)", "Since(system.LastRunTick + 1)", "WriteMask => 1;")]
+    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Write<__Q>();", "IForEachBatch<global::P>", "new global::EasyEcs.MaybeColumn<global::Q>(in entities, false)", "ref __Unsafe.Add(")]
+    [TestCase("[ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) q.Value.V++; }", "access.Write<__Q>();", "MaybeColumn<global::Q>(in entities, false)")]  // untracked: no stamp
+    [TestCase("[ForEach] static void A(ref P p, ReadOnlyMaybe<Q> q) { if (q.HasValue) p.V = q.Value.V; }", "access.Read<__Q>();", "MaybeColumn<global::Q>(in entities, false)")]
+    [TestCase("[ForEach] static void A(ref P p, Maybe<T> t) { if (t.HasValue) t.Value = default; }", "access.Write<__T>();", "MaybeColumn<global::T>(in entities, true)")]  // tracked: stamped
+    [TestCase("[ForEach] static void A(Mut<T> t, in P p) => t.SetIfChanged(new T { V = p.V });", "access.Write<__T>();", "access.Read<__P>();",
+        "IForEachBatch<global::T, global::P>", "new __Mut_T(ref __Unsafe.Add(ref r1, i), in u0, (int)i)", "var u0 = global::EasyEcs.MutColumn.Of<global::T>(in entities);",
         "WriteMask => 1;", "SelfStamped => 1;")]                                                                          // stamped by row
     [TestCase("[ForEach] static void A(Entity e, Mut<T> t) { t.Write().V = 1; e.Destroy(); }", "IForEachEntity<global::T>",
-        "new global::EasyEcs.Mut<global::T>(ref c1, entity)", "SelfStamped => 1;", "access.RunAlone();")]                 // moves: by entity
-    [TestCase("[ForEach] static void A(in P p, Mut<Q> q) { if (p.V > 0) q.Write().V = p.V; }", "access.Write<global::Q>();", "WriteMask => 2;", "SelfStamped => 2;")]  // untracked: a plain ref
+        "new __Mut_T(ref c1, entity)", "SelfStamped => 1;", "access.RunAlone();")]                 // moves: by entity
+    [TestCase("[ForEach] static void A(in P p, Mut<Q> q) { if (p.V > 0) q.Write().V = p.V; }", "access.Write<__Q>();", "WriteMask => 2;", "SelfStamped => 2;")]  // untracked: a plain ref
     [TestCase("[ForEach] static void A(Mut<T> t, Maybe<Q> q) { if (q.HasValue) t.Write().V = q.Value.V; }", "IForEachBatch<global::T>",
-        "new global::EasyEcs.Mut<global::T>(ref __Unsafe.Add(ref r1, i), in u0, (int)i)", "var u0 = global::EasyEcs.MutColumn.Of<global::T>(in entities);", "SelfStamped => 1;")]
-    [TestCase("[ForEach(Parallel = true)] static void A(Mut<T> t) => t.SetIfChanged(default);", "ForEachEntityParallel<global::T,", "SelfStamped => 1;")]
+        "new __Mut_T(ref __Unsafe.Add(ref r1, i), in u0, (int)i)", "var u0 = global::EasyEcs.MutColumn.Of<global::T>(in entities);", "SelfStamped => 1;")]
+    [TestCase("[ForEach(Parallel = true)] static void A(Mut<T> t) => t.SetIfChanged(default);", "ForEachEntityParallel<__T,", "SelfStamped => 1;")]
     [TestCase("[ForEach, ChangedAny<T, T2>, ChangedAny<T2, T>] static void A(ref P p) { } public struct T2 : IComponent, ITracked { public int V; }",
-        ".ChangedAny<global::T, global::S.T2>(0)", "access.Read<global::T>();", "access.Read<global::S.T2>();", "Since(system.LastRunTick + 1)")]
-    [TestCase("[ForEach, RemovedAny<T, T>] static void A(ref P p) { }", ".RemovedAny<global::T, global::T>(0)", "access.Read<global::T>();", "Since(system.LastRunTick + 1)")]
+        ".ChangedAny<__T, __T2>(0)", "access.Read<__T>();", "access.Read<global::S.T2>();", "Since(system.LastRunTick + 1)")]
+    [TestCase("[ForEach, RemovedAny<T, T>] static void A(ref P p) { }", ".RemovedAny<__T, __T>(0)", "access.Read<__T>();", "Since(system.LastRunTick + 1)")]
     [TestCase("[ForEach] static void A(in P p, World world) { }", "access.RunAlone();")]                        // reaches the world
     [TestCase("[ForEach] static void A(in P p) { } static void OnUpdate() { }", "access.RunAlone();")]       // an OnUpdate method
     [TestCase("[ForEach] static void A(ref P p) { }", "internal static readonly global::EasyEcs.QueryFilter AFilter0 = default;",
-        "world.Count<global::P>(in __ForEach.AFilter0)", "(ref job0, in __ForEach.AFilter0);")]                          // no filter: no zeroed temporary
-    [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<global::P>();", "(ref job0, __ForEach.AFilter0.Slice((int)(system.RunCount % 3), 3));")]
+        "world.Count<__P>(in __ForEach.AFilter0)", "(ref job0, in __ForEach.AFilter0);")]                          // no filter: no zeroed temporary
+    [TestCase("[ForEach(Slices = 3)] static void A(ref P p) { }", "access.Write<__P>();", "(ref job0, __ForEach.AFilter0.Slice((int)(system.RunCount % 3), 3));")]
     [TestCase("[ForEach(Slices = 2, Parallel = true), Without<Q>] static void A(ref P p) { }", "ForEachMaskedParallel<", "AFilter0.Slice((int)(system.RunCount % 2), 2)")]
     [TestCase("[ForEach(Parallel = true, ChunkSize = 100)] static void A(ref P p) { }", "ForEachMaskedParallel<", "(ref job0, in __ForEach.AFilter0, chunkSize: 100);")]
     [TestCase("[ForEach(Slices = 4)] static void A(System.Span<P> p) { }", "ForEachBatch<", "Slice((int)(system.RunCount % 4), 4)")]
@@ -161,26 +161,26 @@ public class GeneratorTests
     // the cells' buffers is sized from the shape when the assembly loads.
     [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }",
         "[ForEach] static void A(Tile<byte, G> t, ref P p) => p.V = t.Cells.Length;",
-        "public global::EasyEcs.TileNeighbors n0;", "(k0, entity, out n0);", "h0.Around(k0, entity, out n0);", "new global::EasyEcs.Tile<byte, global::G>(entity, in n0)",
+        "public global::EasyEcs.TileNeighbors n0;", "(k0, entity, out n0);", "h0.Around(k0, entity, out n0);", "new __Tile_byte_G(entity, in n0)",
         "file static class __TilePools\n{\n    [global::System.Runtime.CompilerServices.ModuleInitializer]\n    internal static void Pool()\n    {\n        global::EasyEcs.TileCells.SizePool<byte, global::G>();\n    }\n}")]
     // A pair method: the pass orders and pairs the neighbors' tables (2 axes), the cutoff read from its test, a vector loop
     // of a cluster of rows against each neighbor; with the neighbor's entity, one pair at a time. The system runs alone.
     [TestCase("public struct Fp : IComponent { public float X, Y; }",
         "[ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X, dy = p.Y - o.Y, d2 = dx * dx + dy * dy; if (d2 >= 4f) return; q.V++; }",
-        "world.ForPairs<global::Fp, ", ", 2);", "public double CutoffSquared => (double)(4f);", "public bool CutoffPerRow => false;", "Vectors(in run);", "access.RunAlone();")]
+        "world.ForPairs<__Fp, ", ", 2);", "public double CutoffSquared => (double)4f;", "public bool CutoffPerRow => false;", "Vectors(in run);", "access.RunAlone();")]
     [TestCase("public struct Fp : IComponent { public float X, Y; } public struct Rg : IComponent { public float R; }",
         "[ForEach] static void N(in Fp p, in Rg r, ref Q q, [Neighbor] in Fp o, [Neighbor] Entity e) { float dx = p.X - o.X; if (dx * dx >= r.R * r.R || e.Id.Index < 0) return; q.V++; }",
-        "world.ForPairs<global::Fp, ", ", 1);", "public bool CutoffPerRow => true;", "Rows(in run);", "float d0 = at.X - near.X;", "if (d0 * d0 > reach2) continue;", "access.RunAlone();")]
+        "world.ForPairs<__Fp, ", ", 1);", "public bool CutoffPerRow => true;", "Rows(in run);", "float d0 = at.X - near.X;", "if (d0 * d0 > reach2) continue;", "access.RunAlone();")]
     // Both sides written: each unordered pair once (the neighbors are the rows, a table against itself from the row after),
     // one pair at a time.
     [TestCase("public struct Fp : IComponent { public float X, Y; }",
         "[ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o, [Neighbor] ref Q r) { float dx = p.X - o.X; if (dx * dx >= 4f) return; q.V++; r.V++; }",
-        "static bool global::EasyEcs.IPairJob.Symmetric => true;", "Rows(in run);", "NNeighbors0 = NRows0;",
+        "static bool __IPairJob.Symmetric => true;", "Rows(in run);", "NNeighbors0 = NRows0;",
         "half ? global::System.Math.Max(ranges[k], (int)i + 1) : ranges[k]", "access.RunAlone();")]
     // In parallel: the colored chunks of the core's pass (ForPairHalves), the same job.
     [TestCase("public struct Fp : IComponent { public float X, Y; }",
         "[ForEach(Parallel = true)] static void N(in Fp p, ref Q q, [Neighbor] in Fp o, [Neighbor] ref Q r) { float dx = p.X - o.X; if (dx * dx >= 4f) return; q.V++; r.V += 2; }",
-        "world.ForPairsParallel<global::Fp, ", "static bool global::EasyEcs.IPairJob.Symmetric => true;", "access.RunAlone();")]
+        "world.ForPairsParallel<__Fp, ", "static bool __IPairJob.Symmetric => true;", "access.RunAlone();")]
     public void AccessIsDeclaredFromParametersBeside(string declarations, string members, params string[] expected)
         => AccessOf(declarations, members, expected);
 
@@ -189,8 +189,19 @@ public class GeneratorTests
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"{declarations} [EcsSystem] public ref struct S {{ {members} }}"),
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("struct __S_SystemCode")).ToString();
-        foreach (var line in expected) Assert.That(generated, Does.Contain(line), generated);
+        foreach (var line in expected) Assert.That(generated + Unaliased(generated), Does.Contain(line), generated);
         if (!expected.Contains("access.RunAlone();")) Assert.That(generated, Does.Not.Contain("RunAlone"));
+    }
+
+    /// <summary>
+    /// <paramref name="generated"/> with each alias of its alias block written as the type it names: an expectation shared
+    /// by several cases may name a type its file names once (written in full) or more (through an alias).
+    /// </summary>
+    internal static string Unaliased(string generated)
+    {
+        foreach (System.Text.RegularExpressions.Match alias in System.Text.RegularExpressions.Regex.Matches(generated, @"(?m)^using (__(?!ForEach\b)\w+) = (.+);$"))
+            generated = System.Text.RegularExpressions.Regex.Replace(generated, $@"(?<![\w.])({alias.Groups[1].Value})(?!\w)(?! =)", alias.Groups[2].Value.Replace("$", "$$"));
+        return generated;
     }
 
     private const string Lanes = """
@@ -515,7 +526,7 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t)).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("internal ref struct AJob0 : global::EasyEcs.IForEach<"), generated);  // per row
+        Assert.That(generated, Does.Contain("internal ref struct AJob0 : __IForEach_"), generated);  // per row
         Assert.That(generated, Does.Contain("internal ref struct BJob1 : global::EasyEcs.IForEachMasked<"), generated);
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, "__Vec.LoadUnsafe").Count, Is.EqualTo(2), generated); // B only: its batch and masked forms (and their Vector512.LoadUnsafe)
     }
@@ -568,12 +579,12 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("internal struct AJob0 : global::EasyEcs.IForEachMasked<global::F>, global::EasyEcs.INoStructuralChanges")
-            .And.Contain("ref readonly global::G __p1 = ref s1.Value;")
+        Assert.That(generated, Does.Contain("internal struct AJob0 : global::EasyEcs.IForEachMasked<__F>, global::EasyEcs.INoStructuralChanges")
+            .And.Contain("var __u0 = __Vec.Create<float>(s1.Value.Pull);")
             .And.Contain("var l2 = a2;")
             .And.Contain("l2.Value.N = unchecked((int)(l2.Value.N + __Vec.Sum(__a2_0)));")
-            .And.Contain("static bool global::EasyEcs.IForEachBatch<global::F>.Merges => true;")
-            .And.Contain("world.ForEachMaskedParallel<global::F, __ForEach.AJob0>(ref job0, in __ForEach.AFilter0);")
+            .And.Contain("static bool __IForEachBatch_F.Merges => true;")
+            .And.Contain("world.ForEachMaskedParallel<__F, __ForEach.AJob0>(ref job0, in __ForEach.AFilter0);")
             .And.Contain("ulong pass"), generated); // each chunk's masked words
     }
 
@@ -605,13 +616,13 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("ref float __r1 = ref __Unsafe.As<global::H, float>(ref m1.Lanes);")
+        Assert.That(generated + Unaliased(generated), Does.Contain("ref float __r1 = ref __Unsafe.As<__H, float>(ref m1.Lanes);")
             .And.Contain("var __has1 = __Interleaved.Lanes32(m1.Present(i), 0);")
             .And.Contain("var __has1 = __Interleaved.Lanes32In512(m1.Present(i), 0);")
             .And.Contain("var __q1_0 = __Vec.LoadUnsafe(ref __r1, (nuint)i & __z1);")
             .And.Not.Contain("__live"), generated);
         // One check, for the read outside the branch; none for the one under h.HasValue.
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__Vec_int.AllBitsSet & ~__has1\) != __Vec_int.Zero;").Count, Is.EqualTo(1), generated);
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= ~__has1 != __Vec_int.Zero;").Count, Is.EqualTo(1), generated);
         Assert.That(System.Text.RegularExpressions.Regex.Matches(generated, @"__bail \|= \(__pass & ~__has1\) != __Vec_int.Zero;").Count, Is.EqualTo(1), generated);
         Assert.That(generated, Does.Not.Contain("__bail |= (__pass & __m"), generated);
     }
@@ -655,8 +666,8 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("lanes = rows * 2;").And.Contain("var __t1 = (__c1_0 + (__c2_0 * __u0));")
-            .And.Contain("var __t2 = (__c1_1 + (__c2_1 * __u0));"), generated); // the flat loop, then the masked one per lane
+        Assert.That(generated, Does.Contain("lanes = rows * 2;").And.Contain("__c1_0 = __c1_0 + __c2_0 * __u0;")
+            .And.Contain("__c1_1 = __V512.ConditionalSelect(__passF, __c1_1 + __c2_1 * __u0, __c1_1);"), generated); // the flat loop, then the masked one per lane
     }
 
     // A wide component (a float, a bool, a byte and an int a row): the float lane gathered from 3 words per row by
@@ -672,9 +683,9 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated, Does.Contain("private static readonly bool __layout1 = __Layout1();")
             .And.Contain("t = t with { Speed = global::System.BitConverter.Int32BitsToSingle(1) };")
-            .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported && __layout1 && rows - i >=")
+            .And.Contain("__Avx512F.IsSupported && __layout1 && rows >=")
             .And.Contain("__V512.LoadUnsafe(ref e1, (nuint)i * 3 + 32);")
-            .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2(")
+            .And.Contain("__Avx512F.PermuteVar16x32x2(")
             .And.Contain("__Vec.IsHardwareAccelerated && __Interleaved.IsWideAccelerated && __layout1 && rows - i >=")
             .And.Contain("var __c1_0 = __Interleaved.Pick(__v1_0, __v1_1, __v1_2, __y0);")
             .And.Contain("__v1_1 = __Interleaved.PickInto(__v1_1, __c1_0, __y2);")
@@ -693,10 +704,10 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("__Vec.IsHardwareAccelerated && __Interleaved.IsWide256 && !global::System.Runtime.Intrinsics.X86.Avx512F.IsSupported && __layout1 && rows - i >=")
+        Assert.That(generated, Does.Contain("__Vec.IsHardwareAccelerated && __Interleaved.IsWide256 && !__Avx512F.IsSupported && __layout1 && rows - i >=")
             .And.Contain("__Interleaved.Permute256(__v1_0, __v1_1, __V256.Create(")
             .And.Contain("__Interleaved.Merge256(")
-            .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2(")
+            .And.Contain("__Avx512F.PermuteVar16x32x2(")
             .And.Contain("A: vector (Vector512 or Vector<float> of 256 or 128 bits), wide component (permutes, table lookups), masked words vector"), generated);
     }
 
@@ -710,9 +721,9 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("t = t with { X = global::System.BitConverter.Int64BitsToDouble(1) };")
-            .And.Contain("ref long w = ref __Unsafe.As<global::Probe, long>(ref t);")
-            .And.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar8x64x2(")
+        Assert.That(generated, Does.Contain("t = t with { X = __BitConverter.Int64BitsToDouble(1) };")
+            .And.Contain("ref long w = ref __Unsafe.As<__Probe, long>(ref t);")
+            .And.Contain("__Avx512F.PermuteVar8x64x2(")
             .And.Contain("__Interleaved.Permute256(")
             .And.Contain("A: vector (Vector512 or Vector<double> of 256 bits)"), generated);
     }
@@ -748,7 +759,7 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("global::System.Runtime.Intrinsics.X86.Avx512F.PermuteVar16x32x2(")
+        Assert.That(generated, Does.Contain("__Avx512F.PermuteVar16x32x2(")
             .And.Contain("A: vector (Vector512 only), wide component (permutes), masked words scalar")
             .And.Not.Contain("Interleaved.Pick").And.Not.Contain("Vector128<byte>").And.Not.Contain("IsWideAccelerated"), generated);
     }
@@ -765,7 +776,7 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated, Does.Contain("__Vec.SubtractSaturate(__c1_0, __c2_0)")
             .And.Contain("__V512.AddSaturate(")
-            .And.Contain("(__c1_0 + __c2_0)")
+            .And.Contain("__c1_0 + __c2_0")
             .And.Contain("Interleaved.Lanes8"), generated); // masked words of byte lanes: a word's bits as lanes
         // the masked Execute: the vector loop over the word, its passing rows as lanes
         string masked = generated.Substring(generated.IndexOf("ulong pass,", System.StringComparison.Ordinal));
@@ -783,12 +794,12 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("AddSaturate(__c1_0, __c2_0)").And.Not.Contain("(__c1_0 + __c2_0)")
+        Assert.That(generated + Unaliased(generated), Does.Contain("AddSaturate(__c1_0, __c2_0)").And.Not.Contain("__c1_0 + __c2_0")
             .And.Contain("__Blank.Nonzero").And.Contain("internal static readonly byte F0;")
             .And.Not.Contain("bool __blank").And.Not.Contain("bool __nonzero"), generated);
         // What keeps the pass within the inliner's budget: the exchange out of line, the walk as plain loops over the
         // words of rows, the stepped buffer checked once per tile, the shape's constants and offsets read once.
-        Assert.That(generated, Does.Contain("A_0__Exchange0(ref __tile0);").And.Contain("MethodImplOptions.NoInlining)]\n    private static void A_0__Exchange0(")
+        Assert.That(generated + Unaliased(generated), Does.Contain("A_0__Exchange0(ref __tile0);").And.Contain("MethodImplOptions.NoInlining)]\n    private static void A_0__Exchange0(")
             .And.Contain("__walk.RowsOf(__l)").And.Not.Contain("foreach (var __row")
             .And.Contain("__tile0.JacobiNext(out ulong[] __written)").And.Not.Contain("Write(__row)")
             .And.Contain("int __width = global::EasyEcs.Cell<byte, ").And.Contain("nint __d0 = global::EasyEcs.Cell<byte, ").And.Contain(">.Offset(-1, 0, 0);")
@@ -830,7 +841,7 @@ public class GeneratorTests
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         Assert.That(generated, Does.Contain("__Vec.Sin(__c1_0)").And.Contain("__V512.Sin(__c1_0)")
-            .And.Contain("__Vec.Create<float>(global::System.MathF.Cos(__p1.Pull))")
+            .And.Contain("__Vec.Create<float>(__MathF.Cos(s1.Pull))")
             .And.Contain("__Vec.DegreesToRadians(__c1_0)").And.Contain("__V512.DegreesToRadians(__c1_0)"), generated);
     }
 
@@ -854,15 +865,15 @@ public class GeneratorTests
     [TestCase("[ForEach] static void A(ref F f, in H h) => f.V = h.V switch { < 0 => 0, > 10 when f.V > 1 => 1, _ => f.V };",
         "var __m1 = __Vec.As<float, int>(__Vec.LessThan<float>(__c2_0, __Vec.Create<float>(0f)));",
         "var __t4 = __Vec.As<float, int>(__Vec.GreaterThan<float>(__c1_0, __Vec.Create<float>(1f)));",
-        "var __m5 = (__Vec.As<float, int>(__Vec.GreaterThan<float>(__c2_0, __Vec.Create<float>(10f))) & __t4);",
+        "var __m5 = __Vec.As<float, int>(__Vec.GreaterThan<float>(__c2_0, __Vec.Create<float>(10f))) & __t4;",
         "__c1_0 = __Vec.ConditionalSelect(__Vec.As<int, float>(__m1), __Vec.Create<float>(0f), __Vec.ConditionalSelect(__Vec.As<int, float>(__m5), __Vec.Create<float>(1f), __c1_0));")]
     [TestCase("[ForEach] static void A(ref P p, in Q q) { switch (q.V) { default: p.V++; break; case 1: case 2: p.V = 0; break; } }",
         "var __m1 = __Vec.Equals<int>(__c2_0, __Vec.Create<int>(1));",
         "var __m3 = __Vec.Equals<int>(__c2_0, __Vec.Create<int>(2));",
-        "var __m4 = (__m1 | __m3);",
-        "__c1_0 = __Vec.ConditionalSelect(~__m4, (__c1_0 + __Vec_int.One), __c1_0);",                 // the default, first
+        "var __m4 = __m1 | __m3;",
+        "__c1_0 = __Vec.ConditionalSelect(~__m4, __c1_0 + __Vec_int.One, __c1_0);",                 // the default, first
         "__c1_0 = __Vec.ConditionalSelect(__m4, __Vec.Create<int>(0), __c1_0);",
-        "__c1_0 = __Vec.ConditionalSelect((~__m4 & __pass), (__c1_0 + __Vec_int.One), __c1_0);")]      // in a masked word
+        "__c1_0 = __Vec.ConditionalSelect(~__m4 & __pass, __c1_0 + __Vec_int.One, __c1_0);")]      // in a masked word
     public void ASwitchIsMasksOfItsArms(string method, params string[] lines)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"[EcsSystem] public ref struct S {{ {method} }}"), out var output, out _);
@@ -882,16 +893,16 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("var __id1 = global::Count.Identity;")
+        Assert.That(generated, Does.Contain("var __id1 = __Count.Identity;")
             .And.Contain("var __a1_0 = __Vec.Create<int>(__id1.N);")
             .And.Contain("var __a1_1 = __Vec.Create<int>(__id1.Low);")
-            .And.Contain("__a1_0 = __Vec.ConditionalSelect(__m0, (__a1_0 + __c1_0), __a1_0);")
+            .And.Contain("__a1_0 = __Vec.ConditionalSelect(__m0, __a1_0 + __c1_0, __a1_0);")
             .And.Contain("__a1_1 = __Vec.Min(__a1_1, __c1_0);")
             .And.Contain("l1.Value.N = unchecked((int)(l1.Value.N + __Vec.Sum(__a1_0)));")
-            .And.Contain("for (int __j = 0; __j < __Vec_int.Count; __j++) l1.Value.Low = global::System.Math.Min(l1.Value.Low, __a1_1[__j]);")
+            .And.Contain("for (int __j = 0; __j < __Vec_int.Count; __j++) l1.Value.Low = __Math.Min(l1.Value.Low, __a1_1[__j]);")
             .And.Not.Contain("Combine(__v)"), generated);
         // In a masked word each write of an accumulator leaves the lanes that do not pass as they were: no select after.
-        Assert.That(generated, Does.Contain("__a1_0 = __Vec.ConditionalSelect((__m0 & __pass), (__a1_0 + __c1_0), __a1_0);")
+        Assert.That(generated, Does.Contain("__a1_0 = __Vec.ConditionalSelect(__m0 & __pass, __a1_0 + __c1_0, __a1_0);")
             .And.Contain("__a1_1 = __Vec.ConditionalSelect(__pass, __Vec.Min(__a1_1, __c1_0), __a1_1);")
             .And.Not.Contain("var __h1_0 = __a1_0;"), generated);
     }
@@ -979,8 +990,8 @@ public class GeneratorTests
 
     [TestCase("[EcsSystem] public ref struct G<T> where T : struct, IComponent { [ForEach] static void A(ref T t, in P p) { } } "
               + "public static class U { public static void F(World w) { w.AddSystem<G<P>>(); w.HasSystem<G<Q>>(); } }",
-        "file static class __ForEach<T> where T : struct, global::EasyEcs.IComponent", "(global::G<T> owner, ref T t, in global::P p)",
-        "public readonly struct __G_1_SystemCode<T> : global::EasyEcs.ISystemCode where T : struct, global::EasyEcs.IComponent",
+        "file static class __ForEach<T> where T : struct, __IComponent", "(global::G<T> owner, ref T t, in global::P p)",
+        "public readonly struct __G_1_SystemCode<T> : global::EasyEcs.ISystemCode where T : struct, __IComponent",
         "access.Write<T>();", "[assembly: global::EasyEcs.GenericSystemCode(typeof(global::G<>), typeof(global::__G_1_SystemCode<>))]",
         "systems.Add<global::G<global::P>, global::__G_1_SystemCode<global::P>>();", "systems.Add<global::G<global::Q>, global::__G_1_SystemCode<global::Q>>();")]
     // Every API that names a system closes it: the set registers the closed type's code (no reflection, AOT-safe).
@@ -992,12 +1003,12 @@ public class GeneratorTests
         "systems.Add<global::After, global::__After_SystemCode>();")]
     [TestCase("public static class R { [ForEach] static void A<T>(in T t, ref int n) where T : struct, IComponent { } }",
         "public static void A<T>(global::EasyEcs.World world, ref int n) where T : struct, global::EasyEcs.IComponent",
-        "internal ref struct AJob0<T> : global::EasyEcs.IForEachBatch<T> where T : struct, global::EasyEcs.IComponent",
+        "internal ref struct AJob0<T> : global::EasyEcs.IForEachBatch<T> where T : struct, __IComponent",
         "internal static extern void A_0<T>([global::System.Runtime.CompilerServices.UnsafeAccessorType(\"R\")] object owner, in T t, ref int n) where T : struct, global::EasyEcs.IComponent;")]
     [TestCase("[Without<Q>, WithAny<T, P>] public struct G : ISystemGroup; [UpdateInGroup<G>] [EcsSystem] public ref struct S { [ForEach, Without<Q>] static void A(ref P p) { } [ForEach, With<P>] static void B() { } }",
-        "AFilter0 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T, global::P>();", // once, though both name it
+        "AFilter0 = __QueryFilter.Create().Without<__Q>().WithAny<__T, __P>();", // once, though both name it
         "BFilter1 = global::EasyEcs.QueryFilter.Create().Without<global::Q>().WithAny<global::T, global::P>();", 
-        "world.ForEachMasked<global::P, __ForEach.A_B_Fused0>(ref fused0, in __ForEach.A_B_Fused0Filter)")] // the same rows: one walk
+        "world.ForEachMasked<__P, __ForEach.A_B_Fused0>(ref fused0, in __ForEach.A_B_Fused0Filter)")] // the same rows: one walk
     [TestCase("public record struct In<T>(int X) : IComponent; public interface IActor<TSelf> : ISystemGroupWith<In<TSelf>>, ISystemGroupWithout<Q> where TSelf : struct; "
         + "public struct Map : IActor<Map>; [UpdateInGroup<Map>] [EcsSystem] public ref struct S { [ForEach] static void A(ref P p) { } }",
         ".With<global::In<global::Map>>()", ".Without<global::Q>()")] // the group's filters through a generic interface
@@ -1009,7 +1020,7 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Where(t => IsCode(t) || IsEntryPoints(t) || t.FilePath.EndsWith("SystemCode.g.cs") || t.FilePath.EndsWith("__EasyEcsSystems.g.cs"))
             .Select(t => t.ToString()));
-        foreach (var line in expected) Assert.That(generated, Does.Contain(line), generated);
+        foreach (var line in expected) Assert.That(generated + Unaliased(generated), Does.Contain(line), generated);
     }
 
     [Test]
@@ -1057,7 +1068,7 @@ public class GeneratorTests
         string generated = string.Concat(output.SyntaxTrees.Where(t => IsCode(t)).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain(".With<global::Framework.In<global::Map>>()"), generated);
         string members = string.Concat(output.SyntaxTrees.Where(t => t.ToString().Contains("MapIndex")).Select(t => t.ToString()));
-        Assert.That(members, Does.Contain("ValueIndex<global::Map, global::Map> MapIndex"), members);
+        Assert.That(members, Does.Contain("ValueIndex<__Map, __Map> MapIndex"), members);
 
         // Run it: the group sees the actor, the key component keeps its index.
         using var userImage = new System.IO.MemoryStream();
@@ -1452,9 +1463,9 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string text = string.Join("\n", output.SyntaxTrees.Select(t => t.ToString()));
         Assert.That(text, Does.Contain("ref var job_total1 = ref world.GetOrAddSingleton(global::Tot.Identity); // [Accumulate]: the total, then this pass\n"
-                                      + "        job_total1 = global::Tot.Combine(job_total1, job.a1.Value);").Or.Match(@"ref var \w+_total\d = ref \w+\.GetOrAddSingleton\(global::Tot\.Identity\)"));
-        Assert.That(System.Text.RegularExpressions.Regex.Matches(text, @"= global::Tot\.Combine\(\w+_total\d, ").Count, Is.EqualTo(2), "the system and the runner");
-        Assert.That(text, Does.Match(@"GetOrAddSingleton<global::Last>\(\) = \w+\.a2\.Value;"));
+                                      + "        job_total1 = global::Tot.Combine(job_total1, job.a1.Value);").Or.Match(@"ref var \w+_total\d = ref \w+\.GetOrAddSingleton\((?:global::|__)Tot\.Identity\)"));
+        Assert.That(System.Text.RegularExpressions.Regex.Matches(text, @"= (?:global::|__)Tot\.Combine\(\w+_total\d, ").Count, Is.EqualTo(2), "the system and the runner");
+        Assert.That(text, Does.Match(@"GetOrAddSingleton<(?:global::|__)Last>\(\) = \w+\.a2\.Value;"));
     }
 
     // Realistic keystrokes, in a build (every output) and as the IDE runs the generators while typing (implementation
@@ -1651,15 +1662,15 @@ public class GeneratorTests
             public static class R { [ForEach, Consume] static void D(in Q q, ref int n) => n++; }
             """), out var output, out _);
         string all = string.Join("\n", output.SyntaxTrees.Skip(2).Select(t => t.ToString()));
-        Assert.That(all, Does.Contain("world.DestroyAll<global::P>(in __ForEach.AFilter0); // [Consume]"));
-        Assert.That(all, Does.Contain("__ForEach.B_1(default, entity, ref c1);\n            entity.Destroy();"));
-        Assert.That(all, Does.Contain("world.DestroyAll<global::Q>(in __ForEach.DFilter0); // [Consume]"));          // a runner's
-        Assert.That(all, Does.Contain("public static int Interval => 4;\n\n    public static int Phase => 3;").And.Contain("public static int Interval => 2;\n\n    public static int Phase => 0;"));
-        Assert.That(all, Does.Contain("systems.Add<global::G<global::P>, global::__G_1_SystemCode<global::P>>();"));
-        Assert.That(all, Does.Contain("public static bool C(global::EasyEcs.Entity e, ulong since, int n)"));
-        Assert.That(all, Does.Contain("bool ran = false;\n            OEntityMethods.__C_0(e, since, n, ref ran);\n            return ran;"));  // the entry point calls its pass
-        Assert.That(all, Does.Contain("if (e.World is not { } world) return;"));
-        Assert.That(all, Does.Contain("ran = e.Run<global::P, __ForEach.CJob0>(ref job, in __ForEach.CFilter0, since);"));
+        Assert.That(all + Unaliased(all), Does.Contain("world.DestroyAll<__P>(in __ForEach.AFilter0); // [Consume]"));
+        Assert.That(all + Unaliased(all), Does.Contain("__ForEach.B_1(default, entity, ref c1);\n            entity.Destroy();"));
+        Assert.That(all + Unaliased(all), Does.Contain("world.DestroyAll<__Q>(in __ForEach.DFilter0); // [Consume]"));          // a runner's
+        Assert.That(all + Unaliased(all), Does.Contain("public static int Interval => 4;\n\n    public static int Phase => 3;").And.Contain("public static int Interval => 2;\n\n    public static int Phase => 0;"));
+        Assert.That(all + Unaliased(all), Does.Contain("systems.Add<global::G<global::P>, global::__G_1_SystemCode<global::P>>();"));
+        Assert.That(all + Unaliased(all), Does.Contain("public static bool C(global::EasyEcs.Entity e, ulong since, int n)"));
+        Assert.That(all + Unaliased(all), Does.Contain("bool ran = false;\n            OEntityMethods.__C_0(e, since, n, ref ran);\n            return ran;"));  // the entry point calls its pass
+        Assert.That(all + Unaliased(all), Does.Contain("if (e.World is not { } world) return;"));
+        Assert.That(all + Unaliased(all), Does.Contain("ran = e.Run<__P, __ForEach.CJob0>(ref job, in __ForEach.CFilter0, since);"));
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, all);
     }
 
@@ -1706,7 +1717,7 @@ public class GeneratorTests
         foreach (var member in new[] { "bool IsDead\n", "bool HasTarget\n", " ZoneIndex\n" })
             Assert.That(generated, Does.Not.Contain(member), member);
         // A prefab has IsShieldDisabled once (the tag's), so it keeps it; the entity would have it twice.
-        var classes = generated.Split("[global::System.CodeDom.Compiler.GeneratedCode(");
+        var classes = System.Text.RegularExpressions.Regex.Split(generated, @"\[(?:global::System\.CodeDom\.Compiler\.|__)GeneratedCode\(");
         Assert.That(classes.Where(c => c.Contains("bool IsShieldDisabled")).Select(c => c.Split('"')[1]), Is.EqualTo(new[] { "EasyEcs.Generator.Prefab" }));
         Assert.That(generated, Does.Contain("class LootEcsPrefabBufferExtensions").And.Contain("class LootPrefabEcsBufferExtensions"));
     }
@@ -1771,8 +1782,8 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.Contains(".g.cs")).Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("Entity SetBuffer(int v)").And.Not.Contain("Prefab SetBuffer("));   // the prefab's own SetBuffer<T> would win
-        Assert.That(generated, Does.Contain("SetProps(int hp, float speed) => @this.Set(new global::Props { Hp = hp, Speed = speed })")
-            .And.Contain("LinkAlly(global::EasyEcs.EntityId target, int weight) => @this.Link(new global::Ally { Target = target, Weight = weight })")
+        Assert.That(generated, Does.Contain("SetProps(int hp, float speed) => @this.Set(new __Props { Hp = hp, Speed = speed })")
+            .And.Contain("LinkAlly(__EntityId target, int weight) => @this.Link(new __Ally { Target = target, Weight = weight })")
             .And.Not.Contain("SetLocked("));
     }
 
@@ -1865,7 +1876,7 @@ public class GeneratorTests
         string local = Run(Compile(ForeignComponents, ForeignMethods));
         string foreign = Run(Compile(ForeignMethods).AddReferences(ForeignLibrary()));
         Assert.That(foreign, Is.EqualTo(local));
-        Assert.That(foreign, Does.Contain("internal ref struct ChaseJob0 : global::EasyEcs.IForEach<"), foreign); // a call that adds lanes: rows
+        Assert.That(foreign, Does.Contain("internal ref struct ChaseJob0 : __IForEach_"), foreign); // a call that adds lanes: rows
         Assert.That(foreign, Does.Contain("for (nint last = rows - __Vec_"), foreign);
     }
 
@@ -2097,7 +2108,7 @@ public class GeneratorTests
         string code = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".g.cs")).Select(t => t.ToString()));
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, code);
         Assert.That(code, Does.Not.Contain("Chases"));
-        Assert.That(code, Does.Contain("public double CutoffSquared => (double)((s3.R * s3.R));"));
+        Assert.That(code, Does.Contain("public double CutoffSquared => (double)(s3.R * s3.R);"));
         var diagnostics = (await output.WithAnalyzers(EasyEcsAnalyzer.All).GetAllDiagnosticsAsync()).Where(d => d.Id.StartsWith("EECS")).ToArray();
         Assert.That(diagnostics.Select(d => d.Id), Has.None.EqualTo("EECS106"));
         Assert.That(diagnostics.Select(d => d.GetMessage()), Has.None.Contains("the generator failed"));
@@ -2224,7 +2235,7 @@ public class GeneratorTests
             "[EcsSystem] public ref struct S { [ForEach] static void A(ref P p, Maybe<Q> q) { if (q.HasValue) (q.Value.V, p.V) = (1, 2); } }"),
             out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => IsCode(t)).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("access.Write<global::Q>();"));
+        Assert.That(generated, Does.Contain("access.Write<__Q>();"));
     }
 
     [Test]
@@ -2280,7 +2291,7 @@ public class GeneratorTests
         const string noInlining = "__MethodImpl(__MethodImplOptions.NoInlining)]";
         Assert.That(generated, Does.Contain($"Name = \"Loops\"), {noInlining}"), generated);
         Assert.That(generated, Does.Contain($"Name = \"Calls\"), {noInlining}"), generated);   // a run of rows calls it too
-        Assert.That(generated, Does.Contain("internal ref struct CallsJob1 : global::EasyEcs.IForEachBatch<"), generated);
+        Assert.That(generated, Does.Contain("internal ref struct CallsJob1 : __IForEachBatch_"), generated);
         Assert.That(generated, Does.Contain("Name = \"Counts\")]"), generated);
         Assert.That(generated, Does.Contain("Name = \"Plain\")]"), generated);
     }
@@ -2443,7 +2454,7 @@ public class GeneratorTests
             "[EcsSystem] public ref struct S { [ForEach] static void A(Entity e, ref P p, ReadOnlyMaybe<Q> q) { if (q.HasValue) e.Destroy(); } }"),
             out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => IsCode(t)).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("IForEachEntity<global::P>").And.Contain("global::EasyEcs.Maybe<global::Q>.ForRead(entity)"));
+        Assert.That(generated, Does.Contain("IForEachEntity<global::P>").And.Contain("global::EasyEcs.Maybe<__Q>.ForRead(entity)"));
     }
 
     [Test]
@@ -2457,10 +2468,10 @@ public class GeneratorTests
             }
             """), out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => IsCode(t)).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("SumJob0 : global::EasyEcs.IForEachBatch<global::P>")
+        Assert.That(generated + Unaliased(generated), Does.Contain("SumJob0 : __IForEachBatch_P")
             .And.Contain("var l1 = x1;").And.Contain("var l2 = x2;").And.Contain("ref l1, ref l2")
             .And.Contain("x1 = l1;").And.Contain("x2 = l2;"));
-        Assert.That(generated, Does.Contain("KillJob1 : global::EasyEcs.IForEachEntity<global::P>"));   // a structural method keeps the ref
+        Assert.That(generated + Unaliased(generated), Does.Contain("KillJob1 : global::EasyEcs.IForEachEntity<global::P>"));   // a structural method keeps the ref
     }
 
     [Test]
@@ -2510,36 +2521,36 @@ public class GeneratorTests
         Assert.That(diagnostics, Is.Empty);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Component.g.cs")).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("public ref global::P P"));
-        Assert.That(generated, Does.Contain("public bool HasP"));
-        Assert.That(generated, Does.Contain("public bool TryGetP(out global::P value)"));
-        Assert.That(generated, Does.Contain("public ref global::P GetOrAddP()"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("public ref __P P"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("public bool HasP"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("public bool TryGetP(out global::P value)"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("public ref __P GetOrAddP()"));
         Assert.That(generated, Does.Not.Contain("GetOrAddOwned"));                                         // indexed: Set only
-        Assert.That(generated, Does.Contain("[global::System.CodeDom.Compiler.GeneratedCode(\"EasyEcs.Generator\""));
-        Assert.That(generated, Does.Contain("SetNamed(string? name)"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("[global::System.CodeDom.Compiler.GeneratedCode(\"EasyEcs.Generator\""));
+        Assert.That(generated + Unaliased(generated), Does.Contain("SetNamed(string? name)"));
         Assert.That(output.SyntaxTrees.Count(t => t.FilePath.Contains("Split.") && t.FilePath.EndsWith(".Component.g.cs")), Is.EqualTo(1));
-        Assert.That(generated, Does.Contain("SetP(int v) => @this.Set(new global::P { V = v })"));          // from the fields
-        Assert.That(generated, Does.Contain("public global::EasyEcs.Entity RemoveP()"));
-        Assert.That(generated, Does.Contain("public ref readonly global::T T"));                            // tracked: read-only
-        Assert.That(generated, Does.Contain("public ref global::T WriteT()"));                              // and a ref write
-        Assert.That(generated, Does.Contain("public bool SetTIfChanged(int v) => @this.SetIfChanged(new global::T { V = v })")); // only a new value
-        Assert.That(generated, Does.Contain("public bool SetOwnedIfChanged("));                              // indexed: no index update when equal
+        Assert.That(generated + Unaliased(generated), Does.Contain("SetP(int v) => @this.Set(new __P { V = v })"));          // from the fields
+        Assert.That(generated + Unaliased(generated), Does.Contain("public __Entity RemoveP()"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("public ref readonly __T T"));                            // tracked: read-only
+        Assert.That(generated + Unaliased(generated), Does.Contain("public ref __T WriteT()"));                              // and a ref write
+        Assert.That(generated + Unaliased(generated), Does.Contain("public bool SetTIfChanged(int v) => @this.SetIfChanged(new __T { V = v })")); // only a new value
+        Assert.That(generated + Unaliased(generated), Does.Contain("public bool SetOwnedIfChanged("));                              // indexed: no index update when equal
         Assert.That(generated, Does.Not.Contain("SetPIfChanged"));                                         // not watched: a plain write is as cheap
         Assert.That(generated, Does.Not.Contain("WriteOwned"));                                            // indexed: Set only
-        Assert.That(generated, Does.Contain("public ref readonly global::Owned Owned"));                    // indexed: read-only
-        Assert.That(generated, Does.Contain("ValueIndex<global::Owned, global::EasyEcs.EntityId> OwnedIndex"));
-        Assert.That(generated, Does.Contain("public ref global::Clock Clock"));                             // a singleton
-        Assert.That(generated, Does.Contain("public void SetClock(int ticks)"));
-        Assert.That(generated, Does.Contain("public ref global::Clock GetOrAddClock()"));
-        Assert.That(generated, Does.Contain("SetSpeed(float V) => @this.Set(new global::Game.Speed(V))"));  // from the constructor
-        Assert.That(generated, Does.Contain("public bool IsTagged"));
-        Assert.That(generated, Does.Contain("SetTagged() => @this.Set(default(global::Tagged))"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("public ref readonly __Owned Owned"));                    // indexed: read-only
+        Assert.That(generated + Unaliased(generated), Does.Contain("ValueIndex<__Owned, __EntityId> OwnedIndex"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("public ref __Clock Clock"));                             // a singleton
+        Assert.That(generated + Unaliased(generated), Does.Contain("public void SetClock(int ticks)"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("public ref __Clock GetOrAddClock()"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("SetSpeed(float V) => @this.Set(new __Speed(V))"));  // from the constructor
+        Assert.That(generated + Unaliased(generated), Does.Contain("public bool IsTagged"));
+        Assert.That(generated + Unaliased(generated), Does.Contain("SetTagged() => @this.Set(default(__Tagged))"));
         // An internal component's class is internal, its members public: an internal extension property is unusable
         // from a friend assembly (AFriendAssemblyUsesTheMembersOfItsLibrary).
-        Assert.That(generated, Does.Contain("internal static class HiddenEcsExtensions").And.Contain("public ref global::Game.Hidden Hidden")
+        Assert.That(generated + Unaliased(generated), Does.Contain("internal static class HiddenEcsExtensions").And.Contain("public ref __Hidden Hidden")
             .And.Not.Contain("internal ref"));
-        Assert.That(generated, Does.Not.Contain("public ref global::World World").And.Contain("public ref readonly global::World World")); // Entity.World; a prefab has none
-        Assert.That(generated, Does.Contain("public bool HasWorld"));
+        Assert.That(generated, Does.Not.Contain("public ref global::World World").And.Contain("public ref readonly __World World")); // Entity.World; a prefab has none
+        Assert.That(generated + Unaliased(generated), Does.Contain("public bool HasWorld"));
         Assert.That(generated, Does.Not.Contain("SetFixed"));
         Assert.That(generated, Does.Not.Contain("Secret"));
     }
@@ -2609,7 +2620,7 @@ public class GeneratorTests
         Assert.That(diagnostics, Is.Empty);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error).Select(d => d.ToString()), Is.Empty);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Buffer.g.cs")).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("public bool LinksId(global::EasyEcs.EntityId target)").And.Contain("public bool HasId"));
+        Assert.That(generated, Does.Contain("public bool LinksId(__EntityId target)").And.Contain("public bool HasId"));
         Assert.That(generated, Does.Not.Contain("DynamicBuffer<global::Id> Id"));
     }
 
@@ -2653,7 +2664,7 @@ public class GeneratorTests
         Assert.That(diagnostics, Is.Empty);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Join("\n", output.SyntaxTrees.Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("public global::EasyEcs.QueryFilter InZone(int group) => @this.InGroup<global::Zone>(group);"));
+        Assert.That(generated, Does.Contain("public __QueryFilter InZone(int group) => @this.InGroup<__Zone>(group);"));
     }
 
     [Test]
@@ -2699,15 +2710,15 @@ public class GeneratorTests
         Assert.That(diagnostics, Is.Empty);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Buffer.g.cs")).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("public ref readonly global::EasyEcs.DynamicBuffer<global::Game.Loot> Loot"));
-        Assert.That(generated, Does.Contain("public ref global::EasyEcs.DynamicBuffer<global::Game.Block> WriteBlock()"));
-        Assert.That(generated, Does.Contain("internal static class NoteEcsBufferExtensions").And.Contain("public ref global::EasyEcs.DynamicBuffer<global::Game.Note> WriteNote()"));
-        Assert.That(generated, Does.Contain("public global::EasyEcs.Entity LinkFriend(global::EasyEcs.EntityId Target) => @this.Link(new global::Game.Friend(Target));")
+        Assert.That(generated, Does.Contain("public ref readonly __DynamicBuffer_Loot Loot"));
+        Assert.That(generated, Does.Contain("public ref __DynamicBuffer_Block WriteBlock()"));
+        Assert.That(generated, Does.Contain("internal static class NoteEcsBufferExtensions").And.Contain("public ref __DynamicBuffer_Note WriteNote()"));
+        Assert.That(Unaliased(generated), Does.Contain("public global::EasyEcs.Entity LinkFriend(global::EasyEcs.EntityId Target) => @this.Link(new global::Game.Friend(Target));")
             .And.Contain("public int UnlinkFriend(global::EasyEcs.EntityId target)").And.Contain("public bool LinksFriend(global::EasyEcs.EntityId target)")
             .And.Contain("public global::EasyEcs.RelationIndex<global::Game.Friend> FriendIndex"));
         Assert.That(output.SyntaxTrees.Count(t => t.FilePath.EndsWith(".Buffer.g.cs")), Is.EqualTo(4)); // Loot, Note, Block, Friend: not int, not a component
         Assert.That(generated, Does.Not.Contain("WriteFriend").And.Not.Contain("int RemoveFriend(")); // links: LinkFriend / UnlinkFriend
-        Assert.That(generated, Does.Contain("public global::EasyEcs.Prefab SetLoot(params global::System.ReadOnlySpan<global::Game.Loot> items)")
+        Assert.That(Unaliased(generated), Does.Contain("public global::EasyEcs.Prefab SetLoot(params global::System.ReadOnlySpan<global::Game.Loot> items)")
             .And.Not.Contain("Prefab SetFriend"));                                                     // a recipe holds no links
         Assert.That(await Diagnose(Components, source), Is.Empty);                                    // no EECS012 on the members
     }
@@ -2737,9 +2748,9 @@ public class GeneratorTests
         var files = output.SyntaxTrees.Where(t => t.FilePath.Contains("EasyEcs.QueryItem.")).Select(t => t.ToString()).ToArray();
         Assert.That(files, Has.Length.EqualTo(3), "one file per shape; P with Game.P has no names to give");
         string generated = string.Join("\n", files);
-        Assert.That(generated, Does.Contain("public ref global::P P").And.Contain("get => ref @this.Component2;")
-            .And.Contain("public ref readonly global::Owned Owned"));
-        string read = files.Single(f => f.Contains("extension(global::EasyEcs.ReadItem<global::P, global::Q> @this)"));
+        Assert.That(generated, Does.Contain("public ref __P P").And.Contain("get => ref @this.Component2;")
+            .And.Contain("public ref readonly __Owned Owned"));
+        string read = files.Select(Unaliased).Single(f => f.Contains("extension(global::EasyEcs.ReadItem<global::P, global::Q> @this)"));
         Assert.That(read, Does.Contain("public ref readonly global::P P").And.Not.Contain("public ref global::"));
         Assert.That(await Diagnose(Components, source), Is.Empty);
     }

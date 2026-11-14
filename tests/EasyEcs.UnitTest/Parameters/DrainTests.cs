@@ -227,12 +227,12 @@ public class DrainTests
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(source), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string text = string.Join("\n", output.SyntaxTrees.Select(t => t.ToString()));
-        Assert.That(text, Does.Contain("internal ref struct HJob0 : global::EasyEcs.IDrain<global::Rec>"));
-        Assert.That(text, Does.Contain("public void Execute(in global::Rec record) => __ForEach.H_0(default, in record, ref s1, new global::EasyEcs.Lookup<global::P>(World, null), new global::EasyEcs.Emit<global::Other>(ref this.e3));"));
-        Assert.That(text, Does.Contain("global::EasyEcs.Emitted<global::Rec>.Drain(world, ref job0);"));
-        Assert.That(text, Does.Contain("access.WriteSingleton<global::EasyEcs.Emitted<global::Rec>>();"));
-        Assert.That(text, Does.Contain("public static void G(global::EasyEcs.World world, ref int n)"));
-        Assert.That(text, Does.Contain("\"H: the records of Emitted<Rec>, in order, then cleared\""));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("internal ref struct HJob0 : global::EasyEcs.IDrain<__Rec>"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("public void Execute(in global::Rec record) => __ForEach.H_0(default, in record, ref s1, new global::EasyEcs.Lookup<global::P>(World, null), new global::EasyEcs.Emit<global::Other>(ref e3));"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("__Emitted_Rec.Drain(world, ref job0);"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("access.WriteSingleton<__Emitted_Rec>();"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("public static void G(global::EasyEcs.World world, ref int n)"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("\"H: the records of Emitted<Rec>, in order, then cleared\""));
     }
 
     [TestCase("public static class R { [Drain] static void A(in Rec r, in P p) { } }", "takes 'p', which a pass over records has none of")]

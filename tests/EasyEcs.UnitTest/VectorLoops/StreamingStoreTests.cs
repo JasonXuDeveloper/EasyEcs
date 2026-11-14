@@ -128,17 +128,23 @@ public class StreamingStoreTests
         string Job(string name) => text.Split("internal ref struct ").Single(j => j.StartsWith(name + " "));
 
         string set = Job("SetJob0");
-        Assert.That(set, Does.Contain("if (global::EasyEcs.StreamingStores.Pays(in entities, rows, ").And.Contain("i = __Stream("));
-        Assert.That(set, Does.Contain("var __c2_0 = default(__V512_float);")
-            .And.Contain("global::EasyEcs.StreamingStores.Store(__c2_0, ref e2, (nuint)i);")
-            .And.Contain("global::EasyEcs.StreamingStores.Head(ref e2, i, 1, ").And.Contain("global::EasyEcs.StreamingStores.Fence();"));
+        Assert.That(set, Does.Contain("if (__StreamingStores.Pays(in entities, rows, ").And.Contain("i = __Stream("));
+        // the streaming method alone: the masked words load what they keep
+        static string Streamed(string job)
+        {
+            string stream = job.Substring(job.IndexOf("private nint __Stream(", System.StringComparison.Ordinal));
+            return stream.Substring(0, stream.IndexOf("return i;", System.StringComparison.Ordinal));
+        }
+        Assert.That(Streamed(set), Does.Not.Contain("LoadUnsafe(ref e2")); // only written: not loaded
+        Assert.That(set, Does.Contain("__StreamingStores.Store(__c2_0, ref e2, (nuint)i);")
+            .And.Contain("__StreamingStores.Head(ref e2, i, 1, ").And.Contain("__StreamingStores.Fence();"));
         Assert.That(set.Split("public void Execute(").Last(), Does.Not.Contain("StreamingStores.Pays"), "masked words keep plain stores");
         foreach (var plain in new[] { "AddJob1", "SomeJob2" })
             Assert.That(Job(plain), Does.Not.Contain("StreamingStores"), plain);
         Assert.That(Job("LateJob3"), Does.Contain("i = __Stream("), "a value read after the method wrote it is not the column's");
         Assert.That(Job("WideJob4"), Does.Contain("StreamingStores.Store(__c2_0_0, ref e2, ").And.Contain("StreamingStores.Store(__c2_0_1, ref e2, "));
         Assert.That(Job("FlatJob5"), Does.Contain("StreamingStores.Head(ref e2, i * 3, 3, ").And.Contain("StreamingStores.Store(__c2_0, ref e2, (nuint)i);"));
-        Assert.That(Job("OwnJob6"), Does.Contain("var __c1_0 = default("), "a column only written: no load at all");
+        Assert.That(Streamed(Job("OwnJob6")), Does.Not.Contain("LoadUnsafe(ref e1"), "a column only written: no load at all");
 
         using var world = new World();
         world.AddSystem<StreamLoopsSystem>();

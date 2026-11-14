@@ -421,14 +421,14 @@ public class MaxRowsTests
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(source), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string text = string.Join("\n", output.SyntaxTrees.Select(t => t.ToString()));
-        Assert.That(text, Does.Contain("internal ref struct AJob0 : global::EasyEcs.IForEachEntity<global::P, global::Q>"));
-        Assert.That(text, Does.Contain("__ForEach.A_0(default, in c1, ref c2, World, ref s3);\n            entity.Destroy();"));  // [Consume]: after its row
-        Assert.That(text, Does.Contain("static int global::EasyEcs.IForEachEntity<global::P, global::Q>.WriteMask => 2;"));      // Q written back
-        Assert.That(text, Does.Contain("world.ForEachCollected<global::P, global::Q, __ForEach.AJob0>(ref job0, 6, in __ForEach.AFilter0);"));
-        Assert.That(text, Does.Contain("global::System.Math.Min(world.Count<global::P, global::Q>(in __ForEach.AFilter0), 6)"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("internal ref struct AJob0 : __IForEachEntity_P_Q"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("__ForEach.A_0(default, in c1, ref c2, World, ref s3);\n            entity.Destroy();"));  // [Consume]: after its row
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("static int global::EasyEcs.IForEachEntity<global::P, global::Q>.WriteMask => 2;"));      // Q written back
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("world.ForEachCollected<__P, __Q, __ForEach.AJob0>(ref job0, 6, in __ForEach.AFilter0);"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("global::System.Math.Min(world.Count<__P, __Q>(in __ForEach.AFilter0), 6)"));
         Assert.That(text, Does.Not.Contain("DestroyAll"));                                                                  // a budget leaves rows behind
-        Assert.That(text, Does.Contain("\"A: at most 6 rows per run, collected first, then run one by one outside the walk\""));
-        Assert.That(text, Does.Contain("world.ForEachCollected<global::Mark, __ForEach.BJob0>(ref job, 3, in __ForEach.BFilter0);"));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("\"A: at most 6 rows per run, collected first, then run one by one outside the walk\""));
+        Assert.That(text + GeneratorTests.Unaliased(text), Does.Contain("world.ForEachCollected<__Mark, __ForEach.BJob0>(ref job, 3, in __ForEach.BFilter0);"));
     }
 
     [TestCase("[EcsSystem] public ref struct S { [ForEach(MaxRows = -1)] static void A(ref P p) { } }", "MaxRows = -1 must be 0 (every row) or more")]
