@@ -7,6 +7,7 @@
 # (tools/build.sh prints its errors). --no-build runs what the solution's Release build left (CI).
 #
 #   tools/perf/inlining.sh [--no-build] [benchmark class names...]
+#   FRAMEWORK=net11.0 tools/perf/inlining.sh    .NET 11's JIT (default: net10.0, the first target framework; tools/build.sh)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 build=()
