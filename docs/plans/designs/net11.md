@@ -147,10 +147,12 @@ slower. Left for the docs pass: D21's .NET 11 part from this file. Handed on: th
   1,282.78 us), MultiWorld (627.3 vs 656.0 us) and BattleServer (3.616 vs 3.691 ms), every pair within its error,
   0 B both (section 3, B0). A second target would have doubled CI's test jobs and the site's columns for nothing.
 - **The owner's decision.** The package targets `net10.0` only and runs on .NET 10 and later (L25); the site shows
-  one runtime's numbers (L26); feat-net10-only undid the second target. The site's numbers still come from CI (L17).
+  one runtime's numbers (L26); feat-net10-only undid the second target, except the unit tests, which run on both
+  runtimes (L27). The site's numbers still come from CI (L17).
 - **What stays.** The two generator fixes .NET 11 needed (a .NET 11 project consuming the net10.0 package compiles
   its generated code and matches its methods bit for bit): Kernel.Tables passes a table as `table[..]` (CS9164), and
   `DegreesToRadians` / `RadiansToDegrees` lanes are the runtime's vector form. Both were found by building and testing
-  the repository once with a .NET 11 target; verify keeps that as a manual pre-release check against the newest .NET.
+  the repository once with a .NET 11 target; the unit tests keep doing that (owner, L27: they target net10.0;net11.0 and
+  reference the net10.0 library from both, and CI runs them as a matrix over the two runtimes).
 - **Handed on.** The 256-bit two-source permute in `Interleaved` (B1's finding) is `feat-interleaved-256`, for both
   runtimes.

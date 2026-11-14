@@ -3678,7 +3678,7 @@ names.
 - `lint:search`: the en "ChunkRows" query must find `guide/performance/threading` (the expectation was updated with the
   move; re-run once the build passes).
 
-## feat-net11 and feat-net10-only (ledger L14, L16, L17, L21, L25, L26: one target, net10.0)
+## feat-net11 and feat-net10-only (ledger L14, L16, L17, L21, L25, L26, L27: one target, net10.0)
 
 feat-net11 added `net11.0` beside `net10.0` and measured .NET 11; no .NET 11 API made EasyEcs faster or shorter and the
 runtime alone measured level, so the owner kept one target (L25) and one runtime on the site (L26); feat-net10-only
@@ -3688,8 +3688,8 @@ undid the second target. What stays for users: two generator fixes and ".NET 10 
       only and runs on .NET 10 and later. Why: .NET 11 was measured (docs/plans/designs/net11.md: every .NET 11 API
       weighed from its listing equal to or slower than what EasyEcs writes; the headline worlds net11.0 against
       net10.0 within error at 0 B, section 3 B0), so a second target would double CI and the site for nothing (L25,
-      L26). How a newer runtime stays safe: the generated code is built and tested once against the newest .NET before
-      a release (verify's manual check), which is how the two fixes below were found. D21 (".NET 10 features only where
+      L26). How a newer runtime stays safe: the unit tests target net10.0 and net11.0, referencing the net10.0 package
+      from both, and CI runs them on both runtimes (L27); building them for .NET 11 is how the two fixes below were found. D21 (".NET 10 features only where
       they measure") gets the .NET 11 items of net11.md section 3 as one paragraph with the B0 numbers quoted (a
       decision record may quote).
 - [ ] **Changelog `### Fixes`** (the version it ships in): a `[ForEach]` method reading a uniform `[InlineArray]` table
