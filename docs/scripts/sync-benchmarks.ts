@@ -16,10 +16,14 @@
  * data with a few rows from another machine.
  *
  *   BENCH_RESULTS=/path/to/BenchmarkDotNet.Artifacts/results bun run sync:benchmarks
- *   bun scripts/sync-benchmarks.ts --dir <results> --out <bench.json> [--runtime net11.0] [--partial | --merge]
+ *   bun scripts/sync-benchmarks.ts --dir <results> --out <bench.json> [--runtime net11.0] [--replace | --partial | --merge]
  *
  * `--runtime` takes only the reports of that runtime (the others are skipped
- * with a warning). `--partial` writes whatever the directory holds for a
+ * with a warning). `--replace` makes the directory's reports a runtime's
+ * whole set, whatever machine or SDK the committed set came from (the CI
+ * Benchmarks workflow's run, the site's source: tools/perf/sync-ci.sh); it is
+ * refused when the reports lack a class the committed set has (a class that
+ * failed in the run), unless `--partial` is passed too. `--partial` writes whatever the directory holds for a
  * runtime (for a first run, or when a benchmark class was removed on
  * purpose). `--merge` replaces the classes the directory holds and keeps
  * every other committed class of that runtime (a run of new or changed
@@ -51,6 +55,7 @@ const dir =
 const out = arg('--out') ?? path.join(docsRoot, 'src/data/bench.json');
 const partial = process.argv.includes('--partial');
 const merge = process.argv.includes('--merge');
+const replace = process.argv.includes('--replace');
 /** Only the reports of this runtime ("net11.0"); bench.sh passes its --framework */
 const only = arg('--runtime');
 
@@ -377,11 +382,11 @@ function main() {
     const missing = Object.keys(before?.benchmarks ?? {}).filter(
       (name) => !(name in read.benchmarks),
     );
-    if (!partial && (!before || missing.length > 0)) {
+    if (!partial && (before ? missing.length > 0 : !replace)) {
       console.warn(
         before
           ? `[bench] ${dir} lacks ${missing.length} ${id} benchmark class(es) of the committed data (${missing.join(', ')}): keeping the ${id} numbers. Pass --partial to write them anyway, or --merge.`
-          : `[bench] ${dir} holds ${id} reports and the committed data has no ${id} numbers: pass --merge (or --partial) to add them.`,
+          : `[bench] ${dir} holds ${id} reports and the committed data has no ${id} numbers: pass --replace or --merge (or --partial) to add them.`,
       );
       continue;
     }

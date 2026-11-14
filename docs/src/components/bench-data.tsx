@@ -27,10 +27,10 @@ import {
   formatBytes,
   formatRatio,
   formatTime,
+  headlineFor,
   libraryName,
   peerLabel,
   peers,
-  primaryRuntime,
   runtimes,
   sourceLine,
 } from '@/lib/benchmarks';
@@ -78,7 +78,8 @@ export interface BenchTableProps extends ComparisonQuery {
  * A comparison as table cells: library, case, the [Params] that vary, then
  * mean, time relative to EasyEcs and allocations, each a column per runtime
  * (an empty cell where a runtime has no number). The rows and their order are
- * the primary runtime's, then any row only another runtime has. Shared by
+ * the class's headline runtime's (`headlineFor`), then any row only another
+ * runtime has. Shared by
  * <BenchTable>, the data table under <BenchChart> and the Markdown copies.
  */
 export function comparisonTable(
@@ -89,8 +90,9 @@ export function comparisonTable(
     runtime: r,
     result: comparison({ ...query, runtime: r.id }),
   }));
+  const headline = headlineFor(query.bench);
   const primary =
-    per.find((p) => p.runtime.id === primaryRuntime)?.result ?? per[0].result;
+    per.find((p) => p.runtime.id === headline)?.result ?? per[0].result;
   const shape = primary.rows.length
     ? primary
     : (per.find((p) => p.result.rows.length)?.result ?? primary);
@@ -158,7 +160,10 @@ export function peerTable(
     list: peers(entities, r.id),
   }));
   const order = (
-    per.find((p) => p.runtime.id === primaryRuntime && p.list.length) ??
+    per.find(
+      (p) =>
+        p.runtime.id === headlineFor('EcsComparisonBenchmark') && p.list.length,
+    ) ??
     per.find((p) => p.list.length) ??
     per[0]
   ).list.map((p) => p.method);
@@ -361,26 +366,21 @@ export function featureTable(
       : behind
         ? 'Faster library'
         : 'Next fastest';
-  // The order, tiers and the library compared against are the primary
-  // runtime's; each other runtime adds EasyEcs' time and the ratio there
-  const primaryLabel =
-    runtimes.find((r) => r.id === primaryRuntime)?.label ?? primaryRuntime;
-  const others_ = runtimes.filter((r) => r.id !== primaryRuntime);
+  // The order, tiers and the library compared against are each comparison's
+  // headline runtime's (benchmarks.ts, headlineFor); each runtime then has its
+  // columns of EasyEcs' time and the ratio, an empty cell where it has none
   const ratioHead = zh ? '它的耗时对比 EasyEcs' : 'Its time vs EasyEcs';
   const head = [
     zh ? '测的是什么' : 'What is measured',
-    perRuntime('EasyEcs', primaryLabel, zh),
     versusHead,
-    perRuntime(ratioHead, primaryLabel, zh),
-    ...others_.flatMap((r) => [
+    ...runtimes.flatMap((r) => [
       perRuntime('EasyEcs', r.label, zh),
       perRuntime(ratioHead, r.label, zh),
     ]),
     ...(last === 'why' ? [zh ? '原因' : 'Why'] : []),
     ...(last === 'others' ? [zh ? '其余的库' : 'The others'] : []),
   ];
-  const right = (i: number) =>
-    i === 1 || i === 3 || (i > 3 && i < 4 + others_.length * 2);
+  const right = (i: number) => i >= 2 && i < 2 + runtimes.length * 2;
   const others = (item: FeatureResult) => {
     const rest = item.rivals.filter((r) => r !== item.versus);
     if (!rest.length) return '—';
@@ -409,18 +409,8 @@ export function featureTable(
             <td className="min-w-48">
               <a href={href(item.anchor)}>{item.label[locale]}</a>
             </td>
-            <td className="text-end tabular-nums">{timed(item.ours, zh)}</td>
-            <td className="tabular-nums">
-              {timed(
-                item.versus.row,
-                zh,
-                library ? undefined : libraryName(item.versus.library),
-              )}
-            </td>
-            <td className="text-end font-medium tabular-nums">
-              {ratioText(item, zh)}
-            </td>
-            {others_.map((r) => {
+            <td>{libraryName(item.versus.library)}</td>
+            {runtimes.map((r) => {
               const same = featureOn(item, r.id);
               return [
                 <td key={`${r.id}-ours`} className="text-end tabular-nums">

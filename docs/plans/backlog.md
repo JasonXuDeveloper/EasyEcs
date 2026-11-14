@@ -79,7 +79,10 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       CI's per-runtime jobs become a matrix (parallel), and a `workflow_dispatch` benchmark workflow runs
       `bench.sh --site` once per runtime as a matrix and uploads the reports for the sync. Package S handed back on branch
       `feat-net11`: done as described; open: the .NET 11 numbers themselves and where published numbers come from
-      (docs-todos `feat-net11`). Next: package B.
+      (docs-todos `feat-net11`). Package S2 (L17, L21, L22) and package B handed back: the site's numbers from the
+      Benchmarks workflow (`tools/perf/sync-ci.sh`), .NET 11 as the headline runtime with .NET 10 as fallback,
+      BenchmarkDotNet 0.15 made to run on .NET 11; net11.0 equals net10.0 within error on the headline worlds; no .NET
+      11 API ships code (net11.md section 3). Open: the first CI `--site` run and its sync; D21's .NET 11 part.
 - [ ] **`feat-generated-text-2`** (owner, 2026-11-14, ledger L15; starts when feat-ground-cells merges, both edit
       Kernel and SystemGenerator): read the generated files of the GeneratedTextTests corpora, the samples and the
       benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and
@@ -105,6 +108,10 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       j. the 512-bit and `Vector<T>` bodies are the same text with another prefix (the largest duplication, about
          half of every vector job): #172's "one body per width" needs a width-generic helper the JIT specializes;
          try it on one job, Tier1 equal or it stays.
+- [ ] **`feat-interleaved-256`** (found by feat-net11's B1): a two-source permute (`vpermt2ps`,
+      `Avx512F.VL.PermuteVar8x32x2`) in `Interleaved`'s 256-bit loads and stores, behind `Avx512F.VL`: the path x64
+      AVX-512 machines run by default (`Vector<T>` stays 256 bits there), 4 shuffles a pair of fields today. Both
+      runtimes. Proof: KernelBenchmark's interleaved cases, the headline worlds, Tier1; DOTNET_EnableAVX512=0 unchanged.
 - [ ] **`feat-ground-layer`** (owner, L19): a `Cell<TCell, Ground<TTile>>` method that also reads a layer of the
       3D tile it is the ground of; design the public form (two or three shapes, as a popup), then generator, analyzer,
       tests, TileGroundBenchmark case, docs-todos. After feat-generated-text-2's package A (same emit code).

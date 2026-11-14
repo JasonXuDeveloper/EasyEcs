@@ -13,7 +13,8 @@ dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --fil
 dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*Iterate*' --frameworks net10.0,net11.0  # one runtime against the other
 tools/perf/bench.sh BulkBenchmark Features.RemovalComparison --sync   # classes, resumable, merged into the site's numbers
 tools/perf/bench.sh --site --sync                                   # every class the site shows (before a release)
-tools/perf/bench.sh --site --framework net11.0 --sync              # on .NET 11 (default net10.0): the site keeps both runtimes' numbers
+tools/perf/bench.sh BulkBenchmark --framework net11.0              # on .NET 11 (default net10.0)
+gh workflow run benchmarks.yml -f classes=--site; tools/perf/sync-ci.sh <run id>   # the site's numbers, both runtimes, from CI (L17)
 ```
 
 A full run takes hours: run what a change touches (`audit-perf` has the method: A/B, lock, quiet machine) and merge
@@ -118,6 +119,8 @@ skills/easyecs/                the public skill (`npx skills add JasonXuDevelope
                                lists only this one
 tools/perf/                    the performance tools. bench.sh: benchmark classes one BenchmarkDotNet process per class (resumable,
                                under a shared lock), merged into docs/src/data/bench.json (--sync); --site runs the classes the site shows.
+                               sync-ci.sh: the site's numbers from a run of the Benchmarks workflow (both runtimes' artifacts downloaded and
+                               synced); moved.py: the rows of a runtime that moved between two bench.json, for both.
                                jitdisasm.sh: the Tier1 machine code of a [ForEach] method's job (DOTNET_JitDisasm), to check a vector loop: no
                                call in the loop body, no needless range check. loopbound.sh: where each vector loop of a benchmark class is
                                bound (ports, front end or a loop-carried chain): LoopBound/ runs its methods past Tier1 under DOTNET_JitDisasm,
