@@ -3677,3 +3677,11 @@ names.
 - `/zh/docs/ai`'s description was 102 characters (40-90): shortened (the docs commit after a86f374).
 - `lint:search`: the en "ChunkRows" query must find `guide/performance/threading` (the expectation was updated with the
   move; re-run once the build passes).
+
+## feat-lane1-core (backlog Lane 1: C11-C19, the rerun)
+
+- decisions.mdx + .zh (dropped, with numbers; text in owner-review.md): C13 the enumerator's short path for tables
+  without holes (the walk's state round-trips through the stack per row; QueryWrite 1.21x), C15 retired entities'
+  bits flipped in place (CleanupBenchmark 105.6 -> 133.5 us), C17 `Removed<T>` from a log (the cost is per visited
+  row), C14's batch half (a wash; the masked half is 42b8e9d's record if it has one, else one line there). Roadmap
+  "Dropped" names them. C11 follows when package E has measured its last variant.
