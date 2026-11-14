@@ -68,6 +68,12 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
         collections). Rebuild and measure.
 - [ ] **`feat-net11`** (owner, 2026-11-14, ledger L14): `net11.0` beside `net10.0` in the package, tests, benchmarks,
       CI and docs; .NET 11's performance features tried one by one, each kept only as a measured win.
+- [ ] **`feat-generated-text-2`** (owner, 2026-11-14, ledger L15; starts when feat-ground-cells merges, both edit
+      Kernel and SystemGenerator): read the generated files of the GeneratedTextTests corpora, the samples and the
+      benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and
+      masks, repeated setup, `this.v0`, dead narrow temps: G17's rest in owner-review, now to do), remove each in the
+      generator, add its count to GeneratedTextTests with a budget of 0; IL-changing ones proven level by Tier1 or
+      BenchmarkDotNet.
 - [ ] **`feat-ground-cells`** (inner-loops leftover (a)): the first run was lost the same way before reporting.
 - [x] **`feat-lane5-renames`** merged 2026-11-08: R1-R6 (tests 4237 + 1 skipped: R4 deleted 17, R3 added 3; DocCheck 28 at
       base and head). Left: the internal `World.ChunkRows(...)` and `PairHalves.ChunkRows` follow `MaxChunkSize` as
