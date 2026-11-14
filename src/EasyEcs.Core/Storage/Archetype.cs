@@ -548,6 +548,14 @@ internal sealed class Archetype
     private static ref TSummary Summary<TSummary>(TSummary[][] summaries, int column, int index) =>
         ref Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(Unsafe.Add(ref MemoryMarshal.GetArrayDataReference(summaries), column)), index);
 
+    /// <summary>
+    /// The first row of the change ticks of <typeparamref name="T"/>, a tracked component the table has: query
+    /// enumerators store a visited row's tick through it after noting the row's word (<see cref="NoteVisited{T}"/>).
+    /// Valid until the next structural change.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal ref RowTick TickBase<T>() where T : struct, IComponent => ref Data<RowTick>(TicksColumn<T>());
+
     /// <summary>The row's change tick alone; its word must have been noted at <paramref name="tick"/> (<see cref="NoteVisited{T}"/>).</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void StampRowTick<T>(int slot, ulong tick) where T : struct, IComponent

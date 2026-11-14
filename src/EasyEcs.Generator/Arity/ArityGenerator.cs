@@ -1782,6 +1782,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private int _ticket; // 0: not started; QueryWalk.Ended: ended
                     private ref EntityId _rows;
                 {{Lines(n, i => $"    private ref T{i} _r{i};")}}
+                {{(read ? "" : Lines(n, i => $"    private ref RowTick _t{i}; // the change ticks of a tracked T{i}"))}}
                     private int _id, _storage;
                     // Native-sized: indexing needs no sign extension (movsxd on x64, sbfiz/sxtw on arm64) per row.
                     private nint _slot;
@@ -1852,6 +1853,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         if (table == null) return false;
                         _id = Unsafe.Add(ref _rows, _slot).Index;
                 {{Lines(n, i => $"        _r{i} = ref table.Base<T{i}>(_b{i});")}}
+                {{(read ? "" : Lines(n, i => $"        if (default(T{i}) is ITracked) _t{i} = ref table.TickBase<T{i}>();"))}}
 
                     Found:
                 {{(read ? "        return true;\n    }\n" : Stamping(n))}}
@@ -1876,34 +1878,26 @@ public sealed class ArityGenerator : IIncrementalGenerator
     /// component counts as written (a JIT-time constant: no code for queries without tracked components).
     /// </summary>
     private static string Stamping(int n) => $$"""
-                if ({{List(n, i => $"default(T{i}) is ITracked", " || ")}}) Stamp(_walk, (int)_slot);
+                // The row's tick stored here, one store per tracked component: the word's summaries are noted by a call
+                // once per word and tick (rows come in order), so a row costs no call.
+                if ({{List(n, i => $"default(T{i}) is ITracked", " || ")}})
+                {
+                    ulong tick = _world.ChangeTick;
+                    if ((int)(_slot >> 6) != _walk.StampWord || tick != _walk.StampTick) Note(_walk, (int)_slot, tick);
+        {{Lines(n, i => $"            if (default(T{i}) is ITracked) Unsafe.Add(ref _t{i}, _slot).Value = tick;")}}
+                }
+
                 return true;
             }
 
+            /// <summary>The first visited row of a word (or of a tick): its change-tick summaries noted, the row stamped by the caller.</summary>
             [MethodImpl(MethodImplOptions.NoInlining)]
-            private static void Stamp(QueryWalk walk, int slot)
+            private static void Note(QueryWalk walk, int slot, ulong tick)
             {
                 var archetype = walk.Current;
-                ulong tick = walk.World.ChangeTick;
-                // Rows come in order: the summaries of a word are noted once per word and tick.
-                if (slot >> 6 != walk.StampWord || tick != walk.StampTick)
-                {
-                    StampWord(walk, archetype, slot, tick);
-                    return;
-                }
-
-        {{Lines(n, i => $"        archetype.StampRowTick<T{i}>(slot, tick);")}}
-            }
-
-            // The first row of a word: a call in tail position, so the per-row Stamp keeps no register of
-            // the summaries' code (its prologue would save them for every row).
-            [MethodImpl(MethodImplOptions.NoInlining)]
-            private static void StampWord(QueryWalk walk, Archetype archetype, int slot, ulong tick)
-            {
                 walk.StampWord = slot >> 6;
                 walk.StampTick = tick;
         {{Lines(n, i => $"        archetype.NoteVisited<T{i}>(slot, tick);")}}
-        {{Lines(n, i => $"        archetype.StampRowTick<T{i}>(slot, tick);")}}
             }
         """;
 }
