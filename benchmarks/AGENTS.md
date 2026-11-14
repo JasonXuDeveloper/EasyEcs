@@ -93,6 +93,9 @@ Grids/TileHaloBenchmark.cs      item 12a's prototype: the halo copied into a tex
 Grids/TileInPlaceBenchmark.cs   the hand-written Laplacian with its halo copied into a texture against its rows read
                                 in place from the neighbors' buffers, put beside it in a window (InPlace) or shifted
                                 in registers (InPlaceShift), and the four neighbor lookups alone
+Grids/TileGroundBenchmark.cs    the ground of tall tiles (Ground<TTile>) stepped in place: a cross and a box as the
+                                cell method, as written (SimdMode.Off) and walked by hand (Columns(4) with Load128, Columns(16)
+                                with Load512 where Vector512 is accelerated)
 Grids/TileLayersBenchmark.cs    a seven-point cell method over tall tiles whose warmth sits in a band of layers:
                                 every layer against the band an ITileLayers component gives
 Grids/TileColdStartBenchmark.cs a scent whose springs move, read once settled: [GaussSeidel] settled from nothing
