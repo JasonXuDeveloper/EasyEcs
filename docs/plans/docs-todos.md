@@ -3677,3 +3677,41 @@ names.
 - `/zh/docs/ai`'s description was 102 characters (40-90): shortened (the docs commit after a86f374).
 - `lint:search`: the en "ChunkRows" query must find `guide/performance/threading` (the expectation was updated with the
   move; re-run once the build passes).
+
+## feat-net11 (ledger L14: net10.0 and net11.0)
+
+Package A (compatibility) changed the projects, CI, AGENTS.md files, skills, README and the install / requirements
+lines of getting-started, index, faq and samples/godot (en + zh). For the docs pass:
+
+- [ ] **Changelog** (4.8 or the version it ships in, `### New`): "EasyEcs targets `net10.0` and `net11.0`: the package
+      carries both builds, NuGet picks the one of your project." Link getting-started.
+- [ ] **Changelog `### Fixes`** (the same version): on .NET 11 a `[ForEach]` method reading a uniform `[InlineArray]`
+      table at a row's index (Kernel.Tables) failed to compile (CS9164); and `float.DegreesToRadians` /
+      `RadiansToDegrees` in a vector loop are now the runtime's own vector form, which rounds as the scalar call does on
+      either runtime (.NET 11 computes the float form in double and the double form as a correctly rounded three-limb
+      product, so the old `(x * Pi) / 180` lanes differed from the method's on .NET 11).
+- [ ] **Migration** (`migration.mdx` + zh): no code changes for users; a note in the section of that version that the
+      template's `--framework` (`-f net11.0`) picks .NET 11 and that a project moving to net11.0 may see float results of
+      `DegreesToRadians` / `RadiansToDegrees` change in the last bit (.NET 11's own change, scalar and vector alike).
+- [ ] **README "What's new"**: .NET 11 support (both runtimes tested in CI, x64 and ARM64, Native AOT on both).
+- [ ] **Decision record** (replaces D15 ".NET 10 only" in place, AGENTS.md "Nothing stale"): EasyEcs targets the
+      supported .NET releases from 10 on (`net10.0;net11.0`); why both (10 is the LTS until 2028, 11 the STS with the
+      newer JIT); how runtime-specific code is kept (`#if NET11_0_OR_GREATER`, the net10.0 path unchanged, generated
+      code compiling on both); applications in the repository on one runtime (samples, DocCheck, ApiDocs: net11.0, the
+      SDK's own; Godot and the demo: net10.0); the template's default net10.0 (either SDK builds it); what the site's
+      numbers run on. D21 (".NET 10 features only where they measure") gets the .NET 11 items of
+      `docs/plans/designs/net11.md` (kept and dropped, with their numbers) once packages B+ finish.
+- [ ] **Pages still saying ".NET 10 only" or "needs .NET 10"** (the requirement, not history): `why-fast.mdx` (344:
+      ".NET 10 only", D15 link), `migrate-from-friflo.mdx` (20), `vs-defaultecs.mdx` (18, 39, 173, 184), `vs-friflo.mdx`
+      (19, 41, 220-221), `vs-arch.mdx` (12, 19, 41, 201, 208-209), `vs-unity-entities.mdx` (4, 10, 22, 141),
+      `faq.mdx` (13, 136), `what-is-ecs.mdx` (20, 244, 259), `roadmap.mdx` (28: "The floor is the .NET 10 SDK (C# 14,
+      Roslyn 5.0)" is still true for the generator; 33-38 Unity), `comparison.mdx`, `features.mdx`, the seoTitles of
+      `index.mdx` and `getting-started.mdx` ("for C# and .NET 10"), and each `.zh.mdx`. `guide/production/testing.mdx`
+      (374) shows a test csproj with `net10.0`: fine as an example, or say either. The public skill
+      (`skills/easyecs/SKILL.md` 3, 8, 230: ".NET 10, C# 14", "runtimes older than .NET 10").
+- [ ] **demo.mdx** (27) "a .NET 10 WebAssembly app" stays true (the demo targets net10.0, workload `wasm-tools-net10`
+      under the .NET 11 SDK).
+- [ ] **The site's benchmark runtime**: `bench.json` records .NET 10.0.13 and SDK 10.0.402; `sync-benchmarks --merge`
+      refuses reports of another SDK or runtime, so the next `tools/perf/bench.sh ... --sync` (SDK 11 now) needs a full
+      `--site --sync --fresh` run. Which runtime the site shows is the owner's call (asked with package A); the
+      performance page then says which runtime its numbers are from.
