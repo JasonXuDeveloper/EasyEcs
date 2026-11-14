@@ -135,3 +135,22 @@ not applicable, B10 settled (L22). No .NET 11 item ships code: each is either eq
 slower. Left for the docs pass: D21's .NET 11 part from this file. Handed on: the 256-bit two-source permute
 (`Avx512F.VL.PermuteVar8x32x2`) in `Interleaved`'s 256-bit loads and stores, which x64 AVX-512 machines run by default
 (Vector<T> 256 bits), a Core-lane item for both runtimes (B1).
+
+## 4. Closing (owner, L25, L26: one target, net10.0)
+
+- **What was checked.** Every .NET 11 runtime, library and C# 15 item that could touch an allocation-free ECS
+  (sections 1 and 2): the APIs from their Tier1 listings against what EasyEcs writes (B1, B2), the rest from the code
+  (B3-B15); the runtime alone on the headline worlds with BenchmarkDotNet (B0).
+- **Why nothing ships.** No .NET 11 API was shorter or faster than the code EasyEcs has (Unzip: twice the shuffles on
+  AVX2, and its AVX-512 form an instruction .NET 8 already offers; CreateGeometricSequence: the same constant), and the
+  runtime alone measured level: net11.0 against net10.0 on WorldSimulation (10k: 89.95 vs 94.84 us; 100k: 1,282.78 vs
+  1,282.78 us), MultiWorld (627.3 vs 656.0 us) and BattleServer (3.616 vs 3.691 ms), every pair within its error,
+  0 B both (section 3, B0). A second target would have doubled CI's test jobs and the site's columns for nothing.
+- **The owner's decision.** The package targets `net10.0` only and runs on .NET 10 and later (L25); the site shows
+  one runtime's numbers (L26); feat-net10-only undid the second target. The site's numbers still come from CI (L17).
+- **What stays.** The two generator fixes .NET 11 needed (a .NET 11 project consuming the net10.0 package compiles
+  its generated code and matches its methods bit for bit): Kernel.Tables passes a table as `table[..]` (CS9164), and
+  `DegreesToRadians` / `RadiansToDegrees` lanes are the runtime's vector form. Both were found by building and testing
+  the repository once with a .NET 11 target; verify keeps that as a manual pre-release check against the newest .NET.
+- **Handed on.** The 256-bit two-source permute in `Interleaved` (B1's finding) is `feat-interleaved-256`, for both
+  runtimes.
