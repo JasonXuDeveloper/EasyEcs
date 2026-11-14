@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 # Runs benchmark classes one BenchmarkDotNet process per class, resumable, and merges them into the site's numbers.
 #
-#   tools/perf/bench.sh --site [--sync]          the classes the site shows (the classes of docs/src/data/bench.json)
+#   tools/perf/bench.sh --site [--sync]          the classes the site shows (the classes of docs/src/data/bench.json, of
+#                                                either runtime)
 #   tools/perf/bench.sh Class... [--sync]        the given classes (short names: BulkBenchmark, Features.RemovalComparison)
 #   tools/perf/bench.sh --all [--sync]           every class of both projects
-#   --framework net11.0                          the runtime the classes run on (default net10.0, the runtime of the
-#                                                site's numbers: --sync refuses reports of another runtime)
+#   --framework net11.0                          the runtime the classes run on (default net10.0); the site keeps
+#                                                numbers per runtime, so --sync merges into that runtime's set
 #
-# A class that finished is marked in BenchmarkDotNet.Artifacts/done/ and skipped by the next run, so a run cut short
-# (a container restart) goes on where it stopped; --fresh clears the marks. Each project is built and lists its
-# benchmarks once; a class runs, with --no-build, in the project that declares it. One run at a time on a machine: the
-# runs share a lock (BENCH_LOCK, flock -o, so a build server left behind does not keep it). --sync merges the reports into docs/src/data/bench.json (sync-benchmarks --merge):
-# the classes run replace theirs, the others stay, and the rows that moved (15 %, or their allocation) are listed.
+# A class that finished is marked in BenchmarkDotNet.Artifacts/done/<tfm>/ and skipped by the next run of that runtime,
+# so a run cut short (a container restart) goes on where it stopped; --fresh clears the marks. The reports of a runtime
+# go to BenchmarkDotNet.Artifacts/<tfm>/results. Each project is built and lists its benchmarks once; a class runs,
+# with --no-build, in the project that declares it. One run at a time on a machine: the runs share a lock (BENCH_LOCK,
+# flock -o, so a build server left behind does not keep it). --sync merges the reports into the runtime's numbers in
+# docs/src/data/bench.json (sync-benchmarks --runtime <tfm> --merge, refused when the machine or the SDK differs from
+# that runtime's committed numbers): the classes run replace theirs, the others stay, and the rows that moved (15 %, or
+# their allocation) are listed. Reports from elsewhere (the CI benchmark workflow's artifacts) are merged the same way:
+#   (cd docs && BENCH_RESULTS=<download>/net11.0/results bun scripts/sync-benchmarks.ts --runtime net11.0 --merge)
 set -euo pipefail
 root=$(cd "$(dirname "$0")/../.." && pwd)
 art=$root/BenchmarkDotNet.Artifacts
@@ -31,8 +36,12 @@ for arg in "$@"; do
     --fresh) fresh=1 ;;
     --site) mapfile -t -O "${#classes[@]}" classes < <(python3 -c '
 import json, sys
-for name, entry in json.load(open(sys.argv[1]))["benchmarks"].items():
-    print(f"{entry[\"namespace\"]}.{name}" if entry.get("namespace") else name)' "$root/docs/src/data/bench.json") ;;
+seen = {}
+for numbers in json.load(open(sys.argv[1]))["runtimes"].values():
+    for name, entry in numbers["benchmarks"].items():
+        ns = entry.get("namespace")
+        seen.setdefault(f"{ns}.{name}" if ns else name, None)
+print("\n".join(seen))' "$root/docs/src/data/bench.json") ;;
     --all) all=1 ;;
     -*) echo "unknown option $arg" >&2; exit 2 ;;
     *) classes+=("$arg") ;;
@@ -76,7 +85,8 @@ for cls in "${classes[@]}"; do
   case $cls in EasyEcs.*|EcsComparison.*) filter="$cls.*" ;; *) filter="*.$cls.*" ;; esac
   log=$marks/$cls.log
   # BenchmarkDotNet exits with 0 when the filter matches nothing: that run is a failure, not a class done.
-  if dotnet run -c Release --no-build --framework "$framework" --project "benchmarks/$p" -- --filter "$filter" --buildTimeout 900 > "$log" 2>&1 \
+  if dotnet run -c Release --no-build --framework "$framework" --project "benchmarks/$p" -- --filter "$filter" --buildTimeout 900 \
+       --artifacts "$art/$framework" > "$log" 2>&1 \
     && ! grep -q 'No benchmarks to choose from' "$log"; then
     touch "$marks/$cls"
   else
@@ -87,11 +97,11 @@ echo "$(date +%T) done"
 if [ $sync = 1 ]; then
   before=$(mktemp)
   cp docs/src/data/bench.json "$before"
-  (cd docs && BENCH_RESULTS="$art/results" bun scripts/sync-benchmarks.ts --merge)
+  (cd docs && BENCH_RESULTS="$art/$framework/results" bun scripts/sync-benchmarks.ts --runtime "$framework" --merge)
   # What moved: a row 15 % slower or faster, or allocating differently, is checked before it is published.
-  python3 - "$before" docs/src/data/bench.json <<'PY'
+  python3 - "$before" docs/src/data/bench.json "$framework" <<'PY'
 import json, sys
-old, new = (json.load(open(f))["benchmarks"] for f in sys.argv[1:])
+old, new = (json.load(open(f))["runtimes"].get(sys.argv[3], {}).get("benchmarks", {}) for f in sys.argv[1:3])
 key = lambda r: (r["method"], tuple(sorted(r["params"].items())))
 for cls, entry in new.items():
     rows = {key(r): r for r in old.get(cls, {}).get("rows", [])}
