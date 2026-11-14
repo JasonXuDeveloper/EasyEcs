@@ -115,6 +115,9 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       L17; BenchmarkConfig's .NET 11 toolchain workaround and `--frameworks` go. Kept: Kernel.Tables' `table[..]` and
       the runtime's `DegreesToRadians` vector form (a .NET 11 project compiles and matches bit for bit), `net11.md` as
       the record of what was measured, a decision record in docs-todos. Docs and instructions say ".NET 10 and later".
+      **Amended by L27**: the unit-test project keeps `net10.0;net11.0` (it references the net10.0 library from
+      both), global.json stays on the SDK that builds both, and CI's test job is a matrix over the two runtimes;
+      nothing else targets or installs .NET 11 (benchmarks, AOT, samples, tools, template, release).
 - [ ] **`feat-interleaved-256`** (found by feat-net11's B1): a two-source permute (`vpermt2ps`,
       `Avx512F.VL.PermuteVar8x32x2`) in `Interleaved`'s 256-bit loads and stores, behind `Avx512F.VL`: the path x64
       AVX-512 machines run by default (`Vector<T>` stays 256 bits there), 4 shuffles a pair of fields today. Both
