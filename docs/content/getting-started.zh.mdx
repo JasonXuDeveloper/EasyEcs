@@ -8,7 +8,8 @@ icon: Rocket
 这篇教程从一个空的控制台项目开始，搭一个小型模拟：一千个单位向东走，其中一部分着了火，着火的会死，尸体被清理掉，每秒打印一次战报。
 每一步只引入一个概念，都能编译，并链接到深入讲解它的指南页面。整个过程大约十五分钟。
 
-需要先装好 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)。EasyEcs 只支持 `net10.0`。
+需要先装好 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) 或 [.NET 11 SDK](https://dotnet.microsoft.com/download/dotnet/11.0)。
+EasyEcs 支持 `net10.0` 和 `net11.0`。
 
 ## 一步一步搭起来 [#steps]
 
@@ -33,7 +34,7 @@ dotnet add package EasyEcs
     （[模板](https://github.com/JasonXuDeveloper/EasyEcs/tree/master/templates)）。
   - 想读完整程序：[示例](/zh/docs/samples)，从最小的 HelloWorld
     开始，一个比一个深入。
-  - Godot 4 .NET 游戏：把 `.csproj` 里的 `<TargetFramework>` 设为 `net10.0`，再加上这个包；
+  - Godot 4 .NET 游戏：把 `.csproj` 里的 `<TargetFramework>` 设为 `net10.0`（或 `net11.0`），再加上这个包；
     [Godot 示例](/zh/docs/samples/godot)演示了每个物理 tick 推进一次 World（[Unity 与 Godot](/zh/docs/faq#unity-godot)）。
 </Callout>
 

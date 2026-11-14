@@ -7,7 +7,9 @@ world, adds singletons and systems, runs and prints. Code that a real program ne
 (a mailbox between threads, fake clients, checks, printing) is in a file or folder of its own (`Host/`,
 `Support.cs`) that says so.
 
-The samples reference `src/EasyEcs.Core` and the generator directly, so they always build against this repository.
+The samples target `net11.0`, the runtime of the repository's SDK (`global.json`), so a clone with the .NET 11 SDK runs
+them; the Godot project targets `net10.0`. EasyEcs itself targets both `net10.0` and `net11.0`, so your own project picks
+either. The samples reference `src/EasyEcs.Core` and the generator directly, so they always build against this repository.
 In your own project one line does the same, since the package carries the generator and the analyzer:
 `<PackageReference Include="EasyEcs" Version="..."/>`.
 

@@ -8,6 +8,7 @@
 dotnet new install EasyEcs.Templates
 dotnet new easyecs -n MyServer              # a console server: a world updated at 20 Hz until Ctrl+C
 dotnet new easyecs -n MyServer --tests      # plus MyServer.Tests (NUnit), one test file per system
+dotnet new easyecs -n MyServer -f net11.0   # on .NET 11 (default: net10.0, the LTS, which either SDK builds)
 cd MyServer
 dotnet new easyecs-system -n RegenSystem -o Systems   # one more system, in Systems/
 dotnet run -- --ticks 100                   # stop after 100 ticks
@@ -60,4 +61,4 @@ What each part teaches:
 `EasyEcs.Templates/content/` holds the templates; `EASYECS_VERSION` in it becomes the version of
 `Directory.Build.props` when the package is packed. `templates/smoke.sh` packs EasyEcs and the templates into a
 local feed, creates `easyecs --tests` and an `easyecs-system` in its `Systems/` folder (checking the namespace),
-then builds, runs and tests the result (CI runs it).
+then builds, runs and tests the result, and the same project with `-f net11.0` (CI runs it).
