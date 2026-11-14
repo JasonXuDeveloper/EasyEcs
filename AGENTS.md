@@ -166,7 +166,9 @@ owner has asked for once must be written where the next session will find it.
 - **Talking to the owner** (owner, 2026-10-27 / 2026-10-30: "用中文对话"; 2026-10-28: "需要我选的给我弹窗，需要我做的给我命令"):
   reply to the owner in Chinese (code, comments, commits and docs stay English); a choice that is the owner's is asked
   as a popup (the question tool) with the recommended option first; an action only the owner can take is given as the
-  exact command or dashboard step.
+  exact command or dashboard step. Every question that is the owner's is asked this way as soon as it is known
+  (owner, 2026-11-14: "需要我决定的问题也全部弹窗问我"), also one a lane has parked in `docs/owner-review.md` as the
+  owner's call: a note in a report is not a question.
 - **Pick each agent's model by its task** (owner, 2026-11-08: "根据任务决定用什么，机械活用 sonnet，高难度的再用 opus"):
   a subagent runs on the session's model unless its call names one, so every call names it. Sonnet for mechanical
   work whose steps the prompt spells out: renames, file maps and stale comments, CI and tool scripts, moving files,
