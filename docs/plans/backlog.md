@@ -74,6 +74,25 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       masks, repeated setup, `this.v0`, dead narrow temps: G17's rest in owner-review, now to do), remove each in the
       generator, add its count to GeneratedTextTests with a budget of 0; IL-changing ones proven level by Tier1 or
       BenchmarkDotNet.
+      Read by hand on 2026-11-14 (the benchmark project's 836 generated files, 4,961,043 bytes, 72,648 lines):
+      a. user types spelled in full: 20,708 `global::EasyEcs.Benchmark...` names = 1,006,406 bytes, a fifth of the
+         text; a per-file alias per component / singleton type (`using __T1 = global::...Heat;`) as G14 did for
+         the BCL names;
+      b. attributes outside the alias block: 442 `[global::System.ComponentModel.EditorBrowsable(...Never)]`, the
+         `UnsafeAccessor` lines, the explicit `IForEachBatch<...>.WriteMask` / `OneQuery` members;
+      c. a temp then a copy: 149 `__c1_0 = __t0;` after `var __t0 = (...)`, then the store: store the expression;
+      d. outer parentheses: 1,520 lines `= (expr);` and nested `((a + b) - c)` where precedence needs none;
+      e. `As<int, float>(__pass)` spelled at every write of a masked loop (351 lines): one `__passF` per iteration;
+      f. `ref readonly Pull __p3 = ref s3;` used once as `__p3.Value`: read `s3.Value`;
+      g. `rows - i >=` / `lanes - i` in the first width's check, where `i` is the literal 0 above it;
+      h. the `__loops` text's condition repeats `__Vec.IsHardwareAccelerated` in two of its three terms;
+      i. not text only, measure: a masked loop selects by `__pass` at every write of a field
+         (`__c1_0 = Select(m6 & pass, u7, c1); __c1_0 = Select(~m6 & pass, c1 + c2 * u8, c1);`): compute the
+         writes unmasked (`Select(m6, u7, c1 + c2 * u8)`) and select by `__pass` once at the store, one select
+         and no `& __pass` per extra write; KernelBenchmark's masked cases and StructuralLoop decide;
+      j. the 512-bit and `Vector<T>` bodies are the same text with another prefix (the largest duplication, about
+         half of every vector job): #172's "one body per width" needs a width-generic helper the JIT specializes;
+         try it on one job, Tier1 equal or it stays.
 - [ ] **`feat-ground-cells`** (inner-loops leftover (a)): the first run was lost the same way before reporting.
 - [x] **`feat-lane5-renames`** merged 2026-11-08: R1-R6 (tests 4237 + 1 skipped: R4 deleted 17, R3 added 3; DocCheck 28 at
       base and head). Left: the internal `World.ChunkRows(...)` and `PairHalves.ChunkRows` follow `MaxChunkSize` as
