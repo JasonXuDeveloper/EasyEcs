@@ -72,7 +72,12 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       warnings and pass every test; two generator fixes .NET 11 needed (Kernel.Tables' `[..]`, DegreesToRadians as the
       runtime's vector form). Next: package B, the research list `docs/plans/designs/net11.md` (runtime-alone numbers,
       then B1 Unzip/Zip). Docs for the docs pass: docs-todos `feat-net11`. After the merges: rebuild the live demo
-      (its hash covers Core's csproj) and decide the site's benchmark runtime.
+      (its hash covers Core's csproj).
+      **Package S (owner, L16)**: the site shows both runtimes. `bench.json` gains a runtime dimension
+      (`sync-benchmarks.ts` merges a report into its runtime's numbers and refuses only a mismatch within one
+      runtime), the tables and charts show .NET 10 and .NET 11 side by side, `bench.sh --site` takes the runtime;
+      CI's per-runtime jobs become a matrix (parallel), and a `workflow_dispatch` benchmark workflow runs
+      `bench.sh --site` once per runtime as a matrix and uploads the reports for the sync.
 - [ ] **`feat-generated-text-2`** (owner, 2026-11-14, ledger L15; starts when feat-ground-cells merges, both edit
       Kernel and SystemGenerator): read the generated files of the GeneratedTextTests corpora, the samples and the
       benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and
