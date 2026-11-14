@@ -66,6 +66,8 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
         runner labels already in use: the package carries linux-x64's library, other runtimes keep the pinned heap);
         prototype 0.14-0.70x of pinned for allocate-fill-free; `GC.AddMemoryPressure` dropped (it starts gen2
         collections). Rebuild and measure.
+- [ ] **`feat-net11`** (owner, 2026-11-14, ledger L14): `net11.0` beside `net10.0` in the package, tests, benchmarks,
+      CI and docs; .NET 11's performance features tried one by one, each kept only as a measured win.
 - [ ] **`feat-ground-cells`** (inner-loops leftover (a)): the first run was lost the same way before reporting.
 - [x] **`feat-lane5-renames`** merged 2026-11-08: R1-R6 (tests 4237 + 1 skipped: R4 deleted 17, R3 added 3; DocCheck 28 at
       base and head). Left: the internal `World.ChunkRows(...)` and `PairHalves.ChunkRows` follow `MaxChunkSize` as
