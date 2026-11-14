@@ -284,7 +284,11 @@ Kernel/Recorded.cs  those facts read back per referenced assembly (cached on its
 
 ```
 Shared/Symbols.cs         symbol checks shared by generator and analyzer
-Shared/Code.cs            tiny string helpers for the generators' templates (List, Lines, TypeParams)
+Shared/Code.cs            tiny string helpers for the generators' templates (List, Lines, TypeParams); Aliased: a generated
+                          file's BCL names through its alias block, then Tidy's passes
+Shared/Tidy.cs            the last passes over a generated file's text, IL unchanged: the other types it names twice or more
+                          through aliases (Types: where a name's position proves it a type), and the parentheses precedence
+                          does not need (Parentheses, outermost pair first)
 Shared/EquatableArray.cs  array with value equality (generator models cache between edits)
 Shared/Polyfills.cs       IsExternalInit (records) and System.Index (list patterns) for netstandard2.0; do not delete
 ```
