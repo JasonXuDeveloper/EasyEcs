@@ -364,9 +364,10 @@ public sealed partial class SystemGenerator
             sb.Append("        }\n        else\n        {\n");
         }
 
-        var members = Enumerable.Range(0, count).Select(k =>
-            $"j{k} = new {forEach}.{model.Methods[start + k].Name}Job{start + k}{(chases && model.Methods[start + k].HasChaseTwin ? "Chases" : "")}{Fields(model.Methods[start + k], "world")}");
-        sb.Append($"        var {local} = new {forEach}.{walk} {{ {string.Join(", ", members)} }};\n");
+        // a job with no field to set is the fused job's default already
+        var members = Enumerable.Range(0, count).Select(k => (k, Fields(model.Methods[start + k], "world"))).Where(m => m.Item2 != "()").Select(m =>
+            $"j{m.k} = new {forEach}.{model.Methods[start + m.k].Name}Job{start + m.k}{(chases && model.Methods[start + m.k].HasChaseTwin ? "Chases" : "")}{m.Item2}").ToList();
+        sb.Append(members.Count == 0 ? $"        var {local} = new {forEach}.{walk}();\n" : $"        var {local} = new {forEach}.{walk} {{ {string.Join(", ", members)} }};\n");
         for (int k = 0; k < count; k++)
         {
             var method = model.Methods[start + k];
@@ -536,9 +537,9 @@ public sealed partial class SystemGenerator
         void Walk(bool twin, string indent)
         {
             string walk = twin ? name + "Chases" : name, local = twin ? "chases" : "fused"; // one name per scope (CS0136)
-            var members = Enumerable.Range(0, both.Methods.Length).Select(k =>
-                $"j{k} = new {JobOf(both.Methods[k], k, second)}{(twin && both.Methods[k].HasChaseTwin ? "Chases" : "")}{Fields(both.Methods[k], "world")}");
-            sb.Append($"{indent}var {local} = new __ForEach.{walk} {{ {string.Join(", ", members)}, Tick = tick }};\n");
+            var members = Enumerable.Range(0, both.Methods.Length).Select(k => (k, Fields(both.Methods[k], "world"))).Where(m => m.Item2 != "()").Select(m =>
+                $"j{m.k} = new {JobOf(both.Methods[m.k], m.k, second)}{(twin && both.Methods[m.k].HasChaseTwin ? "Chases" : "")}{m.Item2}, ");
+            sb.Append($"{indent}var {local} = new __ForEach.{walk} {{ {string.Concat(members)}Tick = tick }};\n");
             string loop = FusedInterface(both, 0, both.Methods.Length, second).Substring(1);
             sb.Append($"{indent}world.{loop}<{query}, __ForEach.{walk}>(ref {local}, in __ForEach.{name}Filter);\n");
             for (int k = 0; k < both.Methods.Length; k++) EmitReductions(sb, both.Methods[k], "world", $"{local}.j{k}", indent);

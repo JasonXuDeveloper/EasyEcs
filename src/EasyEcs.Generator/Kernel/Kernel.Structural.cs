@@ -144,8 +144,9 @@ internal sealed partial class Kernel
         foreach (var argument in change.Arguments)
             if (!IsUniform(argument))
                 throw FixableReason($"'{Text(op)}' sets {type.Name} to a value that differs per row: a vector loop gives the rows it marks one value; set the tag here and the value in a [ForEach] method over the tag");
-        if (!change.Generated) return ValueText(change.Arguments[0]);
-        if (change.Arguments.Length == 0) return $"default({t})";
+        // The type's default needs no line: the job's field v0 holds it from the job's creation.
+        if (!change.Generated) return IsDefault(change.Arguments[0]) ? "" : ValueText(change.Arguments[0]);
+        if (change.Arguments.Length == 0) return "";
         if (change.Arguments.Any(a => a.Syntax.Parent is ArgumentSyntax { NameColon: not null }))
             throw FixableReason($"'{Text(op)}' names its arguments: write the value, {type.Name}'s constructor with its arguments in order");
         // The generated SetX(args) builds the value with the public constructor of that many parameters, or, without one,
@@ -158,6 +159,14 @@ internal sealed partial class Kernel
         var fields = type.GetMembers().OfType<IFieldSymbol>().Where(f => !f.IsStatic).ToArray();
         if (fields.Length != change.Arguments.Length) throw FixableReason($"'{Text(op)}': write unit.Set(new {type.Name} {{ ... }})");
         return $"new {t} {{ {string.Join(", ", fields.Select((f, i) => $"{Symbols.MemberName(f)} = {Scalar(change.Arguments[i])}"))} }}";
+    }
+
+    /// <summary><c>default</c>, <c>default(T)</c> or <c>new T()</c> of a struct whose constructor the compiler wrote.</summary>
+    private static bool IsDefault(IOperation op)
+    {
+        while (op is IConversionOperation { Conversion.IsIdentity: true } c) op = c.Operand;
+        return op is IDefaultValueOperation
+            || op is IObjectCreationOperation { Constructor: { IsImplicitlyDeclared: true }, Arguments.Length: 0, Initializer: null, Type.IsValueType: true };
     }
 
     /// <summary>A uniform value as C#: <c>default</c>, <c>new T(...) { ... }</c> of uniform values, or a scalar.</summary>
@@ -203,7 +212,7 @@ internal sealed partial class Kernel
         else throw FixableReason($"it emits '{Text(record)}': {Shape()}, written new {type.Name}(value)");
         string t = type.ToDisplayString(Symbols.Fqn);
         string lanes = $"global::EasyEcs.Lanes.Ballot({LiveLanes})";
-        string emit = $"new global::EasyEcs.Emit<{t}>(ref this.e{index})";
+        string emit = $"new global::EasyEcs.Emit<{t}>(ref {(index <= _components.Count ? "this." : "")}e{index})"; // this: when a column ref of the loop shares the name
         if (EntityId(value))
         {
             Live(_active, $"{emit}.AddIds(in entities, {Row}, {lanes});\n");
@@ -261,12 +270,16 @@ internal sealed partial class Kernel
         {
             // The rows the change marks: one mark declares them (a mark zeroed then OR-ed once is one more operation and
             // local; a mark of a plain local is that local), several start from none.
-            _body.Append($"this.d0.Mark(in entities, {Row}, global::EasyEcs.Lanes.Ballot(__d0));\n");
+            _body.Append($"d0.Mark(in entities, {Row}, global::EasyEcs.Lanes.Ballot(__d0));\n");
             if (!_body.DeclareOnce("__d0")) _body.Insert(0, $"var __d0 = {Vec(_mask)}.Zero; // the rows the change marks\n");
-            if (_change.Value.Length > 0) _setup.Append($"this.v0 = {_change.Value};\n");
+            if (_change.Value.Length > 0) _setup.Append($"v0 = {_change.Value};\n");
         }
     }
 
-    /// <summary>The change and its type for the job (<see cref="Code.StructuralChanges"/>): "Set global::Dead", or none.</summary>
-    private EquatableArray<string> StructuralChanges() => new(_change == null ? [] : [$"{_change.Kind} {_change.Type}".TrimEnd()]);
+    /// <summary>
+    /// The change and its type for the job (<see cref="Code.StructuralChanges"/>): "Set global::Dead" (its value in the
+    /// job's field v0), "SetDefault global::Dead" (the type's default, no field), or none.
+    /// </summary>
+    private EquatableArray<string> StructuralChanges() =>
+        new(_change == null ? [] : [$"{(_change is { Kind: "Set", Value.Length: 0 } ? "SetDefault" : _change.Kind)} {_change.Type}".TrimEnd()]);
 }

@@ -79,6 +79,27 @@ internal sealed partial class Kernel
         foreach (int k in streamed)
             body = Regex.Replace(body, $@"(?m)^var (__c{k}_0(?:_[01])?) = {Regex.Escape(V)}\.LoadUnsafe\(ref e{k}, [^\n]*\);$",
                 $"var $1 = default({V.Replace("$", "$$")}<{columns[k - 1]}>);");
+        return Declared(body);
+    }
+
+    /// <summary>
+    /// <paramref name="body"/> with a lane declared <c>default</c> whose first use writes it whole at the same depth
+    /// (<c>var __c3_0 = default(V&lt;float&gt;); ... __c3_0 = a + b;</c>) declared by that write instead.
+    /// </summary>
+    private static string Declared(string body)
+    {
+        foreach (var unloaded in Regex.Matches(body, @"(?m)^var (__c\d+_0(?:_[01])?) = default\([^\n]*\);\n").Cast<Match>().Reverse())
+        {
+            string name = unloaded.Groups[1].Value;
+            var next = Regex.Match(body.Substring(unloaded.Index + unloaded.Length), $@"\b{name}\b");
+            if (!next.Success) continue;
+            int at = unloaded.Index + unloaded.Length + next.Index;
+            int line = body.LastIndexOf('\n', at - 1) + 1, end = body.IndexOf('\n', at);
+            string write = body.Substring(line, (end < 0 ? body.Length : end) - line);
+            if (line != at || !write.StartsWith(name + " = ", System.StringComparison.Ordinal) || Regex.IsMatch(write.Substring(name.Length + 3), $@"\b{name}\b"))
+                continue;
+            body = body.Insert(at, "var ").Remove(unloaded.Index, unloaded.Length);
+        }
         return body;
     }
 }
