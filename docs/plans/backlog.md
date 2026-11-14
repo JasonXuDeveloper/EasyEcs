@@ -105,6 +105,9 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       j. the 512-bit and `Vector<T>` bodies are the same text with another prefix (the largest duplication, about
          half of every vector job): #172's "one body per width" needs a width-generic helper the JIT specializes;
          try it on one job, Tier1 equal or it stays.
+- [ ] **`feat-ground-layer`** (owner, L19): a `Cell<TCell, Ground<TTile>>` method that also reads a layer of the
+      3D tile it is the ground of; design the public form (two or three shapes, as a popup), then generator, analyzer,
+      tests, TileGroundBenchmark case, docs-todos. After feat-generated-text-2's package A (same emit code).
 - [x] **`feat-ground-cells`** merged 2026-11-14. (inner-loops leftover (a), from fc26ea4): the first run was lost the same way before
       reporting; `Cell<TCell, Ground<TTile>>` already ran through the cell pass (no core or
       generator change was needed: the shape is any ITileShape); proved by TileTests.Cells.cs (2a12b41: a cross stepping
