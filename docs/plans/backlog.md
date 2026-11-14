@@ -118,6 +118,8 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       **Amended by L27**: the unit-test project keeps `net10.0;net11.0` (it references the net10.0 library from
       both), global.json stays on the SDK that builds both, and CI's test job is a matrix over the two runtimes;
       nothing else targets or installs .NET 11 (benchmarks, AOT, samples, tools, template, release).
+      Handed back on branch `feat-net10-only`: done as described, with L27 (global.json on SDK 11.0.100; the unit
+      tests on both runtimes, CI's x64 test job a matrix over them); the site's numbers still come from CI (L17).
 - [ ] **`feat-interleaved-256`** (found by feat-net11's B1): a two-source permute (`vpermt2ps`,
       `Avx512F.VL.PermuteVar8x32x2`) in `Interleaved`'s 256-bit loads and stores, behind `Avx512F.VL`: the path x64
       AVX-512 machines run by default (`Vector<T>` stays 256 bits there), 4 shuffles a pair of fields today. Both

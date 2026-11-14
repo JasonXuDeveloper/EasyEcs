@@ -30,10 +30,10 @@ import {
   formatBytes,
   formatRatio,
   formatTime,
-  headlineSourceLine,
   libraryName,
   peerLabel,
   peers,
+  sourceLine,
 } from '@/lib/benchmarks';
 import { cn } from '@/lib/cn';
 import {
@@ -371,7 +371,7 @@ const copy: Record<Locale, Copy> = {
         note: 'one world of 100,000 entities, after warm-up',
       },
     ],
-    numbersNote: `Entities spawn, die, gain and lose components every tick. ${headlineSourceLine(false)}`,
+    numbersNote: `Entities spawn, die, gain and lose components every tick. ${sourceLine(false)}`,
     numbersLink: 'What the tick simulates',
     codeTitle: 'Plain data in, inlined jobs out',
     codeText:
@@ -632,7 +632,7 @@ const copy: Record<Locale, Copy> = {
         note: '单个 World，10 万实体，预热之后',
       },
     ],
-    numbersNote: `每个 tick 都有实体生成、死亡、增减组件。${headlineSourceLine(true)}`,
+    numbersNote: `每个 tick 都有实体生成、死亡、增减组件。${sourceLine(true)}`,
     numbersLink: '这个 tick 模拟了什么',
     codeTitle: '写的是数据，跑的是内联 job',
     codeText:
@@ -1096,7 +1096,7 @@ export default function HomePage({ params, loaderData }: Route.ComponentProps) {
                 </StatCard>
               )}
               <p className="text-xs leading-relaxed text-fd-muted-foreground">
-                {headlineSourceLine(lang === 'zh')}
+                {sourceLine(lang === 'zh')}
               </p>
             </div>
           </section>

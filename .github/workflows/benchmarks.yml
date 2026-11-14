@@ -1,12 +1,11 @@
 name: Benchmarks
 
-# Run manually: Actions -> Benchmarks -> Run workflow. One job per runtime (net10.0, net11.0), in parallel, each running
-# tools/perf/bench.sh on a GitHub-hosted runner and uploading the BenchmarkDotNet reports as an artifact
-# (benchmarks-<tfm>: <tfm>/results and done/<tfm>/*.log). Its numbers are the site's (owner, ledger L17): a run of
-# --site before a release, then, on a clone, tools/perf/sync-ci.sh <run id> downloads both artifacts, makes each
-# runtime's reports its whole set in docs/src/data/bench.json and lists the rows that moved; commit the JSON. Nothing
-# is committed by the workflow itself. Hosted runners are shared machines whose speed varies from run to run and whose
-# CPU may differ between the two jobs; the site's source line names each runtime's machine.
+# Run manually: Actions -> Benchmarks -> Run workflow. Runs tools/perf/bench.sh on a GitHub-hosted runner and uploads
+# the BenchmarkDotNet reports as an artifact (benchmarks: results/ and done/*.log). Its numbers are the site's (owner,
+# ledger L17): a run of --site before a release, then, on a clone, tools/perf/sync-ci.sh <run id> downloads the
+# artifact, makes its reports the whole set of docs/src/data/bench.json and lists the rows that moved; commit the JSON.
+# Nothing is committed by the workflow itself. Hosted runners are shared machines whose speed varies from run to run;
+# the site's source line names the machine.
 
 on:
   workflow_dispatch:
@@ -23,32 +22,27 @@ permissions:
 jobs:
   bench:
     runs-on: ubuntu-26.04
-    strategy:
-      fail-fast: false
-      matrix:
-        framework: [ net10.0, net11.0 ]
-    name: bench (${{ matrix.framework }})
     # A full --site run takes hours; GitHub stops a job at 6 h
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v6
         with:
-          # both runtimes the library targets; global.json picks the SDK (11)
+          # the SDK global.json names (11) builds net10.0 and the unit tests' net11.0; .NET 10 runs the rest
           dotnet-version: |
             10.0.x
             11.0.x
-      - name: Run the benchmarks on ${{ matrix.framework }} (tools/perf/bench.sh)
+      - name: Run the benchmarks (tools/perf/bench.sh)
         env:
           CLASSES: ${{ inputs.classes }}
         # word splitting of CLASSES is wanted: one argument per class
-        run: tools/perf/bench.sh $CLASSES --framework ${{ matrix.framework }}
+        run: tools/perf/bench.sh $CLASSES
       - name: Upload the reports (results/ for sync-benchmarks.ts, the logs per class)
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: benchmarks-${{ matrix.framework }}
+          name: benchmarks
           path: |
-            BenchmarkDotNet.Artifacts/${{ matrix.framework }}/results
-            BenchmarkDotNet.Artifacts/done/${{ matrix.framework }}/*.log
+            BenchmarkDotNet.Artifacts/results
+            BenchmarkDotNet.Artifacts/done/*.log
           if-no-files-found: warn
