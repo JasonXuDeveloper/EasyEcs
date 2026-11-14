@@ -2,13 +2,11 @@ name: Benchmarks
 
 # Run manually: Actions -> Benchmarks -> Run workflow. One job per runtime (net10.0, net11.0), in parallel, each running
 # tools/perf/bench.sh on a GitHub-hosted runner and uploading the BenchmarkDotNet reports as an artifact
-# (benchmarks-<tfm>). Nothing is committed: hosted runners are shared machines whose speed varies from run to run, so
-# their numbers are a check of both runtimes, not the site's published numbers unless the owner decides so
-# (docs/plans/docs-todos.md, feat-net11). To feed a run's reports to the site's numbers, on a clone:
-#   gh run download <run id> -n benchmarks-net11.0 -D /tmp/bench-net11.0      # <tfm>/results and done/<tfm>/*.log
-#   (cd docs && BENCH_RESULTS=/tmp/bench-net11.0/net11.0/results bun scripts/sync-benchmarks.ts --runtime net11.0 --merge)
-# The merge is refused when the machine or the SDK differs from the runtime's committed numbers (sync-benchmarks.ts);
-# --partial writes them as that runtime's whole set instead.
+# (benchmarks-<tfm>: <tfm>/results and done/<tfm>/*.log). Its numbers are the site's (owner, ledger L17): a run of
+# --site before a release, then, on a clone, tools/perf/sync-ci.sh <run id> downloads both artifacts, makes each
+# runtime's reports its whole set in docs/src/data/bench.json and lists the rows that moved; commit the JSON. Nothing
+# is committed by the workflow itself. Hosted runners are shared machines whose speed varies from run to run and whose
+# CPU may differ between the two jobs; the site's source line names each runtime's machine.
 
 on:
   workflow_dispatch:
