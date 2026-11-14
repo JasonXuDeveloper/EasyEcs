@@ -151,6 +151,15 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       `Avx512F.VL.PermuteVar8x32x2`) in `Interleaved`'s 256-bit loads and stores, behind `Avx512F.VL`: the path x64
       AVX-512 machines run by default (`Vector<T>` stays 256 bits there), 4 shuffles a pair of fields today. Both
       runtimes. Proof: KernelBenchmark's interleaved cases, the headline worlds, Tier1; DOTNET_EnableAVX512=0 unchanged.
+- [ ] **`fix-allocation-tests-warmup`**: 0 B tests that fail once in many full-suite runs on a loaded machine and
+      never alone: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate` (net11.0, AVX-512 off, gate of
+      f2da0801) and `NeighborTests.APassOverListsAllocatesNothingOnceWarm` (net10.0, 336 B, lane 1's gate). Suspected:
+      a fixed warm-up count loses the race with tier-up (OSR / Tier1 of a job compiling inside the measured window)
+      when other processes hold the cores. Find the allocation's source first (an EventListener on the JIT and GC
+      allocation ticks in the failing window, or `DOTNET_TieredCompilation` settings to reproduce: `TC_BackgroundWorkerTimeoutMs`,
+      a busy machine), then fix the cause: warm up until N consecutive updates allocate nothing and the JIT has
+      compiled nothing new, in one helper (`Allocations.WarmUp`) every 0 B test uses. Also: `HugePagesTests` goes
+      Inconclusive without a free 2 MiB page (the count of tests then differs by one): expected, say so in tests/AGENTS.md.
 - [ ] **`feat-ground-layer`** (owner, L19): a `Cell<TCell, Ground<TTile>>` method that also reads a layer of the
       3D tile it is the ground of; design the public form (two or three shapes, as a popup), then generator, analyzer,
       tests, TileGroundBenchmark case, docs-todos. After feat-generated-text-2's package A (same emit code).
