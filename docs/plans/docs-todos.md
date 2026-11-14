@@ -3754,3 +3754,9 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
   bits flipped in place (CleanupBenchmark 105.6 -> 133.5 us), C17 `Removed<T>` from a log (the cost is per visited
   row), C14's batch half (a wash; the masked half is 42b8e9d's record if it has one, else one line there). Roadmap
   "Dropped" names them. C11 follows when package E has measured its last variant.
+- changelog.mdx + .zh (coming version, `### Performance`): a query over tracked components (`world.Query<...>`) no
+  longer calls out per row to stamp it (C12); link guide/changes/change-tracking (what a query stamps: every row it
+  visits, before the loop's body sees it, unchanged). decisions.mdx + .zh: a record "a query stamps the rows it visits,
+  not its words" (stamping a word ahead was the faster form on paper and was refused: a loop that breaks would report
+  rows it never visited to `Changed<T>` passes; the exact form got the win: QueryTick about 0.5-0.6x, numbers in the
+  backlog's C12).

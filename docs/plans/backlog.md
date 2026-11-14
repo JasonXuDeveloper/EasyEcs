@@ -259,10 +259,18 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       World.Parallel.cs. Proof: ParallelFor, Reduce, ChunkRows, Emit, ParallelPass, ParallelRunner, ParallelSystems,
       SystemDispatch, PairsBenchmark GeneratedParallel, TileActive Sparse 4 threads, BattleServer, WorldSimulation,
       MultiWorld (`--launchCount 6` for the parallel classes); a decision record extending D22 / D130.
-- [ ] **C12. P3: a query over tracked components stamps a word ahead, not a call per row** (`perf.md` P3). Files:
+- [x] **C12. P3: a query over tracked components stamps without a call per row** (`perf.md` P3). Files:
       ArityGenerator.cs (enumerator template), Query.cs. Proof: ChangeTrackingBenchmark QueryTick / Tick,
       MicroBenchmarks QueryIterate / QueryWrite (controls), tests of `[Changed<T>]` after a loop (full, break,
-      structural change).
+      structural change). **Done** (feat-lane1-core rerun, 7df979e + 2877f4f): stamping ahead was refused (a loop that
+      breaks would report rows nobody touched); the exact form keeps a ref to each tracked component's ticks and stores
+      the visited row's tick inline, a call only per word for the summaries, so the rows stamped are the rows visited,
+      each before the body sees it. Against 0ac2281, default job, two rounds, net10.0, 0 B: QueryTick 100k Written 10
+      base 353 / 415 us, head 220 / 206 us; Written 1,000 475 / 452 against 257 / 278 us; the Changed = true cases and
+      Tick level (891 / 884 against 846 / 915 ns; 67.3 / 71.5 against 70.0 / 67.6 us); controls level: ToggleComponent
+      112 / 122 against 109 / 123 us, QueryIterate 24.4 / 26.1 against 25.5 / 26.2 us, QueryIterate3 5.41 / 5.36
+      against 5.19 / 5.00 us, QueryWrite 13.7 / 12.5 against 13.8 / 13.8 us (untracked: the Tier1 loop the same, the
+      listings apart only in the cold path's registers, 886 / 890 bytes; a `--dev` pair read base 13.96, head 11.42).
 - [x] **C13. P4: the query enumerator skips the id load and tombstone test on tables without holes** (`perf.md` P4),
       one branch with C12. Proof: MicroBenchmarks Query*, ToggleComponent, SparseBenchmark QueryTheFew; Tier1 listing.
       **Dropped** (owner-review.md, the lost run's cause: the walk's state round-trips through the stack per row).
