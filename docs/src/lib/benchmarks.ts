@@ -9,9 +9,11 @@
  * a named key (`keys` below) that MDX uses: `<BenchValue k="tick.oneWorld" />`.
  *
  * The numbers are kept per runtime (`runtimes`: .NET 10 and .NET 11, the
- * library's two targets). Every accessor takes the runtime last and defaults
- * to `primaryRuntime`; tables, charts and named values show the runtimes side
- * by side, and a runtime with no number yet shows an empty cell, never a guess.
+ * library's two targets). Every accessor takes the runtime last; left out, it
+ * is the headline runtime of that class (`headlineFor`: .NET 11, or .NET 10
+ * while .NET 11 has no number for the class). Tables, charts and named values
+ * show the runtimes side by side, and a runtime with no number yet shows an
+ * empty cell, never a guess.
  */
 import data from '@/data/bench.json';
 
@@ -55,11 +57,14 @@ export const runtimes = [
 export type RuntimeId = (typeof runtimes)[number]['id'];
 
 /**
- * The runtime of a number shown alone: a named value when only it has one,
- * the home page's figures, the social cards and llms.txt, the order and tiers
- * of the feature comparison
+ * The runtime of a number shown alone (owner, ledger L21): the home page's
+ * figures, the social cards, llms.txt, a stat's figure, the order and tiers
+ * of the feature comparison and the row order of a table. Where it has no
+ * number for a class yet, `fallbackRuntime`'s is shown instead (no empty
+ * figure on the home page), and the source line names both.
  */
-export const primaryRuntime: RuntimeId = 'net10.0';
+export const headlineRuntime: RuntimeId = 'net11.0';
+const fallbackRuntime: RuntimeId = 'net10.0';
 
 const sets = data.runtimes as unknown as Partial<
   Record<RuntimeId, RuntimeData>
@@ -78,10 +83,7 @@ export const measuredRuntimes = runtimes.filter((r) => sets[r.id]);
  * A class by its name ("RemovalComparison") or by the end of its full name
  * ("Features.RemovalComparison", "EcsComparison.Features.RemovalComparison").
  */
-export function benchClass(
-  name: string,
-  runtime: RuntimeId = primaryRuntime,
-): BenchClass | undefined {
+function findClass(runtime: RuntimeId, name: string): BenchClass | undefined {
   const benchmarks = sets[runtime]?.benchmarks ?? {};
   if (benchmarks[name]) return benchmarks[name];
   for (const [short, entry] of Object.entries(benchmarks)) {
@@ -91,11 +93,24 @@ export function benchClass(
   return undefined;
 }
 
+/** The runtime a class's numbers are quoted from when no runtime is named: the headline one while it has the class */
+export function headlineFor(name: string): RuntimeId {
+  return findClass(headlineRuntime, name) ? headlineRuntime : fallbackRuntime;
+}
+
+/** A class on a runtime (default: its headline runtime, `headlineFor`) */
+export function benchClass(
+  name: string,
+  runtime: RuntimeId = headlineFor(name),
+): BenchClass | undefined {
+  return findClass(runtime, name);
+}
+
 /** The rows of a class whose [Params] include every given value */
 export function benchRows(
   name: string,
   params: Record<string, string> = {},
-  runtime: RuntimeId = primaryRuntime,
+  runtime: RuntimeId = headlineFor(name),
 ) {
   const rows = benchClass(name, runtime)?.rows ?? [];
   return rows.filter((row) =>
@@ -107,7 +122,7 @@ export function bench(
   name: string,
   method: string,
   params: Record<string, string> = {},
-  runtime: RuntimeId = primaryRuntime,
+  runtime: RuntimeId = headlineFor(name),
 ): BenchRow | undefined {
   return benchRows(name, params, runtime).find((row) => row.method === method);
 }
@@ -527,10 +542,11 @@ export interface BenchNumber {
 /** A named number, or undefined when the runtime's data has no such row */
 export function benchNumber(
   key: string,
-  runtime: RuntimeId = primaryRuntime,
+  runtime?: RuntimeId,
 ): BenchNumber | undefined {
   const def = keys[key];
   if (!def) return undefined;
+  runtime ??= headlineFor(def.bench);
   const row = bench(def.bench, def.method, def.params, runtime);
   if (!row) return undefined;
   switch (def.field ?? 'mean') {
@@ -561,7 +577,7 @@ export function benchNumber(
 }
 
 /** The text of a named number; throws on an unknown key so a typo fails the build */
-export function benchValue(key: string, runtime: RuntimeId = primaryRuntime) {
+export function benchValue(key: string, runtime?: RuntimeId) {
   if (!(key in keys)) throw new Error(`Unknown benchmark key "${key}"`);
   return benchNumber(key, runtime)?.text ?? '—';
 }
@@ -615,7 +631,7 @@ export function peerLabel(method: string, ourVersion: string) {
 /** The headline comparison (the same server tick ported to each library), fastest first */
 export function peers(
   entities = '100000',
-  runtime: RuntimeId = primaryRuntime,
+  runtime: RuntimeId = headlineFor('EcsComparisonBenchmark'),
 ): Peer[] {
   return benchRows('EcsComparisonBenchmark', { Entities: entities }, runtime)
     .map((row) => ({
@@ -665,7 +681,7 @@ export interface Comparison {
 
 export interface ComparisonQuery {
   bench: string;
-  /** The runtime whose numbers (default: primaryRuntime) */
+  /** The runtime whose numbers (default: the class's headline runtime, `headlineFor`) */
   runtime?: RuntimeId;
   /** [Params] filter, "Written=1000" or "Removed=10,Mode=A" */
   params?: string;
@@ -703,7 +719,7 @@ export function comparison({
   bench,
   params,
   methods,
-  runtime = primaryRuntime,
+  runtime = headlineFor(bench),
 }: ComparisonQuery): Comparison {
   const filter = parseParams(params);
   let rows = benchRows(bench, filter, runtime);
@@ -716,9 +732,9 @@ export function comparison({
   }
   const keyOf = (row: BenchRow) => JSON.stringify(row.params);
   // EasyEcs' own benchmarks compare ways of doing one job in EasyEcs, not libraries
-  const own =
-    benchClass(bench, runtime)?.namespace === 'EasyEcs.Benchmark' ||
-    benchClass(bench, primaryRuntime)?.namespace === 'EasyEcs.Benchmark';
+  const own = runtimes.some(
+    (r) => benchClass(bench, r.id)?.namespace === 'EasyEcs.Benchmark',
+  );
   const items = rows.map((row) => {
     const { library, case: name } = own
       ? { library: 'EasyEcs', case: row.method }
@@ -783,11 +799,10 @@ export function comparisonLabel(
 
 /**
  * One line naming the tool, the runtimes and the machine, under every chart
- * and table: every runtime that has numbers (or `only` that one, under figures
- * of one runtime such as the home page's), with the machine once when they
- * ran on the same one
+ * and table: every runtime that has numbers (or only those of `only`), with the
+ * machine once when they ran on the same one
  */
-export function sourceLine(zh: boolean, only?: RuntimeId) {
+export function sourceLine(zh: boolean, only?: RuntimeId[]) {
   const machineOf = (env: Environment) => {
     const cores = env.cores?.match(/(\d+) physical/)?.[1];
     const os = env.os?.replace(/^Linux\s+/, '').replace(/\s*\(.*\)$/, '');
@@ -796,7 +811,7 @@ export function sourceLine(zh: boolean, only?: RuntimeId) {
       .join(zh ? '，' : ', ');
   };
   const envs = measuredRuntimes.flatMap((r) => {
-    if (only && r.id !== only) return [];
+    if (only && !only.includes(r.id)) return [];
     const env = sets[r.id]?.environment;
     return env ? [env] : [];
   });
@@ -815,4 +830,24 @@ export function sourceLine(zh: boolean, only?: RuntimeId) {
   return zh
     ? `${tool}；${parts.join('；')}。`
     : `${tool}; ${parts.join('; ')}.`;
+}
+
+/**
+ * The source line of figures quoted from the headline runtime (the home page,
+ * llms.txt): that runtime, and the fallback too while the headline runtime
+ * lacks a class the fallback has
+ */
+export function headlineSourceLine(zh: boolean) {
+  const fallback = Object.keys(sets[fallbackRuntime]?.benchmarks ?? {});
+  const complete =
+    sets[headlineRuntime] &&
+    fallback.every((c) => findClass(headlineRuntime, c));
+  return sourceLine(
+    zh,
+    complete
+      ? [headlineRuntime]
+      : sets[headlineRuntime]
+        ? [fallbackRuntime, headlineRuntime]
+        : [fallbackRuntime],
+  );
 }

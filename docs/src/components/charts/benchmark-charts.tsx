@@ -19,7 +19,6 @@ import {
   measuredRuntimes,
   peerLabel,
   peers,
-  primaryRuntime,
   type RuntimeId,
   sourceLine,
 } from '@/lib/benchmarks';
@@ -194,7 +193,7 @@ export function LeadChart({
         const next = item.versus;
         const bars = barsOf(
           (r) => {
-            const same = r === primaryRuntime ? item : featureOn(item, r);
+            const same = featureOn(item, r);
             return same ? { key: 'ours', ns: same.ratio } : undefined;
           },
           (v) => `${formatRatio(v)} · ${next.library}`,

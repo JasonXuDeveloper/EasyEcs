@@ -10,7 +10,6 @@
 import {
   type BenchRow,
   benchRows,
-  primaryRuntime,
   type RuntimeId,
   splitMethod,
 } from './benchmarks';
@@ -481,6 +480,8 @@ export interface Rival {
 }
 
 export interface FeatureResult {
+  /** The comparison class, as `benchClass` takes it */
+  bench: string;
   label: Text;
   short: Text;
   anchor: string;
@@ -511,7 +512,7 @@ interface Measured {
   rivals: Rival[];
 }
 
-function measure(m: Matchup, runtime: RuntimeId): Measured | undefined {
+function measure(m: Matchup, runtime?: RuntimeId): Measured | undefined {
   const rows = benchRows(m.bench, m.params, runtime);
   const ours = fastest(
     rows.filter((r) =>
@@ -538,6 +539,7 @@ function against(
 ): FeatureResult {
   const ratio = versus.vs;
   return {
+    bench: m.bench,
     label: m.label,
     short: m.short,
     anchor: m.anchor,
@@ -556,12 +558,16 @@ function against(
 
 const byLead = (a: FeatureResult, b: FeatureResult) => b.ratio - a.ratio;
 
-/** Each runtime's comparisons, measured once */
+/**
+ * Each runtime's comparisons, measured once; `undefined` is each class on its
+ * headline runtime (benchmarks.ts, headlineFor), the order and tiers the site
+ * shows
+ */
 const cache = new Map<
-  RuntimeId,
+  RuntimeId | undefined,
   { measured: Measured[]; all: FeatureResult[] }
 >();
-function onRuntime(runtime: RuntimeId) {
+function onRuntime(runtime: RuntimeId | undefined) {
   let entry = cache.get(runtime);
   if (!entry) {
     const measured = matchups.flatMap((m) => measure(m, runtime) ?? []);
@@ -583,7 +589,7 @@ function onRuntime(runtime: RuntimeId) {
 export function featureComparison(
   tier?: Tier,
   library?: string,
-  runtime: RuntimeId = primaryRuntime,
+  runtime?: RuntimeId,
 ): FeatureResult[] {
   const { measured, all } = onRuntime(runtime);
   const results = library
@@ -603,10 +609,7 @@ export function featureComparison(
  * and how many each tier holds; against the fastest other library, or
  * against `library`
  */
-export function featureCounts(
-  library?: string,
-  runtime: RuntimeId = primaryRuntime,
-) {
+export function featureCounts(library?: string, runtime?: RuntimeId) {
   const results = featureComparison(undefined, library, runtime);
   const count = (test: (r: FeatureResult) => boolean) =>
     results.filter(test).length;
