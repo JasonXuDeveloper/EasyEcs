@@ -7,7 +7,7 @@
              ref Tile step); BattleServer.cs is kept clean by tests/EasyEcs.Aot (warnings as errors). -->
         <NoWarn>$(NoWarn);EECS033;EECS065;EECS067;EECS084;EECS103;EECS116</NoWarn>
         <OutputType>Exe</OutputType>
-        <TargetFramework>net10.0</TargetFramework>
+        <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
         <ImplicitUsings>disable</ImplicitUsings>
         <Nullable>disable</Nullable>
         <IsPackable>false</IsPackable>
