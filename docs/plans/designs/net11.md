@@ -99,14 +99,39 @@ Measured first: the headline worlds and the classes below on net11.0 against net
 - **B13 Span.Sort with value comparers: not applicable.** Core's sorts (`Pairs.cs`, `RowClusters.cs`,
   `ValueIndex.cs`) use the default comparer (`Array.Sort(keys, ids, ...)`, `Comparer<TKey>.Default`), which #116109
   does not change.
-- **Found on the way: BenchmarkDotNet 0.15.2 cannot name net11.0.** A job with
-  `CoreRuntime.CreateForNewVersion("net11.0")` fails its SDK validator (`GetRuntimeVersion not implemented for
-  NotRecognized`), so `--frameworks` makes the host's runtime the job without a runtime and names the older one
-  (`CoreRuntime.Core10_0`): the host must run the newest (`dotnet run -f net11.0`). `bench.sh --framework net11.0`
-  was never affected (the host's runtime is never validated).
+- **Found on the way: BenchmarkDotNet 0.15 could not run on .NET 11 at all.** Its SDK check
+  (`DotNetSdkValidator.ValidateCoreSdks`) and its parallel-build choice (`BenchmarkRunnerClean.Run`) both call
+  `GetRuntimeVersion`, which throws `NotImplementedException` for a runtime it does not name (`NotRecognized`), the
+  host's own included: `dotnet run -f net11.0` and `--frameworks` both died before the first case (0.15.8's validator
+  is the same; only the 0.16 previews name `Net11_0`). `BenchmarkConfig.OnRuntime` gives a net11.0 job the project
+  toolchain of its target framework without that check (`Unchecked`), the config sets `DisableParallelBuild` (so the
+  version is never asked), and net10.0 is `CoreRuntime.Core10_0` when it is not the host (d3d564a8).
+
+### B0. What the runtime alone gives: nothing measurable on the headline worlds
+
+`dotnet run -c Release -f net11.0 --project benchmarks/EasyEcs.Benchmark -- --filter '*.WorldSimulationBenchmark.*'
+'*.MultiWorldBenchmark.*' '*.BattleServerBenchmark.*' --frameworks net10.0,net11.0`, the default job (2 launches x 8
+iterations per runtime), one round under `flock -x`, load 1.3-1.9, 2026-11-14, Xeon 2.10 GHz AVX-512 (Vector<T> 256 bits),
+.NET 10.0.15 against 11.0.0:
+
+| Benchmark | net10.0 | net11.0 | Allocated |
+|---|---|---|---|
+| WorldSimulationBenchmark.Tick, 10,000 | 89.95 us ± 10.3 | 94.84 us ± 4.2 | 0 B both |
+| WorldSimulationBenchmark.Tick, 100,000 | 1,282.78 us ± 70.1 | 1,282.78 us ± 75.1 | 0 B both |
+| MultiWorldBenchmark.TickAllWorlds, 100,000 | 627.3 us ± 60.0 | 656.0 us ± 72.4 | 0 B both |
+| BattleServerBenchmark.Tick, 100,000 | 3.616 ms ± 0.141 | 3.691 ms ± 0.312 | 0 B both |
+
+Every pair is within its error bars: on the code EasyEcs generates and the core it runs, .NET 11's JIT changes neither
+the time nor the allocations of a tick. Expected from section 1: the generated loops already hoist their checks
+(constant tables, `Unsafe` row access behind documented invariants), so the new bounds-check and loop-cloning work
+finds little left; the vector loops spend their time in loads and stores (WorldSimulation's tick sits near the memory
+roof, audit-perf's roofline), which no JIT change moves. One round, so it is an observation, not a keep / revert
+decision; the site's numbers of both runtimes come from CI (L17).
 
 ## Order
 
-Package B: the runtime-alone comparison (section 1: WorldSimulationBenchmark, BattleServerBenchmark,
-MultiWorldBenchmark, KernelBenchmark, the math kernels with the new DegreesToRadians) and B1. Then B2, B3/B4 checks,
-B13. Each kept item's numbers and each dropped item's cause go into this file, then into D21's .NET 11 part (docs pass).
+Done in package B: B0 (section 3), B1, B2, B4, B13 from their listings and the code, B3 / B5-B7 / B11 / B12 / B14 / B15
+not applicable, B10 settled (L22). No .NET 11 item ships code: each is either equal to what EasyEcs writes already or
+slower. Left for the docs pass: D21's .NET 11 part from this file. Handed on: the 256-bit two-source permute
+(`Avx512F.VL.PermuteVar8x32x2`) in `Interleaved`'s 256-bit loads and stores, which x64 AVX-512 machines run by default
+(Vector<T> 256 bits), a Core-lane item for both runtimes (B1).
