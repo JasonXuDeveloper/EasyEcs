@@ -1,36 +1,30 @@
 /**
  * Writes src/data/bench.json, the only source of the benchmark numbers the
  * site shows, from BenchmarkDotNet's `*-report.csv` files (and the machine
- * from the matching `*-report-github.md` headers). The numbers are kept per
- * runtime (`runtimes["net10.0"]`, `runtimes["net11.0"]`): each report goes
- * into the set of the runtime it ran on (its header's `[Host]` line), and the
- * other runtimes' sets are kept as committed.
+ * from the matching `*-report-github.md` headers).
  *
  * Input: the directory in BENCH_RESULTS, else the repository's
  * BenchmarkDotNet.Artifacts/results (where `dotnet run -c Release --project
- * benchmarks/EasyEcs.Benchmark` and `.../EasyEcs.Comparison` write them;
- * tools/perf/bench.sh writes BenchmarkDotNet.Artifacts/<tfm>/results and
- * passes it). `bun run build` runs this first; when the directory is missing
- * (Cloudflare Pages) or holds only part of a run, the committed file is kept,
- * so a filtered local run (`--filter '*Iterate*'`) never replaces the full
- * data with a few rows from another machine.
+ * benchmarks/EasyEcs.Benchmark` and `.../EasyEcs.Comparison` write them).
+ * `bun run build` runs this first; when the directory is missing (Cloudflare
+ * Pages) or holds only part of a run, the committed file is kept, so a
+ * filtered local run (`--filter '*Iterate*'`) never replaces the full data
+ * with a few rows from another machine.
  *
  *   BENCH_RESULTS=/path/to/BenchmarkDotNet.Artifacts/results bun run sync:benchmarks
- *   bun scripts/sync-benchmarks.ts --dir <results> --out <bench.json> [--runtime net11.0] [--replace | --partial | --merge]
+ *   bun scripts/sync-benchmarks.ts --dir <results> --out <bench.json> [--replace | --partial | --merge]
  *
- * `--runtime` takes only the reports of that runtime (the others are skipped
- * with a warning). `--replace` makes the directory's reports a runtime's
- * whole set, whatever machine or SDK the committed set came from (the CI
- * Benchmarks workflow's run, the site's source: tools/perf/sync-ci.sh); it is
- * refused when the reports lack a class the committed set has (a class that
- * failed in the run), unless `--partial` is passed too. `--partial` writes whatever the directory holds for a
- * runtime (for a first run, or when a benchmark class was removed on
- * purpose). `--merge` replaces the classes the directory holds and keeps
- * every other committed class of that runtime (a run of new or changed
- * classes only, or a runtime's first numbers); it refuses reports from
- * another machine or SDK than that runtime's committed numbers, whose numbers
- * would not compare with them. A runtime with no numbers yet shows an empty
- * cell on the site, never a guess. */
+ * `--replace` makes the reports the whole set, whatever machine or SDK the
+ * committed set came from, as the default does when they hold every committed
+ * class (the CI Benchmarks workflow's run, the site's source: owner, ledger
+ * L17, tools/perf/sync-ci.sh); it says so when the machine changes, and with
+ * `--partial` too it drops a class the run lacks.
+ * `--partial` writes whatever the directory holds (for a first run, or when a
+ * benchmark class was removed on purpose). `--merge` replaces the classes the
+ * directory holds and keeps every other committed class (a run of new or
+ * changed classes only); it refuses reports from another machine or runtime,
+ * whose numbers would not compare with the committed ones.
+ */
 import {
   existsSync,
   readdirSync,
@@ -56,8 +50,6 @@ const out = arg('--out') ?? path.join(docsRoot, 'src/data/bench.json');
 const partial = process.argv.includes('--partial');
 const merge = process.argv.includes('--merge');
 const replace = process.argv.includes('--replace');
-/** Only the reports of this runtime ("net11.0"); bench.sh passes its --framework */
-const only = arg('--runtime');
 
 /* ------------------------------------------------------------------ */
 /* Types (src/lib/benchmarks.ts reads the same shape)                  */
@@ -76,9 +68,8 @@ export interface BenchRow {
   allocatedBytes: number | null;
 }
 
-/** The numbers of one runtime */
-export interface Runtime {
-  /** The time of the newest report */
+export interface BenchFile {
+  source: string;
   generatedAt: string;
   environment: {
     benchmarkDotNet: string | null;
@@ -89,6 +80,8 @@ export interface Runtime {
     runtime: string | null;
     jit: string | null;
   };
+  /** NuGet versions of the libraries the comparison runs against */
+  peers: Record<string, string>;
   benchmarks: Record<
     string,
     {
@@ -98,14 +91,6 @@ export interface Runtime {
       rows: BenchRow[];
     }
   >;
-}
-
-export interface BenchFile {
-  source: string;
-  /** NuGet versions of the libraries the comparison runs against */
-  peers: Record<string, string>;
-  /** By target framework: "net10.0", "net11.0" */
-  runtimes: Record<string, Runtime>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -221,7 +206,7 @@ function readReport(file: string) {
 /** The machine block at the top of a `*-report-github.md` */
 function readEnvironment(
   file: string,
-): Runtime['environment'] & { job: string | null } {
+): BenchFile['environment'] & { job: string | null } {
   const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
   const block = /```\s*\n([\s\S]*?)```/.exec(text)?.[1] ?? '';
   const lines = block.split('\n').map((l) => l.trim());
@@ -264,12 +249,6 @@ function readPeers() {
   return peers;
 }
 
-/** "net10.0" for a report of ".NET 10.0.13" */
-function runtimeOf(env: Runtime['environment']) {
-  const m = /^\.NET (\d+)\.(\d+)/.exec(env.runtime ?? '');
-  return m ? `net${m[1]}.${m[2]}` : null;
-}
-
 function main() {
   const committed: BenchFile | undefined = existsSync(out)
     ? JSON.parse(readFileSync(out, 'utf8'))
@@ -291,128 +270,97 @@ function main() {
     return;
   }
 
-  // The reports by runtime: each goes into the numbers of the runtime it ran on
-  type Read = {
-    benchmarks: Runtime['benchmarks'];
-    environments: Map<string, Runtime['environment']>;
-    files: string[];
-  };
-  const byRuntime = new Map<string, Read>();
+  const benchmarks: BenchFile['benchmarks'] = {};
+  const environments = new Map<string, BenchFile['environment']>();
   for (const file of reports) {
     const full = file.replace(/-report\.csv$/, '');
     const dot = full.lastIndexOf('.');
     const name = full.slice(dot + 1);
+    benchmarks[name] = {
+      namespace: full.slice(0, Math.max(dot, 0)),
+      job: null,
+      rows: readReport(path.join(dir, file)),
+    };
     const { job, ...env } = readEnvironment(
       path.join(dir, `${full}-report-github.md`),
     );
-    const id = runtimeOf(env);
-    if (!id) {
-      console.warn(`[bench] ${file}: no runtime in its report header, skipped`);
-      continue;
+    benchmarks[name].job = job;
+    environments.set(JSON.stringify(env), env);
+  }
+
+  if (environments.size > 1)
+    console.warn(
+      `[bench] the reports come from ${environments.size} different machines or runtimes; the first one is recorded`,
+    );
+
+  const missing = Object.keys(committed?.benchmarks ?? {}).filter(
+    (name) => !(name in benchmarks),
+  );
+  if (merge && committed) {
+    const env = [...environments.values()][0];
+    if (
+      environments.size > 1 ||
+      JSON.stringify(env) !== JSON.stringify(committed.environment)
+    ) {
+      console.warn(
+        `[bench] --merge: the reports in ${dir} come from another machine or runtime than ${path.relative(docsRoot, out)}; nothing written`,
+      );
+      process.exitCode = 1;
+      return;
     }
-    if (only && id !== only) {
-      console.warn(`[bench] ${file} ran on ${id}, not ${only}: skipped`);
-      continue;
-    }
-    let read = byRuntime.get(id);
-    if (!read) {
-      read = { benchmarks: {}, environments: new Map(), files: [] };
-      byRuntime.set(id, read);
-    }
-    read.benchmarks[name] = {
-      namespace: full.slice(0, Math.max(dot, 0)),
-      job,
-      rows: readReport(path.join(dir, file)),
+    // The committed classes in their order, the new ones replaced or added at the end
+    const merged: BenchFile['benchmarks'] = {};
+    for (const [name, entry] of Object.entries(committed.benchmarks))
+      merged[name] = benchmarks[name] ?? entry;
+    for (const [name, entry] of Object.entries(benchmarks))
+      merged[name] ??= entry;
+    const newest = Math.max(
+      Date.parse(committed.generatedAt),
+      ...reports.map((f) => statSync(path.join(dir, f)).mtimeMs),
+    );
+    const data: BenchFile = {
+      ...committed,
+      generatedAt: new Date(newest).toISOString(),
+      peers: readPeers(),
+      benchmarks: merged,
     };
-    read.environments.set(JSON.stringify(env), env);
-    read.files.push(file);
+    writeFileSync(out, `${JSON.stringify(data, null, 2)}\n`);
+    console.log(
+      `[bench] merged ${reports.length} class(es) into ${path.relative(docsRoot, out)}: ${Object.keys(benchmarks).join(', ')}`,
+    );
+    return;
+  }
+  if (
+    replace &&
+    committed &&
+    JSON.stringify([...environments.values()][0]) !==
+      JSON.stringify(committed.environment)
+  )
+    console.log(
+      `[bench] --replace: the numbers of ${committed.environment.cpu} (${committed.environment.runtime}, SDK ${committed.environment.sdk}) give way to the run's`,
+    );
+  if (missing.length > 0 && !partial) {
+    console.warn(
+      `[bench] ${dir} lacks ${missing.length} benchmark class(es) of the committed data (${missing.join(', ')}): keeping ${path.relative(docsRoot, out)}. Pass --partial to write it anyway.`,
+    );
+    return;
   }
 
   const data: BenchFile = {
     source: 'BenchmarkDotNet *-report.csv (scripts/sync-benchmarks.ts)',
+    // The time of the run, not of this script: the newest report's mtime.
+    generatedAt: new Date(
+      Math.max(...reports.map((f) => statSync(path.join(dir, f)).mtimeMs)),
+    ).toISOString(),
+    environment: [...environments.values()][0],
     peers: readPeers(),
-    runtimes: { ...(committed?.runtimes ?? {}) },
+    benchmarks,
   };
-  let wrote = false;
-  for (const [id, read] of byRuntime) {
-    // The time of the run, not of this script: the newest report's mtime
-    const newest = Math.max(
-      ...read.files.map((f) => statSync(path.join(dir, f)).mtimeMs),
-    );
-    const env = [...read.environments.values()][0];
-    const before = committed?.runtimes?.[id];
-    if (read.environments.size > 1) {
-      console.warn(
-        `[bench] ${id}: the reports come from ${read.environments.size} different machines or SDKs; nothing written for ${id}`,
-      );
-      process.exitCode = 1;
-      continue;
-    }
-    if (merge) {
-      // Within one runtime the numbers compare only when the machine and the SDK are the same
-      if (
-        before &&
-        JSON.stringify(env) !== JSON.stringify(before.environment)
-      ) {
-        console.warn(
-          `[bench] --merge: the ${id} reports in ${dir} come from another machine or SDK than the committed ${id} numbers; nothing written for ${id}`,
-        );
-        process.exitCode = 1;
-        continue;
-      }
-      // The committed classes in their order, the new ones replaced or added at the end
-      const merged: Runtime['benchmarks'] = {};
-      for (const [name, entry] of Object.entries(before?.benchmarks ?? {}))
-        merged[name] = read.benchmarks[name] ?? entry;
-      for (const [name, entry] of Object.entries(read.benchmarks))
-        merged[name] ??= entry;
-      data.runtimes[id] = {
-        generatedAt: new Date(
-          Math.max(newest, before ? Date.parse(before.generatedAt) : 0),
-        ).toISOString(),
-        environment: env,
-        benchmarks: merged,
-      };
-      console.log(
-        `[bench] merged ${read.files.length} class(es) into the ${id} numbers: ${Object.keys(read.benchmarks).join(', ')}`,
-      );
-      wrote = true;
-      continue;
-    }
-    const missing = Object.keys(before?.benchmarks ?? {}).filter(
-      (name) => !(name in read.benchmarks),
-    );
-    if (!partial && (before ? missing.length > 0 : !replace)) {
-      console.warn(
-        before
-          ? `[bench] ${dir} lacks ${missing.length} ${id} benchmark class(es) of the committed data (${missing.join(', ')}): keeping the ${id} numbers. Pass --partial to write them anyway, or --merge.`
-          : `[bench] ${dir} holds ${id} reports and the committed data has no ${id} numbers: pass --replace or --merge (or --partial) to add them.`,
-      );
-      continue;
-    }
-    data.runtimes[id] = {
-      generatedAt: new Date(newest).toISOString(),
-      environment: env,
-      benchmarks: read.benchmarks,
-    };
-    const rows = Object.values(read.benchmarks).reduce(
-      (n, b) => n + b.rows.length,
-      0,
-    );
-    console.log(
-      `[bench] ${id}: ${read.files.length} classes, ${rows} rows (${env.cpu}, ${env.runtime})`,
-    );
-    wrote = true;
-  }
-  if (!wrote) return;
-  // The runtimes in the order of their versions
-  data.runtimes = Object.fromEntries(
-    Object.entries(data.runtimes).sort(([a], [b]) =>
-      a.localeCompare(b, 'en', { numeric: true }),
-    ),
-  );
   writeFileSync(out, `${JSON.stringify(data, null, 2)}\n`);
-  console.log(`[bench] wrote ${path.relative(docsRoot, out)}`);
+  const rows = Object.values(benchmarks).reduce((n, b) => n + b.rows.length, 0);
+  console.log(
+    `[bench] wrote ${path.relative(docsRoot, out)}: ${reports.length} classes, ${rows} rows (${data.environment.cpu}, ${data.environment.runtime})`,
+  );
 }
 
 main();

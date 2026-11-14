@@ -6,15 +6,18 @@
  */
 import { asMarkdown, md, renderToMarkdown } from 'fumadocs-core/server';
 import type { ComponentProps, ReactNode } from 'react';
-import {
-  benchTable,
-  featureCountText,
-  featureTable,
-  peerTable,
-} from '@/components/bench-data';
+import { benchTable, featureTable } from '@/components/bench-data';
 import { type StatProps, statData } from '@/components/stats';
-import { benchValues, sourceLine } from '@/lib/benchmarks';
-import type { featureCounts, Tier } from '@/lib/feature-comparison';
+import {
+  benchValue,
+  formatBytes,
+  formatRatio,
+  formatTime,
+  peerLabel,
+  peers,
+  sourceLine,
+} from '@/lib/benchmarks';
+import { featureCounts, type Tier } from '@/lib/feature-comparison';
 import { getMDXComponents } from '@/mdx-components';
 import type { Locale } from './i18n';
 import { docsVersion, siteUrl } from './site';
@@ -156,9 +159,8 @@ function markdownComponents(lang: Locale, pageUrl: string) {
           ? (await md`${data.note}`).trim().replace(/\s*\n\s*/g, ' ')
           : '';
         const head = data.label ? `${data.label}${zh ? '：' : ': '}` : '';
-        const alt = data.alt ? (zh ? `（${data.alt}）` : ` (${data.alt})`) : '';
         const tail = note ? `${zh ? '，' : ', '}${note}` : '';
-        return `- ${head}**${figure}**${alt}${tail}\n`;
+        return `- ${head}**${figure}**${tail}\n`;
       })();
     },
     Steps({ children }: Children) {
@@ -221,7 +223,7 @@ function markdownComponents(lang: Locale, pageUrl: string) {
     },
     BenchValue({ k }: { k: string }) {
       asMarkdown();
-      return benchValues(k, zh);
+      return benchValue(k);
     },
     BenchSource() {
       asMarkdown();
@@ -251,7 +253,7 @@ function markdownComponents(lang: Locale, pageUrl: string) {
       library?: string;
     }) {
       asMarkdown();
-      return featureCountText(k, library, zh);
+      return String(featureCounts(library)[k]);
     },
     // A chart becomes its title, its data table and the source line.
     LeadChart({
@@ -270,7 +272,7 @@ function markdownComponents(lang: Locale, pageUrl: string) {
     },
     PeerChart({ entities = '100000' }: { entities?: string }) {
       asMarkdown();
-      const { head, rows } = peerTable(entities, zh, docsVersion);
+      const list = peers(entities);
       return (
         <div>
           <p>
@@ -280,7 +282,17 @@ function markdownComponents(lang: Locale, pageUrl: string) {
                 : `One server tick of ${Number(entities).toLocaleString('en-US')} entities`}
             </strong>
           </p>
-          {table(head, rows)}
+          {table(
+            zh
+              ? ['库', '耗时', '对比 EasyEcs', '分配']
+              : ['Library', 'Time', 'vs EasyEcs', 'Allocated'],
+            list.map((p) => [
+              peerLabel(p.method, docsVersion),
+              formatTime(p.row.meanNs),
+              p.row.ratio === null ? '—' : formatRatio(p.row.ratio),
+              formatBytes(p.row.allocatedBytes),
+            ]),
+          )}
           <p>{sourceLine(zh)}</p>
         </div>
       );

@@ -7,13 +7,6 @@
  * A number is addressed by benchmark class, method and [Params] values:
  * `bench('WorldSimulationBenchmark', 'Tick', { Entities: '100000' })`, or by
  * a named key (`keys` below) that MDX uses: `<BenchValue k="tick.oneWorld" />`.
- *
- * The numbers are kept per runtime (`runtimes`: .NET 10 and .NET 11, the
- * library's two targets). Every accessor takes the runtime last; left out, it
- * is the headline runtime of that class (`headlineFor`: .NET 11, or .NET 10
- * while .NET 11 has no number for the class). Tables, charts and named values
- * show the runtimes side by side, and a runtime with no number yet shows an
- * empty cell, never a guess.
  */
 import data from '@/data/bench.json';
 
@@ -33,58 +26,16 @@ interface BenchClass {
   rows: BenchRow[];
 }
 
-export interface Environment {
-  benchmarkDotNet: string | null;
-  os: string | null;
-  cpu: string | null;
-  cores: string | null;
-  sdk: string | null;
-  runtime: string | null;
-  jit: string | null;
-}
-
-interface RuntimeData {
-  generatedAt: string;
-  environment: Environment;
-  benchmarks: Record<string, BenchClass>;
-}
-
-/** The runtimes the site shows numbers for, side by side, in this order */
-export const runtimes = [
-  { id: 'net10.0', label: '.NET 10' },
-  { id: 'net11.0', label: '.NET 11' },
-] as const;
-export type RuntimeId = (typeof runtimes)[number]['id'];
-
-/**
- * The runtime of a number shown alone (owner, ledger L21): the home page's
- * figures, the social cards, llms.txt, a stat's figure, the order and tiers
- * of the feature comparison and the row order of a table. Where it has no
- * number for a class yet, `fallbackRuntime`'s is shown instead (no empty
- * figure on the home page), and the source line names both.
- */
-export const headlineRuntime: RuntimeId = 'net11.0';
-const fallbackRuntime: RuntimeId = 'net10.0';
-
-const sets = data.runtimes as unknown as Partial<
-  Record<RuntimeId, RuntimeData>
->;
+const benchmarks = data.benchmarks as unknown as Record<string, BenchClass>;
+export const environment = data.environment;
 export const peerVersions = data.peers as Record<string, string>;
-
-/** The numbers of one runtime, or undefined when it has none yet */
-export function runtimeData(runtime: RuntimeId): RuntimeData | undefined {
-  return sets[runtime];
-}
-
-/** The runtimes that have numbers, in the order of `runtimes` */
-export const measuredRuntimes = runtimes.filter((r) => sets[r.id]);
+export const benchGeneratedAt = data.generatedAt;
 
 /**
  * A class by its name ("RemovalComparison") or by the end of its full name
  * ("Features.RemovalComparison", "EcsComparison.Features.RemovalComparison").
  */
-function findClass(runtime: RuntimeId, name: string): BenchClass | undefined {
-  const benchmarks = sets[runtime]?.benchmarks ?? {};
+export function benchClass(name: string): BenchClass | undefined {
   if (benchmarks[name]) return benchmarks[name];
   for (const [short, entry] of Object.entries(benchmarks)) {
     const full = entry.namespace ? `${entry.namespace}.${short}` : short;
@@ -93,26 +44,9 @@ function findClass(runtime: RuntimeId, name: string): BenchClass | undefined {
   return undefined;
 }
 
-/** The runtime a class's numbers are quoted from when no runtime is named: the headline one while it has the class */
-export function headlineFor(name: string): RuntimeId {
-  return findClass(headlineRuntime, name) ? headlineRuntime : fallbackRuntime;
-}
-
-/** A class on a runtime (default: its headline runtime, `headlineFor`) */
-export function benchClass(
-  name: string,
-  runtime: RuntimeId = headlineFor(name),
-): BenchClass | undefined {
-  return findClass(runtime, name);
-}
-
 /** The rows of a class whose [Params] include every given value */
-export function benchRows(
-  name: string,
-  params: Record<string, string> = {},
-  runtime: RuntimeId = headlineFor(name),
-) {
-  const rows = benchClass(name, runtime)?.rows ?? [];
+export function benchRows(name: string, params: Record<string, string> = {}) {
+  const rows = benchClass(name)?.rows ?? [];
   return rows.filter((row) =>
     Object.entries(params).every(([k, v]) => row.params[k] === v),
   );
@@ -122,9 +56,8 @@ export function bench(
   name: string,
   method: string,
   params: Record<string, string> = {},
-  runtime: RuntimeId = headlineFor(name),
 ): BenchRow | undefined {
-  return benchRows(name, params, runtime).find((row) => row.method === method);
+  return benchRows(name, params).find((row) => row.method === method);
 }
 
 /* ------------------------------------------------------------------ */
@@ -539,15 +472,11 @@ export interface BenchNumber {
   row: BenchRow;
 }
 
-/** A named number, or undefined when the runtime's data has no such row */
-export function benchNumber(
-  key: string,
-  runtime?: RuntimeId,
-): BenchNumber | undefined {
+/** A named number, or undefined when the data has no such row */
+export function benchNumber(key: string): BenchNumber | undefined {
   const def = keys[key];
   if (!def) return undefined;
-  runtime ??= headlineFor(def.bench);
-  const row = bench(def.bench, def.method, def.params, runtime);
+  const row = bench(def.bench, def.method, def.params);
   if (!row) return undefined;
   switch (def.field ?? 'mean') {
     case 'allocated':
@@ -564,7 +493,7 @@ export function benchNumber(
     }
     case 'ratio': {
       const base = def.over
-        ? bench(def.bench, def.over.method, def.over.params, runtime)?.meanNs
+        ? bench(def.bench, def.over.method, def.over.params)?.meanNs
         : undefined;
       const ratio = def.over ? (base ? row.meanNs / base : null) : row.ratio;
       return ratio === null
@@ -577,27 +506,9 @@ export function benchNumber(
 }
 
 /** The text of a named number; throws on an unknown key so a typo fails the build */
-export function benchValue(key: string, runtime?: RuntimeId) {
+export function benchValue(key: string) {
   if (!(key in keys)) throw new Error(`Unknown benchmark key "${key}"`);
-  return benchNumber(key, runtime)?.text ?? '—';
-}
-
-/**
- * A named number on every runtime that has it: "1.20 ms" when one runtime
- * has a number, "1.20 ms (.NET 10) · 1.10 ms (.NET 11)" when both do. A
- * runtime without the number is left out, never estimated.
- */
-export function benchValues(key: string, zh = false) {
-  if (!(key in keys)) throw new Error(`Unknown benchmark key "${key}"`);
-  const found = runtimes.flatMap((r) => {
-    const n = benchNumber(key, r.id);
-    return n ? [{ label: r.label, text: n.text }] : [];
-  });
-  if (found.length === 0) return '—';
-  if (found.length === 1) return found[0].text;
-  return found
-    .map((f) => (zh ? `${f.text}（${f.label}）` : `${f.text} (${f.label})`))
-    .join(' · ');
+  return benchNumber(key)?.text ?? '—';
 }
 
 /* ------------------------------------------------------------------ */
@@ -629,11 +540,8 @@ export function peerLabel(method: string, ourVersion: string) {
 }
 
 /** The headline comparison (the same server tick ported to each library), fastest first */
-export function peers(
-  entities = '100000',
-  runtime: RuntimeId = headlineFor('EcsComparisonBenchmark'),
-): Peer[] {
-  return benchRows('EcsComparisonBenchmark', { Entities: entities }, runtime)
+export function peers(entities = '100000'): Peer[] {
+  return benchRows('EcsComparisonBenchmark', { Entities: entities })
     .map((row) => ({
       method: row.method,
       name: peerNames[row.method]?.name ?? row.method,
@@ -681,8 +589,6 @@ export interface Comparison {
 
 export interface ComparisonQuery {
   bench: string;
-  /** The runtime whose numbers (default: the class's headline runtime, `headlineFor`) */
-  runtime?: RuntimeId;
   /** [Params] filter, "Written=1000" or "Removed=10,Mode=A" */
   params?: string;
   /** Methods to keep, comma-separated, in this order (default: all) */
@@ -719,10 +625,9 @@ export function comparison({
   bench,
   params,
   methods,
-  runtime = headlineFor(bench),
 }: ComparisonQuery): Comparison {
   const filter = parseParams(params);
-  let rows = benchRows(bench, filter, runtime);
+  let rows = benchRows(bench, filter);
   if (methods) {
     const all = rows;
     rows = methods
@@ -732,9 +637,7 @@ export function comparison({
   }
   const keyOf = (row: BenchRow) => JSON.stringify(row.params);
   // EasyEcs' own benchmarks compare ways of doing one job in EasyEcs, not libraries
-  const own = runtimes.some(
-    (r) => benchClass(bench, r.id)?.namespace === 'EasyEcs.Benchmark',
-  );
+  const own = benchClass(bench)?.namespace === 'EasyEcs.Benchmark';
   const items = rows.map((row) => {
     const { library, case: name } = own
       ? { library: 'EasyEcs', case: row.method }
@@ -797,57 +700,19 @@ export function comparisonLabel(
   return `${parts.join(': ')}${params ? ` (${params})` : ''}`;
 }
 
-/**
- * One line naming the tool, the runtimes and the machine, under every chart
- * and table: every runtime that has numbers (or only those of `only`), with the
- * machine once when they ran on the same one
- */
-export function sourceLine(zh: boolean, only?: RuntimeId[]) {
-  const machineOf = (env: Environment) => {
-    const cores = env.cores?.match(/(\d+) physical/)?.[1];
-    const os = env.os?.replace(/^Linux\s+/, '').replace(/\s*\(.*\)$/, '');
-    return [env.cpu, cores ? (zh ? `${cores} 核` : `${cores} cores`) : null, os]
-      .filter(Boolean)
-      .join(zh ? '，' : ', ');
-  };
-  const envs = measuredRuntimes.flatMap((r) => {
-    if (only && !only.includes(r.id)) return [];
-    const env = sets[r.id]?.environment;
-    return env ? [env] : [];
-  });
-  if (envs.length === 0) return '';
-  const tool = `BenchmarkDotNet ${envs[0].benchmarkDotNet}`;
-  const machines = new Set(envs.map(machineOf));
-  if (machines.size === 1) {
-    const names = envs.map((e) => e.runtime).join(zh ? ' 和 ' : ' and ');
-    return zh
-      ? `${tool}，${names}，${machineOf(envs[0])}。`
-      : `${tool}, ${names}, ${machineOf(envs[0])}.`;
-  }
-  const parts = envs.map((e) =>
-    zh ? `${e.runtime}：${machineOf(e)}` : `${e.runtime} on ${machineOf(e)}`,
-  );
+/** One line naming the machine and the tool, under every chart and table */
+export function sourceLine(zh: boolean) {
+  const env = environment;
+  const cores = env.cores?.match(/(\d+) physical/)?.[1];
+  const os = env.os?.replace(/^Linux\s+/, '').replace(/\s*\(.*\)$/, '');
+  const machine = [
+    env.cpu,
+    cores ? (zh ? `${cores} 核` : `${cores} cores`) : null,
+    os,
+  ]
+    .filter(Boolean)
+    .join(zh ? '，' : ', ');
   return zh
-    ? `${tool}；${parts.join('；')}。`
-    : `${tool}; ${parts.join('; ')}.`;
-}
-
-/**
- * The source line of figures quoted from the headline runtime (the home page,
- * llms.txt): that runtime, and the fallback too while the headline runtime
- * lacks a class the fallback has
- */
-export function headlineSourceLine(zh: boolean) {
-  const fallback = Object.keys(sets[fallbackRuntime]?.benchmarks ?? {});
-  const complete =
-    sets[headlineRuntime] &&
-    fallback.every((c) => findClass(headlineRuntime, c));
-  return sourceLine(
-    zh,
-    complete
-      ? [headlineRuntime]
-      : sets[headlineRuntime]
-        ? [fallbackRuntime, headlineRuntime]
-        : [fallbackRuntime],
-  );
+    ? `BenchmarkDotNet ${env.benchmarkDotNet}，${env.runtime}，${machine}。`
+    : `BenchmarkDotNet ${env.benchmarkDotNet}, ${env.runtime}, ${machine}.`;
 }
