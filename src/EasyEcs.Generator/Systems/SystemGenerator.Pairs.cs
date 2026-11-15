@@ -254,6 +254,10 @@ public sealed partial class SystemGenerator
         {
             // Each chunk's partial results, combined in chunk order (TSelf is this job: the pass passes its own TJob).
             sb.Append("\n        static bool global::EasyEcs.IPairJob.Merges => true;\n\n");
+            // A neighbor's columns read per pair: its point, its [Neighbor] components (an Entity's id: 8 bytes).
+            var read = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Neighbor).Select(p => p.Type).Prepend(pair.Position)
+                .Distinct().Select(t => t == "global::EasyEcs.Entity" ? "8" : $"{unsafeType}.SizeOf<{t}>()");
+            sb.Append($"        static int global::EasyEcs.IPairJob.RowBytes => {string.Join(" + ", read)};\n\n");
             sb.Append("        static void global::EasyEcs.IPairJob.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {\n");
             sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {method.Name}Job{number}>(ref job);\n");
             sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {method.Name}Job{number}>(ref {unsafeType}.AsRef(in chunk));\n");

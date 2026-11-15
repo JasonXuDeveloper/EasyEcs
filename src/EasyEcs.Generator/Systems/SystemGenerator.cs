@@ -1158,6 +1158,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             // The chunks' partial results and records, combined in chunk order (TSelf is this job: the runtime passes its own TJob).
             const string unsafeType = "global::System.Runtime.CompilerServices.Unsafe";
             sb.Append($"        static bool global::EasyEcs.{declaring}<{method.ComponentTypes}>.Merges => true;\n\n");
+            bool entity = method.TakesEntity || method.Parameters.Any(p => p.Kind == Symbols.ParamKind.Entities);
+            sb.Append($"        static int global::EasyEcs.{declaring}<{method.ComponentTypes}>.RowBytes => {RowBytes(method.Query, entity, [method])};\n\n");
             sb.Append($"        static void global::EasyEcs.{declaring}<{method.ComponentTypes}>.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {{\n");
             sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {job}>(ref job);\n");
             sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {job}>(ref {unsafeType}.AsRef(in chunk));\n");
@@ -1169,6 +1171,20 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
 
         if (suffix.Length > 0) return; // the filter is the vector job's
         EmitFilter(sb, method, number);
+    }
+
+    /// <summary>
+    /// A merging job's RowBytes: the bytes of the columns one row of its pass reads and writes (the query's components,
+    /// the Maybe&lt;T&gt; ones, the entity's id when it takes the entity), from which a parallel pass sizes its chunks
+    /// (World.MergedChunkRows: at least World.MinChunkBytes each), so its boundaries follow the data alone.
+    /// </summary>
+    private static string RowBytes(IEnumerable<string> query, bool entity, IEnumerable<ForEachModel> methods)
+    {
+        const string size = "global::System.Runtime.CompilerServices.Unsafe.SizeOf";
+        var types = query.Concat(methods.SelectMany(m => m.Parameters).Where(p => p.Kind == Symbols.ParamKind.Optional).Select(p => p.Type))
+            .Distinct().Select(t => $"{size}<{t}>()");
+        if (entity) types = types.Append("8"); // an EntityId: index and incarnation
+        return string.Join(" + ", types);
     }
 
     /// <summary>The method's filter, a field of the file's class (<c>{Name}Filter{number}</c>).</summary>
