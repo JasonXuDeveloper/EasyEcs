@@ -97,8 +97,9 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       decides (docs-todos `feat-generated-text-2`). A/B (two rounds, net10.0): runtime classes within noise; KernelBenchmark
       Share 10 % slower at 1,000 rows without `AllBitsSet` in the bail test, so that text is back (6 counted in
       GeneratedTextTests). GeneratorBenchmark Cold: the masked jobs translated twice more for the pass masks (+60 MB),
-      fixed (PassMasks over the loops written once); what is left is Tidy's own pass (about +16-20 MB, Cold +7-13 %),
-      under measurement in the package's last A/B. Merged claude/relaxed-ramanujan-j4j9k4 (a1eeebb5). Next: package B
+      fixed (PassMasks over the loops written once); then the alias passes made cheap (no regex, one buffer, collections
+      per thread, one read per line): Cold 0.91-0.99x of base at 336 MB against 416 MB, the Edit rows level (0.85-1.11x
+      across two rounds, both directions), Compile level at lower allocation. Merged claude/relaxed-ramanujan-j4j9k4 (a1eeebb5). Next: package B
       (item i), then C (item j).
       The original item: read the generated files of the GeneratedTextTests corpora, the samples and the
       benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and
