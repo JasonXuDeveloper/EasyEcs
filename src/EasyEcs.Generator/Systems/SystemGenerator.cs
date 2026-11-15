@@ -559,7 +559,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         foreach (var write in simd.StructuralChanges)
         {
             string kind = write.Split(' ')[0], type = write.Length > kind.Length ? write.Substring(kind.Length + 1) : "";
-            sb.Append($"{indent}    {local}.d0.{kind switch { "Set" => $"SetAll({local}.v0)", "Destroy" => "DestroyAll()", _ => $"{kind}All<{type}>()" }}; // the rows the pass marked\n");
+            sb.Append($"{indent}    {local}.d0.{kind switch { "Set" => $"SetAll({local}.v0)", "SetDefault" => $"SetAll(default({type}))", "Destroy" => "DestroyAll()", _ => $"{kind}All<{type}>()" }}; // the rows the pass marked\n");
         }
 
         sb.Append($"{indent}}}\n{indent}else\n{indent}{{\n");
@@ -969,7 +969,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
             Symbols.ParamKind.Tile when p.RefKind == "ref" => $"ref w{i}", // the step's tile, a local the call writes through
             Symbols.ParamKind.Tile => $"new global::EasyEcs.Tile<{p.Cell}, {p.Shape}>({(runs ? "entities[(int)i]" : "entity")}, in n{method.GridOf(i)})",
-            Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref this.e{i})", // this: a vector loop's column refs are e1, e2...
+            // this: a vector loop's column refs are e1, e2..., one of which may share the field's name
+            Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref {(method.Simd != null && i <= components.Length ? "this." : "")}e{i})",
             Symbols.ParamKind.View => View(p, i),
             Symbols.ParamKind.Context when local[i] => $"ref l{i}",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
@@ -1203,7 +1204,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             Symbols.ParamKind.Record => "in record",
             Symbols.ParamKind.Singleton => $"{p.RefKind} s{i}",
             Symbols.ParamKind.Lookup => $"new global::EasyEcs.Lookup<{p.Type}>(World, {(p.Key.Length > 0 ? $"k{i}" : "null")})",
-            Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref this.e{i})",
+            Symbols.ParamKind.Emit => $"new global::EasyEcs.Emit<{p.Type}>(ref e{i})",
             Symbols.ParamKind.Context => $"{(p.RefKind.Length == 0 ? "" : p.RefKind + " ")}x{i}",
             _ => "World",
         }).Prepend(owner.AccessorArgument));

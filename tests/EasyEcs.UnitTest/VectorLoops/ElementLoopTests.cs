@@ -492,7 +492,7 @@ public class ElementLoopTests
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(GeneratorTests.Components).AddSyntaxTrees(tree), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Where(GeneratorTests.IsCode).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("static nint __Elements0(ref global::Pair2 r1, nint i, nint rows, int at)"), generated);
+        Assert.That(generated, Does.Contain("static nint __Elements0(ref __Pair2 r1, nint i, nint rows, int at)"), generated);
     }
 
     [Test]
@@ -502,8 +502,8 @@ public class ElementLoopTests
         GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(GeneratorTests.Components).AddSyntaxTrees(tree), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Where(GeneratorTests.IsCode).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("#nullable restore\n    internal static void A_0(")                // the copy, under the accessor's name, inlined as the method is
-            .And.Contain("int __at0 = (__span0.Length) >= __Vec_float.Count ? (int)__Elements0(") // short spans skip the call
+        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("#nullable restore\n    internal static void A_0(")                // the copy, under the accessor's name, inlined as the method is
+            .And.Contain("int __at0 = __span0.Length >= __Vec_float.Count ? (int)__Elements0(") // short spans skip the call
             .And.Contain("static nint __Elements0(ref float r1, nint i, nint rows, int at, float x1)")         // the vector form, k as its value
             .And.Contain("__Elements0(ref __MemoryMarshal.GetReference(__span0), 0, __span0.Length, 0, k)")
             .And.Contain("__span0.Slice(__at0)")                                                        // the loop as written runs the rest

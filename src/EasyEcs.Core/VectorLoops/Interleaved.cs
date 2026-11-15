@@ -468,10 +468,42 @@ public static partial class Interleaved
     // ---------------- 256 bits (AVX2) ----------------
 
     // The 256-bit forms run only behind IsAccelerated (AVX2): Avx / Avx2 calls have no software fallback here.
+    //
+    // Where AVX-512VL is there too, two fields and four fields of 4 bytes take the two-source permutes of the 512-bit
+    // form at 256 bits (vpermt2ps / vpermt2pd): Load2 / Store2 2 shuffles instead of 4, Load4 / Store4 8 instead of 12
+    // (llvm-mca of KernelBenchmark's Move2 masked loop: 10.1 -> 8.1 cycles per vector on Ice Lake, 14.1 -> 8.1 on
+    // Skylake-SP). A generated loop takes this 256-bit form on an AVX-512 machine only where the runtime reports
+    // Vector512.IsHardwareAccelerated false, else it runs the Vector512 loop: by default that is Intel Skylake-SP / X,
+    // Cascade Lake and Cooper Lake, the parts that downclock under 512-bit work, on which .NET 8 and later keep
+    // Vector512 unaccelerated (Ice Lake and later report it accelerated:
+    // https://devblogs.microsoft.com/dotnet/dotnet-8-hardware-intrinsics/), and any machine run with
+    // DOTNET_PreferredVectorBitWidth=256. Three fields keep their blends (3 permutes and 6 blends: 3.0 cycles per
+    // vector against 6.0 for the two-source form, which takes 6 permutes on port 5) and four 8-byte fields their
+    // transpose (8 shuffles either way, 8.0 cycles both: llvm-mca of probes of both forms, feat-interleaved-256).
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Load2<T>(ref T column, nuint row, out Vector256<T> f0, out Vector256<T> f1)
     {
+        if (Avx512F.VL.IsSupported)
+        {
+            if (Unsafe.SizeOf<T>() == 4)
+            {
+                ref float s = ref Unsafe.As<T, float>(ref column);
+                var a = Vector256.LoadUnsafe(ref s, row * 2);
+                var b = Vector256.LoadUnsafe(ref s, row * 2 + 8);
+                f0 = Avx512F.VL.PermuteVar8x32x2(a, Tables256.Even32, b).As<float, T>();
+                f1 = Avx512F.VL.PermuteVar8x32x2(a, Tables256.Odd32, b).As<float, T>();
+            }
+            else
+            {
+                ref double s = ref Unsafe.As<T, double>(ref column);
+                var a = Vector256.LoadUnsafe(ref s, row * 2);
+                var b = Vector256.LoadUnsafe(ref s, row * 2 + 4);
+                f0 = Avx512F.VL.PermuteVar4x64x2(a, Tables256.Even64, b).As<double, T>();
+                f1 = Avx512F.VL.PermuteVar4x64x2(a, Tables256.Odd64, b).As<double, T>();
+            }
+            return;
+        }
         if (Unsafe.SizeOf<T>() == 4)
         {
             ref float s = ref Unsafe.As<T, float>(ref column);
@@ -494,6 +526,22 @@ public static partial class Interleaved
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Store2<T>(Vector256<T> f0, Vector256<T> f1, ref T column, nuint row)
     {
+        if (Avx512F.VL.IsSupported)
+        {
+            if (Unsafe.SizeOf<T>() == 4)
+            {
+                ref float d = ref Unsafe.As<T, float>(ref column);
+                Avx512F.VL.PermuteVar8x32x2(f0.AsSingle(), Tables256.ZipLow32, f1.AsSingle()).StoreUnsafe(ref d, row * 2);
+                Avx512F.VL.PermuteVar8x32x2(f0.AsSingle(), Tables256.ZipHigh32, f1.AsSingle()).StoreUnsafe(ref d, row * 2 + 8);
+            }
+            else
+            {
+                ref double d = ref Unsafe.As<T, double>(ref column);
+                Avx512F.VL.PermuteVar4x64x2(f0.AsDouble(), Tables256.ZipLow64, f1.AsDouble()).StoreUnsafe(ref d, row * 2);
+                Avx512F.VL.PermuteVar4x64x2(f0.AsDouble(), Tables256.ZipHigh64, f1.AsDouble()).StoreUnsafe(ref d, row * 2 + 4);
+            }
+            return;
+        }
         if (Unsafe.SizeOf<T>() == 4)
         {
             ref float d = ref Unsafe.As<T, float>(ref column);
@@ -576,6 +624,23 @@ public static partial class Interleaved
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Load4<T>(ref T column, nuint row, out Vector256<T> f0, out Vector256<T> f1, out Vector256<T> f2, out Vector256<T> f3)
     {
+        if (Unsafe.SizeOf<T>() == 4 && Avx512F.VL.IsSupported)
+        {
+            ref float s = ref Unsafe.As<T, float>(ref column);
+            var r0 = Vector256.LoadUnsafe(ref s, row * 4);      // rows 0 1
+            var r1 = Vector256.LoadUnsafe(ref s, row * 4 + 8);  // rows 2 3
+            var r2 = Vector256.LoadUnsafe(ref s, row * 4 + 16); // rows 4 5
+            var r3 = Vector256.LoadUnsafe(ref s, row * 4 + 24); // rows 6 7
+            var xy0 = Avx512F.VL.PermuteVar8x32x2(r0, Tables256.Load4XY, r1); // x0 x1 x2 x3 y0 y1 y2 y3
+            var zw0 = Avx512F.VL.PermuteVar8x32x2(r0, Tables256.Load4ZW, r1); // z0 z1 z2 z3 w0 w1 w2 w3
+            var xy1 = Avx512F.VL.PermuteVar8x32x2(r2, Tables256.Load4XY, r3); // x4 .. x7 y4 .. y7
+            var zw1 = Avx512F.VL.PermuteVar8x32x2(r2, Tables256.Load4ZW, r3);
+            f0 = Avx512F.VL.PermuteVar8x32x2(xy0, Tables256.Halves0, xy1).As<float, T>(); // the low halves
+            f1 = Avx512F.VL.PermuteVar8x32x2(xy0, Tables256.Halves1, xy1).As<float, T>(); // the high halves
+            f2 = Avx512F.VL.PermuteVar8x32x2(zw0, Tables256.Halves0, zw1).As<float, T>();
+            f3 = Avx512F.VL.PermuteVar8x32x2(zw0, Tables256.Halves1, zw1).As<float, T>();
+            return;
+        }
         if (Unsafe.SizeOf<T>() == 4)
         {
             ref float s = ref Unsafe.As<T, float>(ref column);
@@ -617,6 +682,20 @@ public static partial class Interleaved
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Store4<T>(Vector256<T> f0, Vector256<T> f1, Vector256<T> f2, Vector256<T> f3, ref T column, nuint row)
     {
+        if (Unsafe.SizeOf<T>() == 4 && Avx512F.VL.IsSupported)
+        {
+            ref float d = ref Unsafe.As<T, float>(ref column);
+            // Load4's steps backwards: each field's halves joined (xy of rows 0-3 | 4-7), then the rows interleaved
+            var xy0 = Avx512F.VL.PermuteVar8x32x2(f0.AsSingle(), Tables256.Halves0, f1.AsSingle()); // x0..x3 y0..y3
+            var xy1 = Avx512F.VL.PermuteVar8x32x2(f0.AsSingle(), Tables256.Halves1, f1.AsSingle()); // x4..x7 y4..y7
+            var zw0 = Avx512F.VL.PermuteVar8x32x2(f2.AsSingle(), Tables256.Halves0, f3.AsSingle());
+            var zw1 = Avx512F.VL.PermuteVar8x32x2(f2.AsSingle(), Tables256.Halves1, f3.AsSingle());
+            Avx512F.VL.PermuteVar8x32x2(xy0, Tables256.Store4Low, zw0).StoreUnsafe(ref d, row * 4);
+            Avx512F.VL.PermuteVar8x32x2(xy0, Tables256.Store4High, zw0).StoreUnsafe(ref d, row * 4 + 8);
+            Avx512F.VL.PermuteVar8x32x2(xy1, Tables256.Store4Low, zw1).StoreUnsafe(ref d, row * 4 + 16);
+            Avx512F.VL.PermuteVar8x32x2(xy1, Tables256.Store4High, zw1).StoreUnsafe(ref d, row * 4 + 24);
+            return;
+        }
         if (Unsafe.SizeOf<T>() == 4)
         {
             ref float d = ref Unsafe.As<T, float>(ref column);
@@ -820,6 +899,31 @@ public static partial class Interleaved
     // Each table is a vector of literals, a constant of the compiled code: no static to initialize, which a static
     // readonly vector built at run time would need under Native AOT (a class-initialization check on every iteration
     // of the loop, and the loop's vectors spilled around it).
+    /// <summary>
+    /// The index vectors of the 256-bit two-source permutes (AVX-512VL): an index below the lane count picks from the
+    /// first source, one at or above it from the second. Literals, as Tables32's (no class-initialization check).
+    /// </summary>
+    private static class Tables256
+    {
+        public static Vector256<int> Even32 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(0, 2, 4, 6, 8, 10, 12, 14); }
+        public static Vector256<int> Odd32 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(1, 3, 5, 7, 9, 11, 13, 15); }
+        public static Vector256<int> ZipLow32 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(0, 8, 1, 9, 2, 10, 3, 11); }
+        public static Vector256<int> ZipHigh32 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(4, 12, 5, 13, 6, 14, 7, 15); }
+        public static Vector256<long> Even64 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(0L, 2, 4, 6); }
+        public static Vector256<long> Odd64 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(1L, 3, 5, 7); }
+        public static Vector256<long> ZipLow64 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(0L, 4, 1, 5); }
+        public static Vector256<long> ZipHigh64 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(2L, 6, 3, 7); }
+        // Four fields: rows 0-1 (a) and 2-3 (b) -> x0 x1 x2 x3 y0 y1 y2 y3 and z0 .. z3 w0 .. w3
+        public static Vector256<int> Load4XY { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(0, 4, 8, 12, 1, 5, 9, 13); }
+        public static Vector256<int> Load4ZW { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(2, 6, 10, 14, 3, 7, 11, 15); }
+        // The low halves of two vectors, and the high ones
+        public static Vector256<int> Halves0 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(0, 1, 2, 3, 8, 9, 10, 11); }
+        public static Vector256<int> Halves1 { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(4, 5, 6, 7, 12, 13, 14, 15); }
+        // xy (x0..x3 y0..y3) and zw -> rows 0 1 and rows 2 3
+        public static Vector256<int> Store4Low { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(0, 4, 8, 12, 1, 5, 9, 13); }
+        public static Vector256<int> Store4High { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector256.Create(2, 6, 10, 14, 3, 7, 11, 15); }
+    }
+
     private static class Tables32
     {
         public static Vector512<int> Load2A { [MethodImpl(MethodImplOptions.AggressiveInlining)] get => Vector512.Create(0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30); }

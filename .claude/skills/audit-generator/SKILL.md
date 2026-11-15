@@ -159,7 +159,10 @@ Write it like hand-written code:
 - **Short names through one alias block.** Every type the body names more than once goes through a file-level
   `using` alias with a reserved `__` name (`using __V512i = global::System.Runtime.Intrinsics.Vector512<int>;`), one
   per closed type the file uses; the body never spells `global::System...` (about half of SystemGenerator's text
-  was qualified names). Never a plain `using System.Numerics;`: a user type named `Vector` would win.
+  was qualified names). Never a plain `using System.Numerics;`: a user type named `Vector` would win. The BCL's
+  vector names have fixed aliases (`Code.Aliased`); every other type a file names twice or more gets one from
+  `Tidy.Types` (`__Heat`, a closed generic `__IForEachBatch_P3_V3`), so a template writes names in full and the pass
+  shortens them: it aliases only where a name's position proves a type, and the IL stays the same.
 - **No line that does nothing**: no identity copy (`var __c = __s;`), no temporary that no aliasing needs (`__t`),
   no local nobody reads (deinterleaved fields, broadcasts, pair masks, accumulator holds a body never uses), no empty
   method (an empty `Create` / `Destroy` hook: interface defaults instead), no `x = default` the constructor already
@@ -174,7 +177,12 @@ Write it like hand-written code:
   `this.v0 = default`) is written once above the width blocks; a mark written once is assigned, not zeroed then OR-ed
   (`__d0 = Zero; __d0 |= x` -> `var __d0 = x`); a table or broadcast with the same value is declared once per type.
 - **Parentheses only where precedence needs them**: no `((0))`, no parentheses around a whole right-hand side or
-  argument (the printer adds them where an operator binds weaker).
+  argument. Templates may wrap every operator; `Tidy.Parentheses` drops what precedence does not need, outermost pair
+  first, and keeps a pair between operators of different kinds (`(x >> k) & 1`, `x >> (64 - n)`) and around a
+  negative operand, as a reader would.
+- **Store what is computed**: a value is held in a temporary only when a later write of the same statement would
+  change what it reads (a swap); a lane is declared by its first write, not as `default` then written; a pass mask
+  used by two writes is named once per vector (`__passF`), unless that local would push the job past 32 IL locals.
 - **Names a reader can follow**: locals after the parameter and field they hold (`__hp_Value`, not `__c1_0`; `hp`,
   not `r1`/`e1`); the PDB is the only place local names live, so this costs nothing.
 - **Generate once, refer to it**: a form that needs code another file already generates names that code (a fused
@@ -191,9 +199,13 @@ Prove a text change by what it changes:
 - **IL changes** (a copy, a local's order, a hoisted value, anything near the inliner's budget): Tier1 listings with
   `DOTNET_TieredPGO=0` of the Move3, Cycle, CycleHoles, WorldSimulation, BattleServer and MultiWorld runners
   identical (`tools/perf/jitdisasm.sh`, `audit-vector-loops`), else BenchmarkDotNet decides; no `call ...Execute` appears.
-- `GeneratedTextTests` (to build first, `docs/plans/backlog.md`) runs the generators over the Kernel, Fusion and LambdaPass corpora and fails on unused locals
-  and identity copies (Roslyn data flow; D126's copy allow-listed), constant broadcasts, a Zero OR-ed once, doubled
-  or redundant parentheses, duplicate tables, empty methods and `global::` outside the alias block. A new form adds
+- `GeneratedTextTests` runs the generators over the battle server, GeneratorBenchmark's modules and the Kernel,
+  StructuralLoop, Fusion and LambdaPass corpora and counts each kind of dead text against a budget that may only fall
+  (most are 0): unused locals, identity copies, temporaries copied into a name, lanes declared default then written,
+  setup locals read once, constants made in a method, a Zero OR-ed once, all lanes and-ed with a mask, a pass mask
+  spelled again, needless parentheses (reparsed: the expression parses the same without them), needless `this.`,
+  job fields set to their default, the first loop's `rows - i`, repeated hardware terms, empty methods, `global::`
+  outside the alias block, and the corpus's bytes. It prints the first line of each kind it finds. A new form adds
   its sources to that corpus. GeneratorBenchmark reports output bytes next to time.
 
 Reading the output: build with `-p:EmitCompilerGeneratedFiles=true`, and read only files the build just wrote:

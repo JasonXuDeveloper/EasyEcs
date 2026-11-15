@@ -3742,5 +3742,43 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
   rows it never visited to `Changed<T>` passes; the exact form got the win: QueryTick about 0.5-0.6x, numbers in the
   backlog's C12).
 - decisions.mdx + .zh (dropped, with numbers; text in owner-review.md): C18 integer tuple keys hashed by their bytes
-  through a comparer (the dictionary's interface calls to a given comparer cost more than the hash saves). Roadmap
+  (a comparer: its interface calls cost more than the hash saves; a wrapper key: still slower in BenchmarkDotNet, the gap open). Roadmap
   "Dropped" names it.
+
+## feat-interleaved-256 (from feat-net11's B1: two-source permutes in Interleaved's 256-bit forms)
+
+- changelog.mdx + .zh, "Performance": on AVX-512 machines whose runtime keeps Vector512 unaccelerated (Intel
+  Skylake-SP / X, Cascade Lake, Cooper Lake by default; .NET decides it per CPU:
+  https://devblogs.microsoft.com/dotnet/dotnet-8-hardware-intrinsics/), the vector loops' reads and writes of components
+  of two or four 4-byte fields take two-source permutes (vpermt2ps / vpermt2pd): fewer shuffles per row.
+- decisions.mdx + .zh: a record. Listings (tools/perf/loopbound.sh, REG=ymm, DOTNET_PreferredVectorBitWidth=256):
+  KernelBenchmark's Move2 masked loop 10.1 -> 8.1 cycles per vector on Ice Lake, 14.1 -> 8.1 on Skylake-SP; the flat
+  loops of Push / Move4 1.8 -> 1.6. Not taken: three fields (6 two-source permutes, all on port 5, 6.0 cycles against
+  3.0 for 3 permutes and 6 blends) and four 8-byte fields (8 shuffles either way, 8.0 cycles both, more
+  instructions). Numbers (DOTNET_PreferredVectorBitWidth=256, base 27baf410 against head, two interleaved rounds,
+  0 B everywhere; .NET 11 in process: BenchmarkDotNet 0.15 cannot build for a .NET 11 host): Move2GapsGenerated
+  0.86-1.00 at 1k rows, 0.92-0.98 at 100k; SlicesBenchmark (an Npc of four floats) 0.81-0.97 in most rows; the
+  headline worlds level within the run's noise (control rows without interleaved code moved +-15 % on this VM).
+  SlicesBenchmark's Update/1/Entity read 1.7x on .NET 11 in the two full rounds: only in the second in-process
+  launch after other classes (launch 1 of the same run 72-89 us against base 80-104); alone in its process
+  (--launchCount 3) 81.3 against 85.3 us. An artifact of in-process launches, not of the loop.
+
+## feat-generated-text-2 (ledger L15: the generated text shortened)
+
+- [ ] **Decision record** (decisions.mdx + zh; extends D135's neighbor on generated text, or a new D): the generated
+      text is written as a reader would write it, with the IL unchanged where only the text changes: every type a
+      file names twice or more through a file-level alias (`Tidy.Types`: only where a name's position proves a type;
+      a closed generic of qualified arguments gets one of its own), parentheses only where precedence or a reader
+      needs them (`Tidy.Parentheses`: kept between operators of different kinds and around negative operands), no
+      temporary before a store unless a later write of the statement changes what it reads, a pass mask named once
+      per vector unless that local would split the job past 32 IL locals, a Set of the type's default with no field.
+      Numbers: the benchmark project's generated files 5,048,414 -> 4,509,703 bytes and 39,358 -> 18,687 `global::`;
+      the 16,999 method bodies of the benchmark assembly IL-identical for the aliases and parentheses; the
+      BenchmarkDotNet A/B of the IL-changing part (backlog `feat-generated-text-2`).
+- [ ] **Pages that show generated text "with the `global::` prefixes dropped"** (guide/basics/systems.mdx 650, 749;
+      guide/performance/threading.mdx 344, 635; guide/performance/grids.mdx 219; queries.mdx 295-301; each `.zh.mdx`):
+      the generated file now names types through `__`-aliases (`__Health`, `__Vec`, `__ForEach`) and without the
+      outer parentheses (`__c1_0 = __c1_0 + __c2_0;`, no `var __t = ...` before it). Refresh each excerpt from a build
+      with `-p:EmitCompilerGeneratedFiles=true`, and say "trimmed" instead of "global:: dropped".
+- [ ] **audit-generator's "The generated text"** already says what `Tidy` does (this branch); the public skill needs
+      nothing (users do not write generated text).

@@ -339,9 +339,11 @@ internal sealed partial class Kernel
         for (int k = 0; k < value.Length; k++)
         {
             if (value[k] is not { } v) continue;
-            // A lane no write of this statement changes is read where it is (v.Y in v = new(-v.X, v.Y)): a local
+            // A lane no write of this statement changes is read where it is (v.Y in v = new(-v.X, v.Y)), and a value
+            // that reads no lane written before its own write is written as it is (v = new(v.X + 1, v.Y)): a local
             // would be one more of the 32 a runner inlines (SystemGenerator.InlinedLocals).
             if (IsName(v) && (v == destinations[under[k]] || !written.Contains(v))) { held[k] = v; continue; }
+            if (!ReadsAny(v, Enumerable.Range(0, k).Select(j => value[j] == null ? null : destinations[under[j]]))) { held[k] = v; continue; }
             held[k] = Temp("t");
             _body.Append($"var {held[k]} = {v};\n"); // read before any lane is written
         }
@@ -353,6 +355,10 @@ internal sealed partial class Kernel
             Write(name, lane, paths[under[k]][paths[under[k]].Length - 1].Type, mask);
         }
     }
+
+    /// <summary>Whether the expression <paramref name="text"/> names any of <paramref name="names"/> (null entries skipped).</summary>
+    private static bool ReadsAny(string text, IEnumerable<string?> names) =>
+        names.Any(n => n != null && Generator.Code.Word(text, n) >= 0);
 
     /// <summary>Whether <paramref name="text"/> is one name (a lane, a local), not an expression.</summary>
     private static bool IsName(string text) => text.Length > 0 && (char.IsLetter(text[0]) || text[0] == '_') && text.All(c => char.IsLetterOrDigit(c) || c == '_');

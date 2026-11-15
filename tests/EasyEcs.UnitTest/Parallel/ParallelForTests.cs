@@ -246,8 +246,8 @@ public class ParallelForTests
             "public static class Run { public static void F(World world, ref DynamicBuffer<Cell> items, float k) => world.ParallelFor(ref items, k, static (ref Cell c, float k) => c.V = c.V * k + c.W); }"), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Lambdas.g.cs")).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("internal struct LambdaJob0 : global::EasyEcs.IForSpan<global::Cell>")
-            .And.Contain("__world.ParallelFor(ref __items, ref job);").And.Contain("Interleaved.Load2(ref e1, (nuint)i").And.Contain("((__c1_0 * __u0) + __c1_1)"), generated);
+        Assert.That(generated, Does.Contain("internal struct LambdaJob0 : global::EasyEcs.IForSpan<__Cell>")
+            .And.Contain("__world.ParallelFor(ref __items, ref job);").And.Contain("Interleaved.Load2(ref e1, (nuint)i").And.Contain("__c1_0 = __c1_0 * __u0 + __c1_1;"), generated);
     }
 
     private static async Task<Diagnostic[]> RulesOf(string call) =>
