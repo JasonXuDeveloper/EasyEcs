@@ -503,6 +503,21 @@ public sealed class ArityGenerator : IIncrementalGenerator
             static virtual void Merge<TSelf>(ref TSelf job, in TSelf chunk) where TSelf : struct { }
         """;
 
+    /// <summary>
+    /// A job interface's RowBytes: the bytes of the columns a row's run reads and writes, by default its components'
+    /// (and the entity row's, for a job taking the entity). A merging parallel pass cuts chunks of at least
+    /// World.MinChunkBytes of them; hidden, as generated jobs set it.
+    /// </summary>
+    private static string RowBytes(int n, bool entity) => $$"""
+            /// <summary>
+            /// The bytes of the columns one row of the job's pass reads and writes (default: its components'{{(entity ? ", and the entity's id" : "")}}): a
+            /// parallel pass that <see cref="Merges"/> cuts chunks of at least <c>World.MinChunkBytes</c> of them, so
+            /// its chunk boundaries follow the data alone. Generated jobs set it.
+            /// </summary>
+            [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+            static virtual int RowBytes => {{List(n, i => $"Unsafe.SizeOf<T{i}>()", " + ")}}{{(entity ? " + Unsafe.SizeOf<EntityId>()" : "")}};
+        """;
+
     private static string Queries()
     {
         var sb = new StringBuilder(Header).Append("""
@@ -532,6 +547,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     void Execute({{List(n, i => $"ref T{i} c{i}")}});
 
                 {{JobMasks}}
+
+                {{RowBytes(n, false)}}
                 }
 
                 /// <summary>
@@ -550,6 +567,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     void Execute(EntitySpan entities, {{List(n, i => $"Span<T{i}> c{i}")}});
 
                 {{JobMasks}}
+
+                {{RowBytes(n, false)}}
                 }
 
                 /// <summary>
@@ -581,6 +600,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     void Execute(Entity entity, {{List(n, i => $"ref T{i} c{i}")}});
 
                 {{JobMasks}}
+
+                {{RowBytes(n, true)}}
                 }
 
 
@@ -1619,7 +1640,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         var archetypes = match.Archetypes;
                         // A job writing a tracked component stamps change-tick summaries shared by 4,096 rows (a JIT-time constant).
                         bool stamps = {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}} || TJob.OptionalWrites.HasComponents;
-                        int size = world.ChunkRows(this, archetypes, stamps, TJob.Merges, filter.SliceCount, chunkSize);
+                        int size = world.ChunkRows(this, archetypes, stamps, TJob.Merges, TJob.RowBytes, filter.SliceCount, chunkSize);
                         bool open = stamps && (size & 4095) != 0; // chunks split blocks: open them first (Archetype.OpenBlocks)
                         for (int a = 0; a < archetypes.Length; a++)
                         {

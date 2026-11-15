@@ -291,6 +291,8 @@ public sealed partial class SystemGenerator
         if (merges.Length > 0)
         {
             sb.Append($"        static bool global::EasyEcs.{iface}<{types}>.Merges => true;\n\n");
+            bool entity = methods.Any(m => m.TakesEntity || m.Parameters.Any(p => p.Kind == Symbols.ParamKind.Entities));
+            sb.Append($"        static int global::EasyEcs.{iface}<{types}>.RowBytes => {RowBytes(query, entity, methods)};\n\n");
             sb.Append($"        static void global::EasyEcs.{iface}<{types}>.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {{\n");
             sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {walk}>(ref job);\n");
             sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {walk}>(ref {unsafeType}.AsRef(in chunk));\n");
