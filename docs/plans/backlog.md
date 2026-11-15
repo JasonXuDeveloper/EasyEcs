@@ -161,6 +161,13 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
          aliases a file always writes (`__ForEach`), can still be shadowed by a user's `__` type; read the
          referenced assemblies' `__` names once per compilation (cheap: the metadata names, cached per reference),
          and give `__ForEach` the same reservation; tests for both.
+      k2. (owner, 2026-11-15) the platforms item k and the kernel of item l cover: x64, x86 (32-bit: the same SSE / AVX
+         intrinsics, fewer registers; `nint` is 4 bytes), arm64 (AdvSimd, 128 bits; SVE not used: no hardware to
+         measure) and arm32. On arm32 RyuJIT accelerates no vector type (`Vector128.IsHardwareAccelerated` is
+         false), so the chain ends at the method per row there: the study confirms it on the runtime's own
+         statement and the tests run the scalar path (`DOTNET_EnableHWIntrinsic=0` reproduces it on x64). CI tests
+         x64 and arm64 today; whether x86 and arm32 get a CI job (Windows x86 on the standard runner, arm32 under
+         emulation) is the owner's question once the kernel exists.
       l. (owner, L29) research: a generic, shared kernel instead of per-job loop text. Today every job carries its
          own drivers (the flat loop per width, the masked loop per width, the pass-mask loop, the tails), about 100
          lines around a body of a few lines. Design `docs/plans/designs/lane-kernel.md`:
