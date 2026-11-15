@@ -137,7 +137,7 @@ internal static class LaneJobs
     private static readonly QueryFilter Unfiltered = default;
 
     // heat.Value += speed.Value * Dt
-    internal ref struct IntegrateJob : IForEachMasked<Heat, Speed>, ILaneStep
+    internal ref struct IntegrateJob : IForEachMasked<Heat, Speed>, IWidthStep
     {
         private ref Heat r1;
         private ref Speed r2;
@@ -148,14 +148,14 @@ internal static class LaneJobs
         {
             r1 = ref MemoryMarshal.GetReference(c1);
             r2 = ref MemoryMarshal.GetReference(c2);
-            LaneKernel.Run(ref this, c1.Length);
+            WidthKernel.Run(ref this, c1.Length);
         }
 
         public void Execute(EntitySpan entities, ulong pass, Span<Heat> c1, Span<Speed> c2)
         {
             r1 = ref MemoryMarshal.GetReference(c1);
             r2 = ref MemoryMarshal.GetReference(c2);
-            LaneKernel.RunMasked(ref this, pass, c1.Length);
+            WidthKernel.RunMasked(ref this, pass, c1.Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -178,7 +178,7 @@ internal static class LaneJobs
 
     // float force = heat * 0.5f - mass * pull; speed = Max(Min(speed + force - Drag, Limit), -Limit);
     // if (heat > 100f) heat = 100f; else heat += speed * 0.125f;
-    internal ref struct StepJob : IForEachMasked<Heat, Speed, Mass>, ILaneStep
+    internal ref struct StepJob : IForEachMasked<Heat, Speed, Mass>, IWidthStep
     {
         public ref Pull s3;
         private float u3; // the singleton read once per run, as today's loop broadcasts it once
@@ -194,7 +194,7 @@ internal static class LaneJobs
             r2 = ref MemoryMarshal.GetReference(c2);
             r3 = ref MemoryMarshal.GetReference(c3);
             u3 = s3.Value;
-            LaneKernel.Run(ref this, c1.Length);
+            WidthKernel.Run(ref this, c1.Length);
         }
 
         public void Execute(EntitySpan entities, ulong pass, Span<Heat> c1, Span<Speed> c2, Span<Mass> c3)
@@ -203,7 +203,7 @@ internal static class LaneJobs
             r2 = ref MemoryMarshal.GetReference(c2);
             r3 = ref MemoryMarshal.GetReference(c3);
             u3 = s3.Value;
-            LaneKernel.RunMasked(ref this, pass, c1.Length);
+            WidthKernel.RunMasked(ref this, pass, c1.Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -230,7 +230,7 @@ internal static class LaneJobs
     }
 
     // tally.Count++; if ((ticks & 1) == 0) tally.Sum += ticks; tally.Low = Min(Low, ticks); tally.High = Max(High, ticks)
-    internal ref struct TallyJob : IForEachMasked<Ticks>, ILaneWalk
+    internal ref struct TallyJob : IForEachMasked<Ticks>, IWidthWalk
     {
         public Reduce<Tally> a1;
         private ref Ticks r1;
@@ -240,13 +240,13 @@ internal static class LaneJobs
         public void Execute(EntitySpan entities, Span<Ticks> c1)
         {
             r1 = ref MemoryMarshal.GetReference(c1);
-            LaneKernel.RunWalk(ref this, c1.Length);
+            WidthKernel.RunWalk(ref this, c1.Length);
         }
 
         public void Execute(EntitySpan entities, ulong pass, Span<Ticks> c1)
         {
             r1 = ref MemoryMarshal.GetReference(c1);
-            LaneKernel.RunWalkMasked(ref this, pass, c1.Length);
+            WidthKernel.RunWalkMasked(ref this, pass, c1.Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -260,7 +260,7 @@ internal static class LaneJobs
             var a3 = Lane<W, int>.Create(id.High);
             for (nint last = rows - Lane<W, int>.Count; i <= last; i += Lane<W, int>.Count)
             {
-                if (!LaneKernel.Lanes<W, M>(pass, i, out var p)) continue;
+                if (!WidthKernel.Lanes<W, M>(pass, i, out var p)) continue;
                 var c1 = Lane<W, int>.Load(ref e1, i);
                 a0 = Lane<W, int>.Keep<M>(p, a0 + Lane<W, int>.One, a0);
                 var m0 = Lane<W, int>.Equal(c1 & Lane<W, int>.Create(1), Lane<W, int>.Create(0));
@@ -317,23 +317,26 @@ internal static class TypedJobs
         {
             r1 = ref MemoryMarshal.GetReference(c1);
             r2 = ref MemoryMarshal.GetReference(c2);
-            LaneKernel4.Run(ref this, c1.Length);
+            nint i = LaneKernel.Run(ref this, c1.Length);
+            for (; i < c1.Length; i++) Row(i);
         }
 
         public void Execute(EntitySpan entities, ulong pass, Span<Heat> c1, Span<Speed> c2)
         {
             r1 = ref MemoryMarshal.GetReference(c1);
             r2 = ref MemoryMarshal.GetReference(c2);
-            LaneKernel4.RunMasked(ref this, pass, c1.Length);
+            nint i = LaneKernel.RunMasked(ref this, pass, c1.Length);
+            for (; i < c1.Length; i++)
+                if (((pass >> (int)i) & 1) != 0) Row(i);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Step<LF, LI, M>(nint i, LI pass) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode
+        public void Step<LF, LI, M>(nint i, LI pass, LF passF) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode
         {
             ref float e1 = ref Unsafe.As<Heat, float>(ref r1);
             var c1 = LF.Load(ref e1, i);
             var c2 = LF.Load(ref Unsafe.As<Speed, float>(ref r2), i);
-            c1 = LaneKernel4.Keep<M, LF, float, LI>(pass, c1 + c2 * LF.Create(0.033333335f), c1);
+            c1 = LF.Keep<M>(passF, c1 + c2 * LF.Create(0.033333335f), c1);
             LF.Store(c1, ref e1, i);
         }
 
@@ -359,7 +362,8 @@ internal static class TypedJobs
             r2 = ref MemoryMarshal.GetReference(c2);
             r3 = ref MemoryMarshal.GetReference(c3);
             u3 = s3.Value;
-            LaneKernel4.Run(ref this, c1.Length);
+            nint i = LaneKernel.Run(ref this, c1.Length);
+            for (; i < c1.Length; i++) Row(i);
         }
 
         public void Execute(EntitySpan entities, ulong pass, Span<Heat> c1, Span<Speed> c2, Span<Mass> c3)
@@ -368,20 +372,22 @@ internal static class TypedJobs
             r2 = ref MemoryMarshal.GetReference(c2);
             r3 = ref MemoryMarshal.GetReference(c3);
             u3 = s3.Value;
-            LaneKernel4.RunMasked(ref this, pass, c1.Length);
+            nint i = LaneKernel.RunMasked(ref this, pass, c1.Length);
+            for (; i < c1.Length; i++)
+                if (((pass >> (int)i) & 1) != 0) Row(i);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void Step<LF, LI, M>(nint i, LI pass) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode
+        public void Step<LF, LI, M>(nint i, LI pass, LF passF) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode
         {
             ref float e1 = ref Unsafe.As<Heat, float>(ref r1), e2 = ref Unsafe.As<Speed, float>(ref r2);
             var c1 = LF.Load(ref e1, i);
             var c2 = LF.Load(ref e2, i);
             var c3 = LF.Load(ref Unsafe.As<Mass, float>(ref r3), i);
             var l0 = c1 * LF.Create(0.5f) - c3 * LF.Create(u3);
-            c2 = LaneKernel4.Keep<M, LF, float, LI>(pass, LF.Max(LF.Min(c2 + l0 - LF.Create(0.25f), LF.Create(10f)), LF.Create(-10f)), c2);
+            c2 = LF.Keep<M>(passF, LF.Max(LF.Min(c2 + l0 - LF.Create(0.25f), LF.Create(10f)), LF.Create(-10f)), c2);
             var m6 = LF.GreaterThan(c1, LF.Create(100f));
-            c1 = LaneKernel4.Keep<M, LF, float, LI>(pass, LF.Select(m6, LF.Create(100f), c1 + c2 * LF.Create(0.125f)), c1);
+            c1 = LF.Keep<M>(passF, LF.Select(m6, LF.Create(100f), c1 + c2 * LF.Create(0.125f)), c1);
             LF.Store(c1, ref e1, i);
             LF.Store(c2, ref e2, i);
         }
@@ -402,13 +408,13 @@ internal static class TypedJobs
         public void Execute(EntitySpan entities, Span<Ticks> c1)
         {
             r1 = ref MemoryMarshal.GetReference(c1);
-            LaneKernel4.RunWalk(ref this, c1.Length);
+            LaneWalk4.RunWalk(ref this, c1.Length);
         }
 
         public void Execute(EntitySpan entities, ulong pass, Span<Ticks> c1)
         {
             r1 = ref MemoryMarshal.GetReference(c1);
-            LaneKernel4.RunWalkMasked(ref this, pass, c1.Length);
+            LaneWalk4.RunWalkMasked(ref this, pass, c1.Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -422,12 +428,12 @@ internal static class TypedJobs
             var a3 = LI.Create(id.High);
             for (nint last = rows - LI.Count; i <= last; i += LI.Count)
             {
-                if (!LaneKernel4.Lanes<LI, M>(pass, i, out var p)) continue;
+                if (!LaneKernel.Lanes<LI, M>(pass, i, out var p)) continue;
                 var c1 = LI.Load(ref e1, i);
-                a0 = LaneKernel4.Keep<M, LI, int, LI>(p, a0 + LI.One, a0);
-                a1s = LaneKernel4.Keep<M, LI, int, LI>(p, LI.SelectEqual(c1 & LI.Create(1), LI.Create(0), a1s + c1, a1s), a1s);
-                a2 = LaneKernel4.Keep<M, LI, int, LI>(p, LI.Min(a2, c1), a2);
-                a3 = LaneKernel4.Keep<M, LI, int, LI>(p, LI.Max(a3, c1), a3);
+                a0 = LI.Keep<M>(p, a0 + LI.One, a0);
+                a1s = LI.Keep<M>(p, LI.SelectEqual(c1 & LI.Create(1), LI.Create(0), a1s + c1, a1s), a1s);
+                a2 = LI.Keep<M>(p, LI.Min(a2, c1), a2);
+                a3 = LI.Keep<M>(p, LI.Max(a3, c1), a3);
             }
             a1.Value.Count = unchecked(a1.Value.Count + LI.Sum(a0));
             a1.Value.Sum = unchecked(a1.Value.Sum + LI.Sum(a1s));
@@ -468,7 +474,7 @@ internal static class WalkJobs
             r1 = ref MemoryMarshal.GetReference(c1);
             r2 = ref MemoryMarshal.GetReference(c2);
             r3 = ref MemoryMarshal.GetReference(c3);
-            LaneKernel4.RunWalk(ref this, c1.Length);
+            LaneWalk4.RunWalk(ref this, c1.Length);
         }
 
         public void Execute(EntitySpan entities, ulong pass, Span<Heat> c1, Span<Speed> c2, Span<Mass> c3)
@@ -476,7 +482,7 @@ internal static class WalkJobs
             r1 = ref MemoryMarshal.GetReference(c1);
             r2 = ref MemoryMarshal.GetReference(c2);
             r3 = ref MemoryMarshal.GetReference(c3);
-            LaneKernel4.RunWalkMasked(ref this, pass, c1.Length);
+            LaneWalk4.RunWalkMasked(ref this, pass, c1.Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -486,13 +492,13 @@ internal static class WalkJobs
             var u2 = LF.Create(s3.Value);
             for (nint last = rows - LF.Count; i <= last; i += LF.Count)
             {
-                if (!LaneKernel4.Lanes<LI, M>(pass, i, out var p)) continue;
+                if (!LaneKernel.Lanes<LI, M>(pass, i, out var p)) continue;
                 var c1 = LF.Load(ref e1, i);
                 var c2 = LF.Load(ref e2, i);
                 var c3 = LF.Load(ref e3, i);
                 var l0 = c1 * LF.Create(0.5f) - c3 * u2;
-                c2 = LaneKernel4.Keep<M, LF, float, LI>(p, LF.Max(LF.Min(c2 + l0 - LF.Create(0.25f), 10f), -10f), c2);
-                c1 = LaneKernel4.Keep<M, LF, float, LI>(p, LF.SelectGreaterThan(c1, LF.Create(100f), LF.Create(100f), c1 + c2 * LF.Create(0.125f)), c1);
+                c2 = LF.Keep<M>(LI.As<LF, float>(p), LF.Max(LF.Min(c2 + l0 - LF.Create(0.25f), 10f), -10f), c2);
+                c1 = LF.Keep<M>(LI.As<LF, float>(p), LF.SelectGreaterThan(c1, LF.Create(100f), LF.Create(100f), c1 + c2 * LF.Create(0.125f)), c1);
                 LF.Store(c1, ref e1, i);
                 LF.Store(c2, ref e2, i);
             }
