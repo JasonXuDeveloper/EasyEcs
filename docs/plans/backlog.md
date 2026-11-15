@@ -94,7 +94,12 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       73,843 -> 77,236 lines (alias lines), 39,358 -> 18,687 `global::`; GeneratedTextTests corpus 12,310,172 ->
       11,532,883 bytes, `global::` 85,849 -> 17,810, parentheses 333 -> 0, identity copies 108 -> 40. FullOpts listings
       of 7 benchmark classes: 16 runners differ (instruction order, spills, the dropped `v0` store), BenchmarkDotNet
-      decides (docs-todos `feat-generated-text-2`). Next: package B (item i), then C (item j).
+      decides (docs-todos `feat-generated-text-2`). A/B (two rounds, net10.0): runtime classes within noise; KernelBenchmark
+      Share 10 % slower at 1,000 rows without `AllBitsSet` in the bail test, so that text is back (6 counted in
+      GeneratedTextTests). GeneratorBenchmark Cold: the masked jobs translated twice more for the pass masks (+60 MB),
+      fixed (PassMasks over the loops written once); what is left is Tidy's own pass (about +16-20 MB, Cold +7-13 %),
+      under measurement in the package's last A/B. Merged claude/relaxed-ramanujan-j4j9k4 (a1eeebb5). Next: package B
+      (item i), then C (item j).
       The original item: read the generated files of the GeneratedTextTests corpora, the samples and the
       benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and
       masks, repeated setup, `this.v0`, dead narrow temps: G17's rest in owner-review, now to do), remove each in the
