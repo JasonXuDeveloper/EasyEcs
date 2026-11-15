@@ -104,7 +104,12 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       masked word selecting by __pass once; KernelBenchmark Step / StepHelpers / Holes / Halves 0.75-1.01x, two rounds,
       5 runners shorter in FullOpts, none longer); item p, aliases of one simple name qualified by the outer names that
       tell them apart (AliasTests), and no alias taking a __ name the user's code declares (Code.Reserved: a user type
-      __Vec or __Heat broke the generated code before). Next: package C (items j, k, l).
+      __Vec or __Heat broke the generated code before).
+      **Package C (study) handed back**: docs/plans/designs/lane-kernel.md, the prototype in Core
+      (VectorLoops/LaneKernel.cs) and LaneKernelBenchmark: one body per job over ILane<TSelf, T> (Lane512/256/128<T>),
+      the 512 -> 256 -> 128 -> row chain in Core, bit for bit on every width setting; each width's walk a method of
+      its own (the inliner's budget); flat jobs level, conditions and reductions not yet (the JIT's import-time forms
+      and mask registers lost through a lane struct); 64-70 % less text. The owner decides the rollout.
       The original item: read the generated files of the GeneratedTextTests corpora, the samples and the
       benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and
       masks, repeated setup, `this.v0`, dead narrow temps: G17's rest in owner-review, now to do), remove each in the
