@@ -392,10 +392,11 @@ public partial class ReduceTests
 
     /// <summary>
     /// Without ChunkSize too: a pass that merges cuts its chunks from the row count alone, so a float sum is the same
-    /// bits at 1 to 8 threads, on every run, whether the runner wakes helpers or runs alone. Table sizes below, at and
-    /// above the cap of a chunk (16 chunks of 1,024 to 16,384 rows).
+    /// bits at 1 to 8 threads, on every run, whether the runner wakes helpers or runs alone. Table sizes below the floor
+    /// by bytes (World.MinChunkBytes of a 4-byte row: one chunk), past it, and past the cap of a chunk.
     /// </summary>
     [TestCase(5_000)]
+    [TestCase(20_000)]
     [TestCase(100_000)]
     [TestCase(400_000)]
     public void AFloatReductionDoesNotDependOnTheThreads(int rows) => SameMassOnAnyThreads<DefaultChunkMass>(rows);
