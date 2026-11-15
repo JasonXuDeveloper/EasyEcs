@@ -1389,7 +1389,7 @@ public class GeneratorTests
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
         "GroupBy", "TargetPolicies", "NotSaved", "EntityMethods", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
         "SystemPlaces", "SystemFusions", "SetFusions", "ForEachBodies", "DrainBodies", "EntityMethodBodies", "SystemCode", "ForEachCode", "DrainCode",
-        "EntityMethodCode", "RecordedTypes", "TileParts",
+        "EntityMethodCode", "RecordedTypes", "TileParts", "ReservedNames",
         "IsEasyEcsCore", // ArityGenerator's one stage: the package ships it, idle outside EasyEcs.Core
     ];
 
