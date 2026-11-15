@@ -62,7 +62,7 @@ internal static class Tidy
     /// be right: only a name of a member must never get one, and a member is never in those positions.
     /// The lists it returns are the thread's scratch (<see cref="Scratch"/>): read before the next call on the thread.
     /// </summary>
-    public static List<(int Start, int End, string Alias)> Types(string text, SortedDictionary<string, string> aliases)
+    public static List<(int Start, int End, string Alias)> Types(string text, SortedDictionary<string, string> aliases, EquatableArray<string> declared)
     {
         var scratch = Scratch.Of(text);
         var edits = scratch.Edits;
@@ -77,6 +77,7 @@ internal static class Tidy
             reserved.Add(pair.Key);
             existing[pair.Value] = pair.Key;
         }
+        for (int k = 0; k < declared.Length; k++) reserved.Add(declared[k]); // the user's own __ names (Code.Reserved)
         // the template's own alias directives (using __ForEach = ...;)
         for (int u = text.StartsWith("using __", StringComparison.Ordinal) ? 0 : text.IndexOf("\nusing __", StringComparison.Ordinal); u >= 0;
              u = text.IndexOf("\nusing __", u + 1, StringComparison.Ordinal))
@@ -147,6 +148,7 @@ internal static class Tidy
             chosen.Add((pair.Key, spans.Text(pair.Key.Item1) + (pair.Key.Item2 ? "Attribute" : ""), had));
         }
         chosen.Sort(ByTarget);
+        var parts = chosen.Count == 0 ? null : Parts(text, types, uses, existing, scratch);
         HashSet<int>? named = null;
         foreach (var (key, target, had) in chosen)
         {
@@ -155,7 +157,7 @@ internal static class Tidy
                 alias[key] = had;
                 continue;
             }
-            string chosenAlias = AliasOf(target, reserved, text, named ??= Named(text, scratch.Named));
+            string chosenAlias = AliasOf(target, reserved, text, named ??= Named(text, scratch.Named), parts);
             reserved.Add(chosenAlias);
             alias[key] = chosenAlias;
             aliases[chosenAlias] = target;
@@ -222,6 +224,7 @@ internal static class Tidy
         public readonly HashSet<string> Reserved = new(StringComparer.Ordinal);
         public readonly Dictionary<string, string> Existing = new(StringComparer.Ordinal);
         public readonly HashSet<int> Named = [];
+        public readonly Dictionary<int, int> Simple = [];
         public readonly List<(int Start, int End, string Alias)> Edits = [];
         public readonly Pairs Pairs = new();
         public readonly Stack<int> Open = new();
@@ -476,17 +479,18 @@ internal static class Tidy
     }
 
     /// <summary>An alias for <paramref name="target"/> the file does not use: <c>__Heat</c>, else with its outer name or arguments, else numbered.</summary>
-    private static string AliasOf(string target, HashSet<string> reserved, string text, HashSet<int> named)
+    private static string AliasOf(string target, HashSet<string> reserved, string text, HashSet<int> named, Dictionary<string, string>? parts)
     {
         bool Taken(string name) => reserved.Contains(name) || named.Contains(Hash(name, 0, name.Length)) && Used(text, name);
         int open = target.IndexOf('<');
         string chain = open < 0 ? target : target.Substring(0, open);
         string[] segments = chain.Substring(8).Split('.');
-        string simple = segments[segments.Length - 1].TrimStart('@');
-        if (simple.EndsWith("Attribute", StringComparison.Ordinal) && simple.Length > 9) simple = simple.Substring(0, simple.Length - 9);
-        // a closed generic by its arguments too (__IForEachBatch_P3_V3), so two of one file read apart
-        string first = open < 0 ? "__" + simple
-            : "__" + simple + "_" + ArgumentNames(target, open);
+        string simple = SimpleName(segments[segments.Length - 1]);
+        // a type whose simple name another of the file shares by its outer names too (__A_Position, __B_Position); a
+        // closed generic by its arguments too (__IForEachBatch_P3_V3, __Span_A_Position), so two of one file read apart
+        string own = parts != null && parts.TryGetValue(chain, out var part) ? part : simple;
+        string first = open < 0 ? "__" + own
+            : "__" + own + "_" + ArgumentNames(target, open, parts);
         if (!Taken(first)) return first;
         string second = open < 0 && segments.Length > 1 ? "__" + segments[segments.Length - 2].TrimStart('@') + "_" + simple : first;
         if (!Taken(second)) return second;
@@ -499,7 +503,7 @@ internal static class Tidy
     /// <paramref name="open"/>), each a run of name characters followed by <c>,</c> <c>&gt;</c> <c>[</c> or <c>?</c>
     /// (spaces between), without its <c>@</c>, joined by <c>_</c>: <c>P3_V3</c>.
     /// </summary>
-    private static string ArgumentNames(string target, int open)
+    private static string ArgumentNames(string target, int open, Dictionary<string, string>? parts)
     {
         var names = new StringBuilder();
         for (int i = open; i < target.Length;)
@@ -514,13 +518,117 @@ internal static class Tidy
             int next = i;
             while (next < target.Length && char.IsWhiteSpace(target[next])) next++;
             if (next >= target.Length || target[next] is not (',' or '>' or '[' or '?')) continue;
-            while (start < i && target[start] == '@') start++;
             if (names.Length > 0) names.Append('_');
+            // the argument's whole name (global::Game.A.Position), whose part tells it from the file's other Positions
+            int whole = start;
+            while (whole > open + 1 && target[whole - 1] == '.') for (whole--; whole > open + 1 && IsWord(target[whole - 1]);) whole--;
+            if (parts != null && whole >= 8 && string.CompareOrdinal(target, whole - 8, "global::", 0, 8) == 0
+                && parts.TryGetValue(target.Substring(whole - 8, i - whole + 8), out var part))
+            {
+                names.Append(part);
+                continue;
+            }
+            while (start < i && target[start] == '@') start++;
             names.Append(target, start, i - start);
         }
         return names.ToString();
 
         static bool IsWord(char c) => char.IsLetterOrDigit(c) || c is '_' or '@';
+    }
+
+    /// <summary>A type's last name as its alias says it: without its <c>@</c>, an attribute without <c>Attribute</c>.</summary>
+    private static string SimpleName(string last)
+    {
+        string simple = last.TrimStart('@');
+        return simple.EndsWith("Attribute", StringComparison.Ordinal) && simple.Length > 9 ? simple.Substring(0, simple.Length - 9) : simple;
+    }
+
+    /// <summary>
+    /// For each type of the file (<paramref name="types"/>, the targets of <paramref name="uses"/>, those its alias
+    /// block already names: <paramref name="existing"/>) whose simple name
+    /// another type of the file shares, the outer names that tell it apart as an alias says them: the fewest from its
+    /// end that no other of those types ends with (<c>A_Position</c>, <c>B_Position</c>; <c>Ship_Pos</c>), keyed by its
+    /// qualified name; null when no two share one, which hashes alone find without copying a name.
+    /// </summary>
+    private static Dictionary<string, string>? Parts(string text, HashSet<Span> types, Dictionary<(Span, bool), int> uses,
+        Dictionary<string, string> existing, Scratch scratch)
+    {
+        var simple = scratch.Simple; // the simple name's hash -> the first qualified name's hash, or 0 once two differ
+        simple.Clear();
+        bool shared = false;
+        foreach (var t in types) shared |= Note(text, t.Start, t.Length, simple);
+        foreach (var key in uses.Keys) shared |= Note(text, key.Item1.Start, key.Item1.Length, simple);
+        foreach (var target in existing.Keys) shared |= Note(target, 0, target.Length, simple);
+        if (!shared) return null;
+        // the names of the shared simple names, copied
+        var groups = new Dictionary<string, List<string[]>>(StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var t in types) Add(text, t.Start, t.Length);
+        foreach (var key in uses.Keys) Add(text, key.Item1.Start, key.Item1.Length);
+        foreach (var target in existing.Keys) Add(target, 0, target.Length);
+        var parts = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var group in groups.Values)
+        {
+            if (group.Count < 2) continue;
+            foreach (var segments in group)
+            {
+                int depth = 2;
+                while (depth < segments.Length && group.Exists(o => o != segments && Suffix(o, depth) == Suffix(segments, depth))) depth++;
+                parts["global::" + string.Join(".", segments)] = Suffix(segments, depth);
+            }
+        }
+        return parts;
+
+        void Add(string source, int start, int length)
+        {
+            if (length < 9 || string.CompareOrdinal(source, start, "global::", 0, 8) != 0) return;
+            var (simpleHash, _, end) = Hashes(source, start, length);
+            if (simple.TryGetValue(simpleHash, out int first) && first != 0) return;
+            string chain = source.Substring(start, end - start);
+            if (!seen.Add(chain)) return;
+            string[] segments = chain.Substring(8).Split('.');
+            string name = SimpleName(segments[segments.Length - 1]);
+            if (!groups.TryGetValue(name, out var group)) groups[name] = group = [];
+            group.Add(segments);
+        }
+
+        // the last depth names joined as an alias says them (A_Position): every name when there are fewer
+        static string Suffix(string[] segments, int depth)
+        {
+            int from = Math.Max(0, segments.Length - depth);
+            var sb = new StringBuilder();
+            for (int k = from; k < segments.Length; k++)
+                sb.Append(k > from ? "_" : "").Append(k == segments.Length - 1 ? SimpleName(segments[k]) : segments[k].TrimStart('@', '_')); // an outer generated name without its __ (__S_Jobs: S_Jobs)
+            return sb.ToString();
+        }
+    }
+
+    /// <summary>Records <paramref name="span"/>'s names in <paramref name="simple"/>: true when its simple name is another qualified name's too.</summary>
+    private static bool Note(string text, int start, int length, Dictionary<int, int> simple)
+    {
+        if (length < 9 || string.CompareOrdinal(text, start, "global::", 0, 8) != 0) return false;
+        var (simpleHash, chainHash, _) = Hashes(text, start, length);
+        if (chainHash == 0) chainHash = 1;
+        if (!simple.TryGetValue(simpleHash, out int first))
+        {
+            simple[simpleHash] = chainHash;
+            return false;
+        }
+        if (first == 0 || first == chainHash) return first == 0;
+        simple[simpleHash] = 0;
+        return true;
+    }
+
+    /// <summary>The hashes of a type name's simple name (as <see cref="SimpleName"/> says it) and of its qualified name, without type arguments; where those end.</summary>
+    private static (int Simple, int Chain, int End) Hashes(string text, int start, int length)
+    {
+        int end = text.IndexOf('<', start, length);
+        if (end < 0) end = start + length;
+        int last = text.LastIndexOf('.', end - 1, end - start - 8) + 1;
+        if (last <= start + 8) last = start + 8;
+        while (last < end && text[last] == '@') last++;
+        int simpleEnd = end - last > 9 && string.CompareOrdinal(text, end - 9, "Attribute", 0, 9) == 0 ? end - 9 : end;
+        return (Hash(text, last, simpleEnd - last), Hash(text, start, end - start), end);
     }
 
     /// <summary>The hashes of the <c>__</c> names <paramref name="text"/> holds (into <paramref name="named"/>): an alias candidate whose hash is not among them is free.</summary>

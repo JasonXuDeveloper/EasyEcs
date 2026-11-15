@@ -74,11 +74,12 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         // What the bodies say (SystemGenerator.Kernels.cs): each method's vector loop, structural changes, chases, ...,
         // in stages only implementation output reads, put back into its type's model before the code is written.
         var bodies = BodiesOf(context);
+        var reserved = Code.Reserved(context);
         var systemCode = WithBodies(updates, bodies.Systems, "SystemCode");
-        context.RegisterImplementationSourceOutput(systemCode, static (spc, model) => Add(spc, model));
-        context.RegisterImplementationSourceOutput(WithBodies(runners, bodies.Runners, "ForEachCode"), static (spc, model) => Add(spc, model));
-        context.RegisterImplementationSourceOutput(WithBodies(records, bodies.Records, "DrainCode"), static (spc, model) => Add(spc, model));
-        context.RegisterImplementationSourceOutput(WithBodies(ones, bodies.Ones, "EntityMethodCode"), static (spc, model) => Add(spc, model));
+        context.RegisterImplementationSourceOutput(systemCode.Combine(reserved), static (spc, input) => Add(spc, input.Left, input.Right));
+        context.RegisterImplementationSourceOutput(WithBodies(runners, bodies.Runners, "ForEachCode").Combine(reserved), static (spc, input) => Add(spc, input.Left, input.Right));
+        context.RegisterImplementationSourceOutput(WithBodies(records, bodies.Records, "DrainCode").Combine(reserved), static (spc, input) => Add(spc, input.Left, input.Right));
+        context.RegisterImplementationSourceOutput(WithBodies(ones, bodies.Ones, "EntityMethodCode").Combine(reserved), static (spc, input) => Add(spc, input.Left, input.Right));
 
         // The assembly's system set: its non-generic systems and the closed generic systems it names (its own generic
         // systems' and those of referenced assemblies' public ones), registered without runtime code generation.
@@ -96,7 +97,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         // Pairs of systems that may share one walk (SystemGenerator.Fusion.cs): their code, and the set's declarations.
         // The pairs are one value, not a Collect of them: a Collect over no pair runs again on every compilation.
         var fusions = FusionPairs(systemCode, places);
-        context.RegisterImplementationSourceOutput(fusions.SelectMany(static (all, _) => all), static (spc, pair) => AddFusion(spc, pair));
+        context.RegisterImplementationSourceOutput(fusions.SelectMany(static (all, _) => all).Combine(reserved), static (spc, input) => AddFusion(spc, input.Left, input.Right));
         var declared = fusions.Select(static (all, _) => new EquatableArray<SetFusion>(
             all.Select(p => new SetFusion(p.First.Owner.FullName, p.Second.Owner.FullName, p.FullCodeName)).ToArray())).WithTrackingName("SetFusions");
         context.RegisterImplementationSourceOutput(set.Combine(declared), static (spc, input) =>
@@ -105,7 +106,7 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
         });
 
         // world.ForEach(static (ref P p) => ...): each call intercepted by the job of its lambda (SystemGenerator.Lambdas.cs).
-        InitializeLambdas(context);
+        InitializeLambdas(context, reserved);
         // c.Load128<T>(x + k, dy, dz) in a column loop: checked once per loop (SystemGenerator.TileLoads.cs).
         InitializeTileLoads(context);
 
@@ -146,10 +147,10 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     private static void AddEntryPoints(SourceProductionContext context, UpdateModel model) =>
         context.AddSource($"{model.Owner.HintName}.{(model.One ? "EntityMethod" : "ForEach")}.EntryPoints.g.cs", SourceText.From(EmitEntryPoints(model), Encoding.UTF8));
 
-    private static void Add(SourceProductionContext context, UpdateModel model)
+    private static void Add(SourceProductionContext context, UpdateModel model, EquatableArray<string> reserved)
     {
         var owner = model.Owner;
-        context.AddSource($"{owner.HintName}.{(model.One ? "EntityMethod" : owner.IsSystem ? "System" : "ForEach")}.g.cs", SourceText.From(Code.Aliased(Emit(model)), Encoding.UTF8));
+        context.AddSource($"{owner.HintName}.{(model.One ? "EntityMethod" : owner.IsSystem ? "System" : "ForEach")}.g.cs", SourceText.From(Code.Aliased(Emit(model), reserved), Encoding.UTF8));
         if (model.One || !owner.IsSystem || !owner.IsPublic || owner.TypeParameters.Length == 0) return;
         // Assembly attributes cannot follow the namespace of the code's file.
         string ns = owner.Namespace.Length > 0 ? owner.Namespace + "." : "";

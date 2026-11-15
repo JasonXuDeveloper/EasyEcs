@@ -22,7 +22,7 @@ namespace EasyEcs.Generator;
 /// </summary>
 public sealed partial class SystemGenerator
 {
-    private static void InitializeLambdas(IncrementalGeneratorInitializationContext context)
+    private static void InitializeLambdas(IncrementalGeneratorInitializationContext context, IncrementalValueProvider<EquatableArray<string>> reserved)
     {
         var calls = BoundLater(context, static (node, _) => LambdaPass.IsCandidate(node), LambdaModel.Create)
             .WithTrackingName("LambdaPasses");
@@ -31,8 +31,8 @@ public sealed partial class SystemGenerator
             .SelectMany(static (all, _) => all.GroupBy(c => c!.File, System.StringComparer.Ordinal)
                 .Select(g => new LambdaFile(g.Key, new EquatableArray<LambdaModel>(g.OrderBy(c => c!.Position).ToArray()!))))
             .WithTrackingName("LambdaFiles");
-        context.RegisterImplementationSourceOutput(files, static (spc, file) =>
-            spc.AddSource($"{System.IO.Path.GetFileNameWithoutExtension(file.File)}.{Fnv(file.File):x8}.Lambdas.g.cs", SourceText.From(Code.Aliased(EmitLambdas(file)), Encoding.UTF8)));
+        context.RegisterImplementationSourceOutput(files.Combine(reserved), static (spc, input) =>
+            spc.AddSource($"{System.IO.Path.GetFileNameWithoutExtension(input.Left.File)}.{Fnv(input.Left.File):x8}.Lambdas.g.cs", SourceText.From(Code.Aliased(EmitLambdas(input.Left), input.Right), Encoding.UTF8)));
     }
 
     /// <summary>The lambda passes of one source file, in the order they appear.</summary>

@@ -54,10 +54,12 @@ public sealed class ComponentGenerator : IIncrementalGenerator
         var supported = context.ParseOptionsProvider
             .Select(static (o, _) => o is CSharpParseOptions { LanguageVersion: var version } && (int)version >= 1400)
             .WithTrackingName("ExtensionMembers");
+        var reserved = Code.Reserved(context);
+        var options = supported.Combine(reserved);
 
-        context.RegisterSourceOutput(components.Combine(supported), static (spc, pair) =>
+        context.RegisterSourceOutput(components.Combine(options), static (spc, pair) =>
         {
-            if (pair.Right) spc.AddSource($"{pair.Left!.HintName}.Component.g.cs", SourceText.From(Code.Aliased(Emit(pair.Left!)), Encoding.UTF8));
+            if (pair.Right.Left) spc.AddSource($"{pair.Left!.HintName}.Component.g.cs", SourceText.From(Code.Aliased(Emit(pair.Left!), pair.Right.Right), Encoding.UTF8));
         });
 
         // DynamicBuffer<T> names, bound once: the buffer's named members (one file per element type of this compilation,
@@ -75,9 +77,9 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .Collect()
             .SelectMany(static (all, _) => all.Distinct())
             .WithTrackingName("BufferElements");
-        context.RegisterSourceOutput(elements.Combine(supported), static (spc, pair) =>
+        context.RegisterSourceOutput(elements.Combine(options), static (spc, pair) =>
         {
-            if (pair.Right) spc.AddSource($"{pair.Left.HintName}.Buffer.g.cs", SourceText.From(Code.Aliased(EmitBuffer(pair.Left)), Encoding.UTF8));
+            if (pair.Right.Left) spc.AddSource($"{pair.Left.HintName}.Buffer.g.cs", SourceText.From(Code.Aliased(EmitBuffer(pair.Left), pair.Right.Right), Encoding.UTF8));
         });
 
         // Query<T1..Tn> and Read<T1..Tn> calls: each shape's items get named refs (item.Position for item.Component1),
@@ -91,9 +93,9 @@ public sealed class ComponentGenerator : IIncrementalGenerator
             .Collect()
             .SelectMany(static (all, _) => all.Distinct())
             .WithTrackingName("QueryShapes");
-        context.RegisterSourceOutput(shapes.Combine(supported), static (spc, pair) =>
+        context.RegisterSourceOutput(shapes.Combine(options), static (spc, pair) =>
         {
-            if (pair.Right) spc.AddSource($"EasyEcs.QueryItem.{pair.Left.Hash}.g.cs", SourceText.From(Code.Aliased(EmitQueryItem(pair.Left)), Encoding.UTF8));
+            if (pair.Right.Left) spc.AddSource($"EasyEcs.QueryItem.{pair.Left.Hash}.g.cs", SourceText.From(Code.Aliased(EmitQueryItem(pair.Left), pair.Right.Right), Encoding.UTF8));
         });
 
         // Saves name types: every component, singleton and DynamicBuffer<T> of the compilation is registered when the

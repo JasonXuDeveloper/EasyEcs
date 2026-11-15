@@ -2,7 +2,9 @@ using System;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace EasyEcs.Generator;
 
@@ -102,6 +104,44 @@ internal static class Code
         return 0;
     }
 
+    private static bool Contains(EquatableArray<string> names, string name)
+    {
+        for (int k = 0; k < names.Length; k++)
+            if (names[k] == name) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// The names starting with <c>__</c> the user's code declares (types, members, type parameters): an alias of a
+    /// generated file must not take one, since a type or member of an enclosing namespace or type wins over a file's
+    /// alias (generated code sits in the user's namespaces and types). The declarations alone decide, so an edit inside
+    /// a method body changes nothing here.
+    /// </summary>
+    public static IncrementalValueProvider<EquatableArray<string>> Reserved(IncrementalGeneratorInitializationContext context) =>
+        context.SyntaxProvider
+            .CreateSyntaxProvider(static (node, _) => ReservedName(node) != null, static (ctx, _) => ReservedName(ctx.Node)!)
+            .Collect()
+            .Select(static (names, _) => new EquatableArray<string>(names.Distinct().OrderBy(n => n, StringComparer.Ordinal).ToArray()))
+            .WithTrackingName("ReservedNames");
+
+    /// <summary>The name <paramref name="node"/> declares when it starts with <c>__</c>, else null.</summary>
+    private static string? ReservedName(SyntaxNode node)
+    {
+        var name = node switch
+        {
+            BaseTypeDeclarationSyntax t => t.Identifier,
+            DelegateDeclarationSyntax d => d.Identifier,
+            MethodDeclarationSyntax m => m.Identifier,
+            PropertyDeclarationSyntax p => p.Identifier,
+            EventDeclarationSyntax e => e.Identifier,
+            VariableDeclaratorSyntax { Parent.Parent: BaseFieldDeclarationSyntax } v => v.Identifier,
+            TypeParameterSyntax tp => tp.Identifier,
+            _ => default,
+        };
+        string text = name.ValueText;
+        return text != null && text.Length > 2 && text[0] == '_' && text[1] == '_' ? text : null;
+    }
+
     private static bool At(string text, int at, string word) =>
         at + word.Length <= text.Length && string.CompareOrdinal(text, at, word, 0, word.Length) == 0;
 
@@ -111,7 +151,7 @@ internal static class Code
     /// with: the comment stays first, which tells analyzers the file is generated); then the other types it names
     /// twice or more through aliases of their own and without the parentheses precedence does not need (<see cref="Tidy"/>).
     /// </summary>
-    public static string Aliased(string text)
+    public static string Aliased(string text, EquatableArray<string> reserved)
     {
         var used = new System.Collections.Generic.SortedDictionary<string, string>(StringComparer.Ordinal); // alias -> target
         Chars? replaced = null;
@@ -119,8 +159,8 @@ internal static class Code
         for (int at = text.IndexOf("global::", StringComparison.Ordinal); at >= 0; at = text.IndexOf("global::", at, StringComparison.Ordinal))
         {
             int length = LongAt(text, at, out string alias, out string target);
-            // a using directive cannot name an alias of its own file
-            if (length == 0 || string.CompareOrdinal(text, text.LastIndexOf('\n', at) + 1, "using ", 0, 6) == 0)
+            // a using directive cannot name an alias of its own file; a name the user's code declares would win over it
+            if (length == 0 || string.CompareOrdinal(text, text.LastIndexOf('\n', at) + 1, "using ", 0, 6) == 0 || Contains(reserved, alias))
             {
                 at += length == 0 ? 8 : length;
                 continue;
@@ -131,7 +171,7 @@ internal static class Code
             copied = at;
         }
         string body = replaced == null ? text : replaced.Append(text, copied, text.Length - copied).ToString();
-        var edits = Tidy.Types(body, used);
+        var edits = Tidy.Types(body, used, reserved);
         var dropped = Tidy.Parentheses(body);
         if (used.Count == 0 && edits.Count == 0 && dropped.Count == 0) return body;
         var sb = Chars.Empty(body.Length + used.Count * 80);
