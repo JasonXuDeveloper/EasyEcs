@@ -325,7 +325,22 @@ interface dispatch (`call [r11]` stubs for `GetHashCode` and `Equals`, compiled 
 devirtualization), while with no comparer it calls `ValueTuple<int, int>.GetHashCode` and `Equals` directly. Two
 dispatches per probe cost more than the cheaper hash saves.
 
-What would change the verdict: a key whose default hash collides badly (where fewer probes would pay for the
-dispatch), or a dictionary keyed by a wrapper struct whose own `GetHashCode` is the byte hash (the default comparer's
-direct calls kept), which changes `ValueIndex`'s dictionary type for those keys; or a runtime that devirtualizes a
-sealed comparer in `FindValue`.
+**The fix the cause points to, tried** (branch `wip-lane1-c18b`, 2d56b57): the dictionary keyed by a wrapper,
+`BytesKey<TKey>` (`IEquatable`, its own byte hash and byte compare), behind a `HeadMap<TKey>` that `ValueIndex` holds
+(the wrapped dictionary for integer-tuple keys, a JIT-time constant; every other key keeps its dictionary; the public API
+unchanged; the probe prefetch hashing the same way). The Tier1 `TryFind` from the benchmark process now has the hash
+inlined (the golden-ratio `imul`, no `call [r11]` on the path taken), but it kept the key on the stack (the byte reads
+take its address: a store and two reloads per compare), so keys of 4, 8 and 16 bytes then went through
+`Unsafe.BitCast` in registers. Default job against c9518a2, net10.0, 0 B: LookupUnique base 88.9 / 72.5 us, head
+(wrapper) 190.8 / 183.9 us; head (wrapper + registers) 160.6 / 154.2 against base 89.2 / 69.0 us; LookupGrid 27.6 /
+28.8 against 49.8 / 49.3 us; LookupDirect, the Rekey cases, CreateUnique and TradeAndCount level. The dictionary is not
+the difference either: read through reflection in a world built like the benchmark's, both sides have 919 buckets,
+431 / 429 of them used, 600 distinct stored hashes and the same 5,716 hits. And a plain loop of the benchmark's 8,192
+lookups over that index, run outside BenchmarkDotNet under the exclusive lock with `DOTNET_TC_CallCountingDelayMs=0`
+(diagnosis only, not a number for a decision), read head 9.4-9.9 ns a lookup against base 10.0-10.9 ns. So the
+BenchmarkDotNet case is slower on every build while the same lookups in a loop are not: what in the benchmark
+process makes the difference (the workload loop's own Tier1 code, its tiering) is not found yet.
+
+What would change the verdict: the cause of that gap found and fixed (the next step: the Tier1 listings of the
+workload method and of `TryFind` from the BenchmarkDotNet process of the register build against base, instruction by
+instruction), then the same two rounds; or a key whose default hash collides badly, where fewer probes would pay.

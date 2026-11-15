@@ -350,7 +350,10 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       IndexBenchmark LookupUnique, ValueQueryComparison, IndexComparison.
       **Not shipped** (feat-lane1-core rerun, owner-review.md): LookupUnique 2.4-3.4x slower (base 82.9 / 67.2 us, head
       204.7 / 225.4 us) with the fold's buckets as good as random (380 of 631); the cause is the comparer's interface
-      dispatch in `Dictionary.FindValue` (two `call [r11]` per probe against direct `ValueTuple` calls).
+      dispatch in `Dictionary.FindValue` (two `call [r11]` per probe against direct `ValueTuple` calls). The fix it
+      points to (a wrapper key, `BytesKey<TKey>`, direct calls; then keys in registers) still measured 1.8-2.6x slower
+      in BenchmarkDotNet (LookupUnique 160.6 / 154.2 against 89.2 / 69.0 us) while a plain loop of the same lookups read
+      level or faster; that gap is open (owner-review.md; code on `wip-lane1-c18b`).
 - [ ] **C19. The core's unmanaged columns on mimalloc** (owner, 2026-11-07: option (b); `native-columns.md`), last in
       the lane and after Finish 1b's move: columns off `Array`, Dispose and a finalizer, `GC.AddMemoryPressure`, the
       NuGet `runtimes/` binaries and the pinned-heap fallback. Proof: `native-columns.md` section 4 (nothing slower,
