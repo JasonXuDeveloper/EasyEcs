@@ -157,6 +157,10 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
          `A.Position` and `B.Position` (both as parameters, in a filter, in a `Span<>` alias), nested types of one
          name in two outer types, a user type named like a BCL alias (`Vector`, `Unsafe`, `Span`), a type whose
          name starts with `__`; each compiles and the aliases read apart.
+      q. left by package B's `Code.Reserved`: a public type named `__X` in a referenced assembly, and the fixed
+         aliases a file always writes (`__ForEach`), can still be shadowed by a user's `__` type; read the
+         referenced assemblies' `__` names once per compilation (cheap: the metadata names, cached per reference),
+         and give `__ForEach` the same reservation; tests for both.
       l. (owner, L29) research: a generic, shared kernel instead of per-job loop text. Today every job carries its
          own drivers (the flat loop per width, the masked loop per width, the pass-mask loop, the tails), about 100
          lines around a body of a few lines. Design `docs/plans/designs/lane-kernel.md`:
