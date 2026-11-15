@@ -1486,7 +1486,8 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
             if (Elements is { Cells: true } cells) return $"{Name}: a tile per entity; {cells.Loops[0]}";
             if (Simd is not { } simd) return $"{Name}: scalar ({(Scalar.Length > 0 ? Scalar : "not a vector kernel")}){(HasChaseTwin ? ", lookups prefetched past the cache" : "")}"
                 + (Elements is { } elements ? string.Concat(elements.Loops.Select(l => "; " + l)) : "");
-            var parts = new List<string> { $"vector (Vector512 or Vector<{simd.Lane}>)" };
+            var lanes = LaneStepOf(simd);
+            var parts = new List<string> { lanes != null ? "vector (lane kernel: Vector512, Vector256, Vector128)" : $"vector (Vector512 or Vector<{simd.Lane}>)" };
             if (simd.Flat != null) parts.Add("flat");
             else if (simd.Interleaves) parts.Add("interleaved fields");
             if (simd.Wide != null)

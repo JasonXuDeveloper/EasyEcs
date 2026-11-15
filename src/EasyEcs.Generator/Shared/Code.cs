@@ -28,7 +28,7 @@ internal static class Code
 
     /// <summary>
     /// The long names generated code repeats most (vector types and their static classes, Unsafe, MemoryMarshal, the
-    /// inlining attribute, Interleaved), each written once in a file-level alias block (<c>using __V512_float =
+    /// inlining attribute, Interleaved, the lane kernel), each written once in a file-level alias block (<c>using __V512_float =
     /// global::System.Runtime.Intrinsics.Vector512&lt;float&gt;;</c>) and by its alias everywhere else: an alias names the
     /// same type, so the IL is the same and only the text shrinks (docs/plans/designs/generated-text.md kind 2). The aliases start
     /// with <c>__</c>, names no user type takes (one named so in an enclosing namespace would win over the alias). A
@@ -62,6 +62,8 @@ internal static class Code
         ("global::System.Runtime.CompilerServices.MethodImpl", "__MethodImpl", "global::System.Runtime.CompilerServices.MethodImplAttribute"),
         ("global::System.Runtime.InteropServices.MemoryMarshal", "__MemoryMarshal", "global::System.Runtime.InteropServices.MemoryMarshal"),
         ("global::EasyEcs.Interleaved", "__Interleaved", "global::EasyEcs.Interleaved"),
+        ("global::EasyEcs.LaneKernel", "__LaneKernel", "global::EasyEcs.LaneKernel"),
+        ("global::EasyEcs.ILaneStep4", "__ILaneStep4", "global::EasyEcs.ILaneStep4"),
     ];
 
     /// <summary>
