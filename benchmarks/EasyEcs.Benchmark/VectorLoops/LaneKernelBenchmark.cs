@@ -284,7 +284,10 @@ internal static class LaneJobs
     }
 }
 
-/// <summary>The three jobs in the typed form (ILane: one lane type per width and element type, item l2).</summary>
+/// <summary>
+/// The three jobs in the typed form (ILane: one lane type per width and element type, item l2), a step per vector
+/// (LaneStep4: package D's form, whose uniform the JIT left broadcast in the loop).
+/// </summary>
 internal static class TypedJobs
 {
     public static void Integrate(World world)
@@ -317,7 +320,7 @@ internal static class TypedJobs
         {
             r1 = ref MemoryMarshal.GetReference(c1);
             r2 = ref MemoryMarshal.GetReference(c2);
-            nint i = LaneKernel.Run(ref this, c1.Length);
+            nint i = LaneStep4.Run(ref this, c1.Length);
             for (; i < c1.Length; i++) Row(i);
         }
 
@@ -325,7 +328,7 @@ internal static class TypedJobs
         {
             r1 = ref MemoryMarshal.GetReference(c1);
             r2 = ref MemoryMarshal.GetReference(c2);
-            nint i = LaneKernel.RunMasked(ref this, pass, c1.Length);
+            nint i = LaneStep4.RunMasked(ref this, pass, c1.Length);
             for (; i < c1.Length; i++)
                 if (((pass >> (int)i) & 1) != 0) Row(i);
         }
@@ -362,7 +365,7 @@ internal static class TypedJobs
             r2 = ref MemoryMarshal.GetReference(c2);
             r3 = ref MemoryMarshal.GetReference(c3);
             u3 = s3.Value;
-            nint i = LaneKernel.Run(ref this, c1.Length);
+            nint i = LaneStep4.Run(ref this, c1.Length);
             for (; i < c1.Length; i++) Row(i);
         }
 
@@ -372,7 +375,7 @@ internal static class TypedJobs
             r2 = ref MemoryMarshal.GetReference(c2);
             r3 = ref MemoryMarshal.GetReference(c3);
             u3 = s3.Value;
-            nint i = LaneKernel.RunMasked(ref this, pass, c1.Length);
+            nint i = LaneStep4.RunMasked(ref this, pass, c1.Length);
             for (; i < c1.Length; i++)
                 if (((pass >> (int)i) & 1) != 0) Row(i);
         }
@@ -400,7 +403,7 @@ internal static class TypedJobs
         static bool IForEachBatch<Heat, Speed, Mass>.OneQuery => true;
     }
 
-    internal ref struct TallyJob : IForEachMasked<Ticks>, ILaneWalk4
+    internal ref struct TallyJob : IForEachMasked<Ticks>, IStudyWalk4
     {
         public Reduce<Tally> a1;
         private ref Ticks r1;
@@ -408,13 +411,13 @@ internal static class TypedJobs
         public void Execute(EntitySpan entities, Span<Ticks> c1)
         {
             r1 = ref MemoryMarshal.GetReference(c1);
-            LaneWalk4.RunWalk(ref this, c1.Length);
+            StudyWalk4.RunWalk(ref this, c1.Length);
         }
 
         public void Execute(EntitySpan entities, ulong pass, Span<Ticks> c1)
         {
             r1 = ref MemoryMarshal.GetReference(c1);
-            LaneWalk4.RunWalkMasked(ref this, pass, c1.Length);
+            StudyWalk4.RunWalkMasked(ref this, pass, c1.Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -462,7 +465,7 @@ internal static class WalkJobs
 
     private static readonly QueryFilter Unfiltered = default;
 
-    internal ref struct StepJob : IForEachMasked<Heat, Speed, Mass>, ILaneWalk4
+    internal ref struct StepJob : IForEachMasked<Heat, Speed, Mass>, IStudyWalk4
     {
         public ref Pull s3;
         private ref Heat r1;
@@ -474,7 +477,7 @@ internal static class WalkJobs
             r1 = ref MemoryMarshal.GetReference(c1);
             r2 = ref MemoryMarshal.GetReference(c2);
             r3 = ref MemoryMarshal.GetReference(c3);
-            LaneWalk4.RunWalk(ref this, c1.Length);
+            StudyWalk4.RunWalk(ref this, c1.Length);
         }
 
         public void Execute(EntitySpan entities, ulong pass, Span<Heat> c1, Span<Speed> c2, Span<Mass> c3)
@@ -482,7 +485,7 @@ internal static class WalkJobs
             r1 = ref MemoryMarshal.GetReference(c1);
             r2 = ref MemoryMarshal.GetReference(c2);
             r3 = ref MemoryMarshal.GetReference(c3);
-            LaneWalk4.RunWalkMasked(ref this, pass, c1.Length);
+            StudyWalk4.RunWalkMasked(ref this, pass, c1.Length);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
