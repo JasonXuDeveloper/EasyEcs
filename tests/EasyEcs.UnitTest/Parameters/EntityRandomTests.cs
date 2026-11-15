@@ -302,8 +302,7 @@ public class EntityRandomTests
         world.CreateEntities(entities, new Fraction(), new Spread(1), new Die(), new Hit(), new Noise());
         world.SetEntityRandom(Seed: 3);
         world.AddSystem<LaneDraws>();
-        Allocations.WarmUp(() => world.Update(), 20);
-        Assert.That(Allocations.Of(() => world.Update()), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 20, 1), Is.Zero);
     }
 
     [Test]

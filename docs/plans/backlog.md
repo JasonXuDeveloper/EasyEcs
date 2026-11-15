@@ -191,7 +191,9 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       the path runs only where Vector512 is not accelerated (Skylake-SP / X, Cascade Lake, Cooper Lake by default, or
       DOTNET_PreferredVectorBitWidth=256), so x64 machines from Ice Lake on keep their Vector512 loops. Load3 and the
       8-byte Load4 keep their forms (llvm-mca: no better). Numbers and listings in docs-todos.
-- [ ] **`fix-allocation-tests-warmup`**: 0 B tests that fail once in many full-suite runs on a loaded machine and
+- [ ] **`fix-allocation-tests-warmup`** handed back on its branch (causes, fix and proof in docs-todos): JIT compiles in
+      the window (`Allocations.Steady`), a Scratch list made late, a test frame that leaked links, and a core fix (a
+      merging parallel pair pass cut by count). The item as it was: 0 B tests that fail once in many full-suite runs on a loaded machine and
       never alone: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate` (net11.0, AVX-512 off, gate of
       f2da0801) and `NeighborTests.APassOverListsAllocatesNothingOnceWarm` (net10.0, 336 B, lane 1's gate). Suspected:
       a fixed warm-up count loses the race with tier-up (OSR / Tier1 of a job compiling inside the measured window)

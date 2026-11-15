@@ -524,10 +524,7 @@ public class StructuralLoopTests
             world.GetSingleton<Emitted<Fallen>>().Items.Clear();
             world.GetSingleton<Emitted<Peak>>().Items.Clear();
         }
-        for (int i = 0; i < 40; i++) Round(); // warm-up: tables, query caches, marks, JIT
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 8; i++) Round();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(Round, 40, 8), Is.Zero); // tables, query caches, marks
     }
 
     private static void AssertVectorized(World world)

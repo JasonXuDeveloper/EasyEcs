@@ -117,7 +117,6 @@ public class ForeignBodyTests
     {
         var entities = new Entity[1000];
         using var world = Make<ForeignRules>(entities.Length, 5, entities);
-        Allocations.WarmUp(() => world.Update(), 10);
-        Assert.That(Allocations.Of(() => world.Update()), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 10, 1), Is.Zero);
     }
 }

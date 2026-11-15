@@ -588,8 +588,7 @@ public class LaneMathTests
             LoweredKernels.Halve(world);
             LoweredKernels.Hyperbolic(world);
         }
-        Allocations.WarmUp(Step, 3);
-        Assert.That(Allocations.Of(Step), Is.Zero);
+        Assert.That(Allocations.Steady(Step, 3, 1), Is.Zero);
     }
 
     private static long Ulps(float a, float b)

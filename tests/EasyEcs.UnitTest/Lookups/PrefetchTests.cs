@@ -235,8 +235,7 @@ public class PrefetchTests
                 LookupKernels.Steer(world);
             }
 
-            Allocations.WarmUp(Frame, 50);
-            Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) Frame(); }), Is.Zero);
+            Assert.That(Allocations.Steady(Frame, 50, 10), Is.Zero);
         });
     }
 
@@ -569,8 +568,7 @@ public class PrefetchTests
                     c = beacons.Has(t.Target) ? new Course(beacons.Read(t.Target).X - b.X, b.Y) : default);
             }
 
-            Allocations.WarmUp(Frame, 50); // until the JIT is done with the jobs' loops (none compiles in the window)
-            Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) Frame(); }), Is.Zero);
+            Assert.That(Allocations.Steady(Frame, 50, 10), Is.Zero); // until the JIT is done with the jobs' loops (none compiles in the window)
         });
     }
 

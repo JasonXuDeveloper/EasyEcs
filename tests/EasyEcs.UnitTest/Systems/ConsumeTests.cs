@@ -210,22 +210,14 @@ public class ConsumeTests
             world.CreateEntity(new Spawn(2));
         }
 
-        for (int i = 0; i < 20; i++)
+        void Step()
         {
             Fill();
             world.Update();
             world.Update();
         }
 
-        Assert.That(Allocations.Of(() =>
-        {
-            for (int i = 0; i < 50; i++)
-            {
-                Fill();
-                world.Update();
-                world.Update();
-            }
-        }), Is.Zero);
+        Assert.That(Allocations.Steady(Step, 20, 50), Is.Zero);
         Assert.That(world.Count<Hit>(), Is.Zero);
     }
 }

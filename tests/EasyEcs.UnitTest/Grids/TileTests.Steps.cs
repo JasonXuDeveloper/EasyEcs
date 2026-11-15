@@ -964,8 +964,7 @@ public partial class TileTests
         for (int w = 0; w < worlds.Length; w++)
         {
             var world = worlds[w];
-            for (int i = 0; i < 200; i++) world.Update(); // every thread gets its frame, every tile its second buffer
-            Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero, names[w]);
+            Assert.That(Allocations.Steady(world.Update, 200, 100), Is.Zero, names[w]); // every thread gets its frame, every tile its second buffer
         }
     }
 
@@ -1010,8 +1009,7 @@ public partial class TileTests
         }
         world.AddSystem<FarHeatSystem>();
         Assert.That(ComponentType<FarHeat>.Bit, Is.GreaterThan(255));
-        for (int i = 0; i < 200; i++) world.Update();
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 200, 100), Is.Zero);
     }
 
     /// <summary>A source that moves along its tile every update: the field around it keeps changing.</summary>
@@ -1329,8 +1327,7 @@ public partial class TileTests
             cells[++tick % 256] = new Spring(1);
             world.Update();
         }
-        Allocations.WarmUp(Step, 200);
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) Step(); }), Is.Zero);
+        Assert.That(Allocations.Steady(Step, 200, 100), Is.Zero);
     }
 
     // A spring wandering into plates its scent never reached (TileColdStartBenchmark's Linger) allocates nothing: a tile

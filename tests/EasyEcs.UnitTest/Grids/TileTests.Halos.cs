@@ -160,8 +160,7 @@ public partial class TileTests
     {
         var (world, _) = KeptWorld(threads);
         using var __ = world;
-        Allocations.WarmUp(world.Update, 200);
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 200, 100), Is.Zero);
         Assert.That(world.KeptNeighbors<KeptPlate>(), Is.EqualTo(Torus * Torus));
     }
 }

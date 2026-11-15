@@ -619,22 +619,14 @@ public class NeighborTests
     public void APassAllocatesNothingOnceWarm()
     {
         using var world = Crowd(5000, 50f, 6, tables: true);
-        for (int i = 0; i < 200; i++) // through re-sorts of the order's cadence (10 updates), past tiering and OSR under every ISA
+        void Step()
         {
             Neighbors.Reset(world);
             Neighbors.Separate(world);
             world.Update();
         }
 
-        Assert.That(Allocations.Of(() =>
-        {
-            for (int i = 0; i < 20; i++)
-            {
-                Neighbors.Reset(world);
-                Neighbors.Separate(world);
-                world.Update();
-            }
-        }), Is.EqualTo(0));
+        Assert.That(Allocations.Steady(Step, 200, 20), Is.Zero); // through re-sorts of the order's cadence (10 updates)
     }
 
     // Equal entry by entry: the first difference named (a large dictionary's mismatch message takes minutes).
@@ -723,22 +715,14 @@ public class NeighborTests
     public void AParallelPassAllocatesNothingOnceWarm()
     {
         using var world = Crowd(30000, 60f, 6, tables: true, threads: 4);
-        for (int i = 0; i < 200; i++) // re-sorts, past tiering and OSR
+        void Step()
         {
             Neighbors.Reset(world);
             Neighbors.SeparateParallel(world);
             world.Update();
         }
 
-        Assert.That(Allocations.Of(() =>
-        {
-            for (int i = 0; i < 20; i++)
-            {
-                Neighbors.Reset(world);
-                Neighbors.SeparateParallel(world);
-                world.Update();
-            }
-        }), Is.EqualTo(0));
+        Assert.That(Allocations.Steady(Step, 200, 20), Is.Zero); // through re-sorts
     }
 
     private static World Pickup(int collectors, int loot, float extent, int seed, bool tables)
@@ -992,24 +976,20 @@ public class NeighborTests
         using var world = Crowd(5000, 100f, 6, tables: true);
         WithLists(PairState.ListMode.On, () =>
         {
-            for (int i = 0; i < 200; i++) // lists built, kept and built again through re-sorts, the margin settled, past tiering and OSR
+            int i = 0;
+            void Step()
             {
                 Neighbors.Reset(world);
                 Neighbors.Separate(world);
                 foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + (i % 20 < 10 ? 0.01f : -0.01f), item.Component1.Y);
                 world.Update();
+                i++;
             }
 
-            Assert.That(Allocations.Of(() =>
-            {
-                for (int i = 0; i < 20; i++)
-                {
-                    Neighbors.Reset(world);
-                    Neighbors.Separate(world);
-                    foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + (i % 20 < 10 ? 0.01f : -0.01f), item.Component1.Y);
-                    world.Update();
-                }
-            }), Is.EqualTo(0));
+            // Lists built, kept and built again through re-sorts, the margin settled. After 200 fixed runs and a lambda
+            // of its own, the window once held 7 compiles on this thread (the lambda, then the on-stack replacements of
+            // the lists' rare paths: Build, Moved, Save, the job's rows), 2 of which allocated 168 B each.
+            Assert.That(Allocations.Steady(Step, 200, 20), Is.Zero);
             return 0;
         });
     }
@@ -1115,6 +1095,35 @@ public class NeighborTests
     }
 
     [Test]
+    public void AParallelPassWithResultsIsCutByCountWhateverItsRunsCost()
+    {
+        // A pass that merges per chunk keeps a copy of its job per chunk. Cut by the measured cost, a run slowed down by a
+        // loaded machine cut it into more chunks than any before, and the copies grew long after the warm-up (8,216 B in
+        // PassesWithResultsAndMutsAllocateNothingOnceWarm), at chunk boundaries no earlier run had.
+        using var world = Crowd(30000, 60f, 6, tables: true, threads: 4);
+        world.AddSingleton<PairTally>();
+        void Step()
+        {
+            world.GetSingleton<PairTally>() = default;
+            Neighbors.TallyParallel(world);
+        }
+
+        Allocations.WarmUp(Step, 20);
+        var expected = world.GetSingleton<PairTally>();
+        const System.Reflection.BindingFlags Private = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        var works = (World.ParallelWork[])typeof(World).GetField("_parallelWork", Private)!.GetValue(world)!;
+        var chunks = System.Array.Find(works, w => w != null && w.GetType().Name.StartsWith("PairChunks"));
+        var size = chunks!.GetType().GetField("_clusters", Private)!;
+        int cut = (int)size.GetValue(chunks)!;
+        foreach (long ticks in new[] { long.MaxValue / 4, 1L }) // runs ever slower, then ever faster (each moves the average by 1/8 at most)
+        {
+            for (int i = 0; i < 300; i++) chunks.Cost(ticks);
+            Assert.That(Allocations.Of(Step), Is.Zero);
+            Assert.That(((int)size.GetValue(chunks)!, world.GetSingleton<PairTally>()), Is.EqualTo((cut, expected)), "the same chunks, the same result");
+        }
+    }
+
+    [Test]
     public void PassesWithResultsAndMutsAllocateNothingOnceWarm()
     {
         using var world = Crowd(30000, 60f, 6, tables: true, threads: 4);
@@ -1122,16 +1131,13 @@ public class NeighborTests
         WithItems(pickup);
         // Until the JIT settles, not a fixed count (tests/AGENTS.md); every buffer of both worlds' pair passes reaches its
         // size in their first pass, the same in every run (traced at each growth site), so nothing of theirs grows here.
-        Allocations.WarmUp(() => Passes(world, pickup), 200);
-        Assert.That(Allocations.Of(() =>
-        {
-            for (int i = 0; i < 20; i++) Passes(world, pickup);
-        }), Is.EqualTo(0));
+        void Step() => Passes(world, pickup);
+        Assert.That(Allocations.Steady(Step, 200, 20), Is.Zero);
         // Nothing rented from ArrayPool.Shared either (the re-sorts' scratch is the world's): on a loaded machine the pool
         // drops its arrays at every gen2 collection, and a rent then allocates (8216 B in a loaded suite run).
         Assert.That(Allocations.PoolRents(() =>
         {
-            for (int i = 0; i < 20; i++) Passes(world, pickup);
+            for (int i = 0; i < 20; i++) Step();
         }), Is.Zero);
 
         static void Passes(World world, World pickup)
@@ -1151,21 +1157,13 @@ public class NeighborTests
     public void AWritingPassAllocatesNothingOnceWarm()
     {
         using var world = Pickup(1000, 3000, 40f, 6, true);
-        Allocations.WarmUp(() =>
+        void Step()
         {
             ResetPickup(world);
             Neighbors.Pick(world);
             world.Update();
-        }, 200); // re-sorts, until the JIT settles
+        }
 
-        Assert.That(Allocations.Of(() =>
-        {
-            for (int i = 0; i < 20; i++)
-            {
-                ResetPickup(world);
-                Neighbors.Pick(world);
-                world.Update();
-            }
-        }), Is.EqualTo(0));
+        Assert.That(Allocations.Steady(Step, 200, 20), Is.Zero); // through re-sorts
     }
 }

@@ -266,7 +266,6 @@ public class HelperLoopTests
             HelperPasses.HitParallel(world);
         }
 
-        Allocations.WarmUp(Frame, 50); // every table the rules reach exists (Downed), until the JIT settles
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) Frame(); }), Is.Zero);
+        Assert.That(Allocations.Steady(Frame, 50, 10), Is.Zero); // every table the rules reach exists (Downed), until the JIT settles
     }
 }
