@@ -144,6 +144,15 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
          expression when the lane is not read again; a masked write likewise selects straight into the store.
       o. the flat and the masked `Execute` repeat the same preamble (column refs, `rows`, the element refs) and
          the per-row tail; with item l's kernel both go away, without it they could share one local function.
+      p. (owner's question, 2026-11-15: "如果用了A.Position和B.Position会怎样") two types of one simple name in one
+         file. Tidy.AliasOf today: the first met takes `__Position`, the second `__B_Position` (its outer name), a
+         third or a closed generic over them a number (`__Span_Position2`): correct, but the reader cannot tell
+         which is which. Make it symmetric: when a file names two types with one simple name, every one of them
+         is qualified by as many outer names as tell them apart (`__A_Position`, `__B_Position`,
+         `__Span_A_Position`), no numbers unless the full names differ only by arity. Tests: a system over
+         `A.Position` and `B.Position` (both as parameters, in a filter, in a `Span<>` alias), nested types of one
+         name in two outer types, a user type named like a BCL alias (`Vector`, `Unsafe`, `Span`), a type whose
+         name starts with `__`; each compiles and the aliases read apart.
       l. (owner, L29) research: a generic, shared kernel instead of per-job loop text. Today every job carries its
          own drivers (the flat loop per width, the masked loop per width, the pass-mask loop, the tails), about 100
          lines around a body of a few lines. Design `docs/plans/designs/lane-kernel.md`:
