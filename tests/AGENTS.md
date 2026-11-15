@@ -106,6 +106,9 @@ Entities/InstantiateTests.cs  Instantiate
 ## Generator/
 
 ```
+Generator/AliasTests.cs              a generated file's aliases where type names meet: two types of one simple name (each
+                                     qualified by the outer names that tell it apart), nested types of one name, user types
+                                     named like the BCL aliases, names starting with __ the user's code declares; each compiles
 Generator/GeneratedTextTests.cs      the generated text's dead lines counted per kind over the corpora of every vector form
                                      (global:: outside the alias block, needless parentheses, identity copies, unread locals,
                                      marks zeroed then OR-ed once, empty methods, constants made in a method), each against a

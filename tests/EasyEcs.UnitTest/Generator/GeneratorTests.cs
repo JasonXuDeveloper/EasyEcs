@@ -871,9 +871,8 @@ public class GeneratorTests
         "var __m1 = __Vec.Equals<int>(__c2_0, __Vec.Create<int>(1));",
         "var __m3 = __Vec.Equals<int>(__c2_0, __Vec.Create<int>(2));",
         "var __m4 = __m1 | __m3;",
-        "__c1_0 = __Vec.ConditionalSelect(~__m4, __c1_0 + __Vec_int.One, __c1_0);",                 // the default, first
-        "__c1_0 = __Vec.ConditionalSelect(__m4, __Vec.Create<int>(0), __c1_0);",
-        "__c1_0 = __Vec.ConditionalSelect(~__m4 & __pass, __c1_0 + __Vec_int.One, __c1_0);")]      // in a masked word
+        "__c1_0 = __Vec.ConditionalSelect(~__m4, __c1_0 + __Vec_int.One, __Vec.Create<int>(0));",  // the default first, both sections one write
+        "__c1_0 = __Vec.ConditionalSelect(__pass, __Vec.ConditionalSelect(~__m4, __c1_0 + __Vec_int.One, __u5), __c1_0);")] // a masked word selects by __pass once
     public void ASwitchIsMasksOfItsArms(string method, params string[] lines)
     {
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, $"[EcsSystem] public ref struct S {{ {method} }}"), out var output, out _);
@@ -1390,7 +1389,7 @@ public class GeneratorTests
         "BufferElements", "QueryShapes", "SavedComponents", "SavedBuffers", "ModuleInitializers", "Parts",
         "GroupBy", "TargetPolicies", "NotSaved", "EntityMethods", "LambdaPasses", "LambdaFiles", "TileLoads", "TileLoadFiles", "Views", "Prefabs",
         "SystemPlaces", "SystemFusions", "SetFusions", "ForEachBodies", "DrainBodies", "EntityMethodBodies", "SystemCode", "ForEachCode", "DrainCode",
-        "EntityMethodCode", "RecordedTypes", "TileParts",
+        "EntityMethodCode", "RecordedTypes", "TileParts", "ReservedNames",
         "IsEasyEcsCore", // ArityGenerator's one stage: the package ships it, idle outside EasyEcs.Core
     ];
 

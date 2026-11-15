@@ -512,7 +512,7 @@ public sealed partial class SystemGenerator
     /// The file of a pair of systems: both systems' methods (accessors and jobs, numbered first's then second's), the
     /// walk's job and the code the set calls (<c>Update</c>).
     /// </summary>
-    private static void AddFusion(SourceProductionContext context, FusionPair pair)
+    private static void AddFusion(SourceProductionContext context, FusionPair pair, EquatableArray<string> reserved)
     {
         var both = pair.Both;
         var first = pair.First.Owner;
@@ -558,6 +558,6 @@ public sealed partial class SystemGenerator
             sb.Append($"        if (world.Count<{query}>(in __ForEach.{name}Filter) < global::EasyEcs.SystemCode.FusedRows) return false; // in cache: each pass on its own\n");
         Walk(false, "        ");
         sb.Append("    }\n}\n");
-        context.AddSource($"{pair.First.Owner.HintName}+{pair.Second.Owner.HintName}.Fusion.g.cs", SourceText.From(Code.Aliased(sb.ToString()), Encoding.UTF8));
+        context.AddSource($"{pair.First.Owner.HintName}+{pair.Second.Owner.HintName}.Fusion.g.cs", SourceText.From(Code.Aliased(sb.ToString(), reserved), Encoding.UTF8));
     }
 }

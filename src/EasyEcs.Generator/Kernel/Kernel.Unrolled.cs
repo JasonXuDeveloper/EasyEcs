@@ -89,6 +89,7 @@ internal sealed partial class Kernel
         for (int j = 0; j < declared.Length; j++)
             if (Prefix(declared[j]) != Prefix(first[j]) || first.Contains(declared[j])) return;
         foreach (var name in first) _implied.Remove(name); // what a mask of the first step proved is not the later step's
+        _lastWrite = null; // the text after it is rewritten
         _body.Rewrite(start, text =>
         {
             for (int j = 0; j < declared.Length; j++)
