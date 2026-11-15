@@ -3741,9 +3741,12 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
   not its words" (stamping a word ahead was the faster form on paper and was refused: a loop that breaks would report
   rows it never visited to `Changed<T>` passes; the exact form got the win: QueryTick about 0.5-0.6x, numbers in the
   backlog's C12).
-- decisions.mdx + .zh (dropped, with numbers; text in owner-review.md): C18 integer tuple keys hashed by their bytes
-  (a comparer: its interface calls cost more than the hash saves; a wrapper key: still slower in BenchmarkDotNet, the gap open). Roadmap
-  "Dropped" names it.
+- changelog.mdx + .zh (`### Performance`): lookups of a value index keyed by a tuple of integers (`(int, int)` grid
+  cells) take about half the time (C18); link the indexes page. decisions.mdx + .zh: a record "integer tuple keys are
+  the dictionary's own wrapper key, read element by element": a comparer handed to the dictionary is an interface call
+  per hash and compare; a wider load over the narrower stores that wrote the key cannot be forwarded (the BytesKey
+  read element by element); numbers in the backlog's C18. guide (indexes, "What it costs") + zh: an integer tuple key
+  costs no more than an int key's lookup.
 
 ## feat-interleaved-256 (from feat-net11's B1: two-source permutes in Interleaved's 256-bit forms)
 
