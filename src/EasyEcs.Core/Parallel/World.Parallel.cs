@@ -74,15 +74,17 @@ public sealed partial class World
     /// Rows per chunk of a pass of <paramref name="rows"/> rows that merges per chunk: a share of <see cref="MergedChunks"/>,
     /// cut by count, never by cost (nothing for <paramref name="work"/> to learn), so its result and its chunk count,
     /// which sizes the copies it keeps, never follow how long a run took. Whole 4,096-row blocks when it
-    /// <paramref name="stamps"/> change ticks.
+    /// <paramref name="stamps"/> change ticks; else at least <paramref name="least"/> rows (1,024 for a row pass: light
+    /// rows; a pair pass passes 64, one word: its rows each meet a cluster's neighbors, and a crowd of 1,000 cut into
+    /// one chunk of 1,024 ran 2.8 times slower than cut by its cost, PairsBenchmark.GeneratedParallelResult).
     /// </summary>
-    internal static int MergedChunkRows(ParallelWork work, long rows, bool stamps)
+    internal static int MergedChunkRows(ParallelWork work, long rows, bool stamps, int least = 1024)
     {
         work.Items = 0;
         long share = rows / MergedChunks;
         return stamps
             ? (int)Math.Clamp((share + 4095) & ~4095L, 4096, MaxChunkSize)
-            : (int)Math.Clamp((share + 63) & ~63L, 1024, MaxChunkSize);
+            : (int)Math.Clamp((share + 63) & ~63L, least, MaxChunkSize);
     }
 
     /// <summary>
