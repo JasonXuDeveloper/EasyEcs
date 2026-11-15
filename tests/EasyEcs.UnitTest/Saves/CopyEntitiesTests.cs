@@ -396,8 +396,7 @@ public class CopyEntitiesTests
             from.CopyEntities<Replica>(to, CollectionsMarshal.AsSpan(ids), in set, copied);
         }
 
-        Allocations.WarmUp(Exchange, 10);
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 50; i++) Exchange(); }), Is.Zero);
+        Assert.That(Allocations.Steady(Exchange, 10, 50), Is.Zero);
         Assert.That((to.Count<Replica>(), copied[^1].Read<Health>().Value), Is.EqualTo((ids.Count, 999)));
     }
 }

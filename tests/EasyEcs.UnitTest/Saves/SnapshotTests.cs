@@ -333,10 +333,9 @@ public class SnapshotTests
             world.Restore(snapshot);
         }
 
-        for (int round = 0; round < 4; round++) Tick(round);              // rehearsals: the first writes copy the shared lists
-        long before = Allocations.Baseline();
-        for (int round = 0; round < 20; round++) Tick(round);
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        int next = 0;
+        void Step() => Tick(next++);
+        Assert.That(Allocations.Steady(Step, 4, 20), Is.Zero); // rehearsals: the first writes copy the shared lists
         Assert.That(entities[0].Read<DynamicBuffer<int>>()[0], Is.EqualTo(1));
         Assert.That(entities[0].Read<Shield>().Value, Is.EqualTo(1));
     }

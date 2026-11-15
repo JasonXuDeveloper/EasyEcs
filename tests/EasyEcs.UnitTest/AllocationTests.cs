@@ -24,19 +24,11 @@ public class AllocationTests
         world.AddSystem<ReduceTests.ParallelCensus>();
         world.AddSystem<ScratchTests.SumDigits>();
         world.AddSystem<LookupTests.SumFollowers>();
-        Allocations.WarmUp(world.Update, 30); // until the JIT is done with the jobs' loops (none compiles in the window)
-        // One update at a time: it fails once in many full-suite runs and never alone, so a failure names the update,
-        // its bytes and the helper threads the process had (another test's world may have started more).
-        long total = 0, first = 0;
-        int at = -1;
-        for (int i = 0; i < 100; i++)
-        {
-            long bytes = Allocations.Of(() => world.Update());
-            if (bytes != 0 && at < 0) (at, first) = (i, bytes);
-            total += bytes;
-        }
-
-        Assert.That(total, Is.Zero, $"update {at} allocated {first} B first, {total} B in all; {Workers.Count} helper threads");
+        // SumDigits' list is made on a thread's first row (Scratch<T>), and the stage hands chunks to whichever thread is
+        // free: this thread may run its first row long after any warm-up (120 B, List<int> and its int[16], at update 218
+        // of a loaded run), so it makes its own first.
+        ScratchTests.MakeThisThreadsList();
+        Assert.That(Allocations.Steady(world.Update, 30, 100), Is.Zero);
         Assert.That(leader.Found.Followers, Is.EqualTo(World.MaxChunkSize));
     }
 
@@ -114,10 +106,7 @@ public class AllocationTests
             _ = probe.Run<Health, Heal>(ref heal) && probe.Run<Health, Heal>(ref heal, QueryFilter.Create().With<Frozen>());
         }
 
-        Allocations.WarmUp(Frame, 10); // query caches, edges, until the JIT settles
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 100; i++) Frame();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(Frame, 10, 100), Is.Zero); // query caches, edges
     }
 
     [Test]
@@ -145,10 +134,7 @@ public class AllocationTests
 
         for (int i = 0; i < 10; i++) Frame();
         world.TrimExcess();
-        Allocations.WarmUp(Frame, 10); // the dropped tables and edges come back once, until the JIT settles
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 100; i++) Frame();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(Frame, 10, 100), Is.Zero); // the dropped tables and edges come back once
     }
 
     [Test]
@@ -189,10 +175,7 @@ public class AllocationTests
             _ = world.Any<Armor>(changed);
         }
 
-        Allocations.WarmUp(Frame, 200); // every kid replaced, query caches, until the JIT settles
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 500; i++) Frame();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(Frame, 200, 500), Is.Zero); // every kid replaced, query caches
     }
 
     [Test]
@@ -256,10 +239,8 @@ public class AllocationTests
             leaf.Remove<Lease>();
         }
 
-        Allocations.WarmUp(Frame, 3000); // keys sorted, buffers, links, stacks and tables grown, until the JIT settles
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 500; i++) Frame();
-        Assert.That((GC.GetAllocatedBytesForCurrentThread() - before, world.EntityCount), Is.EqualTo((0L, players.Length + walkers.Length)));
+        // Keys sorted, buffers, links, stacks and tables grown.
+        Assert.That((Allocations.Steady(Frame, 3000, 500), world.EntityCount), Is.EqualTo((0L, players.Length + walkers.Length)));
     }
 
     [Test]
@@ -296,10 +277,7 @@ public class AllocationTests
             }
         }
 
-        Allocations.WarmUp(Frame, 50); // query caches, until the JIT settles
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 300; i++) Frame();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(Frame, 50, 300), Is.Zero); // query caches
     }
 
     /// <summary>A region of a map, one per key, with a list of cells: what a server unloads and loads back.</summary>
@@ -340,10 +318,8 @@ public class AllocationTests
         }
 
         int next = 0;
-        Allocations.WarmUp(() => Cycle(next++), 2000);
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 500; i++) Cycle(next++);
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        void Step() => Cycle(next++);
+        Assert.That(Allocations.Steady(Step, 2000, 500), Is.Zero);
     }
 
     [Test]
@@ -555,10 +531,7 @@ public class AllocationTests
             if (load) world.Load(bytes);
         }
 
-        Allocations.WarmUp(Cycle, 50);
-        long before = Allocations.Baseline();
-        for (int round = 0; round < 200; round++) Cycle();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(Cycle, 50, 200), Is.Zero);
         Assert.That(ratings.Find(3).Count, Is.EqualTo(43));
         if (links) Assert.That(parties.Find(party.Id).Count, Is.EqualTo(300));
     }
@@ -569,8 +542,7 @@ public class AllocationTests
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
         world.CreateEntities(new Entity[World.MaxChunkSize * 4], new ParallelTests.Counter(0), new ParallelTests.Seen(1));
         world.AddSystem<ParallelTests.ChunkedIncrement>();
-        Allocations.WarmUp(world.Update, 10);
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 500; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 10, 500), Is.Zero);
     }
 
     [Test]
@@ -582,8 +554,7 @@ public class AllocationTests
         world.CreateEntities(new Entity[100], new Position(0, 0), new Velocity(1, 1));
         world.AddSystem<ParallelTests.ChunkedIncrement>();
         var moves = world.AddSystem<SystemTests.Moves>();
-        Allocations.WarmUp(world.Update, 10);
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 500; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 10, 500), Is.Zero);
         Assert.That(moves.Stats.LastEntities, Is.EqualTo(100));
     }
 

@@ -1489,8 +1489,7 @@ public partial class TileTests
         using var b = life;
         foreach (var world in new[] { heat, life })
         {
-            for (int i = 0; i < 30; i++) world.Update(); // every thread gets its texture
-            Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
+            Assert.That(Allocations.Steady(world.Update, 30, 100), Is.Zero); // every thread gets its texture
         }
     }
 

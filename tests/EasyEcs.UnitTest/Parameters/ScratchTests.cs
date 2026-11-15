@@ -86,6 +86,19 @@ public class ScratchTests
         return world;
     }
 
+    /// <summary>
+    /// Has this thread make its own <see cref="Digits"/> list (the scratch is per method and thread, of any world; the
+    /// list is made on the thread's first row). A parallel pass hands its chunks to whichever thread is free, so after
+    /// any warm-up the calling thread may not have run a row of <see cref="SumDigits"/> yet, and its first row long
+    /// after allocates the list inside a 0 B measurement. A world of one thread runs every row here.
+    /// </summary>
+    internal static void MakeThisThreadsList()
+    {
+        using var alone = Numbered(64, threads: 1);
+        alone.AddSystem<SumDigits>();
+        alone.Update();
+    }
+
     private static int SumOfDigits(int n)
     {
         int total = 0;
@@ -165,8 +178,8 @@ public class ScratchTests
     {
         using var world = Numbered(World.MaxChunkSize * 4);
         world.AddSystem<SumDigits>();
-        for (int i = 0; i < 20; i++) world.Update(); // every helper thread has created its list
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
+        MakeThisThreadsList();
+        Assert.That(Allocations.Steady(world.Update, 20, 200), Is.Zero); // every helper thread has created its list
     }
 
     [Test]
@@ -184,10 +197,7 @@ public class ScratchTests
             Assert.That(item.DigitSum.Value, Is.EqualTo(SumOfDigits(item.Number.Value) + bonus));
         }
 
-        for (int i = 0; i < 10; i++) world.Update();
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 100; i++) world.Update();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 10, 100), Is.Zero);
     }
 
     [Test]

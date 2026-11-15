@@ -21,14 +21,22 @@ rest of the thread's allocation context to the count although nothing was alloca
 never the process (`GC.GetTotalAllocatedBytes`): the test host's own threads allocate now and then (168 B at 1
 thread with every method of the walk compiled, ATileThatChangesLateDoesNotAllocate); a parallel pass's helpers are
 covered because the calling thread steps chunks too (that test failed on this thread's bytes alone, 696-1016 B,
-before its fix). A warm-up before a 0 B
-check runs through `Allocations.WarmUp(step, least)`, which goes on until the JIT has settled: in the full suite a loop
-can still run Tier0 code after a fixed warm-up, and its on-stack replacement compiles (and allocates) on the measuring
-thread (fix-flaky-alloc). The fixed warm-ups left in KernelTests race the same way (moved once
-feat-inner-loops merges). A 0 B check of a path that could rent from `ArrayPool` also asserts
+before its fix). A 0 B check of code run
+again and again measures through `Allocations.Steady(step, least, runs)`: `Allocations.WarmUp` of that same delegate
+(at least `least` runs, then until no method compiled in the process and nothing allocated on this thread for a stretch
+of runs that follows the longest gap between this thread's compiles), then `runs` runs of it. Never warm up one piece of
+code and measure a lambda written around it, never a fixed warm-up: a compile on the measuring thread allocates (an
+on-stack replacement of a Tier0 loop, 168 B: a string and a `TypeName`), and in a loaded full suite the lambda itself
+and the replacements of a pass's rare paths compiled inside the window (NeighborTests' lists, 336 B;
+fix-allocation-tests-warmup). A failure writes how many methods this thread compiled in the window to the test's output.
+A parallel pass hands its chunks to any thread, so per-thread state made on a thread's first row (a `Scratch<T>`'s
+list) is made by the measuring thread first (`ScratchTests.MakeThisThreadsList`). A 0 B check of a path that could rent from `ArrayPool` also asserts
 `Allocations.PoolRents(run)` is 0: on a quiet machine a rent reuses the pool's array, but under high memory load the
 pool empties at every gen2 collection (which `Allocations.Of` starts with), so the rent allocates (OrderTests,
 NeighborTests; audit-core).
+
+`HugePagesTests` goes Inconclusive when the kernel has no free 2 MiB page, so the suite's total of passed tests can
+differ by one between runs: expected.
 
 `tests/EasyEcs.UnitTest/` NUnit, one file per feature
 
@@ -38,7 +46,7 @@ NeighborTests; audit-core).
 AllocationTests.cs    the 0 B budget of steady-state ticks, structural changes, saves and loads
 BattleServerTests.cs  the world of docs/content/example.mdx as a whole (BattleServer.cs linked from
                       EasyEcs.Benchmark)
-Fixtures.cs           the shared test components; Allocations (Of, Baseline, WarmUp, PoolRents)
+Fixtures.cs           the shared test components; Allocations (Of, Baseline, Steady, WarmUp, PoolRents)
 LocalityTests.cs      the phase 0 prototypes of docs/plans/designs/locality.md and borrowed-ideas.md
                       (benchmarks/EasyEcs.Benchmark/Locality linked): each against its plain form, 0 B per
                       tick

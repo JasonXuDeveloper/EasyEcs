@@ -205,8 +205,7 @@ public class DrainTests
         using var _w = world;
         world.AddSystem<Strikes>();
         world.AddSystem<Book>();
-        for (int i = 0; i < 10; i++) world.Update();
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 10, 200), Is.Zero);
     }
 
     // ---------------- generated code and rules ----------------

@@ -285,8 +285,7 @@ public class EmitTests
         {
             world.AddSystem<ParallelStrikes>();
             world.AddSystem<ApplyHits>();
-            for (int i = 0; i < 30; i++) world.Update();
-            Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
+            Assert.That(Allocations.Steady(world.Update, 30, 100), Is.Zero);
         }
     }
 
@@ -299,8 +298,7 @@ public class EmitTests
         world.CreateEntities(new Entity[World.MaxChunkSize * 4], new Attack(1), new Aim(aimed.Id));
         var strikes = world.AddSystem<ParallelStrikes>();
         world.AddSystem<ApplyHits>();
-        for (int i = 0; i < 30; i++) world.Update();
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }, () => strikes.Stats.TotalAllocated), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 30, 100, () => strikes.Stats.TotalAllocated), Is.Zero);
     }
 
     // Segments: a parallel pass hands its chunks' lists to Emitted<T> (BufferStore.Segmented), joined only when the

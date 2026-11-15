@@ -488,8 +488,8 @@ public class LambdaPassTests
     public void PassesInOneWalkAllocateNothing()
     {
         using var world = Filled(SystemCode.FusedRows + 300);
-        Allocations.WarmUp(() => Fused(world, 0.5f), 10);
-        Assert.That(Allocations.Of(() => Fused(world, 0.5f)), Is.Zero);
+        void Step() => Fused(world, 0.5f);
+        Assert.That(Allocations.Steady(Step, 10, 1), Is.Zero);
     }
 
     [Test]

@@ -350,7 +350,6 @@ public class LookupTests
         world.CreateEntities(new Entity[World.MaxChunkSize * 2], new Wants(7), new Found(), new Place(1, 1));
         world.AddSystem<FindLogin>();
         world.AddSystem<CountFollowers>();
-        for (int i = 0; i < 10; i++) world.Update();
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 10, 200), Is.Zero);
     }
 }

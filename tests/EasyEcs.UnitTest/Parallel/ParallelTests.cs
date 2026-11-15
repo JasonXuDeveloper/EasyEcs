@@ -354,8 +354,7 @@ public class ParallelTests
         world.AddSystem<Movement>();
 
         // Warm-up: helpers, JIT tiers, and the thread pool's own worker threads (started from the queuing thread).
-        for (int i = 0; i < 500; i++) world.Update();
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 500, 100), Is.Zero);
     }
 
     private struct StampId : IForEach<Counter>, INoStructuralChanges
@@ -608,7 +607,8 @@ public class ParallelTests
 
         Assert.That(alone, Is.True, "tiny items run alone");
         Assert.That(work.Runs, Is.All.EqualTo(runs), "every item once per run, alone or with helpers");
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.RunChunks(work, 8); }), Is.Zero);
+        void Step() => world.RunChunks(work, 8);
+        Assert.That(Allocations.Steady(Step, 0, 100), Is.Zero);
     }
 
     [Test]
@@ -715,6 +715,6 @@ public class ParallelTests
         Assert.That((counter.Get<Counter>().N, armor.Armor.Value), Is.EqualTo((updates, updates)));
         Assert.That(bumpsCounter.LastRunTick, Is.EqualTo(bumpsArmor.LastRunTick), "a stage's systems share its tick");
         Assert.That(world.CreateEntity(new Counter(0)).IsAlive, Is.True, "the gate is open after the stage");
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 0, 200), Is.Zero);
     }
 }
