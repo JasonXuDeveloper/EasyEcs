@@ -436,7 +436,9 @@ every NaN as one, as KernelTests.Same does; the old loops matched only by the lu
 ElementLoop, Fusion, BattleServer, SwitchLoop, HelperLoop tests) under the default, `DOTNET_PreferredVectorBitWidth=256`
 and `DOTNET_EnableAVX=0`, and under `DOTNET_EnableHWIntrinsic=0` all but TheScheduleNamesEachMethodsLoop (base fails
 it there too); the full suite on net10.0 and net11.0 (AReductionFoldsEachFieldOnItsOwn and
-ASwitchIsMasksOfItsArms fail on base a5e0e905 already: package E's Interleaved.Select changed the text they read);
+ASwitchIsMasksOfItsArms fail on base a5e0e905 already: package E's Interleaved.Select changed the text they read;
+ViewTests.AViewMethodsPlainArgumentKeepsFlatLanes read the flat loop's text and now reads the walk's too, rechecked
+with GeneratorTests by `$S/kernelF/recheck.sh` into `$S/kernelF/RECHECKDONE`);
 `tools/perf/inlining.sh` over KernelBenchmark, the headline worlds, FusionBenchmark, LookupGatherBenchmark,
 LaneKernelBenchmark, VectorFormsBenchmark, ViewBenchmark and AccessBenchmark: every job inlined. A/B:
 `$S/kernelF/ab.sh` (base a5e0e905 with head's three benchmark files against 7d2c676c, two rounds under the default
