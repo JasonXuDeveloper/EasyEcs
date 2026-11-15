@@ -96,6 +96,7 @@ public static class Allocations
     public static long Steady(System.Action step, int least, int runs, System.Func<long> bytes = null)
     {
         WarmUp(step, least);
+        Repeat(step, 0); // compiled outside the window (the first Steady of the process)
         bytes ??= System.GC.GetAllocatedBytesForCurrentThread;
         Settle();
         long compiled = System.Runtime.JitInfo.GetCompiledMethodCount(currentThread: true);

@@ -1095,6 +1095,35 @@ public class NeighborTests
     }
 
     [Test]
+    public void AParallelPassWithResultsIsCutByCountWhateverItsRunsCost()
+    {
+        // A pass that merges per chunk keeps a copy of its job per chunk. Cut by the measured cost, a run slowed down by a
+        // loaded machine cut it into more chunks than any before, and the copies grew long after the warm-up (8,216 B in
+        // PassesWithResultsAndMutsAllocateNothingOnceWarm), at chunk boundaries no earlier run had.
+        using var world = Crowd(30000, 60f, 6, tables: true, threads: 4);
+        world.AddSingleton<PairTally>();
+        void Step()
+        {
+            world.GetSingleton<PairTally>() = default;
+            Neighbors.TallyParallel(world);
+        }
+
+        Allocations.WarmUp(Step, 20);
+        var expected = world.GetSingleton<PairTally>();
+        const System.Reflection.BindingFlags Private = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        var works = (World.ParallelWork[])typeof(World).GetField("_parallelWork", Private)!.GetValue(world)!;
+        var chunks = System.Array.Find(works, w => w != null && w.GetType().Name.StartsWith("PairChunks"));
+        var size = chunks!.GetType().GetField("_clusters", Private)!;
+        int cut = (int)size.GetValue(chunks)!;
+        foreach (long ticks in new[] { long.MaxValue / 4, 1L }) // runs ever slower, then ever faster (each moves the average by 1/8 at most)
+        {
+            for (int i = 0; i < 300; i++) chunks.Cost(ticks);
+            Assert.That(Allocations.Of(Step), Is.Zero);
+            Assert.That(((int)size.GetValue(chunks)!, world.GetSingleton<PairTally>()), Is.EqualTo((cut, expected)), "the same chunks, the same result");
+        }
+    }
+
+    [Test]
     public void PassesWithResultsAndMutsAllocateNothingOnceWarm()
     {
         using var world = Crowd(30000, 60f, 6, tables: true, threads: 4);
