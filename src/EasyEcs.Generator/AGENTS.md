@@ -332,9 +332,11 @@ Systems/SystemGenerator.cs            [ForEach] -> struct jobs (per entity or pe
                                       called once per run past the last-level cache (StreamingStores.Pays);
                                       Systems/SystemGenerator.Lanes.cs: a flat job's lane kernel (owner L33): LaneStepOf decides
                                       the shape from Kernel.Code alone (below, "The lane kernel's shape"), StepText writes the
-                                      step over LF / LI (loads, stores, constants in place, a masked word's writes as
-                                      Keep<M>), EmitLanes the job's __Lanes struct (the column refs, one ILaneStep4.Step) and
-                                      Execute's call of LaneKernel.Run / RunFlat / RunMasked, the rows after it the method's;
+                                      step over LF / LI (loads, stores, constants in place, uniforms by name, a masked word's
+                                      writes as Keep<M>), WalkText the walk around it (the uniforms broadcast before its loop),
+                                      EmitLanes the job's __Lanes struct (the column refs, the uniforms' scalars read in
+                                      Execute, one ILaneWalk4.Walk) and Execute's call of LaneKernel.Run / RunFlat /
+                                      RunMasked, the rows after it the method's;
                                       every other shape keeps EmitLoops' loops per width;
                                       Systems/SystemGenerator.Cells.cs: a cell method's pass (Cell<TCell, TTile> inputs of one tile, the
                                       first driving the walk, the others sampled, out cells and ref Reduce<T> results per tile;
@@ -412,7 +414,7 @@ Systems/Chases.cs                     a [ForEach] method's or lambda pass's chas
 
 ## The lane kernel's shape
 
-A [ForEach] job's vector loop is Core's lane kernel (`LaneKernel`, one `Step` written over the lane types, the widths
+A [ForEach] job's vector loop is Core's lane kernel (`LaneKernel`, one `Walk` written over the lane types, the widths
 512 -> 256 -> 128 Core's) exactly when `SystemGenerator.LaneStepOf` returns a step; it reads only the `Kernel.Code` the
 method's body produced, so no symbol is bound again. A job is flat when:
 
@@ -422,10 +424,14 @@ method's body produced, so no symbol is bound again. A job is flat when:
 - its statements are straight-line lane arithmetic: loads at `i`, stores at `i`, `+ - * / & | ^ ~`, unary `-`,
   locals, literals and constants of its setup (written in place); any other call or token (a comparison, a select
   under a condition, Min / Max, a conversion, `Interleaved`, `LaneMath`) keeps the loops;
-- its setup holds constants only (a uniform's broadcast is not hoisted out of the walk's loop: the study's finding);
+- its setup holds constants (written in place) and uniform scalars of float or int lanes (a singleton's value, a
+  parameter's: `var __uN = V.Create<T>(value)`, through a `ref readonly` alias of the setup at most), each read in
+  Execute into the walk's struct and broadcast before the walk's loop: a broadcast written in the loop stays there
+  once the loop holds many vector locals (RyuJIT's hoisting declines cheap trees under its register-pressure estimate,
+  and a lane struct's inlined temporaries count; lane-kernel.md, package F);
 - nothing else of `Code`: no bail, reduction (`Restore` / `Fold` / `Chains`), structural change, record or vector
   tail, gather, draw, prefetch, streamed column, wide component, statics, pair mode, narrow index or cold branch;
-- the step declares at most `InlinedLocals` IL locals (it inlines into the walk, once per width).
+- the walk declares at most `InlinedLocals` IL locals (it inlines into `LaneKernel.Walk`, once per width).
 
 Masked words take the same step when their text (`MaskedBody`) is the whole run's with each write as
 `Keep<M>(pass, value, old)` (`Unkept`); otherwise, and for a flat loop of several fields (whose masked words
