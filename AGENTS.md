@@ -171,8 +171,10 @@ owner has asked for once must be written where the next session will find it.
   work whose steps the prompt spells out: renames, file maps and stale comments, CI and tool scripts, moving files,
   rewriting examples into a form already decided, gates and benchmark runs, collecting numbers or a search. Opus for
   work that needs judgment: generator and vector-loop forms, analyzer rules, core and performance work (finding why
-  something is slower), designs, audits, triage and merges. A Sonnet agent that hits a problem needing judgment stops
-  and hands it back instead of guessing.
+  something is slower), designs, audits and triage of conflicting evidence. A Sonnet agent that hits a problem needing
+  judgment stops and hands it back instead of guessing. Sonnet is the default (owner, 2026-11-15: "不要全opus，根据实际情况开，
+  不然用量不够用"): at most one Opus agent runs at a time, and what an Opus agent leaves waiting on runs (benchmarks,
+  gates, collecting numbers) is handed to a Sonnet agent instead of keeping the Opus agent waiting.
 - **Decide, then record what you did not do.** The owner has delegated judgment: do what clearly fits the
   project's rules and goals without asking (public API changes included, with their migration); ask only for what is
   truly the owner's to decide. A proposal you judge not worth doing goes into `docs/owner-review.md` with the reason
