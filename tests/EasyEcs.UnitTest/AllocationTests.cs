@@ -203,7 +203,10 @@ public class AllocationTests
             // Multi-target links: a player joins a party and leaves another, a party lists its members.
             var party = players[next * 7 % players.Length];
             player.Link(new MemberOf(party));
-            players[(next + 128) % players.Length].Unlink<MemberOf>(players[(next + 128) * 7 % players.Length]);
+            // The party the player 128 frames ahead joined 127 frames ago: every link leaves, so the links stay bounded (a
+            // party 7 players off left them growing by one a frame, its buffers and lists doubling now and then: the
+            // MBs a warm-up of another length measured; 239,331 links after 100,000 frames).
+            players[(next + 128) % players.Length].Unlink<MemberOf>(players[(next + 129) * 7 % players.Length]);
             foreach (var _ in parties.Find(party)) seen++;
 
             // A party disbands while linked and a new one takes its id: both incarnations have links for a while.
@@ -241,6 +244,9 @@ public class AllocationTests
 
         // Keys sorted, buffers, links, stacks and tables grown.
         Assert.That((Allocations.Steady(Frame, 3000, 500), world.EntityCount), Is.EqualTo((0L, players.Length + walkers.Length)));
+        int links = 0;
+        foreach (var player in players) links += player.Has<DynamicBuffer<MemberOf>>() ? player.Read<DynamicBuffer<MemberOf>>().Count : 0;
+        Assert.That(links, Is.LessThanOrEqualTo(128), "a steady state: each player's link leaves 127 frames after it came");
     }
 
     [Test]
