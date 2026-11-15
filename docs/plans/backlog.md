@@ -168,6 +168,17 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
          statement and the tests run the scalar path (`DOTNET_EnableHWIntrinsic=0` reproduces it on x64). CI tests
          x64 and arm64 today; whether x86 and arm32 get a CI job (Windows x86 on the standard runner, arm32 under
          emulation) is the owner's question once the kernel exists.
+      k3. (owner, 2026-11-15) the 512-bit step is taken only where the runtime says it pays: `Vector512.IsHardwareAccelerated`
+         is false on the CPUs that lower their clock for 512-bit work (Skylake-SP/X, Cascade Lake, Cooper Lake) and
+         when `DOTNET_PreferredVectorBitWidth=256`; the kernel asks that, never `Avx512F.IsSupported`, so those
+         machines start at 256 (feat-interleaved-256's two-source permutes serve them). The study states it in the
+         design and tests both start widths.
+      l2. (owner, 2026-11-15) the form the owner expects for item l: the width as a struct type argument
+         (`where TLane : struct, ILane<TLane, T>` with static abstract operators and `Load` / `Store` / `Select` /
+         `Count`), the job as a struct type argument too (`allows ref struct`), so each width is its own
+         instantiation (value types are never shared-canonical), every call is direct (no interface or virtual
+         dispatch) and inlinable (`AggressiveInlining`). The prototype proves exactly these three in the Tier1 listing
+         of each width, plus the inliner budget of the runner that calls the kernel.
       l. (owner, L29) research: a generic, shared kernel instead of per-job loop text. Today every job carries its
          own drivers (the flat loop per width, the masked loop per width, the pass-mask loop, the tails), about 100
          lines around a body of a few lines. Design `docs/plans/designs/lane-kernel.md`:
