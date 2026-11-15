@@ -288,7 +288,8 @@ Shared/Code.cs            tiny string helpers for the generators' templates (Lis
                           file's BCL names through its alias block, then Tidy's passes
 Shared/Tidy.cs            the last passes over a generated file's text, IL unchanged: the other types it names twice or more
                           through aliases (Types: where a name's position proves it a type), and the parentheses precedence
-                          does not need (Parentheses, outermost pair first)
+                          does not need (Parentheses, outermost pair first), in collections kept per thread (Scratch); Chars:
+                          the thread's one buffer a file's text is written into (Code.Aliased)
 Shared/EquatableArray.cs  array with value equality (generator models cache between edits)
 Shared/Polyfills.cs       IsExternalInit (records) and System.Index (list patterns) for netstandard2.0; do not delete
 ```

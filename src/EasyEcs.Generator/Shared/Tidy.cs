@@ -44,8 +44,13 @@ internal static class Tidy
         @"\G\s*(?:(?:public|internal|private|protected|static|readonly|ref|partial|sealed|abstract|unsafe|file|new)\s+)*(?:class|struct|interface|record)\b|\G\s*where\s",
         RegexOptions.CultureInvariant);
 
-    /// <summary>A qualified name: where it starts, where its dotted identifiers end, and where its type arguments end (-1: none).</summary>
-    private readonly record struct Name(int Start, int End, int GenericEnd);
+    /// <summary>
+    /// A qualified name: where it starts, where its dotted identifiers end, and where its type arguments end (-1: none);
+    /// the hashes of its text to <see cref="End"/> and to <see cref="GenericEnd"/>, and its dots with the hash of the text
+    /// before each (<see cref="Scratch.Dots"/>[<see cref="Dots"/>, + <see cref="DotCount"/>)): every prefix a pass looks up
+    /// is hashed once, as <see cref="Parse"/> reads it.
+    /// </summary>
+    private readonly record struct Name(int Start, int End, int GenericEnd, int Hash, int GenericHash, int Dots, int DotCount);
 
     /// <summary>
     /// <paramref name="text"/> with the qualified type names (<c>global::EasyEcs.Benchmark.KernelBenchmark.Heat</c>) it
@@ -55,17 +60,23 @@ internal static class Tidy
     /// (<c>global::X.M(</c>), a base, or an attribute; a type with its arguments (<c>IForEachBatch&lt;A, B&gt;</c>) gets
     /// one alias of its own when its arguments are all qualified. An alias of a namespace taken for a type would still
     /// be right: only a name of a member must never get one, and a member is never in those positions.
+    /// The lists it returns are the thread's scratch (<see cref="Scratch"/>): read before the next call on the thread.
     /// </summary>
     public static List<(int Start, int End, string Alias)> Types(string text, SortedDictionary<string, string> aliases)
     {
-        var edits = new List<(int Start, int End, string Alias)>();
-        var names = new List<Name>();
-        var spans = new Spans(text);
-        var types = new HashSet<Span>(spans);
-        var closed = new Dictionary<Span, int>(spans);
-        var reserved = new HashSet<string>(aliases.Keys, StringComparer.Ordinal); // and every __ name of the text (Used)
-        var existing = new Dictionary<string, string>(StringComparer.Ordinal); // target -> alias written by the template
-        foreach (var pair in aliases) existing[pair.Value] = pair.Key;
+        var scratch = Scratch.Of(text);
+        var edits = scratch.Edits;
+        var names = scratch.Names;
+        var spans = scratch.Spans;
+        var types = scratch.Types;
+        var closed = scratch.Closed;
+        var reserved = scratch.Reserved; // and every __ name of the text (Used)
+        var existing = scratch.Existing; // target -> alias written by the template
+        foreach (var pair in aliases)
+        {
+            reserved.Add(pair.Key);
+            existing[pair.Value] = pair.Key;
+        }
         // the template's own alias directives (using __ForEach = ...;)
         for (int u = text.StartsWith("using __", StringComparison.Ordinal) ? 0 : text.IndexOf("\nusing __", StringComparison.Ordinal); u >= 0;
              u = text.IndexOf("\nusing __", u + 1, StringComparison.Ordinal))
@@ -74,17 +85,18 @@ internal static class Tidy
             Existing(text, from, to < 0 ? text.Length : to, existing, reserved);
         }
         // each global:: name in code (IndexOf finds them; a line's comment, string or directive leaves one out)
+        var line = new Line(-1);
         for (int i = text.IndexOf("global::", StringComparison.Ordinal); i >= 0; i = text.IndexOf("global::", i + 8, StringComparison.Ordinal))
         {
-            if (i > 0 && (IsPart(text[i - 1]) || text[i - 1] == '.') || !InCode(text, i) || Parse(text, i) is not { } name) continue;
+            if (i > 0 && (IsPart(text[i - 1]) || text[i - 1] == '.') || !InCode(text, i, ref line) || Parse(text, i, scratch.Dots) is not { } name) continue;
             names.Add(name);
-            Classify(text, name, types, closed);
+            Classify(text, name, types, closed, scratch.Dots);
         }
         if (names.Count == 0) return edits;
 
         // What each name becomes: a closed generic's alias, else its longest prefix known as a type.
-        var targets = new List<(int Start, int End, Span Target, bool Attribute)>();
-        var uses = new Dictionary<(Span, bool), int>(new SpansOrAttribute(spans));
+        var targets = scratch.Targets;
+        var uses = scratch.Uses;
         int skipUntil = 0;
         foreach (var name in names)
         {
@@ -92,8 +104,8 @@ internal static class Tidy
             Span? target = null;
             bool attribute = false;
             int end = 0;
-            if (name.GenericEnd > 0 && Usage(text, name) && new Span(name.Start, name.GenericEnd - name.Start) is var whole
-                && closed.TryGetValue(whole, out int count) && (count >= 2 || existing.ContainsKey(spans.Text(whole))) && Qualified(text, name.End + 1, name.GenericEnd - 1))
+            if (name.GenericEnd > 0 && Usage(text, name) && new Span(name.Start, name.GenericEnd - name.Start, name.GenericHash) is var whole
+                && closed.TryGetValue(whole, out int count) && (count >= 2 || Had(text, whole, false, existing) != null) && Qualified(text, name.End + 1, name.GenericEnd - 1))
             {
                 target = whole;
                 end = name.GenericEnd;
@@ -103,16 +115,16 @@ internal static class Tidy
             {
                 if (name.GenericEnd < 0 && IsAttribute(text, name) && IsAny(text, name.Start, name.End, Attributes))
                 {
-                    target = new Span(name.Start, name.End - name.Start);
+                    target = new Span(name.Start, name.End - name.Start, name.Hash);
                     attribute = true;
                     end = name.End;
                 }
                 else
-                    for (int k = name.End; k > name.Start + 8; k = text.LastIndexOf('.', k - 1, k - 1 - (name.Start + 8)))
+                    // the whole chain (a generic type is not its non-generic namesake), then before each dot, longest first
+                    for (int d = name.DotCount - (name.GenericEnd > 0 ? 1 : 0); d >= 0; d--)
                     {
-                        if (k == name.End && name.GenericEnd > 0) continue; // a generic type is not its non-generic namesake
-                        if (k < 0) break;
-                        var prefix = new Span(name.Start, k - name.Start);
+                        var (k, hash) = d == name.DotCount ? (name.End, name.Hash) : scratch.Dots[name.Dots + d];
+                        var prefix = new Span(name.Start, k - name.Start, hash);
                         if (!types.Contains(prefix) && !IsAny(text, name.Start, k, Seeds)) continue;
                         target = prefix;
                         end = k;
@@ -124,23 +136,29 @@ internal static class Tidy
             uses[(t, attribute)] = uses.TryGetValue((t, attribute), out int u) ? u + 1 : 1;
         }
 
-        // An alias for each target named twice or more (or that already has one); names the file does not use. The
-        // targets' text is copied only here, once each.
-        var alias = new Dictionary<(Span, bool), string>(uses.Comparer);
-        HashSet<int>? named = null;
-        foreach (var (key, count, target) in uses.Select(p => (p.Key, p.Value, spans.Text(p.Key.Item1) + (p.Key.Item2 ? "Attribute" : "")))
-                     .OrderBy(p => p.Item3, StringComparer.Ordinal))
+        // An alias for each target named twice or more (or that already has one), in the order of the targets' text;
+        // names the file does not use. A target's text is copied only when it gets an alias.
+        var alias = scratch.Alias;
+        var chosen = scratch.Chosen;
+        foreach (var pair in uses)
         {
-            if (existing.TryGetValue(target, out var had))
+            string? had = Had(text, pair.Key.Item1, pair.Key.Item2, existing);
+            if (had == null && pair.Value < 2) continue;
+            chosen.Add((pair.Key, spans.Text(pair.Key.Item1) + (pair.Key.Item2 ? "Attribute" : ""), had));
+        }
+        chosen.Sort(ByTarget);
+        HashSet<int>? named = null;
+        foreach (var (key, target, had) in chosen)
+        {
+            if (had != null)
             {
                 alias[key] = had;
                 continue;
             }
-            if (count < 2) continue;
-            string chosen = AliasOf(target, reserved, text, named ??= Named(text));
-            reserved.Add(chosen);
-            alias[key] = chosen;
-            aliases[chosen] = target;
+            string chosenAlias = AliasOf(target, reserved, text, named ??= Named(text, scratch.Named));
+            reserved.Add(chosenAlias);
+            alias[key] = chosenAlias;
+            aliases[chosenAlias] = target;
         }
         int at = 0;
         foreach (var (start, end, target, attribute) in targets)
@@ -152,17 +170,101 @@ internal static class Tidy
         return edits;
     }
 
-    /// <summary>A range of the file's text: a name compared by its characters, copied only when it becomes an alias's target.</summary>
-    private readonly record struct Span(int Start, int Length);
+    private static readonly Comparison<((Span, bool) Key, string Target, string? Had)> ByTarget =
+        static (a, b) => string.CompareOrdinal(a.Target, b.Target);
 
-    /// <summary>Equality of <see cref="Span"/>s of one text by their characters.</summary>
-    private sealed class Spans(string text) : IEqualityComparer<Span>
+    /// <summary>The alias the template or the BCL pass gave the target <paramref name="target"/> (plus "Attribute" for an <paramref name="attribute"/>), or null.</summary>
+    private static string? Had(string text, Span target, bool attribute, Dictionary<string, string> existing)
     {
-        public string Text(Span s) => text.Substring(s.Start, s.Length);
+        if (existing.Count == 0) return null;
+        int length = target.Length + (attribute ? 9 : 0);
+        foreach (var pair in existing)
+            if (pair.Key.Length == length && string.CompareOrdinal(text, target.Start, pair.Key, 0, target.Length) == 0
+                && (!attribute || string.CompareOrdinal(pair.Key, target.Length, "Attribute", 0, 9) == 0)) return pair.Value;
+        return null;
+    }
 
-        public bool Equals(Span a, Span b) => a.Length == b.Length && string.CompareOrdinal(text, a.Start, text, b.Start, a.Length) == 0;
+    /// <summary>A range of the file's text and its hash: a name compared by its characters, copied only when it becomes an alias's target.</summary>
+    private readonly record struct Span(int Start, int Length, int Hash);
 
-        public int GetHashCode(Span s) => Hash(text, s.Start, s.Length);
+    /// <summary>Equality of <see cref="Span"/>s of the file's text (<see cref="Text"/>, set per file) by their characters.</summary>
+    private sealed class Spans : IEqualityComparer<Span>
+    {
+        public string Source = "";
+
+        public string Text(Span s) => Source.Substring(s.Start, s.Length);
+
+        public bool Equals(Span a, Span b) =>
+            a.Hash == b.Hash && a.Length == b.Length && string.CompareOrdinal(Source, a.Start, Source, b.Start, a.Length) == 0;
+
+        public int GetHashCode(Span s) => s.Hash;
+    }
+
+    /// <summary>
+    /// The collections both passes fill, one set per thread, cleared per file and kept with their capacity: a file's
+    /// tidying allocates only what it writes. A generator thread runs one file's passes at a time.
+    /// </summary>
+    private sealed class Scratch
+    {
+        [ThreadStatic] private static Scratch? _thread;
+
+        public readonly Spans Spans = new();
+        public readonly List<Name> Names = [];
+
+        /// <summary>The dots of the names (<see cref="Name.Dots"/>): where each is and the hash of the name's text before it.</summary>
+        public readonly List<(int At, int Hash)> Dots = [];
+        public readonly HashSet<Span> Types;
+        public readonly Dictionary<Span, int> Closed;
+        public readonly List<(int Start, int End, Span Target, bool Attribute)> Targets = [];
+        public readonly Dictionary<(Span, bool), int> Uses;
+        public readonly Dictionary<(Span, bool), string> Alias;
+        public readonly List<((Span, bool) Key, string Target, string? Had)> Chosen = [];
+        public readonly HashSet<string> Reserved = new(StringComparer.Ordinal);
+        public readonly Dictionary<string, string> Existing = new(StringComparer.Ordinal);
+        public readonly HashSet<int> Named = [];
+        public readonly List<(int Start, int End, string Alias)> Edits = [];
+        public readonly Pairs Pairs = new();
+        public readonly Stack<int> Open = new();
+        public readonly List<int> Dropped = [];
+
+        private Scratch()
+        {
+            Types = new HashSet<Span>(Spans);
+            Closed = new Dictionary<Span, int>(Spans);
+            var keys = new SpansOrAttribute(Spans);
+            Uses = new Dictionary<(Span, bool), int>(keys);
+            Alias = new Dictionary<(Span, bool), string>(keys);
+        }
+
+        /// <summary>The thread's scratch, emptied, for <paramref name="text"/>.</summary>
+        public static Scratch Of(string text)
+        {
+            var s = _thread ??= new Scratch();
+            s.Spans.Source = text;
+            s.Names.Clear();
+            s.Dots.Clear();
+            s.Types.Clear();
+            s.Closed.Clear();
+            s.Targets.Clear();
+            s.Uses.Clear();
+            s.Alias.Clear();
+            s.Chosen.Clear();
+            s.Reserved.Clear();
+            s.Existing.Clear();
+            s.Named.Clear();
+            s.Edits.Clear();
+            return s;
+        }
+
+        /// <summary>The thread's scratch for <see cref="Parentheses"/>, its bracket lists emptied.</summary>
+        public static Scratch ForPairs()
+        {
+            var s = _thread ??= new Scratch();
+            s.Pairs.Clear();
+            s.Open.Clear();
+            s.Dropped.Clear();
+            return s;
+        }
     }
 
     /// <summary><see cref="Spans"/> with the attribute flag (an attribute's target is its class, the name plus "Attribute").</summary>
@@ -178,7 +280,7 @@ internal static class Tidy
     /// characters at <paramref name="dropped"/> (in order) left out, from <paramref name="from"/> on, appended to
     /// <paramref name="sb"/>: one copy of the file for both passes.
     /// </summary>
-    public static void Write(StringBuilder sb, string text, int from, List<(int Start, int End, string Alias)> edits, List<int> dropped)
+    public static void Write(Chars sb, string text, int from, List<(int Start, int End, string Alias)> edits, List<int> dropped)
     {
         int at = from, e = 0, d = 0;
         while (e < edits.Count || d < dropped.Count)
@@ -206,57 +308,101 @@ internal static class Tidy
     /// Whether <paramref name="at"/> is code: not in a using directive or a preprocessor line, nor after a line comment or
     /// inside a string or character literal of its line. Generated code puts no block comment or multi-line literal
     /// around a qualified name, so the line alone decides.
+    /// The names come in order, so <paramref name="line"/> carries the scan of their line from one to the next: each
+    /// line's text is read once, however many names it holds.
     /// </summary>
-    private static bool InCode(string text, int at)
+    private static bool InCode(string text, int at, ref Line line)
     {
-        int k = at == 0 ? 0 : text.LastIndexOf('\n', at - 1) + 1;
-        while (k < at && text[k] is ' ' or '\t' or '\uFEFF') k++;
-        if (k < at && text[k] == '#' || string.CompareOrdinal(text, k, "using ", 0, 6) == 0) return false;
-        for (; k < at; k++)
+        if (line.End < 0 || at >= line.End)
+        {
+            int start = at == 0 ? 0 : text.LastIndexOf('\n', at - 1) + 1, end = text.IndexOf('\n', at);
+            int k = start;
+            while (k < at && text[k] is ' ' or '\t' or '\uFEFF') k++;
+            bool directive = k < at && text[k] == '#' || string.CompareOrdinal(text, k, "using ", 0, 6) == 0;
+            line = new Line(end < 0 ? text.Length + 1 : end) { At = k, Dead = directive };
+        }
+        if (line.Dead || at < line.At) return false; // a directive or a comment; inside a literal read before
+        for (int k = line.At; k < at; k++)
         {
             char c = text[k];
-            if (c == '/' && k + 1 < at && text[k + 1] == '/') return false;
+            if (c == '/' && k + 1 < at && text[k + 1] == '/')
+            {
+                line.Dead = true;
+                return false;
+            }
             if (c is '"' or '\'')
             {
                 int end = SkipLiteral(text, k);
-                if (end > at) return false;
+                if (end > at)
+                {
+                    line.At = end;
+                    return false;
+                }
                 k = end - 1;
             }
         }
+        line.At = at;
         return true;
     }
 
-    /// <summary>The name of a qualified name at <paramref name="i"/> (its <c>global::</c>), or null when no identifier follows.</summary>
-    private static Name? Parse(string text, int i)
+    /// <summary>
+    /// <see cref="InCode"/>'s line: where it ends (-1: none read yet), how far it is read (<see cref="At"/>: the next
+    /// character to read, or a literal's end past the last name), and whether the rest is no code (<see cref="Dead"/>).
+    /// </summary>
+    private struct Line(int end)
     {
-        int j = i + 8;
-        if (j >= text.Length || !IsStart(text[j])) return null;
-        j = IdentifierEnd(text, j);
-        while (j + 1 < text.Length && text[j] == '.' && IsStart(text[j + 1])) j = IdentifierEnd(text, j + 1);
-        return new Name(i, j, j < text.Length && text[j] == '<' ? GenericEnd(text, j) : -1);
+        public readonly int End = end;
+        public int At;
+        public bool Dead;
+    }
+
+    /// <summary>
+    /// The name of a qualified name at <paramref name="i"/> (its <c>global::</c>), or null when no identifier follows; its
+    /// dots go into <paramref name="dots"/>.
+    /// </summary>
+    private static Name? Parse(string text, int i, List<(int At, int Hash)> dots)
+    {
+        int j = i + 8, n = text.Length;
+        if (j >= n || !IsStart(text[j])) return null;
+        int first = dots.Count;
+        unchecked
+        {
+            int hash = HashFrom(Seed, text, i, j);
+            while (true)
+            {
+                hash = (hash ^ text[j++]) * Prime;
+                while (j < n && IsPart(text[j])) hash = (hash ^ text[j++]) * Prime;
+                if (j + 1 >= n || text[j] != '.' || !IsStart(text[j + 1])) break;
+                dots.Add((j, hash));
+                hash = (hash ^ '.') * Prime;
+                j++;
+            }
+            int generic = j < n && text[j] == '<' ? GenericEnd(text, j) : -1;
+            return new Name(i, j, generic, hash, generic > 0 ? HashFrom(hash, text, j, generic) : 0, first, dots.Count - first);
+        }
     }
 
     /// <summary>Records what <paramref name="name"/>'s position proves: the name or its left side a type, or a closed generic type.</summary>
-    private static void Classify(string text, Name name, HashSet<Span> types, Dictionary<Span, int> closed)
+    private static void Classify(string text, Name name, HashSet<Span> types, Dictionary<Span, int> closed, List<(int At, int Hash)> dots)
     {
         int after = name.GenericEnd > 0 ? name.GenericEnd : name.End;
         char next = after < text.Length ? text[after] : '\0';
         bool afterNew = WordBefore(text, name.Start, "new", out char prev);
         if (name.GenericEnd > 0)
         {
-            if (next == '(' && !afterNew) Left(text, name, types); // a generic method's type
+            if (next == '(' && !afterNew) Left(name, types, dots); // a generic method's type
             else
             {
-                var whole = new Span(name.Start, name.GenericEnd - name.Start);
+                var whole = new Span(name.Start, name.GenericEnd - name.Start, name.GenericHash);
                 closed[whole] = closed.TryGetValue(whole, out int c) ? c + 1 : 1;
             }
             return;
         }
-        var chain = new Span(name.Start, name.End - name.Start);
+        var chain = new Span(name.Start, name.End - name.Start, name.Hash);
         if (next == '(')
         {
             if (afterNew) types.Add(chain);
-            else if (!IsAttribute(text, name)) Left(text, name, types); // a member called: its left side is a type
+            else if (!IsAttribute(text, name)) Left(name, types, dots); // a member called: its left side is a type
             return;
         }
         if (IsAttribute(text, name)) return;
@@ -274,10 +420,11 @@ internal static class Tidy
     }
 
     /// <summary>The left side of <paramref name="name"/>'s last dot, a type (the name is a member of it).</summary>
-    private static void Left(string text, Name name, HashSet<Span> types)
+    private static void Left(Name name, HashSet<Span> types, List<(int At, int Hash)> dots)
     {
-        int dot = text.LastIndexOf('.', name.End - 1, name.End - name.Start - 8);
-        if (dot > name.Start + 8) types.Add(new Span(name.Start, dot - name.Start));
+        if (name.DotCount == 0) return;
+        var (dot, hash) = dots[name.Dots + name.DotCount - 1];
+        types.Add(new Span(name.Start, dot - name.Start, hash));
     }
 
     /// <summary>Whether the closed generic <paramref name="name"/> is used as a type, not called as a generic method.</summary>
@@ -339,7 +486,7 @@ internal static class Tidy
         if (simple.EndsWith("Attribute", StringComparison.Ordinal) && simple.Length > 9) simple = simple.Substring(0, simple.Length - 9);
         // a closed generic by its arguments too (__IForEachBatch_P3_V3), so two of one file read apart
         string first = open < 0 ? "__" + simple
-            : "__" + simple + "_" + string.Join("_", Regex.Matches(target.Substring(open), @"[\w@]+(?=\s*[,>\[?])").Cast<Match>().Select(m => m.Value.TrimStart('@')));
+            : "__" + simple + "_" + ArgumentNames(target, open);
         if (!Taken(first)) return first;
         string second = open < 0 && segments.Length > 1 ? "__" + segments[segments.Length - 2].TrimStart('@') + "_" + simple : first;
         if (!Taken(second)) return second;
@@ -347,10 +494,38 @@ internal static class Tidy
             if (!Taken(second + k)) return second + k;
     }
 
-    /// <summary>The hashes of the <c>__</c> names <paramref name="text"/> holds: an alias candidate whose hash is not among them is free.</summary>
-    private static HashSet<int> Named(string text)
+    /// <summary>
+    /// The last identifier of each type argument of <paramref name="target"/> (from its <c>&lt;</c> at
+    /// <paramref name="open"/>), each a run of name characters followed by <c>,</c> <c>&gt;</c> <c>[</c> or <c>?</c>
+    /// (spaces between), without its <c>@</c>, joined by <c>_</c>: <c>P3_V3</c>.
+    /// </summary>
+    private static string ArgumentNames(string target, int open)
     {
-        var named = new HashSet<int>();
+        var names = new StringBuilder();
+        for (int i = open; i < target.Length;)
+        {
+            if (!IsWord(target[i]))
+            {
+                i++;
+                continue;
+            }
+            int start = i;
+            while (i < target.Length && IsWord(target[i])) i++;
+            int next = i;
+            while (next < target.Length && char.IsWhiteSpace(target[next])) next++;
+            if (next >= target.Length || target[next] is not (',' or '>' or '[' or '?')) continue;
+            while (start < i && target[start] == '@') start++;
+            if (names.Length > 0) names.Append('_');
+            names.Append(target, start, i - start);
+        }
+        return names.ToString();
+
+        static bool IsWord(char c) => char.IsLetterOrDigit(c) || c is '_' or '@';
+    }
+
+    /// <summary>The hashes of the <c>__</c> names <paramref name="text"/> holds (into <paramref name="named"/>): an alias candidate whose hash is not among them is free.</summary>
+    private static HashSet<int> Named(string text, HashSet<int> named)
+    {
         for (int at = text.IndexOf("__", StringComparison.Ordinal); at >= 0; at = text.IndexOf("__", at + 2, StringComparison.Ordinal))
         {
             if (at > 0 && IsPart(text[at - 1])) continue;
@@ -362,15 +537,19 @@ internal static class Tidy
     }
 
     /// <summary>FNV-1a over <paramref name="text"/>[<paramref name="from"/>, + <paramref name="length"/>).</summary>
-    private static int Hash(string text, int from, int length)
+    private static int Hash(string text, int from, int length) => HashFrom(Seed, text, from, from + length);
+
+    /// <summary>FNV-1a's <paramref name="hash"/> continued over <paramref name="text"/>[<paramref name="from"/>, <paramref name="to"/>).</summary>
+    private static int HashFrom(int hash, string text, int from, int to)
     {
         unchecked
         {
-            int hash = (int)2166136261;
-            for (int i = from; i < from + length; i++) hash = (hash ^ text[i]) * 16777619;
+            for (int i = from; i < to; i++) hash = (hash ^ text[i]) * Prime;
             return hash;
         }
     }
+
+    private const int Seed = unchecked((int)2166136261), Prime = 16777619;
 
     /// <summary>Whether <paramref name="text"/> names <paramref name="name"/> as a whole identifier.</summary>
     private static bool Used(string text, string name)
@@ -408,17 +587,27 @@ internal static class Tidy
     /// </summary>
     public static List<int> Parentheses(string text)
     {
-        var pairs = new Pairs();
-        var stack = new Stack<int>();
+        var scratch = Scratch.ForPairs();
+        var pairs = scratch.Pairs;
+        var stack = scratch.Open;
         int n = text.Length;
-        for (int i = Preprocessor(text, 0); i < n;)
+        int afterDirective = -1; // the start of the line after the directive skipped last, which is not read as one
+        for (int i = 0; i < n;)
         {
             i = text.IndexOfAny(Brackets, i);
             if (i < 0) break;
             char c = text[i];
-            if (c == '\n')
+            if (c == '#')
             {
-                i = Preprocessor(text, i + 1);
+                // a directive: the first character of its line, the line after a directive aside
+                int k = i - 1;
+                while (k >= 0 && text[k] is ' ' or '\t' or '\uFEFF') k--;
+                if ((k < 0 || text[k] == '\n') && k + 1 != afterDirective)
+                {
+                    int end = text.IndexOf('\n', i);
+                    i = afterDirective = end < 0 ? n : end + 1;
+                }
+                else i++;
                 continue;
             }
             int s = SkipLiteral(text, i);
@@ -434,7 +623,7 @@ internal static class Tidy
         for (int k = 0; k < pairs.Count; k++)
             if (text[pairs.OpenAt(k)] == '(' && pairs.CloseOf(k) is var close and > 0 && text[close] == ')' && Removable(text, pairs.OpenAt(k), close, pairs))
                 pairs.Remove(k);
-        var dropped = new List<int>();
+        var dropped = scratch.Dropped;
         for (int k = 0; k < pairs.Count; k++)
             if (pairs.Removed(k))
             {
@@ -445,8 +634,8 @@ internal static class Tidy
         return dropped;
     }
 
-    /// <summary>What the bracket scan stops at: brackets, the starts of literals and comments, a line's end (a directive may follow).</summary>
-    private static readonly char[] Brackets = ['(', ')', '[', ']', '"', '\'', '/', '\n'];
+    /// <summary>What the bracket scan stops at: brackets, the starts of literals and comments, a directive's <c>#</c>.</summary>
+    private static readonly char[] Brackets = ['(', ')', '[', ']', '"', '\'', '/', '#'];
 
     /// <summary>
     /// The text's bracket pairs, '(' and '[', in the order they open: where each closes, which are removed. Lookups by
@@ -458,6 +647,15 @@ internal static class Tidy
         private readonly List<bool> _removed = [];
 
         public int Count => _opens.Count;
+
+        public void Clear()
+        {
+            _opens.Clear();
+            _closeOf.Clear();
+            _closes.Clear();
+            _openOf.Clear();
+            _removed.Clear();
+        }
 
         public int Open(int at)
         {
@@ -799,16 +997,6 @@ internal static class Tidy
         return -1;
     }
 
-    /// <summary>Where the line at <paramref name="i"/> ends when it is a preprocessor line, else <paramref name="i"/>.</summary>
-    private static int Preprocessor(string text, int i)
-    {
-        int k = i;
-        while (k < text.Length && text[k] is ' ' or '\t' or '\uFEFF') k++;
-        if (k >= text.Length || text[k] != '#') return i;
-        int end = text.IndexOf('\n', k);
-        return end < 0 ? text.Length : end + 1;
-    }
-
     /// <summary>Where the comment, string or character literal at <paramref name="i"/> ends, or <paramref name="i"/> when none starts there.</summary>
     private static int SkipLiteral(string text, int i)
     {
@@ -853,4 +1041,52 @@ internal static class Tidy
         }
         return i;
     }
+}
+
+/// <summary>
+/// A text being written, in the thread's one buffer, kept with its capacity from file to file: a file's text is
+/// allocated once, as the string <see cref="ToString"/> returns (a StringBuilder would allocate its buffer as well).
+/// One text at a time per thread: <see cref="Empty"/> starts the next.
+/// </summary>
+internal sealed class Chars
+{
+    [ThreadStatic] private static Chars? _thread;
+
+    private char[] _buffer = new char[1024];
+    private int _length;
+
+    /// <summary>The thread's buffer, emptied, with room for <paramref name="capacity"/> characters.</summary>
+    public static Chars Empty(int capacity)
+    {
+        var chars = _thread ??= new Chars();
+        chars._length = 0;
+        if (chars._buffer.Length < capacity) chars._buffer = new char[Math.Max(capacity, chars._buffer.Length * 2)];
+        return chars;
+    }
+
+    public Chars Append(string text)
+    {
+        Ensure(text.Length);
+        text.CopyTo(0, _buffer, _length, text.Length);
+        _length += text.Length;
+        return this;
+    }
+
+    public Chars Append(string text, int start, int count)
+    {
+        Ensure(count);
+        text.CopyTo(start, _buffer, _length, count);
+        _length += count;
+        return this;
+    }
+
+    private void Ensure(int more)
+    {
+        if (_length + more <= _buffer.Length) return;
+        var grown = new char[Math.Max(_length + more, _buffer.Length * 2)];
+        Array.Copy(_buffer, grown, _length);
+        _buffer = grown;
+    }
+
+    public override string ToString() => new(_buffer, 0, _length);
 }
