@@ -3820,5 +3820,8 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
   Crowd 100,000 4,863 -> 5,067, Sparse 1,000 12.2 -> 12.3, Sparse 10,000 124 -> 136, Sparse 100,000 1,634 -> 1,557
   (all but the first within their error); the control GeneratedParallel (not merging) level (31.8 / 29.6,
   266 / 266, 2,758 / 2,830 us). Tuned by count (764dcd7a): a pair pass's floor is 64 rows, one word, so it still
-  makes 16 chunks at any thread count and cost. Its A/B (two rounds) was queued in
-  scratchpad/ab (run.sh, progress.txt, log-{base,head}-{1,2}.txt); round 1 of the first A/B is in ab/v1.
+  makes 16 chunks at any thread count and cost. Its A/B, two rounds (base / head, us): Crowd 1,000 35.6 / 33.6 and
+  31.0 / 32.7 (level again); Crowd 10,000 520 / 495 and 506 / 535; Crowd 100,000 5,154 / 5,278 and 4,668 / 5,199;
+  Sparse 1,000 11.5 / 11.2 and 12.8 / 11.4; Sparse 10,000 123 / 121 and 131 / 126; Sparse 100,000 1,496 / 1,578
+  and 1,671 / 1,583: every row within its error (+-7-10 %), the control GeneratedParallel moving as much
+  (2,940 / 2,746, 2,572 / 2,781). 0 B on both sides.
