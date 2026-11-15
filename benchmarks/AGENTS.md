@@ -314,6 +314,10 @@ VectorLoops/InlineArrayBenchmark.cs         loops over a row's inline arrays unr
                                             value's waypoints; each against SimdMode.Off
 VectorLoops/KernelBenchmark.cs              a [ForEach] method for one row as the per-row loop, the batch method and the vector
                                             loop the generator writes
+VectorLoops/LaneKernelBenchmark.cs          package C's prototype (docs/plans/designs/lane-kernel.md): Integrate, Step (and its
+                                            masked words) and Tally as one body per job over Core's lane kernel, in the width
+                                            form, the typed form and the walk form, against the loops generated today;
+                                            setup checks them bit for bit
 VectorLoops/LateHolesBenchmark.cs           vector loops whose runner reached Tier1 before their table had holes: the masked
                                             words' tables and lane masks
 VectorLoops/StreamingStoreBenchmark.cs      borrowed-ideas.md item 5: a write-only column with plain against non-temporal
