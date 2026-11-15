@@ -235,6 +235,13 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       (the generated job knows its columns: a static `RowBytes`). Proof: the merging `[ForEach]` rows of
       ReduceBenchmark / EmitBenchmark and PairsBenchmark.GeneratedParallelResult level with the per-kind floors at
       every size, 0 B, results bit-identical across thread counts (a test at 1, 2 and 8 threads).
+      **Running** on branch `chunk-floor-by-bytes` (built: core 352702af, generator 7ea76252, tests 6d2658c7;
+      `MinChunkBytes` = 32 KB until the A/B picks; a hand-written job's `RowBytes` defaults to its type arguments' sizes,
+      a hand-written pair job's to 0, one word). Full suite green on net10.0 and net11.0 but the new pair test's first
+      build (fixed in 6d2658c7). The A/B (base 7e9e5e40 against 16 / 32 / 64 KB, two rounds, each side from its own root)
+      and GeneratorBenchmark Cold / Edit* (base against head) run from the scratchpad scripts `floorbytes/run.sh`,
+      `genbench.sh`, compared by `compare.py`; first round: 16 KB slower at 100,000 rows (chunks of 2,048 rows of an
+      8-byte Spot: 49 chunks against 16), faster at 10,000.
 - [ ] **`feat-ground-layer`** (owner, L19): a `Cell<TCell, Ground<TTile>>` method that also reads a layer of the
       3D tile it is the ground of; design the public form (two or three shapes, as a popup), then generator, analyzer,
       tests, TileGroundBenchmark case, docs-todos. After feat-generated-text-2's package A (same emit code).

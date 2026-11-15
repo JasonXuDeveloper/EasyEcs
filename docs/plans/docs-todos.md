@@ -3831,3 +3831,24 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
   Sparse 1,000 11.5 / 11.2 and 12.8 / 11.4; Sparse 10,000 123 / 121 and 131 / 126; Sparse 100,000 1,496 / 1,578
   and 1,671 / 1,583: every row within its error (+-7-10 %), the control GeneratedParallel moving as much
   (2,940 / 2,746, 2,572 / 2,781). 0 B on both sides.
+
+## chunk-floor-by-bytes (owner, L31, L32: a merging pass's chunks from its rows and its bytes per row)
+
+- [ ] **Decision record** (extends D125, `decisions.mdx` + `.zh.mdx`): a pass that merges per chunk (`Reduce<T>`,
+      `Emit<T>`, a merging pair pass) cuts `max(floor, NextPowerOfTwo(rows) / 64)` rows a chunk, the floor
+      `NextPowerOfTwo(MinChunkBytes / bytesPerRow)` and at least 64 (one presence word); whole 4,096-row blocks when it
+      stamps; at most `MaxChunkSize`. Bytes per row: the generated job's hidden `RowBytes` (its query's components, its
+      `Maybe<T>` ones, the entity's id when it takes the entity; a hand-written job's default is the sizes of its type
+      arguments); a pair pass's is a neighbor's point and `[Neighbor]` components times the neighbors a row meets
+      (`PairRun.NeighborsPerRow`: the run's lists, else its clusters' ranges). Never the core count or a measured cost:
+      the same bits on every thread count and run. Considered: K = 64 with a 64-row floor (4-11x slower on small cheap
+      merging passes, d1ca87c7), the per-kind floors (64 rows for pairs, 1,024 for `[ForEach]`, 764dcd7a). The numbers:
+      the A/B of the branch (backlog entry). Note what the pair floor still depends on: the neighbors of a cluster's
+      ranges grow with the cluster's size (`Vector<float>.Count`), so the floor of a pair pass without lists can differ
+      between an AVX-512 and an ARM64 machine (never between thread counts or runs).
+- [ ] **Stale text** (public XML docs, with their zh entries in `tools/docs/ApiDocs/zh/`): `Reduce.cs` ("16 chunks of
+      1,024 to 16,384 rows"), `ForEachAttributes.cs` (`ChunkSize`: "16 chunks"), the `ForEachParallel` family's summary in
+      `ArityGenerator.cs` ("16 for a job that merges"); the pages `reference/reduce.mdx`, `reference/foreachattribute.mdx`
+      (regenerated), `guide/performance/threading` where it says how a reducing pass is cut, D125's text.
+- [ ] **Changelog (Performance or Fixes, by the numbers):** a parallel `Reduce<T>` / `Emit<T>` pass cuts its chunks
+      from its rows and the bytes each row reads; a float result is still the same at any thread count.
