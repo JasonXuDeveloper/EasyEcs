@@ -361,7 +361,7 @@ public sealed partial class World
                 // combined at followed how long runs took, and a run slower than any before grew the copies it keeps.
                 int perWord = 64 / run.ClusterSize, clusters = run.End;
                 long items = (long)clusters * run.ClusterSize;
-                int size = (TJob.Merges ? MergedChunkRows(work, items, false) : ChunkRows(work, items, 0)) / run.ClusterSize;
+                int size = (TJob.Merges ? MergedChunkRows(work, items, false, 64) : ChunkRows(work, items, 0)) / run.ClusterSize;
                 size = (size + perWord - 1) / perWord * perWord;
                 int chunks = (clusters + size - 1) / size;
                 work.Set(start, in run, size, chunks);
