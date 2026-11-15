@@ -96,7 +96,9 @@ record a dropped one.
 ## Vector loops
 
 The vector loops (`Kernel*.cs`: what becomes SIMD, side effects, fixable reasons, proof) have their own skill:
-`audit-vector-loops`.
+`audit-vector-loops`. Which text a vector job gets (the lane kernel's one step for flat jobs, the loops per width for
+every other shape) is its rule too; when a change to `Kernel.Code` or its texts moves jobs in or out of
+`SystemGenerator.LaneStepOf`, the benchmark project's count of `__Lanes` structs and GeneratedTextTests show it.
 
 ## Tuned for the machine (the owner's rule)
 

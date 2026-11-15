@@ -817,7 +817,7 @@ public ref struct SteeringSystem
 `world.DescribeSchedule()` 列出系统每个方法得到的循环，每个方法一行（`SystemInfo.Loops`）：
 
 ```text
-      loop Move: vector (Vector512 or Vector<float>), flat, masked words vector
+      loop Move: vector (lane kernel: Vector512, Vector256, Vector128), flat, masked words vector
       loop Steer: vector (Vector512 only), wide component (permutes), masked words scalar
       loop Spawn: scalar (it takes the Entity)
 ```
