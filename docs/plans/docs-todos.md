@@ -3813,3 +3813,12 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
 - **Proof.** The reproduction (4 copies at once of AllocationTests, NeighborTests and ScratchTests, net11.0, AVX-512
   off), which failed 3 of 32 runs before: 24 of 24 in a row after (and 24 of 24 before the links fix, the other
   causes fixed). Full suite 4,379 passed on net10.0 and net11.0; build 0 warnings; inlining.sh 0.
+- **Measured (follow-up, PairsBenchmark.GeneratedParallelResult, new: a parallel pair method into a Reduce<T>;
+  net10.0, AVX-512, 4 cores, default job, base = main with Pairs.cs and World.Parallel.cs of 1ab64d96, each side
+  from its own root).** No benchmark ran a merging pair pass before. Round 1, base (cut by cost) against cut by count
+  with the 1,024-row floor: Crowd 1,000 35.0 -> 98.4 us (2.8x: one chunk on the caller), Crowd 10,000 506 -> 544,
+  Crowd 100,000 4,863 -> 5,067, Sparse 1,000 12.2 -> 12.3, Sparse 10,000 124 -> 136, Sparse 100,000 1,634 -> 1,557
+  (all but the first within their error); the control GeneratedParallel (not merging) level (31.8 / 29.6,
+  266 / 266, 2,758 / 2,830 us). Tuned by count (764dcd7a): a pair pass's floor is 64 rows, one word, so it still
+  makes 16 chunks at any thread count and cost. Its A/B (two rounds) was queued in
+  scratchpad/ab (run.sh, progress.txt, log-{base,head}-{1,2}.txt); round 1 of the first A/B is in ab/v1.
