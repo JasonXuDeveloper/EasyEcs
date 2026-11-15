@@ -414,8 +414,19 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
 - [x] **C17. P7: `Removed<T>` from a log of removals** (`perf.md` P7, low). Files: Archetype.cs, a log file, Query.cs.
       Proof: RemovalComparison, removal writers' cost. **Not built** (owner-review.md: the cost is per visited row,
       which a log still pays).
-- [ ] **C18. P8: integer tuple keys hashed by bytes** (`perf.md` P8, low). Files: ValueIndex.cs. Proof:
+- [x] **C18. P8: integer tuple keys hashed by bytes** (`perf.md` P8, low). Files: ValueIndex.cs. Proof:
       IndexBenchmark LookupUnique, ValueQueryComparison, IndexComparison.
+      **Done** (feat-lane1-core rerun, 4dda817 + 0bbab15): `ValueIndex` keys integer tuples by a wrapper,
+      `BytesKey<TKey>` (the dictionary's own key, so its default comparer calls the byte hash and compare directly),
+      read element by element. Three forms lost first, each with its cause: a comparer handed to the dictionary (an
+      interface call per hash and per compare: LookupUnique 82.9 / 67.2 -> 204.7 / 225.4 us); the wrapper reading the key
+      as bytes or through `Unsafe.BitCast` (one 8-byte load over the two 4-byte stores that wrote an `(int, int)`: a
+      store-forwarding stall per probe, seen in the BenchmarkDotNet process's Tier1 listing of the workload,
+      `mov dword [rbp-0x30]; mov dword [rbp-0x2C]; mov rax, qword [rbp-0x30]`; 160.6 / 154.2 against 89.2 / 69.0 us; a
+      plain loop whose keys came from memory whole did not show it). Shipped form against c9518a2, default job, two
+      rounds, net10.0, 0 B: LookupUnique base 102.5 / 74.3 us, head 53.0 / 49.9 us; LookupGrid 29.0 / 28.5 against
+      23.7 / 25.2 us; LookupDirect (no hash on its path) level over four rounds (base 16.8 / 19.5 / 22.3 / 19.7, head
+      20.7 / 20.1 / 17.8 / 22.2 us); RekeyAndLookup, RekeyAndLookupUnique, CreateUnique, TradeAndCount level.
 - [ ] **C19. The core's unmanaged columns on mimalloc** (owner, 2026-11-07: option (b); `native-columns.md`), last in
       the lane and after Finish 1b's move: columns off `Array`, Dispose and a finalizer, `GC.AddMemoryPressure`, the
       NuGet `runtimes/` binaries and the pinned-heap fallback. Proof: `native-columns.md` section 4 (nothing slower,

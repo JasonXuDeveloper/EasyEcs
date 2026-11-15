@@ -461,20 +461,21 @@ public class PrefetchTests
         using var world = new World();
         world.Reserve<Login, Callsign>(keys);
         for (int i = 0; i < keys; i++) world.CreateEntity(new Login(i * 7 - 3), new Callsign("k" + i % (keys / 3 + 1)));
+        for (int i = 0; i < keys; i++) world.CreateEntity(new IndexTests.TupleCell(i, -i)); // keyed by its bytes (BytesKey)
         foreach (var (name, check) in new (string, Func<double>)[]
                  {
                      ("unique int keys", () => Heads<Login, int>(world, i => i * 7 - 3, keys)),
                      ("shared string keys", () => Heads<Callsign, string>(world, i => "k" + i, keys / 3 + 1)),
+                     ("unique tuple keys", () => Heads<IndexTests.TupleCell, (int, int)>(world, i => (i, -i), keys)),
                  })
             Assert.That(check(), Is.GreaterThan(0.5), name);
 
         static double Heads<T, TKey>(World world, Func<int, TKey> key, int count) where T : struct, IComponent, IIndexed<TKey> where TKey : IEquatable<TKey>
         {
             var index = (ValueIndex<T, TKey>)LookupExtensions.Prepared<T, TKey>(world);
-            var heads = (System.Collections.Generic.Dictionary<TKey, IndexHead>)typeof(ValueIndex<T, TKey>)
+            var heads = (HeadMap<TKey>)typeof(ValueIndex<T, TKey>)
                 .GetField("_heads", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(index)!;
-            Assert.That(HashSlots<TKey, IndexHead>.Works, Is.True, "the dictionary's fields are where they are read");
-            int stride = HashSlots<TKey, IndexHead>.Stride(heads, out var buckets, out var entries, out _);
+            int stride = heads.Stride(out var buckets, out var entries, out _); // 0 when the dictionary's fields are not where they are read
             Assert.That(stride, Is.GreaterThanOrEqualTo(System.Runtime.CompilerServices.Unsafe.SizeOf<IndexHead>()));
             WithCache(1, () => index.Probes()); // reads the arrays the stages use
             var all = new TKey[count];
@@ -486,7 +487,7 @@ public class PrefetchTests
                 byte* bucket = (byte*)index.Address(k, 1), entry = (byte*)index.Address(k, 2);
                 fixed (int* first = buckets)
                     if (bucket < (byte*)first || bucket >= (byte*)(first + buckets.Length) || entry == null) wrong++; // stage 1 is a bucket naming an entry
-                byte* value = (byte*)System.Runtime.CompilerServices.Unsafe.AsPointer(ref System.Runtime.InteropServices.CollectionsMarshal.GetValueRefOrNullRef(heads, k));
+                byte* value = (byte*)System.Runtime.CompilerServices.Unsafe.AsPointer(ref heads.Find(k));
                 if (value >= entry && value < entry + stride) headed++;
             }
 

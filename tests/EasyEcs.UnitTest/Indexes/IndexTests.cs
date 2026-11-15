@@ -1002,4 +1002,69 @@ public class IndexTests
         long all = Allocations.Of(() => world.Index<Rating, int>());
         Assert.That(all, Is.LessThan(once * 2), $"one reservation: {once} B");
     }
+
+    internal record struct TupleCell(int X, int Z) : IComponent, IUniqueIndexed<(int, int)>
+    {
+        public readonly (int, int) Key => (X, Z);
+    }
+
+    internal record struct TupleVoxel(short X, short Y, short Z) : IComponent, IIndexed<(short, short, short)>
+    {
+        public readonly (short, short, short) Key => (X, Y, Z);
+    }
+
+    internal record struct TupleRegion(long A, long B, long C) : IComponent, IIndexed<(long, long, long)>
+    {
+        public readonly (long, long, long) Key => (A, B, C);
+    }
+
+    /// <summary>
+    /// Tuples of integers of one size are keyed by their bytes (TupleKeys, BytesKey), other keys as they are; lookups
+    /// find every key, negative ones included, and miss the keys around them.
+    /// </summary>
+    [Test]
+    public void IntegerTupleKeysAreHashedByTheirBytes()
+    {
+        Assert.That(TupleKeys<(int, int)>.Bytes, Is.True);
+        Assert.That(TupleKeys<(short, short, short)>.Bytes, Is.True);
+        Assert.That(TupleKeys<(long, long, long)>.Bytes, Is.True);
+        Assert.That(TupleKeys<(int, long)>.Bytes, Is.False);   // padding between the fields
+        Assert.That(TupleKeys<(int, string)>.Bytes, Is.False);
+        Assert.That(TupleKeys<int>.Bytes, Is.False);
+
+        using var world = new World();
+        for (int x = -20; x < 20; x++)
+        for (int z = -15; z < 15; z++)
+            world.CreateEntity(new TupleCell(x, z), new TupleVoxel((short)x, (short)(x * z), (short)z), new TupleRegion(x, (long)z << 40, -x));
+
+        var cells = world.Index<TupleCell, (int, int)>();
+        var voxels = world.Index<TupleVoxel, (short, short, short)>();
+        var regions = world.Index<TupleRegion, (long, long, long)>();
+        for (int x = -25; x < 25; x++)
+        for (int z = -20; z < 20; z++)
+        {
+            bool inside = x is >= -20 and < 20 && z is >= -15 and < 15;
+            Assert.That(cells.TryGet((x, z), out var cell), Is.EqualTo(inside), $"({x}, {z})");
+            if (inside) Assert.That(cell.Read<TupleCell>(), Is.EqualTo(new TupleCell(x, z)));
+            Assert.That(voxels.Count(((short)x, (short)(x * z), (short)z)), Is.EqualTo(inside ? 1 : 0));
+            Assert.That(regions.Count((x, (long)z << 40, -x)), Is.EqualTo(inside ? 1 : 0));
+        }
+
+        static BytesKey<(short, short, short)> Key(short x, short y, short z) => new((x, y, z));
+        Assert.That(Key(1, 2, 3).Equals(Key(1, 2, 3)), Is.True);
+        Assert.That(Key(1, 2, 3).Equals(Key(1, 2, 4)), Is.False); // the last field, past the first four bytes
+        Assert.That(Key(1, 2, 3).GetHashCode(), Is.Not.EqualTo(Key(1, 2, 4).GetHashCode()));
+
+        var last = (int.MinValue, int.MinValue); // the keys copied out of the dictionary for a sort
+        int walked = 0;
+        foreach (var e in cells.Ascending())
+        {
+            var key = e.Read<TupleCell>().Key;
+            Assert.That(key.CompareTo(last), Is.GreaterThan(0));
+            last = key;
+            walked++;
+        }
+
+        Assert.That(walked, Is.EqualTo(40 * 30));
+    }
 }
