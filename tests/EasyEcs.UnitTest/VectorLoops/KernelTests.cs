@@ -1480,7 +1480,7 @@ public class KernelTests
         var system = world.DescribeSchedule().Groups[0].Stages[0].Systems[0];
         Assert.That(system.Loops, Is.EqualTo(new[]
         {
-            "Move: vector (Vector512 or Vector<float>), flat, masked words vector",
+            "Move: vector (lane kernel: Vector512, Vector256, Vector128), flat, masked words vector",
             "Hurt: vector (Vector512 or Vector<float>), masked words vector, cold branch (it calls Console.WriteLine, which is defined in another assembly)",
             "Mark: scalar (it uses the Entity in 'entity.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>))",
         }));
