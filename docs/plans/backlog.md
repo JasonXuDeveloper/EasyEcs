@@ -99,8 +99,12 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       GeneratedTextTests). GeneratorBenchmark Cold: the masked jobs translated twice more for the pass masks (+60 MB),
       fixed (PassMasks over the loops written once); then the alias passes made cheap (no regex, one buffer, collections
       per thread, one read per line): Cold 0.91-0.99x of base at 336 MB against 416 MB, the Edit rows level (0.85-1.11x
-      across two rounds, both directions), Compile level at lower allocation. Merged claude/relaxed-ramanujan-j4j9k4 (a1eeebb5). Next: package B
-      (item i), then C (item j).
+      across two rounds, both directions), Compile level at lower allocation. Merged claude/relaxed-ramanujan-j4j9k4 (a1eeebb5).
+      **Package B handed back**: item i as the merge of an if / else's two writes of one lane (x = Select(m, a, b), a
+      masked word selecting by __pass once; KernelBenchmark Step / StepHelpers / Holes / Halves 0.75-1.01x, two rounds,
+      5 runners shorter in FullOpts, none longer); item p, aliases of one simple name qualified by the outer names that
+      tell them apart (AliasTests), and no alias taking a __ name the user's code declares (Code.Reserved: a user type
+      __Vec or __Heat broke the generated code before). Next: package C (items j, k, l).
       The original item: read the generated files of the GeneratedTextTests corpora, the samples and the
       benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and
       masks, repeated setup, `this.v0`, dead narrow temps: G17's rest in owner-review, now to do), remove each in the
