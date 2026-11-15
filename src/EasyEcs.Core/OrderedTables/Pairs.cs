@@ -357,8 +357,11 @@ public sealed partial class World
             while (state.Next<T, TOrder, TJob>(this, ref job, axes, reach, out var run))
             {
                 // Chunks of whole words of rows: a chunk's rows never share a presence or tick word with another's.
+                // A job that merges is cut by count (MergedChunkRows): cut by cost, the boundaries its partial results are
+                // combined at followed how long runs took, and a run slower than any before grew the copies it keeps.
                 int perWord = 64 / run.ClusterSize, clusters = run.End;
-                int size = ChunkRows(work, (long)clusters * run.ClusterSize, 0) / run.ClusterSize;
+                long items = (long)clusters * run.ClusterSize;
+                int size = (TJob.Merges ? MergedChunkRows(work, items, false) : ChunkRows(work, items, 0)) / run.ClusterSize;
                 size = (size + perWord - 1) / perWord * perWord;
                 int chunks = (clusters + size - 1) / size;
                 work.Set(start, in run, size, chunks);
