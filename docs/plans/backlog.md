@@ -228,6 +228,13 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       a busy machine), then fix the cause: warm up until N consecutive updates allocate nothing and the JIT has
       compiled nothing new, in one helper (`Allocations.WarmUp`) every 0 B test uses. Also: `HugePagesTests` goes
       Inconclusive without a free 2 MiB page (the count of tests then differs by one): expected, say so in tests/AGENTS.md.
+- [ ] **`chunk-floor-by-bytes`** (owner, L31, L32): `MergedChunkRows` = max(floor, NextPowerOfTwo(rows) / 64), the floor
+      from bytes: at least `MinChunkBytes` (a constant, measured: try 16 KB, 32 KB, 64 KB) of the columns the pass
+      reads and writes, as rows = NextPowerOfTwo(MinChunkBytes / bytesPerRow), at least 64; a pair pass's bytes per
+      row times its cluster's neighbour count (data, not machine). Needs the pass's bytes per row in the runner
+      (the generated job knows its columns: a static `RowBytes`). Proof: the merging `[ForEach]` rows of
+      ReduceBenchmark / EmitBenchmark and PairsBenchmark.GeneratedParallelResult level with the per-kind floors at
+      every size, 0 B, results bit-identical across thread counts (a test at 1, 2 and 8 threads).
 - [ ] **`feat-ground-layer`** (owner, L19): a `Cell<TCell, Ground<TTile>>` method that also reads a layer of the
       3D tile it is the ground of; design the public form (two or three shapes, as a popup), then generator, analyzer,
       tests, TileGroundBenchmark case, docs-todos. After feat-generated-text-2's package A (same emit code).
