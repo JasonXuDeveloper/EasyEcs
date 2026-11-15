@@ -651,10 +651,7 @@ public class ForEachSystemTests
         world.AddSystem<SlicedBatch>();
         world.AddSystem<SlicedParallel>();
         world.AddSystem<SlicedArmor>();
-        Allocations.WarmUp(world.Update, 24); // every slice of every system, query caches, until the JIT settles
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 120; i++) world.Update();
-        Assert.That(System.GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 24, 120), Is.Zero); // every slice of every system, query caches
     }
     [Test]
     public void APassKeepsItsQueryPerWorldAndSeesNewTables()

@@ -579,11 +579,8 @@ public class SymmetricPairTests
     {
         using var world = Bodies(5000, 50f, 6, tables: true, sight: true);
         using var items = Items(2000, 20f, 3, 8, true);
-        for (int i = 0; i < 200; i++) Passes(world, items); // re-sorts of the cadence, past tiering and OSR under every ISA
-        Assert.That(Allocations.Of(() =>
-        {
-            for (int i = 0; i < 20; i++) Passes(world, items);
-        }), Is.EqualTo(0));
+        void Step() => Passes(world, items);
+        Assert.That(Allocations.Steady(Step, 200, 20), Is.Zero); // re-sorts of the cadence
 
         static void Passes(World world, World items)
         {

@@ -68,7 +68,7 @@ public static class Allocations
     /// The bytes one run of <paramref name="run"/> allocated (<paramref name="bytes"/>: this thread's allocated bytes, or
     /// another counter such as a system's stats). One run: helpers are the process's fixed threads (no thread pool
     /// thread starts while it runs) and their state is set up on all of them at once, so a run allocates nothing whichever
-    /// thread runs which chunk.
+    /// thread runs which chunk. For code a test runs again and again, <see cref="Steady"/>.
     /// </summary>
     public static long Of(System.Action run, System.Func<long> bytes = null)
     {
@@ -87,13 +87,51 @@ public static class Allocations
     }
 
     /// <summary>
-    /// Run <paramref name="step"/>, the code a test then measures, <paramref name="least"/> times, then until the JIT has
-    /// settled: no method compiled anywhere in the process during the last <see cref="QuietRuns"/> runs and the last
-    /// half second. A loop still running Tier0 code compiles its on-stack replacement on the thread that runs it, once
-    /// its patchpoints have been hit often enough, and that compile can allocate on that thread (168 B for each of
-    /// PrefetchTests' probe jobs): inside a measurement, a failure. Tiering moves a method on only after 30 calls, a
-    /// 100 ms delay and a compile on its background thread, which in the full suite waits behind the methods of every
-    /// test before: a fixed warm-up that is enough alone measures Tier0 loops there.
+    /// The bytes <paramref name="runs"/> runs of <paramref name="step"/> allocated once it is warm: <see cref="WarmUp"/>
+    /// of the same delegate first, so the code measured is the code warmed (a lambda written around the step would be
+    /// compiled, and its loops replaced on the stack, inside the window). Every 0 B check of code run again and again
+    /// measures through it. A failure writes to the test's output how many methods this thread compiled in the window:
+    /// some, the warm-up did not settle; none, the code allocated.
+    /// </summary>
+    public static long Steady(System.Action step, int least, int runs, System.Func<long> bytes = null)
+    {
+        WarmUp(step, least);
+        Repeat(step, 0); // compiled outside the window (the first Steady of the process)
+        bytes ??= System.GC.GetAllocatedBytesForCurrentThread;
+        Settle();
+        long compiled = System.Runtime.JitInfo.GetCompiledMethodCount(currentThread: true);
+        long before = bytes();
+        Repeat(step, runs);
+        long allocated = bytes() - before;
+        compiled = System.Runtime.JitInfo.GetCompiledMethodCount(currentThread: true) - compiled;
+        if (allocated != 0)
+            NUnit.Framework.TestContext.Out.WriteLine($"Allocations.Steady: {allocated} B in {runs} runs after the warm-up, "
+                + $"{compiled} methods compiled on this thread in them, {Workers.Count} helper threads");
+        return allocated;
+    }
+
+    // Out of line: one loop for every test, compiled and tiered long before a measurement reaches it.
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static void Repeat(System.Action step, int runs)
+    {
+        for (int i = 0; i < runs; i++) step();
+    }
+
+    /// <summary>
+    /// Run <paramref name="step"/>, the code a test then measures, <paramref name="least"/> times, then until it has
+    /// settled: no method compiled anywhere in the process and nothing allocated on this thread during the last
+    /// <see cref="QuietRuns"/> runs, at least twice the longest stretch between two compiles on this thread, and the last
+    /// half second; at most 30 s.
+    /// <para>
+    /// A compile on this thread inside a measurement allocates: an on-stack replacement of a Tier0 loop, 168 B (a string
+    /// and a System.Reflection.Metadata.TypeName, the runtime parsing a type name while it compiles), which made
+    /// NeighborTests' lists pass fail with 336 B. Tiering moves a method on only after 30 calls, a 100 ms delay and a
+    /// compile on its background thread, which in the full suite waits behind the methods of every test before, so a
+    /// fixed warm-up that is enough alone still runs Tier0 loops there. A method of a rare path (a pair pass's lists
+    /// drawn again every few runs) stays at Tier0 longer and compiles its replacement late: at runs 12, 59, 71, 90 and 92
+    /// of one loaded run, past a stretch of 40 quiet runs; hence the stretch follows the longest gap seen. And nothing
+    /// allocated in it: what a rare path grows has grown before the measurement.
+    /// </para>
     /// </summary>
     public static void WarmUp(System.Action step, int least)
     {
@@ -101,14 +139,21 @@ public static class Allocations
         long quiet = System.Diagnostics.Stopwatch.Frequency / 2;
         long start = System.Diagnostics.Stopwatch.GetTimestamp(), since = start;
         long compiled = System.Runtime.JitInfo.GetCompiledMethodCount();
-        for (int runs = 0; ;)
+        long here = System.Runtime.JitInfo.GetCompiledMethodCount(currentThread: true);
+        int clean = 0, gap = 0, longest = 0; // settled runs; runs since this thread's last compile; the longest such gap
+        while (true)
         {
+            long before = System.GC.GetAllocatedBytesForCurrentThread();
             step();
+            long allocated = System.GC.GetAllocatedBytesForCurrentThread() - before;
             long now = System.Diagnostics.Stopwatch.GetTimestamp(), count = System.Runtime.JitInfo.GetCompiledMethodCount();
-            if (count != compiled) (compiled, since, runs) = (count, now, 0);
-            else if (++runs >= QuietRuns && now - since >= quiet) return;
-            // A JIT that never settles (a step compiling new code every run): the measurement shows what allocates.
-            if (now - start > 60 * System.Diagnostics.Stopwatch.Frequency) return;
+            long countHere = System.Runtime.JitInfo.GetCompiledMethodCount(currentThread: true);
+            gap++;
+            if (countHere != here) (here, longest, gap) = (countHere, System.Math.Max(longest, gap), 0);
+            if (count != compiled || allocated != 0) (compiled, since, clean) = (count, now, 0);
+            else if (++clean >= System.Math.Max(QuietRuns, 2 * longest) && now - since >= quiet) return;
+            // A step that never settles (it compiles or allocates every run): the measurement shows it.
+            if (now - start > 30 * System.Diagnostics.Stopwatch.Frequency) return;
         }
     }
 

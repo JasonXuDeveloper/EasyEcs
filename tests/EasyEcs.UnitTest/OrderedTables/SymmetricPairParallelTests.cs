@@ -326,11 +326,8 @@ public class SymmetricPairParallelTests
     {
         using var world = Bodies(5000, 40f, 6, tables: true, threads: 4);
         using var items = Items(3000, 20f, 3, 8, threads: 4);
-        for (int i = 0; i < 200; i++) Run(world, items);
-        Assert.That(Allocations.Of(() =>
-        {
-            for (int i = 0; i < 20; i++) Run(world, items);
-        }), Is.EqualTo(0));
+        void Step() => Run(world, items);
+        Assert.That(Allocations.Steady(Step, 200, 20), Is.Zero);
 
         static void Run(World world, World items)
         {

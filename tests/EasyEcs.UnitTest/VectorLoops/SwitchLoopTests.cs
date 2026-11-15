@@ -345,7 +345,6 @@ public class SwitchLoopTests
             SwitchPasses.ClampParallel(world);
         }
 
-        Allocations.WarmUp(Frame, 50);
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) Frame(); }), Is.Zero);
+        Assert.That(Allocations.Steady(Frame, 50, 10), Is.Zero);
     }
 }

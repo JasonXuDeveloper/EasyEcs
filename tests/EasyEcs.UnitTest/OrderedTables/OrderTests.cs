@@ -755,8 +755,7 @@ public class OrderTests
             world.SortRows<Walker>();
         }
 
-        for (int i = 0; i < 5; i++) Tick();
-        Assert.That(Allocations.Of(Tick), Is.Zero);
+        Assert.That(Allocations.Steady(Tick, 5, 1), Is.Zero);
         // The sort's keys, rows and words are the world's: a rent from ArrayPool.Shared allocated after every gen2
         // collection of a loaded machine (the pool drops its arrays then), 8 KB to 590 KB in loaded suite runs.
         Assert.That(Allocations.PoolRents(Tick), Is.Zero, "rents of the sort");

@@ -2875,8 +2875,7 @@ public class KernelTests
             ParallelKernels.Spend(world);
         }
 
-        Allocations.WarmUp(Frame, 50); // the query cache, the static index tables of Interleaved, until the JIT settles
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) Frame(); }), Is.Zero); // parallel kernels wake helpers
+        Assert.That(Allocations.Steady(Frame, 50, 10), Is.Zero); // the query cache, the static index tables of Interleaved, until the JIT settles
     }
 
     // Lane counts that leave a tail, and two tables (the Frozen tag) so a pass sees several runs.

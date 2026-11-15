@@ -53,15 +53,7 @@ public sealed partial class World
         long rows = 0;
         for (int i = 0; i < tables.Length; i++) rows += tables[i].Count;
         if (slices > 1) rows /= slices; // a sliced pass visits about 1 / slices of them
-        if (merges)
-        {
-            work.Items = 0; // cut by count, never by cost: nothing to learn
-            long share = rows / MergedChunks;
-            return stamps
-                ? (int)Math.Clamp((share + 4095) & ~4095L, 4096, MaxChunkSize)
-                : (int)Math.Clamp((share + 63) & ~63L, 1024, MaxChunkSize);
-        }
-
+        if (merges) return MergedChunkRows(work, rows, stamps);
         int size = ChunkRows(work, rows, 0);
         if (!stamps) return size;
         if (work.Measured) return size >= 4096 ? (size + 4095) & ~4095 : size; // small chunks of heavy rows open their blocks
@@ -77,6 +69,21 @@ public sealed partial class World
     /// <see cref="MaxChunkSize"/> rows, more than enough for any thread count.
     /// </summary>
     private const int MergedChunks = 16;
+
+    /// <summary>
+    /// Rows per chunk of a pass of <paramref name="rows"/> rows that merges per chunk: a share of <see cref="MergedChunks"/>,
+    /// cut by count, never by cost (nothing for <paramref name="work"/> to learn), so its result and its chunk count,
+    /// which sizes the copies it keeps, never follow how long a run took. Whole 4,096-row blocks when it
+    /// <paramref name="stamps"/> change ticks.
+    /// </summary>
+    internal static int MergedChunkRows(ParallelWork work, long rows, bool stamps)
+    {
+        work.Items = 0;
+        long share = rows / MergedChunks;
+        return stamps
+            ? (int)Math.Clamp((share + 4095) & ~4095L, 4096, MaxChunkSize)
+            : (int)Math.Clamp((share + 63) & ~63L, 1024, MaxChunkSize);
+    }
 
     /// <summary>
     /// Items per chunk for <paramref name="items"/> items of <paramref name="work"/> (rows of a pass, elements of

@@ -390,8 +390,7 @@ public partial class TileTests
         using (bounded)
         using (whole)
         {
-            Allocations.WarmUp(bounded.Update, 50);
-            Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) bounded.Update(); }), Is.Zero);
+            Assert.That(Allocations.Steady(bounded.Update, 50, 10), Is.Zero);
         }
     }
 
@@ -1418,8 +1417,7 @@ public partial class TileTests
         GroundChunks(world);
         world.AddSystem<CellGroundCrossSystem>();
         world.AddSystem<CellGroundBoxSystem>();
-        Allocations.WarmUp(world.Update, 50);
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 50, 10), Is.Zero);
     }
 
     [Test]
@@ -1434,8 +1432,7 @@ public partial class TileTests
         }
         world.AddSystem<CellBlurTorusSystem>();
         world.AddSystem<CommitHeatSystem>();
-        Allocations.WarmUp(world.Update, 50);
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 10; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 50, 10), Is.Zero);
     }
 }
 

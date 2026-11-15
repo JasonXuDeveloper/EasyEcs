@@ -3779,3 +3779,37 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
       with `-p:EmitCompilerGeneratedFiles=true`, and say "trimmed" instead of "global:: dropped".
 - [ ] **audit-generator's "The generated text"** already says what `Tidy` does (this branch); the public skill needs
       nothing (users do not write generated text).
+
+## fix-allocation-tests-warmup (0 B tests failing under load; a decision draft, and one changelog line)
+
+- **Causes, traced in loaded runs** (4 copies of AllocationTests + NeighborTests at once, AVX-512 off; an
+  EventListener on the JIT and GC events, GCSampledObjectAllocationHigh enabled from startup for the types):
+  1. A JIT compile on the measuring thread allocates: an on-stack replacement, 168 B (a `string` and a
+     `System.Reflection.Metadata.TypeName`, the runtime parsing a type name while compiling). NeighborTests' lists
+     pass, 336 B: after 200 fixed runs the window held 7 compiles on this thread (the measured lambda, compiled
+     only there, and the replacements of the lists' rare paths: `PairState.Build`, `Moved`, `Save`, the job's rows),
+     2 of them 168 B each. Rare paths stay at Tier0 and compile late (runs 12, 59, 71, 90, 92 of one run).
+  2. `ParallelReductionsScratchAndLookupsDoNotAllocate`: 120 B (`List<int>` and its `int[16]`) at update 2, 218
+     or 1,386 with no compile: SumDigits' `Scratch<T>` list is made on a thread's first row, and the stage hands its
+     chunks to any thread, so the measuring thread may run its first row late (the documented contract).
+  3. `OrderedWalksRelationsCascadesAndCleanupDoNotAllocate`, 0.2 to 4.3 MB, no compile: the test's frame never
+     removed a link (it unlinked a party 7 seats off), 1 link more a frame, buffers and the index's lists doubling;
+     a longer warm-up put a doubling in the window.
+  4. Core: `ForPairsParallel` cut a merging job (a `Reduce<T>` of pairs) by the measured cost: its chunk
+     boundaries, where partial results combine, followed timing, and a run slower than any before grew the copies
+     it keeps (marked "warm-up only"). Forced slower in a test the cut went from 32 clusters a chunk to 8.
+     `PassesWithResultsAndMutsAllocateNothingOnceWarm` failed with 8,216 B under load (1 compile in the window);
+     not attributed to this growth with certainty, and it did not recur after the fixes.
+- **Decision draft.** Every 0 B check of code run again and again goes through `Allocations.Steady(step, least,
+  runs)`: warm up that same delegate until no method compiled in the process and nothing was allocated on the
+  measuring thread for a stretch following the longest gap between this thread's compiles (at least 40 runs and
+  0.5 s, at most 30 s), then measure. No retry of a failed measurement; a failure prints the compiles on this
+  thread in the window. Considered: tiering or OSR off for the tests (other code than users run); longer fixed
+  warm-ups (they race the tiering backlog). A merging parallel pair pass is cut by count (`MergedChunkRows`, the
+  rule merging [ForEach] passes already had).
+- **Changelog (Fixes):** a parallel pair method with a `Reduce<T>` combines its chunks at boundaries that depend on
+  the row count only, never on how long earlier runs took, and no longer allocates when a run is slower than any
+  before. Links: guide/performance/threading or the pair page.
+- **Proof.** The reproduction (4 copies at once of AllocationTests, NeighborTests and ScratchTests, net11.0, AVX-512
+  off), which failed 3 of 32 runs before: 24 of 24 in a row after (and 24 of 24 before the links fix, the other
+  causes fixed). Full suite 4,379 passed on net10.0 and net11.0; build 0 warnings; inlining.sh 0.

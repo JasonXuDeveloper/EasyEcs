@@ -263,10 +263,7 @@ public class MoveTests
             into[0].Destroy();
         }
 
-        for (int i = 0; i < 5; i++) Arrive();
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 100; i++) Arrive();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(Arrive, 5, 100), Is.Zero);
     }
 
     [Test]

@@ -263,9 +263,7 @@ public class DynamicBufferTests
             world.Update();
         }
 
-        for (int i = 0; i < 20; i++) Cycle();
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 200; i++) Cycle(); },
-            () => GC.GetAllocatedBytesForCurrentThread() + replay.Stats.TotalAllocated), Is.Zero);
+        Assert.That(Allocations.Steady(Cycle, 20, 200, () => GC.GetAllocatedBytesForCurrentThread() + replay.Stats.TotalAllocated), Is.Zero);
         for (int i = 0; i < rows.Length; i++) Assert.That(rows[i].Replayed[0], Is.EqualTo(new Replayed(i)));
         world.Restore(snapshot);
         Assert.That(rows[5].Replayed[0], Is.EqualTo(new Replayed(0)));   // the snapshot kept its own elements
@@ -305,11 +303,7 @@ public class DynamicBufferTests
         Assert.That(bags[1].Read<DynamicBuffer<Loot>>().Count, Is.Zero);
         world.AddSystem<Refill>();
         world.AddSystem<Weigh>();
-        for (int i = 0; i < 5; i++) world.Update();   // the lists reach their capacity
-
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 100; i++) world.Update();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 5, 100), Is.Zero); // the lists reach their capacity
     }
 
     [Test]
@@ -336,10 +330,7 @@ public class DynamicBufferTests
             held.Remove<DynamicBuffer<Loot>>();                                   // a component that goes
         }
 
-        for (int i = 0; i < 5; i++) Churn();
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 100; i++) Churn();
-        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+        Assert.That(Allocations.Steady(Churn, 5, 100), Is.Zero);
     }
 
     [Test]

@@ -459,8 +459,7 @@ public partial class ReduceTests
     {
         using var world = Pointed(World.MaxChunkSize * 4);
         world.AddSystem<ParallelScores>();
-        for (int i = 0; i < 10; i++) world.Update();
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 300; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 10, 300), Is.Zero);
     }
 
     /// <summary>
@@ -623,8 +622,7 @@ public partial class ReduceTests
         using var world = Pointed(World.MaxChunkSize * 4);
         world.AddSystem<ParallelTotals>();
         world.AddSystem<SerialTotals>();
-        for (int i = 0; i < 10; i++) world.Update();
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 300; i++) world.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(world.Update, 10, 300), Is.Zero);
     }
 
     /// <summary>
@@ -656,8 +654,7 @@ public partial class ReduceTests
 
         using var small = Pointed(40);
         small.AddSystem<ParallelEnds>();
-        Allocations.WarmUp(() => small.Update(), 50);
-        Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) small.Update(); }), Is.Zero);
+        Assert.That(Allocations.Steady(small.Update, 50, 100), Is.Zero);
     }
 
     /// <summary>The entity with the fewest points ([MinBy], MINLOC): the generator writes Identity and Combine.</summary>
@@ -730,8 +727,7 @@ public partial class ReduceTests
             world.Update();
             Assert.That(world.Least, Is.EqualTo(new Least(entities[World.MaxChunkSize + 7].Id, 1)), $"{threads} threads");
 
-            Allocations.WarmUp(() => world.Update(), 20);
-            Assert.That(Allocations.Of(() => { for (int i = 0; i < 100; i++) world.Update(); }), Is.Zero, $"{threads} threads");
+            Assert.That(Allocations.Steady(world.Update, 20, 100), Is.Zero, $"{threads} threads");
         }
     }
 

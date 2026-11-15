@@ -346,8 +346,7 @@ public class MaxRowsTests
             world.ForEachCollected<Level, ForEachCollectedJob>(ref job, 100);  // past the stack: the world's array
         }
 
-        Allocations.WarmUp(Step, 50);
-        Assert.That(Allocations.Of(Step), Is.Zero);
+        Assert.That(Allocations.Steady(Step, 50, 1), Is.Zero);
         // Past 64 ids the array is the world's: a rent from ArrayPool.Shared allocated after every gen2 collection of a
         // loaded machine (the pool drops its arrays then).
         Assert.That(Allocations.PoolRents(Step), Is.Zero, "rents of the collected ids");
@@ -368,8 +367,7 @@ public class MaxRowsTests
         Step();
         // Each of the outer run's 100 rows ran the inner run over 120 rows: the inner ids never overwrote the outer ones.
         Assert.That((outer.Rows, outer.Inner), Is.EqualTo((100, 100 * 120)));
-        Allocations.WarmUp(Step, 5);
-        Assert.That(Allocations.Of(Step), Is.Zero);
+        Assert.That(Allocations.Steady(Step, 5, 1), Is.Zero);
         Assert.That(Allocations.PoolRents(Step), Is.Zero, "rents of the collected ids");
         Assert.That((outer.Rows, outer.Inner), Is.EqualTo((100, 100 * 120)));
     }
