@@ -3846,6 +3846,7 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
       the A/B of the branch (backlog entry). Note what the pair floor still depends on: the neighbors of a cluster's
       ranges grow with the cluster's size (`Vector<float>.Count`), so the floor of a pair pass without lists can differ
       between an AVX-512 and an ARM64 machine (never between thread counts or runs).
+      The numbers: 3-repeat interleaved --dev screens at 32 KB (49 chunks at 100,000 Spots) against base 7e9e5e40: level (not slower beyond both error bars in 2 of 3 repeats; EmitParallel 10,000 11.2-11.9 us against 13.7-14.9, 100,000 48.9-68.5 us against 49.0-65.2, LowestVector 1,000 to 1,000,000 rows level, 0 B everywhere), so `MinChunkBytes` stays 32 KB and `MergedChunks` 64; 32 KB with `MergedChunks` = 16 and 64 KB were also level.
 - [ ] **Stale text** (public XML docs, with their zh entries in `tools/docs/ApiDocs/zh/`): `Reduce.cs` ("16 chunks of
       1,024 to 16,384 rows"), `ForEachAttributes.cs` (`ChunkSize`: "16 chunks"), the `ForEachParallel` family's summary in
       `ArityGenerator.cs` ("16 for a job that merges"); the pages `reference/reduce.mdx`, `reference/foreachattribute.mdx`
