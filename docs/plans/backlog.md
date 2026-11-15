@@ -110,6 +110,23 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       the 512 -> 256 -> 128 -> row chain in Core, bit for bit on every width setting; each width's walk a method of
       its own (the inliner's budget); flat jobs level, conditions and reductions not yet (the JIT's import-time forms
       and mask registers lost through a lane struct); 64-70 % less text. The owner decides the rollout.
+      **Owner, L33**: roll the kernel out for flat jobs first (package D), keep researching the walk form and the
+      reduction until each shape is level, then shape by shape (package F); fix today's 128-bit (SSE) path apart
+      (package E).
+      **Package D handed back on branch `feat-lane-kernel`** (from 89090767 + this branch): Core's LaneKernel
+      (the typed form: ILane, Lane512/256/128, ILaneStep4, Run / RunFlat / RunMasked, hidden; the width and walk
+      forms moved to benchmarks/.../LaneKernelStudy.cs); SystemGenerator.LaneStepOf decides the flat shape from
+      Kernel.Code (src/EasyEcs.Generator/AGENTS.md, "The lane kernel's shape"; audit-vector-loops) and EmitLanes
+      writes a __Lanes struct with one Step and Execute's LaneKernel call; every other shape keeps its loops. 24 of
+      the benchmark project's 260 vector jobs take it; Integrate's job 4,304 -> 2,372 bytes, the project's generated
+      files 4,522,249 -> 4,502,057, the GeneratedTextTests corpus 11,532,139 -> 11,524,667. Bit for bit under the
+      four width settings (LaneKernelTests and the vector-loop test classes), full suite on both runtimes, AOT,
+      inlining.sh 0. A/B (two rounds, base 89090767) running from scratchpad/kernelD/ab.sh: the merge waits for it
+      (only level or a win at 0 B with nothing slower ships). Details: lane-kernel.md "Package D", docs-todos
+      `feat-lane-kernel`.
+      Package E (open): today's generator's 128-bit path from what the kernel's SSE code shows.
+      Package F (open): the walk form (uniforms, a select under one comparison, Min / Max against constants),
+      8-byte lanes (ILaneStep8) and reductions, each rolled out once level at 0 B.
       The original item: read the generated files of the GeneratedTextTests corpora, the samples and the
       benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and
       masks, repeated setup, `this.v0`, dead narrow temps: G17's rest in owner-review, now to do), remove each in the

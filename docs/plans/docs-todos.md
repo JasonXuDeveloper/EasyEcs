@@ -3786,6 +3786,34 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
 - [ ] **audit-generator's "The generated text"** already says what `Tidy` does (this branch); the public skill needs
       nothing (users do not write generated text).
 
+## feat-lane-kernel (ledger L33: the lane kernel rolled out for flat jobs, package D)
+
+- [ ] **Decision record** (decisions.mdx + zh, a new D): a flat [ForEach] job's vector loop is one step written over
+      Core's lane types (`ILane<TSelf, T>`, `Lane512/256/128<T>`) and Core's `LaneKernel` walks it at 512, 256, then
+      128 bits (512 only where `Vector512.IsHardwareAccelerated`), the rows after it the method's; the shape (4-byte
+      float / int lanes, straight-line arithmetic, constants as the only uniforms, no mask, reduction, structural
+      change, wide or interleaved component) is `SystemGenerator.LaneStepOf`, read from `Kernel.Code`. Why: one body
+      per job instead of one per width (Integrate's job 4,304 -> 2,372 bytes), the 128-bit step for the rows a wider
+      vector leaves (up to 3 rows run the method, against 7 after a 256-bit loop today), measured level on the study (two rounds) and on this
+      branch's A/B (the numbers of `scratchpad/kernelD/ab.sh`, to fill in). Considered: the width form
+      (`Lane<W, T>`, one type parameter for every element type; the same machine code, kept in the benchmark
+      project for package F), the step in the job itself (a parallel job is a struct and holds no ref fields), every
+      shape at once (conditions, uniforms and reductions measured slower through a lane struct: lane-kernel.md).
+- [ ] **guide/basics/systems.mdx (+ zh)**: the schedule example's Move line now reads "vector (lane kernel: Vector512,
+      Vector256, Vector128), flat, masked words vector" (changed on this branch); the paragraph after it says
+      `tools/perf/jitdisasm.sh <project> 'EasyEcs.World:Masked'` shows the loop: a kernel job's loop is in
+      `'EasyEcs.LaneKernel:Walk'` (one listing per width). Say so, and that the job's text is a `__Lanes` struct with
+      one `Step`.
+- [ ] **The vector-loop guide page** (guide/performance, where the widths are explained): the widths a job runs at
+      (a flat job: 512, 256, 128, then the method; other jobs: Vector512, then Vector<T>, then the method), and what
+      makes a job flat (the shape above, in users' words: arithmetic of the row's fields and constants). The public
+      skill (skills/easyecs) needs nothing: users write the same methods.
+- [ ] **The live demo**: Core changed, so `bun run demo:build` and commit `docs/public/demo` with its `source.sha256`
+      (CI compares it) before the merge to master.
+- [ ] **Changelog (Performance)**: the vector loop of a flat [ForEach] method (straight-line arithmetic of its
+      components' fields) also runs its rows left after the widest vector at 256 and 128 bits; the generated file of
+      such a method is about half as long. Only if the A/B is level or better.
+
 ## fix-allocation-tests-warmup (0 B tests failing under load; a decision draft, and one changelog line)
 
 - **Causes, traced in loaded runs** (4 copies of AllocationTests + NeighborTests at once, AVX-512 off; an

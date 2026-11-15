@@ -3,15 +3,17 @@
 The study of backlog items j, k, k2, k3, l and l2 (feat-generated-text-2 package C). It answers whether the vector
 loops the generator writes can be one body per job, written once over a width-generic lane type the JIT specializes,
 with the width chain (512 -> 256 -> 128 -> the method per row), the tails and the masked words held once in Core. It
-is a prototype on three jobs, hand-written as the generator would write them; the generator is not changed and nothing
-is rolled out. The owner decides the rollout.
+was a prototype on three jobs, hand-written as the generator would write them. The owner chose the rollout (L33):
+flat jobs first (package D, below, "Package D: flat jobs"), the walk form and the reduction researched further
+(package F), today's 128-bit path fixed apart (package E).
 
 Code:
 
-- `src/EasyEcs.Core/VectorLoops/LaneKernel.cs`. Two forms of the lane type and the kernels over them:
-  - the width form, `Lane<W, T>` over W512 / W256 / W128, with one type parameter for every element type;
-  - the typed form of item l2: `ILane<TSelf, T>`, with `Lane512<T>` / `Lane256<T>` / `Lane128<T>`, and
-    `LaneKernel4` over `ILaneStep4` / `ILaneWalk4`.
+- `src/EasyEcs.Core/VectorLoops/LaneKernel.cs` (shipped, hidden): the typed form of item l2, `ILane<TSelf, T>` with
+  `Lane512<T>` / `Lane256<T>` / `Lane128<T>`, and `LaneKernel` over `ILaneStep4` (the study called it LaneKernel4).
+- `benchmarks/EasyEcs.Benchmark/VectorLoops/LaneKernelStudy.cs`: the study's other forms, which Core does not ship: the
+  width form (`Lane<W, T>` over W512 / W256 / W128, one type parameter for every element type; its kernel
+  `WidthKernel`) and the typed walk form (`ILaneWalk4`, `LaneWalk4`).
 - `benchmarks/EasyEcs.Benchmark/VectorLoops/LaneKernelBenchmark.cs`: the three jobs in each form, against today's
   generated jobs. Its setup checks every job bit for bit.
 
@@ -31,15 +33,15 @@ public struct Lane512<T> : ILane<Lane512<T>, T> { public Vector512<T> V; ... }  
 // the job: its body once, over the float and int lanes of a width (one type parameter per lane size it uses)
 internal ref struct IntegrateJob : IForEachMasked<Heat, Speed>, ILaneStep4
 {
-    public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2) { ...refs...; LaneKernel4.Run(ref this, c1.Length); }
-    public void Execute(EntitySpan entities, ulong pass, Span<Heat> c1, Span<Speed> c2) { ...; LaneKernel4.RunMasked(ref this, pass, c1.Length); }
+    public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2) { ...refs...; LaneKernel.Run(ref this, c1.Length); }
+    public void Execute(EntitySpan entities, ulong pass, Span<Heat> c1, Span<Speed> c2) { ...; LaneKernel.RunMasked(ref this, pass, c1.Length); }
 
-    public void Step<LF, LI, M>(nint i, LI pass) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode
+    public void Step<LF, LI, M>(nint i, LI pass, LF passF) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode
     {
         ref float e1 = ref Unsafe.As<Heat, float>(ref r1);
         var c1 = LF.Load(ref e1, i);
         var c2 = LF.Load(ref Unsafe.As<Speed, float>(ref r2), i);
-        c1 = LaneKernel4.Keep<M, LF, float, LI>(pass, c1 + c2 * LF.Create(0.033333335f), c1);
+        c1 = LF.Keep<M>(passF, c1 + c2 * LF.Create(0.033333335f), c1);
         LF.Store(c1, ref e1, i);
     }
 
@@ -47,7 +49,7 @@ internal ref struct IntegrateJob : IForEachMasked<Heat, Speed>, ILaneStep4
 }
 ```
 
-The kernel in Core (`LaneKernel4.Run`) does three things:
+The kernel in Core (`LaneKernel.Run`) does three things:
 
 - **Picks the widths.** It takes 512 bits where `Vector512.IsHardwareAccelerated` (never `Avx512F.IsSupported`, item
   k3), then 256, then 128. Each width takes the whole vectors the wider one left, and the method runs on the rows left
@@ -70,7 +72,7 @@ jobs of many lane sizes.
 The listings are in `$S/t1c` (width form), `$S/t1e` and `$S/t1f` (typed form).
 
 **Own instantiation per width.** Each width compiles on its own, for example
-`LaneKernel4:Walks[WalkJobs+StepJob, Lane512<float>, Lane512<int>, EveryRow]` and its Lane256 twin. No call is shared
+`LaneKernel:Walks[WalkJobs+StepJob, Lane512<float>, Lane512<int>, EveryRow]` and its Lane256 twin. No call is shared
 across widths, and no generic virtual dispatch appears. The job is a struct type argument with `allows ref struct`,
 and every `LF.Op` is a constrained call on a struct, which the JIT resolves.
 
@@ -194,14 +196,14 @@ public void Execute(__EntitySpan entities, ulong pass, __Span_Heat c1, __Span_Sp
 The typed form (36 lines; the chain, the masked words and the tail are Core's):
 
 ```csharp
-public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2) { r1 = ...; r2 = ...; LaneKernel4.Run(ref this, c1.Length); }
-public void Execute(EntitySpan entities, ulong pass, Span<Heat> c1, Span<Speed> c2) { r1 = ...; r2 = ...; LaneKernel4.RunMasked(ref this, pass, c1.Length); }
-public void Step<LF, LI, M>(nint i, LI pass) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode
+public void Execute(EntitySpan entities, Span<Heat> c1, Span<Speed> c2) { r1 = ...; r2 = ...; LaneKernel.Run(ref this, c1.Length); }
+public void Execute(EntitySpan entities, ulong pass, Span<Heat> c1, Span<Speed> c2) { r1 = ...; r2 = ...; LaneKernel.RunMasked(ref this, pass, c1.Length); }
+public void Step<LF, LI, M>(nint i, LI pass, LF passF) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode
 {
     ref float e1 = ref Unsafe.As<Heat, float>(ref r1);
     var c1 = LF.Load(ref e1, i);
     var c2 = LF.Load(ref Unsafe.As<Speed, float>(ref r2), i);
-    c1 = LaneKernel4.Keep<M, LF, float, LI>(pass, c1 + c2 * LF.Create(0.033333335f), c1);
+    c1 = LF.Keep<M>(passF, c1 + c2 * LF.Create(0.033333335f), c1);
     LF.Store(c1, ref e1, i);
 }
 public void Row(nint i) => Kernels.Integrate(ref Unsafe.Add(ref r1, i), in Unsafe.Add(ref r2, i));
@@ -245,6 +247,79 @@ Recommended: do not roll out across the generator now. If the owner wants a step
    Step / Tally are noise or real.
 3. Raise the mask-register gap with the runtime: a promoted SIMD field defined by a comparison could stay `TYP_MASK`.
    That would close the remaining gap for every shape.
+
+## Package D: flat jobs (owner L33, branch feat-lane-kernel)
+
+**The shape** (`SystemGenerator.LaneStepOf`, read from `Kernel.Code` alone; src/EasyEcs.Generator/AGENTS.md, "The lane
+kernel's shape"): 4-byte float or int lanes; the row loop of one-field components, or a flat loop over several fields
+alike (`Code.Flat`, walked as `rows * fields` lanes by `RunFlat`); straight-line lane arithmetic (loads and stores at
+`i`, `+ - * / & | ^ ~`, unary `-`, locals, literals); constants as the only uniforms (written in place); no bail,
+reduction, structural change, record, vector tail, gather, draw, prefetch, streamed column, wide component, statics,
+pair mode or cold branch; at most 32 IL locals in the step. Masked words take the same step when their text is the
+whole run's with each write as `Keep<M>(pass, value, old)`; a flat loop of several fields keeps its deinterleaving
+masked loops.
+
+**What the generator writes** (KernelBenchmark's Integrate):
+
+```csharp
+public void Execute(__EntitySpan entities, __Span_Heat c1, __Span_Speed c2)
+{
+    ref __Heat r1 = ref __MemoryMarshal.GetReference(c1);
+    ref __Speed r2 = ref __MemoryMarshal.GetReference(c2);
+    nint rows = c1.Length;
+    var __lanes = new __Lanes { e1 = ref __Unsafe.As<__Heat, float>(ref r1), e2 = ref __Unsafe.As<__Speed, float>(ref r2) };
+    nint i = __LaneKernel.Run(ref __lanes, rows);
+    for (; i < rows; i++) // the rows after the last whole vector: the method itself
+        __ForEach.Integrate_2(null, ref __Unsafe.Add(ref r1, i), in __Unsafe.Add(ref r2, i));
+}
+// the masked Execute: the same with __LaneKernel.RunMasked(ref __lanes, pass, rows) and the bit test in the tail
+
+private ref struct __Lanes : __ILaneStep4
+{
+    public ref float e1;
+    public ref float e2;
+
+    [__MethodImpl(__MethodImplOptions.AggressiveInlining)]
+    void __ILaneStep4.Step<LF, LI, M>(nint i, LI pass, LF passF)
+    {
+        var __c1_0 = LF.Load(ref e1, i);
+        var __c2_0 = LF.Load(ref e2, i);
+        __c1_0 = LF.Keep<M>(passF, __c1_0 + __c2_0 * LF.Create(0.033333335f), __c1_0);
+        LF.Store(__c1_0, ref e1, i);
+    }
+}
+```
+
+The step lives in a struct of the column refs, not in the job: a parallel job is a struct (no ref fields), and the
+tail keeps Execute's call of the method with every argument it already writes. The explicit implementation needs no
+constraint clauses. Tier1 (FullOpts) of `LaneKernel:Walk[IntegrateJob2+__Lanes, Lane512<float>, ...]`: the column
+refs loaded once, the loop `vmovups; vmovups; vmulps {1to16} (the constant as an embedded broadcast); vaddps;
+vmovups`, no call; `tools/perf/inlining.sh` over KernelBenchmark, the headline worlds, FusionBenchmark,
+LookupGatherBenchmark, LaneKernelBenchmark and VectorFormsBenchmark: every generated job inlined.
+
+**Where it applies.** The benchmark project: 24 of 260 vector jobs (30 Executes: 6 Run, 18 RunFlat, 6 RunMasked):
+KernelBenchmark's Integrate, Move2, Push, Move3, Move4; BattleServer's Move; FusionBenchmark's Movement and
+Integrate jobs; Trim's Drift, CrowdPairs' steps, Regeneration, a lambda pass of ViewBenchmark. The rest have a
+condition, a uniform (a singleton's dt), a reduction, interleaved fields or 8-byte lanes. WorldSimulation's Move
+has conditions: it keeps its loops.
+
+**Generated text.** Integrate's job 80 lines / 4,304 bytes -> 47 / 2,372 (-45 %; the study's 36 lines left out the
+two Execute preambles and tails the job keeps); BattleServer's Move job (its masked words deinterleave, so they keep
+their loops) 83 / 4,883 -> 76 / 4,295. The benchmark project's generated files 4,522,249 -> 4,502,057 bytes
+(77,486 -> 77,209 lines); the GeneratedTextTests corpus 11,532,139 -> 11,524,667: few jobs of either are flat.
+
+**Proof.** LaneKernelTests (five flat jobs against SimdMode.Off, every length to 70, 255, 1,000, 1,021, with and
+without masked words) and KernelTests, InlineArrayTests, LambdaPassTests, ViewTests, ElementLoopTests,
+FusionTests, BattleServerTests bit for bit in the default mode and under `DOTNET_PreferredVectorBitWidth=256`,
+`DOTNET_EnableAVX=0` and `DOTNET_EnableHWIntrinsic=0` (one failure there, TheScheduleNamesEachMethodsLoop, is the
+schedule's "; rows on this hardware" under no SIMD at all, on base too). The full suite on net10.0 and net11.0; the
+AOT check (BattleServer's Move is a kernel job). A/B: `scratchpad/kernelD/ab.sh` (base 89090767 against af168ac8,
+two rounds; KernelBenchmark's flat cases, LaneKernelBenchmark, VectorFormsBenchmark, the headline worlds,
+GeneratorBenchmark Cold and Edit); the numbers go here and into docs-todos `feat-lane-kernel`.
+
+**Next shapes** (package F, each only once level at 0 B): uniforms (the walk form, broadcasts before its loop), a
+select under one comparison and Min / Max against constants (the fused members), 8-byte lanes (`ILaneStep8`),
+reductions.
 
 ## Runs left for the coordinator (Sonnet)
 
