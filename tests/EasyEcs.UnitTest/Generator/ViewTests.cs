@@ -470,10 +470,10 @@ public class ViewRuleTests
             "public static class R { [EntityMethod] static void A(VM v) => v.Up(1); } [EcsSystem] public ref struct S { [ForEach] static void B(VM v) => v.Up(1); }"), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("global::EasyEcs.MutColumn.Of<global::T>(in entities)"));              // a run's change-tick column
-        Assert.That(generated, Does.Contain("T = new global::EasyEcs.Mut<global::T>(ref c1, entity)"));            // one entity
-        Assert.That(generated, Does.Contain("T = new global::EasyEcs.Mut<global::T>(ref __Unsafe.Add(ref r1, i), in v0_0, (int)i)"));
-        Assert.That(generated, Does.Contain("T = new global::EasyEcs.Mut<global::T>(ref global::System.Runtime.CompilerServices.Unsafe.AsRef(in @this.Read<global::T>()), @this)")); // AsVM
+        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("global::EasyEcs.MutColumn.Of<__T>(in entities)"));              // a run's change-tick column
+        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("T = new global::EasyEcs.Mut<global::T>(ref c1, entity)"));            // one entity
+        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("T = new global::EasyEcs.Mut<__T>(ref __Unsafe.Add(ref r1, i), in v0_0, (int)i)"));
+        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("T = new global::EasyEcs.Mut<global::T>(ref global::System.Runtime.CompilerServices.Unsafe.AsRef(in @this.Read<global::T>()), @this)")); // AsVM
     }
 
     // A lambda pass takes a view as a [ForEach] method does (its members inlined into the vector loop; what the loop
@@ -498,8 +498,8 @@ public class ViewRuleTests
             "public static class Run { public static void F(World world) => world.ForEach(static (PQ v) => v.Add()); }"), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Lambdas.g.cs")).Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("internal ref struct LambdaJob0").And.Contain("__V512.LoadUnsafe(ref e1, (nuint)i)")
-            .And.Contain("(__c1_0 + __c2_0)"), generated);
+        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("internal ref struct LambdaJob0").And.Contain("__V512.LoadUnsafe(ref e1, (nuint)i)")
+            .And.Contain("__c1_0 + __c2_0"), generated);
     }
 
     [Test]
@@ -542,8 +542,8 @@ public class ViewRuleTests
             "public static class R { [EntityMethod] static void A(in T t, PQ v) => v.Add(); } [EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void B(PQ v) => v.Add(); }"), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Select(t => t.ToString()));
-        Assert.That(generated, Does.Contain("new global::PQ { P = ref c2, Q = ref c3 }"));                          // one entity: after the component parameter
-        Assert.That(generated, Does.Contain("new global::PQ { P = ref __Unsafe.Add(ref r1, i), Q = ref __Unsafe.Add(ref r2, i) }")); // a run of rows: the vector loop's scalar tail
-        Assert.That(generated, Does.Contain("Write<global::P>()").And.Contain("Read<global::Q>()"));
+        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("new __PQ { P = ref c2, Q = ref c3 }"));                          // one entity: after the component parameter
+        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("new __PQ { P = ref __Unsafe.Add(ref r1, i), Q = ref __Unsafe.Add(ref r2, i) }")); // a run of rows: the vector loop's scalar tail
+        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("Write<__P>()").And.Contain("Read<global::Q>()"));
     }
 }

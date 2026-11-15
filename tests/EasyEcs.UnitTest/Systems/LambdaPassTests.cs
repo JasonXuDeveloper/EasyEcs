@@ -168,10 +168,10 @@ public class LambdaPassTests
             """);
         Assert.That(errors, Is.Empty, code);
         var diagnostics = GeneratorTests.Analyze([GeneratorTests.Components, "namespace Game; public static class Run { const int Step = 2; public static void F(World world, int bonus) => world.ForEach(bonus, [Without<Q>] static (ref P p, int bonus, in Clock c) => p.V += bonus * Step + c.Ticks); }"]).Result;
-        Assert.That(code, Does.Contain("[global::System.Runtime.CompilerServices.InterceptsLocation(1, \"")
+        Assert.That(code + GeneratorTests.Unaliased(code), Does.Contain("[global::System.Runtime.CompilerServices.InterceptsLocation(1, \"")
             .And.Contain("internal static void Lambda0(this global::EasyEcs.World __world, int bonus, global::System.Delegate __body)")
-            .And.Contain("internal static void Lambda_0(object __owner, ref global::P p, int bonus, in global::Clock c)")
-            .And.Contain("p.V += bonus * ((int)(2)) + c.Ticks;") // the constant written as its value
+            .And.Contain("internal static void Lambda_0(object __owner, ref __P p, int bonus, in __Clock c)")
+            .And.Contain("p.V += bonus * (int)2 + c.Ticks;") // the constant written as its value
             .And.Contain("QueryFilter.Create().Without<global::Q>()")
             .And.Contain("internal ref struct LambdaJob0"), code + string.Join("\n", diagnostics.Select(d => d.ToString())));
     }
@@ -191,7 +191,7 @@ public class LambdaPassTests
     {
         var (code, errors) = Generate("public static class Run { public static void F(World world, int n) => world.ForEach(n, [Without<Q>] static (Entity e, in P p, int n) => { if (p.V > n) e.Set(new Q()); }); }");
         Assert.That(errors, Is.Empty, code);
-        Assert.That(code, Does.Contain("Vector512").And.Contain("if (__ForEach.LambdaJob0.Vectorizes)").And.Contain("job.d0.SetAll(job.v0); // the rows the pass marked")
+        Assert.That(code, Does.Contain("Vector512").And.Contain("if (__ForEach.LambdaJob0.Vectorizes)").And.Contain("job.d0.SetAll(default(__Q)); // the rows the pass marked")
             .And.Contain("LambdaJob0Rows"), code);
     }
 

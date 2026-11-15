@@ -29,56 +29,123 @@ internal static class Code
     /// inlining attribute, Interleaved), each written once in a file-level alias block (<c>using __V512_float =
     /// global::System.Runtime.Intrinsics.Vector512&lt;float&gt;;</c>) and by its alias everywhere else: an alias names the
     /// same type, so the IL is the same and only the text shrinks (docs/plans/designs/generated-text.md kind 2). The aliases start
-    /// with <c>__</c>, names no user type takes (one named so in an enclosing namespace would win over the alias).
+    /// with <c>__</c>, names no user type takes (one named so in an enclosing namespace would win over the alias). A
+    /// vector type is one of <see cref="Vectors"/>, bare or closed over one of <see cref="Lanes"/>, and followed by no
+    /// other name character or type argument; the others by no name character (<see cref="LongAt"/>).
     /// </summary>
-    private static readonly Regex Long = new(
-        @"global::System\.(?:Numerics\.Vector|Runtime\.Intrinsics\.Vector(?:512|256|128))(?:<(?:sbyte|byte|short|ushort|int|uint|long|ulong|float|double)>|(?![\w<]))"
-        + @"|global::System\.Runtime\.CompilerServices\.(?:Unsafe|MethodImplOptions|MethodImpl)(?!\w)"
-        + @"|global::System\.Runtime\.InteropServices\.MemoryMarshal(?!\w)|global::EasyEcs\.Interleaved(?!\w)",
-        RegexOptions.CultureInvariant);
+    private static readonly (string Name, string Alias)[] Vectors =
+    [
+        ("global::System.Numerics.Vector", "__Vec"), ("global::System.Runtime.Intrinsics.Vector512", "__V512"),
+        ("global::System.Runtime.Intrinsics.Vector256", "__V256"), ("global::System.Runtime.Intrinsics.Vector128", "__V128"),
+    ];
+
+    private static readonly string[] Lanes = ["sbyte", "byte", "short", "ushort", "int", "uint", "long", "ulong", "float", "double"];
+
+    /// <summary>Each vector type closed over each lane type: its name and alias (<c>__V512_float</c>), [vector, lane].</summary>
+    private static readonly (string Name, string Alias)[,] Closed = ClosedVectors();
+
+    private static (string Name, string Alias)[,] ClosedVectors()
+    {
+        var closed = new (string, string)[Vectors.Length, Lanes.Length];
+        for (int v = 0; v < Vectors.Length; v++)
+            for (int l = 0; l < Lanes.Length; l++)
+                closed[v, l] = ($"{Vectors[v].Name}<{Lanes[l]}>", $"{Vectors[v].Alias}_{Lanes[l]}");
+        return closed;
+    }
+
+    private static readonly (string Name, string Alias, string Target)[] Others =
+    [
+        ("global::System.Runtime.CompilerServices.Unsafe", "__Unsafe", "global::System.Runtime.CompilerServices.Unsafe"),
+        ("global::System.Runtime.CompilerServices.MethodImplOptions", "__MethodImplOptions", "global::System.Runtime.CompilerServices.MethodImplOptions"),
+        ("global::System.Runtime.CompilerServices.MethodImpl", "__MethodImpl", "global::System.Runtime.CompilerServices.MethodImplAttribute"),
+        ("global::System.Runtime.InteropServices.MemoryMarshal", "__MemoryMarshal", "global::System.Runtime.InteropServices.MemoryMarshal"),
+        ("global::EasyEcs.Interleaved", "__Interleaved", "global::EasyEcs.Interleaved"),
+    ];
 
     /// <summary>
-    /// <paramref name="text"/>, a generated file, with the names of <see cref="Long"/> it holds replaced by their aliases
+    /// The long name at <paramref name="at"/> (a <c>global::</c>): how many characters it takes, its alias and the type
+    /// the alias names; 0 when none starts there.
+    /// </summary>
+    private static int LongAt(string text, int at, out string alias, out string target)
+    {
+        alias = target = "";
+        for (int v = 0; v < Vectors.Length; v++)
+        {
+            string name = Vectors[v].Name;
+            if (!At(text, at, name)) continue;
+            int end = at + name.Length;
+            if (end < text.Length && text[end] == '<')
+            {
+                for (int l = 0; l < Lanes.Length; l++)
+                {
+                    string lane = Lanes[l];
+                    int close = end + 1 + lane.Length;
+                    if (close < text.Length && text[close] == '>' && string.CompareOrdinal(text, end + 1, lane, 0, lane.Length) == 0)
+                    {
+                        (target, alias) = Closed[v, l];
+                        return close + 1 - at;
+                    }
+                }
+                return 0;
+            }
+            if (end < text.Length && IsWordChar(text[end])) return 0;
+            (target, alias) = Vectors[v];
+            return name.Length;
+        }
+        foreach (var (name, a, t) in Others)
+        {
+            if (!At(text, at, name) || at + name.Length < text.Length && IsWordChar(text[at + name.Length])) continue;
+            alias = a;
+            target = t;
+            return name.Length;
+        }
+        return 0;
+    }
+
+    private static bool At(string text, int at, string word) =>
+        at + word.Length <= text.Length && string.CompareOrdinal(text, at, word, 0, word.Length) == 0;
+
+    /// <summary>
+    /// <paramref name="text"/>, a generated file, with the names of <see cref="LongAt"/> it holds replaced by their aliases
     /// and the alias block after its header (the <c>// &lt;auto-generated/&gt;</c> and <c>#nullable</c> lines it starts
-    /// with: the comment stays first, which tells analyzers the file is generated).
+    /// with: the comment stays first, which tells analyzers the file is generated); then the other types it names
+    /// twice or more through aliases of their own and without the parentheses precedence does not need (<see cref="Tidy"/>).
     /// </summary>
     public static string Aliased(string text)
     {
-        var used = new System.Collections.Generic.SortedDictionary<string, string>(StringComparer.Ordinal);
-        string body = Long.Replace(text, m =>
+        var used = new System.Collections.Generic.SortedDictionary<string, string>(StringComparer.Ordinal); // alias -> target
+        Chars? replaced = null;
+        int copied = 0;
+        for (int at = text.IndexOf("global::", StringComparison.Ordinal); at >= 0; at = text.IndexOf("global::", at, StringComparison.Ordinal))
         {
+            int length = LongAt(text, at, out string alias, out string target);
             // a using directive cannot name an alias of its own file
-            int line = text.LastIndexOf('\n', m.Index) + 1;
-            if (string.CompareOrdinal(text, line, "using ", 0, 6) == 0) return m.Value;
-            string alias = AliasOf(m.Value);
-            used[alias] = m.Value.EndsWith("MethodImpl", StringComparison.Ordinal) ? m.Value + "Attribute" : m.Value;
-            return alias;
-        });
-        if (used.Count == 0) return text;
-        var sb = new StringBuilder(body.Length + used.Count * 80);
+            if (length == 0 || string.CompareOrdinal(text, text.LastIndexOf('\n', at) + 1, "using ", 0, 6) == 0)
+            {
+                at += length == 0 ? 8 : length;
+                continue;
+            }
+            (replaced ??= Chars.Empty(text.Length)).Append(text, copied, at - copied).Append(alias);
+            used[alias] = target;
+            at += length;
+            copied = at;
+        }
+        string body = replaced == null ? text : replaced.Append(text, copied, text.Length - copied).ToString();
+        var edits = Tidy.Types(body, used);
+        var dropped = Tidy.Parentheses(body);
+        if (used.Count == 0 && edits.Count == 0 && dropped.Count == 0) return body;
+        var sb = Chars.Empty(body.Length + used.Count * 80);
         int start = 0;
-        foreach (string line in new[] { "// <auto-generated/>\n", "#nullable disable\n", "#nullable enable\n" })
+        foreach (string line in HeaderLines)
             if (string.CompareOrdinal(body, start, line, 0, line.Length) == 0) start += line.Length;
         sb.Append(body, 0, start);
         foreach (var pair in used) sb.Append("using ").Append(pair.Key).Append(" = ").Append(pair.Value).Append(";\n");
-        return sb.Append(body, start, body.Length - start).ToString();
+        Tidy.Write(sb, body, start, edits, dropped);
+        return sb.ToString();
     }
 
-    /// <summary>The alias of a name <see cref="Long"/> matched: <c>__V512_float</c>, <c>__Vec</c>, <c>__Unsafe</c>.</summary>
-    private static string AliasOf(string name)
-    {
-        int open = name.IndexOf('<');
-        string type = open < 0 ? name : name.Substring(0, open);
-        string shortName = type.Substring(type.LastIndexOf('.') + 1) switch
-        {
-            "Vector" => "__Vec",
-            "Vector512" => "__V512",
-            "Vector256" => "__V256",
-            "Vector128" => "__V128",
-            var other => "__" + other,
-        };
-        return open < 0 ? shortName : shortName + "_" + name.Substring(open + 1, name.Length - open - 2);
-    }
+    /// <summary>The lines a generated file starts with, which stay before its alias block.</summary>
+    private static readonly string[] HeaderLines = ["// <auto-generated/>\n", "#nullable disable\n", "#nullable enable\n"];
 
     /// <summary>
     /// The <c>[GeneratedCode]</c> attribute of a generated class or member, naming <paramref name="tool"/> (the analyzer
@@ -120,6 +187,19 @@ internal static class Code
         for (int i = heads.Length - 1; i >= 0; i--) sb.Append(new string(' ', 4 * i)).Append("}\n");
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Where <paramref name="text"/> names <paramref name="name"/> as a whole word at or after <paramref name="from"/>,
+    /// or -1: a search a template's text runs often, without a regular expression built per name.
+    /// </summary>
+    public static int Word(string text, string name, int from = 0)
+    {
+        for (int at = text.IndexOf(name, from, StringComparison.Ordinal); at >= 0; at = text.IndexOf(name, at + 1, StringComparison.Ordinal))
+            if ((at == 0 || !IsWordChar(text[at - 1])) && (at + name.Length == text.Length || !IsWordChar(text[at + name.Length]))) return at;
+        return -1;
+    }
+
+    private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
     /// <summary>The FNV-1a hash of <paramref name="text"/>'s characters: stable across processes, unlike <c>GetHashCode</c>.</summary>
     public static uint Fnv(string text)

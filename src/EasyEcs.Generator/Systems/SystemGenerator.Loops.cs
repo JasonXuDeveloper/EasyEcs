@@ -56,6 +56,7 @@ public sealed partial class SystemGenerator
         for (int k = 1; k <= components.Length; k++)
             columns.Append($"ref {simd.Columns[k - 1]} e{k} = ref global::System.Runtime.CompilerServices.Unsafe.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k});\n");
         var loops = flat != null ? FlatLoops(flat, simd) : VectorLoops(simd, components, call, masked, rows, split: false);
+        bool passMasks = masked && flat == null;
         var names = new List<Scoped> { new("entities", "in global::EasyEcs.EntitySpan entities", "in entities") };
         if (masked) names.Add(new("pass", "ulong pass", "pass"));
         for (int k = 1; k <= components.Length; k++) names.Add(new($"r{k}", $"ref {components[k - 1]} r{k}", $"ref r{k}"));
@@ -67,25 +68,30 @@ public sealed partial class SystemGenerator
         // own, called once per run, so the loops below and what the runner inlines stay as they are.
         string streams = masked ? "" : StreamLoop(simd, flat, components, call, columns.ToString(), names, members);
         head += streams;
-
-        var inline = new StringBuilder();
-        Indented(inline, indent, columns.ToString() + head);
-        foreach (var loop in loops)
-        {
-            inline.Append($"{indent}if ({loop.Guard})\n{indent}{{\n");
-            Indented(inline, indent + "    ", loop.Body);
-            inline.Append($"{indent}}}\n");
-        }
-        Indented(inline, indent, after);
+        loops = Tidied(loops, streams.Length == 0);
+        if (!masked && flat == null) loops = PassMasks(loops, out _); // the vector tail's, which it always names
         // + the call of the rows left, which Execute appends after the loops (its default owner is a temporary)
-        if (Locals(sb.ToString(start, sb.Length - start) + inline + call) <= InlinedLocals)
+        string before = sb.ToString(start, sb.Length - start);
+        string inline = Inline(loops);
+        int locals = Locals(before + inline + call);
+        if (locals <= InlinedLocals)
         {
+            // a masked loop's named pass masks (PassMasks) are one local each: written in place where they would split it
+            if (passMasks && PassMasks(loops, out int added) is var named && added > 0 && locals + added <= InlinedLocals) inline = Inline(named);
             sb.Append(inline);
             return;
         }
 
         // Split: Execute keeps the run's setup and the rows left; each loop is a method of its own.
-        if (flat == null) loops = VectorLoops(simd, components, call, masked, rows, split: true);
+        if (flat == null)
+        {
+            loops = Tidied(VectorLoops(simd, components, call, masked, rows, split: true), streams.Length == 0);
+            if (!masked) loops = PassMasks(loops, out _);
+            else
+                for (int k = 0; k < loops.Count; k++)
+                    if (PassMasks(loops[k], out int added) is var named && added > 0
+                        && Locals(columns.ToString() + loops[k].Body) + added <= InlinedLocals) loops[k] = named;
+        }
         Indented(sb, indent, head);
         string prefix = masked ? "__Masked" : "__";
         foreach (var loop in loops)
@@ -105,7 +111,111 @@ public sealed partial class SystemGenerator
             members.Append("        }\n");
         }
         Indented(sb, indent, after);
+
+        // The loops in Execute itself: the column refs, the run's head, each loop under its guard.
+        string Inline(List<Loop> written)
+        {
+            var text = new StringBuilder();
+            Indented(text, indent, columns.ToString() + head);
+            foreach (var loop in written)
+            {
+                text.Append($"{indent}if ({loop.Guard})\n{indent}{{\n");
+                Indented(text, indent + "    ", loop.Body);
+                text.Append($"{indent}}}\n");
+            }
+            Indented(text, indent, after);
+            return text.ToString();
+        }
     }
+
+    /// <summary>
+    /// A masked loop's passing rows as a mask of each lane type its writes select by (<c>Vector.As&lt;int, float&gt;(__pass)</c>),
+    /// named once per vector of rows (<c>__passF</c>) when two or more writes use it: the reinterpretation is free, the
+    /// text repeated at every write is not. The local goes after the vector's test of <c>__pass</c> (a vector of rows that
+    /// pass none skips it), or after the line declaring it where nothing tests it (the tail). The loops come written
+    /// without them, so a loop past the locals the runner inlines keeps that text with no second translation, and each
+    /// name adds one to <see cref="Locals"/> (<paramref name="added"/>), counted without counting the text again.
+    /// </summary>
+    private static List<Loop> PassMasks(List<Loop> loops, out int added)
+    {
+        var named = new List<Loop>(loops.Count);
+        added = 0;
+        foreach (var loop in loops)
+        {
+            named.Add(PassMasks(loop, out int one));
+            added += one;
+        }
+        return named;
+    }
+
+    private static Loop PassMasks(Loop loop, out int added) => loop with { Body = PassMasks(loop.Body, loop.Tail ? "" : "    ", out added) };
+
+    /// <summary><paramref name="text"/>, one loop's body, with its pass masks named at <paramref name="indent"/>.</summary>
+    private static string PassMasks(string text, string indent, out int added)
+    {
+        added = 0;
+        int at = text.IndexOf("if (__pass == ", System.StringComparison.Ordinal);
+        if (at < 0) at = text.IndexOf("var __pass = ", System.StringComparison.Ordinal);
+        if (at < 0) return text;
+        at = text.IndexOf('\n', at) + 1; // nothing before names the mask
+        var declared = new StringBuilder();
+        foreach (var group in PassAs.Matches(text).Cast<Match>().GroupBy(m => m.Value).Where(g => g.Count() >= 2))
+        {
+            string name = "__pass" + LaneSuffix(group.First().Groups[1].Value);
+            if (Code.Word(text, name) >= 0) continue;
+            declared.Append($"{indent}var {name} = {group.Key};\n");
+            text = text.Replace(group.Key, name);
+            added++;
+        }
+        return declared.Length == 0 ? text : text.Substring(0, at) + declared + text.Substring(at);
+    }
+
+    private static readonly Regex PassAs = new(@"global::System\.(?:Numerics\.Vector|Runtime\.Intrinsics\.Vector(?:128|256|512))\.As<\w+, (\w+)>\(__pass\)");
+
+    private static string LaneSuffix(string lane) => lane switch
+    {
+        "float" => "F", "double" => "D", "int" => "I", "uint" => "U", "long" => "L", "ulong" => "UL",
+        "short" => "S", "ushort" => "US", "byte" => "B", "sbyte" => "SB", var other => "_" + other.Replace(".", "_"),
+    };
+
+    /// <summary>
+    /// <paramref name="loops"/> as written once their text is settled: each loop without the locals of its setup a single
+    /// line reads (<see cref="Unheld"/>), and, when nothing before them moves <c>i</c> (<paramref name="fromZero"/>: no
+    /// streaming loop), the first one's rows counted from 0 (<c>rows &gt;= Count</c>, not <c>rows - i &gt;= Count</c>).
+    /// </summary>
+    private static List<Loop> Tidied(List<Loop> loops, bool fromZero)
+    {
+        for (int k = 0; k < loops.Count; k++) loops[k] = loops[k] with { Body = Unheld(loops[k].Body) };
+        if (!fromZero || loops.Count == 0 || loops[0].Tail) return loops;
+        var first = loops[0];
+        loops[0] = first with
+        {
+            Guard = first.Guard.Replace("rows - i >= ", "rows >= ").Replace("lanes - i >= ", "lanes >= "),
+            Body = first.Body.Replace("lanes - (lanes - i) % ", "lanes - lanes % "),
+        };
+        return loops;
+    }
+
+    /// <summary>
+    /// <paramref name="body"/> without a setup local of a value of the run (<c>ref readonly Pull __p3 = ref s3;</c>,
+    /// <c>var __p2 = x2;</c>) that one line of the setup reads (<c>Create&lt;float&gt;(__p3.Value)</c>): that line reads the
+    /// job's field itself. A local the loop reads stays: the field would be read through the job at every vector.
+    /// </summary>
+    private static string Unheld(string body)
+    {
+        foreach (var held in Held.Matches(body).Cast<Match>().Reverse())
+        {
+            string name = held.Groups[1].Value;
+            // the declaration, then its one use before the loop, and none after
+            int declared = Code.Word(body, name, held.Index), use = Code.Word(body, name, declared + name.Length);
+            int loop = body.IndexOf("for (", held.Index, System.StringComparison.Ordinal);
+            if (use < 0 || Code.Word(body, name, use + name.Length) >= 0 || loop >= 0 && use > loop) continue;
+            body = body.Remove(use, name.Length).Insert(use, held.Groups[2].Value).Remove(held.Index, held.Length);
+        }
+        return body;
+    }
+
+    private static readonly Regex Held = new(@"(?m)^(?:ref readonly \S+|var) (__p\d+) = (?:ref )?([\w.]+);\n");
 
     /// <summary>
     /// The names of Execute's scope (<paramref name="scope"/>, in the order a loop's method takes them) that
@@ -267,7 +377,10 @@ public sealed partial class SystemGenerator
         if (simd.Wide == null || simd.Wide512) widths.Add(Wide(Hardware(simd), simd.Wide == null ? null : ""));
         if (simd.Wide == null || simd.Wide128) widths.Add(Narrow(Hardware(simd), simd.Wide == null ? null : ""));
         if (simd.Wide != null && simd.Wide256) widths.Add(Narrow256(Hardware(simd), "", simd.Wide512));
-        return string.Join(" || ", widths.Distinct().Select(w => w.Contains(" && ") && widths.Count > 1 ? $"({w})" : w));
+        // A width whose terms hold another's adds nothing to the or (a || a && b is a)
+        var terms = widths.Distinct().Select(w => (Text: w, Terms: w.Split([" && "], System.StringSplitOptions.None))).ToList();
+        var kept = terms.Where(t => !terms.Any(o => o.Text != t.Text && o.Terms.All(t.Terms.Contains))).Select(t => t.Text).ToList();
+        return string.Join(" || ", kept.Select(w => w.Contains(" && ") && kept.Count > 1 ? $"({w})" : w));
     }
 
     /// <summary><paramref name="text"/> without the lines marked <paramref name="drops"/>, and without the mark <paramref name="keep"/>.</summary>
@@ -369,7 +482,7 @@ public sealed partial class SystemGenerator
         foreach (var line in (body + stores).Split('\n')) if (line.Length > 0) loop.Append("    ").Append(line).Append('\n');
         loop.Append("}\nglobal::EasyEcs.StreamingStores.Fence();\n");
         Constants(loop);
-        string text = loop.Replace(Kernel.Visited, "ulong.MaxValue").Replace(Kernel.Row, "(int)i").ToString();
+        string text = Unheld(loop.Replace(Kernel.Visited, "ulong.MaxValue").Replace(Kernel.Row, "(int)i").ToString());
         string wide = flat != null ? $"{Vector512}.IsHardwareAccelerated" : Wide(Hardware(simd), null);
         string narrowGuard = flat != null ? $"{Vector}.IsHardwareAccelerated" : Narrow(Hardware(simd), null);
         string wideText = flat != null ? text.Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512) : Wide(text, null);

@@ -157,19 +157,22 @@ their text shortened (the alias block, one lookup).
 What would change the verdict: ApiDocs resolving `inheritdoc` itself (one zh entry for a family) and the compiler's
 XML output resolving it for every editor, or doc comments showing up in a profile of the package's build.
 
-## The rest of the generated-text cleanups (G17): not done beyond the marks (feat-lane4-rest, 2026-11-08)
+## The rest of the generated-text cleanups (G17): overridden by the owner (L15), done in feat-generated-text-2
 
 **Proposed by** generated-text.md step 5: hoisted scalar setup, `this.v0`, pair broadcasts, struct-local aliases,
 dead narrow temps, unused masks, `ids, 0`, discards for unused fields, the identity copies, one body per width.
 
-**Why not.** The Tier1 listings read for this branch (the runners of the draws and halves programs) show the JIT
-dropping locals never read, forwarding identity copies and hoisting invariant broadcasts, so these change the C#
-text, not the machine code, while each needs its own printer path and test. The one with machine-code weight, the structural
-change's mark (`var __d0 = Zero` then `|=`), shipped (361fbeb: StructuralLoopBenchmark level or better at 0 B, see the
-backlog). GeneratedTextTests keeps counting the rest, so a regression shows.
+**The verdict was** "not done": the JIT already drops what these lines say twice. The owner overrode it (L15, "the
+text gets shorter even where the JIT already removes the copy"): feat-generated-text-2 package A removed the
+temporaries, single-use setup locals, `this.v0 = default`, the `AllBitsSet &` masks and more, aliased the repeated
+type names and dropped needless parentheses (the backlog entry has the counts). What is left and why:
 
-What would change the verdict: a Tier1 listing where one of them survives (a copy or a broadcast the JIT keeps in a
-loop), or the generator's own time on these lines showing in GeneratorBenchmark.
+- Identity copies (40 in GeneratedTextTests' corpus, from 108): a local declared from a lane (`var __l8 = __t9;`, a
+  struct local's lanes) where neither is written again later; the generator writes the declaration before it knows
+  the rest of the body, so removing it needs a pass over the finished body per local. Kept at its budget.
+- Locals never read (4,564): mostly `out` lanes a deinterleave must name and accumulator holds; the budget stays.
+- Parentheses between operators of different kinds (`(x >> k) & 1`) and around negative operands stay on purpose.
+- Package B (masked selects once per store) and C (one body per width) are measured on their own.
 
 ## Changing the ClosedSystems stage: not done (feat-lane4-rest, backlog G11 9c, 2026-11-08)
 

@@ -540,7 +540,7 @@ public partial class FusionTests
         Assert.That(code, Does.Not.Contain("SystemCode.FusedRows"), code); // M and O write A: fused at any size
         // Blocks only above the cache when no component is written twice.
         code = Generated("[EcsSystem] public ref struct S { [ForEach] static void M(ref A a, in B b) => a.V += b.V; [ForEach] static void N(in A a, ref B b) => b.V -= a.V; }", "S");
-        Assert.That(code, Does.Contain("< global::EasyEcs.SystemCode.FusedRows)"), code);
+        Assert.That(code, Does.Contain("< __SystemCode.FusedRows)"), code);
     }
 
     // A view's fields are the method's components: its ref fields writes, so a change filter on them keeps the next apart.

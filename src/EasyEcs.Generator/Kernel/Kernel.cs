@@ -403,7 +403,10 @@ internal sealed partial class Kernel
     /// A statement over the lanes it is computed for (<see cref="LiveLanes"/> in <paramref name="statement"/>): the lanes
     /// <paramref name="active"/> holds (null: every lane) of a whole vector, and of them the rows that pass
     /// (<c>__pass</c>) in a masked word. Written in place rather than kept in a local, since every local counts towards
-    /// the 32 a runner inlines (<see cref="SystemGenerator.InlinedLocals"/>).
+    /// the 32 a runner inlines (<see cref="SystemGenerator.InlinedLocals"/>). Every lane of a whole vector stays written
+    /// <c>AllBitsSet</c> in a bail's test (<c>(AllBitsSet &amp; m) != Zero</c>), though the JIT folds the and: written
+    /// <c>m != Zero</c>, the test moved after the division it guards in KernelBenchmark's Share (the same instructions),
+    /// which measured about 10 % slower at 1,000 rows (feat-generated-text-2; GeneratedTextTests counts these).
     /// </summary>
     private void Live(string? active, string statement) => _body.Append(
         statement.Replace(LiveLanes, active ?? $"{Vec(_mask)}.AllBitsSet"),
@@ -1623,11 +1626,17 @@ internal sealed partial class Kernel
                 return true;
             case IConditionalOperation { WhenTrue: var whenTrue, WhenFalse: var whenFalse } branch when branch.Type == null:
             {
-                string condition = Temp("m");
+                string held = Temp("m");
                 _active = And(mask, _alive);
                 string tested = Expr(branch.Condition);
-                _body.Append($"var {condition} = {tested};\n"); // before either branch writes what it reads
-                Alias(condition, tested);
+                // An optional's presence (__has1) is never written: tested where it is. Anything else is held before
+                // either branch writes what it reads.
+                string condition = System.Text.RegularExpressions.Regex.IsMatch(tested, @"^__has\d+$") ? tested : held;
+                if (condition != tested)
+                {
+                    _body.Append($"var {condition} = {tested};\n");
+                    Alias(condition, tested);
+                }
                 Prove(condition, branch.Condition);
                 Branch(whenTrue, And(mask, condition)!);
                 if (whenFalse != null) Branch(whenFalse, And(mask, $"~{condition}")!);
@@ -1796,14 +1805,18 @@ internal sealed partial class Kernel
                 when !_narrow && (d.Value as ITupleOperation ?? (ITupleOperation)((IConversionOperation)d.Value).Operand) is var values && targets.Elements.Length == values.Elements.Length
                 && targets.Elements.Select((t, k) => (t, k)).All(e => (IsLane(e.t.Type) || IsBool(e.t.Type)) && SymbolEqualityComparer.Default.Equals(e.t.Type, values.Elements[e.k].Type)):
             {
-                // (nearest, next) = (d, i): every value first, each in a local of its own (a swap reads the old ones), then the writes
-                var held = values.Elements.Select(v =>
+                // (nearest, next) = (d, i): a value that reads a target written before its own write (a swap reads the old
+                // ones) first, in a local of its own, then the writes; the others written as they are
+                var names = targets.Elements.Select(Target).ToArray();
+                var held = values.Elements.Select((v, k) =>
                 {
+                    string text = Expr(v);
+                    if (!ReadsAny(text, names.Take(k))) return text;
                     string name = Temp("t");
-                    _body.Append($"var {name} = {Expr(v)};\n");
+                    _body.Append($"var {name} = {text};\n");
                     return name;
                 }).ToArray();
-                for (int k = 0; k < held.Length; k++) Write(Target(targets.Elements[k]), held[k], targets.Elements[k].Type!, mask);
+                for (int k = 0; k < held.Length; k++) Write(names[k], held[k], targets.Elements[k].Type!, mask);
                 return;
             }
             default:
@@ -2579,7 +2592,13 @@ internal sealed partial class Kernel
     }
 
     /// <summary>A uniform scalar of <paramref name="type"/>, broadcast once per run (before the loop); an enum's as its integer.</summary>
-    private string Broadcast(string scalar, ITypeSymbol type) => Broadcast(IsEnum(type) ? $"(({Elem(type)})({scalar}))" : scalar, Elem(type));
+    private string Broadcast(string scalar, ITypeSymbol type) =>
+        Broadcast(IsEnum(type) && !IsCastLiteral(scalar, Elem(type)) ? $"(({Elem(type)})({scalar}))" : scalar, Elem(type));
+
+    /// <summary>Whether <paramref name="scalar"/> is a literal cast to <paramref name="element"/> already (<c>((byte)(2))</c>, <see cref="Literal"/>).</summary>
+    private static bool IsCastLiteral(string scalar, string element) =>
+        scalar.StartsWith("((" + element + ")(", System.StringComparison.Ordinal) && scalar.EndsWith("))", System.StringComparison.Ordinal)
+        && scalar.IndexOfAny(['(', ')'], element.Length + 4) == scalar.Length - 2;
 
     /// <summary>A uniform scalar broadcast to lanes of <paramref name="element"/> (a fully qualified C# type).</summary>
     private string Broadcast(string scalar, string element)
