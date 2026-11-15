@@ -71,6 +71,15 @@ public class PairsBenchmark
         CheckPairs(paired, nameof(GeneratedRows), () => CrowdPairs.TickRows(_pairs));
         CheckPairs(paired, nameof(GeneratedParallel), () => CrowdPairs.TickParallel(_pairs));
         CheckPairs(paired, nameof(GeneratedBoth), () => CrowdPairs.TickBoth(_pairs));
+
+        // The merging pass's pairs against the reference's: every pair within reach, counted once from each side.
+        _pairs.AddSingleton<CrowdPairs.PairWeight>();
+        CrowdPairs.WeighParallel(_pairs);
+        long pairs = _pairs.GetSingleton<CrowdPairs.PairWeight>().Pairs;
+        _pairs.GetSingleton<CrowdPairs.PairWeight>() = default;
+        CrowdPairs.WeighParallel(_pairs);
+        if (pairs == 0 || _pairs.GetSingleton<CrowdPairs.PairWeight>().Pairs != pairs)
+            throw new InvalidOperationException($"{nameof(GeneratedParallelResult)}: {pairs} pairs, then {_pairs.GetSingleton<CrowdPairs.PairWeight>().Pairs}");
     }
 
     private void CheckPairs((double, double, double)[] expected, string name, Action tick)
@@ -200,6 +209,20 @@ public class PairsBenchmark
     public void GeneratedParallel()
     {
         for (int t = 0; t < Ticks; t++) CrowdPairs.TickParallel(_pairs);
+    }
+
+    /// <summary>
+    /// A pair method with a result (<c>Reduce&lt;T&gt;</c>) on every thread the world allows: each chunk keeps a copy,
+    /// combined in chunk order, so its chunks are cut by count, not by cost.
+    /// </summary>
+    [Benchmark(OperationsPerInvoke = Ticks)]
+    public void GeneratedParallelResult()
+    {
+        for (int t = 0; t < Ticks; t++)
+        {
+            _pairs.GetSingleton<CrowdPairs.PairWeight>() = default;
+            CrowdPairs.WeighParallel(_pairs);
+        }
     }
 
     /// <summary>The pair method writing both sides: each unordered pair once, one at a time.</summary>

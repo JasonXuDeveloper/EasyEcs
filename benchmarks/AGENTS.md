@@ -181,7 +181,8 @@ OrderedTables/PairsBenchmark.cs          sums over neighbors within a cutoff: a 
                                          every 1 / 10 / 20 ticks (Locality/Crowd.cs); the same kernel on the core's order and
                                          clusters, 8, 4 or 16 wide (Locality/CoreClusters.cs); the generated pair method,
                                          vector loop and one pair at a time, and writing both sides of each unordered pair
-                                         once (Locality/CrowdPairs.cs); + PairGroups: the generated pass over 1 or 64 groups
+                                         once, and in parallel with a result (Reduce<T>: chunks cut by count) (Locality/CrowdPairs.cs);
+                                         + PairGroups: the generated pass over 1 or 64 groups
                                          of the crowd, what it pays per table and pair of tables
 OrderedTables/RowOrderBenchmark.cs       the core's re-sort: narrow and wide tables, 1k-1M rows, reversed / 1 % churn /
                                          sorted

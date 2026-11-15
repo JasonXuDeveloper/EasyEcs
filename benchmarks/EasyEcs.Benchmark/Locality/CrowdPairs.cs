@@ -69,6 +69,31 @@ public static class CrowdPairs
     [ForEach]
     public static void Reset(ref Crowd.Push push) => push = default;
 
+    /// <summary>What <see cref="WeighParallel"/> sums over the crowd's pairs: their count and their weights.</summary>
+    public struct PairWeight : ISingletonComponent, IReduction<PairWeight>
+    {
+        public long Pairs;
+        public float Weight;
+
+        public static PairWeight Identity => default;
+
+        public static PairWeight Combine(PairWeight left, PairWeight right) =>
+            new() { Pairs = left.Pairs + right.Pairs, Weight = left.Weight + right.Weight };
+    }
+
+    /// <summary>
+    /// A result of the pass on several threads (a <c>Reduce&lt;T&gt;</c> of the pairs): each chunk's copy summed, the
+    /// chunks combined in order, a pass that merges.
+    /// </summary>
+    [ForEach(Parallel = true)]
+    public static void WeighParallel(in Crowd.Position p, [Neighbor] in Crowd.Position q, ref Reduce<PairWeight> total)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= Crowd.Range2 || d2 == 0) return;
+        total.Value.Pairs++;
+        total.Value.Weight += Crowd.Range2 - d2;
+    }
+
     /// <summary><see cref="Separate"/> on several threads: each chunk of clusters writes its own rows.</summary>
     [ForEach(Parallel = true)]
     public static void SeparateParallel(in Crowd.Position p, in Crowd.Velocity v, ref Crowd.Push push,
