@@ -260,7 +260,8 @@ pair mode or cold branch; at most 32 IL locals in the step. Masked words take th
 whole run's with each write as `Keep<M>(pass, value, old)`; a flat loop of several fields keeps its deinterleaving
 masked loops.
 
-**What the generator writes** (KernelBenchmark's Integrate):
+**What the generator writes** (KernelBenchmark's Integrate; package F, below, replaced the step by a walk of the same
+body, with the same machine code):
 
 ```csharp
 public void Execute(__EntitySpan entities, __Span_Heat c1, __Span_Speed c2)
@@ -353,9 +354,112 @@ the generated text and Tier1 listings of base and head (`scratchpad/kernelD2/asm
 The A/B of the fix (a08825cf against 89090767, two rounds): `scratchpad/kernelD2/ab/ab.sh`, its numbers to be added
 here before the merge.
 
-**Next shapes** (package F, each only once level at 0 B): uniforms (the walk form, broadcasts before its loop), a
-select under one comparison and Min / Max against constants (the fused members), 8-byte lanes (`ILaneStep8`),
-reductions.
+**Next shapes** (package F, below, each only once level at 0 B): uniforms (the walk form, broadcasts before its
+loop: form 1), a select under one comparison and Min / Max against constants (the fused members), 8-byte lanes
+(`ILaneWalk8`), reductions.
+
+## Package F: the walk form (branch feat-lane-walk, on feat-lane-kernel 05f91b47)
+
+One form per package, each shipped only once level or a win at 0 B (GeneratorBenchmark Cold / Edit included) and bit
+for bit under the four width settings. Listings: `$S/kernelF/` (`exp/` the hand-written reproduction,
+`haul-base.asm` / `haul-head.asm` KernelBenchmark's Haul / HolesHaul / Integrate in FullOpts, `fall*.asm` the NaN
+investigation below).
+
+### Form 1: uniforms (a singleton's value, a parameter's)
+
+**The cause of the in-loop broadcast.** The step form's uniform was a float field of the job's copy; the step
+broadcast it (`LF.Create(u)`) every vector. Reproduced by hand (`$S/kernelF/exp/Program.cs`, FullOpts, `a.asm` /
+`b.asm`): with one multiply-add in the step (14 inlinees) the JIT hoists the broadcast out of the loop; with the
+study's flat arithmetic plus a uniform (33 inlinees) it leaves `vbroadcastss zmm5, zmm0` inside the loop, the scalar
+load hoisted but the broadcast not. That is RyuJIT's loop hoisting declining a cheap tree under its register-pressure
+estimate (`optIsProfitableToHoistTree`: once the loop's count of live floating-point / SIMD locals reaches the
+registers it assumes available, a tree cheaper than `2 * IND_COST_EX` is not hoisted), and every inlined lane-struct
+operation adds argument and return temporaries to that count. Today's emitted text never depends on hoisting: it
+declares each broadcast in its setup, before the loop. The release JIT has no JitDump to print the decision; the
+evidence is the pair of listings and the walk form's below.
+
+**The fix: one walk per width.** The job's step became a walk (`ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong
+word)`): the generator writes the loop in the job, its uniforms broadcast before it (`var __u0 = LF.Create(this.__u0);`),
+and Core's `LaneKernel.Walk` calls it on a copy of the job, one `NoInlining` method per width and mode as before.
+Execute reads each uniform's scalar into the walk's struct (`__u0 = s3.Value`, through the setup's `ref readonly`
+alias of a singleton). One form for every lane job: a flat job without uniforms compiles to the step form's machine
+code (`haul-*.asm`, Integrate's walks: the same instructions, inlinee counts aside), so the kernel keeps one entry
+chain and no second interface.
+
+```csharp
+private ref struct __Lanes : __ILaneWalk4
+{
+    public ref float e1;
+    public ref float e2;
+    public ref float e3;
+    public float __u0;
+
+    [__MethodImpl(__MethodImplOptions.AggressiveInlining)]
+    nint __ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong word)
+    {
+        var __u0 = LF.Create(this.__u0);
+        for (; i < end; i += LF.Count)
+        {
+            if (!__LaneKernel.Lanes<LI, M>(word, i, out var pass)) continue;
+            var passF = LI.As<LF, float>(pass);
+            var __c1_0 = LF.Load(ref e1, i);
+            var __c2_0 = LF.Load(ref e2, i);
+            var __c3_0 = LF.Load(ref e3, i);
+            __c1_0 = LF.Keep<M>(passF, __c1_0 + (__c2_0 - __c3_0 * __u0) * LF.Create(0.033333335f), __c1_0);
+            LF.Store(__c1_0, ref e1, i);
+        }
+        return i;
+    }
+}
+```
+
+FullOpts of Haul's 512-bit walk (`haul-head.asm`): `vmovss xmm0, [rdi+0x18]; vbroadcastss zmm0, zmm0` before the
+loop, the loop `vmovups x3; vmulps zmm4, zmm4, zmm0; vsubps; vmulps {1to16}; vaddps; vmovups`, no call, the same
+instructions as today's loop in the runner (`haul-base.asm`). Its masked walk matches today's masked loop too, both
+with the passing lanes as a vector (`vpcmpeqd k1; vpmovm2d; vptestmd`); one difference is left there: the passing
+bits' constant (`Lanes32In512`'s 1, 2, 4, ...) is loaded inside the walk's loop (`vmovups zmm1, [RWD00]`), where
+today's loop holds it in a register and copies it (`vmovaps`) per vector: the same hoisting limit, for a later form.
+
+**Where it applies.** The benchmark project: 29 lane jobs against 24 (+ KernelBenchmark's Haul and MoveVector,
+ViewBenchmark's Motion ByRefs / ByView, AccessBenchmark's SingletonParameter); the generated files of SystemGenerator
+2,970,422 -> 2,968,845 bytes (52,338 -> 52,377 lines: each lane job's loop is now in its text, the uniform jobs lose
+their per-width loops); Haul's job 89 lines / 5,098 bytes -> 56 / 3,028.
+
+**NaN.** Bit for bit except which NaN two NaN operands give: LaneKernelTests with a NaN uniform failed at first
+(`fall*.asm`): the SimdMode.Off method at Tier0 (`LaneKernelRows:Fall`) computes `r.Value += x` as
+`vaddss xmm0(x), [r]`, the JIT swapping the operands of +, so with r and x both NaN the scalar method keeps x's NaN
+and the vector walk r's. The scalar method's own compiles differ there (Tier0 against Tier1), so the tests compare
+every NaN as one, as KernelTests.Same does; the old loops matched only by the luck of their operand order.
+
+**Proof.** LaneKernelTests (Fall, Pace, Sink: float and int uniforms, a flat one, a singleton changed each update to
+0.75, NaN, infinity; masked words) and the vector-loop classes (LaneKernel, Kernel, InlineArray, LambdaPass, View,
+ElementLoop, Fusion, BattleServer, SwitchLoop, HelperLoop tests) under the default, `DOTNET_PreferredVectorBitWidth=256`
+and `DOTNET_EnableAVX=0`, and under `DOTNET_EnableHWIntrinsic=0` all but TheScheduleNamesEachMethodsLoop (base fails
+it there too); the full suite on net10.0 and net11.0 (AReductionFoldsEachFieldOnItsOwn and
+ASwitchIsMasksOfItsArms fail on base a5e0e905 already: package E's Interleaved.Select changed the text they read);
+`tools/perf/inlining.sh` over KernelBenchmark, the headline worlds, FusionBenchmark, LookupGatherBenchmark,
+LaneKernelBenchmark, VectorFormsBenchmark, ViewBenchmark and AccessBenchmark: every job inlined. A/B:
+`$S/kernelF/ab.sh` (base a5e0e905 with head's three benchmark files against 7d2c676c, two rounds under the default
+of KernelBenchmark's Haul / HolesHaul / MoveVector / Integrate rows, LaneKernelBenchmark, ViewBenchmark, AccessBenchmark's
+singleton rows, WorldSimulation, BattleServer, GeneratorBenchmark Cold / Edit; one round of the KernelBenchmark rows
+under `DOTNET_EnableAVX=0`). Ships only when level or a win at 0 B with nothing slower.
+
+### The forms left, and what form 1 showed about them
+
+- **A select under one comparison, Min / Max against constants.** The fused members (`SelectGreaterThan`, `Min(a, T
+  constant)`) recover the mask register and the cheap Min / Max in the study. In the walk they need StepText to map a
+  mask local used once (`var __m6 = GreaterThan(...)`, then `ConditionalSelect(__m6, ...)`) into the fused call, and
+  `Min(x, Create(10f))` into `Min(x, 10f)`. A constant kept as a broadcast local before the loop would reach `Min` as
+  a lane struct's field (the IEEE `vrangeps` sequence again), so the constants of Min / Max stay in place; their
+  `vbroadcastss` from memory inside the loop (the study's walk listing) is the hoisting limit above, cheap loads.
+- **8-byte lanes (`ILaneWalk8`: double, long).** Core needs the walk interface over `LD` / `LL` and the chain at 8, 4,
+  2 lanes per width; StepText needs `Size: 8` and the double / long names. Uniforms come for free with form 1.
+- **Reductions.** The walk owns its accumulators (declared before its loop, as form 1's broadcasts) and folds them
+  after it; Core's walk must then write the copy back (`job = copy`, the study's `StudyWalk4`). The study's Tally was
+  1.32x slower at 100,000 rows from one extra column-ref reload and a rotated loop: read its listing in the walk form
+  before generating it.
+- **The passing bits' constant of a masked walk** (above): hoisted by declaring it before the walk's loop
+  (`LI.PassingBits` and a `Passing(bits, word, i)`), measured against today's copy per vector.
 
 ## Runs left for the coordinator (Sonnet)
 

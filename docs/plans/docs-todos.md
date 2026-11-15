@@ -3859,3 +3859,16 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
   Sparse 1,000 11.5 / 11.2 and 12.8 / 11.4; Sparse 10,000 123 / 121 and 131 / 126; Sparse 100,000 1,496 / 1,578
   and 1,671 / 1,583: every row within its error (+-7-10 %), the control GeneratedParallel moving as much
   (2,940 / 2,746, 2,572 / 2,781). 0 B on both sides.
+
+## feat-lane-walk (package F, form 1: uniforms in the lane kernel's walk; only if its A/B ships)
+
+- [ ] **Decision record** (with feat-lane-kernel's, or its own D): a lane job is one walk per width (`ILaneWalk4`),
+      its loop written in the job and Core calling it per width, so a uniform (a singleton's value) is broadcast before
+      the loop: RyuJIT's loop hoisting declines a cheap tree such as a broadcast once the loop's count of vector locals
+      reaches the registers it assumes, and a lane struct's inlined temporaries count (lane-kernel.md, package F).
+      Considered: the step per vector (package D's form: the broadcast left in the loop), uniforms passed to the step
+      as lane parameters (one parameter list per job). The A/B's numbers (`scratchpad/kernelF/ab.sh`) to fill in.
+- [ ] **guide/basics/systems.mdx (+ zh)**: feat-lane-kernel's item says the job's text is a `__Lanes` struct with
+      one `Step`: it is one `Walk` now (its loop, the uniforms broadcast before it).
+- [ ] **The vector-loop guide page**: what makes a job flat gains "a singleton's value or a parameter among the
+      arithmetic".
