@@ -1837,9 +1837,41 @@ internal sealed partial class Kernel
     private void WriteIn(string name, string value, ITypeSymbol type, string? active)
     {
         _maskHalves.Remove(name); // a bool local written: the halves it held are not its value any more
+        // The two branches of an if / else writing one lane, nothing between them (x = Select(m, a, x); x = Select(~m, b,
+        // x)): one write of Select(m, a, b) in the lanes of either. b was computed after the first write, which left its
+        // lanes (~m) as they were, and a before it: each reads in its own lanes what it read as written. A masked word
+        // then selects by __pass once, not once per branch.
+        if (active != null && _half < 0 && _lastWrite is { } last && last.Name == name && last.After == _body.Length
+            && Union(last.Active, active) is { } union)
+        {
+            _body.Length = last.Before;
+            _lastWrite = null;
+            WriteIn(name, $"{V}.ConditionalSelect({MaskAs(last.Active, type)}, {last.Value}, {value})", type, union.Length == 0 ? null : union);
+            _lastWrite = null;
+            return;
+        }
+        var before = _body.Length;
         string Select(string? lanes) => lanes == null ? $"{name} = {value};\n"
             : $"{name} = {V}.ConditionalSelect({(_half < 0 ? MaskAs(lanes, type) : As(_mask, IsBool(type) ? _mask : Elem(type), WidenMask(lanes)))}, {value}, {name});\n";
         _body.Append(Select(active), _half < 0 && Kept(name) ? Select(And(active, "__pass")) : Select(active));
+        _lastWrite = active == null ? null : (name, active, value, before, _body.Length);
+    }
+
+    /// <summary>The last lane write under a mask (<see cref="WriteIn"/>), and the body's lengths before and after it.</summary>
+    private (string Name, string Active, string Value, (int All, int Masked) Before, (int All, int Masked) After)? _lastWrite;
+
+    /// <summary>
+    /// The lanes of <paramref name="a"/> or <paramref name="b"/> when they are complements (<c>m</c> and <c>~m</c>, or
+    /// <c>(p &amp; m)</c> and <c>(p &amp; ~m)</c>): "" for every lane, else <c>p</c>; null when they are not.
+    /// </summary>
+    private static string? Union(string a, string b)
+    {
+        if (b == "~" + a || a == "~" + b) return "";
+        if (a.Length < 2 || b.Length < 2 || a[0] != '(' || b[0] != '(' || a[a.Length - 1] != ')' || b[b.Length - 1] != ')') return null;
+        int x = a.LastIndexOf(" & ", System.StringComparison.Ordinal), y = b.LastIndexOf(" & ", System.StringComparison.Ordinal);
+        if (x < 0 || y < 0 || a.Substring(1, x - 1) != b.Substring(1, y - 1)) return null;
+        string ma = a.Substring(x + 3, a.Length - x - 4), mb = b.Substring(y + 3, b.Length - y - 4);
+        return mb == "~" + ma || ma == "~" + mb ? a.Substring(1, x - 1) : null;
     }
 
     /// <summary>
