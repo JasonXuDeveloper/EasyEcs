@@ -129,6 +129,9 @@ Indexes/ValueIndex.cs     IIndexed<TKey> + ValueIndex: key -> one id array per k
 Indexes/UniqueIndex.cs    IUniqueIndexed<TKey> (one entity per key, an eager index that every write claims keys in
                           before it changes anything) and index.Get / TryGet
 Indexes/OrderedIndex.cs   sorted walks and ranges of a value index with a comparable key
+Indexes/TupleKeys.cs      a value index's lists by key (HeadMap): a tuple of integers of one size keyed by its bytes
+                          (BytesKey: the product's halves folded, compared as bytes, the dictionary's own key), any
+                          other key as it is
 ```
 
 ## Lookups/

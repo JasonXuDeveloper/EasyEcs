@@ -34,8 +34,7 @@ public sealed partial class ValueIndex<T, TKey>
     {
         long cache = CacheSizes.LastLevel;
         if (!Prefetching.IsSupported || cache <= 0) return false;
-        bool hashed = _heads.Count > 0 && HashSlots<TKey, IndexHead>.Works;
-        int stride = hashed ? HashSlots<TKey, IndexHead>.Stride(_heads, out _probeBuckets, out _probeEntries, out _probeComparer) : 0;
+        int stride = _heads.Count > 0 ? _heads.Stride(out _probeBuckets, out _probeEntries, out _probeComparer) : 0;
         if (stride == 0) _probeBuckets = null;
         _probeStride = stride;
         long bytes = (long)(_slots?.Length ?? 0) * Unsafe.SizeOf<KeySlot>()
@@ -76,7 +75,7 @@ public sealed partial class ValueIndex<T, TKey>
         var buckets = _probeBuckets;
         if (buckets == null) return null;
         var comparer = _probeComparer;
-        uint hash = (uint)(typeof(TKey).IsValueType && comparer == null ? key.GetHashCode() : comparer!.GetHashCode(key));
+        uint hash = HeadMap<TKey>.HashOf(key, comparer);
         // The dictionary's bucket: its FastMod is the remainder (HashHelpers.FastMod, exact for 32-bit divisors).
         ref int bucket = ref buckets[hash % (uint)buckets.Length];
         if (stage == 1) return Unsafe.AsPointer(ref bucket);

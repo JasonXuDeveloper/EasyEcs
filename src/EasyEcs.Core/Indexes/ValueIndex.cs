@@ -295,7 +295,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
 
     // Key -> its list (IndexHead: the entities in one array, read in order by a lookup). _nodes (indexed by entity id)
     // knows each entity's key and place in its list, so moving it between keys and dropping it are O(1).
-    private readonly Dictionary<TKey, IndexHead> _heads = new();
+    private readonly HeadMap<TKey> _heads = HeadMap<TKey>.Create(); // integer tuples keyed by their bytes
     private readonly SpareIds _spares = new();
 
     // Relations (EntityId keys): the lists by the target's index, no hashing. A target whose index is still held by
@@ -501,7 +501,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
     /// <summary>Forget everything; after <see cref="World.Restore(WorldSnapshot)"/> the next lookup re-indexes every row, after <see cref="World.Dispose"/> it finds nothing.</summary>
     void World.IValueIndex.Reset(bool rebuild)
     {
-        _spares.Clear(_heads); // a restore indexes as many keys again: their arrays wait for them
+        _heads.Clear(_spares); // a restore indexes as many keys again: their arrays wait for them
         if (_slots != null) Array.Clear(_slots);
         _byTarget.Clear(_spares);
         _keyCount = 0;
@@ -585,7 +585,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
             if (found == 1) throw Taken(key, new ListWalk(holder, 1));
         }
 
-        ref var head = ref CollectionsMarshal.GetValueRefOrNullRef(_heads, key); // unique keys are never EntityIds
+        ref var head = ref _heads.Find(key); // unique keys are never EntityIds
         if (Unsafe.IsNullRef(ref head)) return;
         if ((uint)id < (uint)_nodes.Length && _nodes[id].Linked && _nodes[id].Key.Equals(key)) return; // its own key
         throw Taken(key, head.Walk());
@@ -694,7 +694,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
         }
 
         if (IsNull(key)) return ref Unsafe.NullRef<IndexHead>();
-        return ref CollectionsMarshal.GetValueRefOrNullRef(_heads, key);
+        return ref _heads.Find(key);
     }
 
     /// <summary>The <see cref="_byTarget"/> list of relation key <paramref name="key"/>, or a null ref when it has none there.</summary>
@@ -720,7 +720,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
             }
         }
 
-        ref var added = ref CollectionsMarshal.GetValueRefOrAddDefault(_heads, key, out bool exists);
+        ref var added = ref _heads.GetOrAdd(key, out bool exists);
         if (!exists && _sorted != null) InsertSorted(key);
         return ref added;
     }
@@ -798,7 +798,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
             inSlot = !Unsafe.IsNullRef(ref head);
         }
 
-        if (!inSlot) head = ref CollectionsMarshal.GetValueRefOrNullRef(_heads, node.Key);
+        if (!inSlot) head = ref _heads.Find(node.Key);
         // An emptied _byTarget slot just stays (Count 0 marks it free); a dictionary entry goes.
         bool emptied = head.Remove(node.Place, _spares);
         if (_keySlots != null) Displace(node.Key);
@@ -831,7 +831,7 @@ public sealed partial class ValueIndex<T, TKey> : World.IValueIndex, World.IInde
     {
         var sorted = _sortedSpare is { } spare && spare.Length >= _heads.Count ? spare : new TKey[Math.Max(16, _heads.Count)];
         _sortedSpare = null;
-        _heads.Keys.CopyTo(sorted, 0);
+        _heads.CopyKeys(sorted);
         _sortedCount = _heads.Count;
         Array.Sort(sorted, 0, _sortedCount, Comparer<TKey>.Default);
         _sorted = sorted;
