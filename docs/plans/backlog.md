@@ -371,13 +371,11 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       job if still behind Arch / Friflo), OperationBenchmark EntityBatch (batch form slower than its own per-row form:
       count runs per pass, read the batch job), SingleEntityBenchmark Structural + Filtered (`--launchCount 6`).
       Proof: the numbers; a case still losing becomes its own item here.
-- [ ] **C1. `RemoveTypes` roots the removed types** (`core.md` §1): `_orderRequests`, `_tileSteps`, `PairState`'s
+- [x] **C1. `RemoveTypes` roots the removed types** (`core.md` §1): `_orderRequests`, `_tileSteps`, `PairState`'s
       clusters and lists, `_columnSpares` survive `ForgetTypes`; `Mentions` ignores `_orderRequests`, so a reused bit
       can get another type's `RowOrder`. Files: World.Order.cs, World.Types.cs, TileSteps.cs (after halos), Pairs.cs,
       Archetype.cs. Proof: `UnloadTests` with an ordered component, a pair method and a tile method (the
-      `WeakReference` dies), a reused bit gets its own order. **fix-core-lane1: done except `_tileSteps`** (left to
-      the halos branch, which owns TileSteps.cs: ForgetTypes must drop the `_tileSteps` entries whose type the doomed
-      predicate matches, as `_parallelWork`; then add a tile method to `UnloadTests.OrdersAndPairStatesOfAPluginLetItUnload`).
+      `WeakReference` dies), a reused bit gets its own order. **Done: fix-core-lane1 did all but `_tileSteps`; fix-c1-tile-steps made ForgetTypes drop the `_tileSteps` entries of the doomed types and added a tile method to `UnloadTests.OrdersAndPairStatesOfAPluginLetItUnload`.**
 - [x] **C2. `PairState` keeps a record per table forever, found by a linear scan** (`core.md` §5): drop entries of
       tables no longer matched, on `TrimExcess` / `RemoveTypes` (shared with C1); a slot per table instead of the scan.
       Files: Pairs.cs. Proof: a `NeighborTests` case cycling 100 `GroupBy` values; NeighborBenchmark with 64 groups.
