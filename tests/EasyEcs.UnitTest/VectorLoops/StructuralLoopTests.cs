@@ -467,6 +467,33 @@ public class StructuralLoopTests
         }
     }
 
+    /// <summary>
+    /// A lambda pass changing structure through a generated writer (<c>e.SetDaze</c>) that runs row by row: here a value
+    /// per row keeps it scalar on any hardware, as the method's own job is what hardware without vectors runs for the
+    /// vector form above. The generator cannot bind the writer (another generator's output), so it reads it by name: the
+    /// job must not promise no structural change, or the frozen gate throws at the first change.
+    /// </summary>
+    [TestCase(1000, 1)]
+    [TestCase(77, 2)]
+    public void ALambdaPassChangingStructureRowByRowRunsUnfrozen(int count, int seed)
+    {
+        using var world = new World();
+        var random = new Random(seed);
+        var entities = new Entity[count];
+        for (int i = 0; i < count; i++)
+        {
+            entities[i] = world.CreateEntity(new Stamina(random.Next(-100, 101)));
+            if (i % 5 == 0) entities[i].SetDaze(-1);
+        }
+        world.ForEach([Without<Daze>] static (Entity e, in Stamina v) => { if ((v.Value & 7) == 3) e.SetDaze(v.Value); });
+        for (int i = 0; i < count; i++)
+        {
+            int value = entities[i].Get<Stamina>().Value;
+            int? daze = i % 5 == 0 ? -1 : (value & 7) == 3 ? value : null;
+            Assert.That(entities[i].Has<Daze>() ? entities[i].Get<Daze>().Ticks : (int?)null, Is.EqualTo(daze), $"row {i}");
+        }
+    }
+
     [Test]
     public void ATableEmptiedByTheMarkedRowsIsFreedInRowOrder()
     {
