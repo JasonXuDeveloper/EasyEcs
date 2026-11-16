@@ -1333,7 +1333,7 @@ internal static class Symbols
         if (TileResult(p) != null) return ParamKind.Mutable; // a cell method's result per tile: a write of the entity's T
         if (ReduceElement(p.Type) is { } reduced) // by ref only: the pass's partial result, which the method writes
             return p.RefKind == RefKind.Ref && reduced.IsValueType && IsA(reduced, Singleton) ? ParamKind.Reduction : ParamKind.Invalid;
-        if (p.RefKind == RefKind.Ref && TileElements(p.Type) is { } stepped) // the method steps the tile
+        if (p.RefKind == RefKind.Ref && !IsLayer(p.Type) && TileElements(p.Type) is { } stepped) // the method steps the tile
             return stepped.Grid.IsValueType && TileKey(stepped.Grid) != null && stepped.Shape.IsValueType ? ParamKind.Tile : ParamKind.Invalid;
         if (p.RefKind is RefKind.Ref or RefKind.In or RefKind.RefReadOnlyParameter)
             return !p.Type.IsValueType ? ParamKind.Invalid
@@ -1412,6 +1412,63 @@ internal static class Symbols
     /// <summary>A cell method's cell parameters in order: the first drives the walk, the others are sampled.</summary>
     public static List<IParameterSymbol> Cells(IMethodSymbol method) =>
         method.Parameters.Where(p => p.RefKind == RefKind.None && IsCell(p.Type)).ToList();
+
+    /// <summary>A <c>Layer&lt;TCell, TTile, TLayer&gt;</c>: the cell of one layer of a tall tile under a ground cell.</summary>
+    public static bool IsLayer(ITypeSymbol type) =>
+        type is INamedTypeSymbol { IsGenericType: true } named && Named(named.ConstructedFrom, "EasyEcs.Layer<TCell, TTile, TLayer>");
+
+    /// <summary>A method's layer parameters in order (by value): sampled, after its cells, each its tile's layer under the ground's row.</summary>
+    public static List<IParameterSymbol> Layers(IMethodSymbol method) =>
+        method.Parameters.Where(p => p.RefKind == RefKind.None && IsLayer(p.Type)).ToList();
+
+    /// <summary>
+    /// A cell method's inputs in the order its pass numbers them: its cells (<see cref="Cells"/>, the first driving the
+    /// walk), then its layers (<see cref="Layers"/>).
+    /// </summary>
+    public static List<IParameterSymbol> CellInputs(IMethodSymbol method) => Cells(method).Concat(Layers(method)).ToList();
+
+    /// <summary>
+    /// The value a static property of <paramref name="type"/> implementing <paramref name="member"/> of interface
+    /// <paramref name="contract"/> returns when it is a constant in its declaration (<c>static int ILayer.Index =&gt; 3;</c>),
+    /// <paramref name="fallback"/> when the type leaves the interface's default, else null (computed, or from metadata).
+    /// </summary>
+    public static int? StaticConstant(ITypeSymbol type, string contract, string member, int? fallback)
+    {
+        if (type.AllInterfaces.FirstOrDefault(i => Named(i, contract))?.GetMembers(member).FirstOrDefault() is not IPropertySymbol declared) return null;
+        if (type.FindImplementationForInterfaceMember(declared) is not IPropertySymbol property
+            || SymbolEqualityComparer.Default.Equals(property.ContainingType, declared.ContainingType)) return fallback;
+        foreach (var reference in property.DeclaringSyntaxReferences)
+            if (reference.GetSyntax() is PropertyDeclarationSyntax declaration && Returned(declaration) is LiteralExpressionSyntax { Token.Value: int value })
+                return value;
+        return null;
+    }
+
+    /// <summary>
+    /// Why the layers <paramref name="method"/> takes cannot be read (EECS115), or null: a layer is read under the
+    /// cells of a ground, so the method's first cell is a <c>Cell&lt;TCell, Ground&lt;TTile&gt;&gt;</c> and each layer one of
+    /// that TTile, within its layers (where both are constants in their declarations).
+    /// </summary>
+    public static string? LayerProblem(IMethodSymbol method)
+    {
+        var layers = Layers(method);
+        if (layers.Count == 0) return null;
+        var cells = Cells(method);
+        if (cells.Count == 0)
+            return $"takes layer '{layers[0].Name}' but no cell: a layer is read under the cells of a ground, take a Cell<TCell, Ground<TTile>> first";
+        var shape = ((INamedTypeSymbol)cells[0].Type).TypeArguments[1];
+        if (shape is not INamedTypeSymbol { IsGenericType: true } ground || !Named(ground.ConstructedFrom, "EasyEcs.Ground<TTile>"))
+            return $"takes layer '{layers[0].Name}' under cell '{cells[0].Name}' of {shape.Name}, which is not a ground: a layer is read under the cells of a Ground<TTile> of the layer's tile";
+        foreach (var layer in layers)
+        {
+            var args = ((INamedTypeSymbol)layer.Type).TypeArguments;
+            if (!SymbolEqualityComparer.Default.Equals(args[1], ground.TypeArguments[0]))
+                return $"takes layer '{layer.Name}' of {args[1].Name} under cell '{cells[0].Name}' of the ground of {ground.TypeArguments[0].Name}: a layer is one of the tile the cells are the ground of, take Layer<{args[0].Name}, {ground.TypeArguments[0].Name}, {args[2].Name}>";
+            if (StaticConstant(args[2], "EasyEcs.ILayer", "Index", null) is { } index
+                && StaticConstant(args[1], TileShape, "Height", 1) is { } height && (index < 0 || index >= height))
+                return $"takes layer '{layer.Name}' at {args[2].Name}.Index {index}, outside the {height} layers of {args[1].Name}: 0 to {height - 1}";
+        }
+        return null;
+    }
 
     /// <summary>
     /// A cell method's component that bounds its pass's layers (<c>in T</c>, T an <c>ITileLayers</c> component of the
@@ -1522,13 +1579,15 @@ internal static class Symbols
             : null;
 
     /// <summary>
-    /// The cell type, the shape and the grid's tile component of a <c>Tile&lt;TCell, TTile&gt;</c>, else null: the shape is
-    /// the tile component, or <c>Ground&lt;T&gt;</c> of the grid's T.
+    /// The cell type, the shape and the grid's tile component of a <c>Tile&lt;TCell, TTile&gt;</c> (or a <c>Cell</c>, or a
+    /// <c>Layer&lt;TCell, TTile, TLayer&gt;</c>: TTile's), else null: the shape is the tile component, or
+    /// <c>Ground&lt;T&gt;</c> of the grid's T.
     /// </summary>
     public static (ITypeSymbol Cell, ITypeSymbol Shape, ITypeSymbol Grid)? TileElements(ITypeSymbol type)
     {
-        if (type is not INamedTypeSymbol { IsGenericType: true } named
-            || !Named(named.ConstructedFrom, "EasyEcs.Tile<TCell, TTile>") && !Named(named.ConstructedFrom, "EasyEcs.Cell<TCell, TTile>")) return null;
+        if (type is not INamedTypeSymbol { IsGenericType: true } named) return null;
+        if (IsLayer(named)) return (named.TypeArguments[0], named.TypeArguments[1], named.TypeArguments[1]); // its tile's layer
+        if (!Named(named.ConstructedFrom, "EasyEcs.Tile<TCell, TTile>") && !Named(named.ConstructedFrom, "EasyEcs.Cell<TCell, TTile>")) return null;
         var shape = named.TypeArguments[1];
         var grid = shape is INamedTypeSymbol { IsGenericType: true } columns && Named(columns.ConstructedFrom, "EasyEcs.Ground<TTile>")
             ? columns.TypeArguments[0] : shape;
@@ -1561,6 +1620,7 @@ internal static class Symbols
     {
         var stepped = method.Parameters.Where(IsSteppingTile).ToArray();
         bool gaussSeidel = IsGaussSeidel(method);
+        if (LayerProblem(method) is { } layer) return layer;
         var cells = Cells(method);
         if (cells.FirstOrDefault(c => !SymbolEqualityComparer.Default.Equals(((INamedTypeSymbol)c.Type).TypeArguments[1], ((INamedTypeSymbol)cells[0].Type).TypeArguments[1])) is { } other)
             return $"takes cells '{cells[0].Name}' and '{other.Name}' of different tiles: a cell method's inputs line up row by row, take cells of one TTile";

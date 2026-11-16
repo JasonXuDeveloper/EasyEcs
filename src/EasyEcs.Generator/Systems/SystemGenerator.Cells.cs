@@ -27,13 +27,18 @@ public sealed partial class SystemGenerator
             form = new Kernel.CellForm(new([]), true, null, new([]), $"the generator failed to translate the cell ({e.GetType().Name}: {e.Message})");
         }
 
-        var cells = Symbols.Cells(method);
+        // The inputs: the cells (of the driver's tile), then the layers (Layer<TCell, TTile, TLayer>: layer TLayer.Index of
+        // the tall tile whose ground the cells are, its rows lined up with the ground's in x and z).
+        var cells = Symbols.CellInputs(method);
+        int layer0 = Symbols.Cells(method).Count; // inputs from here on are layers
         var outputs = method.Parameters.Where(p => Symbols.CellOut(p) != null).ToList();
         var results = method.Parameters.Where(p => Symbols.TileResult(p) != null).ToList();
         string Result(int n) => Symbols.TileResult(results[n])!.ToDisplayString(Symbols.Fqn);
         string shape = ((INamedTypeSymbol)cells[0].Type).TypeArguments[1].ToDisplayString(Symbols.Fqn);
-        string CellName(int k) => ((INamedTypeSymbol)cells[k].Type).TypeArguments[0].ToDisplayString(Symbols.Fqn);
-        string At(int k) => $"global::EasyEcs.Cell<{CellName(k)}, {shape}>";
+        string Arg(int k, int a) => ((INamedTypeSymbol)cells[k].Type).TypeArguments[a].ToDisplayString(Symbols.Fqn);
+        string CellName(int k) => Arg(k, 0);
+        string ShapeOf(int k) => k >= layer0 ? Arg(k, 1) : shape; // a layer's tile is the tall one
+        string At(int k) => k >= layer0 ? $"global::EasyEcs.Layer<{CellName(k)}, {Arg(k, 1)}, {Arg(k, 2)}>" : $"global::EasyEcs.Cell<{CellName(k)}, {shape}>";
         string OutName(int j) => outputs[j].Type.ToDisplayString(Symbols.Fqn);
         string at = At(0); // the shape's constants (every input has the driver's tile)
         // An out cell of the driver's own type is its next value: the pass steps the driver's tile (the job hands it by
@@ -52,7 +57,7 @@ public sealed partial class SystemGenerator
                 n = results.FindIndex(r => SymbolEqualityComparer.Default.Equals(r, p));
             if (k >= 0)
             {
-                parameters.Add($"{(k == 0 && step >= 0 ? "ref " : "")}global::EasyEcs.Tile<{CellName(k)}, {shape}> __tile{k}");
+                parameters.Add($"{(k == 0 && step >= 0 ? "ref " : "")}global::EasyEcs.Tile<{CellName(k)}, {ShapeOf(k)}> __tile{k}");
                 call.Append($", \u0001c{k}\u0002");
             }
             else if (j >= 0)
@@ -110,10 +115,12 @@ public sealed partial class SystemGenerator
         // The exchange is a call of its own (NoInlining): inlined, its faces take the inliner's budget for the pass, and
         // the row walk's helpers (the masks, Index, Width, Write's checks) are then left as calls in every row.
         var exchanges = new StringBuilder();
+        // A layer's exchange copies that layer with its ring alone (ExchangeLayer), not the tall tile's other layers.
         for (int k = 0; k < cells.Count; k++)
             exchanges.Append("    [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]\n")
-                .Append($"    private static void {AccessorPrefix}__Exchange{k}(ref global::EasyEcs.Tile<{CellName(k)}, {shape}> tile{(ranged ? ", int from, int to" : "")}) => ")
-                .Append(ranged ? (k == 0 ? "tile.ExchangeHalo(from, to);\n\n" : "tile.ExchangeHalo(from, to, mask: false);\n\n")
+                .Append($"    private static void {AccessorPrefix}__Exchange{k}(ref global::EasyEcs.Tile<{CellName(k)}, {ShapeOf(k)}> tile{(ranged && k < layer0 ? ", int from, int to" : "")}) => ")
+                .Append(k >= layer0 ? $"tile.ExchangeLayer({At(k)}.Index);\n\n"
+                    : ranged ? (k == 0 ? "tile.ExchangeHalo(from, to);\n\n" : "tile.ExchangeHalo(from, to, mask: false);\n\n")
                     : k == 0 && skips ? "tile.ExchangeHalo();\n\n" : $"tile.ExchangeHalo(0, {at}.Height - 1, mask: false);\n\n");
 
         // The row's vector loop, once: the loops of each width, from the row's streams (each width's text names them).
@@ -174,7 +181,7 @@ public sealed partial class SystemGenerator
             }
             else
                 for (int k = 0; k < cells.Count; k++)
-                    row.Append($"ref {CellName(k)} __c{k} = ref {Unsafe}.AsRef(in __tile{k}.At(__row)[0, 0, 0]);\n");
+                    row.Append($"ref {CellName(k)} __c{k} = ref {Unsafe}.AsRef(in __tile{k}.At({(k >= layer0 ? $"new global::EasyEcs.TileRow<{ShapeOf(k)}>({At(k)}.Index, __row.Z)" : "__row")})[0, 0, 0]);\n");
             for (int j = 0; j < outputs.Count; j++)
                 row.Append(j == step
                     ? $"__written[__y] |= 1UL << __z;\nref {OutName(j)} __o{j} = ref {Unsafe}.Add(ref __stepped, __index);\n"
@@ -199,7 +206,7 @@ public sealed partial class SystemGenerator
                             vector.Append($"ref {columns[k]} __west{k + 1} = ref {Cast("__inW0")};\nref {columns[k]} __east{k + 1} = ref {Cast("__inE0")};\n");
                     }
                     else
-                        vector.Append($"ref {columns[k]} e{k + 1} = ref {Cast($"{Unsafe}.Add(ref __c{form.Offsets[k].Cell}, {at}.Offset({form.Offsets[k].Dx}, {form.Offsets[k].Dy}, {form.Offsets[k].Dz}))")};\n");
+                        vector.Append($"ref {columns[k]} e{k + 1} = ref {Cast($"{Unsafe}.Add(ref __c{form.Offsets[k].Cell}, {At(form.Offsets[k].Cell)}.Offset({form.Offsets[k].Dx}, {form.Offsets[k].Dy}, {form.Offsets[k].Dz}))")};\n");
                 }
                 vector.Append($"nint i = 0, rows = {at}.Width;\nint at = 0;\n");
                 for (int n = 0; n < results.Count; n++) // the lanes fold into the tile's result after the row's loop
@@ -216,7 +223,7 @@ public sealed partial class SystemGenerator
                 }
             }
             if (!plane)
-                row.Append($"for (; __x < {at}.Width; __x++)\n    {Call(k => $"new {At(k)}(in {Unsafe}.Add(ref __c{k}, __x), __x, __row.Y, __row.Z)", j => $"{Unsafe}.Add(ref __o{j}, __x)")};\n");
+                row.Append($"for (; __x < {at}.Width; __x++)\n    {Call(k => k >= layer0 ? $"new {At(k)}(in {Unsafe}.Add(ref __c{k}, __x))" : $"new {At(k)}(in {Unsafe}.Add(ref __c{k}, __x), __x, __row.Y, __row.Z)",j => $"{Unsafe}.Add(ref __o{j}, __x)")};\n");
             if (skips)
             {
                 // A row the walk skips reads only zeros: it gets what the method computes there, exactly (with this entity's
@@ -262,7 +269,7 @@ public sealed partial class SystemGenerator
                 // Bounded by the layers: the exchange and the walk of those, none when they are empty.
                 var walking = new StringBuilder();
                 if (ranged)
-                    for (int k = 0; k < cells.Count; k++) walking.Append($"{AccessorPrefix}__Exchange{k}(ref __tile{k}, __from, __to);\n");
+                    for (int k = 0; k < cells.Count; k++) walking.Append($"{AccessorPrefix}__Exchange{k}(ref __tile{k}{(k < layer0 ? ", __from, __to" : "")});\n");
                 walking.Append($"var __walk = {(plane ? "__plane" : "__tile0")}.Rows((global::EasyEcs.TileStencil){stencil});\n");
                 walking.Append("for (int __l = __walk.FirstLayer, __last = __walk.LastLayer; __l <= __last; __l++)\n{\n    int __y = __walk.LayerOf(__l);\n");
                 walking.Append("    for (ulong __m = __walk.RowsOf(__l); __m != 0; __m &= __m - 1)\n    {\n");
@@ -302,7 +309,7 @@ public sealed partial class SystemGenerator
         for (int k = 0; k < form.Offsets.Length; k++)
         {
             var o = form.Offsets[k];
-            string offset = $"{at}.Offset({o.Dx}, {o.Dy}, {o.Dz})";
+            string offset = $"{At(o.Cell)}.Offset({o.Dx}, {o.Dy}, {o.Dz})";
             if (!text.Contains(offset)) continue;
             head.Append($"nint __d{k} = {offset};\n");
             text = text.Replace(offset, $"__d{k}");
