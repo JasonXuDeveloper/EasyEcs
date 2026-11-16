@@ -260,6 +260,17 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       `GeneratedRead`) in `LambdaPass.IsStable`; test `ALambdaPassChangingStructureRowByRowRunsUnfrozen` (scalar on any
       hardware, failed before the fix). `TheScheduleNamesEachMethodsLoop` expects "; rows on this hardware" where the
       machine has neither width. Gate from the scratchpad `nosimd/gate.sh`; branch not merged.
+- [ ] **`perf-align-prefetch`** (owner asked 2026-11-16: "simd 有没有考虑内存对齐和 prefetch"). What holds: unmanaged
+      columns start row 0 on a 64-byte line (`Archetype.Aligned`), runs and chunks start on 64-row words, so every
+      vector load of a walk starts on a line for 4/8/16-byte rows; sequential column reads are left to the hardware
+      prefetcher (microarch.md M3 candidate 9: at most nine columns plus words, under the L2 streamer's 32 streams);
+      software prefetch exists for chases (lookups, index probes) and streamed copies, gated past the last-level cache.
+      Open, to try (Opus, after the lane-walk agent): (a) many small tables (FragmentsIntegrate, 1,000 tables of 5-20
+      rows): each table's columns are cold starts the streamer has not trained on; prefetch the next table's column
+      heads (and its words) while walking the current one, gated like the chase prefetch; A/B on Fragments* and the
+      headline worlds. (b) the first lines of a long run (the streamer needs a few misses to start, and does not cross a
+      4 KB page on every core): prefetch the next page's first line per column; measure, drop if level. (c) check by
+      listing that no generated 512-bit loop loads across a line where rows are 12 or 24 bytes (interleaved forms).
 - [ ] **`feat-ground-layer`** (owner, L19): a `Cell<TCell, Ground<TTile>>` method that also reads a layer of the
       3D tile it is the ground of; public form chosen (L34, 2026-11-16): `Layer<TCell, TTile, TLayer>`, TLayer : ILayer with a static Index; then generator, analyzer,
       tests, TileGroundBenchmark case, docs-todos. After feat-generated-text-2's package A (same emit code).
