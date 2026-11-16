@@ -1,3 +1,4 @@
+using System;
 using EasyEcs;
 using Godot;
 
