@@ -866,12 +866,12 @@ public class GeneratorTests
         "var __m1 = __Vec.As<float, int>(__Vec.LessThan<float>(__c2_0, __Vec.Create<float>(0f)));",
         "var __t4 = __Vec.As<float, int>(__Vec.GreaterThan<float>(__c1_0, __Vec.Create<float>(1f)));",
         "var __m5 = __Vec.As<float, int>(__Vec.GreaterThan<float>(__c2_0, __Vec.Create<float>(10f))) & __t4;",
-        "__c1_0 = __Vec.ConditionalSelect(__Vec.As<int, float>(__m1), __Vec.Create<float>(0f), __Vec.ConditionalSelect(__Vec.As<int, float>(__m5), __Vec.Create<float>(1f), __c1_0));")]
+        "__c1_0 = __Vec.ConditionalSelect(__Vec.As<int, float>(__m1), __Vec.Create<float>(0f), __Vec.ConditionalSelect(__Vec.As<int, float>(__m5), __Vec.Create<float>(1f), __c1_0));")] // two selects: the blend (Kernel.Selects)
     [TestCase("[ForEach] static void A(ref P p, in Q q) { switch (q.V) { default: p.V++; break; case 1: case 2: p.V = 0; break; } }",
         "var __m1 = __Vec.Equals<int>(__c2_0, __Vec.Create<int>(1));",
         "var __m3 = __Vec.Equals<int>(__c2_0, __Vec.Create<int>(2));",
         "var __m4 = __m1 | __m3;",
-        "__c1_0 = __Vec.ConditionalSelect(~__m4, __c1_0 + __Vec_int.One, __Vec.Create<int>(0));",  // the default first, both sections one write
+        "__c1_0 = __Interleaved.Select(~__m4, __c1_0 + __Vec_int.One, __Vec.Create<int>(0));",  // the default first, both sections one write; the loop's one select
         "__c1_0 = __Vec.ConditionalSelect(__pass, __Vec.ConditionalSelect(~__m4, __c1_0 + __Vec_int.One, __u5), __c1_0);")] // a masked word selects by __pass once
     public void ASwitchIsMasksOfItsArms(string method, params string[] lines)
     {
@@ -895,7 +895,7 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("var __id1 = __Count.Identity;")
             .And.Contain("var __a1_0 = __Vec.Create<int>(__id1.N);")
             .And.Contain("var __a1_1 = __Vec.Create<int>(__id1.Low);")
-            .And.Contain("__a1_0 = __Vec.ConditionalSelect(__m0, __a1_0 + __c1_0, __a1_0);")
+            .And.Contain("__a1_0 = __Interleaved.Select(__m0, __a1_0 + __c1_0, __a1_0);")
             .And.Contain("__a1_1 = __Vec.Min(__a1_1, __c1_0);")
             .And.Contain("l1.Value.N = unchecked((int)(l1.Value.N + __Vec.Sum(__a1_0)));")
             .And.Contain("for (int __j = 0; __j < __Vec_int.Count; __j++) l1.Value.Low = __Math.Min(l1.Value.Low, __a1_1[__j]);")

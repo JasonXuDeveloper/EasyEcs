@@ -1706,6 +1706,34 @@ public class KernelTests
         }
     }
 
+    /// <summary>
+    /// Interleaved.Select, the select of a Vector&lt;T&gt; or Vector128 loop with one select, against ConditionalSelect:
+    /// the same bits for any mask (lane masks and arbitrary bits) and NaN payloads; its SSE-only form runs under
+    /// DOTNET_EnableAVX=0.
+    /// </summary>
+    [Test]
+    public void SelectIsConditionalSelectsBits()
+    {
+        var random = new Random(11);
+        var bytes = new byte[Vector<byte>.Count * 3];
+        for (int round = 0; round < 500; round++)
+        {
+            random.NextBytes(bytes);
+            var m = new Vector<int>(bytes);
+            if (round % 2 == 0) m = Vector.GreaterThan(m, Vector<int>.Zero); // a lane mask, as a comparison gives
+            var a = new Vector<float>(bytes.AsSpan(Vector<byte>.Count));
+            var b = new Vector<float>(bytes.AsSpan(2 * Vector<byte>.Count));
+            Assert.That(Interleaved.Select(m, a, b).As<float, int>(), Is.EqualTo(Vector.ConditionalSelect(m, a, b).As<float, int>()), "Vector<float>");
+            var ai = a.As<float, int>();
+            var bi = b.As<float, int>();
+            Assert.That(Interleaved.Select(m, ai, bi), Is.EqualTo(Vector.ConditionalSelect(m, ai, bi)), "Vector<int>");
+            var m128 = System.Runtime.Intrinsics.Vector128.Create(bytes.AsSpan(0, 16)).AsInt32();
+            var a128 = System.Runtime.Intrinsics.Vector128.Create(bytes.AsSpan(16, 16)).AsInt32();
+            var b128 = System.Runtime.Intrinsics.Vector128.Create(bytes.AsSpan(32, 16)).AsInt32();
+            Assert.That(Interleaved.Select(m128, a128, b128), Is.EqualTo(System.Runtime.Intrinsics.Vector128.ConditionalSelect(m128, a128, b128)), "Vector128<int>");
+        }
+    }
+
     [TestCase(false), TestCase(true)]
     public void ByteLanesMatchTheMethodForEveryPairOfOperands(bool holes)
     {
