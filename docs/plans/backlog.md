@@ -261,7 +261,7 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       hardware, failed before the fix). `TheScheduleNamesEachMethodsLoop` expects "; rows on this hardware" where the
       machine has neither width. Gate from the scratchpad `nosimd/gate.sh`; branch not merged.
 - [ ] **`feat-ground-layer`** (owner, L19): a `Cell<TCell, Ground<TTile>>` method that also reads a layer of the
-      3D tile it is the ground of; design the public form (two or three shapes, as a popup), then generator, analyzer,
+      3D tile it is the ground of; public form chosen (L34, 2026-11-16): `Layer<TCell, TTile, TLayer>`, TLayer : ILayer with a static Index; then generator, analyzer,
       tests, TileGroundBenchmark case, docs-todos. After feat-generated-text-2's package A (same emit code).
 - [x] **`feat-ground-cells`** merged 2026-11-14. (inner-loops leftover (a), from fc26ea4): the first run was lost the same way before
       reporting; `Cell<TCell, Ground<TTile>>` already ran through the cell pass (no core or
