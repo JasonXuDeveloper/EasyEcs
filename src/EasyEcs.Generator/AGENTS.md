@@ -431,7 +431,8 @@ method's body produced, so no symbol is bound again. A job is flat when:
   and a lane struct's inlined temporaries count; lane-kernel.md, package F);
 - nothing else of `Code`: no bail, reduction (`Restore` / `Fold` / `Chains`), structural change, record or vector
   tail, gather, draw, prefetch, streamed column, wide component, statics, pair mode, narrow index or cold branch;
-- the walk declares at most `InlinedLocals` IL locals (it inlines into `LaneKernel.Walk`, once per width).
+- the walk declares at most `InlinedLocals` IL locals (it inlines once per width: into `LaneKernel.Walk` for a whole run,
+  into the runner's walk over words for a masked word).
 
 Masked words take the same step when their text (`MaskedBody`) is the whole run's with each write as
 `Keep<M>(pass, value, old)` (`Unkept`); otherwise, and for a flat loop of several fields (whose masked words

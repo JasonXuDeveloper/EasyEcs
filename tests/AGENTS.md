@@ -293,7 +293,8 @@ VectorLoops/KernelTests.cs          methods written for one row run as vector lo
                                     positional record structs, components of several fields (Interleaved)
 VectorLoops/LaneKernelTests.cs      flat jobs over the lane kernel (one field, int lanes, flat loops of 2 and 3 fields, masked
                                     words) against the methods row by row, bit for bit at every length to 70, 255, 1,000 and
-                                    1,021 rows (run under each width setting: lane-kernel.md); their schedule lines
+                                    1,021 rows (run under each width setting: lane-kernel.md); their schedule lines;
+                                    ILane.AddWhereEqual against the select of the sum at each width
 VectorLoops/LaneMathTests.cs        the math a vector loop lowers: integer division, a float divided by a power of two,
                                     Pow, the throwing Abs / CopySign / Sign, FloatMode.Fast's forms; the Vector128 forms
                                     against the scalar operations; every 32-bit input under the explicit category

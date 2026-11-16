@@ -322,7 +322,8 @@ VectorLoops/LaneKernelBenchmark.cs          package C's study (docs/plans/design
 VectorLoops/LaneKernelStudy.cs              the study's forms Core does not ship: the width form (IWidth, W512 / W256 /
                                             W128, Lane<W, T>, WidthKernel), package D's step form (ILaneStep4, LaneStep4:
                                             a step per vector, its uniforms' broadcasts left in the loop by the JIT) and the
-                                            walk form with the rows and a reduction's write-back (IStudyWalk4, StudyWalk4)
+                                            walk form with the rows and a reduction's write-back (IStudyWalk4, StudyWalk4:
+                                            one call per run holding the three widths, as Core's whole runs)
 VectorLoops/LateHolesBenchmark.cs           vector loops whose runner reached Tier1 before their table had holes: the masked
                                             words' tables and lane masks
 VectorLoops/StreamingStoreBenchmark.cs      borrowed-ideas.md item 5: a write-only column with plain against non-temporal
