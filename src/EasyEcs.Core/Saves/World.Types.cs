@@ -118,8 +118,8 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// The singletons, indexes, key reservations, groupings, orders, target rules, parallel work and sort spares of the
-    /// types. Inside the gate.
+    /// The singletons, indexes, key reservations, groupings, orders, target rules, parallel work, tile steps and sort
+    /// spares of the types. Inside the gate.
     /// </summary>
     private void ForgetTypes(Func<Type, bool> doomed, List<ushort> bits)
     {
@@ -157,6 +157,10 @@ public sealed partial class World
                     work[i] = null;
             Volatile.Write(ref _parallelWork, work);
         }
+
+        for (int i = 0; i < _tileSteps.Length; i++) // the tile steps of a job (their types are the plugin's)
+            if (_tileSteps[i] != null && doomed(_tileSteps[i].GetType()))
+                _tileSteps[i] = null;
 
         // Copies of rows a later Load or MoveEntities would reuse: rebuilt on demand.
         _loadSnapshot = null;

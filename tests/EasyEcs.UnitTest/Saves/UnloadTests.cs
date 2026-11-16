@@ -64,10 +64,38 @@ public class UnloadTests
         public record struct Near(int Count) : IComponent;
         public record struct Spot(float X, float Y) : IComponent;
         public record struct Label(string Name) : IComponent;
+        public record struct Warmth(float T);
+
+        // A tile method over the plugin's cells and plates: the world keeps the tile steps of its job.
+        public record struct Plate(TileTests.TilePos Pos) : IComponent, ITile<TileTests.TilePos>
+        {
+            readonly TileTests.TilePos IIndexed<TileTests.TilePos>.Key => Pos;
+            static int ITileShape.Width => 16;
+            static int ITileShape.Depth => 16;
+            static TileTests.TilePos ITile<TileTests.TilePos>.Beside(TileTests.TilePos p, TileFaces face) => face switch
+            {
+                TileFaces.North => p with { Z = p.Z - 1 },
+                TileFaces.South => p with { Z = p.Z + 1 },
+                TileFaces.West => p with { X = p.X - 1 },
+                _ => p with { X = p.X + 1 },
+            };
+        }
 
         [EcsSystem]
         public ref struct Crowd
         {
+            [ForEach]
+            static void Spread(ref Tile<Warmth, Plate> warmth)
+            {
+                warmth.ExchangeHalo();
+                foreach (var row in warmth.Rows(TileStencil.Layer))
+                {
+                    var cells = warmth.At(row);
+                    var into = warmth.Write(row);
+                    for (int x = 0; x < 16; x++) into[x] = new Warmth((cells[x - 1, 0, 0].T + cells[x + 1, 0, 0].T) * 0.5f);
+                }
+            }
+
             [ForEach]
             static void ByPosition(in Position p, ref Near near, [Neighbor] in Position q)
             {
@@ -91,6 +119,7 @@ public class UnloadTests
                 foreach (var player in players) player.Set(new Near(0)).Set(new Label("player"));
                 var spots = new Entity[20];
                 for (int i = 0; i < spots.Length; i++) spots[i] = world.CreateEntity(new Spot(i, 0), new Near(0), new Label("spot"));
+                for (int x = 0; x < 2; x++) world.CreateEntity(new Plate(new TileTests.TilePos(x, 0, 0))).GetOrAdd<DynamicBuffer<Warmth>>().SetCount(256);
                 return spots;
             }
 
@@ -214,8 +243,8 @@ public class UnloadTests
     {
         // The world kept a plugin's order requests (closures over its types), the order of host tables its pair method
         // over a host component asked for, its pair state's clusters of the dropped tables and the sorts' spare columns
-        // of its managed component: the context never unloaded (fix-core-lane1). A type taking a reclaimed bit gets
-        // its own order, not the request of the type that had the bit.
+        // of its managed component, and the tile steps of its tile method: the context never unloaded (fix-core-lane1). A
+        // type taking a reclaimed bit gets its own order, not the request of the type that had the bit.
         using var world = new World();
         var players = new Entity[3];
         for (int i = 0; i < players.Length; i++) players[i] = world.CreateEntity(new Position(i, 0));
