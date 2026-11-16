@@ -27,7 +27,7 @@ public static partial class EasyEcsAnalyzer
 
     /// <summary>
     /// EECS092: the record types the compilation's [ForEach] methods emit (and the first parameter emitting each), the
-    /// ones its code clears, and at the end the emitted ones nothing clears.
+    /// ones its code clears (a [Drain] method included), and at the end the emitted ones nothing clears.
     /// </summary>
     internal static void InitializeRecords(AnalysisContext context) => context.RegisterCompilationStartAction(AnalyzeRecords);
 
@@ -39,6 +39,8 @@ public static partial class EasyEcsAnalyzer
         start.RegisterSymbolAction(context =>
         {
             var method = (IMethodSymbol)context.Symbol;
+            // A [Drain] method's pass clears the records it handled, in the code the generator writes
+            if (Symbols.IsDrain(method) && Symbols.RecordType(method) is { } drained) cleared.TryAdd(drained, 0);
             if (!Symbols.IsForEach(method)) return;
             foreach (var p in method.Parameters)
                 if (Symbols.Classify(p) == Symbols.ParamKind.Emit && Symbols.EmitElement(p.Type) is { } record)
