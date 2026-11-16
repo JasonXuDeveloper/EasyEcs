@@ -127,13 +127,17 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       (only level or a win at 0 B with nothing slower ships). Details: lane-kernel.md "Package D", docs-todos
       `feat-lane-kernel`.
       Package E (open): today's generator's 128-bit path from what the kernel's SSE code shows.
-      **Package F, form 1 handed back on branch `feat-lane-walk`** (rebased onto feat-lane-kernel 05f91b47): uniforms. The
-      step form's broadcast stayed in the loop because RyuJIT's hoisting declines a cheap tree once the loop's count
-      of vector locals (lane-struct temporaries included) reaches the registers it assumes; every lane job is now one
-      walk per width (ILaneWalk4.Walk, its loop in the job, uniforms broadcast before it, read in Execute), flat jobs
-      without uniforms at the same machine code. 29 lane jobs in the benchmark project against 24. Gated (four width
-      settings, full suite on both runtimes, inlining.sh, agents.sh); A/B running from scratchpad/kernelF/ab.sh
-      (base a5e0e905): ships only as level or a win at 0 B. Details: lane-kernel.md "Package F".
+      **Package F, form 1 handed back on branch `feat-lane-walk`** (rebased onto feat-lane-kernel 05f91b47, the walk
+      once per run): uniforms. The step form's broadcast stayed in the loop because RyuJIT's hoisting declines a cheap
+      tree once the loop's count of vector locals (lane-struct temporaries included) reaches the registers it assumes;
+      every lane job is now its own walk (ILaneWalk4.Walk, its loop in the job, uniforms broadcast before it, read in
+      Execute), inlined per width into D's one walk per run. 29 lane jobs in the benchmark project against 24. Its first
+      A/B found HolesHaul 1.21-1.31x: a NoInlining call per masked word (spills, stack arguments, prologue around ~5
+      vectors); masked words now inline their walks into the runner. The owner's reduction item (2026-11-16): the
+      study's Tally 1.3-1.45x at 100,000 rows was the conditional sum blended instead of a masked add (the sum reached
+      SelectEqual as an argument temporary); ILane.AddWhereEqual gives the emitted loop's instructions. Gate
+      scratchpad/kernelF2/gate.sh; A/B scratchpad/kernelF2/ab.sh (base a08825cf): ships only as level or a win at 0 B.
+      Details: lane-kernel.md "Package F".
       Package F (open after form 1): a select under one comparison, Min / Max against constants, 8-byte lanes
       (ILaneWalk8), reductions, the masked walk's passing bits hoisted; each rolled out once level at 0 B.
       The original item: read the generated files of the GeneratedTextTests corpora, the samples and the

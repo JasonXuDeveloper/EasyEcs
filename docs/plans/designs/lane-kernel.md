@@ -299,6 +299,53 @@ refs loaded once, each width's loop `vmovups; vmovups; vmulps {1to16} (the const
 vmovups`, no call; `tools/perf/inlining.sh` over KernelBenchmark, the headline worlds, FusionBenchmark,
 LookupGatherBenchmark, LaneKernelBenchmark and VectorFormsBenchmark: every generated job inlined.
 
+### Masked words: the walks inlined into the runner (HolesHaul)
+
+**What the first A/B showed.** `$S/kernelF/ab.sh` (base a5e0e905): HolesHaulGenerated 1.21x at 1,000 rows and
+1.31x at 100,000 (both rounds; HolesHaulScalar faster in the same runs), 1.16x at 1,000 under `DOTNET_EnableAVX=0`.
+HolesHaul is the first flat job measured over masked words (package D's benchmarks had none: LaneKernelBenchmark's
+Holes is Step, a condition), so the cause is the kernel's masked mode itself, uniforms or not.
+
+**The cause** (FullOpts, `$S/kernelF2/asm/holes-head.asm` against `holes-base.asm`). `_holes` lacks Mass on every
+third row, so every 64-row word is masked and goes to the job's `Execute(pass, ...)` from `World.MaskedRuns`, with
+the rows from its first passing row to its last (about 63). The emitted loops run inline there: three 512-bit
+vectors, one 256-bit, the passing rows after. The kernel made a call per word: `RunMasked` computed the three ends
+with branches, spilled five values of the word loop (`[rbp-0x48]`, `-0x4C`, `-0x70`, `-0xC0`, `-0xC8`), stored the
+job's three refs and uniform as stack arguments, called `LaneKernel:Walk[HaulJob3+__Lanes, PassingRows]` (prologue,
+the uniform broadcast at each width, `vzeroupper`) and reloaded them, about thirty instructions around five vectors of
+about ten each. The walk's own loops are the emitted ones (`vpternlogd` for the kept lanes, the same masks).
+
+**The fix.** `RunMasked` inlines the three walks (`Widths<TJob, PassingRows>` over a copy of the job): the runner's
+walk over words is a `NoInlining` root of its own that holds nothing else of the job (whole runs go to `MaskedRun`,
+where the job's whole-run `Execute` calls the walk once per run), the same root the emitted text's two widths of
+masked loops are inlined into. The whole-run walk keeps its call: a run is long and D's Fragments numbers chose it.
+The inlining budget: `$S/kernelF2/stressM` (package D's stress world, a flat step of six statements over seven
+components, its rows with masked words) checked by `lanecalls.py` for lane operations left as calls.
+
+### Reductions: the conditional sum's masked add (Tally)
+
+**What the A/B showed.** LaneKernelBenchmark's TallyTyped (the lane types) and TallyKernel (the width form) at
+100,000 rows: 8,700-10,100 ns against TallyGenerated's 6,600-7,100 (1.3-1.45x); level at 37 and 1,000.
+
+**The cause** (Tier1, `$S/kernelE/r-def.asm`: `TypedJobs+TallyJob:Walk[Lane512...]` against `World:ForEachBatchRuns
+[..., TallyJob3]`). No column ref is reloaded and the loop is not rotated in today's listings (the study's first
+listing predates the fused members); the two loops differ in the sum under a condition. The emitted text's
+`ConditionalSelect(__m0, __a1_1 + __c1_0, __a1_1)` is one tree, and the JIT contracts it into a masked add,
+`vptestnmd k1; vpaddd zmm1 {k1}, zmm5, zmm1`. The lane form's `SelectEqual(c1 & 1, 0, a1s + c1, a1s)` reaches the
+select with the sum as an argument's temporary (the inliner spills every argument that is not a local or a constant),
+so the JIT blends: `vpaddd zmm7, zmm5, zmm1; vpblendmd zmm1 {k1}, zmm1, zmm7`, one more uop per vector on AVX-512's two
+vector ports and a loop-carried chain of two operations instead of one. llvm-mca: 2.57 cycles per vector against 3.08
+(icelake-server), the 1.2x the listing explains of the 1.3-1.45x measured. The repro (`$S/kernelF2/rx`, FullOpts,
+`rx1.asm` / `rx.asm`): the mask as a local then `Select` keeps the mask as a vector (`vpmovm2d; vpternlogd`), the add
+inside the select's member with the mask from `Equal` likewise, the select as `a + (c & m)` an extra `vpmovm2d; vpandd`;
+only the comparison, the add and the select in one member give the masked add.
+
+**The fix.** `ILane.AddWhereEqual(acc, value, x, y)`: `ConditionalSelect(Equals(x, y), acc + value, acc)` in one
+expression, at every width. Its 512-bit loop is the emitted one instruction for instruction (`vpaddd zmm1 {k1}`), its
+256- and 128-bit loops too (`vpcmpeqd; vpaddd; vpblendvb`, as the emitted `Vector<T>` loop). The study's Tally
+takes it, and its walks run as Core's whole runs do (`StudyWalk4`: one `NoInlining` call per run holding the three
+widths, the job's copy written back). The generator maps a conditional sum to it when reductions join the kernel.
+
 **Where it applies.** The benchmark project: 24 of 260 vector jobs (30 Executes: 6 Run, 18 RunFlat, 6 RunMasked):
 KernelBenchmark's Integrate, Move2, Push, Move3, Move4; BattleServer's Move; FusionBenchmark's Movement and
 Integrate jobs; Trim's Drift, CrowdPairs' steps, Regeneration, a lambda pass of ViewBenchmark. The rest have a
@@ -378,9 +425,11 @@ operation adds argument and return temporaries to that count. Today's emitted te
 declares each broadcast in its setup, before the loop. The release JIT has no JitDump to print the decision; the
 evidence is the pair of listings and the walk form's below.
 
-**The fix: one walk per width.** The job's step became a walk (`ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong
+**The fix: the job's walk.** The job's step became a walk (`ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong
 word)`): the generator writes the loop in the job, its uniforms broadcast before it (`var __u0 = LF.Create(this.__u0);`),
-and Core's `LaneKernel.Walk` calls it on a copy of the job, one `NoInlining` method per width and mode as before.
+and Core's `LaneKernel` inlines it once per width: a whole run's three walks in package D's one `NoInlining`
+`Walk<TJob>(TJob copy, e512, e256, e128)` per run (the branch was rebased onto it from the per-width walks it was
+first written on), a masked word's into the runner (below).
 Execute reads each uniform's scalar into the walk's struct (`__u0 = s3.Value`, through the setup's `ref readonly`
 alias of a singleton). One form for every lane job: a flat job without uniforms compiles to the step form's machine
 code (`haul-*.asm`, Integrate's walks: the same instructions, inlinee counts aside), so the kernel keeps one entry
@@ -395,7 +444,7 @@ private ref struct __Lanes : __ILaneWalk4
     public float __u0;
 
     [__MethodImpl(__MethodImplOptions.AggressiveInlining)]
-    nint __ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong word)
+    void __ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong word)
     {
         var __u0 = LF.Create(this.__u0);
         for (; i < end; i += LF.Count)
@@ -408,7 +457,6 @@ private ref struct __Lanes : __ILaneWalk4
             __c1_0 = LF.Keep<M>(passF, __c1_0 + (__c2_0 - __c3_0 * __u0) * LF.Create(0.033333335f), __c1_0);
             LF.Store(__c1_0, ref e1, i);
         }
-        return i;
     }
 }
 ```
@@ -440,7 +488,12 @@ ASwitchIsMasksOfItsArms fail on base a5e0e905 already: package E's Interleaved.S
 ViewTests.AViewMethodsPlainArgumentKeepsFlatLanes read the flat loop's text and now reads the walk's too, rechecked
 with GeneratorTests by `$S/kernelF/recheck.sh` into `$S/kernelF/RECHECKDONE`);
 `tools/perf/inlining.sh` over KernelBenchmark, the headline worlds, FusionBenchmark, LookupGatherBenchmark,
-LaneKernelBenchmark, VectorFormsBenchmark, ViewBenchmark and AccessBenchmark: every job inlined. A/B:
+LaneKernelBenchmark, VectorFormsBenchmark, ViewBenchmark and AccessBenchmark: every job inlined. After the rebase,
+the masked words' fix and AddWhereEqual: `$S/kernelF2/gate.sh` (the same gate and LaneKernelTests'
+AddWhereEqualIsTheSelectOfTheSum, into `gate.log`) and the A/B `$S/kernelF2/ab.sh` (base a08825cf with head's three
+benchmark files and AddWhereEqual, which the study needs; two rounds of KernelBenchmark's Haul / HolesHaul /
+MoveVector / Integrate rows, LaneKernelBenchmark, BattleServer and WorldSimulation, then two rounds of the
+KernelBenchmark rows and LaneKernelBenchmark under `DOTNET_EnableAVX=0`). The first A/B:
 `$S/kernelF/ab.sh` (base a5e0e905 with head's three benchmark files against 7d2c676c, two rounds under the default
 of KernelBenchmark's Haul / HolesHaul / MoveVector / Integrate rows, LaneKernelBenchmark, ViewBenchmark, AccessBenchmark's
 singleton rows, WorldSimulation, BattleServer, GeneratorBenchmark Cold / Edit; one round of the KernelBenchmark rows
@@ -457,9 +510,9 @@ under `DOTNET_EnableAVX=0`). Ships only when level or a win at 0 B with nothing 
 - **8-byte lanes (`ILaneWalk8`: double, long).** Core needs the walk interface over `LD` / `LL` and the chain at 8, 4,
   2 lanes per width; StepText needs `Size: 8` and the double / long names. Uniforms come for free with form 1.
 - **Reductions.** The walk owns its accumulators (declared before its loop, as form 1's broadcasts) and folds them
-  after it; Core's walk must then write the copy back (`job = copy`, the study's `StudyWalk4`). The study's Tally was
-  1.32x slower at 100,000 rows from one extra column-ref reload and a rotated loop: read its listing in the walk form
-  before generating it.
+  after it; Core's walk must then write the copy back (`job = copy`, the study's `StudyWalk4`). A sum under a condition
+  goes through `AddWhereEqual` (above: through `SelectEqual` the add is blended, not masked); StepText maps
+  `ConditionalSelect(m, a + b, a)` of a mask used once to it, and a reduction under `GreaterThan` needs its own member.
 - **The passing bits' constant of a masked walk** (above): hoisted by declaring it before the walk's loop
   (`LI.PassingBits` and a `Passing(bits, word, i)`), measured against today's copy per vector.
 
