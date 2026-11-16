@@ -38,7 +38,11 @@ public struct Closed : IComponent;
 public struct Saving : ISystemGroup;
 
 /// <summary>
-/// An actor the save group found written, for the host to save after the update: a pass refuses saves (EECS041), so
-/// the system emits one record per actor, which the host finds in singleton Emitted&lt;Unsaved&gt;.
+/// An actor the save group found written: a pass refuses saves (EECS041), so its methods emit one record per actor
+/// and the system's [Drain] method saves it once the pass has ended.
 /// </summary>
 public record struct Unsaved(EntityId Actor);
+
+/// <summary>The database the save group writes to: the host's connection, never saved.</summary>
+[NotSaved]
+public record struct Database(Storage Storage) : ISingletonComponent;
