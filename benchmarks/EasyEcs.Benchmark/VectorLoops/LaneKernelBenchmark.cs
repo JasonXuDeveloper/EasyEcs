@@ -434,7 +434,7 @@ internal static class TypedJobs
                 if (!LaneKernel.Lanes<LI, M>(pass, i, out var p)) continue;
                 var c1 = LI.Load(ref e1, i);
                 a0 = LI.Keep<M>(p, a0 + LI.One, a0);
-                a1s = LI.Keep<M>(p, LI.SelectEqual(c1 & LI.Create(1), LI.Create(0), a1s + c1, a1s), a1s);
+                a1s = LI.Keep<M>(p, LI.AddWhereEqual(a1s, c1, c1 & LI.Create(1), LI.Create(0)), a1s);
                 a2 = LI.Keep<M>(p, LI.Min(a2, c1), a2);
                 a3 = LI.Keep<M>(p, LI.Max(a3, c1), a3);
             }
