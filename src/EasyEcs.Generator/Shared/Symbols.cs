@@ -1961,6 +1961,17 @@ internal static class Symbols
         && !method.Name.StartsWith("In"); // InZone(group): a QueryFilter's, no entity's
 
     /// <summary>
+    /// Whether <paramref name="op"/> is a call on an <c>Entity</c> that does not bind and is no read by
+    /// <see cref="GeneratedRead"/>'s name rule: a writer ComponentGenerator writes (<c>e.SetDaze(round)</c>), which the
+    /// generator cannot bind (another generator's output is not in its compilation) while the analyzer binds it and
+    /// <see cref="IsStructural"/> answers. A structural change, as <see cref="StructuralChange"/> reads it by name.
+    /// </summary>
+    public static bool UnboundEntityWriter(IOperation op, SemanticModel model) =>
+        op is IInvalidOperation invalid && op.Syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax access }
+        && invalid.ChildOperations.FirstOrDefault() is { } receiver && receiver.Syntax == access.Expression && Named(receiver.Type, Entity)
+        && !GeneratedRead(model, access, MemberName(access));
+
+    /// <summary>
     /// Whether <paramref name="access"/> reads through a member ComponentGenerator wrote. The analyzer resolves it; the
     /// generator cannot (another generator's output is not in its compilation), so there the name decides: a
     /// component's name (<c>e.Position</c>), <c>Has</c> / <c>TryGet</c> / <c>Write</c> + a component, <c>Is</c> + a
