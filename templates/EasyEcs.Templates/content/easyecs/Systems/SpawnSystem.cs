@@ -16,9 +16,8 @@ public ref struct SpawnSystem
             return;
         }
 
-        for (int i = 0; i < spawner.Wave; i++)
-        {
-            world.Instantiate(spawner.Bullet);
-        }
+        // The whole wave in one call: one pass through the structural gate and at most one table growth, and
+        // the handles land in a stack buffer. A wave is a few hundred entities; a bigger one passes a rented array.
+        world.Instantiate(spawner.Bullet, stackalloc Entity[spawner.Wave]);
     }
 }
