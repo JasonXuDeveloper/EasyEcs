@@ -1,3 +1,4 @@
+using System.Buffers;
 using EasyEcs;
 
 namespace EasyEcsApp;
@@ -16,8 +17,10 @@ public ref struct SpawnSystem
             return;
         }
 
-        // The whole wave in one call: one pass through the structural gate and at most one table growth, and
-        // the handles land in a stack buffer. A wave is a few hundred entities; a bigger one passes a rented array.
-        world.Instantiate(spawner.Bullet, stackalloc Entity[spawner.Wave]);
+        // The whole wave in one call: one pass through the structural gate and at most one table growth. The
+        // handles land in a pooled array (an Entity holds its world, so it cannot live on the stack).
+        var handles = ArrayPool<Entity>.Shared.Rent(spawner.Wave);
+        world.Instantiate(spawner.Bullet, handles.AsSpan(0, spawner.Wave));
+        ArrayPool<Entity>.Shared.Return(handles);
     }
 }
