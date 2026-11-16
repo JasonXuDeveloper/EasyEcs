@@ -22,3 +22,11 @@ public ref struct ScoringSystem
         score.Points += bonus.Points;
     }
 }
+
+// The total of every unit's points, for the host's log: a runner, a [ForEach] pass the host runs itself
+// between updates (the generated Reports.SumPoints(world, ref total)).
+public static class Reports
+{
+    [ForEach]
+    static void SumPoints(in Score score, ref int total) => total += score.Points;
+}

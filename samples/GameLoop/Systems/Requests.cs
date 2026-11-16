@@ -11,12 +11,12 @@ namespace GameLoop;
 public ref struct LeaveSystem
 {
     [ForEach, Consume]
-    static void Leave(in LeaveRequest leave, ref Stats stats, World world)
+    static void Leave(in LeaveRequest leave, ref Reduce<Stats> stats, World world)
     {
         if (world.ClientIndex.TryFind(leave.Client, out var player))
         {
             player.Destroy();
-            stats.Left++;
+            stats.Value.Left++;
         }
     }
 }
@@ -29,7 +29,7 @@ public ref struct JoinSystem
     static void Join(
         in JoinRequest join,
         in Prefabs prefabs,
-        ref Stats stats,
+        ref Reduce<Stats> stats,
         World world)
     {
         bool alreadyJoined = world.ClientIndex.TryFind(join.Client, out _);
@@ -41,7 +41,7 @@ public ref struct JoinSystem
                 prefabs.Player,
                 new Client(join.Client),
                 new Position(join.Client * 10, 0));
-            stats.Joined++;
+            stats.Value.Joined++;
         }
     }
 }
@@ -70,7 +70,7 @@ public ref struct FireSystem
     static void Fire(
         in FireRequest fire,
         in Prefabs prefabs,
-        ref Stats stats,
+        ref Reduce<Stats> stats,
         World world)
     {
         if (world.ClientIndex.TryFind(fire.Client, out var player))
@@ -81,7 +81,7 @@ public ref struct FireSystem
                 prefabs.Bullet,
                 from,
                 new Velocity(aim.X * BulletSpeed, aim.Y * BulletSpeed));
-            stats.Fired++;
+            stats.Value.Fired++;
         }
     }
 }

@@ -3,7 +3,7 @@ using EasyEcs;
 
 namespace Actors;
 
-// Plumbing, not ECS: a database stand-in that keeps one record per actor key, and the host's save of changed actors.
+// Plumbing, not ECS: a database stand-in that keeps one record per actor key, and the host's side of saving actors.
 public sealed class Storage
 {
     // Keyed by the actor's key (Shop(1), Bank(7)): records compare by value.
@@ -16,33 +16,20 @@ public sealed class Storage
     {
         var storage = new Storage();
         using var earlier = new World();
-        storage.Save(earlier.CreateEntity(new Shop(1), new Stock(2)), new Shop(1));
-        storage.Save(earlier.CreateEntity(new Bank(7), new Balance(1_000)), new Bank(7));
+        storage.Save(earlier.CreateEntity(new Shop(1), new Stock(2)));
+        storage.Save(earlier.CreateEntity(new Bank(7), new Balance(1_000)));
         return storage;
     }
 
-    /// <summary>
-    /// Save the actors the save group listed (world.Update&lt;Saving&gt;()), then clear the records: the tracked
-    /// components told which actors changed, so an actor nobody wrote costs nothing.
-    /// </summary>
-    public int Save(World world)
-    {
-        ref var unsaved = ref world.GetOrAddSingleton<Emitted<Unsaved>>().Items;  // no record yet: none to save
-        foreach (var record in unsaved)
-        {
-            var actor = world.GetEntity(record.Actor);
-            Save(actor, actor.HasShop ? actor.Shop : actor.Bank);
-        }
+    /// <summary>How many records this storage wrote, the earlier run's included.</summary>
+    public int Writes { get; private set; }
 
-        int saved = unsaved.Count;
-        unsaved.Clear();
-        return saved;
-    }
-
-    private void Save(Entity actor, object key)
+    public void Save(Entity actor)
     {
+        object key = actor.HasShop ? actor.Shop : actor.Bank;
         var output = new ArrayBufferWriter<byte>();
         actor.World.SaveEntitiesWith(output, [actor.Id], Activation.Persisted);
         _records[key] = output.WrittenSpan.ToArray();
+        Writes++;
     }
 }

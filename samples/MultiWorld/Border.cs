@@ -10,6 +10,9 @@ public sealed class Border(World[] zones)
     // Ghosts are copied from the units a zone owns, never from the ghosts it holds.
     static readonly QueryFilter Owned = QueryFilter.Create().Without<Ghost>();
 
+    // A ghost carries only what the neighbor reads: its position.
+    static readonly ComponentSet Seen = ComponentSet.Create().With<Position>();
+
     readonly List<EntityId> _toLeft = [], _toRight = []; // reused: no allocation once they are large enough
 
     // How many units arrived in each zone from its neighbors.
@@ -45,12 +48,18 @@ public sealed class Border(World[] zones)
 
     void CopyBorderRows(int z)
     {
+        _toLeft.Clear();
+        _toRight.Clear();
         float left = z * Map.ZoneWidth, right = left + Map.ZoneWidth;
         foreach (var unit in zones[z].Query<Position>(Owned))
         {
-            var position = unit.Position;
-            if (z > 0 && position.X < left + Map.Sight) zones[z - 1].CreateEntity(position, new Ghost());
-            if (z < zones.Length - 1 && position.X >= right - Map.Sight) zones[z + 1].CreateEntity(position, new Ghost());
+            float x = unit.Position.X;
+            if (z > 0 && x < left + Map.Sight) _toLeft.Add(unit.Entity.Id);
+            if (z < zones.Length - 1 && x >= right - Map.Sight) _toRight.Add(unit.Entity.Id);
         }
+
+        // Rows that follow each other in the table are copied as one block per column, each copy tagged Ghost.
+        if (_toLeft.Count != 0) zones[z].CopyEntities<Ghost>(zones[z - 1], CollectionsMarshal.AsSpan(_toLeft), Seen);
+        if (_toRight.Count != 0) zones[z].CopyEntities<Ghost>(zones[z + 1], CollectionsMarshal.AsSpan(_toRight), Seen);
     }
 }

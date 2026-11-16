@@ -6,7 +6,10 @@ namespace SaveLoad;
 // Plumbing, not ECS: prints a world as text and checks the results, so a run proves
 // every step worked.
 
-/// <summary>Collects the result of each check and prints a line per check.</summary>
+/// <summary>
+/// Plumbing, not ECS: prints each check as it is made and remembers whether all of them passed,
+/// so the process can exit with 1 when one fails.
+/// </summary>
 public sealed class Checks
 {
     public bool AllPassed { get; private set; } = true;
