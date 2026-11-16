@@ -44,15 +44,26 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
 - [x] **`feat-lane4-rest`** merged 2026-11-09 (691ae22): the inlining fix (`MaskedRuns` out of line), G5, G7, G8, G15,
       G17, G18, G11 9c measured; G7's NaN sign is the JIT's choice (evidence in the test's comment).
 - [ ] **`feat-lane-kernel`** (owner, L29; `designs/lane-kernel.md`), three packages, merged in order D -> E -> F:
-      D (`feat-lane-kernel`: flat jobs through `LaneKernel` and one `Step<LF,LI,M>`) is on hold: its A/B found five rows
-      slower in both rounds (FragmentsIntegrate 1,000, FragmentsMove2 100,000, Move2 1,000, VectorForms Pow,
-      GeneratorBenchmark EditUnrelatedFile); the causes are being found row by row, then fixed or the shape narrowed.
-      E (`feat-sse-path`: `Interleaved.Select` as xor-and-xor on SSE4.1 without AVX; A/B 2026-11-16, kernelE/cmp.out:
-      SSE wins 9-57 % at 0 B on Brighten, Cool, Tally, Step, Holes, but slower on SSE: Grade +19-22 %, Gate +24 %,
-      Clamp +15 %, Halves +9-12 %, Holes +8-12 %, Survey +7-14 %, Lane TallyTyped +14-75 % (its Lane128 hunk); cause
-      to find in the listing next (Opus, after F), then land E on the main branch without D's hunk) and F (`feat-lane-walk`: the job's
-      own loop with broadcasts hoisted) are built on D, gated, their A/Bs running. Left for F: select under one
-      comparison, Min/Max against constants, 8-byte lanes, reductions, the masked walk's passing-bits constant.
+      **D** (`feat-lane-kernel` 05f91b47: flat jobs through `LaneKernel`, one NoInlining walk per run). Final A/B
+      2026-11-16 (scratchpad kernelD2/cmp2/D.txt; head2 started under load 13.5): 56 level, 3 faster (Pow -10 %,
+      FragmentsMove2 1,000 -6 %, EditMethodBodyIde -23 %), 4 slower: FragmentsIntegrateScalar 100k +10.6 %, VectorForms
+      MarkNarrow +9.7 %, MaskedParallel +9.7 %, MaybeNarrow +5 %; LaneKernelBenchmark has no base side. Those rows are
+      being re-run in three interleaved rounds (scratchpad rerunDF); a row still slower gets its cause from the listing
+      (Opus, after feat-ground-layer), then D merges.
+      **E** (`feat-sse-path` 3498fd4f, rebased onto main 89090767 without D's Lane128 hunk): every slower SSE row has its
+      cause (lane-kernel.md package E): the blend's XMM0 mask made a store/reload chain where one select sits in a loop
+      (the wins), while xor-and-xor pushed loops of several selects past the JIT's constant hoisting (Gate) or lengthened
+      nested chains (Grade, Clamp, Step's masked loop). The select form is now written only for loops with one select;
+      Count, Energy, Move4, Survey and WorldSimulation differ by layout only. Gated; A/B running (scratchpad kernelE2,
+      ALLDONE). Open risk: MaybeParallel keeps the xor form. Merges alone, before or after D.
+      **F** (`feat-lane-walk` 99293792, on D; owner L36: the loop lives in each job's generated Walk): HolesHaul's cause
+      was D's call per masked word (now inlined into `MaskedRuns`); Tally's was the JIT blending the conditional sum
+      (`ILane.AddWhereEqual`). A/B 2026-11-16 (kernelF2/cmp): default 55 level, 3 faster, 5 slower (StepKernel 100k
+      +21 % noisy, TallyTyped 1,000 +20 %, StepWalk 37 +14 %, HolesHaulGenerated 100k +7.8 %, BattleServer Tick +4.3 %);
+      SSE 49 level, 8 faster, 3 slower (StepWalk 100k +15 %, HaulGenerated 1,000 +13 %, HolesHaulGenerated 1,000 +4 %).
+      TallyTyped / TallyGenerated at 100k did not move (1.10-1.23 base, 1.21-1.29 head): the reduction is not level yet.
+      Re-run with D's rows (rerunDF); causes next (Opus). Left for F: select under one comparison, Min/Max against
+      constants, 8-byte lanes, reductions, the masked walk's passing-bits constant.
 - [ ] **`fix-no-simd-structural`** (found by package E's gate): a lambda calling a generated writer (`e.SetDaze`) was
       marked free of structural changes, so its row-by-row job (no SIMD) froze the gate; `Symbols.UnboundEntityWriter`
       reads such calls by name. Gated (fails before, passes after, every width), merging next.
