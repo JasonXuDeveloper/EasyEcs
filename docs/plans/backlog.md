@@ -47,7 +47,10 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       D (`feat-lane-kernel`: flat jobs through `LaneKernel` and one `Step<LF,LI,M>`) is on hold: its A/B found five rows
       slower in both rounds (FragmentsIntegrate 1,000, FragmentsMove2 100,000, Move2 1,000, VectorForms Pow,
       GeneratorBenchmark EditUnrelatedFile); the causes are being found row by row, then fixed or the shape narrowed.
-      E (`feat-sse-path`: `Interleaved.Select` as xor-and-xor on SSE4.1 without AVX) and F (`feat-lane-walk`: the job's
+      E (`feat-sse-path`: `Interleaved.Select` as xor-and-xor on SSE4.1 without AVX; A/B 2026-11-16, kernelE/cmp.out:
+      SSE wins 9-57 % at 0 B on Brighten, Cool, Tally, Step, Holes, but slower on SSE: Grade +19-22 %, Gate +24 %,
+      Clamp +15 %, Halves +9-12 %, Holes +8-12 %, Survey +7-14 %, Lane TallyTyped +14-75 % (its Lane128 hunk); cause
+      to find in the listing next (Opus, after F), then land E on the main branch without D's hunk) and F (`feat-lane-walk`: the job's
       own loop with broadcasts hoisted) are built on D, gated, their A/Bs running. Left for F: select under one
       comparison, Min/Max against constants, 8-byte lanes, reductions, the masked walk's passing-bits constant.
 - [ ] **`fix-no-simd-structural`** (found by package E's gate): a lambda calling a generated writer (`e.SetDaze`) was
