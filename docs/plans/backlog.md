@@ -64,9 +64,13 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       TallyTyped / TallyGenerated at 100k did not move (1.10-1.23 base, 1.21-1.29 head): the reduction is not level yet.
       Re-run with D's rows (rerunDF); causes next (Opus). Left for F: select under one comparison, Min/Max against
       constants, 8-byte lanes, reductions, the masked walk's passing-bits constant.
-- [ ] **`fix-no-simd-structural`** (found by package E's gate): a lambda calling a generated writer (`e.SetDaze`) was
+- [x] **`fix-no-simd-structural`** merged 2026-11-16 (5ddc511a): a lambda calling a generated writer (`e.SetDaze`) was
       marked free of structural changes, so its row-by-row job (no SIMD) froze the gate; `Symbols.UnboundEntityWriter`
-      reads such calls by name. Gated (fails before, passes after, every width), merging next.
+      reads such calls by name.
+- [ ] **`fix-no-simd-lambda-end`**: under `DOTNET_EnableHWIntrinsic=0`, `ALambdaPassChangingStructureEndsWhereTheMethodDoes`
+      (1000,1) and (77,2) fail on main (89090767 and later, every package's gate), as does `TheScheduleNamesEachMethodsLoop`
+      (it expects "; rows on this hardware" where the machine has neither width). Find why the row-by-row lambda pass
+      ends elsewhere than the method, fix both, so the HWIntrinsic=0 gate is clean. Opus queue, after feat-ground-layer.
 - [ ] **`feat-lane1-core`**: the first run (from 3315196) was **lost with its container on 2026-11-09** before any
       push; only its interim reports survive. Rule since then: a lane hands back per item, each item is gated,
       merged and pushed before the next. What the lost run found (to rebuild or to record, not to re-research):
@@ -267,7 +271,7 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       `genbench.sh`, compared by `compare.py`; first round: 16 KB slower at 100,000 rows (chunks of 2,048 rows of an
       8-byte Spot: 49 chunks against 16), faster at 10,000.
       **A/B result:** 3-repeat interleaved --dev screens at 32 KB (49 chunks at 100,000 Spots) against base 7e9e5e40: level (not slower beyond both error bars in 2 of 3 repeats; EmitParallel 10,000 11.2-11.9 us against 13.7-14.9, 100,000 48.9-68.5 us against 49.0-65.2, LowestVector 1,000 to 1,000,000 rows level, 0 B everywhere), so `MinChunkBytes` stays 32 KB and `MergedChunks` 64; 32 KB with `MergedChunks` = 16 and 64 KB were also level.
-- [ ] **`fix-no-simd-structural`** (from 004db709): under `DOTNET_EnableHWIntrinsic=0` a lambda pass changing
+- [x] **`fix-no-simd-structural`** (from 004db709; merged 2026-11-16, 5ddc511a): under `DOTNET_EnableHWIntrinsic=0` a lambda pass changing
       structure through a generated writer (`e.SetDaze(round)`) threw from the frozen gate: `LambdaPass.IsStable` saw
       only bound calls, the generator cannot bind another generator's writers, so the `Rows` job hardware without
       vectors runs carried `INoStructuralChanges`. Fix: `Symbols.UnboundEntityWriter` (the name rule of
@@ -855,7 +859,9 @@ numbers are written once about the final code).
       d. Unit tests that show usage (not the ones pinning an old form on purpose).
       e. Every code example of the docs (fences en + zh, the guides' full examples, the public skill, README),
          DocCheck at 0; L4 of `locality.md` (ZombieTarget, NearestPlayer, AOI).
-- [ ] **2b.** Lane 2's A2 lands here if it has not (its blockers are 2a / 2c).
+- [x] **2b.** merged 2026-11-16 (exemplar-samples): the nine items of 2.b, MultiWorld's ghosts through
+      `CopyEntities<Ghost>`, the template's wave in a pooled array (an Entity cannot be stackalloc'd), EECS092 counting
+      a `[Drain]` as the clear; the demo bundle is stale until the docs pass rebuilds it. A2 still waits on 2a / 2c.
 - [ ] **3. Docs pass** (#141, `audit-docs`): everything in `docs-todos.md` ("Sweep 2026-11-07" first), with the
       analyzer page's guard test (docs-todos: every id anchored, severities equal to the descriptors') committed with
       the page; DocCheck and ApiDocs at 0.
