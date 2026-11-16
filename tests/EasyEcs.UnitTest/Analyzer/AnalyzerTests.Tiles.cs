@@ -137,6 +137,22 @@ public partial class AnalyzerTests
         Assert.That(await Count("EECS055", GeneratorTests.Components, TileParts, Tall + source), Is.Zero);
     }
 
+    // A layer's cells are lanes like the ground's: a byte layer beside float cells is four times as narrow and keeps the
+    // rows cell by cell (EECS055 says to widen it), a 2-byte one is a pair of lanes and vectorizes.
+    [Test]
+    public async Task AByteLayerBesideFloatCellsWarnsAndAShortOneVectorizes()
+    {
+        const string Method = "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<float, Ground<T3>> c, Layer<LANE, T3, L3> r, out float next) => next = r.Value != 0 ? 0 : c[-1, 0, 0] + c[1, 0, 0]; }";
+        var narrow = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, Tall + Method.Replace("LANE", "byte")]))
+            .Where(d => d.Id == "EECS055").ToArray();
+        Assert.That(narrow, Has.Length.EqualTo(1));
+        Assert.That(narrow[0].GetMessage(), Does.Contain("widen the byte to 2-byte lanes"));
+        string wide = Tall + Method.Replace("LANE", "short");
+        Assert.That(await Count("EECS055", GeneratorTests.Components, TileParts, wide), Is.Zero);
+        GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(GeneratorTests.Components, TileParts, wide), out var output, out _);
+        Assert.That(output.SyntaxTrees.Single(t => GeneratorTests.IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString(), Does.Contain("cells of 'c', 'r': vector ("));
+    }
+
     [Test]
     public Task ALayerOfTheGroundsBufferReports() => ReportsOnTiles("EECS073",
         Tall + "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<int, Ground<T3>> c, Layer<int, T3, L3> r, out NF next) => next = new NF(c.Value + r.Value); }");

@@ -87,13 +87,14 @@ public partial class TileTests
     /// A 3 x 3 square of rock chunks (with Rock or Ore cells) with a hole in its middle and a quiet column (rows the walk
     /// skips), heat on some ground cells, solid cells in the top layer and in layer 2 (which no method reads).
     /// </summary>
-    private static Dictionary<TilePos, Entity> LayerChunks<TSolid>(World world, Func<int, TSolid> solid) where TSolid : unmanaged
+    private static Dictionary<TilePos, Entity> LayerChunks<TChunk, TSolid>(World world, Func<TilePos, TChunk> make, Func<int, TSolid> solid)
+        where TChunk : struct, IComponent where TSolid : unmanaged
     {
         var chunks = new Dictionary<TilePos, Entity>();
         var random = new Random(31);
         foreach (var place in Box(3, 1, 3, new TilePos(1, 0, 1)))
         {
-            var chunk = world.CreateEntity(new RockChunk(place));
+            var chunk = world.CreateEntity(make(place));
             var heat = chunk.GetOrAdd<DynamicBuffer<Heat>>().SetCount(64);
             if (place.X != 2)
                 for (int i = 0; i < 12; i++) heat[random.Next(64)] = new Heat(random.Next(1, 1000));
@@ -106,13 +107,14 @@ public partial class TileTests
     }
 
     /// <summary>The three worlds stepped 30 times, bit for bit each step, a solid cell placed in chunk (0, 0, 1) at step 15.</summary>
-    private static void SameLayerSteps<TCells, TByCell, THand, TSolid>(int threads, Func<int, TSolid> solid, string form)
-        where TCells : struct, allows ref struct where TByCell : struct, allows ref struct where THand : struct, allows ref struct where TSolid : unmanaged
+    private static void SameLayerSteps<TCells, TByCell, THand, TChunk, TSolid>(int threads, Func<TilePos, TChunk> make, Func<int, TSolid> solid, string form)
+        where TCells : struct, allows ref struct where TByCell : struct, allows ref struct where THand : struct, allows ref struct
+        where TChunk : struct, IComponent where TSolid : unmanaged
     {
         using var cells = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         using var byCell = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
         using var hand = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
-        var (a, b, c) = (LayerChunks(cells, solid), LayerChunks(byCell, solid), LayerChunks(hand, solid));
+        var (a, b, c) = (LayerChunks(cells, make, solid), LayerChunks(byCell, make, solid), LayerChunks(hand, make, solid));
         cells.AddSystem<TCells>();
         byCell.AddSystem<TByCell>();
         hand.AddSystem<THand>();
@@ -139,18 +141,78 @@ public partial class TileTests
     [TestCase(1)]
     [TestCase(4)]
     public void AGroundCellReadingItsChunksTopLayerStepsAsTheWalkByHand(int threads) =>
-        SameLayerSteps<CellGroundHeatSystem, CellGroundHeatByCellSystem, GroundHeatSystem, Rock>(threads, s => new Rock((byte)s), "cells of 'heat', 'rock': ");
+        SameLayerSteps<CellGroundHeatSystem, CellGroundHeatByCellSystem, GroundHeatSystem, RockChunk, Rock>(threads, p => new RockChunk(p), s => new Rock((byte)s), "cells of 'heat', 'rock': ");
 
     [TestCase(1)]
     [TestCase(4)]
     public void AGroundCellReadingALayerOfIntsIsAVectorLoop(int threads) =>
-        SameLayerSteps<CellGroundOreSystem, CellGroundOreByCellSystem, HandGroundOreSystem, Ore>(threads, s => new Ore(s), "cells of 'heat', 'ore': vector (");
+        SameLayerSteps<CellGroundOreSystem, CellGroundOreByCellSystem, HandGroundOreSystem, RockChunk, Ore>(threads, p => new RockChunk(p), s => new Ore(s), "cells of 'heat', 'ore': vector (");
+
+    /// <summary>A <see cref="RockChunk"/> whose halo has its corners (TileNeighborhood.All): its exchange is the general loop.</summary>
+    public record struct CornerChunk(TilePos Pos) : IComponent, ITile<TilePos>
+    {
+        readonly TilePos IIndexed<TilePos>.Key => Pos;
+        static int ITileShape.Width => 8;
+        static int ITileShape.Depth => 8;
+        static int ITileShape.Height => 4;
+        static TileNeighborhood ITileShape.Neighborhood => TileNeighborhood.All;
+        static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Step(p, face);
+    }
+
+    /// <summary>Heat spreading except under ore, slowed by the ore at the two corners north-west and south-east of it.</summary>
+    [EcsSystem]
+    public ref struct CellCornerOreSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Diffuse(Cell<Heat, Ground<CornerChunk>> heat, Layer<Ore, CornerChunk, TopLayer> ore, out Heat next) =>
+            next = new(ore.Value.Solid != 0 ? 0 : (heat.Value.T + (heat[-1, 0, 0].T + heat[1, 0, 0].T + heat[0, 0, -1].T + heat[0, 0, 1].T - 4 * heat.Value.T) * 0.2f)
+                * (1 - (ore[-1, 0, -1].Solid + ore[1, 0, 1].Solid) * 0.25f));
+    }
+
+    /// <summary><see cref="CellCornerOreSystem"/> as written, cell by cell.</summary>
+    [EcsSystem]
+    public ref struct CellCornerOreByCellSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2, SimdMode = SimdMode.Off)]
+        static void Diffuse(Cell<Heat, Ground<CornerChunk>> heat, Layer<Ore, CornerChunk, TopLayer> ore, out Heat next) =>
+            next = new(ore.Value.Solid != 0 ? 0 : (heat.Value.T + (heat[-1, 0, 0].T + heat[1, 0, 0].T + heat[0, 0, -1].T + heat[0, 0, 1].T - 4 * heat.Value.T) * 0.2f)
+                * (1 - (ore[-1, 0, -1].Solid + ore[1, 0, 1].Solid) * 0.25f));
+    }
+
+    /// <summary><see cref="CellCornerOreSystem"/> by hand: the chunk's ore exchanged at layer 3 with the layers around it.</summary>
+    [EcsSystem]
+    public ref struct HandCornerOreSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Diffuse(ref Tile<Heat, Ground<CornerChunk>> heat, Tile<Ore, CornerChunk> ores)
+        {
+            heat.ExchangeHalo();
+            ores.ExchangeHalo(3, 3, mask: false);
+            foreach (var row in heat.Rows(TileStencil.Layer))
+            {
+                var c = heat.At(row);
+                var into = heat.Write(row);
+                for (int x = 0; x < 8; x++)
+                {
+                    float around = c[x - 1, 0, 0].T + c[x + 1, 0, 0].T + c[x, 0, -1].T + c[x, 0, 1].T;
+                    into[x] = new Heat(ores[x, 3, row.Z].Solid != 0 ? 0 : (c[x, 0, 0].T + (around - 4 * c[x, 0, 0].T) * 0.2f)
+                        * (1 - (ores[x - 1, 3, row.Z - 1].Solid + ores[x + 1, 3, row.Z + 1].Solid) * 0.25f));
+                }
+            }
+        }
+    }
+
+    // The general exchange (corners in the halo): the layer's ring holds the diagonal neighbors' cells, as ExchangeHalo's.
+    [TestCase(1)]
+    [TestCase(4)]
+    public void ALayerWithCornersStepsAsTheWalkByHand(int threads) =>
+        SameLayerSteps<CellCornerOreSystem, CellCornerOreByCellSystem, HandCornerOreSystem, CornerChunk, Ore>(threads, p => new CornerChunk(p), s => new Ore(s), "cells of 'heat', 'ore': vector (");
 
     [Test]
     public void GroundCellsReadingALayerAllocateNothing()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
-        LayerChunks(world, s => new Ore(s));
+        LayerChunks(world, p => new RockChunk(p), s => new Ore(s));
         world.AddSystem<CellGroundOreSystem>();
         Assert.That(Allocations.Steady(world.Update, 50, 10), Is.Zero);
     }
