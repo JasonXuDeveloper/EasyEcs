@@ -298,13 +298,12 @@ public class StreamingStoreTests
             using var world = new World();
             world.Reserve<Fuel, Flare, Breeze3, Wake3>(5000);
             for (int i = 0; i < 5000; i++) world.CreateEntity(new Fuel(i), new Flare(0), new Breeze3(i, i, i), new Wake3());
-            StreamKernels.Shine(world);
-            StreamKernels.Follow(world);
-            Assert.That(Allocations.Of(() =>
+            void Pass()
             {
                 StreamKernels.Shine(world);
                 StreamKernels.Follow(world);
-            }), Is.Zero);
+            }
+            Assert.That(Allocations.Steady(Pass, 4, 20), Is.Zero); // warmed: without SIMD the scalar loops tier up late
         });
     }
 

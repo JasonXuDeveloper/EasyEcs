@@ -1471,17 +1471,22 @@ public class KernelTests
         Assert.That(calls, Is.EqualTo(ColdKernels.Calls.ToArray()));
     }
 
-    /// <summary>DescribeSchedule names the loop each [ForEach] method got, and why a scalar one is scalar (EECS055's reason).</summary>
+    /// <summary>
+    /// DescribeSchedule names the loop each [ForEach] method got, and why a scalar one is scalar (EECS055's reason). A
+    /// vector loop whose widths this hardware has none of (DOTNET_EnableHWIntrinsic=0) says its rows run the method.
+    /// </summary>
     [Test]
     public void TheScheduleNamesEachMethodsLoop()
     {
         using var world = new World();
         world.AddSystem<LoopsSystem>();
         var system = world.DescribeSchedule().Groups[0].Stages[0].Systems[0];
+        // Move and Hurt have a Vector512 loop and a Vector<float> one, and need nothing else of the hardware.
+        string rows = Vector.IsHardwareAccelerated || Vector512.IsHardwareAccelerated ? "" : "; rows on this hardware";
         Assert.That(system.Loops, Is.EqualTo(new[]
         {
-            "Move: vector (Vector512 or Vector<float>), flat, masked words vector",
-            "Hurt: vector (Vector512 or Vector<float>), masked words vector, cold branch (it calls Console.WriteLine, which is defined in another assembly)",
+            "Move: vector (Vector512 or Vector<float>), flat, masked words vector" + rows,
+            "Hurt: vector (Vector512 or Vector<float>), masked words vector, cold branch (it calls Console.WriteLine, which is defined in another assembly)" + rows,
             "Mark: scalar (it uses the Entity in 'entity.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>))",
         }));
         Assert.That(world.DescribeSchedule().ToString(), Does.Contain("      loop Mark: scalar (it uses the Entity in 'entity.Id.Index'"));

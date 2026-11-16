@@ -92,7 +92,13 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   the order the pass marked them, inside a pass of their own, so every table keeps the method's row order (later
   passes emit in the scalar method's order, ids are freed in its order: D122). `Emit<T>` records of a lane or the
   entity's id are appended compacted (`Lanes.Compact`). Every row takes the vector form (the last rows through
-  `Interleaved.LoadTail`), and hardware without the loop's vectors runs the method's own job. One change of one
+  `Interleaved.LoadTail`), and hardware without the loop's vectors runs the method's own job (`Job{i}Rows`), which
+  makes the changes row by row: it must not carry `INoStructuralChanges`, or its frozen pass throws at the first
+  change. Whether a body changes structure is read by name where the generator cannot bind a generated writer
+  (another generator's output: `Symbols.IsStable` for methods, `LambdaPass.IsStable` through
+  `Symbols.UnboundEntityWriter` for lambda passes); a lambda pass that missed it passed every test with vectors and
+  threw under `DOTNET_EnableHWIntrinsic=0` (fix-no-simd-structural), so a structural form is proven there too, and by a
+  twin that stays scalar on any hardware (`ALambdaPassChangingStructureRowByRowRunsUnfrozen`). One change of one
   uniform value per method; a method may change a component it takes only when nothing uses that parameter after the
   change (`Kernel.UsedAfter`: a later reference in the body, or any reference in a loop holding the change; a Maybe of
   it is refused), since the method sees the change at once and a vector loop after the pass; a method that changes structure has

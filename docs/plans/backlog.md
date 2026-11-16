@@ -253,6 +253,13 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       `genbench.sh`, compared by `compare.py`; first round: 16 KB slower at 100,000 rows (chunks of 2,048 rows of an
       8-byte Spot: 49 chunks against 16), faster at 10,000.
       **A/B result:** 3-repeat interleaved --dev screens at 32 KB (49 chunks at 100,000 Spots) against base 7e9e5e40: level (not slower beyond both error bars in 2 of 3 repeats; EmitParallel 10,000 11.2-11.9 us against 13.7-14.9, 100,000 48.9-68.5 us against 49.0-65.2, LowestVector 1,000 to 1,000,000 rows level, 0 B everywhere), so `MinChunkBytes` stays 32 KB and `MergedChunks` 64; 32 KB with `MergedChunks` = 16 and 64 KB were also level.
+- [ ] **`fix-no-simd-structural`** (from 004db709): under `DOTNET_EnableHWIntrinsic=0` a lambda pass changing
+      structure through a generated writer (`e.SetDaze(round)`) threw from the frozen gate: `LambdaPass.IsStable` saw
+      only bound calls, the generator cannot bind another generator's writers, so the `Rows` job hardware without
+      vectors runs carried `INoStructuralChanges`. Fix: `Symbols.UnboundEntityWriter` (the name rule of
+      `GeneratedRead`) in `LambdaPass.IsStable`; test `ALambdaPassChangingStructureRowByRowRunsUnfrozen` (scalar on any
+      hardware, failed before the fix). `TheScheduleNamesEachMethodsLoop` expects "; rows on this hardware" where the
+      machine has neither width. Gate from the scratchpad `nosimd/gate.sh`; branch not merged.
 - [ ] **`feat-ground-layer`** (owner, L19): a `Cell<TCell, Ground<TTile>>` method that also reads a layer of the
       3D tile it is the ground of; design the public form (two or three shapes, as a popup), then generator, analyzer,
       tests, TileGroundBenchmark case, docs-todos. After feat-generated-text-2's package A (same emit code).
