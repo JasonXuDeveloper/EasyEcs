@@ -1227,7 +1227,6 @@ public class GeneratorTests
     // tracked, temporary one). The test fails when one stops reporting, so the list cannot go stale.
     static readonly (string File, string Id, string Item)[] KnownSampleFindings =
     [
-        ("samples/Actors/Host/Storage.cs", "EECS109", "A2: Storage.Save as a [Drain] method, or EECS109 Info with its reason"),
         ("samples/VoxelServer/Systems/Replication.cs", "EECS109", "A2: SendPackets as a [Drain] method"),
         ("samples/VoxelServer/Systems/Replication.cs", "EECS086", "A2: the exemplar pass's [Accumulate] totals"),
         ("samples/VoxelServer/Systems/Zombies.cs", "EECS107", "A2's exemplar pass: Pick as a pair method"),
