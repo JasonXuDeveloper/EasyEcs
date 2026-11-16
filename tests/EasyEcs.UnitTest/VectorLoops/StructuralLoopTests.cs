@@ -480,6 +480,7 @@ public class StructuralLoopTests
         using var world = new World();
         var random = new Random(seed);
         var entities = new Entity[count];
+        world.Reserve<Stamina>(count);
         for (int i = 0; i < count; i++)
         {
             entities[i] = world.CreateEntity(new Stamina(random.Next(-100, 101)));
