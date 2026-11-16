@@ -87,6 +87,38 @@ public class LaneKernelTests
         }
     }
 
+    // A sum under a condition in one member (the add masked by the comparison, as the emitted loops' ConditionalSelect
+    // of an add contracts): every width against the select it stands for, lanes that match and lanes that do not.
+    [Test]
+    public void AddWhereEqualIsTheSelectOfTheSum()
+    {
+        Check<Lane512<int>>();
+        Check<Lane256<int>>();
+        Check<Lane128<int>>();
+
+        static void Check<L>() where L : struct, ILane<L, int>
+        {
+            var random = new Random(5);
+            var acc = new int[L.Count];
+            var value = new int[L.Count];
+            var x = new int[L.Count];
+            var y = new int[L.Count];
+            for (int round = 0; round < 64; round++)
+            {
+                for (int j = 0; j < L.Count; j++)
+                {
+                    acc[j] = random.Next(int.MinValue, int.MaxValue);
+                    value[j] = random.Next(int.MinValue, int.MaxValue);
+                    x[j] = random.Next(4);
+                    y[j] = random.Next(4);
+                }
+                var sum = L.AddWhereEqual(L.Load(ref acc[0], 0), L.Load(ref value[0], 0), L.Load(ref x[0], 0), L.Load(ref y[0], 0));
+                for (int j = 0; j < L.Count; j++)
+                    Assert.That(L.Element(sum, j), Is.EqualTo(x[j] == y[j] ? unchecked(acc[j] + value[j]) : acc[j]), $"{typeof(L).Name} lane {j}");
+            }
+        }
+    }
+
     private static World Make(int count, bool holes)
     {
         var world = new World();
