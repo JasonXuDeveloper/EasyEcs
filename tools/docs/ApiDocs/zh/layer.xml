@@ -1,0 +1,31 @@
+<doc>
+  <member name="T:EasyEcs.Layer`3" source="081e12852377">
+    <summary>
+      高瓦片第 <typeparamref name="TLayer" /> 层上、位于它地面某个格子正下方的格子。它是地面格子方法
+      （<see cref="T:EasyEcs.Ground`1" /> 上的 <c>Cell&lt;TCell, Ground&lt;TTile&gt;&gt;</c>）的参数，这个方法还要读它所在高瓦片的一层。
+      读法和那一层的格子一样：格子本身（<see cref="P:EasyEcs.Layer`3.Value" />）和这一层里常量偏移处的邻居
+      （<c>rock[dx, 0, dz]</c>，在形状的光环之内），在 x 和 z 上和地面的格子对齐：
+      <code>
+      [ForEach(Parallel = true)]
+      static void Diffuse(Cell&lt;Heat, Ground&lt;Chunk&gt;&gt; w, Layer&lt;Rock, Chunk, Top&gt; rock, out Heat next) =&gt;
+          next = new(rock.Value.Solid != 0 ? 0 : w.Value.T + (w[-1, 0, 0].T + w[1, 0, 0].T + w[0, 0, -1].T + w[0, 0, 1].T - 4 * w.Value.T) * 0.2f);
+      </code>
+      生成器只交换这一层的光环（不是瓦片的每一层），把它当作行向量循环里的又一个数据流来读。把它当作瓦片参数看
+      （按值传的 <see cref="T:EasyEcs.Tile`2" />）：行需要实体的 <c>DynamicBuffer&lt;TCell&gt;</c>，邻居来自网格的索引
+      （层属于地面所在瓦片以外的瓦片、超出瓦片的层数、或方法没有地面格子时，EECS115 报告）。
+    </summary>
+    <typeparam name="TCell">高瓦片的格子。</typeparam>
+    <typeparam name="TTile">高瓦片的组件和形状：方法的地面所属的那个瓦片。</typeparam>
+    <typeparam name="TLayer">读的那一层。</typeparam>
+  </member>
+  <member name="P:EasyEcs.Layer`3.Value" source="f407ba202d26">
+    <summary>这一层上位于地面格子正下方的格子（<c>this[0, 0, 0]</c>）。O(1)。</summary>
+  </member>
+  <member name="P:EasyEcs.Layer`3.Item(System.Int32,System.Int32,System.Int32)" source="5903d48c5344">
+    <summary>
+      这一层上从这个格子偏移 (<paramref name="dx" />, 0, <paramref name="dz" />) 处的格子，每个偏移都在形状的光环之内
+      （<paramref name="dy" /> 为 0：只读一层）：瓦片里的邻居，或邻居（或边界）给出的光环格子。偏移是常量，所以生成器把它们读作固定偏移的加载。
+      O(1)；超出光环时抛出异常。
+    </summary>
+  </member>
+</doc>

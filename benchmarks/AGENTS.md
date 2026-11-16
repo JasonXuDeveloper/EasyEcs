@@ -97,7 +97,9 @@ Grids/TileInPlaceBenchmark.cs   the hand-written Laplacian with its halo copied 
                                 in registers (InPlaceShift), and the four neighbor lookups alone
 Grids/TileGroundBenchmark.cs    the ground of tall tiles (Ground<TTile>) stepped in place: a cross and a box as the
                                 cell method, as written (SimdMode.Off) and walked by hand (Columns(4) with Load128, Columns(16)
-                                with Load512 where Vector512 is accelerated)
+                                with Load512 where Vector512 is accelerated); + TileGroundLayerBenchmark: the cross reading
+                                the chunk's top layer (Layer<Stone, Chunk, Top>) against the walk by hand (the chunk's tile
+                                by value, Load128 of the layer's cursor) and SimdMode.Off
 Grids/TileLayersBenchmark.cs    a seven-point cell method over tall tiles whose warmth sits in a band of layers:
                                 every layer against the band an ITileLayers component gives
 Grids/TileColdStartBenchmark.cs a scent whose springs move, read once settled: [GaussSeidel] settled from nothing
