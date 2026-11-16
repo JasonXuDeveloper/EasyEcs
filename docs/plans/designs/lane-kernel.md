@@ -83,8 +83,9 @@ calls (`Lane<W128,float>.op_Multiply`, `Create`, `Load`; 42 calls in the first l
 
 Each width's walk is therefore a method of its own (`NoInlining`), called once per run. Each walk is then its own root,
 and every step inlines to the vector code with no call left. The runner inlines `Execute` and the chain, and
-`tools/perf/inlining.sh LaneKernelBenchmark KernelBenchmark` exits 0. The cost is one call per width per run, not per
-row: today's split loops (`__Loop512`, past 32 locals) already pay the same.
+`tools/perf/inlining.sh LaneKernelBenchmark KernelBenchmark` exits 0. Package D's A/B measured what a call per width
+costs on small tables and moved the three widths into one walk per run, the job passed by value ("Package D", "The
+A/B and the fix").
 
 **Hoisting.** Through the caller's `ref` to the job, every store to a column might write the job, so the column refs
 and a uniform were reloaded every vector. A copy of the job in the walk fixes the refs: they load into registers once.
@@ -292,8 +293,8 @@ private ref struct __Lanes : __ILaneStep4
 
 The step lives in a struct of the column refs, not in the job: a parallel job is a struct (no ref fields), and the
 tail keeps Execute's call of the method with every argument it already writes. The explicit implementation needs no
-constraint clauses. Tier1 (FullOpts) of `LaneKernel:Walk[IntegrateJob2+__Lanes, Lane512<float>, ...]`: the column
-refs loaded once, the loop `vmovups; vmovups; vmulps {1to16} (the constant as an embedded broadcast); vaddps;
+constraint clauses. Tier1 of `LaneKernel:Walk[IntegrateJob2+__Lanes, EveryRow]` (one walk per run, the three widths in it): the column
+refs loaded once, each width's loop `vmovups; vmovups; vmulps {1to16} (the constant as an embedded broadcast); vaddps;
 vmovups`, no call; `tools/perf/inlining.sh` over KernelBenchmark, the headline worlds, FusionBenchmark,
 LookupGatherBenchmark, LaneKernelBenchmark and VectorFormsBenchmark: every generated job inlined.
 
@@ -316,6 +317,41 @@ schedule's "; rows on this hardware" under no SIMD at all, on base too). The ful
 AOT check (BattleServer's Move is a kernel job). A/B: `scratchpad/kernelD/ab.sh` (base 89090767 against af168ac8,
 two rounds; KernelBenchmark's flat cases, LaneKernelBenchmark, VectorFormsBenchmark, the headline worlds,
 GeneratorBenchmark Cold and Edit); the numbers go here and into docs-todos `feat-lane-kernel`.
+
+**The A/B and the fix.** The first A/B (`scratchpad/kernelD/ab.sh`, base 89090767 against af168ac8, two rounds,
+the AVX-512 machine, two other A/Bs interleaved on it) said hold: controls level (median 0.995 / 0.997), five rows
+slower in both rounds. A focused rerun of those rows (`scratchpad/kernelD2/focus.sh`, three launches, two rounds) and
+the generated text and Tier1 listings of base and head (`scratchpad/kernelD2/asm`) sorted them:
+
+| Row | head / base (A/B r1, r2; focused r1, r2) | Verdict |
+|---|---|---|
+| FragmentsIntegrateGenerated (both Entities: the same 1,000 tables of 5-20 rows) | 1.25 1.17, 1.10 1.02; 1.14 1.15, 1.00 1.11 | real, about 1.12x |
+| FragmentsMove2Generated / Move3Generated | 0.98-1.16 / 0.75-1.13; 0.92-1.03 / 0.94-1.01 | level |
+| Move2Generated 1,000 (Move3, Move4 alike) | 1.06 1.07; 1.12 1.04 | small, the same cause |
+| VectorForms Pow | 1.06 1.11; 1.00 0.97 | noise: PowJob's text is base's but for the usings |
+| GeneratorBenchmark EditUnrelatedFile NS=False | 1.11 1.21; 1.04 1.06 | not the change's code (below) |
+
+- **The cause (Fragments, small runs).** Head's runner (`World:Masked[..., IntegrateJob2]`, Tier1) calls a
+  NoInlining walk per width: a table of 12-15 rows takes the 256 and the 128 walk, two calls where base's loops are
+  inline. With the job passed as a `ref` to a local of the runner, the runner also keeps it in memory around each call.
+  The walks themselves are the tight loops of the study (no call, refs in registers).
+- **What fixed it.** `FragmentStudy` (`scratchpad/kernelD2/varS`, one process, Integrate on Fragments / one table of
+  1,000 / of 100,000 rows, two rounds, ratios against the emitted loops): a walk per width 1.18 / 0.99 on Fragments;
+  one walk per run through a ref 1.13 / 1.05; **one walk per run with the job by value 1.02 / 0.93** (1,000 rows
+  0.96 / 0.89, 100,000 rows 1.04 / 0.96); the walks inlined 0.94 / 1.01; the emitted loops plus a 128-bit loop 0.83 /
+  0.82 (the 4-7 rows past the 256-bit vectors as one vector instead of the method per row: why the kernel's 128 width
+  pays on small tables). Core's `LaneKernel` now computes the three ends in the inlined caller and calls one
+  `Walk<TJob, M>(TJob copy, e512, e256, e128, pass)` per run, none for a run shorter than a 128-bit vector.
+- **Why not inline the walks.** With `AggressiveInlining` walks the runner holds six step copies (three widths, two
+  modes), and a flat step of six statements over seven components (`scratchpad/kernelD2/varD2/stress`, in the shape)
+  left `Lane512.op_Addition`, `op_Multiply`, `Store`, `Keep` as calls in `ForEachBatchRuns`: the per-root inlining
+  budget again. The walk per run held the same step with no lane call left (`varA2/stress.asm`, `lanecalls.py`).
+- **EditUnrelatedFile.** `LaneStepOf` and `EmitLanes` run only when a job's text is emitted, and every output is
+  cached on that edit: the step runs base's code, allocates the same to 10 KB (84.14 MB both), and NS=True is level
+  (0.95-1.03). Its StdDev is 35-110 ms on 440 ms.
+
+The A/B of the fix (a08825cf against 89090767, two rounds): `scratchpad/kernelD2/ab/ab.sh`, its numbers to be added
+here before the merge.
 
 **Next shapes** (package F, each only once level at 0 B): uniforms (the walk form, broadcasts before its loop), a
 select under one comparison and Min / Max against constants (the fused members), 8-byte lanes (`ILaneStep8`),

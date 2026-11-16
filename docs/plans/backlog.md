@@ -121,7 +121,9 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       the benchmark project's 260 vector jobs take it; Integrate's job 4,304 -> 2,372 bytes, the project's generated
       files 4,522,249 -> 4,502,057, the GeneratedTextTests corpus 11,532,139 -> 11,524,667. Bit for bit under the
       four width settings (LaneKernelTests and the vector-loop test classes), full suite on both runtimes, AOT,
-      inlining.sh 0. A/B (two rounds, base 89090767) running from scratchpad/kernelD/ab.sh: the merge waits for it
+      inlining.sh 0. A/B (two rounds, base 89090767, scratchpad/kernelD/ab.sh): FragmentsIntegrate 1.10-1.25x (a
+      NoInlining walk call per width on 5-20-row tables); fixed by one walk per run with the job by value (a08825cf,
+      FragmentStudy level to 0.89x); the fix's A/B scratchpad/kernelD2/ab/ab.sh: the merge waits for it
       (only level or a win at 0 B with nothing slower ships). Details: lane-kernel.md "Package D", docs-todos
       `feat-lane-kernel`.
       Package E (open): today's generator's 128-bit path from what the kernel's SSE code shows.
