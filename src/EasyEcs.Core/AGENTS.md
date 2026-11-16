@@ -368,7 +368,8 @@ VectorLoops/LaneKernel.cs       the lane kernel of generated flat jobs (docs/pla
                                 and Lane512 / Lane256 / Lane128<T> (a vector of T as a struct type argument the JIT specializes per
                                 width; operators, Keep<M>: a masked word's write), ILaneStep4 (a job's step over its float and int
                                 lanes, written once), LaneKernel (Run / RunFlat / RunMasked: the width chain 512 -> 256 -> 128,
-                                each width a NoInlining walk over a copy of the step, returning the row the method takes from)
+                                its ends computed inline and one NoInlining walk per run over the step passed by value,
+                                returning the row the method takes from)
 VectorLoops/Lanes.cs            Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress,
                                 AVX2 permutation table, 128-bit byte shuffle: NEON TBL / PSHUFB, picked at run time), for
                                 batch methods, Emit and CollectIds; Lanes.Selection: a mask to row numbers over it (the one

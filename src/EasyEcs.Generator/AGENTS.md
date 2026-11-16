@@ -425,7 +425,7 @@ method's body produced, so no symbol is bound again. A job is flat when:
 - its setup holds constants only (a uniform's broadcast is not hoisted out of the walk's loop: the study's finding);
 - nothing else of `Code`: no bail, reduction (`Restore` / `Fold` / `Chains`), structural change, record or vector
   tail, gather, draw, prefetch, streamed column, wide component, statics, pair mode, narrow index or cold branch;
-- the step declares at most `InlinedLocals` IL locals (it inlines into each width's walk).
+- the step declares at most `InlinedLocals` IL locals (it inlines into the walk, once per width).
 
 Masked words take the same step when their text (`MaskedBody`) is the whole run's with each write as
 `Keep<M>(pass, value, old)` (`Unkept`); otherwise, and for a flat loop of several fields (whose masked words
