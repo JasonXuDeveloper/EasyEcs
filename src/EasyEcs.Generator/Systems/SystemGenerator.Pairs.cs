@@ -243,7 +243,7 @@ public sealed partial class SystemGenerator
             loop.Append("        }\n");
             foreach (var line in simd.MaskedStores.Split('\n')) if (line.Length > 0) loop.Append("    ").Append(line).Append('\n');
             loop.Append("}\n");
-            string text = loop.ToString().Replace(Kernel.SquareRoot, vector + ".SquareRoot(").Replace(Kernel.V, vector).Replace(Kernel.LanesForm, "");
+            string text = Kernel.Selects(loop.ToString()).Replace(Kernel.SquareRoot, vector + ".SquareRoot(").Replace(Kernel.V, vector).Replace(Kernel.LanesForm, "");
             sb.Append("\n        private void Vectors(in global::EasyEcs.PairRun run)\n        {\n");
             foreach (var line in text.Split('\n')) sb.Append(line.Length > 0 ? "            " + line : "").Append('\n');
             sb.Length--; // the split's last empty line

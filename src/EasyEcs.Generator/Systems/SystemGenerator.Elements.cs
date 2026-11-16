@@ -285,7 +285,7 @@ public sealed partial class SystemGenerator
         System.Text.RegularExpressions.Regex.Replace(text, @"\b__(id|a)(\d+)(?!\d)", "__$1$2" + tag);
 
     /// <summary>The Vector128 loop's text: <see cref="Narrow"/>'s, the vector type Vector128.</summary>
-    private static string Width128(string s) => Lines(s, Kernel.Mark128, Kernel.Mark512).Replace(WideGuard, "")
+    private static string Width128(string s) => Kernel.Selects(Lines(s, Kernel.Mark128, Kernel.Mark512)).Replace(WideGuard, "")
         .Replace(Kernel.SquareRoot, Vector128 + ".Sqrt(").Replace(Kernel.V, Vector128).Replace(Kernel.LanesForm, "");
 
     private const string Vector128 = "global::System.Runtime.Intrinsics.Vector128";
