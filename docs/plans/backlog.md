@@ -386,12 +386,30 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
 Starts now; items touching `TileSteps.cs` or `Pairs.cs` wait for feat-later-halos. C12 / C13 / C14 edit
 ArityGenerator.cs: not beside lane 4's generated-text steps.
 
-- [ ] **C0. Re-measure the stale bench.json rows before any A/B** (`perf.md` §0 and §2): SparseBenchmark
+- [x] **C0. Re-measure the stale bench.json rows before any A/B** (`perf.md` §0 and §2): SparseBenchmark
       PassOverTheFew (fixed by fa2770f the same day), TileStencil Blur9 / Laplacian, ParallelFor Light, Reduce
       Sum / Mass, Emit 10k, ParallelQueryComparison (then `tools/perf/inlining.sh` and jitdisasm of `Waypoints.Steer`'s
       job if still behind Arch / Friflo), OperationBenchmark EntityBatch (batch form slower than its own per-row form:
       count runs per pass, read the batch job), SingleEntityBenchmark Structural + Filtered (`--launchCount 6`).
       Proof: the numbers; a case still losing becomes its own item here.
+      **Done 2026-11-16** (scratchpad c0, a clean copy: BDN refuses duplicate csproj files under `.claude/worktrees`).
+      The machine read ~0.8x of bench.json across the board, so ratios inside a class count. Fixed since bench.json:
+      Sparse PassOverTheFew (23x, now 1.08x QueryTheFew), TileStencil Blur9_Tile (0.89x Hand), Reduce Sum (0.16-0.38x),
+      Emit 10k (0.79x serial, was 1.23x), ParallelQueryComparison (first, ahead of Friflo / Arch), EntityBatch (1.48x
+      faster than per-row, level with Friflo), SingleEntity Structural (0.92-1.09, inside RatioSD 0.10-0.21). Still
+      losing, each an item below: C0a-C0d.
+- [ ] **C0a. ParallelFor LightParallelFor at 10k is 1.36x serial** (5.6 vs 4.1 us), and its lambda form LightLambda
+      is 1.64 us: find why the struct form costs 3.4x the lambda form at 10k (and 1.8x at 100k). Opus.
+- [ ] **C0b. Laplacian_Tile at Side 32 is 1.10x Hand (1 thread) and 1.16x (4 threads)**; Laplacian_Cell beats Hand
+      (371 / 252 us). Find the Tile form's extra cost against Blur9_Tile, which beats Hand; or teach EECS116 to
+      point the tile method to its cell form. Opus.
+- [ ] **C0c. MassParallelReduce at 1k / 10k is 1.12x / 1.06x MassSerialRef**: the parallel pass should fall back to
+      the serial form below its break-even, as Sum does; and Mass has no serial Reduce row to compare. Sonnet for the
+      row, Opus for the threshold.
+- [ ] **C0d. Possible regressions to settle in a quiet round**: EmitSerial +25% at 10k and 100k (small StdDev),
+      ComponentThenScan 100k +15%, the DotNetParallelFor baselines +8-27% (machine). A/B against the commit of
+      bench.json's rows first; a real one becomes its own item.
+
 - [x] **C1. `RemoveTypes` roots the removed types** (`core.md` §1): `_orderRequests`, `_tileSteps`, `PairState`'s
       clusters and lists, `_columnSpares` survive `ForgetTypes`; `Mentions` ignores `_orderRequests`, so a reused bit
       can get another type's `RowOrder`. Files: World.Order.cs, World.Types.cs, TileSteps.cs (after halos), Pairs.cs,
