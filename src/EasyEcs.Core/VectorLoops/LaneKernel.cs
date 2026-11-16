@@ -225,13 +225,17 @@ public struct Lane128<T> : ILane<Lane128<T>, T> where T : unmanaged
 /// of a width, each width its own instantiation.
 /// </summary>
 [EditorBrowsable(EditorBrowsableState.Never)]
-public interface ILaneStep4
+public interface ILaneWalk4
 {
     /// <summary>
-    /// The vector of rows (of lanes, for a flat job) from <paramref name="i"/>; a masked word writes only the lanes of
-    /// <paramref name="pass"/> (<paramref name="passF"/>: the same bits as float lanes).
+    /// The vectors of rows (of lanes, for a flat job) from <paramref name="i"/> to <paramref name="end"/> (a whole number
+    /// of vectors, none when <paramref name="end"/> is not past <paramref name="i"/>), in steps of <c>LF.Count</c>. A
+    /// masked word writes only the lanes of the rows <paramref name="word"/> sets (<see cref="LaneKernel.Lanes{LI,M}"/>).
+    /// The walk declares its uniforms' broadcasts before its loop: the JIT does not hoist a broadcast out of the loop
+    /// once the loop holds as many vector locals as the registers it counts (a lane struct's inlined temporaries count
+    /// too).
     /// </summary>
-    void Step<LF, LI, M>(nint i, LI pass, LF passF) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode;
+    void Walk<LF, LI, M>(nint i, nint end, ulong word) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode;
 }
 
 /// <summary>
@@ -246,14 +250,14 @@ public static class LaneKernel
 {
     /// <summary>The whole vectors of a run of <paramref name="rows"/> rows; returns the first row no vector took.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static nint Run<TJob>(ref TJob job, nint rows) where TJob : struct, ILaneStep4, allows ref struct => RunFlat(ref job, rows, 1);
+    public static nint Run<TJob>(ref TJob job, nint rows) where TJob : struct, ILaneWalk4, allows ref struct => RunFlat(ref job, rows, 1);
 
     /// <summary>
     /// A flat job's run: <paramref name="lanes"/> lanes, <paramref name="fields"/> per row (each field alike), walked
     /// as whole vectors of whole rows; returns the first lane no vector took (a multiple of <paramref name="fields"/>).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static nint RunFlat<TJob>(ref TJob job, nint lanes, int fields) where TJob : struct, ILaneStep4, allows ref struct
+    public static nint RunFlat<TJob>(ref TJob job, nint lanes, int fields) where TJob : struct, ILaneWalk4, allows ref struct
     {
         // each width ends at a multiple of its vectors of whole rows (fields is a constant once this is inlined, so the
         // remainders are shifts or multiplies); a run too short for any vector makes no call
@@ -269,7 +273,7 @@ public static class LaneKernel
     /// vector with none is skipped, the others write only their passing lanes); returns the first row no vector took.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static nint RunMasked<TJob>(ref TJob job, ulong pass, nint rows) where TJob : struct, ILaneStep4, allows ref struct
+    public static nint RunMasked<TJob>(ref TJob job, ulong pass, nint rows) where TJob : struct, ILaneWalk4, allows ref struct
     {
         nint e512 = Vector512.IsHardwareAccelerated && rows >= 16 ? rows & ~(nint)15 : 0;
         nint e256 = Vector256.IsHardwareAccelerated && rows - e512 >= 8 ? rows - ((rows - e512) & 7) : e512;
@@ -294,20 +298,14 @@ public static class LaneKernel
     // registers: a ref to the caller's job made the runner keep the job in memory around the call, and with a method per
     // width that cost 1.13-1.18x the emitted loops on tables of 5-20 rows (docs/plans/designs/lane-kernel.md,
     // "Package D"). The copy is also what keeps the refs in registers inside the walk, where through a ref every store
-    // to a column might write them (a step never writes its job).
+    // to a column might write them (a walk never writes its job).
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void Walk<TJob, M>(TJob copy, nint e512, nint e256, nint e128, ulong pass)
-        where TJob : struct, ILaneStep4, allows ref struct where M : struct, IMode
+        where TJob : struct, ILaneWalk4, allows ref struct where M : struct, IMode
     {
-        nint i = 0;
-        if (Vector512.IsHardwareAccelerated)
-            for (; i < e512; i += 16)
-                if (Lanes<Lane512<int>, M>(pass, i, out var lanes)) copy.Step<Lane512<float>, Lane512<int>, M>(i, lanes, Lane512<int>.As<Lane512<float>, float>(lanes));
-        if (Vector256.IsHardwareAccelerated)
-            for (; i < e256; i += 8)
-                if (Lanes<Lane256<int>, M>(pass, i, out var lanes)) copy.Step<Lane256<float>, Lane256<int>, M>(i, lanes, Lane256<int>.As<Lane256<float>, float>(lanes));
-        if (Vector128.IsHardwareAccelerated)
-            for (; i < e128; i += 4)
-                if (Lanes<Lane128<int>, M>(pass, i, out var lanes)) copy.Step<Lane128<float>, Lane128<int>, M>(i, lanes, Lane128<int>.As<Lane128<float>, float>(lanes));
+        // each width's loop is the job's walk, inlined here: its uniforms broadcast once per width, before its loop
+        if (Vector512.IsHardwareAccelerated) copy.Walk<Lane512<float>, Lane512<int>, M>(0, e512, pass);
+        if (Vector256.IsHardwareAccelerated) copy.Walk<Lane256<float>, Lane256<int>, M>(e512, e256, pass);
+        if (Vector128.IsHardwareAccelerated) copy.Walk<Lane128<float>, Lane128<int>, M>(e256, e128, pass);
     }
 }
