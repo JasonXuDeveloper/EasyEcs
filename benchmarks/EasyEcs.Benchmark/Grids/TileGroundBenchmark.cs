@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using BenchmarkDotNet.Attributes;
 
@@ -72,6 +73,67 @@ public class TileGroundBenchmark
     [Benchmark] public void Box_Hand512() => _boxHand512.Update();
     [Benchmark] public void Box_Cell() => _boxCell.Update();
     [Benchmark] public void Box_Off() => _boxOff.Update();
+}
+
+// A layer of the chunks under their ground: the cross where the chunk's top layer (7) holds no stone, zero where it
+// does, over the torus of 32 x 32 chunks (each with 2,048 stones: 8 MiB, which 512 x 512 chunks would make 2 GiB). The
+// ground cell reading that layer (Layer<Stone, Chunk, Top>: that layer's halo alone exchanged), the same method as
+// written (SimdMode.Off), and the walk by hand: the chunk's tile by value (ExchangeHalo(7, 7) copies layers 6 to 8),
+// each row's columns walked with Load128, the stones' row at the layer's cursor.
+
+[MemoryDiagnoser]
+public class TileGroundLayerBenchmark
+{
+    [Params(1, 4)] public int Threads;
+
+    private World _cell, _off, _hand;
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        Plot.Side = Plot.Default;
+        _cell = Make<TileGroundSystems.LayerCellSystem>();
+        _off = Make<TileGroundSystems.LayerOffSystem>();
+        _hand = Make<TileGroundSystems.LayerHandSystem>();
+        for (int i = 0; i < 3; i++)
+        {
+            Layer_Cell();
+            Layer_Off();
+            Layer_Hand();
+        }
+        // Every form steps the same ground, bit for bit.
+        TileWorlds.Same(_cell, _hand);
+        TileWorlds.Same(_off, _hand);
+    }
+
+    /// <summary>A world of chunks with warm ground, each with 2,048 stones: one top-layer cell in eight solid, the layers under it full of them (never read).</summary>
+    private World Make<TSystem>() where TSystem : struct, allows ref struct
+    {
+        var world = TileWorlds.Warm(Threads, p => new TileGroundSystems.Chunk(p), next: false);
+        var random = new System.Random(11);
+        var chunks = new System.Collections.Generic.List<Entity>();
+        foreach (var item in world.Query<TileGroundSystems.Chunk>()) chunks.Add(item.Entity);
+        foreach (var chunk in chunks)
+        {
+            var stones = chunk.GetOrAdd<DynamicBuffer<TileGroundSystems.Stone>>().SetCount(16 * 16 * 8);
+            for (int i = 0; i < 7 * 256; i++) stones[i] = new TileGroundSystems.Stone(1);
+            for (int i = 0; i < 32; i++) stones[7 * 256 + random.Next(256)] = new TileGroundSystems.Stone(1);
+        }
+        world.AddSystem<TSystem>();
+        return world;
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _cell.Dispose();
+        _off.Dispose();
+        _hand.Dispose();
+    }
+
+    [Benchmark(Baseline = true)] public void Layer_Hand() => _hand.Update();
+    [Benchmark] public void Layer_Cell() => _cell.Update();
+    [Benchmark] public void Layer_Off() => _off.Update();
 }
 
 internal static partial class TileGroundSystems
@@ -209,6 +271,54 @@ internal static partial class TileGroundSystems
                         col.Store((col.Load128<float>(-1, 0, -1) + col.Load128<float>(0, 0, -1) + col.Load128<float>(1, 0, -1)
                             + col.Load128<float>(-1) + col.Load128<float>() + col.Load128<float>(1)
                             + col.Load128<float>(-1, 0, 1) + col.Load128<float>(0, 0, 1) + col.Load128<float>(1, 0, 1)) * (1f / 9), into);
+            }
+        }
+    }
+
+    /// <summary>A chunk's stone: 0 open, else solid (4 bytes, the lanes of the warmth).</summary>
+    public record struct Stone(int Solid);
+
+    /// <summary>The top layer of a <see cref="Chunk"/>.</summary>
+    public struct Top : ILayer
+    {
+        public static int Index => 7;
+    }
+
+    [EcsSystem]
+    public ref struct LayerCellSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(Cell<Warmth, Ground<Chunk>> w, Layer<Stone, Chunk, Top> stone, out Warmth next) =>
+            next = new(stone.Value.Solid != 0 ? 0 : w.Value.T + (w[-1, 0, 0].T + w[1, 0, 0].T + w[0, 0, -1].T + w[0, 0, 1].T - 4f * w.Value.T) * Rate);
+    }
+
+    [EcsSystem]
+    public ref struct LayerOffSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16, SimdMode = SimdMode.Off)]
+        static void Step(Cell<Warmth, Ground<Chunk>> w, Layer<Stone, Chunk, Top> stone, out Warmth next) =>
+            next = new(stone.Value.Solid != 0 ? 0 : w.Value.T + (w[-1, 0, 0].T + w[1, 0, 0].T + w[0, 0, -1].T + w[0, 0, 1].T - 4f * w.Value.T) * Rate);
+    }
+
+    [EcsSystem]
+    public ref struct LayerHandSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 16)]
+        static void Step(ref Tile<Warmth, Ground<Chunk>> warmth, Tile<Stone, Chunk> stones)
+        {
+            warmth.ExchangeHalo();
+            stones.ExchangeHalo(Top.Index, Top.Index, mask: false);
+            foreach (var row in warmth.Rows(TileStencil.Layer))
+            {
+                var c = warmth.At(row);
+                var s = stones.At(new TileRow<Chunk>(Top.Index, row.Z));
+                var into = MemoryMarshal.Cast<Warmth, float>(warmth.Write(row));
+                for (int x = 0; x < 16; x += 4)
+                {
+                    var here = c.Load128<float>(x);
+                    var cross = here + (c.Load128<float>(x - 1) + c.Load128<float>(x + 1) + c.Load128<float>(x, 0, -1) + c.Load128<float>(x, 0, 1) - 4f * here) * Rate;
+                    Vector128.ConditionalSelect(Vector128.Equals(s.Load128<int>(x), Vector128<int>.Zero).AsSingle(), cross, Vector128<float>.Zero).CopyTo(into.Slice(x));
+                }
             }
         }
     }
