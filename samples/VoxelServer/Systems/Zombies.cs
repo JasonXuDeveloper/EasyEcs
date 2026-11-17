@@ -146,14 +146,19 @@ public ref struct ZombieAttackSystem
 
 // #endregion attack
 
-// #region sunlight
-// A zombie under the open sky by day catches fire, as in Minecraft: no block above it and no water at its feet. It
-// looks every Rules.BurnEvery ticks, the cadence of the fire's damage, so a zombie catches fire before it is first
-// hurt, and not at all at night. The look reads the chunks around each zombie (the height map, the water) through
-// lookups and writes the zombie's Sunlit and InWater: a parallel pass. Catching fire is a presence flip of Burning, in the zombie
-// prefab, so the zombie stays in its table: the next system, on one thread, a comparison per zombie.
+// #region fire
+// A zombie under the open sky by day catches fire, as in Minecraft: no block above it and no water at its feet. Four
+// methods, in the order they run, all at the fire's own cadence ([UpdateInterval(Rules.BurnEvery)]): a zombie catches
+// fire before it is first hurt, and not at all at night. The look reads the chunks around each zombie (the height map,
+// the water) through lookups and writes its Sunlit and InWater: a parallel pass, the costly part. Catching fire and
+// putting it out are presence flips of Burning, which the zombie prefab has, absent, so the zombie stays in its table:
+// the cheap part, a comparison per zombie, after it. The fire hurts as a method for one row, which the generator runs
+// as a vector loop over the Health column of the burning zombies, 8 rows per instruction with Vector<int> (4 on
+// Arm; integer lanes give the same result on every machine). The cadence is not a branch per tick: Health is
+// tracked, and the pass writing it stamps its rows, so it is written only on the ticks that hurt and the death
+// systems ([Changed<Health>]) find nothing to do on the others.
 [EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public ref struct ZombieExposureSystem
+public ref struct FireSystem
 {
     [ForEach(Parallel = true), With<Zombie>]
     static void Look(in Position position, in Clock clock, ref Sunlit sunlit, ref InWater inWater, Lookup<Chunk> chunks,
@@ -165,42 +170,21 @@ public ref struct ZombieExposureSystem
         sunlit = new Sunlit(!wet && !Rules.IsNight(clock) && near.UnderSky(feet));
         inWater = new InWater(wet);
     }
-}
 
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public ref struct SunlightSystem
-{
     [ForEach, With<Zombie>]
     static void Expose(Entity zombie, in Sunlit sunlit, in Clock clock)
     {
         if (sunlit.Value) zombie.SetBurning(clock.Tick + Rules.BurnFor);
     }
-}
-// #endregion sunlight
 
-// #region burn
-// Every Rules.BurnEvery ticks the fire hurts: a method for one row, which the generator runs as a vector loop over the
-// Health column of the burning zombies, 8 rows per instruction with Vector<int> (4 on Arm; integer lanes give the same
-// result on every machine). The cadence is the system's ([UpdateInterval]), not a branch per tick: Health is tracked,
-// and the pass writing it stamps its rows, so it is written only on the ticks that hurt and the death systems
-// ([Changed<Health>]) find nothing to do on the others. Putting the fire out is a structural change of other rows, at
-// another condition, so it is the next system's job.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public ref struct FireDamageSystem
-{
     [ForEach, With<Burning>]
     static void Hurt(ref Health health) => health.Value--;
-}
 
-// Puts out the fires that burned down, and those of the zombies that walked into water (InWater): it visits only
-// the burning, at the fire's own cadence.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public ref struct ExtinguishSystem
-{
+    // Puts out the fires that burned down, and those of the zombies that walked into water: it visits only the burning.
     [ForEach]
     static void Out(Entity zombie, in Burning fire, in InWater inWater, in Clock clock)
     {
         if (clock.Tick >= fire.Until || inWater.Value) zombie.RemoveBurning();
     }
 }
-// #endregion burn
+// #endregion fire

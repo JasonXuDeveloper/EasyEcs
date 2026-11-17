@@ -119,10 +119,7 @@ public static class Startup
         world.AddSystem<PickupSystem>();
         world.AddSystem<ItemExpirySystem>();
         world.AddSystem<NightSpawnSystem>();
-        world.AddSystem<ZombieExposureSystem>();
-        world.AddSystem<SunlightSystem>();
-        world.AddSystem<FireDamageSystem>();
-        world.AddSystem<ExtinguishSystem>();
+        world.AddSystem<FireSystem>();
         world.AddSystem<ZombieDeathSystem>();
         world.AddSystem<ChunkUnloadSystem>();
         world.AddSystem<ChunkSaveSystem>();
@@ -188,20 +185,20 @@ public static class Startup
             Chunk: new Prefab()
                 .SetChunk(default).SetBuffer<Block>().SetBuffer<Fluid>().SetBuffer<NextFluid>().SetBuffer<Surface>()
                 .SetViewers(0, 0).Set(FluidCount.Dry).SetFluidStep(StepResult.None, FluidCount.Dry, 0, 0)
-                .Set(new Fresh(), new Flowing(), new Unloading()).RemoveUnloading()
+                .Set(new Fresh(), new Flowing()).SetAbsent<Unloading>()
                 .SetGround(default).SetBuffer<Footing>().SetBuffer<Scent>().SetBuffer<NextScent>().SetBuffer<Trail>()
                 .SetScentStep(TileFaces.None, false)
                 .Set(new Spreading(), new Red(), new Black()),
             Player: new Prefab()
-                .SetPlayer(0).SetInChunk(default).SetVisible(default, false).SetScore(0).SetFootprint(default, 0)
-                .SetPosition(default).SetVelocity(default).SetBody(false, false)
-                .SetHealth(Rules.PlayerHealth).SetInput(default, false).SetBuffer<ItemStack>(),
+                .SetPlayer(0).SetInChunk(default).SetAbsent<Visible>().SetScore(0).SetFootprint(default, 0)
+                .SetPosition(default).SetVelocity(default).SetOnGround(false).SetBlocked(false)
+                .SetHealth(Rules.PlayerHealth).SetInput(default).SetDig(false).SetBuffer<ItemStack>(),
             Zombie: new Prefab()
-                .Set(new Zombie()).SetVision(Rules.ZombieVision).SetInChunk(default).SetVisible(default, false).SetTarget(default)
-                .SetPosition(default).SetVelocity(default).SetBody(false, false)
-                .SetHealth(Rules.ZombieHealth).SetCooldown(0).SetSunlit(false).SetInWater(false).SetBurning(0).RemoveBurning(),
+                .Set(new Zombie()).SetVision(Rules.ZombieVision).SetInChunk(default).SetAbsent<Visible>().SetTarget(default)
+                .SetPosition(default).SetVelocity(default).SetOnGround(false).SetBlocked(false)
+                .SetHealth(Rules.ZombieHealth).SetCooldown(0).SetSunlit(false).SetInWater(false).SetAbsent<Burning>(),
             Item: new Prefab()
-                .SetItem(default, 1).SetInChunk(default).SetVisible(default, false).SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
-                .SetBody(false, false).SetDropped(0));
+                .SetItem(default, 1).SetInChunk(default).SetAbsent<Visible>().SetPosition(default).SetVelocity(new System.Numerics.Vector3(0, 0.2f, 0))
+                .SetOnGround(false).SetBlocked(false).SetDropped(0));
     // #endregion prefabs
 }

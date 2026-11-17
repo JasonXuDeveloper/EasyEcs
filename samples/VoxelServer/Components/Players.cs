@@ -5,8 +5,10 @@ namespace VoxelServer;
 
 public record struct Player(int Client) : IComponent;
 
-// What the client asked for this tick: a direction to walk in (x, z) and a dig of the block underfoot.
-public record struct Input(Vector2 Walk, bool Dig) : IComponent;
+// What the client asked for this tick: a direction to walk in (x, z), and a dig of the block underfoot (a component of its
+// own, a column of one byte per player).
+public record struct Input(Vector2 Walk) : IComponent;
+public record struct Dig(bool Value) : IComponent;
 
 // The chunk a player's view is centered on: its client has the loaded chunks of the square of Rules.PlayerVision around
 // it, so the view is this one value, not a list of chunks. AoiViewSystem moves it when the player crosses into another

@@ -88,23 +88,26 @@ public ref struct AoiChunkSystem
     }
 }
 
-// An entity that crossed into another chunk is spawned for the players that see its new chunk and not its old one, and
-// despawned for the reverse; one just created is spawned for the viewers of its chunk. Visible keeps the chunk the
-// clients know it in.
+// An entity just created is spawned for the viewers of its chunk (it has no Visible yet: it gains it here), one that
+// crossed into another chunk for the players that see its new chunk and not its old one, and despawned for the
+// reverse. Visible keeps the chunk the clients know it in.
 [EcsSystem, UpdateInGroup<Replication>]
 public ref struct AoiSpawnSystem
 {
+    [ForEach, Without<Visible>]
+    static void Appeared(Entity entity, in InChunk at, ref Stats stats, World world)
+    {
+        stats.CameIntoView += Aoi.ViewersOf(world, at.Pos);
+        entity.SetVisible(at.Pos);                                        // last: the row is not read after it
+    }
+
     [ForEach, Changed<InChunk>]
     static void Moved(in InChunk at, ref Visible visible, ref Stats stats, World world)
     {
-        var from = visible;
-        visible = new Visible(at.Pos, true);
-        if (!from.Placed) stats.CameIntoView += Aoi.ViewersOf(world, at.Pos);
-        else if (from.Chunk != at.Pos)
-        {
-            stats.CameIntoView += Aoi.Watching(world, at.Pos, from.Chunk);
-            stats.LeftView += Aoi.Watching(world, from.Chunk, at.Pos);
-        }
+        if (visible.Chunk == at.Pos) return;
+        stats.CameIntoView += Aoi.Watching(world, at.Pos, visible.Chunk);
+        stats.LeftView += Aoi.Watching(world, visible.Chunk, at.Pos);
+        visible = new Visible(at.Pos);
     }
 }
 
@@ -115,7 +118,7 @@ public ref struct AoiDespawnSystem
     [ForEach, With<Retired>]
     static void Gone(Entity entity, in Visible visible, ref Stats stats, World world)
     {
-        if (visible.Placed) stats.Despawns += Aoi.ViewersOf(world, visible.Chunk);
+        stats.Despawns += Aoi.ViewersOf(world, visible.Chunk);
         entity.RemoveVisible();                                           // freed once its view is released too
     }
 }
@@ -129,14 +132,14 @@ public static class Aoi
     public static bool Known(World world, ChunkPos pos, out Entity chunk) => world.ChunkIndex.TryGet(pos, out chunk) && !chunk.IsFresh;
 
     // The players that have `chunk` in view.
-    public static int ViewersOf(World world, ChunkPos chunk) => Known(world, chunk, out var loaded) ? loaded.Viewers.Count : 0;
+    public static long ViewersOf(World world, ChunkPos chunk) => Known(world, chunk, out var loaded) ? loaded.Viewers.Count : 0;
 
     // The players that have `chunk` in view and not `other`: the view centers of the strip between the two squares.
-    public static int Watching(World world, ChunkPos chunk, ChunkPos other)
+    public static long Watching(World world, ChunkPos chunk, ChunkPos other)
     {
         if (!Known(world, chunk, out var loaded)) return 0;               // in no view yet
         if (!Known(world, other, out _)) return loaded.Viewers.Count;     // the other in none: every viewer
-        int count = 0;
+        long count = 0;
         foreach (var at in Terrain.Gained(chunk, other, Range)) count += world.ViewCenterIndex.Count(at);
         return count;
     }

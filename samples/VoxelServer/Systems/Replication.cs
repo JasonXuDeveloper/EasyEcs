@@ -42,7 +42,7 @@ public ref struct SendEntitiesSystem
         Lookup<Viewers> viewers, Emit<EntityUpdate> updates)
     {
         if (!chunks.TryFind(at.Pos, out var chunk)) return;
-        int watching = viewers.Read(chunk.Id).Count;
+        int watching = (int)viewers.Read(chunk.Id).Count;
         if (watching == 0) return;
         updates.Add(new EntityUpdate(entity.Id, position.Value, health.HasValue ? health.Value.Value : -1, watching));
     }

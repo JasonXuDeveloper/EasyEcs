@@ -24,7 +24,7 @@ What each file teaches, with its code, is on the docs site:
 | [Systems/Scent/](Systems/Scent) | the zombies' distance field, one system per file: [Footing.cs](Systems/Scent/Footing.cs) (where a zombie can stand), [Wake.cs](Systems/Scent/Wake.cs) (the ground or a player's column changed), [Hunt.cs](Systems/Scent/Hunt.cs) (the field sleeps by day), then the passes: [Step.cs](Systems/Scent/Step.cs) (the shader, settling a chunk in place), [Settle.cs](Systems/Scent/Settle.cs) |
 | [Systems/Movement.cs](Systems/Movement.cs) | `PlayerMoveSystem`, `PhysicsSystem` (steps, walls, gravity), `GridSystem` (the entities by chunk) |
 | [Systems/Aoi.cs](Systems/Aoi.cs) | the areas of interest: `AoiViewSystem` (a player's view), `AoiChunkSystem` (a chunk loaded), `AoiSpawnSystem` (an entity crossing), `AoiDespawnSystem` (an entity gone) |
-| [Systems/Zombies.cs](Systems/Zombies.cs) | `NightSpawnSystem`, `ZombieTargetSystem`, `ZombieChaseSystem` (down the scent's trail), `ZombieAttackSystem`, `SunlightSystem`, `FireDamageSystem`, `ExtinguishSystem` |
+| [Systems/Zombies.cs](Systems/Zombies.cs) | `NightSpawnSystem`, `ZombieTargetSystem`, `ZombieChaseSystem` (down the scent's trail), `ZombieAttackSystem`, `FireSystem` (the sun, the fire, the water) |
 | [Systems/Items.cs](Systems/Items.cs) | `DigSystem`, `PickupSystem` and the inventory, `ItemExpirySystem` (the ordered index of drop ticks) |
 | [Systems/Health.cs](Systems/Health.cs) | `ZombieDeathSystem`, `PlayerRespawnSystem` |
 | [Systems/Replication.cs](Systems/Replication.cs) | `SendChunksSystem`, `ChunkSentSystem`, `SendEntitiesSystem`, `ClockSystem` (the first system of the simulation) |

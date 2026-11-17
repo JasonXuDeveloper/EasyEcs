@@ -15,10 +15,11 @@ public ref struct FakeClientsSystem
         [Vector2.Zero, new(1, 0), new(D, D), new(0, 1), new(-D, D), new(-1, 0), new(-D, -D), new(0, -1), new(D, -D)];
 
     [ForEach]
-    static void Play(Entity bot, in Player player, in Body body, in Clock clock, in EntityRandom random, ref Input input)
+    static void Play(Entity bot, in Player player, in OnGround ground, in Blocked blocked, in Clock clock, in EntityRandom random,
+        ref Input input, ref Dig dig)
     {
         var walk = Directions[EntityRandom.Range(random.Seed, bot.Id, (ulong)(clock.Tick / 100), 0, 0, Directions.Length)];
-        bool dig = walk != Vector2.Zero && body.OnGround && !body.Blocked && (clock.Tick + player.Client) % 40 == 0;
-        input = new Input(walk, dig);
+        input = new Input(walk);
+        dig = new Dig(walk != Vector2.Zero && ground.Value && !blocked.Value && (clock.Tick + player.Client) % 40 == 0);
     }
 }

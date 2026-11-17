@@ -12,10 +12,10 @@ namespace VoxelServer;
 public ref struct DigSystem
 {
     [ForEach]
-    static void Dig(Entity player, in Input input, in Position position, in Score score, in Prefabs prefabs, in Clock clock,
+    static void Dig(Entity player, in Dig dig, in Position position, in Score score, in Prefabs prefabs, in Clock clock,
         ref Stats stats, World world)
     {
-        if (!input.Dig) return;
+        if (!dig.Value) return;
         var at = Terrain.Cell(position.Value.X, position.Value.Y - 1, position.Value.Z);
         if (at.Y <= 0 || at.Y >= Terrain.Height || !world.ChunkIndex.TryGet(Terrain.ChunkOf(at.X, at.Z), out var chunk))
             return;
