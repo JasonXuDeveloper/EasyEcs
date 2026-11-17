@@ -499,6 +499,52 @@ of KernelBenchmark's Haul / HolesHaul / MoveVector / Integrate rows, LaneKernelB
 singleton rows, WorldSimulation, BattleServer, GeneratorBenchmark Cold / Edit; one round of the KernelBenchmark rows
 under `DOTNET_EnableAVX=0`). Ships only when level or a win at 0 B with nothing slower.
 
+### Constants: Haul under SSE4.1 (after the merge of D and E)
+
+**What the A/B showed.** Three interleaved rounds against D (`$S/rerunDF/F_sse.txt`): KernelBenchmark's HaulGenerated
+under `DOTNET_EnableAVX=0` at 1,000 rows 1.059-1.121x the emitted loop in every round (base spread 1.8 %).
+
+**The cause** (Tier1, `$S/haulF/head-walk-sse.asm` against `base-runs.asm`). The two loops are the same eleven
+instructions but one: the emitted loop multiplies by the constant `Vector<float>.Create(Dt)` held in a register
+(`movddup xmm1` hoisted, `mulps xmm3, xmm1`), the walk by the constant in memory (`mulps xmm3, xmmword ptr [RWD16]`),
+while the `movddup xmm1` the loop hoisting wrote before its loop is left unused. Both texts write the constant in the
+loop; what keeps it in a register is the JIT's CSE taking the hoisted copy, and in the walk it did not, so lowering
+contained the constant as the multiply's memory operand. A fourth load per vector where three bound the loop:
+llvm-mca 2.1 -> 2.4 cycles a vector on icelake-server, 2.1 -> 2.6 on znver4 (`tools/perf/loopbound.py --reg xmm`).
+At AVX-512 the constant is an embedded broadcast (`{1to16}`) in both forms, a load too, so only SSE showed it.
+
+**The fix** (`SystemGenerator.StepText` / `WalkText`): each constant vector of a step (`LF.Create(0.033333335f)`,
+`LI.Create(1)`) is a local `__kN` of the walk, declared once before its loop like the uniforms, never written in the
+loop. Haul's SSE walk is then the emitted loop's instructions (`mulps xmm3, xmm1`, the constant in a register); at
+AVX-512 the JIT propagates the local into its use and keeps the embedded broadcast, the same loop as before. Every
+flat lane walk of KernelBenchmark and LaneKernelBenchmark is as short or shorter by llvm-mca (Integrate's 512-bit walk
+2.6 -> 2.3 cycles a vector on icelake-server, its SSE walk 2.6 -> 2.1). Constants of Min / Max, when those join the
+walk, must stay in place (above).
+
+**Proof.** GeneratorTests.ALaneWalksConstantsAreBroadcastBeforeItsLoop; the full suite on net10.0 and net11.0 (4,486
+passed each, `$S/haulF/gate.log`); the vector-loop classes under `DOTNET_PreferredVectorBitWidth=256`,
+`DOTNET_EnableAVX=0` and `DOTNET_EnableHWIntrinsic=0`; `tools/perf/inlining.sh` over the nine benchmark classes:
+every job inlined. The A/B (`$S/haulF/ab.sh`, base = claude/relaxed-ramanujan-j4j9k4 775d7ef4 with head's three benchmark
+files and `AddWhereEqual`, head = this branch; three interleaved rounds of KernelBenchmark's Haul / HolesHaul rows and
+LaneKernelBenchmark, under `DOTNET_EnableAVX=0` and the default; `$S/haulF/ab.txt`): every row level at 0 B. Under
+SSE4.1: HaulGenerated 1,000 131.5 / 132.6 / 130.7 ns -> 138.3 / 135.1 / 136.8 (+5.2 / +1.9 / +4.7 %, was +10.5 / +5.9 /
++12.1); HolesHaulGenerated 1,000 +5.4 / -1.4 / +0.1 %; IntegrateGenerated faster at every size (37: -10 / -8 / -9 %,
+1,000: -6 / -10 / -7 %, 100,000: -27 / -23 / -24 %); the 100,000-row rows move with their scalar twins (HaulScalar
++5.0 / -5.5 / +12.3 %, spread 8-24 %). Default: every row level, HaulGenerated 1,000 -0.4 / +3.5 / +4.5 % (spread 4.1),
+HolesHaulGenerated 100,000 +16.6 / +1.5 / -4.9 % (spread 13.3).
+
+**What is left at 1,000 rows: the call per run.** Haul's walk is still the one `NoInlining` `LaneKernel.Walk` per
+run (package D's form), its job of three column refs and a float (28 bytes) passed in memory (SysV passes a struct
+of more than 16 bytes on the stack: four stores in the runner, four loads in the walk, the call, its frame): about
+20 cycles a run, 2-5 % of a 130 ns run. Integrate's job (two refs, 16 bytes) goes in registers. Measured
+(`$S/haulF/ab2.sh`, `ab2.txt`, two rounds): `RunFlat` inlining the widths into the runner instead of calling `Walk`
+takes HaulGenerated 1,000 to 130.8 / 131.0 ns under SSE4.1 (the emitted loop's 131) and 70.0 / 68.9 at AVX-512
+(head 71.9 / 72.5), the other rows level. It does not ship as is: inlined into every runner, the stress world's walk
+(`$S/kernelF2/stressM`, six statements over seven components) leaves 11 lane operations as calls at AVX-512 and 14
+under SSE4.1 (the runner's inlining budget, package D's reason for the call). A walk small enough to inline
+(Haul's, Integrate's) needs a size rule the generator can read (lane operations times the runner's three call sites
+and three widths) and its own A/B at the rule's edge: the next form of package F.
+
 ### The forms left, and what form 1 showed about them
 
 - **A select under one comparison, Min / Max against constants.** The fused members (`SelectGreaterThan`, `Min(a, T
