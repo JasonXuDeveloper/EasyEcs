@@ -339,7 +339,8 @@ Systems/SystemGenerator.cs            [ForEach] -> struct jobs (per entity or pe
                                       before its loop),
                                       EmitLanes the job's __Lanes struct (the column refs, the uniforms' scalars read in
                                       Execute, one ILaneWalk4.Walk) and Execute's call of LaneKernel.Run / RunFlat /
-                                      RunMasked, the rows after it the method's;
+                                      RunMasked (RunInlined / RunFlatInlined for a walk the runner can inline:
+                                      InlinesWalk, below), the rows after it the method's;
                                       every other shape keeps EmitLoops' loops per width;
                                       Systems/SystemGenerator.Cells.cs: a cell method's pass (Cell<TCell, TTile> inputs of one tile, the
                                       first driving the walk, the others sampled; Layer<TCell, TTile, TLayer> inputs after them, the
@@ -441,6 +442,14 @@ method's body produced, so no symbol is bound again. A job is flat when:
   tail, gather, draw, prefetch, streamed column, wide component, statics, pair mode, narrow index or cold branch;
 - the walk declares at most `InlinedLocals` IL locals (it inlines once per width: into `LaneKernel.Walk` for a whole run,
   into the runner's walk over words for a masked word).
+
+A whole run's walk is inlined into the runner itself (`LaneKernel.RunInlined` / `RunFlatInlined`, no call per run)
+when `InlinesWalk` holds: at most `InlinedWalkOperations` (16) lane operations (`LaneOperations`: each `LF.` / `LI.`
+member of the step, each operator, each constant and uniform broadcast) over at most `InlinedWalkComponents` (6)
+components. The runner's three call sites of Execute take three widths of the walk each, and every inlined lane
+operation brings temporaries: past the edge the runner reaches the JIT's 512 locals and leaves lane operations, the walk
+or the scalar tail as calls (the sweep in lane-kernel.md, package F, "The call per run"). A larger walk keeps the
+`NoInlining` `LaneKernel.Walk`, one call per run.
 
 Masked words take the same step when their text (`MaskedBody`) is the whole run's with each write as
 `Keep<M>(pass, value, old)` (`Unkept`); otherwise, and for a flat loop of several fields (whose masked words

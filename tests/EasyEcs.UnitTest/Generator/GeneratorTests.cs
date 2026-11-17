@@ -349,7 +349,7 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         // A flat job is one step over Core's lane kernel (SystemGenerator.Lanes.cs), its widths Core's; any other shape
         // gets its loops per width: Vector512 first where the hardware runs it, then Vector<T> for the rows left.
-        bool kernel = generated.Contains("ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong word)") && generated.Contains("LaneKernel.Run(ref __lanes, rows)");
+        bool kernel = generated.Contains("ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong word)") && (generated.Contains("LaneKernel.Run(ref __lanes, rows)") || generated.Contains("LaneKernel.RunInlined(ref __lanes, rows)"));
         Assert.That(kernel || generated.Contains("for (nint last = rows - __Vec_"), Is.EqualTo(vectorized), generated);
         if (!kernel)
         {
@@ -571,7 +571,7 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         // a flat loop of straight-line arithmetic is the lane kernel's (SystemGenerator.Lanes.cs), one under a condition
         // the generator's own
-        bool kernel = generated.Contains("LaneKernel.RunFlat(ref __lanes, rows * 2, 2) / 2;");
+        bool kernel = generated.Contains("LaneKernel.RunFlat(ref __lanes, rows * 2, 2) / 2;") || generated.Contains("LaneKernel.RunFlatInlined(ref __lanes, rows * 2, 2) / 2;");
         Assert.That(kernel || generated.Contains("lanes = rows * 2;"), Is.EqualTo(flat), generated);
         Assert.That(generated.Contains("for (nint last = rows - __Vec_"), Is.True, generated); // masked words, or the loop
         if (flat) Assert.That(generated, Does.Contain(kernel ? "LF.Load(ref e1, i)" : "i /= 2;").And.Contain("Interleaved.Load2("), generated); // the masked Execute deinterleaves
@@ -675,7 +675,7 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("RunFlat(ref __lanes, rows * 2, 2) / 2;").And.Contain("var __u0 = LF.Create(this.__u0);")
+        Assert.That(generated, Does.Contain("RunFlatInlined(ref __lanes, rows * 2, 2) / 2;").And.Contain("var __u0 = LF.Create(this.__u0);")
             .And.Contain("__c1_0 = __c1_0 + __c2_0 * __u0;")
             .And.Contain("__c1_1 = __V512.ConditionalSelect(__passF, __c1_1 + __c2_1 * __u0, __c1_1);"), generated); // the flat loop, then the masked one per lane
     }
@@ -695,6 +695,35 @@ public class GeneratorTests
         Assert.That(loop, Is.GreaterThan(0), generated);
         Assert.That(walk.Substring(0, loop), Does.Contain("var __k0 = LF.Create(0.5f);").And.Contain("var __k1 = LF.Create(0.25f);"), generated);
         Assert.That(walk.Substring(loop), Does.Contain("__k0").And.Contain("__k1").And.Not.Contain("LF.Create("), generated); // each constant once
+    }
+
+    // The runner inlines a whole run's walk (LaneKernel.RunInlined) of at most 16 lane operations over at most 6 components,
+    // and calls the larger ones once per run (LaneKernel.Run): its three call sites of Execute take three widths of the
+    // walk each, and past that edge the runner reaches the JIT's 512 locals (lane-kernel.md, package F, "The call per run").
+    // The first walk: a load, a store, the write kept (masked words take the step), four multiplies, three adds, two
+    // subtractions and four constants (16); the second one subtraction more (17); then a small walk over seven components.
+    [TestCase("[ForEach] static void A(ref F f) => f.V = f.V * 0.5f + f.V * 0.25f + f.V * 0.125f + f.V * 2f - f.V - f.V;", 16, true)]
+    [TestCase("[ForEach] static void A(ref F f) => f.V = f.V * 0.5f + f.V * 0.25f + f.V * 0.125f + f.V * 2f - f.V - f.V - f.V;", 17, false)]
+    [TestCase("[ForEach] static void A(ref F f, in H h) => f.V += h.V * 0.5f;", 7, true)]
+    [TestCase("[ForEach] static void A(ref F f, in H h, in C1 a, in C2 b, in C3 c, in C4 d, in C5 e) => f.V += h.V + a.V + b.V + c.V + d.V + e.V;", 15, false)]
+    [TestCase("[ForEach] static void A(ref F f, in H h, in C1 a, in C2 b, in C3 c, in C4 d) => f.V += h.V + a.V + b.V + c.V + d.V;", 13, true)]
+    public void ARunnerInlinesOnlyASmallWalk(string members, int operations, bool inlined)
+    {
+        const string more = "public struct C1 : IComponent { public float V; } public struct C2 : IComponent { public float V; } "
+            + "public struct C3 : IComponent { public float V; } public struct C4 : IComponent { public float V; } public struct C5 : IComponent { public float V; }";
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, more, $"[EcsSystem] public ref struct S {{ {members} }}"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        string walk = generated.Substring(generated.IndexOf("ILaneWalk4.Walk<LF, LI, M>", System.StringComparison.Ordinal));
+        walk = walk.Substring(0, walk.IndexOf("\n            }\n", System.StringComparison.Ordinal));
+        // the step's lines: the loop's own (its header, a masked word's passing lanes) aside
+        var step = walk.Substring(walk.IndexOf("for (; i < end; i += LF.Count)", System.StringComparison.Ordinal)).Split('\n').Skip(1)
+            .Where(l => !l.Contains("LaneKernel.Lanes<") && !l.Contains("LI.As<"));
+        int counted = step.Sum(l => System.Text.RegularExpressions.Regex.Matches(l, @"\bL[FI]\.\w+|[+\-*/&|^~]").Count)
+            + System.Text.RegularExpressions.Regex.Matches(walk, @"var __[uk]\d+ = ").Count; // the broadcasts before the loop
+        Assert.That(counted, Is.EqualTo(operations), walk);
+        Assert.That(generated, Does.Contain(inlined ? "LaneKernel.RunInlined(ref __lanes, rows)" : "LaneKernel.Run(ref __lanes, rows)"), generated);
     }
 
     // A wide component (a float, a bool, a byte and an int a row): the float lane gathered from 3 words per row by

@@ -233,7 +233,11 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   interleaved component, is one `Walk` over Core's lane types (`ILane`, `Lane512/256/128<T>`) and Core's `LaneKernel`
   inlines it at 512, 256, then 128 bits: a whole run's walks into one `NoInlining` method per run, the job passed by
   value (walks inlined into the runner exhaust its inlining budget, a method per width costs a call per width on small
-  tables), a masked word's walks into the runner's walk over words (`MaskedRuns`, a root holding nothing else of the
+  tables), or, for a walk of at most 16 lane operations over at most 6 components, into the runner itself
+  (`LaneKernel.RunInlined`, `SystemGenerator.InlinesWalk`: the runner's three call sites take three widths each, and past
+  that edge it reaches the JIT's 512 locals; a change to the step's text or to the runner rechecks the edge with the
+  sweep of lane-kernel.md, "The call per run", and `tools/perf/inlining.sh`, which reports lane operations left as
+  calls), a masked word's walks into the runner's walk over words (`MaskedRuns`, a root holding nothing else of the
   job: a call per word of at most 64 rows cost as much as its vectors); the exact test is `SystemGenerator.LaneStepOf`
   (src/EasyEcs.Generator/AGENTS.md, "The lane kernel's shape"). Every other shape keeps its loops per width. A shape
   joins the kernel only once it measures level or better at 0 B against its emitted loops (selects under a comparison,

@@ -528,7 +528,7 @@ public class ViewRuleTests
         string generated = string.Concat(output.SyntaxTrees.Select(t => t.ToString()));
         Assert.That(generated, Does.Contain("Interleaved.Load2("));                 // a vector loop either way
         // the flat loop, or the lane kernel's walk over rows * 2 lanes (the singleton's value broadcast before it)
-        Assert.That(generated.Contains("lanes = rows * 2;") || generated.Contains("RunFlat(ref __lanes, rows * 2, 2)"), Is.EqualTo(flat), generated);
+        Assert.That(generated.Contains("lanes = rows * 2;") || generated.Contains("RunFlat(ref __lanes, rows * 2, 2)") || generated.Contains("RunFlatInlined(ref __lanes, rows * 2, 2)"), Is.EqualTo(flat), generated);
     }
 
     [Test]
