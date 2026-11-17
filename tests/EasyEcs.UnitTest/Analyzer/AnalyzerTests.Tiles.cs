@@ -153,6 +153,16 @@ public partial class AnalyzerTests
         Assert.That(output.SyntaxTrees.Single(t => GeneratorTests.IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString(), Does.Contain("cells of 'c', 'r': vector ("));
     }
 
+    // Two layers of one tile's cells load into the thread's one texture of them, whichever layers they read: EECS073.
+    [Test]
+    public async Task TwoLayersOfTheSameCellsReport()
+    {
+        string source = Tall + "public struct L0 : ILayer { public static int Index => 0; } [EcsSystem] public ref struct S { [ForEach] static void A(Cell<NF, Ground<T3>> c, Layer<int, T3, L3> r, Layer<int, T3, L0> s, out NF next) => next = new NF(r.Value + s.Value); }";
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, source])).Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
+        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS073" }), string.Join(", ", found.Select(d => d.GetMessage())));
+        Assert.That(found[0].GetMessage(), Does.Contain("takes 'r' and 's', both of the int cells of T3"));
+    }
+
     [Test]
     public Task ALayerOfTheGroundsBufferReports() => ReportsOnTiles("EECS073",
         Tall + "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<int, Ground<T3>> c, Layer<int, T3, L3> r, out NF next) => next = new NF(c.Value + r.Value); }");

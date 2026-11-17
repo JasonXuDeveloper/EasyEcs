@@ -70,9 +70,9 @@ Analyzer/AnalyzerTests.Systems.cs       system rules
 Analyzer/AnalyzerTests.Tiles.cs         EECS115-117, EECS120's reasons, cell methods' EECS055 / EECS056 / EECS059 / EECS073,
                                         EECS123 and the layers' parameter left out of EECS026, a cell step's EECS115 reasons and
                                         EECS116 advice, lanes of 1 and 4 bytes, EECS115 for cells of two tiles and for a Layer
-                                        it cannot read (past the tile's layers, another tile, no ground cell, no cell), a Layer
-                                        under a ground cell clean, EECS073 for a Layer of the ground's buffer, EECS002 for a
-                                        result per tile outside a cell method
+                                        it cannot read (past the tile's layers, another tile, no ground cell, no cell), EECS073 for
+                                        two layers of the same cells, a Layer under a ground cell clean, EECS073 for a Layer of
+                                        the ground's buffer, EECS002 for a result per tile outside a cell method
 Analyzer/AnalyzerTests.Usage.cs         usage rules
 Analyzer/CodeFixTests.cs                each fix compiles, adds no diagnostic and is not offered again
 Analyzer/FormTests.cs                   EECS080 / EECS084
