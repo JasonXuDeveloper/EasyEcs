@@ -3739,7 +3739,7 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
   chunk under the ground (`GroundHeatSystem`: heat spreading except where the top layer is rock) as `You write` (the
   cell method with `Layer<Rock, RockChunk, Top>`, `struct Top : ILayer`) / `The generator writes` (the layer's
   exchange alone, its row at (Index, z), a stream per offset); dy is 0 (one layer; a stencil across layers is a cell of
-  the tall tile); a layer of the ground's own buffer is EECS073; pitfall: byte cells beside float cells keep the
+  the tall tile); a layer of the ground's own buffer is EECS073, and so are two layers of the same cells (one texture per thread); pitfall: byte cells beside float cells keep the
   rows cell by cell (lanes four times as wide: EECS055 says to widen to 2-byte lanes); `<BenchTable>` of
   TileGroundLayerBenchmark (Layer_Cell / Layer_Hand / Layer_Off) once synced.
 - guide/help/analyzer.mdx + .zh, EECS115: the three layer reasons with an example each.
