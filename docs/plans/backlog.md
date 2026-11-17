@@ -79,6 +79,18 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       classes (EntityRandomTests added) pass on net10.0 and net11.0 (1472 + 18 skipped each), the full suite on both
       (4484 + 1 skipped). Gate: scratchpad `nosimd-end/gate.sh`. A package branch forked before 5ddc511a still fails
       these three until it merges the work branch.
+- [ ] **`fix-view-alloc-under-load`**: `ViewTests.APassThroughAViewAllocatesNothing` allocates 98,352 B in 10 updates
+      on a loaded machine (full suite beside benchmarks: feat-ground-layer's gate, exemplar-voxel's run), even through
+      `Allocations.Steady` (4c804877), and passes alone. Too large for a compile (168 B): a path of the parallel pass
+      that allocates when helpers are busy and the owner thread runs more chunks is the first suspect. Find it (the
+      Steady output names the compiles; an allocation trace of the pass under `stress-ng`-style load), fix it. Opus.
+- [ ] **`research-voxel-pairs`** (exemplar 2a step 4, voxel-rewrite.md section 11; patch in scratchpad/vx/step4.patch):
+      the pair forms (Keep + Acquire, Pickup with `[Neighbor] ref Item`, item merging as a symmetric pair) built clean
+      but ZombieTarget went 0.17 -> 2.00 ms with 9.6 MB allocated after warm-up, Pickup 0.20 -> 1.16 ms, Steady 336 B
+      in 100 ticks. A pair pass allocating in steady state is a core bug: find it, then re-try step 4. Opus.
+- [ ] **`research-voxel-pingpong`** (exemplar 2a step 5; step5.patch): the tile swap stamps `Fluid` changed on every
+      step, settled tiles too (block updates 33,714 -> 101,949), and 16,496 B in 100 ticks. Find whether the ping-pong
+      form should stamp only changed cells (or the sample's form is wrong), then steps 5 and 6. Opus.
 - [ ] **`feat-lane1-core`**: the first run (from 3315196) was **lost with its container on 2026-11-09** before any
       push; only its interim reports survive. Rule since then: a lane hands back per item, each item is gated,
       merged and pushed before the next. What the lost run found (to rebuild or to record, not to re-research):
@@ -885,7 +897,8 @@ numbers are written once about the final code).
 - [ ] **2. The exemplar pass** (#169, `audit-code`; owner, 2026-10-27): every piece of code users read or copy in the
       most fitting form, new features included. Proof: outputs and README / page output blocks match, 0 B steady
       state, tests three ways, A/B no slower.
-      a. **VoxelServer** (`voxel-rewrite.md` steps 1-6, 8, 9, owner answers in its section 9): bool splits
+      a. **VoxelServer** (steps 1-3 and finish-scan 3 merged 2026-11-17 from exemplar-voxel; steps 4-6 wait on
+         research-voxel-pairs / research-voxel-pingpong; step 8: Terrain as a cell method not tried) (`voxel-rewrite.md` steps 1-6, 8, 9, owner answers in its section 9): bool splits
          (`Body.OnGround`, `Exposure.Sunlit`, Input, Visible), Viewers long, SetAbsent, FireDamage per row; `[Accumulate,
          Sum] Stats`, `SendPackets` -> `[Drain]`, `ReserveBuffers`; AOI without the World; pairs (Keep + Acquire,
          ChunkRing deleted, Pickup with `[Neighbor] ref`, item merging through symmetric pairs); water in the ping-pong
