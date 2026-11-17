@@ -7,7 +7,7 @@ using System.Reflection;
 // 0x1000). Run without tiered compilation (tools/perf/inlining.sh sets DOTNET_TieredCompilation=0): every method is compiled
 // optimized at its first call, with the inliner's decisions of Tier1, so one call of each runner decides what it
 // inlines, masked words and the last rows of a run included. Prints each job member (a type of a generated __ForEach
-// class) a method failed to inline and why; exit code 1 if there is one.
+// class), lane kernel walk and lane operation a method failed to inline and why; exit code 1 if there is one.
 string[] classes = args.Length > 0 ? args : ["KernelBenchmark", "WorldSimulationBenchmark", "BattleServerBenchmark", "MultiWorldBenchmark",
     "FusionBenchmark", "LookupGatherBenchmark"];
 using var listener = new Inlining();
@@ -45,6 +45,15 @@ sealed class Inlining : EventListener
         if (e.EventName != "MethodJitInliningFailed" || e.PayloadNames is null || e.Payload is null) return;
         string Get(string n) => e.PayloadNames.IndexOf(n) is >= 0 and var i ? e.Payload[i]?.ToString() ?? "" : "";
         string owner = Get("InlineeNamespace"), name = Get("InlineeName");
+        // A lane kernel's walk or lane operation left as a call (a walk the runner inlines, LaneKernel.RunInlined, must
+        // fit the runner's locals and budget at each of its call sites: lane-kernel.md, package F, "The call per run").
+        if (owner.StartsWith("EasyEcs.Lane512", StringComparison.Ordinal) || owner.StartsWith("EasyEcs.Lane256", StringComparison.Ordinal)
+            || owner.StartsWith("EasyEcs.Lane128", StringComparison.Ordinal) || name.EndsWith("ILaneWalk4.Walk", StringComparison.Ordinal)
+            || owner == "EasyEcs.LaneKernel" && name != "Walk") // Walk: the NoInlining walk of a whole run (LaneKernel.Run)
+        {
+            Failed.TryAdd($"{Get("MethodBeingCompiledName")} <- {owner}::{name}: {Get("FailReason")}", true);
+            return;
+        }
         // A job's Execute or loop method (a type of a generated __ForEach class, not a runner type over one, nor the
         // user's method __ForEach.Name_k, which may be large).
         if (!owner.Contains("__ForEach+") || owner.EndsWith(']') || name != "Execute" && !name.StartsWith("__", StringComparison.Ordinal)
