@@ -75,11 +75,12 @@ public class TileGroundBenchmark
     [Benchmark] public void Box_Off() => _boxOff.Update();
 }
 
-// A layer of the chunks under their ground: the cross where the chunk's top layer (7) holds no stone, zero where it
-// does, over the torus of 32 x 32 chunks (each with 2,048 stones: 8 MiB, which 512 x 512 chunks would make 2 GiB). The
-// ground cell reading that layer (Layer<Stone, Chunk, Top>: that layer's halo alone exchanged), the same method as
-// written (SimdMode.Off), and the walk by hand: the chunk's tile by value (ExchangeHalo(7, 7) copies layers 6 to 8),
-// each row's columns walked with Load128, the stones' row at the layer's cursor.
+// A layer of the chunks under their ground: the cross, slower into a cell over stone in the chunk's top layer (7), over
+// the torus of 32 x 32 chunks (each with 2,048 stones: 8 MiB, which 512 x 512 chunks would make 2 GiB). Slower, not
+// zero (GroundHeatSystem's rule): stones that zero their cells drain the ground to zero within the run, and quiet tiles
+// sleep. The ground cell reading that layer (Layer<Stone, Chunk, Top>: that layer's halo alone exchanged), the same
+// method as written (SimdMode.Off), and the walk by hand: the chunk's tile by value (ExchangeHalo(7, 7) copies layers 6
+// to 8), each row's columns walked with Load128, the stones' row at the layer's cursor.
 
 [MemoryDiagnoser]
 public class TileGroundLayerBenchmark
@@ -275,6 +276,9 @@ internal static partial class TileGroundSystems
         }
     }
 
+    /// <summary>How fast warmth spreads into a cell over stone: slower than over open ground (<see cref="Rate"/>).</summary>
+    private const float StoneRate = 0.05f;
+
     /// <summary>A chunk's stone: 0 open, else solid (4 bytes, the lanes of the warmth).</summary>
     public record struct Stone(int Solid);
 
@@ -289,7 +293,7 @@ internal static partial class TileGroundSystems
     {
         [ForEach(Parallel = true, ChunkSize = 16)]
         static void Step(Cell<Warmth, Ground<Chunk>> w, Layer<Stone, Chunk, Top> stone, out Warmth next) =>
-            next = new(stone.Value.Solid != 0 ? 0 : w.Value.T + (w[-1, 0, 0].T + w[1, 0, 0].T + w[0, 0, -1].T + w[0, 0, 1].T - 4f * w.Value.T) * Rate);
+            next = new(w.Value.T + (w[-1, 0, 0].T + w[1, 0, 0].T + w[0, 0, -1].T + w[0, 0, 1].T - 4f * w.Value.T) * (stone.Value.Solid != 0 ? StoneRate : Rate));
     }
 
     [EcsSystem]
@@ -297,7 +301,7 @@ internal static partial class TileGroundSystems
     {
         [ForEach(Parallel = true, ChunkSize = 16, SimdMode = SimdMode.Off)]
         static void Step(Cell<Warmth, Ground<Chunk>> w, Layer<Stone, Chunk, Top> stone, out Warmth next) =>
-            next = new(stone.Value.Solid != 0 ? 0 : w.Value.T + (w[-1, 0, 0].T + w[1, 0, 0].T + w[0, 0, -1].T + w[0, 0, 1].T - 4f * w.Value.T) * Rate);
+            next = new(w.Value.T + (w[-1, 0, 0].T + w[1, 0, 0].T + w[0, 0, -1].T + w[0, 0, 1].T - 4f * w.Value.T) * (stone.Value.Solid != 0 ? StoneRate : Rate));
     }
 
     [EcsSystem]
@@ -316,8 +320,8 @@ internal static partial class TileGroundSystems
                 for (int x = 0; x < 16; x += 4)
                 {
                     var here = c.Load128<float>(x);
-                    var cross = here + (c.Load128<float>(x - 1) + c.Load128<float>(x + 1) + c.Load128<float>(x, 0, -1) + c.Load128<float>(x, 0, 1) - 4f * here) * Rate;
-                    Vector128.ConditionalSelect(Vector128.Equals(s.Load128<int>(x), Vector128<int>.Zero).AsSingle(), cross, Vector128<float>.Zero).CopyTo(into.Slice(x));
+                    var rate = Vector128.ConditionalSelect(Vector128.Equals(s.Load128<int>(x), Vector128<int>.Zero).AsSingle(), Vector128.Create(Rate), Vector128.Create(StoneRate));
+                    (here + (c.Load128<float>(x - 1) + c.Load128<float>(x + 1) + c.Load128<float>(x, 0, -1) + c.Load128<float>(x, 0, 1) - 4f * here) * rate).CopyTo(into.Slice(x));
                 }
             }
         }
