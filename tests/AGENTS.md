@@ -33,7 +33,13 @@ A parallel pass hands its chunks to any thread, so per-thread state made on a th
 list) is made by the measuring thread first (`ScratchTests.MakeThisThreadsList`). A 0 B check of a path that could rent from `ArrayPool` also asserts
 `Allocations.PoolRents(run)` is 0: on a quiet machine a rent reuses the pool's array, but under high memory load the
 pool empties at every gen2 collection (which `Allocations.Of` starts with), so the rent allocates (OrderTests,
-NeighborTests; audit-core).
+NeighborTests; audit-core). The settling collection also collects the collectible assemblies other tests left (the
+generator and unload tests), and the runtime drops its cast cache with each: the next cast through it, on any thread,
+allocates the table again at its old size (98,352 B at 4,096 entries). Unoptimized code casts on hot paths (a Debug
+build's `typeof(INoStructuralChanges).IsAssignableFrom(typeof(TJob))`, a JIT-time constant once optimized), so the
+settling ends with a cast of its own (`Allocations.RebuildCastCache`): ViewTests.APassThroughAViewAllocatesNothing paid
+another test's unload in the Debug full suite (`dotnet test`'s default, the gate's) before it did
+(fix-view-alloc-under-load; `AllocationTests.AMeasurementDoesNotPayTheCastCacheAnUnloadedAssemblyDropped`).
 
 `HugePagesTests` goes Inconclusive when the kernel has no free 2 MiB page, so the suite's total of passed tests can
 differ by one between runs: expected.
@@ -43,7 +49,8 @@ differ by one between runs: expected.
 ## Root
 
 ```
-AllocationTests.cs    the 0 B budget of steady-state ticks, structural changes, saves and loads
+AllocationTests.cs    the 0 B budget of steady-state ticks, structural changes, saves and loads; a measurement
+                      not paying the cast cache an unloaded assembly dropped
 BattleServerTests.cs  the world of docs/content/example.mdx as a whole (BattleServer.cs linked from
                       EasyEcs.Benchmark)
 Fixtures.cs           the shared test components; Allocations (Of, Baseline, Steady, WarmUp, PoolRents)
