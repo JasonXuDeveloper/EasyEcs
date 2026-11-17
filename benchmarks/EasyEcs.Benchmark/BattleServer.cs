@@ -149,19 +149,37 @@ public ref struct ZoneSystem                                              // a n
 // #endregion movement
 
 // #region combat
+// What a fight is, written once: the components it reads and writes, and the rules over them. Attack by ref (its
+// cooldown runs on every unit), Health by Mut: only a unit that is hit gets its Health stamped. A system takes a Fighter
+// as it would take the two parameters, and the schedule sees the same reads and writes
+[View]
+public ref struct Fighter
+{
+    public ref Attack Attack;
+    public Mut<Health> Health;
+
+    /// <summary>Whether the unit trades a hit this tick: its cooldown runs, and a swing starts it again.</summary>
+    public bool Swings()
+    {
+        if (--Attack.Cooldown > 0) return false;
+        Attack.Cooldown = Attack.Interval;
+        return true;
+    }
+
+    /// <summary>The fight is abstracted: a unit pays for the hits it trades from its own Health.</summary>
+    public void Trade() => Health.Write().Value -= Attack.Damage;
+}
+
 [EcsSystem]
 public ref struct CombatSystem                                            // damage only: statuses are StatusSystem's
 {
     [ForEach, Without<Dead>]                                                  // a frozen unit's Attack is disabled
-    static void Fight(ref Attack attack, Mut<Health> hp, ref Reduce<Strikes> strikes)
+    static void Fight(Fighter fighter, ref Reduce<Strikes> strikes)
     {
-        if (--attack.Cooldown > 0) return;
-        attack.Cooldown = attack.Interval;
-        // The fight is abstracted: a unit pays for the hits it trades from its own Health. A hit is a change of Health,
-        // so only the units hit this tick are stamped.
-        hp.Write().Value -= attack.Damage;
-        strikes.Value.Count++;                                                // a count in a register, not a singleton
-    }                                                                         // written per row
+        if (!fighter.Swings()) return;
+        fighter.Trade();                                                      // a hit is a change of Health: only the
+        strikes.Value.Count++;                                                // units hit are stamped; a count in a register
+    }
 }
 
 [EcsSystem]
@@ -357,13 +375,14 @@ public ref struct ReplicationSystem                                       // onl
 [EcsSystem, UpdateInGroup<Replication>]
 public ref struct KillFeedSystem                                          // the kills since the last send
 {
-    static void OnUpdate(World world)
+    // DeathSystem's records in the order the units died: when the pass that emitted them has ended, the method runs once
+    // on each and the records are cleared, so a kill goes out once. A real server would write each to its clients'
+    // connections; here the feed is counted
+    [Drain]
+    static void Send(in Kill kill, ref Battle battle)
     {
-        ref var kills = ref world.GetOrAddSingleton<Emitted<Kill>>().Items;  // DeathSystem's records, in row order
-        ref var battle = ref world.Battle;
-        battle.Deaths += kills.Count;
-        battle.Replicated += kills.Count;
-        kills.Clear();                                                        // sent once
+        battle.Deaths++;
+        battle.Replicated++;
     }
 }
 // #endregion replication
@@ -394,6 +413,12 @@ public partial struct ManaPool : ISingletonComponent { [Sum] public int Mana; }
 public partial record struct Weakest(EntityId Player, [MinBy] int Health) : ISingletonComponent;
 
 /// <summary>
+/// The living player closest to a point: the row with the lowest squared distance, its id with it ([MinBy] on a float:
+/// the lowest key wins, the earlier row on a tie).
+/// </summary>
+public partial record struct Nearest(EntityId Player, [MinBy] float Distance) : ISingletonComponent;
+
+/// <summary>
 /// [ForEach] methods outside systems: the generator writes the job and an entry point taking the world and the
 /// caller's values (<c>Reports.Scatter(world, round)</c>), for passes the host runs between ticks. A reduction lands in the
 /// world it is called with.
@@ -412,8 +437,14 @@ public static class Reports
         if (hp.Value < weakest.Value.Health) weakest.Value = new Weakest(player.Id, hp.Value);
     }
 
-    [ForEach(Parallel = true)]                                                // chunks on all cores: no shared state
-    static void HealFully(ref Health hp) => hp.Value = hp.Max;
+    // A search for one point of the map: its coordinates are the caller's values (a Position would be a component
+    // parameter), the result a reduction
+    [ForEach, With<Player>, Without<Dead>]
+    static void FindNearest(Entity player, in Position p, ref Reduce<Nearest> nearest, float x, float y)
+    {
+        float dx = p.X - x, dy = p.Y - y, distance = dx * dx + dy * dy;
+        if (distance < nearest.Value.Distance) nearest.Value = new Nearest(player.Id, distance);
+    }
 
     // NPCs start the round anywhere: drawn for the round the caller names (EntityRandom's static form takes the seed
     // and the tick), per entity, the same on any thread
@@ -425,6 +456,23 @@ public static class Reports
 /// <summary>What the server reports: computed by the runners of <see cref="Reports"/>, outside the tick.</summary>
 public record struct Census(int Players, int Alive, long Health, long Mana, Entity Weakest, int ReadyToAttack);
 // #endregion reports
+
+// #region kinds
+// A unit kind declared as the components it starts with: the generator writes Grunt.Prefab from the initializers
+[Prefab]
+public partial struct Grunt
+{
+    public Position Position;
+    public Velocity Velocity;
+    public Health Health = new(120, 120);
+    public Replica Replica = new(120, 0);
+    public FireReplica FireReplica;
+    public Attack Attack = new(6, 8, 0);
+    public Goal Goal;
+    public Spawn Spawn;
+    public Npc Tag;                                                           // what systems filter on
+}
+// #endregion kinds
 
 /// <summary>
 /// The host of one battle: owns its world on one thread, ticks it, and answers questions about it between ticks.
@@ -447,14 +495,13 @@ public sealed class BattleServer : IDisposable
         QueryFilter.Create().ChangedAny<Health, Burning, Goal>(0);                // tick set per call
     private static readonly QueryFilter FiresOut = QueryFilter.Create().Removed<Burning>(0);
 
-    // Unit kinds: recipes that belong to no world (no query sees them), copied by Instantiate
+    // Unit kinds: recipes that belong to no world (no query sees them), copied by Instantiate. Grunt is declared as a
+    // type below; Hero holds buffers, which a declaration cannot, so it is built here
     private static readonly Prefab Hero = new Prefab().Set(new Position(), new Velocity(1, 0))   // several at once
         .SetHealth(500, 500).SetReplica(500, 0).SetFireReplica(false).SetMana(100, 100).SetAttack(8, 6, 0)     // or one by name
         .SetZone(0).SetKills(0).SetPlayer().Set(new DynamicBuffer<Friend>())
         .SetLoot(new Loot(0));                                    // a starter item: each hero gets a bag of its own
-    private static readonly Prefab Grunt = new Prefab().Set(new Position(), new Velocity())
-        .SetHealth(120, 120).SetReplica(120, 0).SetFireReplica(false).SetAttack(6, 8, 0).SetGoal(0).SetSpawn(default).SetNpc();
-    private static readonly Prefab Brute = new Prefab(Grunt)                                    // a variant: a copy
+    private static readonly Prefab Brute = new Prefab(Grunt.Prefab)                                    // a variant: a copy
         .SetHealth(200, 200).SetReplica(200, 0).SetAttack(9, 12, 0);
     internal static readonly Prefab Shot = new Prefab().SetLifetime(20);  // the rest is given per shot (Instantiate)
     // #endregion prefabs
@@ -515,7 +562,7 @@ public sealed class BattleServer : IDisposable
         }
 
         var npcs = new Entity[units - players.Length];
-        World.Instantiate(Grunt, npcs.AsSpan(0, npcs.Length / 2));              // copies of a recipe, in bulk
+        World.Instantiate(Grunt.Prefab, npcs.AsSpan(0, npcs.Length / 2));              // copies of a recipe, in bulk
         World.Instantiate(Brute, npcs.AsSpan(npcs.Length / 2));
         for (int i = 0; i < npcs.Length; i++)
         {
@@ -524,7 +571,7 @@ public sealed class BattleServer : IDisposable
             npcs[i].Attack.Cooldown = (int)(r >> 40 & 0xFF) % 10;
         }
 
-        World.Reserve(Grunt, npcs.Length / 4);                         // respawn waves never grow the tables
+        World.Reserve(Grunt.Prefab, npcs.Length / 4);                         // respawn waves never grow the tables
         World.Reserve(Brute, npcs.Length / 4);
     }
 
@@ -534,7 +581,7 @@ public sealed class BattleServer : IDisposable
     /// <summary>An NPC at <paramref name="at"/>, a grunt or a brute: <paramref name="roll"/> picks it and its cooldown.</summary>
     public static void SpawnNpc(World world, Position at, ulong roll)
     {
-        var npc = world.Instantiate((roll & 1) == 0 ? Grunt : Brute, at);     // a copy with its position: one row copy
+        var npc = world.Instantiate((roll & 1) == 0 ? Grunt.Prefab : Brute, at);     // a copy with its position: one row copy
         npc.Attack.Cooldown = (int)(roll >> 8 & 0xFF) % 10;                   // then only what differs is written
     }
     // #endregion setup
@@ -689,17 +736,11 @@ public sealed class BattleServer : IDisposable
     // #endregion leave-and-transfer
 
     // #region census
-    /// <summary>The living player closest to <paramref name="at"/>: an ad-hoc query.</summary>
+    /// <summary>The living player closest to <paramref name="at"/>: a runner with the point as its value.</summary>
     public Entity NearestPlayer(Position at)
     {
-        Entity nearest = default;
-        float best = float.MaxValue;
-        foreach (var item in World.Query<Position>(AlivePlayers))            // Position is not tracked: reads are free
-        {
-            float dx = item.Position.X - at.X, dy = item.Position.Y - at.Y, distance = dx * dx + dy * dy;
-            if (distance < best) (best, nearest) = (distance, item.Entity);
-        }
-
+        Reports.FindNearest(World, at.X, at.Y);
+        World.TryGetEntity(World.Nearest.Player, out var nearest);            // none when every player is dead
         return nearest;
     }
 
@@ -723,7 +764,7 @@ public sealed class BattleServer : IDisposable
         World.RemoveAll<Frozen>();
         World.EnableAll<Attack>();
         World.EnableAll<Velocity>();
-        Reports.HealFully(World);                                             // on all cores
+        World.ForEachParallel(static (ref Health hp) => hp.Value = hp.Max);   // used once, so it has no name: on all cores
         Reports.Scatter(World, (ulong)Battle.Tick);
         return cleared;
     }

@@ -914,10 +914,17 @@ numbers are written once about the final code).
          FakeClients alike (`code.md` 5); the template's `SpawnSystem` through `Instantiate(prefab, stackalloc
          Entity[n])`; the demo's Bounce / Fade `SimdMode.Off` (plain `[ForEach]` now that conditional structural
          changes vectorize, or a comment naming the reason) and `Groups.cs`' comment.
-      c. **Benchmark worlds**: BattleServer (`Battle` -> `[Accumulate]`, then GeneratorCorpus's EECS086 exception
-         deleted; `Weakest` -> `[MinBy]`; NearestPlayer / LootValue host loops -> `[ForEach]` + reductions;
-         `PlanningSystem.Plan` per row after WP1; KillFeed; give `[View]`, `[Prefab]`, `[Drain]`, `[Neighbor]` and a
-         lambda pass a place; keep the `// #region` blocks); WorldSimulation; an A/B per rewritten world.
+      c. **Benchmark worlds** (branch exemplar-worlds, 2026-11-17): BattleServer's `Battle` `[Accumulate]` (EECS086 exception
+         already gone from GeneratorCorpus), `Weakest` `[MinBy]` and the kill feed were done before; now `KillFeedSystem`
+         a `[Drain]` method, `Grunt` a `[Prefab]` type (Brute its variant, Hero a builder: a declaration holds no buffer),
+         `CombatSystem` takes a `Fighter` `[View]`, `NearestPlayer` a runner over a `[MinBy] Nearest`, `NewRound`'s
+         heal a lambda pass; regions kept, `kinds` added. Not done: `[Neighbor]` (Reports.See behind a Sightings count: the pair job
+         writes two empty methods, CutoffsSquared and Stamp, over GeneratedTextTests' `empty methods` budget of 1: a generator
+         question), `LootValue` as an `[EntityMethod]` with a `ref int` result (its foreach writes `(bag).AsReadOnlySpan()`,
+         a parentheses line over a budget of 0), and `PlanningSystem.Plan` stays a `Mut<Goal>` with
+         `SetIfChanged` (a `ref Goal` stamps every goal and replicates all of them; the page teaches Mut there, and the
+         unrolled argmin needs a plain ref); WorldSimulation unchanged (no analyzer finding at any EECS id; its `Rng` and
+         totals are the rules the Comparison ports share). A/B in the branch's report.
       d. Unit tests that show usage (not the ones pinning an old form on purpose).
       e. Every code example of the docs (fences en + zh, the guides' full examples, the public skill, README),
          DocCheck at 0; L4 of `locality.md` (ZombieTarget, NearestPlayer, AOI).

@@ -56,18 +56,20 @@ EasyEcs' features to their place in this file.
 | [Components, tags, singletons](/en/docs/guide/basics/entities-and-components) | `Position`, `Health`, `Player`, `Dead`; singletons `Battle`, `Rules`, `Waypoints` |
 | Generated members | `players[i].Position = …`, `SetZone`, `SetFrozen`, `RemoveBurning`, `SetDead`, `IsDead`, `HasAccount`, `TryGetMana`, `World.Battle`, `KillsIndex`, `AccountIndex`; buffers `player.Loot`, `WriteLoot()`; `DisableAttack` / `EnableAttack`; on prefabs `SetHealth`, `SetNpc`, `SetLifetime` |
 | [Systems](/en/docs/guide/basics/systems), filters (`With`, `Without`, `WithAny`) | every system; `AfflictionSystem` counts burning **or** frozen units with `World.Count` |
-| Parallel [`[ForEach]`](/en/docs/guide/performance/threading) | `SteeringSystem`; `Reports.HealFully` and `Reports.Scatter` in `NewRound` |
+| Parallel [`[ForEach]`](/en/docs/guide/performance/threading) | `SteeringSystem`; `Reports.Scatter` and the lambda pass that heals, in `NewRound` |
 | Parallel systems (`WorldOptions.ParallelSystems`), [`DescribeSchedule`](/en/docs/guide/production/diagnostics#schedule) | `PlanningSystem` and `ManaSystem`: disjoint data; `Schedule()` shows it |
 | [Slices](/en/docs/guide/basics/systems#slices) (`[ForEach(Slices = N)]`, `RunCount`) | `PlanningSystem` plans a quarter of the NPCs per run |
 | [`Mut<T>`](/en/docs/guide/changes/change-tracking#set-if-changed) and [`SetIfChanged`](/en/docs/guide/changes/change-tracking#set-if-changed) | `PlanningSystem.Plan` writes a goal only when it changes; `CombatSystem` and `RegenerationSystem` stamp `Health` only on a hit or a heal |
 | Batch methods (`Span<T>`), SIMD | `MovementSystem`; `Reports.SumHealth` |
-| `[ForEach]` runners outside systems | `Reports` |
+| `[ForEach]` runners outside systems, reductions (`[MinBy]`) | `Reports`: `FindNearest` behind `NearestPlayer` |
+| `[View]`, lambda passes | `Fighter` taken by `CombatSystem`; the heal of `NewRound` |
+| `Emit<T>` and `[Drain]` | `DeathSystem` emits a `Kill`, `KillFeedSystem` drains them |
 | `Maybe<T>` | `RegenerationSystem` heals burning players less |
 | [Disabling components](/en/docs/guide/changes/cleanup-and-disable) | a frozen unit's `Attack` and `Velocity`; `NewRound` enables them all in bulk |
 | [Cleanup components](/en/docs/guide/changes/cleanup-and-disable) (`ICleanupComponent`, `Retired`), `[Consume]` | `Spawn`: `Despawn` consumes a dead NPC, retired and kept for `RespawnSystem.Revive` |
 | [Hierarchy](/en/docs/guide/data/hierarchy) (`ChildOf`, `Children`, `Descendants`) | projectiles are children of their player; `Transfer` collects the subtree |
 | [Structural changes during passes](/en/docs/guide/changes/structural-changes) | statuses, deaths, respawns, projectiles spawned and destroyed mid-pass |
-| [Prefabs](/en/docs/guide/basics/prefabs) (`Prefab`, `Instantiate`, `Reserve`), cloning | `Hero`, `Grunt`, `Brute` (a variant of `Grunt`); `Mirror` clones a living unit |
+| [Prefabs](/en/docs/guide/basics/prefabs) (`Prefab`, `Instantiate`, `Reserve`), cloning | `Hero`, `Brute` (a variant of `Grunt`), `Grunt` declared with `[Prefab]`; `Mirror` clones a living unit |
 | [Instantiate with values](/en/docs/guide/basics/prefabs#instantiate-with-values) | `Shot` with its position, velocity and `ChildOf`; `SpawnNpc`; `Join` |
 | [Change tracking](/en/docs/guide/changes/change-tracking) and removal detection | `ReplicationSystem`; `WrittenSinceCheckpoint` |
 | [`ChangedAny`](/en/docs/guide/changes/change-tracking#changed-any) per client, [destroy log](/en/docs/guide/changes/change-tracking#destroy-log) | `CatchUp`: one kept filter, each client's tick; `DestroyedSince` |
@@ -76,7 +78,7 @@ EasyEcs' features to their place in this file.
 | [Ordered index, relations, target policies](/en/docs/guide/data/indexes-and-relations) | `Kills` leaderboard; `Friend` links, dropped when a player leaves |
 | [Unique keys](/en/docs/guide/data/indexes-and-relations#unique-keys) (`[UniqueKey]`, `Get` / `TryGet`) | `Account`: `Join` and `Kick` find a hero by account |
 | System groups, `[UpdateInterval(n, Phase = p)]`, ordering, lifecycle | `Replication`; `ManaSystem`, `RegenerationSystem`; `ClockSystem`; `PlanningSystem.OnCreate` |
-| [Queries](/en/docs/guide/basics/queries), handles and [one-entity methods](/en/docs/guide/basics/queries#run-on-one-entity) | `NearestPlayer`, `Census`, `ShotsLeft`; `Hit` calls the `[EntityMethod]` method `Requests.TakeHit` |
+| [Queries](/en/docs/guide/basics/queries), handles and [one-entity methods](/en/docs/guide/basics/queries#run-on-one-entity) | `Census`, `ShotsLeft`; `Hit` calls the `[EntityMethod]` method `Requests.TakeHit` |
 | [Bulk operations](/en/docs/guide/changes/bulk) | `Instantiate(prefab, span)`, `DestroyAll`, `RemoveAll`, `EnableAll` |
 | [Snapshots](/en/docs/guide/saves/snapshots), [saves and moves](/en/docs/guide/saves/saves) | `Checkpoint` / `Rewind`, `Save` / `Load`, `Transfer` |
 | Introspection, diagnostics, error policy | `Tables`, `Schedule`, `Slowest`, `Failure` |
@@ -131,9 +133,10 @@ Combat is split into damage (`CombatSystem`) and statuses (`StatusSystem`). Free
 `Velocity`: the values are kept, but no query sees them until `Thaw` enables them again, so a frozen unit neither
 attacks, moves nor shoots without any system checking for `Frozen`. `AfflictionSystem` counts burning or frozen
 units without a loop: `Count` reads presence bits 64 rows at a time. `DeathSystem` marks the dead with a tag that
-other systems filter on. `CombatSystem` takes `Health` as a `Mut<Health>`: most units are between two attacks, and
-only the ones that hit get their `Health` stamped, with no lookup of the entity per row; the scheduler sees what the
-system reads and writes instead of a system that reaches components through `Entity`.
+other systems filter on. `CombatSystem` takes a `Fighter`, a `[View]`: the unit's `Attack` and its `Health` as a `Mut<Health>` with the rules over them
+(`Swings`, `Trade`) written once. Most units are between two attacks, and only the ones that hit get their `Health` stamped,
+with no lookup of the entity per row; the scheduler sees what the system reads and writes, as it would for the two
+parameters. `DeathSystem` emits a `Kill` record for every unit that dies (`Emit<Kill>`).
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#combat</include>
 
@@ -160,7 +163,8 @@ component, and `Mut<Health>` stamps only the players it heals, not the ones at f
 
 ## Replication by change tracking [#replication]
 
-`ReplicationSystem` belongs to the `Replication` group, which the host updates every third tick. Each method visits
+`KillFeedSystem` sits beside it: its `[Drain]` method runs once on each `Kill` the deaths emitted, in the order they
+happened, and the records are cleared, so a kill goes out once. `ReplicationSystem` belongs to the `Replication` group, which the host updates every third tick. Each method visits
 only what changed since the system last ran: the healths written (`[Changed<Health>]`), the units set on fire
 (`[Changed<Burning>]`), the fires that went out (`[Removed<Burning>]`, the entities that lost the component and
 still lack it), the goals that changed (`[Changed<Goal>]`: the few `Plan` wrote, not every NPC it visited) and the bags
@@ -189,7 +193,8 @@ Why it pays and what counts as a write: [Change tracking](/en/docs/guide/changes
 
 A static `[ForEach]` method of an ordinary static class is a runner: the generator writes an entry point that takes
 the world and the method's other arguments (`Reports.SumMana(world, ref total)`). The host calls them between ticks.
-`SumHealth` reads whole runs of rows as `Vector<int>` lanes; `HealFully` and `Scatter` run in parallel chunks.
+`SumHealth` and `SumMana` add into reductions, and `Scatter` runs in parallel chunks. `FindNearest` keeps the living player with the lowest
+distance to a point: its `Nearest` result is a `[MinBy]` reduction, and the point is the caller's coordinates.
 `Dice` is a pure function of the tick and the entity, so a roll is the same on any thread.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#reports</include>
@@ -201,11 +206,13 @@ the world and the method's other arguments (`Reports.SumMana(world, ref total)`)
 ### Filters and prefabs [#prefabs]
 
 Filters are built once, in `static readonly` fields; `WrittenPlayers`, `ClientChanges` and `FiresOut` take their tick
-per call with `Since`. The prefabs are recipes that belong to no world, so no query sees them: `Hero` sets its
-components several at once or one by one through the generated writers, `Brute` is a variant, a copy of `Grunt` with
-three values changed, and `Shot` holds only what every shot shares: the rest is given when it is fired.
+per call with `Since`. The prefabs are recipes that belong to no world, so no query sees them: `Grunt` is declared as a type (`[Prefab]`: its fields are the components it starts with, and the generator writes `Grunt.Prefab`),
+`Hero` holds buffers, which a declaration cannot, so it sets its components several at once or one by one through the
+generated writers, `Brute` is a variant, a copy of `Grunt.Prefab` with three values changed, and `Shot` holds only what every shot shares: the rest is given when it is fired.
 
-<include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#prefabs</include>
+<include lang="csharp" meta='tab="Kinds" title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#kinds</include>
+
+<include lang="csharp" meta='tab="Prefabs" title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#prefabs</include>
 
 ### Setting up the world [#setup]
 
@@ -267,14 +274,14 @@ thread with `MoveEntities`: they arrive as new entities, the shots still its chi
 
 ### A census [#census]
 
-An ad-hoc `Query` finds the nearest living player; the census adds up runners and counts.
+`NearestPlayer` runs a runner of `Reports` and reads its result; the census adds up runners and counts.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#census</include>
 
 ### A new round [#new-round]
 
 Bulk calls change every match table by table: projectiles destroyed in one pass, statuses removed, disabled
-components enabled, then two parallel runners heal and scatter.
+components enabled, then a lambda pass heals everyone on all cores (a pass used once needs no name) and a parallel runner scatters the NPCs.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#new-round</include>
 
