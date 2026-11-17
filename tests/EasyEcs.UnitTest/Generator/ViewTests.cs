@@ -348,16 +348,11 @@ public class ViewTests
         world.AddSystem<ViewMovement>();
         world.AddSystem<ViewMovementScalar>();
         world.AddSystem<Poisoning>();
-        world.Update();
-        world.Update();
         var e = world.CreateEntity(new Arena.Health(5), new Arena.Armor(0));
-        e.AsFighter().TakeDamage(0);
-        long before = Allocations.Baseline();
-        for (int i = 0; i < 10; i++) world.Update();
-        long passes = GC.GetAllocatedBytesForCurrentThread() - before;
-        before = Allocations.Baseline();
-        for (int i = 0; i < 100; i++) e.AsFighter().TakeDamage(0);
-        Assert.That((passes, GC.GetAllocatedBytesForCurrentThread() - before), Is.EqualTo((0L, 0L)));
+        // Steady: warmed until nothing compiles, so a Tier0 loop replaced inside the window is not counted as the pass's.
+        long passes = Allocations.Steady(world.Update, 2, 10);
+        long call = Allocations.Steady(() => e.AsFighter().TakeDamage(0), 1, 100);
+        Assert.That((passes, call), Is.EqualTo((0L, 0L)));
     }
 
     private static Entity[] Movers(World world, int count)
