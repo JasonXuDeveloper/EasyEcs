@@ -52,7 +52,7 @@ dotnet run --project samples/Actors
 
 保存分组只有一个系统，覆盖所有种类的 Actor。它的 `[Changed<T>]` 方法选出它上次运行后被写过的行，所以每次运行列出的是上次保存后
 被写过的 Actor，它自己的运行就是标记。保存记录会改写表，遍历期间不允许（[EECS041](/zh/docs/guide/help/analyzer#eecs041)），所以
-系统把 Actor 记进 `Unsaved` 单例，由宿主在 `world.Update<Saving>()` 之后保存。
+方法为每个 Actor 发出一条 `Unsaved` 记录，遍历结束后由 `[Drain]` 方法把每条记录保存一次并清空。
 
 <include lang="csharp" meta='title="Systems/SaveSystems.cs"'>../../../samples/Actors/Systems/SaveSystems.cs</include>
 
@@ -66,7 +66,7 @@ dotnet run --project samples/Actors
 
 ## 程序 [#program]
 
-激活、发消息、更新各个分组、保存，最后重启。存储是一个代替数据库的字典，宿主保存所列 Actor 的代码也放在
+激活、发消息、更新各个分组、保存，最后重启。存储是一个代替数据库的字典，放在
 [`Host/Storage.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Actors/Host/Storage.cs) 里：这是周边代码，
 不是本课重点。
 

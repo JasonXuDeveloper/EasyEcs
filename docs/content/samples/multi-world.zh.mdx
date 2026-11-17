@@ -54,7 +54,8 @@ dotnet run -c Release --project samples/MultiWorld -- --updates 50
 
 `Border.Exchange` 在所有区都等待时运行，所以运行它的那一个线程可以碰每个 World；它是宿主代码，因为系统属于一个 World，
 而边界属于两个。它先丢掉上次的幽灵（`DestroyAll<Ghost>`），再用 [`MoveEntities`](/zh/docs/guide/saves/migration-and-unload#move-entities)
-把越过边界的单位迁到它所在的区（所有组件一起走），最后把离边界在视野以内的单位作为幽灵复制进相邻的区。每次交换的幽灵都是新实体：
+把越过边界的单位迁到它所在的区（所有组件一起走），最后用 [`CopyEntities<Ghost>`](/zh/docs/reference/world#copyentities) 把离边界在视野以内的单位作为幽灵复制进相邻的区：
+只带邻居要读的 `Position`，表里相邻的行每列一次块复制。每次交换的幽灵都是新实体：
 可以记住幽灵的位置，不要记住它的 id。
 
 <include lang="csharp" meta='title="Border.cs"'>../../../samples/MultiWorld/Border.cs</include>

@@ -3725,8 +3725,31 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
   result); why a value that is not +0 on blank cells keeps the hand-written form (the step leaves skipped rows zero,
   the cell step writes them with the method's blank value; -0 from a negative factor included).
 - reference: regenerate after the descriptor's text change (EECS103's description names the stepped walk).
-- Not built (owner-review.md "A ground cell sampling its tile's layer"): a ground cell method that also reads a layer
-  of the 3D tile's cells (`GroundHeatSystem`'s rocks): cells of two shapes in one method.
+- Built since: a ground cell reading a layer of its tile (feat-ground-layer below).
+
+## feat-ground-layer (owner L34: a ground cell reading one layer of its tile)
+
+New public API: `ILayer` (a layer named by a type, `static int Index`) and `Layer<TCell, TTile, TLayer>` (a cell
+method's parameter beside a `Cell<TCell, Ground<TTile>>`: the cell of layer `TLayer.Index` of the tall tile under the
+ground's cell, `Value` and `[dx, 0, dz]` within the halo). The pass exchanges that layer alone (the hidden
+`Tile.ExchangeLayer`, no layers around it) and reads it as one more stream of the row's vector loop. EECS115 names the
+layer it cannot read (another tile than the ground's, past the tile's layers, no ground cell).
+
+- guide/performance/grids.mdx + .zh (the ground section, after `Cell<Scent, Ground<Chunk>>`): reading a layer of the
+  chunk under the ground (`GroundHeatSystem`: heat spreading except where the top layer is rock) as `You write` (the
+  cell method with `Layer<Rock, RockChunk, Top>`, `struct Top : ILayer`) / `The generator writes` (the layer's
+  exchange alone, its row at (Index, z), a stream per offset); dy is 0 (one layer; a stencil across layers is a cell of
+  the tall tile); a layer of the ground's own buffer is EECS073, and so are two layers of the same cells (one texture per thread); pitfall: byte cells beside float cells keep the
+  rows cell by cell (lanes four times as wide: EECS055 says to widen to 2-byte lanes); `<BenchTable>` of
+  TileGroundLayerBenchmark (Layer_Cell / Layer_Hand / Layer_Off) once synced.
+- guide/help/analyzer.mdx + .zh, EECS115: the three layer reasons with an example each.
+- api.mdx + .zh: complexity rows for `Layer<TCell, TTile, TLayer>` (Value, the indexer: O(1)); glossary: no new term
+  (layer, ground exist); reference regenerated (layer.zh, ilayer.zh entries exist in tools/docs/ApiDocs/zh).
+- skills/easyecs/SKILL.md: a ground cell reading its chunk's layer takes `Layer<,,>`, never a `Tile<,>` read at
+  `[x, layer, z]` per cell.
+- decisions.mdx + .zh: L34's record (the layer a type with a static Index, read like a cell; not chosen: `[Layer(3)]`
+  on a `Cell<,>` parameter, a `.Layer(n)` call), with the exchange of one layer and the numbers.
+- changelog (coming version, `### New`): ground cells read a layer of their tile; README "What's new".
 
 ## feat-lane1-core (backlog Lane 1: C11-C19, the rerun)
 
@@ -3872,3 +3895,25 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
       one `Step`: it is one `Walk` now (its loop, the uniforms broadcast before it).
 - [ ] **The vector-loop guide page**: what makes a job flat gains "a singleton's value or a parameter among the
       arithmetic".
+
+## chunk-floor-by-bytes (owner, L31, L32: a merging pass's chunks from its rows and its bytes per row)
+
+- [ ] **Decision record** (extends D125, `decisions.mdx` + `.zh.mdx`): a pass that merges per chunk (`Reduce<T>`,
+      `Emit<T>`, a merging pair pass) cuts `max(floor, NextPowerOfTwo(rows) / 64)` rows a chunk, the floor
+      `NextPowerOfTwo(MinChunkBytes / bytesPerRow)` and at least 64 (one presence word); whole 4,096-row blocks when it
+      stamps; at most `MaxChunkSize`. Bytes per row: the generated job's hidden `RowBytes` (its query's components, its
+      `Maybe<T>` ones, the entity's id when it takes the entity; a hand-written job's default is the sizes of its type
+      arguments); a pair pass's is a neighbor's point and `[Neighbor]` components times the neighbors a row meets
+      (`PairRun.NeighborsPerRow`: the run's lists, else its clusters' ranges). Never the core count or a measured cost:
+      the same bits on every thread count and run. Considered: K = 64 with a 64-row floor (4-11x slower on small cheap
+      merging passes, d1ca87c7), the per-kind floors (64 rows for pairs, 1,024 for `[ForEach]`, 764dcd7a). The numbers:
+      the A/B of the branch (backlog entry). Note what the pair floor still depends on: the neighbors of a cluster's
+      ranges grow with the cluster's size (`Vector<float>.Count`), so the floor of a pair pass without lists can differ
+      between an AVX-512 and an ARM64 machine (never between thread counts or runs).
+      The numbers: 3-repeat interleaved --dev screens at 32 KB (49 chunks at 100,000 Spots) against base 7e9e5e40: level (not slower beyond both error bars in 2 of 3 repeats; EmitParallel 10,000 11.2-11.9 us against 13.7-14.9, 100,000 48.9-68.5 us against 49.0-65.2, LowestVector 1,000 to 1,000,000 rows level, 0 B everywhere), so `MinChunkBytes` stays 32 KB and `MergedChunks` 64; 32 KB with `MergedChunks` = 16 and 64 KB were also level.
+- [ ] **Stale text** (public XML docs, with their zh entries in `tools/docs/ApiDocs/zh/`): `Reduce.cs` ("16 chunks of
+      1,024 to 16,384 rows"), `ForEachAttributes.cs` (`ChunkSize`: "16 chunks"), the `ForEachParallel` family's summary in
+      `ArityGenerator.cs` ("16 for a job that merges"); the pages `reference/reduce.mdx`, `reference/foreachattribute.mdx`
+      (regenerated), `guide/performance/threading` where it says how a reducing pass is cut, D125's text.
+- [ ] **Changelog (Performance or Fixes, by the numbers):** a parallel `Reduce<T>` / `Emit<T>` pass cuts its chunks
+      from its rows and the bytes each row reads; a float result is still the same at any thread count.

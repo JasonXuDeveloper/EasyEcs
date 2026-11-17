@@ -7,20 +7,20 @@ namespace EasyEcs.Demo;
 [EcsSystem]
 public ref struct BounceSystem
 {
-    [ForEach(SimdMode = SimdMode.Off)]
+    [ForEach]
     static void Bounce(Entity spark, ref Position p, ref Velocity v, in Arena arena)
     {
         bool hit = false;
         if (p.X < 0 || p.X > arena.Width)
         {
-            p.X = Math.Clamp(p.X, 0, arena.Width);
+            p.X = Math.Min(Math.Max(p.X, 0), arena.Width);   // Clamp throws when a bound is inverted: no vector loop
             v.X = -v.X;
             hit = true;
         }
 
         if (p.Y < 0 || p.Y > arena.Height)
         {
-            p.Y = Math.Clamp(p.Y, 0, arena.Height);
+            p.Y = Math.Min(Math.Max(p.Y, 0), arena.Height);
             v.Y = -v.Y;
             hit = true;
         }

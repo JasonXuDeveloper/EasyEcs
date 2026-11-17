@@ -1,7 +1,8 @@
 namespace HotReload.Host;
 
 /// <summary>
-/// Plumbing, not ECS: collects the result of each check and prints a line per check.
+/// Plumbing, not ECS: prints each check as it is made and remembers whether all of them passed,
+/// so the process can exit with 1 when one fails.
 /// </summary>
 public sealed class Checks
 {

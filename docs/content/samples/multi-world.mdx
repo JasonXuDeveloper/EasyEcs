@@ -64,7 +64,9 @@ after every update. Between two exchanges only its thread touches the world
 since a system belongs to one world and the border to two. It throws away the last ghosts (`DestroyAll<Ghost>`),
 moves each unit that crossed into the zone it stands in with
 [`MoveEntities`](/en/docs/guide/saves/migration-and-unload#move-entities) (every component goes with it), then copies each
-unit within sight of a border into the neighbor zone as a ghost. The ghosts are new entities at every exchange: hold
+unit within sight of a border into the neighbor zone as a ghost with
+[`CopyEntities<Ghost>`](/en/docs/reference/world#copyentities): only the `Position` the neighbor reads, one block copy
+per column for rows that follow each other. The ghosts are new entities at every exchange: hold
 on to a ghost's position, never to its id.
 
 <include lang="csharp" meta='title="Border.cs"'>../../../samples/MultiWorld/Border.cs</include>

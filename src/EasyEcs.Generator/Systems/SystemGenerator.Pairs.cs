@@ -243,7 +243,7 @@ public sealed partial class SystemGenerator
             loop.Append("        }\n");
             foreach (var line in simd.MaskedStores.Split('\n')) if (line.Length > 0) loop.Append("    ").Append(line).Append('\n');
             loop.Append("}\n");
-            string text = loop.ToString().Replace(Kernel.SquareRoot, vector + ".SquareRoot(").Replace(Kernel.V, vector).Replace(Kernel.LanesForm, "");
+            string text = Kernel.Selects(loop.ToString()).Replace(Kernel.SquareRoot, vector + ".SquareRoot(").Replace(Kernel.V, vector).Replace(Kernel.LanesForm, "");
             sb.Append("\n        private void Vectors(in global::EasyEcs.PairRun run)\n        {\n");
             foreach (var line in text.Split('\n')) sb.Append(line.Length > 0 ? "            " + line : "").Append('\n');
             sb.Length--; // the split's last empty line
@@ -254,6 +254,10 @@ public sealed partial class SystemGenerator
         {
             // Each chunk's partial results, combined in chunk order (TSelf is this job: the pass passes its own TJob).
             sb.Append("\n        static bool global::EasyEcs.IPairJob.Merges => true;\n\n");
+            // A neighbor's columns read per pair: its point, its [Neighbor] components (an Entity's id: 8 bytes).
+            var read = method.Parameters.Where(p => p.Kind == Symbols.ParamKind.Neighbor).Select(p => p.Type).Prepend(pair.Position)
+                .Distinct().Select(t => t == "global::EasyEcs.Entity" ? "8" : $"{unsafeType}.SizeOf<{t}>()");
+            sb.Append($"        static int global::EasyEcs.IPairJob.RowBytes => {string.Join(" + ", read)};\n\n");
             sb.Append("        static void global::EasyEcs.IPairJob.Merge<TSelf>(ref TSelf job, in TSelf chunk)\n        {\n");
             sb.Append($"            ref var into = ref {unsafeType}.As<TSelf, {method.Name}Job{number}>(ref job);\n");
             sb.Append($"            ref var part = ref {unsafeType}.As<TSelf, {method.Name}Job{number}>(ref {unsafeType}.AsRef(in chunk));\n");

@@ -48,6 +48,13 @@ public struct PairTally : ISingletonComponent, IReduction<PairTally>
     }
 }
 
+/// <summary>The squared distances of the pairs within range: a float sum, rounded per chunk.</summary>
+[Sum]
+public partial struct PairSpread : ISingletonComponent
+{
+    public float Distance;
+}
+
 /// <summary>The pairs met over every pass: a total.</summary>
 [Accumulate, Sum]
 public partial struct PairTotal : ISingletonComponent
@@ -258,6 +265,14 @@ public static class Neighbors
         float dx = p.X - q.X, dy = p.Y - q.Y;
         if (dx * dx + dy * dy >= Range * Range) return;
         tally.Value.Add((long)self.Id.Index << 32 | (uint)other.Id.Index);
+    }
+
+    /// <summary>The squared distances of the pairs within range, a float result of the pass on several threads.</summary>
+    [ForEach(Parallel = true)]
+    public static void Spread(in PairSpot p, [Neighbor] in PairSpot q, ref Reduce<PairSpread> spread)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d = dx * dx + dy * dy;
+        if (d < Range * Range) spread.Value.Distance += d;
     }
 
     /// <summary>The pairs within range added to a total ([Accumulate]) on several threads.</summary>
@@ -1030,6 +1045,34 @@ public class NeighborTests
             Assert.That(world.GetSingleton<PairTally>(), Is.EqualTo(serial), "the chunks combined in order: the first and the last pair too");
             foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + 0.2f, item.Component1.Y);
             world.Update();
+        }
+    }
+
+    /// <summary>
+    /// A float result of a parallel pair pass is the same bits at 1, 2 and 8 threads, pass after pass as the rows move:
+    /// its chunks follow the rows and the neighbors a row meets (World.MergedChunkRows), never the threads. A crowd small
+    /// enough for the chunk floor to decide, and one cut by the row count.
+    /// </summary>
+    [TestCase(3000, 30f)]
+    [TestCase(40000, 90f)]
+    public void AFloatResultOfAPairPassDoesNotDependOnTheThreads(int count, float extent)
+    {
+        uint[] expected = null;
+        foreach (int threads in new[] { 1, 2, 8 })
+        {
+            using var world = Crowd(count, extent, count, tables: true, threads: threads);
+            var bits = new uint[4];
+            for (int pass = 0; pass < bits.Length; pass++)
+            {
+                Neighbors.Spread(world); // replaces the singleton: no [Accumulate]
+                bits[pass] = BitConverter.SingleToUInt32Bits(world.GetSingleton<PairSpread>().Distance);
+                foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + 0.2f, item.Component1.Y);
+                world.Update();
+            }
+
+            Assert.That(bits[0], Is.Not.Zero, "pairs within range");
+            expected ??= bits;
+            Assert.That(bits, Is.EqualTo(expected), $"{threads} threads");
         }
     }
 

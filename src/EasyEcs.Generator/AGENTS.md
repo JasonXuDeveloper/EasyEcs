@@ -118,7 +118,9 @@ Analyzer/EasyEcsAnalyzer.Records.cs      EECS092 (compilation end): an Emit<T> w
 Analyzer/EasyEcsAnalyzer.Pairs.cs        EECS105-107: a pair method that cannot run per pair (Error), one whose cutoff test the
                                          generator cannot read (every pair runs), a neighbor search written by hand (a Warning
                                          with PairRewrite's fix when mechanical, else Info: the grid's upkeep goes with it)
-Analyzer/EasyEcsAnalyzer.Tiles.cs        EECS115-117, EECS120-121: a tile step the generator cannot write (Symbols.StepProblem, Write on a tile
+Analyzer/EasyEcsAnalyzer.Tiles.cs        EECS115-117, EECS120-121: a tile step the generator cannot write (Symbols.StepProblem, with
+                                         Symbols.LayerProblem: a Layer of another tile than the ground's, past its layers, or
+                                         without a ground cell; Write on a tile
                                          taken by value, Sweep read on one, ColdStart outside a [GaussSeidel] step's ref tile: Error), a second buffer and its plain commit written by hand where the
                                          tile could step itself (compilation end, Warning; StepRewrite: the step method's rewrite
                                          to a ref tile writing Write(row), the fix's properties), a Min / Max relaxation stepped by Jacobi
@@ -234,7 +236,7 @@ Kernel/Kernel.cs    a per-entity [ForEach] method as a Vector<T> loop (enums as 
                     their loads dropped (Unloaded, which element loops and cells use in the cache too), their
                     stores StreamingStores.Store);
                     Kernel/Kernel.Cells.cs: a cell method's body as an element loop over a row (CellFormOf: each
-                    constant offset of each input a stream, each out cell a written stream, X the index's
+                    constant offset of each input (its cells, then its layers: Symbols.CellInputs) a stream, each out cell a written stream, X the index's
                     lanes, Y / Z and the other parameters values; or the reason EECS055 / EECS056 report);
                     Kernel/Kernel.Blank.cs: the proof that lets a cell pass skip a row (ConstantOnBlank: a constant
                     evaluator over the bound, inlined body, the driving cells 0 and the rest unknown; the out
@@ -339,7 +341,9 @@ Systems/SystemGenerator.cs            [ForEach] -> struct jobs (per entity or pe
                                       RunMasked, the rows after it the method's;
                                       every other shape keeps EmitLoops' loops per width;
                                       Systems/SystemGenerator.Cells.cs: a cell method's pass (Cell<TCell, TTile> inputs of one tile, the
-                                      first driving the walk, the others sampled, out cells and ref Reduce<T> results per tile;
+                                      first driving the walk, the others sampled; Layer<TCell, TTile, TLayer> inputs after them, the
+                                      tall tile's layer under a ground's row: its row at (TLayer.Index, z), its exchange that layer
+                                      alone, ExchangeLayer; out cells and ref Reduce<T> results per tile;
                                       an out of the driving cell's own type steps its tile: ref Tile, each row written through
                                       Write(row), the second buffer swapped in, no Mut and no commit: Symbols.IsCellStep);
                                       the job handing it a Tile per input and a Mut per out buffer and result) in place of its accessor: the halo (a NoInlining {Name}_{index}__Exchange{k} per input, so the inliner's budget is left for the rows; a cross stencil of one 2D cell type whose rows are whole vectors reads it in place instead, behind TilePlane.Fits: Tile.Plane, rows through Row / RowBeside, shifted loads through PlaneLoads), the shape's constants and offsets read once, the walk as plain loops over the words of rows (TileRows.RowsOf), bounded with the exchange to the layers of an 'in T' ITileLayers component where the pass may skip rows (Symbols.TileLayers; else EECS123), a stepped tile's buffer checked once (JacobiNext),

@@ -816,6 +816,27 @@ public class GeneratorTests
             .And.Contain("rows = __width"), generated);
     }
 
+    // A layer under a ground cell (Layer<TCell, TTile, TLayer>): its tile's exchange copies that layer alone, its row is the
+    // tall tile's at (TLayer.Index, z), its offsets streams of the ground's vector loop, and the cells the loop leaves get a
+    // Layer built over the row's cell.
+    [Test]
+    public void ALayerIsOneLayersExchangeAndAStreamOfTheGroundsRows()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, AnalyzerTests.TileParts,
+            "public record struct T3(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITileShape.Height => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }"
+            + " public struct L3 : ILayer { public static int Index => 3; }",
+            "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<float, Ground<T3>> c, Layer<int, T3, L3> r, out float next) => next = r.Value != 0 ? 0 : c[-1, 0, 0] + r[1, 0, 0]; }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        string text = generated + Unaliased(generated);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(text, Does.Contain("tile.ExchangeLayer(global::EasyEcs.Layer<int, ").And.Contain(">.Index);")
+            .And.Contain(".At(new global::EasyEcs.TileRow<").And.Contain(">.Index, __row.Z))[0, 0, 0]")
+            .And.Contain(">.Offset(1, 0, 0);").And.Contain("in __Unsafe.Add(ref __c1, __x))")
+            .And.Contain("cells of 'c', 'r': vector (").And.Contain("offsets r(0,0,0) c(-1,0,0) r(1,0,0)")
+            .And.Not.Contain("ExchangeHalo(0, global::EasyEcs.Layer"), generated);
+    }
+
     // A result per tile keeps its lanes across the tile's rows: each width's accumulators start before the walk and fold
     // once after it (a row of a voxel chunk is one vector, and a fold per row cost more than the row's arithmetic).
     [Test]
@@ -877,12 +898,12 @@ public class GeneratorTests
         "var __m1 = __Vec.As<float, int>(__Vec.LessThan<float>(__c2_0, __Vec.Create<float>(0f)));",
         "var __t4 = __Vec.As<float, int>(__Vec.GreaterThan<float>(__c1_0, __Vec.Create<float>(1f)));",
         "var __m5 = __Vec.As<float, int>(__Vec.GreaterThan<float>(__c2_0, __Vec.Create<float>(10f))) & __t4;",
-        "__c1_0 = __Vec.ConditionalSelect(__Vec.As<int, float>(__m1), __Vec.Create<float>(0f), __Vec.ConditionalSelect(__Vec.As<int, float>(__m5), __Vec.Create<float>(1f), __c1_0));")]
+        "__c1_0 = __Vec.ConditionalSelect(__Vec.As<int, float>(__m1), __Vec.Create<float>(0f), __Vec.ConditionalSelect(__Vec.As<int, float>(__m5), __Vec.Create<float>(1f), __c1_0));")] // two selects: the blend (Kernel.Selects)
     [TestCase("[ForEach] static void A(ref P p, in Q q) { switch (q.V) { default: p.V++; break; case 1: case 2: p.V = 0; break; } }",
         "var __m1 = __Vec.Equals<int>(__c2_0, __Vec.Create<int>(1));",
         "var __m3 = __Vec.Equals<int>(__c2_0, __Vec.Create<int>(2));",
         "var __m4 = __m1 | __m3;",
-        "__c1_0 = __Vec.ConditionalSelect(~__m4, __c1_0 + __Vec_int.One, __Vec.Create<int>(0));",  // the default first, both sections one write
+        "__c1_0 = __Interleaved.Select(~__m4, __c1_0 + __Vec_int.One, __Vec.Create<int>(0));",  // the default first, both sections one write; the loop's one select
         "__c1_0 = __Vec.ConditionalSelect(__pass, __Vec.ConditionalSelect(~__m4, __c1_0 + __Vec_int.One, __u5), __c1_0);")] // a masked word selects by __pass once
     public void ASwitchIsMasksOfItsArms(string method, params string[] lines)
     {
@@ -906,7 +927,7 @@ public class GeneratorTests
         Assert.That(generated, Does.Contain("var __id1 = __Count.Identity;")
             .And.Contain("var __a1_0 = __Vec.Create<int>(__id1.N);")
             .And.Contain("var __a1_1 = __Vec.Create<int>(__id1.Low);")
-            .And.Contain("__a1_0 = __Vec.ConditionalSelect(__m0, __a1_0 + __c1_0, __a1_0);")
+            .And.Contain("__a1_0 = __Interleaved.Select(__m0, __a1_0 + __c1_0, __a1_0);")
             .And.Contain("__a1_1 = __Vec.Min(__a1_1, __c1_0);")
             .And.Contain("l1.Value.N = unchecked((int)(l1.Value.N + __Vec.Sum(__a1_0)));")
             .And.Contain("for (int __j = 0; __j < __Vec_int.Count; __j++) l1.Value.Low = __Math.Min(l1.Value.Low, __a1_1[__j]);")
@@ -1238,7 +1259,6 @@ public class GeneratorTests
     // tracked, temporary one). The test fails when one stops reporting, so the list cannot go stale.
     static readonly (string File, string Id, string Item)[] KnownSampleFindings =
     [
-        ("samples/Actors/Host/Storage.cs", "EECS109", "A2: Storage.Save as a [Drain] method, or EECS109 Info with its reason"),
         ("samples/VoxelServer/Systems/Replication.cs", "EECS109", "A2: SendPackets as a [Drain] method"),
         ("samples/VoxelServer/Systems/Replication.cs", "EECS086", "A2: the exemplar pass's [Accumulate] totals"),
         ("samples/VoxelServer/Systems/Zombies.cs", "EECS107", "A2's exemplar pass: Pick as a pair method"),

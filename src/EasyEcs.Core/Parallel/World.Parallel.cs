@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Numerics;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -44,16 +45,16 @@ public sealed partial class World
     /// chunks. A pass that <paramref name="stamps"/> a tracked component gets a multiple of 4,096 rows unless its chunks
     /// are smaller: each block of 4,096 rows shares one change-tick summary per column (<see cref="Archetype.Blocks"/>),
     /// which chunks splitting a block share through <see cref="Archetype.OpenBlocks{T}"/>. A pass that
-    /// <paramref name="merges"/> partial results per chunk cuts <see cref="MergedChunks"/> chunks whatever the threads and
-    /// the cost, so its result does not depend on them.
+    /// <paramref name="merges"/> partial results per chunk is cut by its row count and <paramref name="rowBytes"/> alone
+    /// (<see cref="MergedChunkRows"/>), whatever the threads and the cost, so its result does not depend on them.
     /// </summary>
-    internal int ChunkRows(ParallelWork work, Archetype[] tables, bool stamps, bool merges, int slices = 0, int chunkSize = 0)
+    internal int ChunkRows(ParallelWork work, Archetype[] tables, bool stamps, bool merges, int rowBytes, int slices = 0, int chunkSize = 0)
     {
         if (chunkSize > 0) return ChunkRows(work, 0, chunkSize);
         long rows = 0;
         for (int i = 0; i < tables.Length; i++) rows += tables[i].Count;
         if (slices > 1) rows /= slices; // a sliced pass visits about 1 / slices of them
-        if (merges) return MergedChunkRows(work, rows, stamps);
+        if (merges) return MergedChunkRows(work, rows, stamps, rowBytes);
         int size = ChunkRows(work, rows, 0);
         if (!stamps) return size;
         if (work.Measured) return size >= 4096 ? (size + 4095) & ~4095 : size; // small chunks of heavy rows open their blocks
@@ -62,29 +63,41 @@ public sealed partial class World
     }
 
     /// <summary>
-    /// The chunks a pass that merges per chunk (a <see cref="Reduce{T}"/>, an <see cref="Emit{T}"/>) cuts its rows into
-    /// when it does not set <c>ChunkSize</c>: a constant, so its chunk boundaries follow the row count alone and a
-    /// floating-point result is the same bits at any <see cref="WorldOptions.MaxDegreeOfParallelism"/> (the threads only
-    /// share the chunks out). Four per thread at four threads; tables of 262,144 rows or more get chunks of
-    /// <see cref="MaxChunkSize"/> rows, more than enough for any thread count.
+    /// The chunk count a pass that merges per chunk (a <see cref="Reduce{T}"/>, an <see cref="Emit{T}"/>) aims at when it
+    /// does not set <c>ChunkSize</c>: a constant, so its chunk boundaries depend on neither the core count nor the measured
+    /// cost of a run, and a floating-point result combines the same partial results in the same order: the same bits on
+    /// every machine, at every thread count and on every run (the threads only share the chunks out). Owner, L31.
     /// </summary>
-    private const int MergedChunks = 16;
+    private const int MergedChunks = 64;
 
     /// <summary>
-    /// Rows per chunk of a pass of <paramref name="rows"/> rows that merges per chunk: a share of <see cref="MergedChunks"/>,
-    /// cut by count, never by cost (nothing for <paramref name="work"/> to learn), so its result and its chunk count,
-    /// which sizes the copies it keeps, never follow how long a run took. Whole 4,096-row blocks when it
-    /// <paramref name="stamps"/> change ticks; else at least <paramref name="least"/> rows (1,024 for a row pass: light
-    /// rows; a pair pass passes 64, one word: its rows each meet a cluster's neighbors, and a crowd of 1,000 cut into
-    /// one chunk of 1,024 ran 2.8 times slower than cut by its cost, PairsBenchmark.GeneratedParallelResult).
+    /// The bytes of the columns a merging pass reads and writes that one of its chunks holds at least (owner, L32): below
+    /// it a chunk's partial result, its claim and its merge cost more than its rows (a pass of cheap rows cut into 64
+    /// chunks of one word ran 4 to 11 times slower). Bytes, not rows, so light rows get long chunks and heavy rows (a pair
+    /// pass's rows each meet a cluster's neighbors) short ones; from the data alone, never the machine. Measured at 16, 32
+    /// and 64 KB against the per-kind floors (ReduceBenchmark, EmitBenchmark, PairsBenchmark.GeneratedParallelResult).
     /// </summary>
-    internal static int MergedChunkRows(ParallelWork work, long rows, bool stamps, int least = 1024)
+    internal const int MinChunkBytes = 32 * 1024;
+
+    /// <summary>
+    /// Rows per chunk of a pass of <paramref name="rows"/> rows that merges per chunk, <paramref name="rowBytes"/> bytes of
+    /// its columns a row: <c>max(floor, NextPowerOfTwo(rows) / <see cref="MergedChunks"/>)</c>, the floor
+    /// <c>NextPowerOfTwo(<see cref="MinChunkBytes"/> / rowBytes)</c> and never below 64 (one presence word). Cut by count,
+    /// never by cost (nothing for <paramref name="work"/> to learn), so its result and its chunk count, which sizes the
+    /// copies it keeps, never follow how long a run took or how many threads share it. The powers of two keep the
+    /// boundaries still while the rows grow a little. A pass that <paramref name="stamps"/> change ticks gets whole
+    /// 4,096-row blocks. At most <see cref="MaxChunkSize"/>. A pair pass passes its rows (clusters times the cluster's size)
+    /// and the bytes a row reads of its neighbors.
+    /// </summary>
+    internal static int MergedChunkRows(ParallelWork work, long rows, bool stamps, long rowBytes)
     {
         work.Items = 0;
-        long share = rows / MergedChunks;
+        long floor = rowBytes > 0 ? MinChunkBytes / rowBytes : 0; // 0: unknown (a hand-written pair job), one word
+        floor = floor <= 64 ? 64 : (long)BitOperations.RoundUpToPowerOf2((ulong)floor);
+        long size = Math.Max(floor, (long)(BitOperations.RoundUpToPowerOf2((ulong)Math.Max(rows, 1L)) / MergedChunks));
         return stamps
-            ? (int)Math.Clamp((share + 4095) & ~4095L, 4096, MaxChunkSize)
-            : (int)Math.Clamp((share + 63) & ~63L, least, MaxChunkSize);
+            ? (int)Math.Clamp((size + 4095) & ~4095L, 4096, MaxChunkSize)
+            : (int)Math.Min(size, MaxChunkSize);
     }
 
     /// <summary>

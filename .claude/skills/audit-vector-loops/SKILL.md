@@ -33,6 +33,18 @@ it cannot is recorded and the form falls back to rows there:
   is silently ignored, so read the ISA column of every result before trusting it. `DOTNET_EnableAVX=0` is not a
   NEON proxy for loops that need a deinterleave (pairs of multi-field components): x86's 128-bit path runs them one
   pair at a time where NEON's LD2-4 would not, so their ARM64 verdict waits for the M4.
+- **Selects at 128 bits on x64 without AVX** (package E, docs/plans/designs/lane-kernel.md): SSE4.1's BLENDVPS /
+  PBLENDVB read their mask from XMM0. Where the register allocator kept a value the loop carries in XMM0 (a constant
+  hoisted out of the runner's loops, an accumulator), it stores and reloads it around the blend in every iteration:
+  a store-to-load chain carried by the loop, which bounds a short loop (Tally, Cool, Brighten, Step 1.4-2.3 times
+  slower under `DOTNET_EnableAVX=0`). The xor form `f ^ ((t ^ f) & m)` (`Interleaved.Select`) has no fixed register
+  but costs two uops more per select, three cycles of latency where the blend takes one, and temporaries that stop
+  the JIT hoisting the loop's constants (Gate: every constant loaded in each iteration). So `Kernel.Selects`
+  (applied before `Kernel.V` is replaced, on one loop's text) writes `Interleaved.Select` only in a loop with one
+  select; a loop with several keeps ConditionalSelect (Gate, Grade, Clamp and a masked Step ran 8-24 % slower in the
+  xor form). With AVX and on ARM64 `Interleaved.Select` is ConditionalSelect, the same bits. A new emission site of
+  a Vector<T> / Vector128 loop calls `Kernel.Selects`; the Vector512 text keeps ConditionalSelect (mask registers).
+  Check an SSE-only listing for `movaps [rbp-..], xmm0` inside a loop body, and for constants loaded in it.
 - **Compaction-shaped loops** (a mask to a list of rows or values): store whole vectors while the destination has
   room for one, then the last selected elements one write per set bit. A step that branches on its part of the mask,
   or a variable-length partial store per step, kills the 128-bit and AVX2 forms. Sparse words (12 or fewer set bits)
@@ -92,7 +104,13 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   the order the pass marked them, inside a pass of their own, so every table keeps the method's row order (later
   passes emit in the scalar method's order, ids are freed in its order: D122). `Emit<T>` records of a lane or the
   entity's id are appended compacted (`Lanes.Compact`). Every row takes the vector form (the last rows through
-  `Interleaved.LoadTail`), and hardware without the loop's vectors runs the method's own job. One change of one
+  `Interleaved.LoadTail`), and hardware without the loop's vectors runs the method's own job (`Job{i}Rows`), which
+  makes the changes row by row: it must not carry `INoStructuralChanges`, or its frozen pass throws at the first
+  change. Whether a body changes structure is read by name where the generator cannot bind a generated writer
+  (another generator's output: `Symbols.IsStable` for methods, `LambdaPass.IsStable` through
+  `Symbols.UnboundEntityWriter` for lambda passes); a lambda pass that missed it passed every test with vectors and
+  threw under `DOTNET_EnableHWIntrinsic=0` (fix-no-simd-structural), so a structural form is proven there too, and by a
+  twin that stays scalar on any hardware (`ALambdaPassChangingStructureRowByRowRunsUnfrozen`). One change of one
   uniform value per method; a method may change a component it takes only when nothing uses that parameter after the
   change (`Kernel.UsedAfter`: a later reference in the body, or any reference in a loop holding the change; a Maybe of
   it is refused), since the method sees the change at once and a vector loop after the pass; a method that changes structure has

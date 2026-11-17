@@ -1,0 +1,14 @@
+<doc>
+  <member name="T:EasyEcs.ILayer" source="6718d2bc856c">
+    <summary>
+      高瓦片的一层，用一个类型来命名：<see cref="T:EasyEcs.Layer`3" /> 的类型参数，这样地面格子读的那一层是生成器和 JIT
+      都看得到的常量。
+      <code>
+      public struct Top : ILayer { public static int Index =&gt; 3; }
+      </code>
+    </summary>
+  </member>
+  <member name="P:EasyEcs.ILayer.Index" source="e3c2e9c074d5">
+    <summary>这一层：0 到瓦片的 Height − 1。</summary>
+  </member>
+</doc>

@@ -612,6 +612,13 @@ public class EmitTests
     }
 
     [Test]
+    public void ADrainMethodClearsItsRecords()
+    {
+        // The pass of a [Drain] method clears Emitted<Shot> in generated code, which the analyzer cannot see
+        Assert.That(Uncleared("public static class Host { [Drain] static void Apply(in Shot shot, World world) { } }"), Is.Empty);
+    }
+
+    [Test]
     public void APublicRecordOfALibraryIsLeftToItsUsers()
     {
         var found = GeneratorTests.Analyze([Strikes.Replace("internal record struct Shot", "public record struct Shot")]).Result.Where(d => d.Id == "EECS092");

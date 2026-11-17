@@ -1,3 +1,4 @@
+using System;
 using EasyEcs;
 using Godot;
 
@@ -8,12 +9,12 @@ static class Support
 {
     // `godot --headless --path samples/Godot -- --ticks 120` stops after 120 physics ticks; without it the scene runs
     // until the window is closed.
-    public static int TicksFromCommandLine()
+    public static int TicksFromCommandLine() => Option(OS.GetCmdlineUserArgs(), "--ticks", -1);
+
+    static int Option(string[] args, string name, int fallback)
     {
-        string[] args = OS.GetCmdlineUserArgs();
-        for (int i = 0; i + 1 < args.Length; i++)
-            if (args[i] == "--ticks") return int.Parse(args[i + 1]);
-        return -1;
+        int i = Array.IndexOf(args, name);
+        return i >= 0 && i + 1 < args.Length ? int.Parse(args[i + 1]) : fallback;
     }
 
     public static void Report(World world, int ticks, long allocated)

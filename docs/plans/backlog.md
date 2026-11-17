@@ -43,6 +43,42 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
 
 - [x] **`feat-lane4-rest`** merged 2026-11-09 (691ae22): the inlining fix (`MaskedRuns` out of line), G5, G7, G8, G15,
       G17, G18, G11 9c measured; G7's NaN sign is the JIT's choice (evidence in the test's comment).
+- [ ] **`feat-lane-kernel`** (owner, L29; `designs/lane-kernel.md`), three packages, merged in order D -> E -> F:
+      **D** (`feat-lane-kernel` 05f91b47: flat jobs through `LaneKernel`, one NoInlining walk per run). Final A/B
+      2026-11-16 (scratchpad kernelD2/cmp2/D.txt; head2 started under load 13.5): 56 level, 3 faster (Pow -10 %,
+      FragmentsMove2 1,000 -6 %, EditMethodBodyIde -23 %), 4 slower: FragmentsIntegrateScalar 100k +10.6 %, VectorForms
+      MarkNarrow +9.7 %, MaskedParallel +9.7 %, MaybeNarrow +5 %; LaneKernelBenchmark has no base side. Those rows are
+      re-run in three interleaved rounds (scratchpad rerunDF/D.txt): all four level (every round within the base's own
+      spread), all 0 B. **Merged 2026-11-17 (227f62d9), gated.**
+      **E** (`feat-sse-path` 3498fd4f, rebased onto main 89090767 without D's Lane128 hunk): every slower SSE row has its
+      cause (lane-kernel.md package E): the blend's XMM0 mask made a store/reload chain where one select sits in a loop
+      (the wins), while xor-and-xor pushed loops of several selects past the JIT's constant hoisting (Gate) or lengthened
+      nested chains (Grade, Clamp, Step's masked loop). The select form is now written only for loops with one select;
+      Count, Energy, Move4, Survey and WorldSimulation differ by layout only. **Merged 2026-11-17 (fe99f0e3)**, gated; the A/B is in
+      the entry below. Open risk: MaybeParallel keeps the xor form.
+      **F** (`feat-lane-walk` 99293792, on D; owner L36: the loop lives in each job's generated Walk): HolesHaul's cause
+      was D's call per masked word (now inlined into `MaskedRuns`); Tally's was the JIT blending the conditional sum
+      (`ILane.AddWhereEqual`). A/B 2026-11-16 (kernelF2/cmp): default 55 level, 3 faster, 5 slower (StepKernel 100k
+      +21 % noisy, TallyTyped 1,000 +20 %, StepWalk 37 +14 %, HolesHaulGenerated 100k +7.8 %, BattleServer Tick +4.3 %);
+      SSE 49 level, 8 faster, 3 slower (StepWalk 100k +15 %, HaulGenerated 1,000 +13 %, HolesHaulGenerated 1,000 +4 %).
+      TallyTyped / TallyGenerated at 100k did not move (1.10-1.23 base, 1.21-1.29 head): the reduction is not level yet.
+      Re-run, three interleaved rounds (rerunDF/F_default.txt, F_sse.txt): every row level except **HaulGenerated
+      SSE4.1 1,000, slower in all three (+10.5 / +5.9 / +12.1 %, base spread 1.8 %)**; HolesHaulGenerated AVX-512 100k
+      +3.2 / +2.1 / +3.2 % sits inside its spread (4.4 %) but leans the same way. Tally's ratio still 1.15-1.18 at 100k.
+      F merges once Haul's cause is found and fixed (Opus, next after fix-no-simd-lambda-end). Left for F: select under one comparison, Min/Max against
+      constants, 8-byte lanes, reductions, the masked walk's passing-bits constant.
+- [x] **`fix-no-simd-structural`** merged 2026-11-16 (5ddc511a): a lambda calling a generated writer (`e.SetDaze`) was
+      marked free of structural changes, so its row-by-row job (no SIMD) froze the gate; `Symbols.UnboundEntityWriter`
+      reads such calls by name.
+- [x] **`fix-no-simd-lambda-end`** closed 2026-11-17, no code change: already fixed by fix-no-simd-structural
+      (5ddc511a). Every failing log (hwcheck, kernelD2, kernelE2, kernelF2) ran on 89090767 or a package branch forked
+      from it, before that merge: the throw was its frozen-gate `InvalidOperationException` (the `Rows` job carrying
+      `INoStructuralChanges`), so the pass stopped at the first change and ended short of the method; the schedule
+      failure was the test's old expectation, before the fix made it expect "; rows on this hardware". At 227f62d9 the
+      lambda's `LambdaJob0Rows` has no `INoStructuralChanges`, and under `DOTNET_EnableHWIntrinsic=0` the vector-loop
+      classes (EntityRandomTests added) pass on net10.0 and net11.0 (1472 + 18 skipped each), the full suite on both
+      (4484 + 1 skipped). Gate: scratchpad `nosimd-end/gate.sh`. A package branch forked before 5ddc511a still fails
+      these three until it merges the work branch.
 - [ ] **`feat-lane1-core`**: the first run (from 3315196) was **lost with its container on 2026-11-09** before any
       push; only its interim reports survive. Rule since then: a lane hands back per item, each item is gated,
       merged and pushed before the next. What the lost run found (to rebuild or to record, not to re-research):
@@ -66,7 +102,7 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
         runner labels already in use: the package carries linux-x64's library, other runtimes keep the pinned heap);
         prototype 0.14-0.70x of pinned for allocate-fill-free; `GC.AddMemoryPressure` dropped (it starts gen2
         collections). Rebuild and measure.
-- [ ] **`feat-net11`** (owner, 2026-11-14, ledger L14): `net11.0` beside `net10.0` in the package, tests, benchmarks,
+- [x] **`feat-net11`** merged (f2da0801) (owner, 2026-11-14, ledger L14): `net11.0` beside `net10.0` in the package, tests, benchmarks,
       CI and docs; .NET 11's performance features tried one by one, each kept only as a measured win.
       Running on branch `feat-net11` (from e83188c). Package A (compatibility) handed back: both targets build at 0
       warnings and pass every test; two generator fixes .NET 11 needed (Kernel.Tables' `[..]`, DegreesToRadians as the
@@ -232,7 +268,15 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
          - Prototype on three jobs (a flat float job, a masked job with a condition, a reduction), Tier1 listings
            against today's, BenchmarkDotNet on their classes, generated bytes before and after. Rollout only where
            Tier1 is equal or better; a job shape that loses keeps its emitted loop, and the design says which.
-- [ ] **`feat-net10-only`** (owner, L25, L26): undo feat-net11's second target. Core, tests, AOT check, benchmarks,
+      **Package E merged** (`feat-sse-path`): under `DOTNET_EnableAVX=0` SSE4.1's blend pins its mask to XMM0 and
+         the register allocator spilled a value the loop carries around it in every iteration (a store-to-load
+         chain; TallyGenerated 1.7x). A Vector<T> / Vector128 loop with one select selects through
+         Interleaved.Select (three bitwise operations there, ConditionalSelect elsewhere); loops with several keep
+         the blend (the xor form cost Gate, Grade, Clamp and the masked Step 8-24 %). A/B, two interleaved rounds
+         (scratchpad/kernelE2): SSE4.1 25 rows faster (Tally, Cool, Brighten 40-60 %), 95 level, Move4Generated
+         100k slower +8/+28 % (no select, its text is unchanged: noise at a memory-bound size, the same row at 1k
+         is faster); default (AVX-512) 3 faster, 118 level; all 0 B. Details: lane-kernel.md "Package E".
+- [x] **`feat-net10-only`** merged (27baf410) (owner, L25, L26): undo feat-net11's second target. Core, tests, AOT check, benchmarks,
       plugin, tools, samples and the template target `net10.0` only; `global.json` back to the .NET 10 SDK; CI and
       release install .NET 10 only (the per-runtime matrices go, the Benchmarks workflow runs one runtime);
       `bench.json` and the site back to one runtime, `sync-benchmarks --replace` and `tools/perf/sync-ci.sh` kept for
@@ -244,7 +288,7 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       nothing else targets or installs .NET 11 (benchmarks, AOT, samples, tools, template, release).
       Handed back on branch `feat-net10-only`: done as described, with L27 (global.json on SDK 11.0.100; the unit
       tests on both runtimes, CI's x64 test job a matrix over them); the site's numbers still come from CI (L17).
-- [ ] **`feat-interleaved-256`** (found by feat-net11's B1): a two-source permute (`vpermt2ps`,
+- [x] **`feat-interleaved-256`** merged (cc240a9e) (found by feat-net11's B1): a two-source permute (`vpermt2ps`,
       `Avx512F.VL.PermuteVar8x32x2`) in `Interleaved`'s 256-bit loads and stores, behind `Avx512F.VL`: the path x64
       AVX-512 machines run by default (`Vector<T>` stays 256 bits there), 4 shuffles a pair of fields today. Both
       runtimes. Proof: KernelBenchmark's interleaved cases, the headline worlds, Tier1; DOTNET_EnableAVX512=0 unchanged.
@@ -252,7 +296,7 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       the path runs only where Vector512 is not accelerated (Skylake-SP / X, Cascade Lake, Cooper Lake by default, or
       DOTNET_PreferredVectorBitWidth=256), so x64 machines from Ice Lake on keep their Vector512 loops. Load3 and the
       8-byte Load4 keep their forms (llvm-mca: no better). Numbers and listings in docs-todos.
-- [ ] **`fix-allocation-tests-warmup`** handed back on its branch (causes, fix and proof in docs-todos): JIT compiles in
+- [x] **`fix-allocation-tests-warmup`** merged (95ff51e5) handed back on its branch (causes, fix and proof in docs-todos): JIT compiles in
       the window (`Allocations.Steady`), a Scratch list made late, a test frame that leaked links, and a core fix (a
       merging parallel pair pass cut by count). The item as it was: 0 B tests that fail once in many full-suite runs on a loaded machine and
       never alone: `AllocationTests.ParallelReductionsScratchAndLookupsDoNotAllocate` (net11.0, AVX-512 off, gate of
@@ -263,16 +307,51 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       a busy machine), then fix the cause: warm up until N consecutive updates allocate nothing and the JIT has
       compiled nothing new, in one helper (`Allocations.WarmUp`) every 0 B test uses. Also: `HugePagesTests` goes
       Inconclusive without a free 2 MiB page (the count of tests then differs by one): expected, say so in tests/AGENTS.md.
-- [ ] **`chunk-floor-by-bytes`** (owner, L31, L32): `MergedChunkRows` = max(floor, NextPowerOfTwo(rows) / 64), the floor
+- [x] **`chunk-floor-by-bytes`** merged (004db709) (owner, L31, L32): `MergedChunkRows` = max(floor, NextPowerOfTwo(rows) / 64), the floor
       from bytes: at least `MinChunkBytes` (a constant, measured: try 16 KB, 32 KB, 64 KB) of the columns the pass
       reads and writes, as rows = NextPowerOfTwo(MinChunkBytes / bytesPerRow), at least 64; a pair pass's bytes per
       row times its cluster's neighbour count (data, not machine). Needs the pass's bytes per row in the runner
       (the generated job knows its columns: a static `RowBytes`). Proof: the merging `[ForEach]` rows of
       ReduceBenchmark / EmitBenchmark and PairsBenchmark.GeneratedParallelResult level with the per-kind floors at
       every size, 0 B, results bit-identical across thread counts (a test at 1, 2 and 8 threads).
-- [ ] **`feat-ground-layer`** (owner, L19): a `Cell<TCell, Ground<TTile>>` method that also reads a layer of the
-      3D tile it is the ground of; design the public form (two or three shapes, as a popup), then generator, analyzer,
-      tests, TileGroundBenchmark case, docs-todos. After feat-generated-text-2's package A (same emit code).
+      **Running** on branch `chunk-floor-by-bytes` (built: core 352702af, generator 7ea76252, tests 6d2658c7;
+      `MinChunkBytes` = 32 KB until the A/B picks; a hand-written job's `RowBytes` defaults to its type arguments' sizes,
+      a hand-written pair job's to 0, one word). Full suite green on net10.0 and net11.0 but the new pair test's first
+      build (fixed in 6d2658c7). The A/B (base 7e9e5e40 against 16 / 32 / 64 KB, two rounds, each side from its own root)
+      and GeneratorBenchmark Cold / Edit* (base against head) run from the scratchpad scripts `floorbytes/run.sh`,
+      `genbench.sh`, compared by `compare.py`; first round: 16 KB slower at 100,000 rows (chunks of 2,048 rows of an
+      8-byte Spot: 49 chunks against 16), faster at 10,000.
+      **A/B result:** 3-repeat interleaved --dev screens at 32 KB (49 chunks at 100,000 Spots) against base 7e9e5e40: level (not slower beyond both error bars in 2 of 3 repeats; EmitParallel 10,000 11.2-11.9 us against 13.7-14.9, 100,000 48.9-68.5 us against 49.0-65.2, LowestVector 1,000 to 1,000,000 rows level, 0 B everywhere), so `MinChunkBytes` stays 32 KB and `MergedChunks` 64; 32 KB with `MergedChunks` = 16 and 64 KB were also level.
+- [x] **`fix-no-simd-structural`** (from 004db709; merged 2026-11-16, 5ddc511a): under `DOTNET_EnableHWIntrinsic=0` a lambda pass changing
+      structure through a generated writer (`e.SetDaze(round)`) threw from the frozen gate: `LambdaPass.IsStable` saw
+      only bound calls, the generator cannot bind another generator's writers, so the `Rows` job hardware without
+      vectors runs carried `INoStructuralChanges`. Fix: `Symbols.UnboundEntityWriter` (the name rule of
+      `GeneratedRead`) in `LambdaPass.IsStable`; test `ALambdaPassChangingStructureRowByRowRunsUnfrozen` (scalar on any
+      hardware, failed before the fix). `TheScheduleNamesEachMethodsLoop` expects "; rows on this hardware" where the
+      machine has neither width. Gate from the scratchpad `nosimd/gate.sh`; branch not merged.
+- [ ] **`perf-align-prefetch`** (owner asked 2026-11-16: "simd 有没有考虑内存对齐和 prefetch"). What holds: unmanaged
+      columns start row 0 on a 64-byte line (`Archetype.Aligned`), runs and chunks start on 64-row words, so every
+      vector load of a walk starts on a line for 4/8/16-byte rows; sequential column reads are left to the hardware
+      prefetcher (microarch.md M3 candidate 9: at most nine columns plus words, under the L2 streamer's 32 streams);
+      software prefetch exists for chases (lookups, index probes) and streamed copies, gated past the last-level cache.
+      Open, to try (Opus, after the lane-walk agent): (a) many small tables (FragmentsIntegrate, 1,000 tables of 5-20
+      rows): each table's columns are cold starts the streamer has not trained on; prefetch the next table's column
+      heads (and its words) while walking the current one, gated like the chase prefetch; A/B on Fragments* and the
+      headline worlds. (b) the first lines of a long run (the streamer needs a few misses to start, and does not cross a
+      4 KB page on every core): prefetch the next page's first line per column; measure, drop if level. (c) check by
+      listing that no generated 512-bit loop loads across a line where rows are 12 or 24 bytes (interleaved forms).
+- [ ] **`feat-ground-layer`** (owner, L19; L34) built, ready to merge (branch head 6c594ca3 + this Plans commit, from
+      ff4baa8d): `Layer<TCell, TTile, TLayer>` (TLayer : ILayer, a static Index) beside a `Cell<TCell, Ground<TTile>>`,
+      its layer exchanged alone (`Tile.ExchangeLayer`) and read as one more stream of the row's vector loop; EECS115 for a
+      layer it cannot read (another tile, past its layers, no ground cell); EECS073 for two layers of the same cells (the
+      thread's one texture of them; its message now names the cells, not a Tile<> of the Layer's arguments). Code fix:
+      not built (owner-review.md). TileGroundLayerBenchmark (32 x 32 chunks of 16 x 16 x 8, stone in the top layer slowing
+      the warmth; us, 0 B everywhere; Hand (Tile by value, ExchangeHalo(7, 7), Load128) / Cell / Off): 1 thread 1,199 /
+      772 / 1,295; 4 threads 442 / 307 / 413: the cell at 0.64x / 0.70x of the walk by hand. Gate: 0 warnings; tests
+      net10.0 + net11.0 4410 (2 skipped) with the new EECS073 case after its fix (ViewTests.APassThroughAViewAllocatesNothing
+      failed once in the full run, a compile in its window; it passes alone, the branch touches no view code); tiles,
+      layers and their analyzer and generator tests under AVX=0 and HWIntrinsic=0 (163 each, both runtimes); ApiDocs 0
+      problems (the reference left for the docs pass); agents 0 problems. Docs: docs-todos "feat-ground-layer".
 - [x] **`feat-ground-cells`** merged 2026-11-14. (inner-loops leftover (a), from fc26ea4): the first run was lost the same way before
       reporting; `Cell<TCell, Ground<TTile>>` already ran through the cell pass (no core or
       generator change was needed: the shape is any ITileShape); proved by TileTests.Cells.cs (2a12b41: a cross stepping
@@ -382,19 +461,35 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
 Starts now; items touching `TileSteps.cs` or `Pairs.cs` wait for feat-later-halos. C12 / C13 / C14 edit
 ArityGenerator.cs: not beside lane 4's generated-text steps.
 
-- [ ] **C0. Re-measure the stale bench.json rows before any A/B** (`perf.md` §0 and §2): SparseBenchmark
+- [x] **C0. Re-measure the stale bench.json rows before any A/B** (`perf.md` §0 and §2): SparseBenchmark
       PassOverTheFew (fixed by fa2770f the same day), TileStencil Blur9 / Laplacian, ParallelFor Light, Reduce
       Sum / Mass, Emit 10k, ParallelQueryComparison (then `tools/perf/inlining.sh` and jitdisasm of `Waypoints.Steer`'s
       job if still behind Arch / Friflo), OperationBenchmark EntityBatch (batch form slower than its own per-row form:
       count runs per pass, read the batch job), SingleEntityBenchmark Structural + Filtered (`--launchCount 6`).
       Proof: the numbers; a case still losing becomes its own item here.
-- [ ] **C1. `RemoveTypes` roots the removed types** (`core.md` §1): `_orderRequests`, `_tileSteps`, `PairState`'s
+      **Done 2026-11-16** (scratchpad c0, a clean copy: BDN refuses duplicate csproj files under `.claude/worktrees`).
+      The machine read ~0.8x of bench.json across the board, so ratios inside a class count. Fixed since bench.json:
+      Sparse PassOverTheFew (23x, now 1.08x QueryTheFew), TileStencil Blur9_Tile (0.89x Hand), Reduce Sum (0.16-0.38x),
+      Emit 10k (0.79x serial, was 1.23x), ParallelQueryComparison (first, ahead of Friflo / Arch), EntityBatch (1.48x
+      faster than per-row, level with Friflo), SingleEntity Structural (0.92-1.09, inside RatioSD 0.10-0.21). Still
+      losing, each an item below: C0a-C0d.
+- [ ] **C0a. ParallelFor LightParallelFor at 10k is 1.36x serial** (5.6 vs 4.1 us), and its lambda form LightLambda
+      is 1.64 us: find why the struct form costs 3.4x the lambda form at 10k (and 1.8x at 100k). Opus.
+- [ ] **C0b. Laplacian_Tile at Side 32 is 1.10x Hand (1 thread) and 1.16x (4 threads)**; Laplacian_Cell beats Hand
+      (371 / 252 us). Find the Tile form's extra cost against Blur9_Tile, which beats Hand; or teach EECS116 to
+      point the tile method to its cell form. Opus.
+- [ ] **C0c. MassParallelReduce at 1k / 10k is 1.12x / 1.06x MassSerialRef**: the parallel pass should fall back to
+      the serial form below its break-even, as Sum does; and Mass has no serial Reduce row to compare. Sonnet for the
+      row, Opus for the threshold.
+- [ ] **C0d. Possible regressions to settle in a quiet round**: EmitSerial +25% at 10k and 100k (small StdDev),
+      ComponentThenScan 100k +15%, the DotNetParallelFor baselines +8-27% (machine). A/B against the commit of
+      bench.json's rows first; a real one becomes its own item.
+
+- [x] **C1. `RemoveTypes` roots the removed types** (`core.md` §1): `_orderRequests`, `_tileSteps`, `PairState`'s
       clusters and lists, `_columnSpares` survive `ForgetTypes`; `Mentions` ignores `_orderRequests`, so a reused bit
       can get another type's `RowOrder`. Files: World.Order.cs, World.Types.cs, TileSteps.cs (after halos), Pairs.cs,
       Archetype.cs. Proof: `UnloadTests` with an ordered component, a pair method and a tile method (the
-      `WeakReference` dies), a reused bit gets its own order. **fix-core-lane1: done except `_tileSteps`** (left to
-      the halos branch, which owns TileSteps.cs: ForgetTypes must drop the `_tileSteps` entries whose type the doomed
-      predicate matches, as `_parallelWork`; then add a tile method to `UnloadTests.OrdersAndPairStatesOfAPluginLetItUnload`).
+      `WeakReference` dies), a reused bit gets its own order. **Done: fix-core-lane1 did all but `_tileSteps`; fix-c1-tile-steps made ForgetTypes drop the `_tileSteps` entries of the doomed types and added a tile method to `UnloadTests.OrdersAndPairStatesOfAPluginLetItUnload`.**
 - [x] **C2. `PairState` keeps a record per table forever, found by a linear scan** (`core.md` §5): drop entries of
       tables no longer matched, on `TrimExcess` / `RemoveTypes` (shared with C1); a slot per table instead of the scan.
       Files: Pairs.cs. Proof: a `NeighborTests` case cycling 100 `GroupBy` values; NeighborBenchmark with 64 groups.
@@ -824,7 +919,9 @@ numbers are written once about the final code).
       d. Unit tests that show usage (not the ones pinning an old form on purpose).
       e. Every code example of the docs (fences en + zh, the guides' full examples, the public skill, README),
          DocCheck at 0; L4 of `locality.md` (ZombieTarget, NearestPlayer, AOI).
-- [ ] **2b.** Lane 2's A2 lands here if it has not (its blockers are 2a / 2c).
+- [x] **2b.** merged 2026-11-16 (exemplar-samples): the nine items of 2.b, MultiWorld's ghosts through
+      `CopyEntities<Ghost>`, the template's wave in a pooled array (an Entity cannot be stackalloc'd), EECS092 counting
+      a `[Drain]` as the clear; the demo bundle is stale until the docs pass rebuilds it. A2 still waits on 2a / 2c.
 - [ ] **3. Docs pass** (#141, `audit-docs`): everything in `docs-todos.md` ("Sweep 2026-11-07" first), with the
       analyzer page's guard test (docs-todos: every id anchored, severities equal to the descriptors') committed with
       the page; DocCheck and ApiDocs at 0.

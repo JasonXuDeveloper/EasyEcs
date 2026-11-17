@@ -8,11 +8,7 @@ const int TicksPerSecond = 30;
 const int ReplicateEvery = 3;
 
 // Run 3 seconds by default; `--ticks N` runs N ticks instead.
-int ticksToRun = 3 * TicksPerSecond;
-if (args.Length == 2 && args[0] == "--ticks")
-{
-    ticksToRun = int.Parse(args[1]);
-}
+int ticksToRun = Support.Option(args, "--ticks", 3 * TicksPerSecond);
 
 // Ctrl+C stops the loop cleanly instead of killing the process.
 using var stop = new CancellationTokenSource();

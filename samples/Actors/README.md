@@ -11,14 +11,14 @@ What each file teaches, with its code, is on the docs site: [Actors](https://ecs
 
 | File | What it holds |
 |---|---|
-| [Components.cs](Components.cs) | the `In<TActor>` tag, the `IActor<TSelf>` interface, `Shop` and `Bank`, the persistent `Stock` and `Balance`, the in-memory `Sales` and `Closed`, the `Saving` group and its `Unsaved` list |
+| [Components.cs](Components.cs) | the `In<TActor>` tag, the `IActor<TSelf>` interface, `Shop` and `Bank`, the persistent `Stock` and `Balance`, the in-memory `Sales` and `Closed`, the `Saving` group, its `Unsaved` record and the `Database` singleton the save writes to |
 | [Messages.cs](Messages.cs) | the `Buy` and `Deposit` messages (`[EntityMethod]` methods), and `Mailman`, which runs each on its actor |
 | [Systems/ShopSystems.cs](Systems/ShopSystems.cs) | `RestockSystem`, in the shop group |
 | [Systems/BankSystems.cs](Systems/BankSystems.cs) | `InterestSystem`, in the bank group |
-| [Systems/SaveSystems.cs](Systems/SaveSystems.cs) | `ListUnsavedSystem`, in the save group: the actors written since the last save |
+| [Systems/SaveSystems.cs](Systems/SaveSystems.cs) | `SaveChangedSystem`, in the save group: lists the actors written since the last save and saves each once with a `[Drain]` method |
 | [Activation.cs](Activation.cs) | `Activate`: find the active actor, or make it and load its record |
 | [Program.cs](Program.cs) | activations, messages, the group updates, saves, and a restart |
-| [Host/Storage.cs](Host/Storage.cs) | plumbing that is not the ECS lesson: a dictionary standing in for a database, and the host's save of the listed actors |
+| [Host/Storage.cs](Host/Storage.cs) | plumbing that is not the ECS lesson: a dictionary standing in for a database |
 
 ## Run it
 

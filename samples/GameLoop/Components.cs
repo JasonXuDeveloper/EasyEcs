@@ -46,14 +46,13 @@ public record struct Inbox(Mailbox<ClientMessage> Messages) : ISingletonComponen
 [NotSaved]
 public record struct Outbox(ArrayBufferWriter<byte> Bytes, int Updates) : ISingletonComponent;
 
-// Counters the host prints when it stops.
-public record struct Stats(
-    long Received,
-    long Joined,
-    long Left,
-    long Fired,
-    long Replicated,
-    long SentBytes) : ISingletonComponent;
+// Counters the host prints when it stops. [Accumulate] makes each pass that counts into it (a ref Reduce<Stats>) add
+// its result to the total when the pass ends; [Sum] combines every field by addition.
+[Accumulate, Sum]
+public partial record struct Stats : ISingletonComponent
+{
+    public long Received, Joined, Left, Fired, Replicated, SentBytes;
+}
 
 // ---- System groups: when systems run ----
 // Systems without a group run on world.Update(), the fixed simulation tick.

@@ -35,7 +35,7 @@ internal sealed partial class Kernel
     /// <summary>The shape of cell method <paramref name="method"/>'s body, and its row's vector form when Kernel takes it.</summary>
     public static CellForm CellFormOf(IMethodSymbol method, MethodDeclarationSyntax syntax, SemanticModel model, System.Threading.CancellationToken ct)
     {
-        var cells = Symbols.Cells(method);
+        var cells = Symbols.CellInputs(method); // the cells, then the layers (Layer<TCell, TTile, TLayer>: read the same way)
         var outputs = method.Parameters.Where(p => Symbols.CellOut(p) != null).ToList();
         var results = method.Parameters.Where(p => Symbols.TileResult(p) != null).ToList();
         SyntaxNode? body = (SyntaxNode?)syntax.Body ?? syntax.ExpressionBody?.Expression;

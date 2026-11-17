@@ -61,6 +61,41 @@ public static partial class Interleaved
         return Vector.Equals(new Vector<int>((int)(rows >> first)) & bits, bits);
     }
 
+    /// <summary>
+    /// <c>Vector.ConditionalSelect</c> of a generated Vector&lt;T&gt; or Vector128 loop with one select, the same bits
+    /// on every hardware. On x64 without AVX, SSE4.1's BLENDVPS / PBLENDVB read their mask from XMM0; where the register
+    /// allocator put a value the loop keeps in XMM0 (a hoisted constant, an accumulator), it stores and reloads it around
+    /// the blend in every iteration, a store-to-load chain carried by the loop (KernelBenchmark's TallyGenerated under
+    /// <c>DOTNET_EnableAVX=0</c>: 1.7 times the time of the same loop without it). There the select is three bitwise
+    /// operations on any registers instead; with AVX (VEX blends take any register) and on ARM64 (BSL) it is
+    /// ConditionalSelect. A loop with several selects keeps ConditionalSelect (<c>Kernel.Selects</c> in the generator
+    /// says why).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<T> Select<T>(Vector<T> mask, Vector<T> whenTrue, Vector<T> whenFalse)
+    {
+        if (Sse41.IsSupported && !Avx.IsSupported) return whenFalse ^ ((whenTrue ^ whenFalse) & mask);
+        return Vector.ConditionalSelect(mask, whenTrue, whenFalse);
+    }
+
+    /// <summary><see cref="Select{T}(Vector{T}, Vector{T}, Vector{T})"/> of float lanes under an int mask.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<float> Select(Vector<int> mask, Vector<float> whenTrue, Vector<float> whenFalse) =>
+        Select(mask.As<int, float>(), whenTrue, whenFalse);
+
+    /// <summary><see cref="Select{T}(Vector{T}, Vector{T}, Vector{T})"/> of double lanes under a long mask.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector<double> Select(Vector<long> mask, Vector<double> whenTrue, Vector<double> whenFalse) =>
+        Select(mask.As<long, double>(), whenTrue, whenFalse);
+
+    /// <summary><see cref="Select{T}(Vector{T}, Vector{T}, Vector{T})"/> of a generated loop's Vector128 body.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static Vector128<T> Select<T>(Vector128<T> mask, Vector128<T> whenTrue, Vector128<T> whenFalse)
+    {
+        if (Sse41.IsSupported && !Avx.IsSupported) return whenFalse ^ ((whenTrue ^ whenFalse) & mask);
+        return Vector128.ConditionalSelect(mask, whenTrue, whenFalse);
+    }
+
     /// <summary><see cref="Lanes32"/> for lanes of 8 bytes: <c>Vector&lt;long&gt;.Count</c> rows.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static Vector<long> Lanes64(ulong rows, int first)

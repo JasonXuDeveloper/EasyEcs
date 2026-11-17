@@ -4,11 +4,7 @@ using MultiWorld;
 // A server splits its map into zones side by side, and every zone is a world owned by one thread. Units near a border
 // must still see the units beyond it: between two updates the zones exchange their border rows as ghosts, and the
 // units that crossed a border move to the zone they now stand in.
-int updates = 200;
-if (args.Length == 2 && args[0] == "--updates")
-{
-    updates = int.Parse(args[1]);
-}
+int updates = Support.Option(args, "--updates", 200);
 
 var zones = new World[Map.Zones];
 for (int z = 0; z < zones.Length; z++)

@@ -1471,17 +1471,22 @@ public class KernelTests
         Assert.That(calls, Is.EqualTo(ColdKernels.Calls.ToArray()));
     }
 
-    /// <summary>DescribeSchedule names the loop each [ForEach] method got, and why a scalar one is scalar (EECS055's reason).</summary>
+    /// <summary>
+    /// DescribeSchedule names the loop each [ForEach] method got, and why a scalar one is scalar (EECS055's reason). A
+    /// vector loop whose widths this hardware has none of (DOTNET_EnableHWIntrinsic=0) says its rows run the method.
+    /// </summary>
     [Test]
     public void TheScheduleNamesEachMethodsLoop()
     {
         using var world = new World();
         world.AddSystem<LoopsSystem>();
         var system = world.DescribeSchedule().Groups[0].Stages[0].Systems[0];
+        // Move and Hurt have a Vector512 loop and a Vector<float> one, and need nothing else of the hardware.
+        string rows = Vector.IsHardwareAccelerated || Vector512.IsHardwareAccelerated ? "" : "; rows on this hardware";
         Assert.That(system.Loops, Is.EqualTo(new[]
         {
-            "Move: vector (lane kernel: Vector512, Vector256, Vector128), flat, masked words vector",
-            "Hurt: vector (Vector512 or Vector<float>), masked words vector, cold branch (it calls Console.WriteLine, which is defined in another assembly)",
+            "Move: vector (lane kernel: Vector512, Vector256, Vector128), flat, masked words vector" + rows,
+            "Hurt: vector (Vector512 or Vector<float>), masked words vector, cold branch (it calls Console.WriteLine, which is defined in another assembly)" + rows,
             "Mark: scalar (it uses the Entity in 'entity.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>))",
         }));
         Assert.That(world.DescribeSchedule().ToString(), Does.Contain("      loop Mark: scalar (it uses the Entity in 'entity.Id.Index'"));
@@ -1703,6 +1708,34 @@ public class KernelTests
                 var h = Interleaved.Lanes16In512(rows, first);
                 for (int j = 0; j < 32; j++) Assert.That(h[j], Is.EqualTo(((rows >> (first + j)) & 1) != 0 ? -1 : 0), $"Lanes16In512 {first} {j}");
             }
+        }
+    }
+
+    /// <summary>
+    /// Interleaved.Select, the select of a Vector&lt;T&gt; or Vector128 loop with one select, against ConditionalSelect:
+    /// the same bits for any mask (lane masks and arbitrary bits) and NaN payloads; its SSE-only form runs under
+    /// DOTNET_EnableAVX=0.
+    /// </summary>
+    [Test]
+    public void SelectIsConditionalSelectsBits()
+    {
+        var random = new Random(11);
+        var bytes = new byte[Vector<byte>.Count * 3];
+        for (int round = 0; round < 500; round++)
+        {
+            random.NextBytes(bytes);
+            var m = new Vector<int>(bytes);
+            if (round % 2 == 0) m = Vector.GreaterThan(m, Vector<int>.Zero); // a lane mask, as a comparison gives
+            var a = new Vector<float>(bytes.AsSpan(Vector<byte>.Count));
+            var b = new Vector<float>(bytes.AsSpan(2 * Vector<byte>.Count));
+            Assert.That(Interleaved.Select(m, a, b).As<float, int>(), Is.EqualTo(Vector.ConditionalSelect(m, a, b).As<float, int>()), "Vector<float>");
+            var ai = a.As<float, int>();
+            var bi = b.As<float, int>();
+            Assert.That(Interleaved.Select(m, ai, bi), Is.EqualTo(Vector.ConditionalSelect(m, ai, bi)), "Vector<int>");
+            var m128 = System.Runtime.Intrinsics.Vector128.Create(bytes.AsSpan(0, 16)).AsInt32();
+            var a128 = System.Runtime.Intrinsics.Vector128.Create(bytes.AsSpan(16, 16)).AsInt32();
+            var b128 = System.Runtime.Intrinsics.Vector128.Create(bytes.AsSpan(32, 16)).AsInt32();
+            Assert.That(Interleaved.Select(m128, a128, b128), Is.EqualTo(System.Runtime.Intrinsics.Vector128.ConditionalSelect(m128, a128, b128)), "Vector128<int>");
         }
     }
 

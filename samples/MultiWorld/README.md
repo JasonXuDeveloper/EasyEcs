@@ -14,6 +14,7 @@ What each file teaches, with its code, is on the docs site: [MultiWorld](https:/
 | [Systems.cs](Systems.cs) | `SightSystem` (a pair method over the zone's units and ghosts), `MoveSystem`, `BounceSystem` |
 | [Zone.cs](Zone.cs) | `Map`: the zones side by side, where each unit starts; `Zone`: one zone's world and its update loop |
 | [Border.cs](Border.cs) | the halo exchange between two updates: units that crossed move with `MoveEntities`, border rows are copied into the neighbor zone as ghosts |
+| [Support.cs](Support.cs) | plumbing that is not the ECS lesson: the command-line option |
 | [Program.cs](Program.cs) | starts one thread per zone with a barrier that runs the exchange, prints the results, checks them against the map as one world |
 
 ## Run it

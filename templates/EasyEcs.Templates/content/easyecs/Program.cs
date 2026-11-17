@@ -6,11 +6,7 @@ using EasyEcsApp;
 // (or `--ticks N`). The game itself is in Components/ and Systems/.
 const int TicksPerSecond = 20;
 
-long ticksToRun = long.MaxValue;
-if (args.Length == 2 && args[0] == "--ticks")
-{
-    ticksToRun = long.Parse(args[1]);
-}
+long ticksToRun = Option(args, "--ticks", long.MaxValue);
 
 // Ctrl+C stops the loop cleanly instead of killing the process.
 using var stop = new CancellationTokenSource();
@@ -58,3 +54,10 @@ while (world.Clock.Tick < ticksToRun && !stop.IsCancellationRequested)
 }
 
 Console.WriteLine($"stopped after {world.Clock.Tick} ticks");
+
+// The integer after an option such as `--ticks`, or the fallback.
+static long Option(string[] args, string name, long fallback)
+{
+    int i = Array.IndexOf(args, name);
+    return i >= 0 && i + 1 < args.Length ? long.Parse(args[i + 1]) : fallback;
+}

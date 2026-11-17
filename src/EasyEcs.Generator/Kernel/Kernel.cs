@@ -184,6 +184,36 @@ internal sealed partial class Kernel
     /// </summary>
     internal const string V = "\u0001Vector";
 
+    /// <summary>
+    /// A loop's text for a width that runs on x64 without AVX (Vector&lt;T&gt;, Vector128): a loop with one select
+    /// selects through <c>Interleaved.Select</c>, the same bits. There SSE4.1's blend reads its mask from XMM0, and where
+    /// the register allocator put a value the loop keeps (a hoisted constant, an accumulator) in XMM0, it stores and
+    /// reloads it around the blend in every iteration: a store-to-load chain carried by the loop, which bounds a short
+    /// loop (KernelBenchmark under DOTNET_EnableAVX=0: Tally, Cool, Brighten and Step took 1.4-2.3 times as long with
+    /// the blend as with the xor form). A loop with several selects keeps ConditionalSelect: the xor form costs two
+    /// uops more per select and three cycles of latency where the blend takes one, which a chain of nested selects adds
+    /// up (Grade 18-22 % slower), and its temporaries count against the JIT's hoisting, which then loads every constant
+    /// in each iteration (Gate 24 % slower at 100k), while the spill, where there is one, costs an iteration once for
+    /// all its selects. Called before <see cref="V"/> is replaced, on the text of one loop. The Vector512 text keeps
+    /// ConditionalSelect (AVX-512 masks).
+    /// </summary>
+    internal static string Selects(string text) =>
+        Count(text, ConditionalSelect) == 1 ? text.Replace(ConditionalSelect, "global::EasyEcs.Interleaved.Select(") : text;
+
+    /// <inheritdoc cref="Selects(string)"/>
+    internal static System.Text.StringBuilder Selects(System.Text.StringBuilder text) =>
+        Count(text.ToString(), ConditionalSelect) == 1 ? text.Replace(ConditionalSelect, "global::EasyEcs.Interleaved.Select(") : text;
+
+    private const string ConditionalSelect = V + ".ConditionalSelect(";
+
+    /// <summary>How many times <paramref name="token"/> occurs in <paramref name="text"/>, not overlapping.</summary>
+    private static int Count(string text, string token)
+    {
+        int count = 0;
+        for (int at = text.IndexOf(token, System.StringComparison.Ordinal); at >= 0; at = text.IndexOf(token, at + token.Length, System.StringComparison.Ordinal)) count++;
+        return count;
+    }
+
     /// <summary>The token of the lane masks' form: <c>Interleaved.Lanes32</c>, <c>Interleaved.Lanes32In512</c>.</summary>
     internal const string LanesForm = "\u0001In512";
 
@@ -381,13 +411,6 @@ internal sealed partial class Kernel
         {
             sb.Clear();
             sb.Append(text);
-        }
-
-        private static int Count(string text, string part)
-        {
-            int n = 0;
-            for (int at = text.IndexOf(part, System.StringComparison.Ordinal); at >= 0; at = text.IndexOf(part, at + part.Length, System.StringComparison.Ordinal)) n++;
-            return n;
         }
 
         /// <summary>The text for masked words.</summary>

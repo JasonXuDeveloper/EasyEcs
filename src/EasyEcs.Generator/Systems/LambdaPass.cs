@@ -243,11 +243,15 @@ internal static class LambdaPass
 
     /// <summary>
     /// The lambda cannot change the world's structure: it takes no World, and calls no structural member of an
-    /// Entity (or a generated writer) in its body. Its job gets INoStructuralChanges and may run in parallel.
+    /// Entity (or a generated writer) in its body. Its job gets INoStructuralChanges and may run in parallel. A
+    /// generated writer binds in the analyzer only: in the generator it is an unbound call on the Entity, read by name
+    /// (<see cref="Symbols.UnboundEntityWriter"/>), or the job a vector loop falls back to on hardware without its
+    /// vectors would freeze the structure its row by row changes make.
     /// </summary>
     public static bool IsStable(IAnonymousFunctionOperation function) =>
         !function.Symbol.Parameters.Any(p => Symbols.Classify(p) == Symbols.ParamKind.World)
-        && !function.Body.Descendants().Any(op => op is IInvocationOperation { TargetMethod: var m } && Symbols.IsStructural(m));
+        && !function.Body.Descendants().Any(op => op is IInvocationOperation { TargetMethod: var m } && Symbols.IsStructural(m)
+                                                  || Symbols.UnboundEntityWriter(op, function.SemanticModel!));
 
     // ---------------- the body as generated code ----------------
 

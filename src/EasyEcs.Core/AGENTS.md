@@ -85,7 +85,8 @@ Entities/Prefab.cs            a recipe of component values outside any world (on
 Grids/Tile.cs               grid tiles: ITileShape / ITile<TKey> (a shape, halo, neighborhood, boundary and a key),
                             Ground<TTile> (a 2D tile of a 3D grid's key), Tile<TCell, TTile> (a [ForEach] parameter:
                             up to 26 neighbors found by generated code, TileNeighbors; TileCells.SizePool: the pool of a
-                            tile's cell buffers sized from its shape when the assembly loads), ExchangeHalo into the thread's
+                            tile's cell buffers sized from its shape when the assembly loads), ExchangeHalo (ExchangeLayer: one
+                            layer and its ring, no layers around it, for a Layer's pass) into the thread's
                             TileFrame (a texture padded with the halo, a row mask per layer, the state of the tile it
                             steps), Rows (TZCNT walk; FirstLayer / LastLayer / LayerOf / RowsOf: the same walk as plain loops for generated code), At / the indexer, Write (a stepped tile's row; JacobiNext: its checks once per tile for generated code), Sweep / ColdStart (a [GaussSeidel]
                             step's sweep count, its cells started from a value: TileFrame.ColdStart), TileCursor.Load128 / 256 / 512,
@@ -103,6 +104,10 @@ Grids/Cell.cs               Cell<TCell, TTile>: one cell of a tile with its neig
                             form, written by the generator: SystemGenerator.Cells.cs); Offset / Width / Blank (a cell
                             of a texture of zeros: what a skipped row gets) for generated code; ITileLayers (From / To:
                             a component a cell method takes to bound its pass to those layers)
+Grids/Layer.cs              Layer<TCell, TTile, TLayer> (the cell of layer TLayer.Index of a tall tile under a ground
+                            cell: Value, the indexer at dx / dz within the halo; Offset / Check / Index / Blank for
+                            generated code) and ILayer (a layer named by a type, static Index); its pass exchanges that
+                            layer alone (Tile.ExchangeLayer)
 Grids/TileSteps.cs          a stepping tile's pass (ref Tile, TileSteps<TCell, TTile, TGrid, TKey, TColors>, one per
                             world and method): the second buffer of a Jacobi step swapped in after the pass, the rows
                             it skipped zeroed; [GaussSeidel]'s sweeps in place, color by color (ITileColors,
@@ -349,6 +354,9 @@ VectorLoops/StreamingStores.cs  the non-temporal stores of generated vector loop
                                 Archetype.CopyBlock (a resize keeps memmove: its allocation outweighs the copy)
 VectorLoops/Interleaved.cs      the deinterleaving loads / interleaving stores of generated vector loops over components
                                 of 2 to 4 fields of one lane type, and the lane masks of the passing rows of a word;
+                                Select: the select of a generated Vector<T> / Vector128 loop with one select (three
+                                bitwise operations on x64 without AVX, where SSE4.1's blend pins its mask to XMM0; else
+                                ConditionalSelect);
                                 LoadTail / StoreTail: the last rows of a run copied into a vector's worth (a loop that
                                 marks rows runs them masked); VectorLoops/Interleaved.Wide.cs: Pick / PickInto, the NEON table
                                 lookups (TBL / TBX over 1 to 4 registers) of a wide component's 128-bit form, and

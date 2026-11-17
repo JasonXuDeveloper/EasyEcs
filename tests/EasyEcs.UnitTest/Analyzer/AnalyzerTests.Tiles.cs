@@ -112,6 +112,61 @@ public partial class AnalyzerTests
     public Task CellsOfTwoTilesReport() => ReportsOnTiles("EECS115",
         "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<byte, G> c, Cell<byte, N> d, out NB next) => next = new NB((byte)(c.Value + d.Value)); }");
 
+    // A ground cell reading a layer of its tile (Layer<TCell, TTile, TLayer>): T3 a tile of 4 layers, L3 / L4 its layers 3
+    // and 4 (past it). EECS115 when the layer cannot be read (one diagnostic, no other error); a layer of the ground's
+    // buffer is EECS073's.
+    private const string Tall = "public record struct T3(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITileShape.Height => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }"
+        + " public struct L3 : ILayer { public static int Index => 3; } public struct L4 : ILayer { static int ILayer.Index => 4; } ";
+
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<NF, Ground<T3>> c, Layer<int, T3, L4> r, out NF next) => next = new NF(r.Value); }", "takes layer 'r' at L4.Index 4, outside the 4 layers of T3: 0 to 3")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<NF, Ground<T3>> c, Layer<int, G, L3> r, out NF next) => next = new NF(r.Value); }", "takes layer 'r' of G under cell 'c' of the ground of T3")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<NF, T3> c, Layer<int, T3, L3> r, out NF next) => next = new NF(r.Value); }", "under cell 'c' of T3, which is not a ground")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Layer<int, T3, L3> r, ref P p) => p.V = r.Value; }", "takes layer 'r' but no cell")]
+    public async Task ALayerTheGeneratorCannotReadReports(string source, string reason)
+    {
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, Tall + source])).Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
+        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS115" }), string.Join(", ", found.Select(d => d.GetMessage())));
+        Assert.That(found[0].GetMessage(), Does.Contain(reason));
+    }
+
+    [TestCase("[EcsSystem] public ref struct S { [ForEach(Parallel = true)] static void A(Cell<NF, Ground<T3>> c, Layer<int, T3, L3> r, out NF next) => next = new NF(r.Value != 0 ? 0 : c[1, 0, 0].V + r[1, 0, -1]); }")]
+    [TestCase("[EcsSystem] public ref struct S { [ForEach] static void A(Cell<float, Ground<T3>> c, Layer<int, T3, L3> r, out float next) => next = r.Value != 0 ? 0 : c[-1, 0, 0] + c[0, 0, 1]; }")] // a step
+    public async Task ALayerUnderAGroundCellIsClean(string source)
+    {
+        await AssertClean(GeneratorTests.Components, TileParts, Tall + source);
+        Assert.That(await Count("EECS055", GeneratorTests.Components, TileParts, Tall + source), Is.Zero);
+    }
+
+    // A layer's cells are lanes like the ground's: a byte layer beside float cells is four times as narrow and keeps the
+    // rows cell by cell (EECS055 says to widen it), a 2-byte one is a pair of lanes and vectorizes.
+    [Test]
+    public async Task AByteLayerBesideFloatCellsWarnsAndAShortOneVectorizes()
+    {
+        const string Method = "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<float, Ground<T3>> c, Layer<LANE, T3, L3> r, out float next) => next = r.Value != 0 ? 0 : c[-1, 0, 0] + c[1, 0, 0]; }";
+        var narrow = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, Tall + Method.Replace("LANE", "byte")]))
+            .Where(d => d.Id == "EECS055").ToArray();
+        Assert.That(narrow, Has.Length.EqualTo(1));
+        Assert.That(narrow[0].GetMessage(), Does.Contain("widen the byte to 2-byte lanes"));
+        string wide = Tall + Method.Replace("LANE", "short");
+        Assert.That(await Count("EECS055", GeneratorTests.Components, TileParts, wide), Is.Zero);
+        GeneratorTests.Driver().RunGeneratorsAndUpdateCompilation(GeneratorTests.Compile(GeneratorTests.Components, TileParts, wide), out var output, out _);
+        Assert.That(output.SyntaxTrees.Single(t => GeneratorTests.IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString(), Does.Contain("cells of 'c', 'r': vector ("));
+    }
+
+    // Two layers of one tile's cells load into the thread's one texture of them, whichever layers they read: EECS073.
+    [Test]
+    public async Task TwoLayersOfTheSameCellsReport()
+    {
+        string source = Tall + "public struct L0 : ILayer { public static int Index => 0; } [EcsSystem] public ref struct S { [ForEach] static void A(Cell<NF, Ground<T3>> c, Layer<int, T3, L3> r, Layer<int, T3, L0> s, out NF next) => next = new NF(r.Value + s.Value); }";
+        var found = (await GeneratorTests.Analyze([GeneratorTests.Components, TileParts, source])).Where(d => d.Severity == DiagnosticSeverity.Error).ToArray();
+        Assert.That(found.Select(d => d.Id), Is.EqualTo(new[] { "EECS073" }), string.Join(", ", found.Select(d => d.GetMessage())));
+        Assert.That(found[0].GetMessage(), Does.Contain("takes 'r' and 's', both of the int cells of T3"));
+    }
+
+    [Test]
+    public Task ALayerOfTheGroundsBufferReports() => ReportsOnTiles("EECS073",
+        Tall + "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<int, Ground<T3>> c, Layer<int, T3, L3> r, out NF next) => next = new NF(c.Value + r.Value); }");
+
     // EECS123: a cell method's layers (ITileLayers) where the pass may not skip rows: the rows outside could not be filled.
     private const string Layers = "public record struct GL(int From, int To) : IComponent, ITileLayers; ";
 

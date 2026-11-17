@@ -103,6 +103,14 @@ public interface IPairJob
     static virtual bool Merges => false;
 
     /// <summary>
+    /// The bytes of the neighbor's columns the job reads per pair (its point and its <c>[Neighbor]</c> components): a
+    /// parallel pass that <see cref="Merges"/> cuts chunks of at least <see cref="World.MinChunkBytes"/> of them, times the
+    /// neighbors a row meets. Generated jobs set it; default 0, unknown: chunks down to one word of rows.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    static virtual int RowBytes => 0;
+
+    /// <summary>
     /// Combine the partial results <paramref name="chunk"/> holds into <paramref name="job"/> (both of the job's own
     /// type; <see cref="Merges"/>). Generated parallel jobs with <see cref="Reduce{T}"/> parameters implement it.
     /// </summary>
@@ -255,6 +263,28 @@ public readonly ref struct PairRun
     /// <summary>Row 0 of the other table's column of <typeparamref name="T"/> (a component of the neighbors' filter). O(1).</summary>
     public ref T Others<T>() where T : struct, IComponent => ref _other.Data<T>(_other.ColumnIndex(ComponentType<T>.Bit));
 
+    /// <summary>
+    /// The neighbors a row of the run meets, on average, rounded up: the rows of each row's list when the run carries
+    /// them (<see cref="Listed"/>), else of its cluster's <see cref="Ranges"/>. From the data alone (the rows' points, the
+    /// cutoff), so a merging pass's chunks cut by it hold on any number of threads. O(clusters + ranges).
+    /// </summary>
+    internal long NeighborsPerRow()
+    {
+        if (_nearStarts != null)
+        {
+            int rows = _table.Count;
+            return rows == 0 ? 0 : (_nearStarts[rows] - _nearStarts[0] + rows - 1L) / rows;
+        }
+        long total = 0;
+        for (int c = _first; c < _end; c++)
+        {
+            var ranges = Ranges(c);
+            for (int k = 0; k + 1 < ranges.Length; k += 2) total += ranges[k + 1] - ranges[k];
+        }
+        int clusters = _end - _first;
+        return clusters <= 0 ? 0 : (total + clusters - 1) / clusters;
+    }
+
     /// <summary>A symmetric job's schedule of its list (the run of a pass, not of a chunk).</summary>
     internal PairSchedule Schedule => _schedule;
 
@@ -358,10 +388,11 @@ public sealed partial class World
             {
                 // Chunks of whole words of rows: a chunk's rows never share a presence or tick word with another's.
                 // A job that merges is cut by count (MergedChunkRows): cut by cost, the boundaries its partial results are
-                // combined at followed how long runs took, and a run slower than any before grew the copies it keeps.
+                // combined at followed how long runs took, and a run slower than any before grew the copies it keeps. Its
+                // bytes per row are a neighbor's columns times the neighbors a row meets (the data's, not the machine's).
                 int perWord = 64 / run.ClusterSize, clusters = run.End;
                 long items = (long)clusters * run.ClusterSize;
-                int size = (TJob.Merges ? MergedChunkRows(work, items, false, 64) : ChunkRows(work, items, 0)) / run.ClusterSize;
+                int size = (TJob.Merges ? MergedChunkRows(work, items, false, TJob.RowBytes * run.NeighborsPerRow()) : ChunkRows(work, items, 0)) / run.ClusterSize;
                 size = (size + perWord - 1) / perWord * perWord;
                 int chunks = (clusters + size - 1) / size;
                 work.Set(start, in run, size, chunks);

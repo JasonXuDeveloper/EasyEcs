@@ -445,7 +445,22 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
     /// that is not empty holds fewer cells than the shape, or the layers are not 0 ≤ from ≤ to &lt; Height.
     /// </para>
     /// </summary>
-    public void ExchangeHalo(int from, int to, TCell border = default, bool mask = true)
+    public void ExchangeHalo(int from, int to, TCell border = default, bool mask = true) => Exchange(from, to, border, mask, false);
+
+    /// <summary>
+    /// Layer <paramref name="layer"/> copied with its ring of halo into this thread's texture of the tile, without the
+    /// layers under and over it and without its mask: what a <see cref="Layer{TCell, TTile, TLayer}"/> of a ground cell
+    /// reads (the cells of that layer at offsets within it). The texture's layers around it hold nothing the indexer may
+    /// read. O((Width + 2r) × (Depth + 2r)). Generated code calls this.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public void ExchangeLayer(int layer) => Exchange(layer, layer, default, false, true);
+
+    /// <summary>
+    /// <see cref="ExchangeHalo(int, int, TCell, bool)"/>, and with <paramref name="flat"/> the layers from
+    /// <paramref name="from"/> to <paramref name="to"/> alone (<see cref="ExchangeLayer"/>).
+    /// </summary>
+    private void Exchange(int from, int to, TCell border, bool mask, bool flat)
     {
         TileShapeCheck<TTile>.Check();
         if (from < 0 || from > to || to >= TTile.Height) ThrowLayers(from, to);
@@ -461,8 +476,8 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
         // loop, which the JIT keeps for that shape alone (the condition is a constant): no corner, no remapping.
         if (TTile.Halo == 1 && TTile.Neighborhood == TileNeighborhood.Faces && TTile.Boundary == TileBoundary.Border)
         {
-            if (mask) LoadFaces<Masked>(frame, from, to, border);
-            else LoadFaces<Unmasked>(frame, from, to, border);
+            if (mask) LoadFaces<Masked>(frame, from, to, border, flat);
+            else LoadFaces<Unmasked>(frame, from, to, border, flat);
         }
         // A 2D tile with a border (a blur, a wave, Life): its own loop, with no table of the 27 sources.
         else if (TTile.Height == 1 && TTile.Boundary == TileBoundary.Border && TTile.Halo <= TTile.Width && TTile.Halo <= TTile.Depth)
@@ -470,7 +485,7 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
             if (mask) LoadPlane<Masked>(frame, border);
             else LoadPlane<Unmasked>(frame, border);
         }
-        else LoadAny(frame, from, to, border, mask);
+        else LoadAny(frame, from, to, border, mask, flat);
         frame.From = from;
         frame.To = to;
         frame.Masked = mask;
@@ -487,7 +502,7 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
         _to = frame.To;
     }
 
-    private readonly void LoadAny(TileFrame<TCell, TTile> frame, int from, int to, TCell border, bool mask)
+    private readonly void LoadAny(TileFrame<TCell, TTile> frame, int from, int to, TCell border, bool mask, bool flat)
     {
         int width = TTile.Width, depth = TTile.Depth, height = TTile.Height, r = TTile.Halo, hy = height > 1 ? r : 0;
         int row = width + 2 * r, layer = row * (depth + 2 * r), cells = width * depth * height;
@@ -521,7 +536,8 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
         // checked it), at a layer 0 <= y < Height, a row 0 <= z < Depth and cells 0 <= x < Width (Map keeps the mapped
         // coordinate in the tile it names; Shape.Check holds r <= the extent it reaches across); every write is inside
         // layer t < layers of the texture, which holds (Height + 2 hy) layers of (Depth + 2r) rows of (Width + 2r) cells.
-        for (int t = 0; t < layers; t++)
+        // flat: the layers asked alone, the hy halo layers under and over them left as they were (ExchangeLayer).
+        for (int t = flat ? hy : 0, end = flat ? layers - hy : layers; t < end; t++)
         {
             int y = from - hy + t;
             int dy = Map(y, height, (present >> 4 & 1) != 0, (present >> 22 & 1) != 0, out int sy);
@@ -620,7 +636,7 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
     /// and masks. <typeparamref name="TMask"/> is <see cref="Masked"/> or <see cref="Unmasked"/>: the JIT compiles a
     /// loop for each, and the unmasked one (the blocks a stencil only samples) tests no cell.
     /// </summary>
-    private readonly void LoadFaces<TMask>(TileFrame<TCell, TTile> frame, int from, int to, TCell border) where TMask : struct
+    private readonly void LoadFaces<TMask>(TileFrame<TCell, TTile> frame, int from, int to, TCell border, bool flat) where TMask : struct
     {
         bool mask = typeof(TMask) == typeof(Masked);
         int width = TTile.Width, depth = TTile.Depth, height = TTile.Height, hy = height > 1 ? 1 : 0;
@@ -643,7 +659,8 @@ public ref struct Tile<TCell, TTile> where TCell : unmanaged where TTile : struc
         // The bounds: every read is a row of a buffer that holds at least `cells` (Own and Beside checked it, the blank
         // has `cells`), at a layer 0 <= y < Height and a row 0 <= z < Depth; every write is inside layer t < layers of
         // the texture.
-        for (int t = 0; t < layers; t++)
+        // flat: the layers asked alone, the hy halo layers under and over them left as they were (ExchangeLayer).
+        for (int t = flat ? hy : 0, end = flat ? layers - hy : layers; t < end; t++)
         {
             int y = from - hy + t;
             ref TCell at = ref Unsafe.Add(ref texels, t * layer);

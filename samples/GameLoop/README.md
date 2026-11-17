@@ -10,13 +10,13 @@ What each file teaches, with its code, is on the docs site: [GameLoop](https://e
 
 | File | What it holds |
 |---|---|
-| [Components.cs](Components.cs) | requests, simulation state, singletons, the two system groups |
+| [Components.cs](Components.cs) | requests, simulation state, singletons (`Stats`: an `[Accumulate]` total the request systems count into), the two system groups |
 | [Systems/Input.cs](Systems/Input.cs) | `ReceiveInputSystem`: messages from the mailbox in singleton `Inbox` to request entities |
 | [Systems/Requests.cs](Systems/Requests.cs) | `LeaveSystem`, `JoinSystem`, `MoveSystem`, `FireSystem`: one kind of request each |
 | [Systems/Simulation.cs](Systems/Simulation.cs) | `MovementSystem`, `LifetimeSystem` (bullets expire), `ClockSystem` |
 | [Systems/Replication.cs](Systems/Replication.cs) | `ReplicationSystem`: 16 bytes per moved entity into the outbox |
 | [Program.cs](Program.cs) | creates the world, adds singletons and systems, runs the loop, prints the summary and the checks |
-| [Host/](Host) | plumbing a real server has but that is not the ECS lesson: the `Mailbox` between threads, `FakeClients` standing in for the network, `FixedTick` timing, `Network.SendOutbox`, the `Report` lines, `Checks` |
+| [Host/](Host) | plumbing a real server has but that is not the ECS lesson: the `Mailbox` between threads, `FakeClients` standing in for the network, `FixedTick` timing, `Network.SendOutbox`, the `Report` lines, `Checks`, the command-line option (`Support`) |
 
 ## Run it
 

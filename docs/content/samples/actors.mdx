@@ -60,8 +60,8 @@ stamps only a balance that grew.
 
 The save group has one system, over every kind of actor. Its `[Changed<T>]` methods select the rows written since it
 last ran, so each run lists the actors written since the previous save, and its own run is the mark. Saving a record
-rewrites tables, which a pass refuses ([EECS041](/en/docs/guide/help/analyzer#eecs041)), so the system lists the actors in
-the `Unsaved` singleton and the host saves them after `world.Update<Saving>()`.
+rewrites tables, which a pass refuses ([EECS041](/en/docs/guide/help/analyzer#eecs041)), so the methods emit one
+`Unsaved` record per actor, and a `[Drain]` method saves each record once the pass has ended and clears it.
 
 <include lang="csharp" meta='title="Systems/SaveSystems.cs"'>../../../samples/Actors/Systems/SaveSystems.cs</include>
 
@@ -77,7 +77,7 @@ record: its defaults are its first state, and the next save writes them.
 ## The program [#program]
 
 Activations, messages, the group updates, saves and a restart. The storage is a dictionary standing in for a
-database, and the host's save of the listed actors lives with it in
+database, in
 [`Host/Storage.cs`](https://github.com/JasonXuDeveloper/EasyEcs/blob/master/samples/Actors/Host/Storage.cs):
 plumbing, not the lesson.
 

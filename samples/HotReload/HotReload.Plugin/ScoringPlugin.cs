@@ -7,11 +7,8 @@ public sealed class ScoringPlugin : IGamePlugin
 {
     public void Install(World world)
     {
-        // After a reload the saved bonus is already back; only a first install sets it.
-        if (!world.HasBonus)
-        {
-            world.SetBonus(Points: 1);
-        }
+        // After a reload the saved bonus is already back and stays; only a first install adds it.
+        world.GetOrAddBonus(Points: 1);
 
         world.AddSystem<JoinScoringSystem>();
         world.AddSystem<ScoringSystem>();
@@ -20,11 +17,7 @@ public sealed class ScoringPlugin : IGamePlugin
     public string Status(World world)
     {
         int points = 0;
-        foreach (var item in world.Read<Score>())
-        {
-            points += item.Score.Points;
-        }
-
+        Reports.SumPoints(world, ref points);
         return $"{points} points";
     }
 }
