@@ -178,7 +178,7 @@ stateDiagram-v2
 | 玩家跨进另一片地形，或出现 | 多出的那条地形整块发送，带着其中的实体（没加载的记成 `LoadRequest`）；少掉的那条让客户端忘掉 | `AoiViewSystem`，`[With<Player>, Changed<InChunk>]` |
 | 玩家离开 | 它的视野被释放 | `AoiViewSystem`，`[With<Retired>]` |
 | 一片地形加载完 | 地形和其中的实体，发给周围的玩家 | `AoiChunkSystem`，`[With<Fresh>]` |
-| 实体跨进另一片地形，或刚被创建 | 看得见新地形、看不见旧地形的玩家收到出现包，反过来的收到消失包 | `AoiSpawnSystem`，`[Changed<InChunk>]` |
+| 实体跨进另一片地形，或刚被创建 | 看得见新地形、看不见旧地形的玩家收到出现包，反过来的收到消失包 | `AoiSpawnSystem`，`[Without<Visible>]` 和 `[Changed<InChunk>]` |
 | 实体被销毁 | 看得见它所在地形的玩家收到消失包 | `AoiDespawnSystem`，`[With<Retired>]` |
 
 谁看得见一片地形是数出来的，从不搜索：每个玩家的视野都是 `Rules.PlayerVision`，所以看得见一片地形的玩家，就是以它为中心的正方形里的

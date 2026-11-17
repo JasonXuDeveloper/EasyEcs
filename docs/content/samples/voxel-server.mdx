@@ -210,7 +210,7 @@ row of chunks for a step into the next chunk, the whole square for a respawn. Fo
 | A player crosses into another chunk, or appears | the chunks of the strip it gains, whole with their entities (or a `LoadRequest` for those not loaded); the strip it loses is forgotten | `AoiViewSystem`, `[With<Player>, Changed<InChunk>]` |
 | A player leaves | its view is released | `AoiViewSystem`, `[With<Retired>]` |
 | A chunk finishes loading | the chunk and its entities, for the players around it | `AoiChunkSystem`, `[With<Fresh>]` |
-| An entity crosses into another chunk, or is created | a spawn for the players that see its new chunk and not its old one, a despawn for the reverse | `AoiSpawnSystem`, `[Changed<InChunk>]` |
+| An entity crosses into another chunk, or is created | a spawn for the players that see its new chunk and not its old one, a despawn for the reverse | `AoiSpawnSystem`, `[Without<Visible>]` and `[Changed<InChunk>]` |
 | An entity is destroyed | a despawn for the players that see its chunk | `AoiDespawnSystem`, `[With<Retired>]` |
 
 Who sees a chunk is counted, never searched: every player sees `Rules.PlayerVision`, so the players that see a chunk
