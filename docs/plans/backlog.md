@@ -91,6 +91,12 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
 - [ ] **`research-voxel-pingpong`** (exemplar 2a step 5; step5.patch): the tile swap stamps `Fluid` changed on every
       step, settled tiles too (block updates 33,714 -> 101,949), and 16,496 B in 100 ticks. Find whether the ping-pong
       form should stamp only changed cells (or the sample's form is wrong), then steps 5 and 6. Opus.
+- [ ] **`fix-generated-dead-lines`** (exemplar 2c): two forms the battle server could not use because their generated
+      text is over GeneratedTextTests' budgets. A `[Neighbor]` pair method (`SeeJob4`) writes two empty methods,
+      `CutoffsSquared` and `Stamp` (empty methods: 3, budget 1). An `[EntityMethod]` with a `foreach` over a buffer
+      writes `var __span0 = (bag).AsReadOnlySpan();` (needless parentheses: 1, budget 0). Make the generator skip
+      empty members and drop the parentheses around a plain name; then give the battle server its `Sightings` pair
+      pass and `LootValue` entity method back (2c's 2fdb8445 has both). Opus.
 - [ ] **`feat-lane1-core`**: the first run (from 3315196) was **lost with its container on 2026-11-09** before any
       push; only its interim reports survive. Rule since then: a lane hands back per item, each item is gated,
       merged and pushed before the next. What the lost run found (to rebuild or to record, not to re-research):
