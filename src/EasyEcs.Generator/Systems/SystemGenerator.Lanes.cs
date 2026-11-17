@@ -6,7 +6,7 @@ using System.Text.RegularExpressions;
 namespace EasyEcs.Generator;
 
 // The lane kernel's form of a flat job (docs/plans/designs/lane-kernel.md, owner L33): the job's vector body written once
-// as a walk over Core's lane types (ILane: Lane512 / Lane256 / Lane128), its uniforms broadcast before its loop, the
+// as a walk over Core's lane types (ILane: Lane512 / Lane256 / Lane128), its uniforms and constants broadcast before its loop, the
 // widths, the masked words and the stopping row Core's LaneKernel's; every other shape keeps the loops
 // SystemGenerator.Loops.cs writes per width.
 public sealed partial class SystemGenerator
@@ -18,7 +18,9 @@ public sealed partial class SystemGenerator
     /// <param name="Fields">Lanes per row: a flat loop's fields (each alike), else 1.</param>
     /// <param name="Masked">Masked words take the step too (its writes kept by the passing lanes); else they keep their loops.</param>
     /// <param name="Uniforms">The run's uniform scalars: read in Execute into the walk's struct, broadcast before its loop.</param>
-    internal sealed record LaneStep(string Text, int Fields, bool Masked, IReadOnlyList<Uniform> Uniforms);
+    /// <param name="Constants">The step's constant vectors (<c>LF.Create(0.5f)</c>), named <c>__k0</c>, <c>__k1</c>, ... in
+    /// <paramref name="Text"/>: broadcast before the walk's loop too.</param>
+    internal sealed record LaneStep(string Text, int Fields, bool Masked, IReadOnlyList<Uniform> Uniforms, IReadOnlyList<string> Constants);
 
     /// <summary>A uniform scalar of the run: the step's name for its broadcast, its lane type (float or int), its C# in Execute.</summary>
     internal readonly record struct Uniform(string Name, string Type, string Value);
@@ -32,8 +34,8 @@ public sealed partial class SystemGenerator
     /// no condition (a mask kept across statements), no other call;</item>
     /// <item>no reduction, structural change, record, bail, gather, draw, lookup prefetch, streamed column, wide or
     /// interleaved component;</item>
-    /// <item>constants (written in place) and uniform scalars of float or int (a singleton's dt, a parameter's value:
-    /// broadcast before the walk's loop) as its only setup.</item>
+    /// <item>constants and uniform scalars of float or int (a singleton's dt, a parameter's value) as its only setup, each
+    /// broadcast before the walk's loop.</item>
     /// </list>
     /// Masked words take the step when their text is the whole run's with each write kept by the passing lanes.
     /// </summary>
@@ -43,26 +45,28 @@ public sealed partial class SystemGenerator
                 Wide: null, Statics.Length: 0, Pairs: false, IndexTop: 0, Cold: null, Streams: false }
             || simd.StructuralChanges.Length > 0 || simd.Chains.Length > 0 || simd.Prefetched.Length > 0) return null;
         var uniforms = new List<Uniform>();
+        var constants = new List<string>();
         if (simd.Flat is { } flat)
-            return StepText(flat.Setup, flat.Body + flat.Stores, simd.Columns, uniforms) is { } text && Fits(text, uniforms, false)
-                ? new(text, flat.Fields, false, uniforms) : null;
+            return StepText(flat.Setup, flat.Body + flat.Stores, simd.Columns, uniforms, constants) is { } text && Fits(text, uniforms, constants, false)
+                ? new(text, flat.Fields, false, uniforms, constants) : null;
         if (simd.Interleaves || simd.FlatOnly) return null;
-        if (StepText(simd.Setup, simd.Body + simd.Stores, simd.Columns, uniforms) is not { } whole) return null;
-        if (!simd.MaskedScalar && StepText(simd.Setup, simd.MaskedBody + simd.MaskedStores, simd.Columns, []) is { } masked && Unkept(masked) == whole
-            && Fits(masked, uniforms, true)) return new(masked, 1, true, uniforms);
-        return Fits(whole, uniforms, false) ? new(whole, 1, false, uniforms) : null;
+        if (StepText(simd.Setup, simd.Body + simd.Stores, simd.Columns, uniforms, constants) is not { } whole) return null;
+        var maskedConstants = new List<string>();
+        if (!simd.MaskedScalar && StepText(simd.Setup, simd.MaskedBody + simd.MaskedStores, simd.Columns, [], maskedConstants) is { } masked
+            && Unkept(masked) == whole && Fits(masked, uniforms, maskedConstants, true)) return new(masked, 1, true, uniforms, maskedConstants);
+        return Fits(whole, uniforms, constants, false) ? new(whole, 1, false, uniforms, constants) : null;
     }
 
     /// <summary>Whether the walk of <paramref name="text"/> stays within the IL locals the JIT inlines (into each width's Walk).</summary>
-    private static bool Fits(string text, IReadOnlyList<Uniform> uniforms, bool masked) =>
-        Locals(WalkText(text, uniforms, masked)) <= InlinedLocals;
+    private static bool Fits(string text, IReadOnlyList<Uniform> uniforms, IReadOnlyList<string> constants, bool masked) =>
+        Locals(WalkText(text, uniforms, constants, masked)) <= InlinedLocals;
 
     /// <summary>
     /// <paramref name="text"/>, a loop's statements over <c>Kernel.V</c>, as a step's over the lane types, its setup's
-    /// constants written where they are used and its uniform scalars added to <paramref name="uniforms"/>; null when it
-    /// reads anything else.
+    /// uniform scalars added to <paramref name="uniforms"/> and its constant vectors to <paramref name="constants"/> (each
+    /// named <c>__k</c> and its index in the text); null when it reads anything else.
     /// </summary>
-    private static string? StepText(string setup, string text, EquatableArray<string> columns, List<Uniform> uniforms)
+    private static string? StepText(string setup, string text, EquatableArray<string> columns, List<Uniform> uniforms, List<string> constants)
     {
         var aliases = new Dictionary<string, string>();
         foreach (var line in setup.Split('\n'))
@@ -103,6 +107,15 @@ public sealed partial class SystemGenerator
         text = LaneCreate.Replace(text, m => $"{Lane(m.Groups[1].Value)}.Create(");
         if (!lanes || text.IndexOf('\u0001') >= 0 || Code.Word(text, "__pass") >= 0) return null;
         if (!Regex.IsMatch(StepTokens.Replace(text, " "), @"^[\s+\-*/&|^~()=,;]*$")) return null;
+        // each constant a local of the walk, broadcast before its loop: written in place, the JIT keeps it in a register
+        // only when its CSE takes it, and where it does not (Haul's walk under SSE) each vector reloads it from memory, a
+        // fourth load a vector where the emitted loop's three bound it (lane-kernel.md, package F, "Constants")
+        text = LaneConstant.Replace(text, m =>
+        {
+            int k = constants.IndexOf(m.Value);
+            if (k < 0) constants.Add(m.Value);
+            return $"__k{(k < 0 ? constants.Count - 1 : k)}";
+        });
         // the step inlines into each width's walk: within the IL locals the JIT inlines
         return Locals(text) <= InlinedLocals ? text : null;
     }
@@ -119,6 +132,9 @@ public sealed partial class SystemGenerator
     private static readonly Regex LaneLoad = new(Regex.Escape(Kernel.V) + @"\.LoadUnsafe\(ref e(\d+), \(nuint\)i\)");
     private static readonly Regex LaneStore = new(@"(?m)^([ \t]*)" + Regex.Escape(Kernel.V) + @"\.StoreUnsafe\((.*), ref e(\d+), \(nuint\)i\);$");
     private static readonly Regex LaneCreate = new(Regex.Escape(Kernel.V) + @"\.Create<(\w+)>\(");
+
+    /// <summary>A constant vector of a step: a literal's broadcast or a named constant's (<c>float.Epsilon</c>).</summary>
+    private static readonly Regex LaneConstant = new(@"\bL[FI]\.Create\((?<p>\()?-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?[fFdDmMuUlL]*(?(p)\))\)|\bL[FI]\.Create\((?:float|int)\.[A-Za-z]\w*\)");
 
     /// <summary>What a step may name: the lane operations, its locals, columns and passing lanes, literals.</summary>
     private static readonly Regex StepTokens = new(
@@ -147,15 +163,16 @@ public sealed partial class SystemGenerator
     }
 
     /// <summary>
-    /// The walk of a step's <paramref name="text"/> over one width (<c>ILaneWalk4.Walk</c>'s body): the uniforms
-    /// broadcast before its loop (the JIT leaves a broadcast written in the loop there once the loop holds many vector
-    /// locals: lane-kernel.md, package F), then the vectors from <c>i</c> to <c>end</c>, a masked word's vectors with no
-    /// passing row skipped.
+    /// The walk of a step's <paramref name="text"/> over one width (<c>ILaneWalk4.Walk</c>'s body): the uniforms and
+    /// constants broadcast before its loop (the JIT leaves a broadcast written in the loop there once the loop holds many
+    /// vector locals, and a constant in memory where its CSE declines it: lane-kernel.md, package F), then the vectors
+    /// from <c>i</c> to <c>end</c>, a masked word's vectors with no passing row skipped.
     /// </summary>
-    private static string WalkText(string text, IReadOnlyList<Uniform> uniforms, bool masked)
+    private static string WalkText(string text, IReadOnlyList<Uniform> uniforms, IReadOnlyList<string> constants, bool masked)
     {
         var walk = new StringBuilder();
         foreach (var u in uniforms) walk.Append($"var {u.Name} = {(u.Type == "float" ? "LF" : "LI")}.Create(this.{u.Name});\n");
+        for (int k = 0; k < constants.Count; k++) walk.Append($"var __k{k} = {constants[k]};\n");
         walk.Append("for (; i < end; i += LF.Count)\n{\n");
         if (masked)
         {
@@ -189,7 +206,7 @@ public sealed partial class SystemGenerator
         foreach (var u in step.Uniforms) members.Append($"            public {u.Type} {u.Name};\n");
         members.Append("\n            [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]\n");
         members.Append("            void global::EasyEcs.ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong word)\n            {\n");
-        Indented(members, "                ", WalkText(step.Text, step.Uniforms, step.Masked));
+        Indented(members, "                ", WalkText(step.Text, step.Uniforms, step.Constants, step.Masked));
         members.Append("            }\n        }\n");
     }
 }
