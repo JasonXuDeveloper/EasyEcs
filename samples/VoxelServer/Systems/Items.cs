@@ -13,7 +13,7 @@ public ref struct DigSystem
 {
     [ForEach]
     static void Dig(Entity player, in Dig dig, in Position position, in Score score, in Prefabs prefabs, in Clock clock,
-        ref Stats stats, World world)
+        ref Reduce<Stats> stats, World world)
     {
         if (!dig.Value) return;
         var at = Terrain.Cell(position.Value.X, position.Value.Y - 1, position.Value.Z);
@@ -29,7 +29,7 @@ public ref struct DigSystem
         world.Instantiate(prefabs.Item, new Position(new Vector3(at.X + 0.5f, at.Y + 0.5f, at.Z + 0.5f)),
             new InChunk(Terrain.ChunkOf(at.X, at.Z)), new Item(drop, 1), new Dropped(clock.Tick));
         player.SetScore(score.BlocksDug + 1);                  // indexed: written with Set, read as a parameter
-        stats.BlocksDug++;
+        stats.Value.BlocksDug++;
     }
 }
 // #endregion dig
@@ -44,7 +44,7 @@ public ref struct DigSystem
 public ref struct PickupSystem
 {
     [ForEach(Slices = 2)]
-    static void Pickup(Entity entity, ref Item item, in Dropped dropped, in Position position, in Clock clock, ref Stats stats, World world)
+    static void Pickup(Entity entity, ref Item item, in Dropped dropped, in Position position, in Clock clock, ref Reduce<Stats> stats, World world)
     {
         if (clock.Tick - dropped.Tick < Rules.PickupDelay) return;
         var p = position.Value;
@@ -57,7 +57,7 @@ public ref struct PickupSystem
             if ((player.Position.Value - p).LengthSquared() > Rules.PickupRange * Rules.PickupRange) continue;
             if (!Inventory.HasRoom(player.ItemStack, item.Kind)) continue;   // a read: a full inventory is not stamped
             int taken = Inventory.Add(ref player.WriteItemStack(), item.Kind, item.Count);
-            stats.ItemsPickedUp += taken;
+            stats.Value.ItemsPickedUp += taken;
             if (taken == item.Count)
             {
                 entity.Destroy();

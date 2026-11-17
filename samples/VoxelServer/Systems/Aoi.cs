@@ -28,7 +28,7 @@ namespace VoxelServer;
 public ref struct AoiViewSystem
 {
     [ForEach, With<Player>, Changed<InChunk>]
-    static void Look(Entity player, in InChunk at, ReadOnlyMaybe<ViewCenter> view, in Clock clock, in Regions regions, ref Stats stats, World world)
+    static void Look(Entity player, in InChunk at, ReadOnlyMaybe<ViewCenter> view, in Clock clock, in Regions regions, ref Reduce<Stats> stats, World world)
     {
         bool placed = view.HasValue;                                      // none yet: the player just appeared
         var from = placed ? view.Value.Chunk : default;
@@ -38,8 +38,8 @@ public ref struct AoiViewSystem
             if (Aoi.Known(world, chunk, out var loaded))
             {
                 loaded.Viewers.Count++;
-                stats.ChunksSent++;
-                stats.CameIntoView += world.InChunkIndex.Count(chunk);
+                stats.Value.ChunksSent++;
+                stats.Value.CameIntoView += world.InChunkIndex.Count(chunk);
             }
             else if (loaded == default && !world.LoadRequestIndex.TryGet(chunk, out _))
             {
@@ -47,14 +47,14 @@ public ref struct AoiViewSystem
                 if (!regions.Files.Has(chunk)) request.RemoveSaved();     // never saved: generated
             }
         }
-        if (placed) Release(world, from, at.Pos, true, clock.Tick, ref stats);
+        if (placed) Release(world, from, at.Pos, true, clock.Tick, ref stats.Value);
         player.SetViewCenter(at.Pos);                                     // last: the view is not read after it
     }
 
     [ForEach, With<Retired>]
-    static void Left(Entity player, in ViewCenter view, in Clock clock, ref Stats stats, World world)
+    static void Left(Entity player, in ViewCenter view, in Clock clock, ref Reduce<Stats> stats, World world)
     {
-        Release(world, view.Chunk, default, false, clock.Tick, ref stats);
+        Release(world, view.Chunk, default, false, clock.Tick, ref stats.Value);
         player.RemoveViewCenter();
     }
 
@@ -78,13 +78,13 @@ public ref struct AoiViewSystem
 public ref struct AoiChunkSystem
 {
     [ForEach, With<Fresh>]
-    static void Loaded(in Chunk key, ref Viewers viewers, in Clock clock, ref Stats stats, World world)
+    static void Loaded(in Chunk key, ref Viewers viewers, in Clock clock, ref Reduce<Stats> stats, World world)
     {
         int watching = 0;
         foreach (var chunk in Terrain.ChunksAround(key.Pos, Aoi.Range)) watching += world.ViewCenterIndex.Count(chunk);
         viewers = new Viewers(watching, clock.Tick);
-        stats.ChunksSent += watching;
-        stats.CameIntoView += watching * world.InChunkIndex.Count(key.Pos);
+        stats.Value.ChunksSent += watching;
+        stats.Value.CameIntoView += watching * world.InChunkIndex.Count(key.Pos);
     }
 }
 
@@ -95,18 +95,18 @@ public ref struct AoiChunkSystem
 public ref struct AoiSpawnSystem
 {
     [ForEach, Without<Visible>]
-    static void Appeared(Entity entity, in InChunk at, ref Stats stats, World world)
+    static void Appeared(Entity entity, in InChunk at, ref Reduce<Stats> stats, World world)
     {
-        stats.CameIntoView += Aoi.ViewersOf(world, at.Pos);
+        stats.Value.CameIntoView += Aoi.ViewersOf(world, at.Pos);
         entity.SetVisible(at.Pos);                                        // last: the row is not read after it
     }
 
     [ForEach, Changed<InChunk>]
-    static void Moved(in InChunk at, ref Visible visible, ref Stats stats, World world)
+    static void Moved(in InChunk at, ref Visible visible, ref Reduce<Stats> stats, World world)
     {
         if (visible.Chunk == at.Pos) return;
-        stats.CameIntoView += Aoi.Watching(world, at.Pos, visible.Chunk);
-        stats.LeftView += Aoi.Watching(world, visible.Chunk, at.Pos);
+        stats.Value.CameIntoView += Aoi.Watching(world, at.Pos, visible.Chunk);
+        stats.Value.LeftView += Aoi.Watching(world, visible.Chunk, at.Pos);
         visible = new Visible(at.Pos);
     }
 }
@@ -116,9 +116,9 @@ public ref struct AoiSpawnSystem
 public ref struct AoiDespawnSystem
 {
     [ForEach, With<Retired>]
-    static void Gone(Entity entity, in Visible visible, ref Stats stats, World world)
+    static void Gone(Entity entity, in Visible visible, ref Reduce<Stats> stats, World world)
     {
-        stats.Despawns += Aoi.ViewersOf(world, visible.Chunk);
+        stats.Value.Despawns += Aoi.ViewersOf(world, visible.Chunk);
         entity.RemoveVisible();                                           // freed once its view is released too
     }
 }

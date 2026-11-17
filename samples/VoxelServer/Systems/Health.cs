@@ -2,16 +2,21 @@ using EasyEcs;
 
 namespace VoxelServer;
 
-// A zombie with no health left is gone. [Changed<Health>]: only the zombies hurt since the last tick are looked at.
+// A zombie with no health left is gone. [Changed<Health>]: only the zombies hurt since the last tick are looked at. Two
+// methods, because a vector loop does not both count and destroy: Burned counts, Die destroys.
 [EcsSystem, UpdateInGroup<Simulation>]
 public ref struct ZombieDeathSystem
 {
     [ForEach, With<Zombie>, Changed<Health>]
-    static void Die(Entity zombie, in Health health, ref Stats stats)
+    static void Burned(in Health health, ref Reduce<Stats> stats)
     {
-        if (health.Value > 0) return;
-        zombie.Destroy();
-        stats.ZombiesBurned++;
+        if (health.Value <= 0) stats.Value.ZombiesBurned++;
+    }
+
+    [ForEach, With<Zombie>, Changed<Health>]
+    static void Die(Entity zombie, in Health health)
+    {
+        if (health.Value <= 0) zombie.Destroy();
     }
 }
 
@@ -24,7 +29,7 @@ public ref struct PlayerRespawnSystem
 {
     [ForEach, Changed<Health>]
     static void Respawn(in Player player, Mut<Health> health, Mut<Position> position, ref Velocity velocity,
-        Mut<DynamicBuffer<ItemStack>> inventory, in Prefabs prefabs, in Clock clock, ref Stats stats, World world)
+        Mut<DynamicBuffer<ItemStack>> inventory, in Prefabs prefabs, in Clock clock, ref Reduce<Stats> stats, World world)
     {
         if (health.Value.Value > 0) return;
         var died = position.Value.Value;
@@ -36,7 +41,7 @@ public ref struct PlayerRespawnSystem
         position.Write() = new Position(Rules.SpawnPoint(player.Client));
         velocity = default;
         health.Write() = new Health(Rules.PlayerHealth);
-        stats.PlayerDeaths++;
+        stats.Value.PlayerDeaths++;
 
         // Last: creating the items is a structural change, after which the refs into this row are not used again.
         var chunk = new InChunk(Terrain.ChunkOf(died));

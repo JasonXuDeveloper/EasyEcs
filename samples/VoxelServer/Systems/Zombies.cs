@@ -16,7 +16,7 @@ public ref struct NightSpawnSystem
 
     [ForEach, With<Player>]
     static void Spawn(Entity player, in Position position, in Clock clock, in EntityRandom random, in Prefabs prefabs,
-        ref Stats stats, Lookup<Chunk> chunks, Lookup<DynamicBuffer<Fluid>> water, Lookup<DynamicBuffer<Surface>> surface,
+        ref Reduce<Stats> stats, Lookup<Chunk> chunks, Lookup<DynamicBuffer<Fluid>> water, Lookup<DynamicBuffer<Surface>> surface,
         World world)
     {
         if (!Rules.IsNight(clock)) return;
@@ -33,7 +33,7 @@ public ref struct NightSpawnSystem
         if (top < 0 || near.Water(new BlockPos(x, top + 1, z)) > 0) return;
         world.Instantiate(prefabs.Zombie, new Position(new Vector3(x + 0.5f, top + 1, z + 0.5f)),
             new InChunk(Terrain.ChunkOf(x, z)));
-        stats.ZombiesSpawned++;
+        stats.Value.ZombiesSpawned++;
     }
 }
 // #endregion spawn
@@ -131,7 +131,7 @@ public ref struct ZombieChaseSystem
 public ref struct ZombieAttackSystem
 {
     [ForEach, With<Zombie>]
-    static void Attack(in Position position, in Target target, ref Cooldown cooldown, in Clock clock, ref Stats stats, World world)
+    static void Attack(in Position position, in Target target, ref Cooldown cooldown, in Clock clock, ref Reduce<Stats> stats, World world)
     {
         if (clock.Tick < cooldown.Until || !world.TryGetEntity(target.Player, out var player)) return;
         int health = player.Health.Value;                                   // one lookup for the read and the write
@@ -140,7 +140,7 @@ public ref struct ZombieAttackSystem
         if (new Vector2(to.X, to.Z).LengthSquared() >= 1.2f * 1.2f || MathF.Abs(to.Y) >= 1.5f) return;
         player.SetHealth(health - Rules.ZombieDamage);
         cooldown = new Cooldown(clock.Tick + Rules.TicksPerSecond);
-        stats.Hits++;
+        stats.Value.Hits++;
     }
 }
 

@@ -123,7 +123,6 @@ public static class Startup
         world.AddSystem<ZombieDeathSystem>();
         world.AddSystem<ChunkUnloadSystem>();
         world.AddSystem<ChunkSaveSystem>();
-        world.AddSystem<TallySystem>();
         world.AddSystem<AoiViewSystem>();
         world.AddSystem<AoiChunkSystem>();
         world.AddSystem<AoiSpawnSystem>();
@@ -163,15 +162,8 @@ public static class Startup
         world.Reserve(prefabs.Zombie, capacity.Zombies);
         world.Reserve(prefabs.Item, capacity.Items);
         world.Reserve<LoadRequest>(capacity.Requests);
-        DynamicBuffer<Block>.FillPool(capacity.Chunks);
-        DynamicBuffer<Fluid>.FillPool(capacity.Chunks);
-        DynamicBuffer<Surface>.FillPool(capacity.Chunks);
-        DynamicBuffer<NextFluid>.FillPool(capacity.Flowing);
-        DynamicBuffer<Footing>.FillPool(capacity.Chunks);
-        DynamicBuffer<Scent>.FillPool(capacity.Chunks);
-        DynamicBuffer<NextScent>.FillPool(capacity.Chunks);
-        DynamicBuffer<Trail>.FillPool(capacity.Chunks);
-        DynamicBuffer<ItemStack>.FillPool(capacity.Players);
+        world.ReserveBuffers(prefabs.Chunk, capacity.Chunks);          // the lists of the buffers a chunk gets
+        world.ReserveBuffers(prefabs.Player, capacity.Players);
     }
     // #endregion capacity
 

@@ -83,7 +83,7 @@ public class VoxelServerTests
         var world = Startup.Create(regions, Rules.CapacityFor(1), measure: false);
         world.System<FakeClientsSystem>().Enabled = false;    // the player stands still
         world.System<NightSpawnSystem>().Enabled = false;     // the test's zombie is the only one
-        world.System<SunlightSystem>().Enabled = false;       // and it does not burn
+        world.System<FireSystem>().Enabled = false;          // and it does not burn
         world.System<ZombieAttackSystem>().Enabled = false;   // nor kill the player, who would respawn elsewhere
 
         var chunk = new ChunkPos(0, 0);

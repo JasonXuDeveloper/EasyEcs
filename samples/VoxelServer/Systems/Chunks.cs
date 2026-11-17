@@ -21,12 +21,12 @@ namespace VoxelServer;
 public ref struct ChunkReadSystem
 {
     [ForEach(MaxRows = Rules.MaxRequests), With<Saved>, Consume]
-    static void Read(in LoadRequest request, World world, in Regions regions, ref Stats stats)
+    static void Read(in LoadRequest request, World world, in Regions regions, ref Reduce<Stats> stats)
     {
         regions.Files.TryRead(request.Pos, out var bytes);
         world.LoadEntities(bytes);                                               // the chunk and what was in it
         world.ChunkIndex.Get(request.Pos).Set(new Fresh(), new Flowing(), new Spreading());   // presence bits
-        stats.ChunksLoaded++;
+        stats.Value.ChunksLoaded++;
     }
 }
 
@@ -36,7 +36,7 @@ public ref struct ChunkReadSystem
 public ref struct ChunkGenerateSystem
 {
     [ForEach(MaxRows = Rules.MaxRequests), Without<Saved>, Consume]
-    static void Generate(in LoadRequest request, World world, in Prefabs prefabs, ref Stats stats)
+    static void Generate(in LoadRequest request, World world, in Prefabs prefabs, ref Reduce<Stats> stats)
     {
         var pos = request.Pos;
         int x = pos.X * Terrain.Size + Terrain.Size / 2, z = pos.Z * Terrain.Size + Terrain.Size / 2;
@@ -56,7 +56,7 @@ public ref struct ChunkGenerateSystem
         chunk.WriteScent().SetCount(columns);
         chunk.WriteNextScent().SetCount(columns);
         chunk.WriteTrail().SetCount(columns);
-        stats.ChunksGenerated++;
+        stats.Value.ChunksGenerated++;
     }
 }
 // #endregion load
@@ -83,7 +83,7 @@ public ref struct ChunkUnloadSystem
 public ref struct ChunkSaveSystem
 {
     [ForEach(MaxRows = Rules.MaxRequests), With<Unloading>]
-    static void Save(Entity chunk, in Chunk at, World world, in Regions regions, ref Stats stats)
+    static void Save(Entity chunk, in Chunk at, World world, in Regions regions, ref Reduce<Stats> stats)
     {
         chunk.RemoveUnloading();                                                 // not in the region file
         Span<EntityId> group = stackalloc EntityId[Rules.MaxSaved];
@@ -97,7 +97,7 @@ public ref struct ChunkSaveSystem
         world.SaveEntities(regions.Files.Buffer, group[..size]);
         regions.Files.Write(at.Pos);
         world.DestroyEntities(group[..size]);
-        stats.ChunksUnloaded++;
+        stats.Value.ChunksUnloaded++;
     }
 }
 // #endregion unload
