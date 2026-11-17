@@ -4,7 +4,7 @@ namespace VoxelServer;
 
 // A zombie with no health left is gone. [Changed<Health>]: only the zombies hurt since the last tick are looked at. Two
 // methods, because a vector loop does not both count and destroy: Burned counts, Die destroys.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ZombieDeathSystem
 {
     [ForEach, With<Zombie>, Changed<Health>]
@@ -24,7 +24,7 @@ public ref struct ZombieDeathSystem
 // the spawn point. Position and the inventory are tracked, and a ref parameter of a tracked component stamps every
 // row it visits, written or not: every living player would be sent again each tick. Mut<T> stamps only the rows of
 // the players who respawn, and [Changed<Health>] visits only the players hurt since the last tick.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct PlayerRespawnSystem
 {
     [ForEach, Changed<Health>]

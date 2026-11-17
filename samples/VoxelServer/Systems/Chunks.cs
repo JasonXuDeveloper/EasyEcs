@@ -17,7 +17,7 @@ namespace VoxelServer;
 // Reads and generation serve Rules.MaxRequests requests a tick at most ([ForEach(MaxRows = N)]): the generator collects
 // the first requests and runs the method on each outside the walk, where it may load (LoadEntities) and create
 // entities, and [Consume] destroys each request served. The others wait a tick.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ChunkReadSystem
 {
     [ForEach(MaxRows = Rules.MaxRequests), With<Saved>, Consume]
@@ -32,7 +32,7 @@ public ref struct ChunkReadSystem
 
 // Generates the chunks asked for that were never saved: an instance of the chunk prefab, its blocks written in place
 // (SetCount gives the span to write), its water empty but for a spring in one chunk in four.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ChunkGenerateSystem
 {
     [ForEach(MaxRows = Rules.MaxRequests), Without<Saved>, Consume]
@@ -64,7 +64,7 @@ public ref struct ChunkGenerateSystem
 // #region unload
 // Marks the chunks no player has had in view for five seconds. Slices = 20 spreads the check over a second: each tick
 // visits a twentieth of the chunks.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ChunkUnloadSystem
 {
     [ForEach(Slices = Rules.TicksPerSecond), With<Chunk>, Without<Unloading>]
@@ -79,7 +79,7 @@ public ref struct ChunkUnloadSystem
 // so nothing ticks where no player is, and a player who comes back finds the holes it dug and the zombies it left.
 // Rules.MaxRequests a tick at most, outside the walk like the loads. A chunk a player stands in (one who just respawned
 // there) or holding more than Rules.MaxSaved entities stays loaded and is marked again later.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ChunkSaveSystem
 {
     [ForEach(MaxRows = Rules.MaxRequests), With<Unloading>]

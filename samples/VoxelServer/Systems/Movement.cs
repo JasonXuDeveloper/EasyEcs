@@ -8,7 +8,7 @@ namespace VoxelServer;
 // but itself, so the rows may be split across threads (Parallel = true). The runner times the split against one
 // thread and keeps it only while the helpers make the pass faster: a row this cheap pays from tens of thousands of
 // players, and below that the pass stays on the calling thread at no cost.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct PlayerMoveSystem
 {
     [ForEach(Parallel = true)]
@@ -28,7 +28,7 @@ public ref struct PlayerMoveSystem
 // cost one block lookup. The position is a Mut<Position>, written only when it changes, so a body standing still is
 // not sent again. Each body writes its own row and reads the blocks through lookups (Nearby), which no system writes
 // while it runs, so the bodies are split across threads (Parallel = true).
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct PhysicsSystem
 {
     [ForEach(Parallel = true)]
@@ -87,7 +87,7 @@ public ref struct PhysicsSystem
 // Keeps the InChunk of everything that moves on the chunk it is in: players, zombies, items. [Changed<Position>] visits
 // only what moved this tick (physics writes a position only when it changes), and SetInChunkIfChanged writes only when
 // the entity crossed into another chunk, so the index is touched a few times a second, not every tick.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct GridSystem
 {
     [ForEach(SimdMode = SimdMode.Off), With<InChunk>, Changed<Position>]

@@ -7,7 +7,7 @@ namespace VoxelServer;
 // hold one, and the next chunk woken takes it back without allocating (WaterWakeSystem, on this thread too). A chunk that
 // settled is still woken by a neighbor whose water reached it in the same step: WaterWakeSystem reads the steps after
 // this system.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct WaterSleepSystem
 {
     [ForEach, Changed<FluidStep>]

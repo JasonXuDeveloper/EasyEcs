@@ -16,7 +16,7 @@ What each file teaches, with its code, is on the docs site:
 | File | What it holds |
 |---|---|
 | [Components/](Components) | the data, one file per part of the world: [Chunks.cs](Components/Chunks.cs) (blocks, chunks, load requests, `Fresh`, `Unloading`, `Viewers`), [Water.cs](Components/Water.cs) (the water, its height map and the data of its passes), [Bodies.cs](Components/Bodies.cs), [Players.cs](Components/Players.cs) (`Input`, `Score`, the inventory, `ViewCenter`, `Visible`), [Mobs.cs](Components/Mobs.cs) (zombies, items), [Scent.cs](Components/Scent.cs) (the zombies' distance field: `Ground`, `Footing`, `Scent`, `Trail`, `Footprint`), [Singletons.cs](Components/Singletons.cs) |
-| [Groups.cs](Groups.cs) | the three parts of a tick: `ClientInput`, `Simulation`, `Replication` |
+| [Groups.cs](Groups.cs) | the groups around the simulation (the default group): `ClientInput`, `Replication` |
 | [Rules.cs](Rules.cs) | the numbers of the game (ticks, speeds, damage, ranges) and the spawn points |
 | [Terrain.cs](Terrain.cs) | chunk coordinates, terrain generation, `Nearby` (the blocks, water and height map around a body, one chunk lookup), the square of chunks around a point and the strip a view gains |
 | [Systems/Chunks.cs](Systems/Chunks.cs) | `ChunkReadSystem`, `ChunkGenerateSystem`, `ChunkUnloadSystem`, `ChunkSaveSystem`: a chunk's life |

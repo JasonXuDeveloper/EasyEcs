@@ -7,7 +7,7 @@ namespace VoxelServer;
 // the Fluid buffer (a write, which replication sends) and its summary becomes the chunk's FluidCount; the blocks it
 // filled are counted into Stats. Each chunk writes its own row only (the chunks beside the edges that changed are
 // woken by WaterWakeSystem, from the step's Edges), so the chunks are split across threads, 64 at a time as the step's.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct WaterCommitSystem
 {
     [ForEach(Parallel = true, ChunkSize = 64), Changed<FluidStep>]

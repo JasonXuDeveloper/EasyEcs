@@ -10,7 +10,7 @@ namespace VoxelServer;
 // the few bodies in water. Each body writes its own velocity and reads the chunks through lookups, so the bodies are
 // split across threads, and the bodies carried are counted into Stats. Runs after the walk set the velocity and
 // before physics moves the body.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct FloatSystem
 {
     [ForEach(Parallel = true)]

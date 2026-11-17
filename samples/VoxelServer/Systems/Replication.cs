@@ -65,9 +65,9 @@ public ref struct SendPacketsSystem
 
 // #region clock
 // Starts a tick of the simulation: the clock goes first, so every system of the tick, and the replication after it,
-// sees the same tick (EntityRandom needs no clock: Server.Tick's world.Update() advances its tick). In the Simulation
-// group, not Replication, so a server that replicates less often than it simulates keeps game time.
-[EcsSystem, UpdateInGroup<Simulation>]
+// sees the same tick (EntityRandom needs no clock: Server.Tick's world.Update() advances its tick). In the
+// simulation, not Replication, so a server that replicates less often than it simulates keeps game time.
+[EcsSystem]
 public ref struct ClockSystem
 {
     static void OnUpdate(World world)

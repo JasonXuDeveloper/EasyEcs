@@ -27,7 +27,7 @@ namespace VoxelServer;
 // as a distance-vector route counts to infinity: measured, 7.5 sweeps a step against 2.7, with a long tail to the cap).
 // A stale edge of a neighbor fades the same way between chunks, two steps per update. Once settled, each column also
 // gets the side a zombie on it walks toward (Trail), so a zombie reads one byte, not five columns and their ground.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.ScentEvery)]
+[EcsSystem, UpdateInterval(Rules.ScentEvery)]
 public ref struct ScentStepSystem<TColor> where TColor : struct, IComponent
 {
     const int Size = Terrain.Size, Row = Size + 2;   // the texture: the chunk's 16 x 16 columns in a ring of its neighbors'

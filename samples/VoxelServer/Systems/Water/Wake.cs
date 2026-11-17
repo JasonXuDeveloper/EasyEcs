@@ -13,7 +13,7 @@ namespace VoxelServer;
 // A chunk woken gets its step's buffer here, on the owner thread: the pool keeps its lists per thread, and a list
 // WaterSleepSystem gave back on this thread would not serve a first write of WaterFlowSystem on a helper thread, which
 // would allocate one.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct WaterWakeSystem
 {
     [ForEach, Changed<DynamicBuffer<Block>>]

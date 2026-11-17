@@ -10,7 +10,7 @@ namespace VoxelServer;
 // and out of the water, as in Minecraft, which spawns no hostile mob closer than 24 blocks. A column whose chunk is not loaded gets none. What
 // a zombie hunts is up to its eyes (ZombieTargetSystem). Phase = 1: the first spawn of a night is at its first
 // tick.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.SpawnEvery, Phase = 1)]
+[EcsSystem, UpdateInterval(Rules.SpawnEvery, Phase = 1)]
 public ref struct NightSpawnSystem
 {
 
@@ -47,7 +47,7 @@ public ref struct NightSpawnSystem
 // none in reach, it has no target and stands. It reads the players through lookups, their view centers by key (the
 // index is built before the pass) and their positions by id, and writes its own Target only: the zombies are split
 // across threads.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ZombieTargetSystem
 {
     [ForEach(Parallel = true, Slices = Rules.LookEvery), With<Zombie>]
@@ -88,7 +88,7 @@ public ref struct ZombieTargetSystem
 // along the ground, it stands. The field is one for every zombie, as far as the prefab's Vision (Rules.ScentReach): a
 // zombie that sees further would need a field of its own. Each zombie writes its own velocity and reads the trail and
 // the player through lookups: split across threads.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ZombieChaseSystem
 {
     [ForEach(Parallel = true), With<Zombie>]
@@ -127,7 +127,7 @@ public ref struct ZombieChaseSystem
 // #region attack
 // A zombie close to the player it hunts hits it, then waits a second: its Cooldown is the tick it may hit again, so a
 // zombie that waits costs one comparison and no system counts the cooldowns down.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ZombieAttackSystem
 {
     [ForEach, With<Zombie>]
@@ -157,7 +157,7 @@ public ref struct ZombieAttackSystem
 // Arm; integer lanes give the same result on every machine). The cadence is not a branch per tick: Health is
 // tracked, and the pass writing it stamps its rows, so it is written only on the ticks that hurt and the death
 // systems ([Changed<Health>]) find nothing to do on the others.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
+[EcsSystem, UpdateInterval(Rules.BurnEvery)]
 public ref struct FireSystem
 {
     [ForEach(Parallel = true), With<Zombie>]

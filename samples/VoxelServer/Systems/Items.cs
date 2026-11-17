@@ -8,7 +8,7 @@ namespace VoxelServer;
 // Digs the block under a player who asked to: the chunk's buffer loses the block (a tracked write: the chunk is sent
 // again, and WaterWakeSystem wakes the water around it) and the block drops as an item, grass as dirt, as in
 // Minecraft. The digger's score goes up by one.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct DigSystem
 {
     [ForEach]
@@ -40,7 +40,7 @@ public ref struct DigSystem
 // (world.ViewCenterIndex: players only, not the zombies and items of those chunks). The stacks of its kind grow up to
 // Rules.StackSize, then free slots take the rest; what does not fit stays on the ground. Each tick looks at half the
 // items (Slices = 2): a pickup comes a tick later at most, and costs half.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct PickupSystem
 {
     [ForEach(Slices = 2)]
@@ -106,7 +106,7 @@ public static class Inventory
 // #region expiry
 // Removes the items nobody picked up in time. The ordered index of drop ticks walks the items from the oldest and stops
 // at the first that has time left: a tick visits the items that expire, not every item.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ItemExpirySystem
 {
     static void OnUpdate(World world)
