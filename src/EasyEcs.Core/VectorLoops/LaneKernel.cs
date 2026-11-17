@@ -268,13 +268,39 @@ public static class LaneKernel
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static nint RunFlat<TJob>(ref TJob job, nint lanes, int fields) where TJob : struct, ILaneWalk4, allows ref struct
     {
-        // each width ends at a multiple of its vectors of whole rows (fields is a constant once this is inlined, so the
-        // remainders are shifts or multiplies); a run too short for any vector makes no call
-        nint e512 = Vector512.IsHardwareAccelerated && lanes >= 16 * fields ? lanes - lanes % (16 * fields) : 0;
-        nint e256 = Vector256.IsHardwareAccelerated && lanes - e512 >= 8 * fields ? lanes - (lanes - e512) % (8 * fields) : e512;
-        nint e128 = Vector128.IsHardwareAccelerated && lanes - e256 >= 4 * fields ? lanes - (lanes - e256) % (4 * fields) : e256;
-        if (e128 != 0) Walk(job, e512, e256, e128);
+        nint e128 = Ends(lanes, fields, out nint e512, out nint e256);
+        if (e128 != 0) Walk(job, e512, e256, e128); // a run too short for any vector makes no call
         return e128;
+    }
+
+    /// <summary>
+    /// <see cref="Run{TJob}"/> with the walks inlined into the caller: for a walk small enough that the runner's
+    /// inlining budget takes its three widths at each of its call sites (the generator decides, by the walk's lane
+    /// operations), where the call per run cost more than a small walk's vectors (a job of more than 16 bytes goes
+    /// on the stack).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static nint RunInlined<TJob>(ref TJob job, nint rows) where TJob : struct, ILaneWalk4, allows ref struct => RunFlatInlined(ref job, rows, 1);
+
+    /// <summary><see cref="RunFlat{TJob}"/> with the walks inlined into the caller (<see cref="RunInlined{TJob}"/>).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static nint RunFlatInlined<TJob>(ref TJob job, nint lanes, int fields) where TJob : struct, ILaneWalk4, allows ref struct
+    {
+        nint e128 = Ends(lanes, fields, out nint e512, out nint e256);
+        if (e128 == 0) return 0; // a run too short for any vector broadcasts nothing
+        var copy = job; // the column refs in registers: through a ref, every store to a column might write them
+        Widths<TJob, EveryRow>(ref copy, e512, e256, e128, 0);
+        return e128;
+    }
+
+    // Each width ends at a multiple of its vectors of whole rows (fields is a constant once this is inlined, so the
+    // remainders are shifts or multiplies); returns where the 128-bit vectors end.
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static nint Ends(nint lanes, int fields, out nint e512, out nint e256)
+    {
+        e512 = Vector512.IsHardwareAccelerated && lanes >= 16 * fields ? lanes - lanes % (16 * fields) : 0;
+        e256 = Vector256.IsHardwareAccelerated && lanes - e512 >= 8 * fields ? lanes - (lanes - e512) % (8 * fields) : e512;
+        return Vector128.IsHardwareAccelerated && lanes - e256 >= 4 * fields ? lanes - (lanes - e256) % (4 * fields) : e256;
     }
 
     /// <summary>
@@ -310,7 +336,8 @@ public static class LaneKernel
 
     // One method per job, the three widths' loops of a whole run in it, called once per run: the JIT's inlining budget is
     // per root method, and a runner holding every width of both modes ran out of it (the lane operations of a step of six
-    // statements left as calls), so the walk is a root of its own. The job comes by value, its column refs in argument
+    // statements left as calls), so a large walk is a root of its own (a small one is inlined: RunInlined). The job comes
+    // by value, its column refs in argument
     // registers: a ref to the caller's job made the runner keep the job in memory around the call, and with a method per
     // width that cost 1.13-1.18x the emitted loops on tables of 5-20 rows (docs/plans/designs/lane-kernel.md,
     // "Package D"). The copy is also what keeps the refs in registers inside the walk, where through a ref every store
