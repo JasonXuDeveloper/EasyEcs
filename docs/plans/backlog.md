@@ -48,21 +48,24 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       2026-11-16 (scratchpad kernelD2/cmp2/D.txt; head2 started under load 13.5): 56 level, 3 faster (Pow -10 %,
       FragmentsMove2 1,000 -6 %, EditMethodBodyIde -23 %), 4 slower: FragmentsIntegrateScalar 100k +10.6 %, VectorForms
       MarkNarrow +9.7 %, MaskedParallel +9.7 %, MaybeNarrow +5 %; LaneKernelBenchmark has no base side. Those rows are
-      being re-run in three interleaved rounds (scratchpad rerunDF); a row still slower gets its cause from the listing
-      (Opus, after feat-ground-layer), then D merges.
+      re-run in three interleaved rounds (scratchpad rerunDF/D.txt): all four level (every round within the base's own
+      spread), all 0 B. **Merged 2026-11-17 (227f62d9), gated.**
       **E** (`feat-sse-path` 3498fd4f, rebased onto main 89090767 without D's Lane128 hunk): every slower SSE row has its
       cause (lane-kernel.md package E): the blend's XMM0 mask made a store/reload chain where one select sits in a loop
       (the wins), while xor-and-xor pushed loops of several selects past the JIT's constant hoisting (Gate) or lengthened
       nested chains (Grade, Clamp, Step's masked loop). The select form is now written only for loops with one select;
-      Count, Energy, Move4, Survey and WorldSimulation differ by layout only. Gated; A/B running (scratchpad kernelE2,
-      ALLDONE). Open risk: MaybeParallel keeps the xor form. Merges alone, before or after D.
+      Count, Energy, Move4, Survey and WorldSimulation differ by layout only. **Merged 2026-11-17 (fe99f0e3)**, gated; the A/B is in
+      the entry below. Open risk: MaybeParallel keeps the xor form.
       **F** (`feat-lane-walk` 99293792, on D; owner L36: the loop lives in each job's generated Walk): HolesHaul's cause
       was D's call per masked word (now inlined into `MaskedRuns`); Tally's was the JIT blending the conditional sum
       (`ILane.AddWhereEqual`). A/B 2026-11-16 (kernelF2/cmp): default 55 level, 3 faster, 5 slower (StepKernel 100k
       +21 % noisy, TallyTyped 1,000 +20 %, StepWalk 37 +14 %, HolesHaulGenerated 100k +7.8 %, BattleServer Tick +4.3 %);
       SSE 49 level, 8 faster, 3 slower (StepWalk 100k +15 %, HaulGenerated 1,000 +13 %, HolesHaulGenerated 1,000 +4 %).
       TallyTyped / TallyGenerated at 100k did not move (1.10-1.23 base, 1.21-1.29 head): the reduction is not level yet.
-      Re-run with D's rows (rerunDF); causes next (Opus). Left for F: select under one comparison, Min/Max against
+      Re-run, three interleaved rounds (rerunDF/F_default.txt, F_sse.txt): every row level except **HaulGenerated
+      SSE4.1 1,000, slower in all three (+10.5 / +5.9 / +12.1 %, base spread 1.8 %)**; HolesHaulGenerated AVX-512 100k
+      +3.2 / +2.1 / +3.2 % sits inside its spread (4.4 %) but leans the same way. Tally's ratio still 1.15-1.18 at 100k.
+      F merges once Haul's cause is found and fixed (Opus, next after fix-no-simd-lambda-end). Left for F: select under one comparison, Min/Max against
       constants, 8-byte lanes, reductions, the masked walk's passing-bits constant.
 - [x] **`fix-no-simd-structural`** merged 2026-11-16 (5ddc511a): a lambda calling a generated writer (`e.SetDaze`) was
       marked free of structural changes, so its row-by-row job (no SIMD) froze the gate; `Symbols.UnboundEntityWriter`
