@@ -289,9 +289,18 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       headline worlds. (b) the first lines of a long run (the streamer needs a few misses to start, and does not cross a
       4 KB page on every core): prefetch the next page's first line per column; measure, drop if level. (c) check by
       listing that no generated 512-bit loop loads across a line where rows are 12 or 24 bytes (interleaved forms).
-- [ ] **`feat-ground-layer`** (owner, L19): a `Cell<TCell, Ground<TTile>>` method that also reads a layer of the
-      3D tile it is the ground of; public form chosen (L34, 2026-11-16): `Layer<TCell, TTile, TLayer>`, TLayer : ILayer with a static Index; then generator, analyzer,
-      tests, TileGroundBenchmark case, docs-todos. After feat-generated-text-2's package A (same emit code).
+- [ ] **`feat-ground-layer`** (owner, L19; L34) built, ready to merge (branch head 6c594ca3 + this Plans commit, from
+      ff4baa8d): `Layer<TCell, TTile, TLayer>` (TLayer : ILayer, a static Index) beside a `Cell<TCell, Ground<TTile>>`,
+      its layer exchanged alone (`Tile.ExchangeLayer`) and read as one more stream of the row's vector loop; EECS115 for a
+      layer it cannot read (another tile, past its layers, no ground cell); EECS073 for two layers of the same cells (the
+      thread's one texture of them; its message now names the cells, not a Tile<> of the Layer's arguments). Code fix:
+      not built (owner-review.md). TileGroundLayerBenchmark (32 x 32 chunks of 16 x 16 x 8, stone in the top layer slowing
+      the warmth; us, 0 B everywhere; Hand (Tile by value, ExchangeHalo(7, 7), Load128) / Cell / Off): 1 thread 1,199 /
+      772 / 1,295; 4 threads 442 / 307 / 413: the cell at 0.64x / 0.70x of the walk by hand. Gate: 0 warnings; tests
+      net10.0 + net11.0 4410 (2 skipped) with the new EECS073 case after its fix (ViewTests.APassThroughAViewAllocatesNothing
+      failed once in the full run, a compile in its window; it passes alone, the branch touches no view code); tiles,
+      layers and their analyzer and generator tests under AVX=0 and HWIntrinsic=0 (163 each, both runtimes); ApiDocs 0
+      problems (the reference left for the docs pass); agents 0 problems. Docs: docs-todos "feat-ground-layer".
 - [x] **`feat-ground-cells`** merged 2026-11-14. (inner-loops leftover (a), from fc26ea4): the first run was lost the same way before
       reporting; `Cell<TCell, Ground<TTile>>` already ran through the cell pass (no core or
       generator change was needed: the shape is any ITileShape); proved by TileTests.Cells.cs (2a12b41: a cross stepping

@@ -69,8 +69,10 @@ Analyzer/AnalyzerTests.Performance.cs   costs, lambda passes, view fields
 Analyzer/AnalyzerTests.Systems.cs       system rules
 Analyzer/AnalyzerTests.Tiles.cs         EECS115-117, EECS120's reasons, cell methods' EECS055 / EECS056 / EECS059 / EECS073,
                                         EECS123 and the layers' parameter left out of EECS026, a cell step's EECS115 reasons and
-                                        EECS116 advice, lanes of 1 and 4 bytes, EECS115 for cells of two tiles, EECS002 for a
-                                        result per tile outside a cell method
+                                        EECS116 advice, lanes of 1 and 4 bytes, EECS115 for cells of two tiles and for a Layer
+                                        it cannot read (past the tile's layers, another tile, no ground cell, no cell), EECS073 for
+                                        two layers of the same cells, a Layer under a ground cell clean, EECS073 for a Layer of
+                                        the ground's buffer, EECS002 for a result per tile outside a cell method
 Analyzer/AnalyzerTests.Usage.cs         usage rules
 Analyzer/CodeFixTests.cs                each fix compiles, adds no diagnostic and is not offered again
 Analyzer/FormTests.cs                   EECS080 / EECS084
@@ -144,6 +146,11 @@ Grids/TileTests.Cells.cs  cell methods (Cell<TCell, TTile>) against the whole gr
                           against the copy (box stencils copying it), the loads of PlaneLoads at every i and dx of each
                           width; cells of a ground (Cell<TCell, Ground<TTile>>): a cross stepping in place against the
                           whole ground, the method as written and the column walk by hand, bit for bit, a box blur, 0 B
+Grids/TileTests.Layers.cs a ground cell reading a layer of its chunk (Layer<TCell, TTile, TLayer>): GroundHeatSystem as
+                          the cell method bit for bit against the walk by hand and SimdMode.Off (byte rocks: the method
+                          per cell), a layer of ints as a vector loop against its walk by hand, 1 and 4 threads, a
+                          solid cell placed later, quiet chunks, cells in layers never read; the exchange copying that
+                          layer alone (ExchangeLayer); 0 B
 Grids/TileTests.Halos.cs  kept neighbors (TileNeighborCache) of a by-value Life on a torus of quiet plates against
                           the whole torus, on 1 and 4 threads, through cells written from outside, removed and
                           given back, a plate destroyed and made again, every plate's kept neighbors read, 0 B

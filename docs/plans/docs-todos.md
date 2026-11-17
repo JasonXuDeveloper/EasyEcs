@@ -3725,8 +3725,31 @@ when its value is +0 on blank cells, and reads a `Ground<TTile>`'s literal width
   result); why a value that is not +0 on blank cells keeps the hand-written form (the step leaves skipped rows zero,
   the cell step writes them with the method's blank value; -0 from a negative factor included).
 - reference: regenerate after the descriptor's text change (EECS103's description names the stepped walk).
-- Not built (owner-review.md "A ground cell sampling its tile's layer"): a ground cell method that also reads a layer
-  of the 3D tile's cells (`GroundHeatSystem`'s rocks): cells of two shapes in one method.
+- Built since: a ground cell reading a layer of its tile (feat-ground-layer below).
+
+## feat-ground-layer (owner L34: a ground cell reading one layer of its tile)
+
+New public API: `ILayer` (a layer named by a type, `static int Index`) and `Layer<TCell, TTile, TLayer>` (a cell
+method's parameter beside a `Cell<TCell, Ground<TTile>>`: the cell of layer `TLayer.Index` of the tall tile under the
+ground's cell, `Value` and `[dx, 0, dz]` within the halo). The pass exchanges that layer alone (the hidden
+`Tile.ExchangeLayer`, no layers around it) and reads it as one more stream of the row's vector loop. EECS115 names the
+layer it cannot read (another tile than the ground's, past the tile's layers, no ground cell).
+
+- guide/performance/grids.mdx + .zh (the ground section, after `Cell<Scent, Ground<Chunk>>`): reading a layer of the
+  chunk under the ground (`GroundHeatSystem`: heat spreading except where the top layer is rock) as `You write` (the
+  cell method with `Layer<Rock, RockChunk, Top>`, `struct Top : ILayer`) / `The generator writes` (the layer's
+  exchange alone, its row at (Index, z), a stream per offset); dy is 0 (one layer; a stencil across layers is a cell of
+  the tall tile); a layer of the ground's own buffer is EECS073, and so are two layers of the same cells (one texture per thread); pitfall: byte cells beside float cells keep the
+  rows cell by cell (lanes four times as wide: EECS055 says to widen to 2-byte lanes); `<BenchTable>` of
+  TileGroundLayerBenchmark (Layer_Cell / Layer_Hand / Layer_Off) once synced.
+- guide/help/analyzer.mdx + .zh, EECS115: the three layer reasons with an example each.
+- api.mdx + .zh: complexity rows for `Layer<TCell, TTile, TLayer>` (Value, the indexer: O(1)); glossary: no new term
+  (layer, ground exist); reference regenerated (layer.zh, ilayer.zh entries exist in tools/docs/ApiDocs/zh).
+- skills/easyecs/SKILL.md: a ground cell reading its chunk's layer takes `Layer<,,>`, never a `Tile<,>` read at
+  `[x, layer, z]` per cell.
+- decisions.mdx + .zh: L34's record (the layer a type with a static Index, read like a cell; not chosen: `[Layer(3)]`
+  on a `Cell<,>` parameter, a `.Layer(n)` call), with the exchange of one layer and the numbers.
+- changelog (coming version, `### New`): ground cells read a layer of their tile; README "What's new".
 
 ## feat-lane1-core (backlog Lane 1: C11-C19, the rerun)
 

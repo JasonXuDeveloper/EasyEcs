@@ -25,7 +25,8 @@ public static partial class EasyEcsAnalyzer
         "place, color by color, sweep after sweep until the tile settles. So the pass steps one tile per entity over the " +
         "whole grid ([EntityMethod], Slices and [Consume] cannot), [GaussSeidel] needs that tile and a key of integer fields " +
         "to color the tiles by, Write is for the tile the method steps (a tile taken by value throws), and ColdStart for " +
-        "the tile a [GaussSeidel] method sweeps.",
+        "the tile a [GaussSeidel] method sweeps. A cell method's inputs line up row by row: its cells are of one tile, and " +
+        "a Layer<TCell, TTile, TLayer> is read under the cells of a Ground<TTile> of that same TTile, at a layer within it.",
         helpLinkUri: Help("EECS115"));
 
     public static readonly DiagnosticDescriptor HandCommit = new("EECS116", "A tile's step and its commit written by hand",

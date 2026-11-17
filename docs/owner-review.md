@@ -189,23 +189,22 @@ there is nothing to buy with a change (the backlog item has the numbers).
 What would change the verdict: a corpus whose files name many closed generic systems (the transform then binds each
 on every edit of its file), measured with this stage's tracked step.
 
-## A ground cell sampling its tile's layer: not built (feat-ground-cells, 2026-11-14)
+## A code fix from a layer read by hand to the Layer parameter: not built (feat-ground-layer, 2026-11-16)
 
-**Proposed by** the inner-loops leftover (a): a cell method over a `Ground<TTile>` tile. The plain form (every cell of the
-ground's shape) already ran and now has its tests and TileGroundBenchmark (the backlog item has the numbers). What a
-ground is for, though, is a second field beside the 3D tile's cells, and its stencils read that tile too:
-`GroundHeatSystem` (TileTests.Steps.cs) spreads heat over `Ground<RockChunk>` except where the chunk's top layer is
-rock, reading `rocks[x, 3, row.Z]`.
+**Proposed by** the feat-ground-layer brief: a hand-written read like `rocks[x, 3, row.Z]` in a ground step turned
+into the `Layer<TCell, TTile, TLayer>` parameter of a ground cell method (L34).
 
-**Why not.** A cell method's inputs must share one shape (Symbols.StepProblem, EECS115: "cells of different tiles"),
-because each input is a stream at a constant offset from the driver's cell and their rows line up. A ground row and
-a row of the 3D tile line up in x and z, but the sampled layer is an absolute layer of the other shape (3), not an
-offset within its halo: `Cell<Rock, RockChunk>` has no way to say it, and its exchange would copy every layer of the
-3D tile for one. It needs a public form (a layer pick on the sampled cell, or an attribute naming the layer) and
-the exchange of one layer of another shape: an API for the owner to choose.
+**Why not.** The read never sits in a ground cell method: a cell method has no `row` and no second tile to read (a
+`Tile<,>` it took by value would need its own exchange per cell). It sits in a `ref Tile<TCell, Ground<TTile>>` step
+written by hand, as `GroundHeatSystem` is, and turning that step into a cell method is EECS103 v2's rewrite
+(HandStencil), which recognizes only a walk of `Columns(lanes)` with `col.Store`, not a scalar loop over x with
+indexer reads (GroundHeatSystem's form). So the fix would first need EECS103 to read scalar indexer loops as cells
+(every read `c[x + dx, dy, dz]` a stream, the loop over the row's width) and only then map a read of another tile at
+a constant layer and `row.Z` to a new `ILayer` struct the fix would also have to declare (a type the user names).
+Two new recognizers and a generated type for one shape no sample or benchmark writes yet.
 
-What would change the verdict: the owner choosing that form; then Kernel.CellFormOf reads the pick as a stream
-of the other tile's row at that layer, and the pass exchanges that layer alone (`ExchangeHalo(layer, layer)`).
+What would change the verdict: EECS103 learning the scalar indexer walk (then the layer read is one more stream kind
+of the same rewrite, the ILayer struct declared next to the system), or a sample writing ground steps by hand.
 
 ## The helpers' work estimate from runs alone (C11): dropped (feat-lane1-core, 2026-11-09)
 

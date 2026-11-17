@@ -806,6 +806,27 @@ public class GeneratorTests
             .And.Contain("rows = __width"), generated);
     }
 
+    // A layer under a ground cell (Layer<TCell, TTile, TLayer>): its tile's exchange copies that layer alone, its row is the
+    // tall tile's at (TLayer.Index, z), its offsets streams of the ground's vector loop, and the cells the loop leaves get a
+    // Layer built over the row's cell.
+    [Test]
+    public void ALayerIsOneLayersExchangeAndAStreamOfTheGroundsRows()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, AnalyzerTests.TileParts,
+            "public record struct T3(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 4; static int ITileShape.Depth => 4; static int ITileShape.Height => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }"
+            + " public struct L3 : ILayer { public static int Index => 3; }",
+            "[EcsSystem] public ref struct S { [ForEach] static void A(Cell<float, Ground<T3>> c, Layer<int, T3, L3> r, out float next) => next = r.Value != 0 ? 0 : c[-1, 0, 0] + r[1, 0, 0]; }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        string text = generated + Unaliased(generated);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        Assert.That(text, Does.Contain("tile.ExchangeLayer(global::EasyEcs.Layer<int, ").And.Contain(">.Index);")
+            .And.Contain(".At(new global::EasyEcs.TileRow<").And.Contain(">.Index, __row.Z))[0, 0, 0]")
+            .And.Contain(">.Offset(1, 0, 0);").And.Contain("in __Unsafe.Add(ref __c1, __x))")
+            .And.Contain("cells of 'c', 'r': vector (").And.Contain("offsets r(0,0,0) c(-1,0,0) r(1,0,0)")
+            .And.Not.Contain("ExchangeHalo(0, global::EasyEcs.Layer"), generated);
+    }
+
     // A result per tile keeps its lanes across the tile's rows: each width's accumulators start before the walk and fold
     // once after it (a row of a voxel chunk is one vector, and a fold per row cost more than the row's arithmetic).
     [Test]
