@@ -257,11 +257,12 @@ public static partial class EasyEcsAnalyzer
         "the halo.", helpLinkUri: Help("EECS072"));
 
     public static readonly DiagnosticDescriptor SharedTile = new("EECS073", "Two tiles of the same cells and grid",
-        "[ForEach] method '{0}' takes '{1}' and '{2}', both Tile<{3}>: they load into one texture and read one buffer",
+        "[ForEach] method '{0}' takes '{1}' and '{2}', both of the {3}: they load into one texture and read one buffer",
         Category, DiagnosticSeverity.Error, true,
         "A Tile<TCell, TTile> loads into the running thread's texture for TCell and TTile, and both parameters read the " +
         "same DynamicBuffer<TCell> of the same entity (a Tile<TCell, Ground<TTile>> as well, which the buffer cannot " +
-        "be the cells of too; one taken by ref as well, whose step writes the buffer the other reads): the second load " +
+        "be the cells of too; one taken by ref as well, whose step writes the buffer the other reads; two " +
+        "Layer<TCell, TTile, TLayer> of the same cells as well, whichever layers they read): the second load " +
         "replaces the first while it is still sampled. " +
         "Take one tile per field: one cell type (one struct, one buffer) per field the stencil reads, each its own " +
         "Tile<TCell, TTile>.", helpLinkUri: Help("EECS073"));
@@ -828,7 +829,7 @@ public static partial class EasyEcsAnalyzer
             else if (kind == Symbols.ParamKind.Tile && method.Parameters.FirstOrDefault(other => other.Ordinal < p.Ordinal
                          && SameCells(other.Type, p.Type)) is { } first)
                 context.ReportDiagnostic(Diagnostic.Create(SharedTile, p.Locations.FirstOrDefault(), method.Name, first.Name, p.Name,
-                    string.Join(", ", ((INamedTypeSymbol)p.Type).TypeArguments.Select(t => t.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)))));
+                    Symbols.TileElements(p.Type) is { } cells ? $"{cells.Cell.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat)} cells of {cells.Grid.Name}" : ""));
             else if (kind is Symbols.ParamKind.Lookup or Symbols.ParamKind.Tile
                      && Symbols.LookedUp(p).Select(t => (t, Symbols.LookupProblem(method, p, t))).FirstOrDefault(c => c.Item2 != null) is ({ } read, { } written))
                 context.ReportDiagnostic(Diagnostic.Create(LookupOfWritten, p.Locations.FirstOrDefault(), p.Name, Symbols.Describe(method),
