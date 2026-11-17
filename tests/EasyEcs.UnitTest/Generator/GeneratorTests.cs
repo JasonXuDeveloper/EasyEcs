@@ -680,6 +680,23 @@ public class GeneratorTests
             .And.Contain("__c1_1 = __V512.ConditionalSelect(__passF, __c1_1 + __c2_1 * __u0, __c1_1);"), generated); // the flat loop, then the masked one per lane
     }
 
+    // A lane job's constants are locals of its walk, broadcast before its loop: written in place, the JIT's CSE may leave
+    // one in memory, a load per vector (Haul's walk under SSE4.1, lane-kernel.md package F).
+    [Test]
+    public void ALaneWalksConstantsAreBroadcastBeforeItsLoop()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f) => f.V = f.V * 0.5f + 0.25f * f.V + 0.5f; }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        string walk = generated.Substring(generated.IndexOf("ILaneWalk4.Walk<LF, LI, M>", System.StringComparison.Ordinal));
+        int loop = walk.IndexOf("for (; i < end; i += LF.Count)", System.StringComparison.Ordinal);
+        Assert.That(loop, Is.GreaterThan(0), generated);
+        Assert.That(walk.Substring(0, loop), Does.Contain("var __k0 = LF.Create(0.5f);").And.Contain("var __k1 = LF.Create(0.25f);"), generated);
+        Assert.That(walk.Substring(loop), Does.Contain("__k0").And.Contain("__k1").And.Not.Contain("LF.Create("), generated); // each constant once
+    }
+
     // A wide component (a float, a bool, a byte and an int a row): the float lane gathered from 3 words per row by
     // permutes on AVX-512 and by table lookups on ARM64 (4 rows of 3 words: 3 vectors), each behind its hardware and the
     // job's check of the layout; the masked words run the method.
