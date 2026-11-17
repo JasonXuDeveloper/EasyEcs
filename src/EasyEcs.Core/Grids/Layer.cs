@@ -30,7 +30,8 @@ public interface ILayer
 /// The generator exchanges the halo of that layer alone (not every layer of the tile) and reads it as one more stream
 /// of the row's vector loop. Treat it as a tile parameter (<see cref="Tile{TCell, TTile}"/> by value): the rows need
 /// the entity's <c>DynamicBuffer&lt;TCell&gt;</c>, the neighbors come from the grid's index (EECS115 reports a layer of
-/// another tile than the ground's, one past the tile's layers, or one in a method without a ground cell).
+/// another tile than the ground's, one past the tile's layers, or one in a method without a ground cell; EECS073
+/// two layers of the same cells: a thread keeps one texture of a tile's cells).
 /// </summary>
 /// <typeparam name="TCell">The cell of the tall tile.</typeparam>
 /// <typeparam name="TTile">The tall tile's component and shape: the one the method's ground is of.</typeparam>

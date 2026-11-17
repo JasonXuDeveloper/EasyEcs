@@ -1,5 +1,5 @@
 <doc>
-  <member name="T:EasyEcs.Layer`3" source="081e12852377">
+  <member name="T:EasyEcs.Layer`3" source="4ef6171f54c2">
     <summary>
       高瓦片第 <typeparamref name="TLayer" /> 层上、位于它地面某个格子正下方的格子。它是地面格子方法
       （<see cref="T:EasyEcs.Ground`1" /> 上的 <c>Cell&lt;TCell, Ground&lt;TTile&gt;&gt;</c>）的参数，这个方法还要读它所在高瓦片的一层。
@@ -12,7 +12,8 @@
       </code>
       生成器只交换这一层的光环（不是瓦片的每一层），把它当作行向量循环里的又一个数据流来读。把它当作瓦片参数看
       （按值传的 <see cref="T:EasyEcs.Tile`2" />）：行需要实体的 <c>DynamicBuffer&lt;TCell&gt;</c>，邻居来自网格的索引
-      （层属于地面所在瓦片以外的瓦片、超出瓦片的层数、或方法没有地面格子时，EECS115 报告）。
+      （层属于地面所在瓦片以外的瓦片、超出瓦片的层数、或方法没有地面格子时，EECS115 报告；读同一种格子的两层时，EECS073 报告：
+      一个线程只为一种瓦片格子保留一份纹理）。
     </summary>
     <typeparam name="TCell">高瓦片的格子。</typeparam>
     <typeparam name="TTile">高瓦片的组件和形状：方法的地面所属的那个瓦片。</typeparam>
