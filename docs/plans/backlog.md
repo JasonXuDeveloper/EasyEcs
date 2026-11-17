@@ -70,10 +70,15 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
 - [x] **`fix-no-simd-structural`** merged 2026-11-16 (5ddc511a): a lambda calling a generated writer (`e.SetDaze`) was
       marked free of structural changes, so its row-by-row job (no SIMD) froze the gate; `Symbols.UnboundEntityWriter`
       reads such calls by name.
-- [ ] **`fix-no-simd-lambda-end`**: under `DOTNET_EnableHWIntrinsic=0`, `ALambdaPassChangingStructureEndsWhereTheMethodDoes`
-      (1000,1) and (77,2) fail on main (89090767 and later, every package's gate), as does `TheScheduleNamesEachMethodsLoop`
-      (it expects "; rows on this hardware" where the machine has neither width). Find why the row-by-row lambda pass
-      ends elsewhere than the method, fix both, so the HWIntrinsic=0 gate is clean. Opus queue, after feat-ground-layer.
+- [x] **`fix-no-simd-lambda-end`** closed 2026-11-17, no code change: already fixed by fix-no-simd-structural
+      (5ddc511a). Every failing log (hwcheck, kernelD2, kernelE2, kernelF2) ran on 89090767 or a package branch forked
+      from it, before that merge: the throw was its frozen-gate `InvalidOperationException` (the `Rows` job carrying
+      `INoStructuralChanges`), so the pass stopped at the first change and ended short of the method; the schedule
+      failure was the test's old expectation, before the fix made it expect "; rows on this hardware". At 227f62d9 the
+      lambda's `LambdaJob0Rows` has no `INoStructuralChanges`, and under `DOTNET_EnableHWIntrinsic=0` the vector-loop
+      classes (EntityRandomTests added) pass on net10.0 and net11.0 (1472 + 18 skipped each), the full suite on both
+      (4484 + 1 skipped). Gate: scratchpad `nosimd-end/gate.sh`. A package branch forked before 5ddc511a still fails
+      these three until it merges the work branch.
 - [ ] **`feat-lane1-core`**: the first run (from 3315196) was **lost with its container on 2026-11-09** before any
       push; only its interim reports survive. Rule since then: a lane hands back per item, each item is gated,
       merged and pushed before the next. What the lost run found (to rebuild or to record, not to re-research):
