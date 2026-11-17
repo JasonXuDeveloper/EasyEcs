@@ -350,7 +350,7 @@ public sealed partial class SystemGenerator
         .Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512).Replace(Accelerated, "IsAccelerated512").Replace(Kernel.LanesForm, "In512");
 
     /// <summary>The Vector&lt;T&gt; loop's text: <see cref="Wide"/>'s counterpart, a wide component's 128-bit lines and table lookups.</summary>
-    private static string Narrow(string s, string? layout) => Lines(s, Kernel.Mark128, Kernel.Mark512, Kernel.Mark256)
+    private static string Narrow(string s, string? layout) => Kernel.Selects(Lines(s, Kernel.Mark128, Kernel.Mark512, Kernel.Mark256))
         .Replace(WideGuard, layout == null ? "" : " && global::EasyEcs.Interleaved.IsWideAccelerated" + (layout.Length > 0 ? " && " + layout : ""))
         .Replace(Kernel.V, Vector).Replace(Accelerated, "IsAccelerated").Replace(Kernel.LanesForm, "");
 
@@ -437,7 +437,7 @@ public sealed partial class SystemGenerator
         foreach (var line in (simd.MaskedBody + simd.MaskedStores + simd.Fold).Split('\n')) if (line.Length > 0) tail.Append(line).Append('\n');
         foreach (int k in simd.Written) tail.Append($"{interleaved}.StoreTail(ref {unsafeType}.Add(ref r{k}, __at), __n);\n");
         if (!split) tail.Append("i = rows;\n");
-        return new("Tail", "i < rows", tail.Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue").Replace(Kernel.Row, "(int)__at").Replace(Kernel.V, Vector)
+        return new("Tail", "i < rows", Kernel.Selects(tail).Replace(Kernel.Visited, masked ? "pass" : "ulong.MaxValue").Replace(Kernel.Row, "(int)__at").Replace(Kernel.V, Vector)
             .Replace(Kernel.LanesForm, "").ToString(), Tail: true);
     }
 
@@ -486,7 +486,7 @@ public sealed partial class SystemGenerator
         string wide = flat != null ? $"{Vector512}.IsHardwareAccelerated" : Wide(Hardware(simd), null);
         string narrowGuard = flat != null ? $"{Vector}.IsHardwareAccelerated" : Narrow(Hardware(simd), null);
         string wideText = flat != null ? text.Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512) : Wide(text, null);
-        string narrowText = flat != null ? text.Replace(Kernel.V, Vector) : Narrow(text, null);
+        string narrowText = flat != null ? Kernel.Selects(text).Replace(Kernel.V, Vector) : Narrow(text, null);
 
         var method = new StringBuilder();
         method.Append($"if ({wide})\n{{\n");
@@ -527,7 +527,7 @@ public sealed partial class SystemGenerator
         return
         [
             new("Flat512", guard.Replace(Kernel.V, Vector512), text.Replace(Kernel.SquareRoot, Vector512 + ".Sqrt(").Replace(Kernel.V, Vector512)),
-            new("Flat", guard.Replace(Kernel.V, Vector), text.Replace(Kernel.V, Vector)),
+            new("Flat", guard.Replace(Kernel.V, Vector), Kernel.Selects(text).Replace(Kernel.V, Vector)),
         ];
     }
 

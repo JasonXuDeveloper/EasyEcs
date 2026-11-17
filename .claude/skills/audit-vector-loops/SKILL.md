@@ -33,6 +33,18 @@ it cannot is recorded and the form falls back to rows there:
   is silently ignored, so read the ISA column of every result before trusting it. `DOTNET_EnableAVX=0` is not a
   NEON proxy for loops that need a deinterleave (pairs of multi-field components): x86's 128-bit path runs them one
   pair at a time where NEON's LD2-4 would not, so their ARM64 verdict waits for the M4.
+- **Selects at 128 bits on x64 without AVX** (package E, docs/plans/designs/lane-kernel.md): SSE4.1's BLENDVPS /
+  PBLENDVB read their mask from XMM0. Where the register allocator kept a value the loop carries in XMM0 (a constant
+  hoisted out of the runner's loops, an accumulator), it stores and reloads it around the blend in every iteration:
+  a store-to-load chain carried by the loop, which bounds a short loop (Tally, Cool, Brighten, Step 1.4-2.3 times
+  slower under `DOTNET_EnableAVX=0`). The xor form `f ^ ((t ^ f) & m)` (`Interleaved.Select`) has no fixed register
+  but costs two uops more per select, three cycles of latency where the blend takes one, and temporaries that stop
+  the JIT hoisting the loop's constants (Gate: every constant loaded in each iteration). So `Kernel.Selects`
+  (applied before `Kernel.V` is replaced, on one loop's text) writes `Interleaved.Select` only in a loop with one
+  select; a loop with several keeps ConditionalSelect (Gate, Grade, Clamp and a masked Step ran 8-24 % slower in the
+  xor form). With AVX and on ARM64 `Interleaved.Select` is ConditionalSelect, the same bits. A new emission site of
+  a Vector<T> / Vector128 loop calls `Kernel.Selects`; the Vector512 text keeps ConditionalSelect (mask registers).
+  Check an SSE-only listing for `movaps [rbp-..], xmm0` inside a loop body, and for constants loaded in it.
 - **Compaction-shaped loops** (a mask to a list of rows or values): store whole vectors while the destination has
   room for one, then the last selected elements one write per set bit. A step that branches on its part of the mask,
   or a variable-length partial store per step, kills the 128-bit and AVX2 forms. Sparse words (12 or fewer set bits)

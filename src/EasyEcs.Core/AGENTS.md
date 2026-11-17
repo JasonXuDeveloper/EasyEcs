@@ -354,6 +354,9 @@ VectorLoops/StreamingStores.cs  the non-temporal stores of generated vector loop
                                 Archetype.CopyBlock (a resize keeps memmove: its allocation outweighs the copy)
 VectorLoops/Interleaved.cs      the deinterleaving loads / interleaving stores of generated vector loops over components
                                 of 2 to 4 fields of one lane type, and the lane masks of the passing rows of a word;
+                                Select: the select of a generated Vector<T> / Vector128 loop with one select (three
+                                bitwise operations on x64 without AVX, where SSE4.1's blend pins its mask to XMM0; else
+                                ConditionalSelect);
                                 LoadTail / StoreTail: the last rows of a run copied into a vector's worth (a loop that
                                 marks rows runs them masked); VectorLoops/Interleaved.Wide.cs: Pick / PickInto, the NEON table
                                 lookups (TBL / TBX over 1 to 4 registers) of a wide component's 128-bit form, and
