@@ -24,9 +24,10 @@ after each tick. See [the client and the server](#client-and-server).
 
 Each technique below has its own section, with the code that uses it.
 
-- **A tick in three groups**: [system groups](/en/docs/guide/basics/systems#system-groups) for input, simulation and
-  replication, each run by its own `world.Update<TGroup>()` ([one tick](#one-tick)).
-- **One system, one job**: 35 small systems, each reacting to one piece of data (a tag, a changed component, a
+- **A tick in three parts**: the simulation is the default group, run by `world.Update()`, with
+  [system groups](/en/docs/guide/basics/systems#system-groups) for input and replication around it, each run by its own
+  `world.Update<TGroup>()` ([one tick](#one-tick)).
+- **One system, one job**: 41 small systems, each reacting to one piece of data (a tag, a changed component, a
   request entity) and handing data to the next; none calls another.
 - **A chunk is an entity, its state presence bits**: a [unique index](/en/docs/guide/data/indexes-and-relations#unique-keys)
   finds the chunk at a position, [dynamic buffers](/en/docs/guide/data/dynamic-buffers) hold its blocks and water, and every
@@ -87,7 +88,7 @@ dotnet run -c Release --project samples/VoxelServer -- --realtime        # 20 ti
 dotnet run -c Release --project samples/VoxelServer -- --schedule        # the order the systems run in
 ```
 
-## One tick: three groups [#one-tick]
+## One tick: three parts [#one-tick]
 
 ```mermaid
 flowchart LR
@@ -108,17 +109,18 @@ flowchart LR
   unload --> send
 ```
 
-A tick has three parts, and each is a [system group](/en/docs/guide/basics/systems#system-groups): a struct that names it,
-and `[UpdateInGroup<T>]` on its systems.
+A tick has three parts. The simulation is every system that names no group, the default group; input and replication
+are each a [system group](/en/docs/guide/basics/systems#system-groups): a struct that names it, and `[UpdateInGroup<T>]`
+on its systems.
 
 <include lang="csharp" meta='title="Groups.cs"'>../../../samples/VoxelServer/Groups.cs</include>
 
-The host runs the groups in order, each with its own update. A real server could run `ClientInput` as the packets
+The host runs the three in order, each with its own update. A real server could run `ClientInput` as the packets
 arrive and `Replication` at a lower rate for far players, without touching a system.
 
 <include lang="csharp" meta='title="Host/Server.cs"'>../../../samples/VoxelServer/Host/Server.cs#tick</include>
 
-Inside a group the systems run in the order they were added. No system calls another: each reads and writes
+Inside a part the systems run in the order they were added. No system calls another: each reads and writes
 components, and the next one sees what the last one wrote. Most are a few lines: a system that does two things is
 two systems.
 
