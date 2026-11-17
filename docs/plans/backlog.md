@@ -86,11 +86,26 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       classes (EntityRandomTests added) pass on net10.0 and net11.0 (1472 + 18 skipped each), the full suite on both
       (4484 + 1 skipped). Gate: scratchpad `nosimd-end/gate.sh`. A package branch forked before 5ddc511a still fails
       these three until it merges the work branch.
-- [ ] **`fix-view-alloc-under-load`**: `ViewTests.APassThroughAViewAllocatesNothing` allocates 98,352 B in 10 updates
-      on a loaded machine (full suite beside benchmarks: feat-ground-layer's gate, exemplar-voxel's run), even through
-      `Allocations.Steady` (4c804877), and passes alone. Too large for a compile (168 B): a path of the parallel pass
-      that allocates when helpers are busy and the owner thread runs more chunks is the first suspect. Find it (the
-      Steady output names the compiles; an allocation trace of the pass under `stress-ng`-style load), fix it. Opus.
+- [x] **`fix-view-alloc-under-load`** (branch `fix-view-alloc-under-load`): `ViewTests.APassThroughAViewAllocatesNothing`
+      allocated 98,352 B in its 10 updates in feat-ground-layer's gate (scratchpad gate.log, layer-test.log: 4 of 4
+      runs, both runtimes). Not load and not the parallel pass (the test's world is serial): those runs were the Debug
+      build (`dotnet test`'s default; CI tests Release), and the bytes are the runtime's cast cache. Cause, proven: the
+      runtime drops its cast cache whenever a collectible assembly's loader allocator is collected
+      (`loaderallocator.cpp`, `CastCache::FlushCurrentCache`), and the next cast that misses, on any thread,
+      allocates the table again at its old size, `int[(size + 1) * 6]` (`castcache.cpp`): 98,352 B at 4,096 entries,
+      49,200 B at 2,048. The generator / analyzer tests leave collectible assemblies, which `Allocations`' settling
+      collection collects; in a Debug build `ForEach`'s `typeof(INoStructuralChanges).IsAssignableFrom(typeof(TJob))`
+      (a JIT-time constant once optimized) is a real cast, so the first update in the window paid another test's
+      unload. Evidence: the full Debug suite reproduced it every run with the old form (Int32[] of 49,200 B in the GC's
+      allocation tick; a probe inside `World.Run` put all of it in Poisoning's `ForEach`), only with the Roslyn tests
+      and an EasyEcs class before it (bisected); a RunAndCollect assembly collected before a cast gives exactly 98,352 B
+      in Release too; nothing of it in Release runs or under `yes` / niced load (9 full suites, 0 B). Fix (tests only;
+      optimized Core does not cast there): `Allocations.Settle` ends with a cast through the cache
+      (`Allocations.RebuildCastCache`), so the table is rebuilt before the window; regression test
+      `AllocationTests.AMeasurementDoesNotPayTheCastCacheAnUnloadedAssemblyDropped` (98,352 B without the cast, 0 with
+      it, both runtimes); the old form of the view test passes in the full Debug suite with it; tests/AGENTS.md
+      records the rule. The Steady form passed only because a cast before the window (the warm-up's, a finalizer's)
+      happened to rebuild the table first.
 - [ ] **`research-voxel-pairs`** (exemplar 2a step 4, voxel-rewrite.md section 11; patch in scratchpad/vx/step4.patch):
       the pair forms (Keep + Acquire, Pickup with `[Neighbor] ref Item`, item merging as a symmetric pair) built clean
       but ZombieTarget went 0.17 -> 2.00 ms with 9.6 MB allocated after warm-up, Pickup 0.20 -> 1.16 ms, Steady 336 B
