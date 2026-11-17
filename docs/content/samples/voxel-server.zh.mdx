@@ -302,14 +302,12 @@ flowchart LR
 
 <include lang="csharp" meta='tab="攻击"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
-着火是三个系统，各做一件事，都按火的节奏运行（`[UpdateInterval(Rules.BurnEvery)]`）：`SunlightSystem` 白天给露天的僵尸加上 `Burning`
-（头上是不是天空由高度图回答），`FireDamageSystem` 给着火的扣血，`ExtinguishSystem` 熄灭烧完的或走进水里的火。`Burning` 在僵尸预制体里，
-所以着火只是翻一个存在位。扣血单独成一个系统，是因为 `Health` 被追踪，而批量方法会给它写的整段行打 tick：只在扣血的 tick 写，
-下面的死亡系统在其他 tick 就无事可做。
+着火是一个系统、四个方法，按运行顺序排列，都按火的节奏运行（`[UpdateInterval(Rules.BurnEvery)]`）：`Look` 在多个线程上读每只僵尸头上的天空和脚下的水，
+`Expose` 白天给露天的僵尸加上 `Burning`，`Hurt` 给着火的扣血，`Out` 熄灭烧完的或走进水里的火。`Burning` 在僵尸预制体里，缺席
+（`SetAbsent<Burning>()`），所以着火只是翻一个存在位。扣血是一个处理单行的方法，生成器把它跑成向量循环；`Health` 被追踪，
+而批量方法会给它写的整段行打 tick：只在扣血的 tick 写，下面的死亡系统在其他 tick 就无事可做。
 
-<include lang="csharp" meta='tab="日照"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
-
-<include lang="csharp" meta='tab="燃烧"'>../../../samples/VoxelServer/Systems/Zombies.cs#burn</include>
+<include lang="csharp">../../../samples/VoxelServer/Systems/Zombies.cs#fire</include>
 
 死亡就是 `Health` 归零，每种实体一个系统处理：僵尸消失，玩家把背包掉在原地然后重生。`Health` 是 `ITracked`，所以两个系统都用
 `[Changed<Health>]`，只访问上次运行以来被写过的血量。`Mut<T>` 只为重生的玩家写血量、位置和背包。

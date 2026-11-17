@@ -363,16 +363,15 @@ comparison.
 
 <include lang="csharp" meta='tab="Attack"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
-Fire is three systems, one job each, all at the fire's cadence (`[UpdateInterval(Rules.BurnEvery)]`):
-`SunlightSystem` sets `Burning` on a zombie under the open sky by day (the height map says whether the sky is above
-it), `FireDamageSystem` hurts the burning, and `ExtinguishSystem` puts out the fires that burned down or walked into
-water. `Burning` is in the zombie prefab, so catching fire flips a presence bit. The hurt is its own system because
-`Health` is tracked and a batch method stamps the whole run it writes: written only on the ticks that hurt, the
-death systems below find nothing to do on the others.
+Fire is one system of four methods, in the order they run, all at the fire's cadence (`[UpdateInterval(Rules.BurnEvery)]`):
+`Look` reads the sky and the water above each zombie on several threads, `Expose` sets `Burning` on a zombie under the
+open sky by day, `Hurt` hurts the burning, and `Out` puts out the fires that burned down or walked into water.
+`Burning` is in the zombie prefab, absent (`SetAbsent<Burning>()`), so catching fire flips a presence bit. The hurt is
+a method for one row, which the generator runs as a vector loop; `Health` is tracked and a batch method stamps the
+whole run it writes, so it is written only on the ticks that hurt and the death systems below find nothing to do on
+the others.
 
-<include lang="csharp" meta='tab="Sunlight"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
-
-<include lang="csharp" meta='tab="Burn"'>../../../samples/VoxelServer/Systems/Zombies.cs#burn</include>
+<include lang="csharp">../../../samples/VoxelServer/Systems/Zombies.cs#fire</include>
 
 Dying is a `Health` of zero, handled by one system per kind: zombies go, players drop their inventory where they
 died and respawn. `Health` is `ITracked`, so both systems take `[Changed<Health>]` and visit only the healths written
