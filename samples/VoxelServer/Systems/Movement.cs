@@ -8,7 +8,7 @@ namespace VoxelServer;
 // but itself, so the rows may be split across threads (Parallel = true). The runner times the split against one
 // thread and keeps it only while the helpers make the pass faster: a row this cheap pays from tens of thousands of
 // players, and below that the pass stays on the calling thread at no cost.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct PlayerMoveSystem
 {
     [ForEach(Parallel = true)]
@@ -28,33 +28,33 @@ public ref struct PlayerMoveSystem
 // cost one block lookup. The position is a Mut<Position>, written only when it changes, so a body standing still is
 // not sent again. Each body writes its own row and reads the blocks through lookups (Nearby), which no system writes
 // while it runs, so the bodies are split across threads (Parallel = true).
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct PhysicsSystem
 {
     [ForEach(Parallel = true)]
-    static void Move(Mut<Position> position, ref Velocity velocity, ref Body body, Lookup<Chunk> chunks, Lookup<DynamicBuffer<Block>> blocks)
+    static void Move(Mut<Position> position, ref Velocity velocity, ref OnGround ground, ref Blocked blocked, Lookup<Chunk> chunks, Lookup<DynamicBuffer<Block>> blocks)
     {
         var p = position.Value.Value;
         var v = velocity.Value;
         var near = new Nearby(chunks, blocks);
-        if (body.OnGround && v == Vector3.Zero && near.IsSolid(p.X, p.Y - 1, p.Z)) return;   // at rest
+        if (ground.Value && v == Vector3.Zero && near.IsSolid(p.X, p.Y - 1, p.Z)) return;   // at rest
         v.Y = MathF.Max(v.Y - Rules.Gravity, -3.9f);
 
         float x = p.X + v.X, y = p.Y, z = p.Z + v.Z;
-        bool blocked = false;
+        bool walledIn = false;
         if (v.X != 0 || v.Z != 0)
         {
             bool feet = near.IsSolid(x, y, z), head = near.IsSolid(x, y + 1, z);
-            if (feet && !head && body.OnGround && !near.IsSolid(x, y + 2, z)) y = MathF.Floor(y) + 1;
+            if (feet && !head && ground.Value && !near.IsSolid(x, y + 2, z)) y = MathF.Floor(y) + 1;
             else if (feet || head)
             {
                 (x, z) = (p.X, p.Z);
                 v.X = v.Z = 0;
-                blocked = true;
+                walledIn = true;
             }
         }
 
-        bool onGround = false;
+        bool landed = false;
         int steps = (int)MathF.Ceiling(MathF.Abs(v.Y));
         float step = steps == 0 ? 0 : v.Y / steps;
         for (int i = 0; i < steps; i++)
@@ -64,7 +64,7 @@ public ref struct PhysicsSystem
             {
                 y = MathF.Floor(next) + 1;
                 v.Y = 0;
-                onGround = true;
+                landed = true;
                 break;
             }
             if (step > 0 && near.IsSolid(x, next + 1.8f, z))
@@ -77,7 +77,8 @@ public ref struct PhysicsSystem
 
         position.SetIfChanged(new Position(new Vector3(x, y, z)));
         velocity = new Velocity(v);
-        body = new Body(onGround, blocked);
+        ground = new OnGround(landed);
+        blocked = new Blocked(walledIn);
     }
 }
 // #endregion physics
@@ -86,7 +87,7 @@ public ref struct PhysicsSystem
 // Keeps the InChunk of everything that moves on the chunk it is in: players, zombies, items. [Changed<Position>] visits
 // only what moved this tick (physics writes a position only when it changes), and SetInChunkIfChanged writes only when
 // the entity crossed into another chunk, so the index is touched a few times a second, not every tick.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct GridSystem
 {
     [ForEach(SimdMode = SimdMode.Off), With<InChunk>, Changed<Position>]

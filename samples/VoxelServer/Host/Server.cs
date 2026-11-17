@@ -35,9 +35,8 @@ public static class Server
     public static void Tick(World world)
     {
         // #region tick
-        world.Update();                      // no system in the default group: it advances EntityRandom's tick
         world.Update<ClientInput>();
-        world.Update<Simulation>();
+        world.Update();                      // the simulation: every system in no group (and EntityRandom's tick)
         world.Update<Replication>();
         // #endregion tick
     }

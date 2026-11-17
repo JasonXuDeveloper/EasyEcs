@@ -21,9 +21,9 @@ import { Boxes, FlaskConical, Network, Save } from 'lucide-react';
 
 下面每一项都有单独的一节，附上用到它的代码。
 
-- **一个 tick 分三个组**：输入、模拟、同步各是一个[系统组](/zh/docs/guide/basics/systems#system-groups)，各由自己的
-  `world.Update<TGroup>()` 运行（[一个 tick](#one-tick)）。
-- **一个系统只做一件事**：35 个小系统，每个只响应一份数据（一个标签、一个变了的组件、一个请求实体），再把数据交给下一个；没有系统调用别的系统。
+- **一个 tick 分三部分**：模拟是默认组，由 `world.Update()` 运行；输入和同步各是一个[系统组](/zh/docs/guide/basics/systems#system-groups)，
+  排在它前后，各由自己的 `world.Update<TGroup>()` 运行（[一个 tick](#one-tick)）。
+- **一个系统只做一件事**：41 个小系统，每个只响应一份数据（一个标签、一个变了的组件、一个请求实体），再把数据交给下一个；没有系统调用别的系统。
 - **地形是实体，它的状态是存在位**：[唯一索引](/zh/docs/guide/data/indexes-and-relations#unique-keys)找到某个位置的地形，
   [动态缓冲](/zh/docs/guide/data/dynamic-buffers)装它的方块和水，所有地形都来自同一个带全部标签的[预制体](/zh/docs/guide/basics/prefabs)，
   所以状态变化从不把它搬到另一张表（[地形的一生](#chunks)）。
@@ -69,7 +69,7 @@ dotnet run -c Release --project samples/VoxelServer -- --realtime        # 像�
 dotnet run -c Release --project samples/VoxelServer -- --schedule        # 系统的运行顺序
 ```
 
-## 一个 tick：三个组 [#one-tick]
+## 一个 tick：三部分 [#one-tick]
 
 ```mermaid
 flowchart LR
@@ -90,16 +90,16 @@ flowchart LR
   unload --> send
 ```
 
-一个 tick 分三部分，每部分是一个[系统组](/zh/docs/guide/basics/systems#system-groups)：一个起名用的 struct，加上它的系统上的 `[UpdateInGroup<T>]`。
+一个 tick 分三部分。模拟是所有没有指定组的系统，也就是默认组；输入和同步各是一个[系统组](/zh/docs/guide/basics/systems#system-groups)：一个起名用的 struct，加上它的系统上的 `[UpdateInGroup<T>]`。
 
 <include lang="csharp" meta='title="Groups.cs"'>../../../samples/VoxelServer/Groups.cs</include>
 
-宿主按顺序运行这三个组，每组各 Update 一次。真实服务器可以让 `ClientInput` 随包到达就运行，对远处的玩家降低 `Replication` 的频率，
+宿主按顺序运行这三部分，每部分各 Update 一次。真实服务器可以让 `ClientInput` 随包到达就运行，对远处的玩家降低 `Replication` 的频率，
 系统一行都不用改。
 
 <include lang="csharp" meta='title="Host/Server.cs"'>../../../samples/VoxelServer/Host/Server.cs#tick</include>
 
-组内的系统按添加顺序运行。系统之间不互相调用：每个系统读写组件，下一个系统看到上一个写下的结果。大多数系统只有几行：做两件事的系统就拆成两个。
+同一部分内的系统按添加顺序运行。系统之间不互相调用：每个系统读写组件，下一个系统看到上一个写下的结果。大多数系统只有几行：做两件事的系统就拆成两个。
 
 <include lang="csharp" meta='title="Program.cs"'>../../../samples/VoxelServer/Program.cs#systems</include>
 
@@ -178,7 +178,7 @@ stateDiagram-v2
 | 玩家跨进另一片地形，或出现 | 多出的那条地形整块发送，带着其中的实体（没加载的记成 `LoadRequest`）；少掉的那条让客户端忘掉 | `AoiViewSystem`，`[With<Player>, Changed<InChunk>]` |
 | 玩家离开 | 它的视野被释放 | `AoiViewSystem`，`[With<Retired>]` |
 | 一片地形加载完 | 地形和其中的实体，发给周围的玩家 | `AoiChunkSystem`，`[With<Fresh>]` |
-| 实体跨进另一片地形，或刚被创建 | 看得见新地形、看不见旧地形的玩家收到出现包，反过来的收到消失包 | `AoiSpawnSystem`，`[Changed<InChunk>]` |
+| 实体跨进另一片地形，或刚被创建 | 看得见新地形、看不见旧地形的玩家收到出现包，反过来的收到消失包 | `AoiSpawnSystem`，`[Without<Visible>]` 和 `[Changed<InChunk>]` |
 | 实体被销毁 | 看得见它所在地形的玩家收到消失包 | `AoiDespawnSystem`，`[With<Retired>]` |
 
 谁看得见一片地形是数出来的，从不搜索：每个玩家的视野都是 `Rules.PlayerVision`，所以看得见一片地形的玩家，就是以它为中心的正方形里的
@@ -302,14 +302,12 @@ flowchart LR
 
 <include lang="csharp" meta='tab="攻击"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
-着火是三个系统，各做一件事，都按火的节奏运行（`[UpdateInterval(Rules.BurnEvery)]`）：`SunlightSystem` 白天给露天的僵尸加上 `Burning`
-（头上是不是天空由高度图回答），`FireDamageSystem` 给着火的扣血，`ExtinguishSystem` 熄灭烧完的或走进水里的火。`Burning` 在僵尸预制体里，
-所以着火只是翻一个存在位。扣血单独成一个系统，是因为 `Health` 被追踪，而批量方法会给它写的整段行打 tick：只在扣血的 tick 写，
-下面的死亡系统在其他 tick 就无事可做。
+着火是一个系统、四个方法，按运行顺序排列，都按火的节奏运行（`[UpdateInterval(Rules.BurnEvery)]`）：`Look` 在多个线程上读每只僵尸头上的天空和脚下的水，
+`Expose` 白天给露天的僵尸加上 `Burning`，`Hurt` 给着火的扣血，`Out` 熄灭烧完的或走进水里的火。`Burning` 在僵尸预制体里，缺席
+（`SetAbsent<Burning>()`），所以着火只是翻一个存在位。扣血是一个处理单行的方法，生成器把它跑成向量循环；`Health` 被追踪，
+而批量方法会给它写的整段行打 tick：只在扣血的 tick 写，下面的死亡系统在其他 tick 就无事可做。
 
-<include lang="csharp" meta='tab="日照"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
-
-<include lang="csharp" meta='tab="燃烧"'>../../../samples/VoxelServer/Systems/Zombies.cs#burn</include>
+<include lang="csharp">../../../samples/VoxelServer/Systems/Zombies.cs#fire</include>
 
 死亡就是 `Health` 归零，每种实体一个系统处理：僵尸消失，玩家把背包掉在原地然后重生。`Health` 是 `ITracked`，所以两个系统都用
 `[Changed<Health>]`，只访问上次运行以来被写过的血量。`Mut<T>` 只为重生的玩家写血量、位置和背包。

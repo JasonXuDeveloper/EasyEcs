@@ -24,9 +24,10 @@ after each tick. See [the client and the server](#client-and-server).
 
 Each technique below has its own section, with the code that uses it.
 
-- **A tick in three groups**: [system groups](/en/docs/guide/basics/systems#system-groups) for input, simulation and
-  replication, each run by its own `world.Update<TGroup>()` ([one tick](#one-tick)).
-- **One system, one job**: 35 small systems, each reacting to one piece of data (a tag, a changed component, a
+- **A tick in three parts**: the simulation is the default group, run by `world.Update()`, with
+  [system groups](/en/docs/guide/basics/systems#system-groups) for input and replication around it, each run by its own
+  `world.Update<TGroup>()` ([one tick](#one-tick)).
+- **One system, one job**: 41 small systems, each reacting to one piece of data (a tag, a changed component, a
   request entity) and handing data to the next; none calls another.
 - **A chunk is an entity, its state presence bits**: a [unique index](/en/docs/guide/data/indexes-and-relations#unique-keys)
   finds the chunk at a position, [dynamic buffers](/en/docs/guide/data/dynamic-buffers) hold its blocks and water, and every
@@ -87,7 +88,7 @@ dotnet run -c Release --project samples/VoxelServer -- --realtime        # 20 ti
 dotnet run -c Release --project samples/VoxelServer -- --schedule        # the order the systems run in
 ```
 
-## One tick: three groups [#one-tick]
+## One tick: three parts [#one-tick]
 
 ```mermaid
 flowchart LR
@@ -108,17 +109,18 @@ flowchart LR
   unload --> send
 ```
 
-A tick has three parts, and each is a [system group](/en/docs/guide/basics/systems#system-groups): a struct that names it,
-and `[UpdateInGroup<T>]` on its systems.
+A tick has three parts. The simulation is every system that names no group, the default group; input and replication
+are each a [system group](/en/docs/guide/basics/systems#system-groups): a struct that names it, and `[UpdateInGroup<T>]`
+on its systems.
 
 <include lang="csharp" meta='title="Groups.cs"'>../../../samples/VoxelServer/Groups.cs</include>
 
-The host runs the groups in order, each with its own update. A real server could run `ClientInput` as the packets
+The host runs the three in order, each with its own update. A real server could run `ClientInput` as the packets
 arrive and `Replication` at a lower rate for far players, without touching a system.
 
 <include lang="csharp" meta='title="Host/Server.cs"'>../../../samples/VoxelServer/Host/Server.cs#tick</include>
 
-Inside a group the systems run in the order they were added. No system calls another: each reads and writes
+Inside a part the systems run in the order they were added. No system calls another: each reads and writes
 components, and the next one sees what the last one wrote. Most are a few lines: a system that does two things is
 two systems.
 
@@ -210,7 +212,7 @@ row of chunks for a step into the next chunk, the whole square for a respawn. Fo
 | A player crosses into another chunk, or appears | the chunks of the strip it gains, whole with their entities (or a `LoadRequest` for those not loaded); the strip it loses is forgotten | `AoiViewSystem`, `[With<Player>, Changed<InChunk>]` |
 | A player leaves | its view is released | `AoiViewSystem`, `[With<Retired>]` |
 | A chunk finishes loading | the chunk and its entities, for the players around it | `AoiChunkSystem`, `[With<Fresh>]` |
-| An entity crosses into another chunk, or is created | a spawn for the players that see its new chunk and not its old one, a despawn for the reverse | `AoiSpawnSystem`, `[Changed<InChunk>]` |
+| An entity crosses into another chunk, or is created | a spawn for the players that see its new chunk and not its old one, a despawn for the reverse | `AoiSpawnSystem`, `[Without<Visible>]` and `[Changed<InChunk>]` |
 | An entity is destroyed | a despawn for the players that see its chunk | `AoiDespawnSystem`, `[With<Retired>]` |
 
 Who sees a chunk is counted, never searched: every player sees `Rules.PlayerVision`, so the players that see a chunk
@@ -363,16 +365,15 @@ comparison.
 
 <include lang="csharp" meta='tab="Attack"'>../../../samples/VoxelServer/Systems/Zombies.cs#attack</include>
 
-Fire is three systems, one job each, all at the fire's cadence (`[UpdateInterval(Rules.BurnEvery)]`):
-`SunlightSystem` sets `Burning` on a zombie under the open sky by day (the height map says whether the sky is above
-it), `FireDamageSystem` hurts the burning, and `ExtinguishSystem` puts out the fires that burned down or walked into
-water. `Burning` is in the zombie prefab, so catching fire flips a presence bit. The hurt is its own system because
-`Health` is tracked and a batch method stamps the whole run it writes: written only on the ticks that hurt, the
-death systems below find nothing to do on the others.
+Fire is one system of four methods, in the order they run, all at the fire's cadence (`[UpdateInterval(Rules.BurnEvery)]`):
+`Look` reads the sky and the water above each zombie on several threads, `Expose` sets `Burning` on a zombie under the
+open sky by day, `Hurt` hurts the burning, and `Out` puts out the fires that burned down or walked into water.
+`Burning` is in the zombie prefab, absent (`SetAbsent<Burning>()`), so catching fire flips a presence bit. The hurt is
+a method for one row, which the generator runs as a vector loop; `Health` is tracked and a batch method stamps the
+whole run it writes, so it is written only on the ticks that hurt and the death systems below find nothing to do on
+the others.
 
-<include lang="csharp" meta='tab="Sunlight"'>../../../samples/VoxelServer/Systems/Zombies.cs#sunlight</include>
-
-<include lang="csharp" meta='tab="Burn"'>../../../samples/VoxelServer/Systems/Zombies.cs#burn</include>
+<include lang="csharp">../../../samples/VoxelServer/Systems/Zombies.cs#fire</include>
 
 Dying is a `Health` of zero, handled by one system per kind: zombies go, players drop their inventory where they
 died and respawn. `Health` is `ITracked`, so both systems take `[Changed<Health>]` and visit only the healths written

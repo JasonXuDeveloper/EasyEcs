@@ -17,26 +17,26 @@ namespace VoxelServer;
 // Reads and generation serve Rules.MaxRequests requests a tick at most ([ForEach(MaxRows = N)]): the generator collects
 // the first requests and runs the method on each outside the walk, where it may load (LoadEntities) and create
 // entities, and [Consume] destroys each request served. The others wait a tick.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ChunkReadSystem
 {
     [ForEach(MaxRows = Rules.MaxRequests), With<Saved>, Consume]
-    static void Read(in LoadRequest request, World world, in Regions regions, ref Stats stats)
+    static void Read(in LoadRequest request, World world, in Regions regions, ref Reduce<Stats> stats)
     {
         regions.Files.TryRead(request.Pos, out var bytes);
         world.LoadEntities(bytes);                                               // the chunk and what was in it
         world.ChunkIndex.Get(request.Pos).Set(new Fresh(), new Flowing(), new Spreading());   // presence bits
-        stats.ChunksLoaded++;
+        stats.Value.ChunksLoaded++;
     }
 }
 
 // Generates the chunks asked for that were never saved: an instance of the chunk prefab, its blocks written in place
 // (SetCount gives the span to write), its water empty but for a spring in one chunk in four.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ChunkGenerateSystem
 {
     [ForEach(MaxRows = Rules.MaxRequests), Without<Saved>, Consume]
-    static void Generate(in LoadRequest request, World world, in Prefabs prefabs, ref Stats stats)
+    static void Generate(in LoadRequest request, World world, in Prefabs prefabs, ref Reduce<Stats> stats)
     {
         var pos = request.Pos;
         int x = pos.X * Terrain.Size + Terrain.Size / 2, z = pos.Z * Terrain.Size + Terrain.Size / 2;
@@ -56,7 +56,7 @@ public ref struct ChunkGenerateSystem
         chunk.WriteScent().SetCount(columns);
         chunk.WriteNextScent().SetCount(columns);
         chunk.WriteTrail().SetCount(columns);
-        stats.ChunksGenerated++;
+        stats.Value.ChunksGenerated++;
     }
 }
 // #endregion load
@@ -64,7 +64,7 @@ public ref struct ChunkGenerateSystem
 // #region unload
 // Marks the chunks no player has had in view for five seconds. Slices = 20 spreads the check over a second: each tick
 // visits a twentieth of the chunks.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ChunkUnloadSystem
 {
     [ForEach(Slices = Rules.TicksPerSecond), With<Chunk>, Without<Unloading>]
@@ -79,11 +79,11 @@ public ref struct ChunkUnloadSystem
 // so nothing ticks where no player is, and a player who comes back finds the holes it dug and the zombies it left.
 // Rules.MaxRequests a tick at most, outside the walk like the loads. A chunk a player stands in (one who just respawned
 // there) or holding more than Rules.MaxSaved entities stays loaded and is marked again later.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ChunkSaveSystem
 {
     [ForEach(MaxRows = Rules.MaxRequests), With<Unloading>]
-    static void Save(Entity chunk, in Chunk at, World world, in Regions regions, ref Stats stats)
+    static void Save(Entity chunk, in Chunk at, World world, in Regions regions, ref Reduce<Stats> stats)
     {
         chunk.RemoveUnloading();                                                 // not in the region file
         Span<EntityId> group = stackalloc EntityId[Rules.MaxSaved];
@@ -97,7 +97,7 @@ public ref struct ChunkSaveSystem
         world.SaveEntities(regions.Files.Buffer, group[..size]);
         regions.Files.Write(at.Pos);
         world.DestroyEntities(group[..size]);
-        stats.ChunksUnloaded++;
+        stats.Value.ChunksUnloaded++;
     }
 }
 // #endregion unload

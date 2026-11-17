@@ -9,7 +9,7 @@ namespace VoxelServer;
 // color across a face), so the black half wakes and steps in the same update as the red one that woke it. On one thread:
 // waking another chunk is a presence flip of a row this pass does not own; a copy of 256 bytes per chunk is nothing to
 // split.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.ScentEvery)]
+[EcsSystem, UpdateInterval(Rules.ScentEvery)]
 public ref struct ScentSettleSystem<TColor> where TColor : struct, IComponent
 {
     // Facing reads the neighbors of the ground tile: through the footing, since the scent is the buffer written here.

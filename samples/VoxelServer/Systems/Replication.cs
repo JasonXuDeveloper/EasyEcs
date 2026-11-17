@@ -13,7 +13,7 @@ namespace VoxelServer;
 public ref struct SendChunksSystem
 {
     [ForEach, With<Chunk>, Without<Fresh>, ChangedAny<DynamicBuffer<Block>, DynamicBuffer<Fluid>>]
-    static void Send(in Viewers viewers, ref Stats stats) => stats.BlockUpdates += viewers.Count;
+    static void Send(in Viewers viewers, ref Reduce<Stats> stats) => stats.Value.BlockUpdates += viewers.Count;
 
 }
 
@@ -42,51 +42,32 @@ public ref struct SendEntitiesSystem
         Lookup<Viewers> viewers, Emit<EntityUpdate> updates)
     {
         if (!chunks.TryFind(at.Pos, out var chunk)) return;
-        int watching = viewers.Read(chunk.Id).Count;
+        int watching = (int)viewers.Read(chunk.Id).Count;
         if (watching == 0) return;
         updates.Add(new EntityUpdate(entity.Id, position.Value, health.HasValue ? health.Value.Value : -1, watching));
     }
 }
 
-// Sends the outbox: each packet to the players watching, with its health bar when it has one. Here the packets are
-// counted; a real server would encode each into its viewers' connections. Cleared once sent, so none goes twice.
+// Sends the outbox: the [Drain] method runs once on each packet, in the order they were emitted, when the pass that
+// emitted them has ended, and clears them, so none goes twice. Each goes to the players watching, with its health bar
+// when it has one. Here the packets are counted; a real server would encode each into its viewers' connections.
 [EcsSystem, UpdateInGroup<Replication>]
 public ref struct SendPacketsSystem
 {
-    static void OnUpdate(World world)
+    [Drain]
+    static void Send(in EntityUpdate update, ref Stats stats)
     {
-        ref var outbox = ref world.GetOrAddSingleton<Emitted<EntityUpdate>>().Items;
-        ref var stats = ref world.Stats;
-        foreach (ref readonly var update in outbox.AsReadOnlySpan())
-        {
-            stats.EntityUpdates += update.Viewers;
-            stats.BytesSent += update.Viewers * (Rules.PositionBytes + (update.Health >= 0 ? Rules.HealthBytes : 0));
-        }
-        outbox.Clear();
+        stats.EntityUpdates += update.Viewers;
+        stats.BytesSent += update.Viewers * (Rules.PositionBytes + (update.Health >= 0 ? Rules.HealthBytes : 0));
     }
 }
 // #endregion entities
 
-// #region tally
-// Ends a tick of the simulation: what its passes on several threads counted (each pass a reduction of its own, which
-// it replaces) is added to the run's Stats.
-[EcsSystem, UpdateInGroup<Simulation>]
-public ref struct TallySystem
-{
-    static void OnUpdate(World world)
-    {
-        ref var stats = ref world.Stats;
-        stats.WaterCells += world.Filled.Blocks;
-        stats.Drifts += world.Carried.Bodies;
-    }
-}
-// #endregion tally
-
 // #region clock
 // Starts a tick of the simulation: the clock goes first, so every system of the tick, and the replication after it,
-// sees the same tick (EntityRandom needs no clock: Server.Tick's world.Update() advances its tick). In the Simulation
-// group, not Replication, so a server that replicates less often than it simulates keeps game time.
-[EcsSystem, UpdateInGroup<Simulation>]
+// sees the same tick (EntityRandom needs no clock: Server.Tick's world.Update() advances its tick). In the
+// simulation, not Replication, so a server that replicates less often than it simulates keeps game time.
+[EcsSystem]
 public ref struct ClockSystem
 {
     static void OnUpdate(World world)

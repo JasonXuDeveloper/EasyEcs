@@ -11,8 +11,10 @@ public record struct Position(Vector3 Value) : IComponent, ITracked;
 // Blocks per tick.
 public record struct Velocity(Vector3 Value) : IComponent;
 
-// What PhysicsSystem found: standing on a block, walking into a wall higher than a step.
-public record struct Body(bool OnGround, bool Blocked) : IComponent;
+// What PhysicsSystem found, each a component of its own (a column of one byte per body, which a system reading it takes
+// as a vector loop's mask): standing on a block, walking into a wall higher than a step.
+public record struct OnGround(bool Value) : IComponent;
+public record struct Blocked(bool Value) : IComponent;
 
 // ITracked: the systems that handle a death visit only the healths written ([Changed<Health>]).
 public record struct Health(int Value) : IComponent, ITracked;
@@ -22,9 +24,10 @@ public record struct Health(int Value) : IComponent, ITracked;
 // into another chunk; ITracked, so AoiViewSystem and AoiSpawnSystem visit only the entities that crossed.
 public partial record struct InChunk([LookupKey] ChunkPos Pos) : IComponent, ITracked;
 
-// The chunk the clients see an entity in (Placed once it has one): what AoiSpawnSystem compares a crossing with. A cleanup
-// component: a destroyed entity keeps it, Retired, until AoiDespawnSystem has despawned it for that chunk's viewers.
-public record struct Visible(ChunkPos Chunk, bool Placed) : ICleanupComponent;
+// The chunk the clients see an entity in: what AoiSpawnSystem compares a crossing with. Absent until the entity has been
+// shown (AoiSpawnSystem adds it on first sight). A cleanup component: a destroyed entity keeps it, Retired, until
+// AoiDespawnSystem has despawned it for that chunk's viewers.
+public record struct Visible(ChunkPos Chunk) : ICleanupComponent;
 
 // The packet of an entity that moved, for the players that have its chunk in view: its position, its health bar where it
 // has one (players and zombies; -1 for an item), and how many players get it. A record SendEntitiesSystem emits

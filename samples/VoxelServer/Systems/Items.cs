@@ -8,14 +8,14 @@ namespace VoxelServer;
 // Digs the block under a player who asked to: the chunk's buffer loses the block (a tracked write: the chunk is sent
 // again, and WaterWakeSystem wakes the water around it) and the block drops as an item, grass as dirt, as in
 // Minecraft. The digger's score goes up by one.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct DigSystem
 {
     [ForEach]
-    static void Dig(Entity player, in Input input, in Position position, in Score score, in Prefabs prefabs, in Clock clock,
-        ref Stats stats, World world)
+    static void Dig(Entity player, in Dig dig, in Position position, in Score score, in Prefabs prefabs, in Clock clock,
+        ref Reduce<Stats> stats, World world)
     {
-        if (!input.Dig) return;
+        if (!dig.Value) return;
         var at = Terrain.Cell(position.Value.X, position.Value.Y - 1, position.Value.Z);
         if (at.Y <= 0 || at.Y >= Terrain.Height || !world.ChunkIndex.TryGet(Terrain.ChunkOf(at.X, at.Z), out var chunk))
             return;
@@ -29,7 +29,7 @@ public ref struct DigSystem
         world.Instantiate(prefabs.Item, new Position(new Vector3(at.X + 0.5f, at.Y + 0.5f, at.Z + 0.5f)),
             new InChunk(Terrain.ChunkOf(at.X, at.Z)), new Item(drop, 1), new Dropped(clock.Tick));
         player.SetScore(score.BlocksDug + 1);                  // indexed: written with Set, read as a parameter
-        stats.BlocksDug++;
+        stats.Value.BlocksDug++;
     }
 }
 // #endregion dig
@@ -40,11 +40,11 @@ public ref struct DigSystem
 // (world.ViewCenterIndex: players only, not the zombies and items of those chunks). The stacks of its kind grow up to
 // Rules.StackSize, then free slots take the rest; what does not fit stays on the ground. Each tick looks at half the
 // items (Slices = 2): a pickup comes a tick later at most, and costs half.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct PickupSystem
 {
     [ForEach(Slices = 2)]
-    static void Pickup(Entity entity, ref Item item, in Dropped dropped, in Position position, in Clock clock, ref Stats stats, World world)
+    static void Pickup(Entity entity, ref Item item, in Dropped dropped, in Position position, in Clock clock, ref Reduce<Stats> stats, World world)
     {
         if (clock.Tick - dropped.Tick < Rules.PickupDelay) return;
         var p = position.Value;
@@ -57,7 +57,7 @@ public ref struct PickupSystem
             if ((player.Position.Value - p).LengthSquared() > Rules.PickupRange * Rules.PickupRange) continue;
             if (!Inventory.HasRoom(player.ItemStack, item.Kind)) continue;   // a read: a full inventory is not stamped
             int taken = Inventory.Add(ref player.WriteItemStack(), item.Kind, item.Count);
-            stats.ItemsPickedUp += taken;
+            stats.Value.ItemsPickedUp += taken;
             if (taken == item.Count)
             {
                 entity.Destroy();
@@ -106,7 +106,7 @@ public static class Inventory
 // #region expiry
 // Removes the items nobody picked up in time. The ordered index of drop ticks walks the items from the oldest and stops
 // at the first that has time left: a tick visits the items that expire, not every item.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ItemExpirySystem
 {
     static void OnUpdate(World world)

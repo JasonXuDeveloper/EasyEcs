@@ -12,7 +12,7 @@ namespace VoxelServer;
 // gives it a vector loop (16 to 64 columns per step, the write of each column under its block's test, no branch). The
 // 256 bytes are on the stack (measured: an order of magnitude faster than in the buffer's array), and copied into the
 // buffer once, through the span SetCount returns.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct HeightMapSystem
 {
     const int Columns = Terrain.Size * Terrain.Size;

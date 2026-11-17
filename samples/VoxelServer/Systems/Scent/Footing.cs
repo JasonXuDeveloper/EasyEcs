@@ -7,7 +7,7 @@ namespace VoxelServer;
 // and whether water stands there. [ChangedAny]: only the chunks whose blocks or water changed, a dig, a load or a step
 // of the water; and the footing is written only when a column changed, so a water step that only deepened a lake wakes
 // no field. Each chunk writes its own footing and reads its own buffers: the chunks are split across threads.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct FootingSystem
 {
     const int Columns = Terrain.Size * Terrain.Size;

@@ -23,9 +23,8 @@ public record struct Cooldown(long Until) : IComponent;
 // out flip a presence bit, and the zombie stays in its table.
 public record struct Burning(long Until) : IComponent;
 
-// What a zombie's surroundings do to it, looked at every Rules.BurnEvery ticks (ZombieExposureSystem): by day under the
-// open sky and out of the water, the sun sets it on fire (SunlightSystem); in water, its fire goes out
-// (ExtinguishSystem). The look is the costly part, reads of the chunks around the zombie, and runs on several threads;
+// What a zombie's surroundings do to it, looked at every Rules.BurnEvery ticks (FireSystem): by day under the
+// open sky and out of the water, the sun sets it on fire; in water, its fire goes out. The look is the costly part, reads of the chunks around the zombie, and runs on several threads;
 // catching fire and putting it out are presence flips, the cheap part, after it. Each flag is a component of its own:
 // a column of one byte per zombie, which the system reading it takes as a vector loop's mask (a bool among other
 // fields would keep that system scalar, EECS055).

@@ -10,13 +10,13 @@ namespace VoxelServer;
 // and out of the water, as in Minecraft, which spawns no hostile mob closer than 24 blocks. A column whose chunk is not loaded gets none. What
 // a zombie hunts is up to its eyes (ZombieTargetSystem). Phase = 1: the first spawn of a night is at its first
 // tick.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.SpawnEvery, Phase = 1)]
+[EcsSystem, UpdateInterval(Rules.SpawnEvery, Phase = 1)]
 public ref struct NightSpawnSystem
 {
 
     [ForEach, With<Player>]
     static void Spawn(Entity player, in Position position, in Clock clock, in EntityRandom random, in Prefabs prefabs,
-        ref Stats stats, Lookup<Chunk> chunks, Lookup<DynamicBuffer<Fluid>> water, Lookup<DynamicBuffer<Surface>> surface,
+        ref Reduce<Stats> stats, Lookup<Chunk> chunks, Lookup<DynamicBuffer<Fluid>> water, Lookup<DynamicBuffer<Surface>> surface,
         World world)
     {
         if (!Rules.IsNight(clock)) return;
@@ -33,7 +33,7 @@ public ref struct NightSpawnSystem
         if (top < 0 || near.Water(new BlockPos(x, top + 1, z)) > 0) return;
         world.Instantiate(prefabs.Zombie, new Position(new Vector3(x + 0.5f, top + 1, z + 0.5f)),
             new InChunk(Terrain.ChunkOf(x, z)));
-        stats.ZombiesSpawned++;
+        stats.Value.ZombiesSpawned++;
     }
 }
 // #endregion spawn
@@ -47,7 +47,7 @@ public ref struct NightSpawnSystem
 // none in reach, it has no target and stands. It reads the players through lookups, their view centers by key (the
 // index is built before the pass) and their positions by id, and writes its own Target only: the zombies are split
 // across threads.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ZombieTargetSystem
 {
     [ForEach(Parallel = true, Slices = Rules.LookEvery), With<Zombie>]
@@ -88,7 +88,7 @@ public ref struct ZombieTargetSystem
 // along the ground, it stands. The field is one for every zombie, as far as the prefab's Vision (Rules.ScentReach): a
 // zombie that sees further would need a field of its own. Each zombie writes its own velocity and reads the trail and
 // the player through lookups: split across threads.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ZombieChaseSystem
 {
     [ForEach(Parallel = true), With<Zombie>]
@@ -127,11 +127,11 @@ public ref struct ZombieChaseSystem
 // #region attack
 // A zombie close to the player it hunts hits it, then waits a second: its Cooldown is the tick it may hit again, so a
 // zombie that waits costs one comparison and no system counts the cooldowns down.
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct ZombieAttackSystem
 {
     [ForEach, With<Zombie>]
-    static void Attack(in Position position, in Target target, ref Cooldown cooldown, in Clock clock, ref Stats stats, World world)
+    static void Attack(in Position position, in Target target, ref Cooldown cooldown, in Clock clock, ref Reduce<Stats> stats, World world)
     {
         if (clock.Tick < cooldown.Until || !world.TryGetEntity(target.Player, out var player)) return;
         int health = player.Health.Value;                                   // one lookup for the read and the write
@@ -140,20 +140,25 @@ public ref struct ZombieAttackSystem
         if (new Vector2(to.X, to.Z).LengthSquared() >= 1.2f * 1.2f || MathF.Abs(to.Y) >= 1.5f) return;
         player.SetHealth(health - Rules.ZombieDamage);
         cooldown = new Cooldown(clock.Tick + Rules.TicksPerSecond);
-        stats.Hits++;
+        stats.Value.Hits++;
     }
 }
 
 // #endregion attack
 
-// #region sunlight
-// A zombie under the open sky by day catches fire, as in Minecraft: no block above it and no water at its feet. It
-// looks every Rules.BurnEvery ticks, the cadence of the fire's damage, so a zombie catches fire before it is first
-// hurt, and not at all at night. The look reads the chunks around each zombie (the height map, the water) through
-// lookups and writes the zombie's Sunlit and InWater: a parallel pass. Catching fire is a presence flip of Burning, in the zombie
-// prefab, so the zombie stays in its table: the next system, on one thread, a comparison per zombie.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public ref struct ZombieExposureSystem
+// #region fire
+// A zombie under the open sky by day catches fire, as in Minecraft: no block above it and no water at its feet. Four
+// methods, in the order they run, all at the fire's own cadence ([UpdateInterval(Rules.BurnEvery)]): a zombie catches
+// fire before it is first hurt, and not at all at night. The look reads the chunks around each zombie (the height map,
+// the water) through lookups and writes its Sunlit and InWater: a parallel pass, the costly part. Catching fire and
+// putting it out are presence flips of Burning, which the zombie prefab has, absent, so the zombie stays in its table:
+// the cheap part, a comparison per zombie, after it. The fire hurts as a method for one row, which the generator runs
+// as a vector loop over the Health column of the burning zombies, 8 rows per instruction with Vector<int> (4 on
+// Arm; integer lanes give the same result on every machine). The cadence is not a branch per tick: Health is
+// tracked, and the pass writing it stamps its rows, so it is written only on the ticks that hurt and the death
+// systems ([Changed<Health>]) find nothing to do on the others.
+[EcsSystem, UpdateInterval(Rules.BurnEvery)]
+public ref struct FireSystem
 {
     [ForEach(Parallel = true), With<Zombie>]
     static void Look(in Position position, in Clock clock, ref Sunlit sunlit, ref InWater inWater, Lookup<Chunk> chunks,
@@ -165,42 +170,21 @@ public ref struct ZombieExposureSystem
         sunlit = new Sunlit(!wet && !Rules.IsNight(clock) && near.UnderSky(feet));
         inWater = new InWater(wet);
     }
-}
 
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public ref struct SunlightSystem
-{
     [ForEach, With<Zombie>]
     static void Expose(Entity zombie, in Sunlit sunlit, in Clock clock)
     {
         if (sunlit.Value) zombie.SetBurning(clock.Tick + Rules.BurnFor);
     }
-}
-// #endregion sunlight
 
-// #region burn
-// Every Rules.BurnEvery ticks the fire hurts: a method for one row, which the generator runs as a vector loop over the
-// Health column of the burning zombies, 8 rows per instruction with Vector<int> (4 on Arm; integer lanes give the same
-// result on every machine). The cadence is the system's ([UpdateInterval]), not a branch per tick: Health is tracked,
-// and the pass writing it stamps its rows, so it is written only on the ticks that hurt and the death systems
-// ([Changed<Health>]) find nothing to do on the others. Putting the fire out is a structural change of other rows, at
-// another condition, so it is the next system's job.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public ref struct FireDamageSystem
-{
     [ForEach, With<Burning>]
     static void Hurt(ref Health health) => health.Value--;
-}
 
-// Puts out the fires that burned down, and those of the zombies that walked into water (InWater): it visits only
-// the burning, at the fire's own cadence.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.BurnEvery)]
-public ref struct ExtinguishSystem
-{
+    // Puts out the fires that burned down, and those of the zombies that walked into water: it visits only the burning.
     [ForEach]
     static void Out(Entity zombie, in Burning fire, in InWater inWater, in Clock clock)
     {
         if (clock.Tick >= fire.Until || inWater.Value) zombie.RemoveBurning();
     }
 }
-// #endregion burn
+// #endregion fire

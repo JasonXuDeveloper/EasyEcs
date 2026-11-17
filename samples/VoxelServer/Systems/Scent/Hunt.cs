@@ -7,7 +7,7 @@ namespace VoxelServer;
 // the night. When the first zombie of a night rises, every chunk's field wakes at once (a bulk write of a presence bit,
 // all chunks in one table): the players have walked since the field last settled. At the field's cadence, before its
 // steps.
-[EcsSystem, UpdateInGroup<Simulation>, UpdateInterval(Rules.ScentEvery)]
+[EcsSystem, UpdateInterval(Rules.ScentEvery)]
 public ref struct HuntSystem
 {
     static void OnUpdate(World world)

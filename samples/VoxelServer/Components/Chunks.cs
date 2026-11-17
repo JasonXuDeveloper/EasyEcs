@@ -43,4 +43,4 @@ public struct Unloading : IComponent;
 // The players that have the chunk in view, and since when none has: who is sent what happens in it, and whether it can
 // be unloaded. The AOI systems keep it as the players' views move; ChunkUnloadSystem frees the chunks nobody has seen for a
 // while.
-public record struct Viewers(int Count, long EmptySince) : IComponent;
+public record struct Viewers(long Count, long EmptySince) : IComponent;

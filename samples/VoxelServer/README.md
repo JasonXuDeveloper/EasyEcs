@@ -16,7 +16,7 @@ What each file teaches, with its code, is on the docs site:
 | File | What it holds |
 |---|---|
 | [Components/](Components) | the data, one file per part of the world: [Chunks.cs](Components/Chunks.cs) (blocks, chunks, load requests, `Fresh`, `Unloading`, `Viewers`), [Water.cs](Components/Water.cs) (the water, its height map and the data of its passes), [Bodies.cs](Components/Bodies.cs), [Players.cs](Components/Players.cs) (`Input`, `Score`, the inventory, `ViewCenter`, `Visible`), [Mobs.cs](Components/Mobs.cs) (zombies, items), [Scent.cs](Components/Scent.cs) (the zombies' distance field: `Ground`, `Footing`, `Scent`, `Trail`, `Footprint`), [Singletons.cs](Components/Singletons.cs) |
-| [Groups.cs](Groups.cs) | the three parts of a tick: `ClientInput`, `Simulation`, `Replication` |
+| [Groups.cs](Groups.cs) | the groups around the simulation (the default group): `ClientInput`, `Replication` |
 | [Rules.cs](Rules.cs) | the numbers of the game (ticks, speeds, damage, ranges) and the spawn points |
 | [Terrain.cs](Terrain.cs) | chunk coordinates, terrain generation, `Nearby` (the blocks, water and height map around a body, one chunk lookup), the square of chunks around a point and the strip a view gains |
 | [Systems/Chunks.cs](Systems/Chunks.cs) | `ChunkReadSystem`, `ChunkGenerateSystem`, `ChunkUnloadSystem`, `ChunkSaveSystem`: a chunk's life |
@@ -24,7 +24,7 @@ What each file teaches, with its code, is on the docs site:
 | [Systems/Scent/](Systems/Scent) | the zombies' distance field, one system per file: [Footing.cs](Systems/Scent/Footing.cs) (where a zombie can stand), [Wake.cs](Systems/Scent/Wake.cs) (the ground or a player's column changed), [Hunt.cs](Systems/Scent/Hunt.cs) (the field sleeps by day), then the passes: [Step.cs](Systems/Scent/Step.cs) (the shader, settling a chunk in place), [Settle.cs](Systems/Scent/Settle.cs) |
 | [Systems/Movement.cs](Systems/Movement.cs) | `PlayerMoveSystem`, `PhysicsSystem` (steps, walls, gravity), `GridSystem` (the entities by chunk) |
 | [Systems/Aoi.cs](Systems/Aoi.cs) | the areas of interest: `AoiViewSystem` (a player's view), `AoiChunkSystem` (a chunk loaded), `AoiSpawnSystem` (an entity crossing), `AoiDespawnSystem` (an entity gone) |
-| [Systems/Zombies.cs](Systems/Zombies.cs) | `NightSpawnSystem`, `ZombieTargetSystem`, `ZombieChaseSystem` (down the scent's trail), `ZombieAttackSystem`, `SunlightSystem`, `FireDamageSystem`, `ExtinguishSystem` |
+| [Systems/Zombies.cs](Systems/Zombies.cs) | `NightSpawnSystem`, `ZombieTargetSystem`, `ZombieChaseSystem` (down the scent's trail), `ZombieAttackSystem`, `FireSystem` (the sun, the fire, the water) |
 | [Systems/Items.cs](Systems/Items.cs) | `DigSystem`, `PickupSystem` and the inventory, `ItemExpirySystem` (the ordered index of drop ticks) |
 | [Systems/Health.cs](Systems/Health.cs) | `ZombieDeathSystem`, `PlayerRespawnSystem` |
 | [Systems/Replication.cs](Systems/Replication.cs) | `SendChunksSystem`, `ChunkSentSystem`, `SendEntitiesSystem`, `ClockSystem` (the first system of the simulation) |
