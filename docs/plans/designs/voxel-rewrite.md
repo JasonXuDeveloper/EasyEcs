@@ -341,3 +341,26 @@ Host/Steady.cs 0 B, VoxelServerTests, `--schedule` diff, no EECS055-bool / EECS0
 8. GA5 (a bundle of lookups) and GA6 (box cutoffs): decline and record in owner-review.md?
 9. Prefetch never fires at this scale (~8k entities): leave the sample as is, or add a much larger benchmark
    parameter?
+
+## 11. Exemplar pass, branch exemplar-voxel (2026-11-17)
+
+Done: step 1 (bool splits, Viewers long, SetAbsent, one FireSystem), step 2 (`[Accumulate, Sum] Stats`, `[Drain]`,
+`ReserveBuffers`), step 3 (AOI through lookups), finish-scan 3 (the simulation is the default group). Output identical
+for each. Lines of `.cs`: 2,607 -> 2,580 (Benchmark/ included); `--schedule` 776 -> 653 lines, 42 -> 38 stages.
+
+Stopped, with the numbers (the patches are not kept):
+- Step 1, F7 (`Grid.Track` without `SimdMode.Off`): EECS055 is a Warning there, not the Info the plan expected;
+  `Out` of the fire stays scalar (bool and long lanes differ in size); `ZombieDeath` needs two methods (a vector loop
+  does not both reduce and destroy).
+- Step 3: `Views` cannot hold `Lookup<ViewCenter>`: a pass builds a value index only for the code of the system's own
+  type, so the strip counts live in a helper of `AoiSpawnSystem`. AoiSpawn / AoiDespawn still run alone (structural).
+- Step 4 (pairs: Keep + Acquire, Pickup `[Neighbor] ref Item`, item merge as a symmetric pair): compiled and ran, but
+  at 2,000 players the tick went 4.86 -> 5.84 ms (ZombieTarget 0.17 -> 2.00 ms with 9.6 MB allocated after the warm-up,
+  Pickup 0.20 -> 1.16 ms, Merge +0.58 ms; Physics 0.78 -> 0.24, Float 0.66 -> 0.24, Chase 0.57 -> 0.14 from the row
+  order) and `Steady.Check` failed (336 B in 100 ticks).
+- Step 5 (water in ping-pong form, Sleep + Commit merged into WaterSettleSystem, FluidStep split): output changed (block
+  updates 33,714 -> 101,949: the swap stamps `Fluid` on every step, settled ones too; cells filled 16,069 -> 16,059) and
+  Steady.Check failed (16,496 B in 100 ticks).
+- Step 6 (scent as one `[GaussSeidel]` step): not started, it follows step 5.
+- Step 8: HeightMap and Footing are already plain element loops; Terrain's hand `Vector128` as a cell method (Q5) not
+  attempted.
