@@ -240,9 +240,9 @@ public interface ILaneWalk4
     /// The vectors of rows (of lanes, for a flat job) from <paramref name="i"/> to <paramref name="end"/> (a whole number
     /// of vectors, none when <paramref name="end"/> is not past <paramref name="i"/>), in steps of <c>LF.Count</c>. A
     /// masked word writes only the lanes of the rows <paramref name="word"/> sets (<see cref="LaneKernel.Lanes{LI,M}"/>).
-    /// The walk declares its uniforms' broadcasts before its loop: the JIT does not hoist a broadcast out of the loop
-    /// once the loop holds as many vector locals as the registers it counts (a lane struct's inlined temporaries count
-    /// too).
+    /// The walk declares its uniforms' and constants' broadcasts before its loop: the JIT does not hoist a broadcast out
+    /// of the loop once the loop holds as many vector locals as the registers it counts (a lane struct's inlined
+    /// temporaries count too), and a constant written in the loop stays in a register only where its CSE takes it.
     /// </summary>
     void Walk<LF, LI, M>(nint i, nint end, ulong word) where LF : struct, ILane<LF, float> where LI : struct, ILane<LI, int> where M : struct, IMode;
 }
@@ -319,7 +319,7 @@ public static class LaneKernel
     private static void Walk<TJob>(TJob copy, nint e512, nint e256, nint e128) where TJob : struct, ILaneWalk4, allows ref struct =>
         Widths<TJob, EveryRow>(ref copy, e512, e256, e128, 0);
 
-    /// <summary>Each width's loop: the job's walk, inlined, its uniforms broadcast once per width before its loop.</summary>
+    /// <summary>Each width's loop: the job's walk, inlined, its uniforms and constants broadcast once per width before its loop.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void Widths<TJob, M>(ref TJob copy, nint e512, nint e256, nint e128, ulong pass)
         where TJob : struct, ILaneWalk4, allows ref struct where M : struct, IMode
