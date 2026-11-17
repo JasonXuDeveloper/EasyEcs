@@ -185,6 +185,41 @@ public sealed partial class SystemGenerator
     }
 
     /// <summary>
+    /// The lane operations of a step's walk: each lane member it names (a load, a store, a kept write), each operator,
+    /// each constant and uniform it broadcasts. The JIT imports each as an inlinee, with temporaries of its own, at each
+    /// width and each call site of the runner the walk is inlined into, so they measure what the walk takes of the
+    /// runner's locals.
+    /// </summary>
+    internal static int LaneOperations(LaneStep step) =>
+        LaneOperation.Matches(step.Text).Count + step.Constants.Count + step.Uniforms.Count;
+
+    private static readonly Regex LaneOperation = new(@"\bL[FI]\.\w+|[+\-*/&|^~]");
+
+    /// <summary>
+    /// The most lane operations (<see cref="LaneOperations"/>) of a whole run's walk the runner inlines (Core's
+    /// <c>LaneKernel.RunInlined</c>) instead of calling it once per run (<c>LaneKernel.Run</c>, a <c>NoInlining</c> walk), with
+    /// at most <see cref="InlinedWalkComponents"/> components. The call costs about 20 cycles a run where the job is over
+    /// 16 bytes (passed on the stack: Haul, 2-5 % of a 1,000-row run). A walk inlined lands at each of the runner's three
+    /// call sites of Execute, three widths each, and every inlined lane operation brings temporaries: past the edge the
+    /// runner reaches the 512 locals the JIT inlines into one method ("too many locals") or its time budget, and lane
+    /// operations, the walk itself or the scalar tail stay calls. Measured over a sweep of flat methods of 1 to 9
+    /// components (lane-kernel.md, package F, "The call per run"): with AVX-512 the first call appears at 21 operations
+    /// for 5 and 6 components (23-25 for 1 to 4), at 17 for 7 to 9; with 256 bits at 26 and more; under SSE4.1 none.
+    /// </summary>
+    internal const int InlinedWalkOperations = 16;
+
+    /// <summary>
+    /// The most components of a job whose walk the runner inlines (<see cref="InlinedWalkOperations"/>): each adds its
+    /// column's refs, span and stamp at each call site, and from 7 the runner leaves its scalar tail or lane operations as
+    /// calls with the smallest walk.
+    /// </summary>
+    internal const int InlinedWalkComponents = 6;
+
+    /// <summary>Whether the runner inlines the whole run's walk of <paramref name="step"/> over <paramref name="components"/> components.</summary>
+    internal static bool InlinesWalk(LaneStep step, int components) =>
+        components <= InlinedWalkComponents && LaneOperations(step) <= InlinedWalkOperations;
+
+    /// <summary>
     /// The run of a flat job in Execute: its column refs and uniforms in the walk's struct (<c>__Lanes</c>, a member of
     /// the job written with the whole run's Execute), Core's LaneKernel over it, and <c>i</c> where its vectors stopped
     /// (whole rows), from which Execute runs the method.
@@ -196,9 +231,10 @@ public sealed partial class SystemGenerator
         var fields = named.Select(k => $"e{k} = ref {unsafeType}.As<{components[k - 1]}, {simd.Columns[k - 1]}>(ref r{k})")
             .Concat(step.Uniforms.Select(u => $"{u.Name} = {u.Value}"));
         sb.Append($"{indent}var __lanes = new __Lanes {{ {string.Join(", ", fields)} }};\n");
+        string inlined = InlinesWalk(step, components.Length) ? "Inlined" : "";
         string run = masked ? "RunMasked(ref __lanes, pass, rows)"
-            : step.Fields > 1 ? $"RunFlat(ref __lanes, rows * {step.Fields}, {step.Fields}) / {step.Fields}" // lanes, back to whole rows
-            : "Run(ref __lanes, rows)";
+            : step.Fields > 1 ? $"RunFlat{inlined}(ref __lanes, rows * {step.Fields}, {step.Fields}) / {step.Fields}" // lanes, back to whole rows
+            : $"Run{inlined}(ref __lanes, rows)";
         sb.Append($"{indent}nint i = global::EasyEcs.LaneKernel.{run};\n");
         if (masked) return;
         members.Append("\n        private ref struct __Lanes : global::EasyEcs.ILaneWalk4\n        {\n");
