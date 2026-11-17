@@ -237,10 +237,12 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   job: a call per word of at most 64 rows cost as much as its vectors); the exact test is `SystemGenerator.LaneStepOf`
   (src/EasyEcs.Generator/AGENTS.md, "The lane kernel's shape"). Every other shape keeps its loops per width. A shape
   joins the kernel only once it measures level or better at 0 B against its emitted loops (selects under a comparison,
-  Min / Max against constants, 8-byte lanes, reductions: package F); a value the loop does not change is declared
-  before the walk's loop, never left for the JIT to hoist (RyuJIT declines to hoist a cheap tree such as a broadcast
-  once its count of the loop's vector locals reaches the registers it assumes, and a lane struct's inlined temporaries
-  count: lane-kernel.md, package F); an operation the JIT must fuse with a select (a masked add, a mask register) is
+  Min / Max against constants, 8-byte lanes, reductions: package F); a value the loop does not change, a constant
+  included, is declared before the walk's loop, never left for the JIT to hoist (RyuJIT declines to hoist a cheap tree
+  such as a broadcast once its count of the loop's vector locals reaches the registers it assumes, and a lane struct's
+  inlined temporaries count; a constant written in place stays in a register only where its CSE takes it, and where
+  it does not each vector reloads it from memory: Haul's walk under SSE4.1, a fourth load per vector; lane-kernel.md,
+  package F); an operation the JIT must fuse with a select (a masked add, a mask register) is
   one lane member holding the whole expression (`SelectEqual`, `AddWhereEqual`): a lane member's argument that is not a
   local or a constant reaches it as the inliner's temporary, and `ConditionalSelect(m, a + b, a)` over temporaries is a
   blend, not `vpaddd {k}` (Tally, package F); a new lane operation goes into `ILane` and `StepText` together, and
