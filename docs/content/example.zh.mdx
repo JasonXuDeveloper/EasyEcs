@@ -50,18 +50,20 @@ flowchart LR
 | [组件、标签、单例](/zh/docs/guide/basics/entities-and-components) | `Position`、`Health`、`Player`、`Dead`；单例 `Battle`、`Rules`、`Waypoints` |
 | 生成的成员 | `players[i].Position = …`、`SetZone`、`SetFrozen`、`RemoveBurning`、`SetDead`、`IsDead`、`HasAccount`、`TryGetMana`、`World.Battle`、`KillsIndex`、`AccountIndex`；缓冲 `player.Loot`、`WriteLoot()`；`DisableAttack` / `EnableAttack`；预制体上的 `SetHealth`、`SetNpc`、`SetLifetime` |
 | [系统](/zh/docs/guide/basics/systems)与过滤（`With`、`Without`、`WithAny`） | 所有系统；`AfflictionSystem` 用 `World.Count` 统计着火**或**冻住的单位 |
-| 并行 [`[ForEach]`](/zh/docs/guide/performance/threading) | `SteeringSystem`；`NewRound` 里的 `Reports.HealFully` 和 `Reports.Scatter` |
+| 并行 [`[ForEach]`](/zh/docs/guide/performance/threading) | `SteeringSystem`；`NewRound` 里的 `Reports.Scatter` 和回血的 lambda pass |
 | 并行系统（`WorldOptions.ParallelSystems`）、[`DescribeSchedule`](/zh/docs/guide/production/diagnostics#schedule) | `PlanningSystem` 和 `ManaSystem`：数据互不相交；`Schedule()` 能看到这一点 |
 | [分帧](/zh/docs/guide/basics/systems#slices)（`[ForEach(Slices = N)]`、`RunCount`） | `PlanningSystem` 每次只规划四分之一的 NPC |
 | [`Mut<T>`](/zh/docs/guide/changes/change-tracking#set-if-changed) 与 [`SetIfChanged`](/zh/docs/guide/changes/change-tracking#set-if-changed) | `PlanningSystem.Plan` 只在目标变了时才写；`CombatSystem` 和 `RegenerationSystem` 只在命中或回血时给 `Health` 打 tick |
 | 批处理方法（`Span<T>`）、SIMD | `MovementSystem`；`Reports.SumHealth` |
-| 系统之外的 `[ForEach]` runner | `Reports` |
+| 系统之外的 `[ForEach]` runner、归约（`[MinBy]`）与[配对方法](/zh/docs/samples/multi-world)（`[Neighbor]`） | `Reports`：`NearestPlayer` 背后的 `FindNearest`，`Sightings` 背后的 `See` |
+| `[View]`、lambda pass | `CombatSystem` 接收的 `Fighter`；`NewRound` 里的回血 |
+| `Emit<T>` 与 `[Drain]` | `DeathSystem` 发出 `Kill`，`KillFeedSystem` 排空它们 |
 | `Maybe<T>` | `RegenerationSystem`：着火的玩家回血更少 |
 | [禁用组件](/zh/docs/guide/changes/cleanup-and-disable) | 被冻住单位的 `Attack` 和 `Velocity`；`NewRound` 批量重新启用 |
 | [清理组件](/zh/docs/guide/changes/cleanup-and-disable)（`ICleanupComponent`、`Retired`）、`[Consume]` | `Spawn`：`Despawn` 消费死去的 NPC，它退休后留给 `RespawnSystem.Revive` |
 | [层级](/zh/docs/guide/data/hierarchy)（`ChildOf`、`Children`、`Descendants`） | 投射物是玩家的子实体；`Transfer` 收集整棵子树 |
 | [遍历中的结构变更](/zh/docs/guide/changes/structural-changes) | 遍历途中增删状态、死亡、复活、生成和销毁投射物 |
-| [预制体](/zh/docs/guide/basics/prefabs)（`Prefab`、`Instantiate`、`Reserve`）与克隆 | `Hero`、`Grunt`、`Brute`（`Grunt` 的变体）；`Mirror` 克隆一个活着的单位 |
+| [预制体](/zh/docs/guide/basics/prefabs)（`Prefab`、`Instantiate`、`Reserve`）与克隆 | `Hero`、`Brute`（`Grunt` 的变体）、用 `[Prefab]` 声明的 `Grunt`；`Mirror` 克隆一个活着的单位 |
 | [实例化时直接给值](/zh/docs/guide/basics/prefabs#instantiate-with-values) | `Shot` 连同位置、速度和 `ChildOf` 一起生成；`SpawnNpc`；`Join` |
 | [变更追踪](/zh/docs/guide/changes/change-tracking)与移除检测 | `ReplicationSystem`；`WrittenSinceCheckpoint` |
 | 每个客户端一份 tick 的 [`ChangedAny`](/zh/docs/guide/changes/change-tracking#changed-any)、[销毁日志](/zh/docs/guide/changes/change-tracking#destroy-log) | `CatchUp`：过滤条件只存一个，每个客户端用自己的 tick；`DestroyedSince` |
@@ -70,7 +72,7 @@ flowchart LR
 | [有序索引、关系、目标策略](/zh/docs/guide/data/indexes-and-relations) | `Kills` 击杀榜；`Friend` 好友关系，玩家离开时自动清掉 |
 | [唯一键](/zh/docs/guide/data/indexes-and-relations#unique-keys)（`[UniqueKey]`、`Get` / `TryGet`） | `Account`：`Join` 和 `Kick` 按账号找到英雄 |
 | 系统分组、`[UpdateInterval(n, Phase = p)]`、排序、生命周期 | `Replication`；`ManaSystem`、`RegenerationSystem`；`ClockSystem`；`PlanningSystem.OnCreate` |
-| [查询](/zh/docs/guide/basics/queries)、实体句柄与[单实体方法](/zh/docs/guide/basics/queries#run-on-one-entity) | `NearestPlayer`、`Census`、`ShotsLeft`；`Hit` 调用 `[EntityMethod]` 方法 `Requests.TakeHit` |
+| [查询](/zh/docs/guide/basics/queries)、实体句柄与[单实体方法](/zh/docs/guide/basics/queries#run-on-one-entity) | `Census`、`ShotsLeft`；`Hit` 调用 `[EntityMethod]` 方法 `Requests.TakeHit` |
 | [批量操作](/zh/docs/guide/changes/bulk) | `Instantiate(prefab, span)`、`DestroyAll`、`RemoveAll`、`EnableAll` |
 | [快照](/zh/docs/guide/saves/snapshots)、[存档与迁移](/zh/docs/guide/saves/saves) | `Checkpoint` / `Rewind`、`Save` / `Load`、`Transfer` |
 | 内省、诊断、错误策略 | `Tables`、`Schedule`、`Slowest`、`Failure` |
@@ -116,9 +118,9 @@ flowchart LR
 战斗拆成两部分：`CombatSystem` 只管伤害，`StatusSystem` 只管状态。冻住一个单位就是禁用它的 `Attack` 和 `Velocity`：
 值还留着，但在 `Thaw` 重新启用之前没有查询能看到它们。于是被冻住的单位不攻击、不移动、不射击，却没有任何系统需要检查
 `Frozen`。`AfflictionSystem` 统计着火或冻住的单位时不写循环：`Count` 直接读存在位，一次 64 行。`DeathSystem`
-给死者打上标签，其他系统按这个标签过滤。`CombatSystem` 以 `Mut<Health>` 接收 `Health`：大多数单位处在两次攻击之间，只有出手的
-单位的 `Health` 会被打 tick，而且每行不用再按实体查找一次；调度器看到的是系统读写了哪些组件，而不是一个经由 `Entity`
-访问组件的系统。
+给死者打上标签，其他系统按这个标签过滤。`CombatSystem` 接收一个 `Fighter`（`[View]`）：单位的 `Attack` 和以 `Mut<Health>` 持有的 `Health`，
+以及只写一次的规则（`Swings`、`Trade`）。大多数单位处在两次攻击之间，只有出手的单位的 `Health` 会被打 tick，而且每行不用再按实体查找一次；
+调度器看到的读写集合和直接写两个参数时一样。`DeathSystem` 为每个死去的单位发出一条 `Kill` 记录（`Emit<Kill>`）。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#combat</include>
 
@@ -143,7 +145,7 @@ NPC 死亡时，把下一个 NPC 的出生点写进 `Spawn` 清理组件，把�
 
 ## 靠变更追踪做同步 [#replication]
 
-`ReplicationSystem` 属于 `Replication` 分组，宿主每三个 tick 更新一次。每个方法只访问系统上次运行以来变了的东西：
+`KillFeedSystem` 与它同组：它的 `[Drain]` 方法按死亡顺序对每条 `Kill` 记录运行一次，随后记录被清空，所以一次击杀只发出一次。`ReplicationSystem` 属于 `Replication` 分组，宿主每三个 tick 更新一次。每个方法只访问系统上次运行以来变了的东西：
 被写过的血量（`[Changed<Health>]`）、刚着火的单位（`[Changed<Burning>]`）、火已熄灭的单位（`[Removed<Burning>]`，
 即失去了这个组件且现在仍没有它的实体）、变了的目标（`[Changed<Goal>]`：只有 `Plan` 真正写过的那几个，而不是它经过的每个
 NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`）。没有任何地方手动标脏：写入本身就是标记，不管是通过 `ref` 还是 `Mut<T>`。
@@ -166,8 +168,9 @@ NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`�
 ## tick 之外的遍历 [#reports]
 
 普通静态类里的静态 `[ForEach]` 方法就是一个 runner：生成器会写一个入口，参数是 World 加上方法的其余参数
-（`Reports.SumMana(world, ref total)`）。宿主在两次 tick 之间调用它们。`SumHealth` 把整段行当作 `Vector<int>` 读；
-`HealFully` 和 `Scatter` 分块并行。`Dice` 只取决于 tick 和实体，所以在哪个线程上掷出的结果都一样。
+（`Reports.SumMana(world, ref total)`）。宿主在两次 tick 之间调用它们。`SumHealth` 和 `SumMana` 累加进归约，`Scatter` 分块并行。`FindNearest` 保留离某个点最近的活着的玩家：它的结果 `Nearest` 是一个 `[MinBy]` 归约，
+点是调用者传入的值。`See` 是配对方法：`[Neighbor]` 标出配对的另一个单位，生成器根据距离判断写出邻居搜索，
+所以 `Sightings` 不必比较每一对就能数出每个活着的玩家会被告知哪些单位。`Dice` 只取决于 tick 和实体，所以在哪个线程上掷出的结果都一样。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#reports</include>
 
@@ -178,10 +181,12 @@ NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`�
 ### 过滤条件与预制体 [#prefabs]
 
 过滤条件只建一次，放在 `static readonly` 字段里；`WrittenPlayers`、`ClientChanges` 和 `FiresOut` 每次调用时用 `Since`
-换上新的 tick。预制体是不属于任何 World 的配方，查询看不到它们：`Hero` 既可以一次设置多个组件，也可以用生成的方法逐个设置；
-`Brute` 是变体，复制自 `Grunt` 并改了三个值；`Shot` 只放每颗投射物都一样的部分，其余的在发射时给出。
+换上新的 tick。预制体是不属于任何 World 的配方，查询看不到它们：`Grunt` 声明成一个类型（`[Prefab]`：字段就是它起始的组件，生成器写出 `Grunt.Prefab`）；`Hero` 带缓冲区，声明做不到，
+所以既可以一次设置多个组件，也可以用生成的方法逐个设置；`Brute` 是变体，复制自 `Grunt.Prefab` 并改了三个值；`Shot` 只放每颗投射物都一样的部分，其余的在发射时给出。
 
-<include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#prefabs</include>
+<include lang="csharp" meta='tab="类型" title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#kinds</include>
+
+<include lang="csharp" meta='tab="预制体" title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#prefabs</include>
 
 ### 搭建 World [#setup]
 
@@ -221,7 +226,7 @@ tick 中表不会再扩容。`SpawnNpc` 实例化重生的 NPC 时直接给出�
 ### 背包、克隆、击杀榜和好友 [#buffers-and-indexes]
 
 `Mirror` 原样克隆一个活着的单位，索引、分组和下一次同步都会知道这个副本。英雄的副本会和它共用账号，唯一键不允许这样
-（`Clone` 会抛异常），所以只克隆机器人和 NPC。`LootValue` 读背包，不算写入；`Give` 先用读操作校验，
+（`Clone` 会抛异常），所以只克隆机器人和 NPC。`LootValue` 读背包，不算写入（一个 `[EntityMethod]`，把物品加进调用者传入的值）；`Give` 先用读操作校验，
 再同时写两个背包。`TopKillers` 从顶部遍历有序的 `Kills` 索引，`FriendsOf` 向关系索引查询有谁把这个玩家加为好友。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#buffers-and-indexes</include>
@@ -235,13 +240,13 @@ tick 中表不会再扩容。`SpawnNpc` 实例化重生的 NPC 时直接给出�
 
 ### 人口统计 [#census]
 
-一个临时 `Query` 找出最近的活着的玩家；统计把几个 runner 和计数的结果汇总起来。
+`NearestPlayer` 和 `Sightings` 运行 `Reports` 的 runner 并读取结果；统计把几个 runner 和计数的结果汇总起来。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#census</include>
 
 ### 新一轮 [#new-round]
 
-批量调用逐表处理所有匹配：一次遍历销毁全部投射物，移除状态，启用被禁用的组件，再用两个并行 runner 回满血、打散 NPC。
+批量调用逐表处理所有匹配：一次遍历销毁全部投射物，移除状态，启用被禁用的组件，再用一个 lambda pass 在所有核心上回满血（只用一次的遍历不需要名字），并用并行 runner 打散 NPC。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#new-round</include>
 
