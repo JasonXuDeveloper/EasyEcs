@@ -132,7 +132,7 @@ public class VoxelServerTests
 /// The zombies' chase before the scent: straight at the player they hunt, while within their Vision. Kept here as
 /// what the field replaced, to show where it sticks.
 /// </summary>
-[EcsSystem, UpdateInGroup<Simulation>]
+[EcsSystem]
 public ref struct StraightChaseSystem
 {
     [ForEach, With<Zombie>]
