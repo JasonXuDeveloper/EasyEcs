@@ -61,6 +61,17 @@ public record struct Score(int Deaths, int Points) : ISingletonComponent;
 /// still run when a measurement starts, more often on a loaded machine where their thread is slow. A blocking full
 /// collection waits for a running one first, so a measurement that starts after it sees only what the code allocates
 /// (nothing it measures allocates, so no collection starts meanwhile).
+/// <para>
+/// The runtime's cast cache (the table of type pairs a cast looked up: <c>castcache.cpp</c>) is dropped when a collectible
+/// assembly's loader allocator is collected (<c>loaderallocator.cpp</c>, <c>CastCache::FlushCurrentCache</c>), and the
+/// next cast that misses, on whatever thread, allocates the new table at the old size: an <c>int[(size + 1) * 6]</c>,
+/// 98,352 B for the 4,096 entries the full suite grows it to. The generator and unload tests leave collectible
+/// assemblies behind, which the blocking collection of a measurement collects; code that casts through the cache would
+/// then pay another test's unload in its window (unoptimized code does: a Debug build's
+/// <c>typeof(INoStructuralChanges).IsAssignableFrom(typeof(TJob))</c>, a JIT-time constant once optimized, made
+/// ViewTests.APassThroughAViewAllocatesNothing allocate 98,352 B in the full Debug suite). So a measurement starts with
+/// a cast through the cache after the collection (<see cref="RebuildCastCache"/>).
+/// </para>
 /// </remarks>
 public static class Allocations
 {
@@ -160,12 +171,23 @@ public static class Allocations
     /// <summary>Runs without a compile that end a warm-up: past the 30 calls after which tiering promotes a method.</summary>
     private const int QuietRuns = 40;
 
-    // Waits for a running background collection (a blocking gen2 request does) and its finalizers.
+    // Waits for a running background collection (a blocking gen2 request does) and its finalizers, then has the cast
+    // cache rebuilt if they dropped it.
     private static void Settle()
     {
         System.GC.Collect(2, System.GCCollectionMode.Forced, blocking: true);
         System.GC.WaitForPendingFinalizers();
+        RebuildCastCache();
     }
+
+    /// <summary>
+    /// A cast through the runtime's cast cache: when a collected collectible assembly dropped the cache, this thread
+    /// allocates its new table here, outside the measurement (see the remarks). Otherwise a lookup that finds the pair.
+    /// </summary>
+    private static void RebuildCastCache() => _castInterface.IsAssignableFrom(_castType);
+
+    // Not readonly: the JIT folds a test between two known types, and the cast must reach the cache.
+    private static System.Type _castInterface = typeof(System.IDisposable), _castType = typeof(System.IO.MemoryStream);
 
     /// <summary>
     /// The arrays one run of <paramref name="run"/> rented from any <c>ArrayPool</c> on this thread

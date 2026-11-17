@@ -564,6 +564,35 @@ public class AllocationTests
         Assert.That(moves.Stats.LastEntities, Is.EqualTo(100));
     }
 
+    [Test]
+    public void AMeasurementDoesNotPayTheCastCacheAnUnloadedAssemblyDropped()
+    {
+        // A collectible assembly with an entry in the cast cache, left for the measurements' collections to collect: the
+        // runtime drops the cache then, and the next cast through it allocates the new table (98,352 B at 4,096 entries;
+        // the cause of fix-view-alloc-under-load). Allocations' settling rebuilds it before the window opens.
+        var unloaded = CollectibleAssembly();
+        long allocated = 0;
+        for (int i = 0; i < 5; i++) allocated += Allocations.Of(CastThroughTheCache);
+        Assert.That((unloaded.IsAlive, allocated), Is.EqualTo((false, 0L)));
+    }
+
+    // Not readonly: the JIT folds a test between two known types, and the cast must reach the cache.
+    private static Type _castTarget = typeof(INoStructuralChanges), _castSource = typeof(NoChanges);
+
+    private struct NoChanges : INoStructuralChanges;
+
+    private static void CastThroughTheCache() => _castTarget.IsAssignableFrom(_castSource);
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    private static WeakReference CollectibleAssembly()
+    {
+        var assembly = System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(
+            new System.Reflection.AssemblyName("CastCacheProbe"), System.Reflection.Emit.AssemblyBuilderAccess.RunAndCollect);
+        var type = assembly.DefineDynamicModule("Probe").DefineType("Probe", System.Reflection.TypeAttributes.Public).CreateType();
+        _ = typeof(IDisposable).IsAssignableFrom(type); // its entry in the cast cache
+        return new WeakReference(assembly);
+    }
+
     private struct Churned : IComponent;
 
     // Toggles a tag on the entity it runs on: entity.Run with a structural change inside.
