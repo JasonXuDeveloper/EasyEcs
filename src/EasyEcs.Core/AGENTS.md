@@ -374,10 +374,14 @@ VectorLoops/TableLanes.cs       a uniform table of up to 16 values read at a lan
                                 into the vectors it fills, once per run), Pick (VPERMD over 16 or 8, a shuffle per vector of 4)
 VectorLoops/LaneKernel.cs       the lane kernel of generated flat jobs (docs/plans/designs/lane-kernel.md, hidden): ILane<TSelf, T>
                                 and Lane512 / Lane256 / Lane128<T> (a vector of T as a struct type argument the JIT specializes per
-                                width; operators, Keep<M>: a masked word's write), ILaneStep4 (a job's step over its float and int
-                                lanes, written once), LaneKernel (Run / RunFlat / RunMasked: the width chain 512 -> 256 -> 128,
-                                its ends computed inline and one NoInlining walk per run over the step passed by value,
-                                returning the row the method takes from)
+                                width; operators, the fused members: SelectEqual / SelectGreaterThan keep a mask register,
+                                AddWhereEqual a sum under a condition as a masked add; Keep<M>: a masked word's write),
+                                ILaneWalk4 (a job's walk over one width of its float and int lanes, written once: its uniforms and
+                                constants broadcast before its loop, the JIT not hoisting them), LaneKernel (Run / RunFlat / RunMasked: the width chain 512 -> 256 -> 128, its ends
+                                computed inline; a whole run's walks in one NoInlining method per run, the job passed by value;
+                                a masked word's walks inlined into the runner's walk over words, a call per word costing as
+                                much as its vectors; each returns the row the method takes from; Lanes: a masked word's
+                                passing lanes)
 VectorLoops/Lanes.cs            Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress,
                                 AVX2 permutation table, 128-bit byte shuffle: NEON TBL / PSHUFB, picked at run time), for
                                 batch methods, Emit and CollectIds; Lanes.Selection: a mask to row numbers over it (the one

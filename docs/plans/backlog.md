@@ -65,7 +65,14 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       Re-run, three interleaved rounds (rerunDF/F_default.txt, F_sse.txt): every row level except **HaulGenerated
       SSE4.1 1,000, slower in all three (+10.5 / +5.9 / +12.1 %, base spread 1.8 %)**; HolesHaulGenerated AVX-512 100k
       +3.2 / +2.1 / +3.2 % sits inside its spread (4.4 %) but leans the same way. Tally's ratio still 1.15-1.18 at 100k.
-      F merges once Haul's cause is found and fixed (Opus, next after fix-no-simd-lambda-end). Left for F: select under one comparison, Min/Max against
+      **Haul's cause** (2026-11-17, lane-kernel.md "Constants"): the walk's constant was CSE'd into a register in the
+      emitted loop but left in memory in the walk (`mulps xmm, [RWD16]`, a fourth load a vector under SSE4.1); fixed by
+      declaring each constant of a step before the walk's loop (`__kN`, Generator 8f2ec2d3). A/B, three rounds
+      (`$S/haulF/ab.txt`): every row level at 0 B under both settings, HaulGenerated SSE 1,000 +5.2 / +1.9 / +4.7 %
+      (was +10.5 / +5.9 / +12.1), IntegrateGenerated SSE 7-27 % faster. The rest is the call per run with a 28-byte job
+      passed in memory; inlining the walk into the runner recovers it (130.8 ns against the emitted 131) but exhausts
+      the stress world's inlining budget, so it needs a size rule: next form. Gate green (net10.0 / net11.0 full
+      suite, the vector classes under the width settings, inlining.sh). Not merged. Left for F: select under one comparison, Min/Max against
       constants, 8-byte lanes, reductions, the masked walk's passing-bits constant.
 - [x] **`fix-no-simd-structural`** merged 2026-11-16 (5ddc511a): a lambda calling a generated writer (`e.SetDaze`) was
       marked free of structural changes, so its row-by-row job (no SIMD) froze the gate; `Symbols.UnboundEntityWriter`
@@ -181,8 +188,19 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       (only level or a win at 0 B with nothing slower ships). Details: lane-kernel.md "Package D", docs-todos
       `feat-lane-kernel`.
       Package E (open): today's generator's 128-bit path from what the kernel's SSE code shows.
-      Package F (open): the walk form (uniforms, a select under one comparison, Min / Max against constants),
-      8-byte lanes (ILaneStep8) and reductions, each rolled out once level at 0 B.
+      **Package F, form 1 handed back on branch `feat-lane-walk`** (rebased onto feat-lane-kernel 05f91b47, the walk
+      once per run): uniforms. The step form's broadcast stayed in the loop because RyuJIT's hoisting declines a cheap
+      tree once the loop's count of vector locals (lane-struct temporaries included) reaches the registers it assumes;
+      every lane job is now its own walk (ILaneWalk4.Walk, its loop in the job, uniforms broadcast before it, read in
+      Execute), inlined per width into D's one walk per run. 29 lane jobs in the benchmark project against 24. Its first
+      A/B found HolesHaul 1.21-1.31x: a NoInlining call per masked word (spills, stack arguments, prologue around ~5
+      vectors); masked words now inline their walks into the runner. The owner's reduction item (2026-11-16): the
+      study's Tally 1.3-1.45x at 100,000 rows was the conditional sum blended instead of a masked add (the sum reached
+      SelectEqual as an argument temporary); ILane.AddWhereEqual gives the emitted loop's instructions. Gate
+      scratchpad/kernelF2/gate.sh; A/B scratchpad/kernelF2/ab.sh (base a08825cf): ships only as level or a win at 0 B.
+      Details: lane-kernel.md "Package F".
+      Package F (open after form 1): a select under one comparison, Min / Max against constants, 8-byte lanes
+      (ILaneWalk8), reductions, the masked walk's passing bits hoisted; each rolled out once level at 0 B.
       The original item: read the generated files of the GeneratedTextTests corpora, the samples and the
       benchmark worlds for redundancy (one value assigned to several locals, identity copies, unread locals and
       masks, repeated setup, `this.v0`, dead narrow temps: G17's rest in owner-review, now to do), remove each in the

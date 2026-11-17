@@ -14,7 +14,8 @@ namespace EasyEcs.Benchmark;
 /// (<c>HandWritten512</c>, the widest the hardware may have), and as the generator's vector loop of the same per-row
 /// method (<c>Generated</c>, Kernel.cs). <c>Step</c> computes (a clamp, a branch on random data; <c>StepHelpers</c> is the
 /// same method written through helpers it calls, inlined into its vector loop: Kernel.Inlining.cs); <c>Integrate</c> and
-/// <c>Count</c> stream memory (one float multiply-add, one int increment per row); <c>Expire</c> is a timer (<c>--</c> as the
+/// <c>Count</c> stream memory (one float multiply-add, one int increment per row; <c>Haul</c> is Integrate with a
+/// singleton's value among its arithmetic, a uniform of the run, and <c>HolesHaul</c> the same over masked words); <c>Expire</c> is a timer (<c>--</c> as the
 /// value tested), <c>Survey</c> running totals kept in a singleton taken by ref, <c>SteerTable</c> a singleton's table of
 /// eight waypoints read at the row's index (BattleServer's Steer: a permute per field) and <c>Aim</c> / <c>Bearing</c> /
 /// <c>Sway</c> math with no vector form called once per lane (an Atan2 alone, which the gate keeps as written and
@@ -347,6 +348,20 @@ public partial class KernelBenchmark
 
     [Benchmark]
     public void IntegrateGenerated() => Kernels.Integrate(_world);
+
+    // Integrate with a singleton's value among its arithmetic (a uniform of the run), over every row and over _holes
+    // (masked words): the lane kernel's walk broadcasts it before its loop.
+    [Benchmark]
+    public void HaulScalar() => Kernels.HaulRows(_world);
+
+    [Benchmark]
+    public void HaulGenerated() => Kernels.Haul(_world);
+
+    [Benchmark]
+    public void HolesHaulScalar() => Kernels.HaulRows(_holes);
+
+    [Benchmark]
+    public void HolesHaulGenerated() => Kernels.Haul(_holes);
 
     [Benchmark]
     public void CountScalar()
@@ -1130,6 +1145,12 @@ public partial class KernelBenchmark
 
         [ForEach]
         internal static void Integrate(ref Heat heat, in Speed speed) => heat.Value += speed.Value * Dt;
+
+        [ForEach]
+        internal static void Haul(ref Heat heat, in Speed speed, in Mass mass, in Pull pull) => heat.Value += (speed.Value - mass.Value * pull.Value) * Dt;
+
+        [ForEach(SimdMode = SimdMode.Off)]
+        internal static void HaulRows(ref Heat heat, in Speed speed, in Mass mass, in Pull pull) => heat.Value += (speed.Value - mass.Value * pull.Value) * Dt;
 
         // Reductions into a singleton: integers exact, so vectorized as written; a float sum only under FloatMode.Fast.
         [ForEach(SimdMode = SimdMode.Require)]

@@ -63,7 +63,7 @@ internal static class Code
         ("global::System.Runtime.InteropServices.MemoryMarshal", "__MemoryMarshal", "global::System.Runtime.InteropServices.MemoryMarshal"),
         ("global::EasyEcs.Interleaved", "__Interleaved", "global::EasyEcs.Interleaved"),
         ("global::EasyEcs.LaneKernel", "__LaneKernel", "global::EasyEcs.LaneKernel"),
-        ("global::EasyEcs.ILaneStep4", "__ILaneStep4", "global::EasyEcs.ILaneStep4"),
+        ("global::EasyEcs.ILaneWalk4", "__ILaneWalk4", "global::EasyEcs.ILaneWalk4"),
     ];
 
     /// <summary>

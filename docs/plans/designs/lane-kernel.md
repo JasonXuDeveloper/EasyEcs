@@ -260,7 +260,8 @@ pair mode or cold branch; at most 32 IL locals in the step. Masked words take th
 whole run's with each write as `Keep<M>(pass, value, old)`; a flat loop of several fields keeps its deinterleaving
 masked loops.
 
-**What the generator writes** (KernelBenchmark's Integrate):
+**What the generator writes** (KernelBenchmark's Integrate; package F, below, replaced the step by a walk of the same
+body, with the same machine code):
 
 ```csharp
 public void Execute(__EntitySpan entities, __Span_Heat c1, __Span_Speed c2)
@@ -297,6 +298,53 @@ constraint clauses. Tier1 of `LaneKernel:Walk[IntegrateJob2+__Lanes, EveryRow]` 
 refs loaded once, each width's loop `vmovups; vmovups; vmulps {1to16} (the constant as an embedded broadcast); vaddps;
 vmovups`, no call; `tools/perf/inlining.sh` over KernelBenchmark, the headline worlds, FusionBenchmark,
 LookupGatherBenchmark, LaneKernelBenchmark and VectorFormsBenchmark: every generated job inlined.
+
+### Masked words: the walks inlined into the runner (HolesHaul)
+
+**What the first A/B showed.** `$S/kernelF/ab.sh` (base a5e0e905): HolesHaulGenerated 1.21x at 1,000 rows and
+1.31x at 100,000 (both rounds; HolesHaulScalar faster in the same runs), 1.16x at 1,000 under `DOTNET_EnableAVX=0`.
+HolesHaul is the first flat job measured over masked words (package D's benchmarks had none: LaneKernelBenchmark's
+Holes is Step, a condition), so the cause is the kernel's masked mode itself, uniforms or not.
+
+**The cause** (FullOpts, `$S/kernelF2/asm/holes-head.asm` against `holes-base.asm`). `_holes` lacks Mass on every
+third row, so every 64-row word is masked and goes to the job's `Execute(pass, ...)` from `World.MaskedRuns`, with
+the rows from its first passing row to its last (about 63). The emitted loops run inline there: three 512-bit
+vectors, one 256-bit, the passing rows after. The kernel made a call per word: `RunMasked` computed the three ends
+with branches, spilled five values of the word loop (`[rbp-0x48]`, `-0x4C`, `-0x70`, `-0xC0`, `-0xC8`), stored the
+job's three refs and uniform as stack arguments, called `LaneKernel:Walk[HaulJob3+__Lanes, PassingRows]` (prologue,
+the uniform broadcast at each width, `vzeroupper`) and reloaded them, about thirty instructions around five vectors of
+about ten each. The walk's own loops are the emitted ones (`vpternlogd` for the kept lanes, the same masks).
+
+**The fix.** `RunMasked` inlines the three walks (`Widths<TJob, PassingRows>` over a copy of the job): the runner's
+walk over words is a `NoInlining` root of its own that holds nothing else of the job (whole runs go to `MaskedRun`,
+where the job's whole-run `Execute` calls the walk once per run), the same root the emitted text's two widths of
+masked loops are inlined into. The whole-run walk keeps its call: a run is long and D's Fragments numbers chose it.
+The inlining budget: `$S/kernelF2/stressM` (package D's stress world, a flat step of six statements over seven
+components, its rows with masked words) checked by `lanecalls.py` for lane operations left as calls.
+
+### Reductions: the conditional sum's masked add (Tally)
+
+**What the A/B showed.** LaneKernelBenchmark's TallyTyped (the lane types) and TallyKernel (the width form) at
+100,000 rows: 8,700-10,100 ns against TallyGenerated's 6,600-7,100 (1.3-1.45x); level at 37 and 1,000.
+
+**The cause** (Tier1, `$S/kernelE/r-def.asm`: `TypedJobs+TallyJob:Walk[Lane512...]` against `World:ForEachBatchRuns
+[..., TallyJob3]`). No column ref is reloaded and the loop is not rotated in today's listings (the study's first
+listing predates the fused members); the two loops differ in the sum under a condition. The emitted text's
+`ConditionalSelect(__m0, __a1_1 + __c1_0, __a1_1)` is one tree, and the JIT contracts it into a masked add,
+`vptestnmd k1; vpaddd zmm1 {k1}, zmm5, zmm1`. The lane form's `SelectEqual(c1 & 1, 0, a1s + c1, a1s)` reaches the
+select with the sum as an argument's temporary (the inliner spills every argument that is not a local or a constant),
+so the JIT blends: `vpaddd zmm7, zmm5, zmm1; vpblendmd zmm1 {k1}, zmm1, zmm7`, one more uop per vector on AVX-512's two
+vector ports and a loop-carried chain of two operations instead of one. llvm-mca: 2.57 cycles per vector against 3.08
+(icelake-server), the 1.2x the listing explains of the 1.3-1.45x measured. The repro (`$S/kernelF2/rx`, FullOpts,
+`rx1.asm` / `rx.asm`): the mask as a local then `Select` keeps the mask as a vector (`vpmovm2d; vpternlogd`), the add
+inside the select's member with the mask from `Equal` likewise, the select as `a + (c & m)` an extra `vpmovm2d; vpandd`;
+only the comparison, the add and the select in one member give the masked add.
+
+**The fix.** `ILane.AddWhereEqual(acc, value, x, y)`: `ConditionalSelect(Equals(x, y), acc + value, acc)` in one
+expression, at every width. Its 512-bit loop is the emitted one instruction for instruction (`vpaddd zmm1 {k1}`), its
+256- and 128-bit loops too (`vpcmpeqd; vpaddd; vpblendvb`, as the emitted `Vector<T>` loop). The study's Tally
+takes it, and its walks run as Core's whole runs do (`StudyWalk4`: one `NoInlining` call per run holding the three
+widths, the job's copy written back). The generator maps a conditional sum to it when reductions join the kernel.
 
 **Where it applies.** The benchmark project: 24 of 260 vector jobs (30 Executes: 6 Run, 18 RunFlat, 6 RunMasked):
 KernelBenchmark's Integrate, Move2, Push, Move3, Move4; BattleServer's Move; FusionBenchmark's Movement and
@@ -353,9 +401,166 @@ the generated text and Tier1 listings of base and head (`scratchpad/kernelD2/asm
 The A/B of the fix (a08825cf against 89090767, two rounds): `scratchpad/kernelD2/ab/ab.sh`, its numbers to be added
 here before the merge.
 
-**Next shapes** (package F, each only once level at 0 B): uniforms (the walk form, broadcasts before its loop), a
-select under one comparison and Min / Max against constants (the fused members), 8-byte lanes (`ILaneStep8`),
-reductions.
+**Next shapes** (package F, below, each only once level at 0 B): uniforms (the walk form, broadcasts before its
+loop: form 1), a select under one comparison and Min / Max against constants (the fused members), 8-byte lanes
+(`ILaneWalk8`), reductions.
+
+## Package F: the walk form (branch feat-lane-walk, on feat-lane-kernel 05f91b47)
+
+One form per package, each shipped only once level or a win at 0 B (GeneratorBenchmark Cold / Edit included) and bit
+for bit under the four width settings. Listings: `$S/kernelF/` (`exp/` the hand-written reproduction,
+`haul-base.asm` / `haul-head.asm` KernelBenchmark's Haul / HolesHaul / Integrate in FullOpts, `fall*.asm` the NaN
+investigation below).
+
+### Form 1: uniforms (a singleton's value, a parameter's)
+
+**The cause of the in-loop broadcast.** The step form's uniform was a float field of the job's copy; the step
+broadcast it (`LF.Create(u)`) every vector. Reproduced by hand (`$S/kernelF/exp/Program.cs`, FullOpts, `a.asm` /
+`b.asm`): with one multiply-add in the step (14 inlinees) the JIT hoists the broadcast out of the loop; with the
+study's flat arithmetic plus a uniform (33 inlinees) it leaves `vbroadcastss zmm5, zmm0` inside the loop, the scalar
+load hoisted but the broadcast not. That is RyuJIT's loop hoisting declining a cheap tree under its register-pressure
+estimate (`optIsProfitableToHoistTree`: once the loop's count of live floating-point / SIMD locals reaches the
+registers it assumes available, a tree cheaper than `2 * IND_COST_EX` is not hoisted), and every inlined lane-struct
+operation adds argument and return temporaries to that count. Today's emitted text never depends on hoisting: it
+declares each broadcast in its setup, before the loop. The release JIT has no JitDump to print the decision; the
+evidence is the pair of listings and the walk form's below.
+
+**The fix: the job's walk.** The job's step became a walk (`ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong
+word)`): the generator writes the loop in the job, its uniforms broadcast before it (`var __u0 = LF.Create(this.__u0);`),
+and Core's `LaneKernel` inlines it once per width: a whole run's three walks in package D's one `NoInlining`
+`Walk<TJob>(TJob copy, e512, e256, e128)` per run (the branch was rebased onto it from the per-width walks it was
+first written on), a masked word's into the runner (below).
+Execute reads each uniform's scalar into the walk's struct (`__u0 = s3.Value`, through the setup's `ref readonly`
+alias of a singleton). One form for every lane job: a flat job without uniforms compiles to the step form's machine
+code (`haul-*.asm`, Integrate's walks: the same instructions, inlinee counts aside), so the kernel keeps one entry
+chain and no second interface.
+
+```csharp
+private ref struct __Lanes : __ILaneWalk4
+{
+    public ref float e1;
+    public ref float e2;
+    public ref float e3;
+    public float __u0;
+
+    [__MethodImpl(__MethodImplOptions.AggressiveInlining)]
+    void __ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong word)
+    {
+        var __u0 = LF.Create(this.__u0);
+        for (; i < end; i += LF.Count)
+        {
+            if (!__LaneKernel.Lanes<LI, M>(word, i, out var pass)) continue;
+            var passF = LI.As<LF, float>(pass);
+            var __c1_0 = LF.Load(ref e1, i);
+            var __c2_0 = LF.Load(ref e2, i);
+            var __c3_0 = LF.Load(ref e3, i);
+            __c1_0 = LF.Keep<M>(passF, __c1_0 + (__c2_0 - __c3_0 * __u0) * LF.Create(0.033333335f), __c1_0);
+            LF.Store(__c1_0, ref e1, i);
+        }
+    }
+}
+```
+
+FullOpts of Haul's 512-bit walk (`haul-head.asm`): `vmovss xmm0, [rdi+0x18]; vbroadcastss zmm0, zmm0` before the
+loop, the loop `vmovups x3; vmulps zmm4, zmm4, zmm0; vsubps; vmulps {1to16}; vaddps; vmovups`, no call, the same
+instructions as today's loop in the runner (`haul-base.asm`). Its masked walk matches today's masked loop too, both
+with the passing lanes as a vector (`vpcmpeqd k1; vpmovm2d; vptestmd`); one difference is left there: the passing
+bits' constant (`Lanes32In512`'s 1, 2, 4, ...) is loaded inside the walk's loop (`vmovups zmm1, [RWD00]`), where
+today's loop holds it in a register and copies it (`vmovaps`) per vector: the same hoisting limit, for a later form.
+
+**Where it applies.** The benchmark project: 29 lane jobs against 24 (+ KernelBenchmark's Haul and MoveVector,
+ViewBenchmark's Motion ByRefs / ByView, AccessBenchmark's SingletonParameter); the generated files of SystemGenerator
+2,970,422 -> 2,968,845 bytes (52,338 -> 52,377 lines: each lane job's loop is now in its text, the uniform jobs lose
+their per-width loops); Haul's job 89 lines / 5,098 bytes -> 56 / 3,028.
+
+**NaN.** Bit for bit except which NaN two NaN operands give: LaneKernelTests with a NaN uniform failed at first
+(`fall*.asm`): the SimdMode.Off method at Tier0 (`LaneKernelRows:Fall`) computes `r.Value += x` as
+`vaddss xmm0(x), [r]`, the JIT swapping the operands of +, so with r and x both NaN the scalar method keeps x's NaN
+and the vector walk r's. The scalar method's own compiles differ there (Tier0 against Tier1), so the tests compare
+every NaN as one, as KernelTests.Same does; the old loops matched only by the luck of their operand order.
+
+**Proof.** LaneKernelTests (Fall, Pace, Sink: float and int uniforms, a flat one, a singleton changed each update to
+0.75, NaN, infinity; masked words) and the vector-loop classes (LaneKernel, Kernel, InlineArray, LambdaPass, View,
+ElementLoop, Fusion, BattleServer, SwitchLoop, HelperLoop tests) under the default, `DOTNET_PreferredVectorBitWidth=256`
+and `DOTNET_EnableAVX=0`, and under `DOTNET_EnableHWIntrinsic=0` all but TheScheduleNamesEachMethodsLoop (base fails
+it there too); the full suite on net10.0 and net11.0 (AReductionFoldsEachFieldOnItsOwn and
+ASwitchIsMasksOfItsArms fail on base a5e0e905 already: package E's Interleaved.Select changed the text they read;
+ViewTests.AViewMethodsPlainArgumentKeepsFlatLanes read the flat loop's text and now reads the walk's too, rechecked
+with GeneratorTests by `$S/kernelF/recheck.sh` into `$S/kernelF/RECHECKDONE`);
+`tools/perf/inlining.sh` over KernelBenchmark, the headline worlds, FusionBenchmark, LookupGatherBenchmark,
+LaneKernelBenchmark, VectorFormsBenchmark, ViewBenchmark and AccessBenchmark: every job inlined. After the rebase,
+the masked words' fix and AddWhereEqual: `$S/kernelF2/gate.sh` (the same gate and LaneKernelTests'
+AddWhereEqualIsTheSelectOfTheSum, into `gate.log`) and the A/B `$S/kernelF2/ab.sh` (base a08825cf with head's three
+benchmark files and AddWhereEqual, which the study needs; two rounds of KernelBenchmark's Haul / HolesHaul /
+MoveVector / Integrate rows, LaneKernelBenchmark, BattleServer and WorldSimulation, then two rounds of the
+KernelBenchmark rows and LaneKernelBenchmark under `DOTNET_EnableAVX=0`). The first A/B:
+`$S/kernelF/ab.sh` (base a5e0e905 with head's three benchmark files against 7d2c676c, two rounds under the default
+of KernelBenchmark's Haul / HolesHaul / MoveVector / Integrate rows, LaneKernelBenchmark, ViewBenchmark, AccessBenchmark's
+singleton rows, WorldSimulation, BattleServer, GeneratorBenchmark Cold / Edit; one round of the KernelBenchmark rows
+under `DOTNET_EnableAVX=0`). Ships only when level or a win at 0 B with nothing slower.
+
+### Constants: Haul under SSE4.1 (after the merge of D and E)
+
+**What the A/B showed.** Three interleaved rounds against D (`$S/rerunDF/F_sse.txt`): KernelBenchmark's HaulGenerated
+under `DOTNET_EnableAVX=0` at 1,000 rows 1.059-1.121x the emitted loop in every round (base spread 1.8 %).
+
+**The cause** (Tier1, `$S/haulF/head-walk-sse.asm` against `base-runs.asm`). The two loops are the same eleven
+instructions but one: the emitted loop multiplies by the constant `Vector<float>.Create(Dt)` held in a register
+(`movddup xmm1` hoisted, `mulps xmm3, xmm1`), the walk by the constant in memory (`mulps xmm3, xmmword ptr [RWD16]`),
+while the `movddup xmm1` the loop hoisting wrote before its loop is left unused. Both texts write the constant in the
+loop; what keeps it in a register is the JIT's CSE taking the hoisted copy, and in the walk it did not, so lowering
+contained the constant as the multiply's memory operand. A fourth load per vector where three bound the loop:
+llvm-mca 2.1 -> 2.4 cycles a vector on icelake-server, 2.1 -> 2.6 on znver4 (`tools/perf/loopbound.py --reg xmm`).
+At AVX-512 the constant is an embedded broadcast (`{1to16}`) in both forms, a load too, so only SSE showed it.
+
+**The fix** (`SystemGenerator.StepText` / `WalkText`): each constant vector of a step (`LF.Create(0.033333335f)`,
+`LI.Create(1)`) is a local `__kN` of the walk, declared once before its loop like the uniforms, never written in the
+loop. Haul's SSE walk is then the emitted loop's instructions (`mulps xmm3, xmm1`, the constant in a register); at
+AVX-512 the JIT propagates the local into its use and keeps the embedded broadcast, the same loop as before. Every
+flat lane walk of KernelBenchmark and LaneKernelBenchmark is as short or shorter by llvm-mca (Integrate's 512-bit walk
+2.6 -> 2.3 cycles a vector on icelake-server, its SSE walk 2.6 -> 2.1). Constants of Min / Max, when those join the
+walk, must stay in place (above).
+
+**Proof.** GeneratorTests.ALaneWalksConstantsAreBroadcastBeforeItsLoop; the full suite on net10.0 and net11.0 (4,486
+passed each, `$S/haulF/gate.log`); the vector-loop classes under `DOTNET_PreferredVectorBitWidth=256`,
+`DOTNET_EnableAVX=0` and `DOTNET_EnableHWIntrinsic=0`; `tools/perf/inlining.sh` over the nine benchmark classes:
+every job inlined. The A/B (`$S/haulF/ab.sh`, base = claude/relaxed-ramanujan-j4j9k4 775d7ef4 with head's three benchmark
+files and `AddWhereEqual`, head = this branch; three interleaved rounds of KernelBenchmark's Haul / HolesHaul rows and
+LaneKernelBenchmark, under `DOTNET_EnableAVX=0` and the default; `$S/haulF/ab.txt`): every row level at 0 B. Under
+SSE4.1: HaulGenerated 1,000 131.5 / 132.6 / 130.7 ns -> 138.3 / 135.1 / 136.8 (+5.2 / +1.9 / +4.7 %, was +10.5 / +5.9 /
++12.1); HolesHaulGenerated 1,000 +5.4 / -1.4 / +0.1 %; IntegrateGenerated faster at every size (37: -10 / -8 / -9 %,
+1,000: -6 / -10 / -7 %, 100,000: -27 / -23 / -24 %); the 100,000-row rows move with their scalar twins (HaulScalar
++5.0 / -5.5 / +12.3 %, spread 8-24 %). Default: every row level, HaulGenerated 1,000 -0.4 / +3.5 / +4.5 % (spread 4.1),
+HolesHaulGenerated 100,000 +16.6 / +1.5 / -4.9 % (spread 13.3).
+
+**What is left at 1,000 rows: the call per run.** Haul's walk is still the one `NoInlining` `LaneKernel.Walk` per
+run (package D's form), its job of three column refs and a float (28 bytes) passed in memory (SysV passes a struct
+of more than 16 bytes on the stack: four stores in the runner, four loads in the walk, the call, its frame): about
+20 cycles a run, 2-5 % of a 130 ns run. Integrate's job (two refs, 16 bytes) goes in registers. Measured
+(`$S/haulF/ab2.sh`, `ab2.txt`, two rounds): `RunFlat` inlining the widths into the runner instead of calling `Walk`
+takes HaulGenerated 1,000 to 130.8 / 131.0 ns under SSE4.1 (the emitted loop's 131) and 70.0 / 68.9 at AVX-512
+(head 71.9 / 72.5), the other rows level. It does not ship as is: inlined into every runner, the stress world's walk
+(`$S/kernelF2/stressM`, six statements over seven components) leaves 11 lane operations as calls at AVX-512 and 14
+under SSE4.1 (the runner's inlining budget, package D's reason for the call). A walk small enough to inline
+(Haul's, Integrate's) needs a size rule the generator can read (lane operations times the runner's three call sites
+and three widths) and its own A/B at the rule's edge: the next form of package F.
+
+### The forms left, and what form 1 showed about them
+
+- **A select under one comparison, Min / Max against constants.** The fused members (`SelectGreaterThan`, `Min(a, T
+  constant)`) recover the mask register and the cheap Min / Max in the study. In the walk they need StepText to map a
+  mask local used once (`var __m6 = GreaterThan(...)`, then `ConditionalSelect(__m6, ...)`) into the fused call, and
+  `Min(x, Create(10f))` into `Min(x, 10f)`. A constant kept as a broadcast local before the loop would reach `Min` as
+  a lane struct's field (the IEEE `vrangeps` sequence again), so the constants of Min / Max stay in place; their
+  `vbroadcastss` from memory inside the loop (the study's walk listing) is the hoisting limit above, cheap loads.
+- **8-byte lanes (`ILaneWalk8`: double, long).** Core needs the walk interface over `LD` / `LL` and the chain at 8, 4,
+  2 lanes per width; StepText needs `Size: 8` and the double / long names. Uniforms come for free with form 1.
+- **Reductions.** The walk owns its accumulators (declared before its loop, as form 1's broadcasts) and folds them
+  after it; Core's walk must then write the copy back (`job = copy`, the study's `StudyWalk4`). A sum under a condition
+  goes through `AddWhereEqual` (above: through `SelectEqual` the add is blended, not masked); StepText maps
+  `ConditionalSelect(m, a + b, a)` of a mask used once to it, and a reduction under `GreaterThan` needs its own member.
+- **The passing bits' constant of a masked walk** (above): hoisted by declaring it before the walk's loop
+  (`LI.PassingBits` and a `Passing(bits, word, i)`), measured against today's copy per vector.
 
 ## Runs left for the coordinator (Sonnet)
 

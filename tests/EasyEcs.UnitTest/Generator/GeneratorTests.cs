@@ -349,7 +349,7 @@ public class GeneratorTests
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
         // A flat job is one step over Core's lane kernel (SystemGenerator.Lanes.cs), its widths Core's; any other shape
         // gets its loops per width: Vector512 first where the hardware runs it, then Vector<T> for the rows left.
-        bool kernel = generated.Contains("ILaneStep4.Step<LF, LI, M>(nint i, LI pass, LF passF)") && generated.Contains("LaneKernel.Run(ref __lanes, rows)");
+        bool kernel = generated.Contains("ILaneWalk4.Walk<LF, LI, M>(nint i, nint end, ulong word)") && generated.Contains("LaneKernel.Run(ref __lanes, rows)");
         Assert.That(kernel || generated.Contains("for (nint last = rows - __Vec_"), Is.EqualTo(vectorized), generated);
         if (!kernel)
         {
@@ -665,7 +665,8 @@ public class GeneratorTests
             .And.Not.Contain("Log("), generated);
     }
 
-    // A component of a Vector2 assigned whole: one statement per lane, and as each lane is computed alike, the flat loop.
+    // A component of a Vector2 assigned whole: one statement per lane, and as each lane is computed alike, the flat loop:
+    // the lane kernel's walk over rows * 2 lanes, the singleton's value read in Execute and broadcast before its loop.
     [Test]
     public void AWholeComponentOfAVector2IsOneStatementPerLane()
     {
@@ -674,8 +675,26 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("lanes = rows * 2;").And.Contain("__c1_0 = __c1_0 + __c2_0 * __u0;")
+        Assert.That(generated, Does.Contain("RunFlat(ref __lanes, rows * 2, 2) / 2;").And.Contain("var __u0 = LF.Create(this.__u0);")
+            .And.Contain("__c1_0 = __c1_0 + __c2_0 * __u0;")
             .And.Contain("__c1_1 = __V512.ConditionalSelect(__passF, __c1_1 + __c2_1 * __u0, __c1_1);"), generated); // the flat loop, then the masked one per lane
+    }
+
+    // A lane job's constants are locals of its walk, broadcast before its loop: written in place, the JIT's CSE may leave
+    // one in memory, a load per vector (Haul's walk under SSE4.1, lane-kernel.md package F).
+    [Test]
+    public void ALaneWalksConstantsAreBroadcastBeforeItsLoop()
+    {
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes,
+            "[EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f) => f.V = f.V * 0.5f + 0.25f * f.V + 0.5f; }"),
+            out var output, out _);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
+        string walk = generated.Substring(generated.IndexOf("ILaneWalk4.Walk<LF, LI, M>", System.StringComparison.Ordinal));
+        int loop = walk.IndexOf("for (; i < end; i += LF.Count)", System.StringComparison.Ordinal);
+        Assert.That(loop, Is.GreaterThan(0), generated);
+        Assert.That(walk.Substring(0, loop), Does.Contain("var __k0 = LF.Create(0.5f);").And.Contain("var __k1 = LF.Create(0.25f);"), generated);
+        Assert.That(walk.Substring(loop), Does.Contain("__k0").And.Contain("__k1").And.Not.Contain("LF.Create("), generated); // each constant once
     }
 
     // A wide component (a float, a bool, a byte and an int a row): the float lane gathered from 3 words per row by
@@ -875,7 +894,8 @@ public class GeneratorTests
     }
 
     // The Vector512 loop is the Vector<T> loop's text with the vector type's token replaced: user types named
-    // Vector-something in the setup (a context value, a singleton's field) stay as written.
+    // Vector-something in the setup (a context value, a singleton's field) stay as written, in the loops and in the
+    // uniforms a lane kernel's walk reads in Execute.
     [TestCase("public static partial class R { [ForEach(SimdMode = SimdMode.Require)] public static void A(ref F f, in System.Numerics.Vector3 wind) => f.V += wind.X * wind.Y; }")]
     [TestCase("public static partial class R { [ForEach(SimdMode = SimdMode.Require)] public static void A(ref F f, in System.Numerics.Vector<float> bias, float gain) => f.V *= gain; }")]
     [TestCase("public struct Wind : ISingletonComponent { public System.Numerics.Vector3 V; } [EcsSystem] public ref struct S { [ForEach(SimdMode = SimdMode.Require)] static void A(ref F f, in Wind w) => f.V += w.V.X; }")]
@@ -884,7 +904,7 @@ public class GeneratorTests
         Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, Lanes, source), out var output, out _);
         string generated = string.Join("\n", output.SyntaxTrees.Where(t => IsCode(t)).Select(t => t.ToString()));
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated, Does.Contain("for (nint last = rows - __V512_float.Count;"), generated);
+        Assert.That(generated.Contains("for (nint last = rows - __V512_float.Count;") || generated.Contains("ILaneWalk4.Walk<LF, LI, M>"), generated);
         Assert.That(generated, Does.Not.Contain("Vector5123").And.Not.Contain("Intrinsics.Vector512<float> __p").And.Not.Contain("Intrinsics.Vector512<float> x"), generated);
         Assert.That(generated.IndexOf('\u0001'), Is.EqualTo(-1), "a token left in the loop"); // ordinal: culture comparison ignores U+0001
     }

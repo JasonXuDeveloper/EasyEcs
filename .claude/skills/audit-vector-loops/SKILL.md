@@ -228,14 +228,24 @@ vector method's loop line there and fails on "; rows on this hardware" except ga
   the inherent reason.
 - **Which loop text a vector job gets: the lane kernel for flat jobs** (owner L33, docs/plans/designs/lane-kernel.md).
   A job whose loop is straight-line lane arithmetic over 4-byte float / int lanes of one-field components (or a flat
-  loop over fields alike), with only constants for uniforms and no mask kept across statements, reduction, structural
-  change, record, bail, gather, draw, prefetch, streamed column, wide or interleaved component, is one `Step` over
-  Core's lane types (`ILane`, `Lane512/256/128<T>`) and Core's `LaneKernel` walks it at 512, 256, then 128 bits
-  (one `NoInlining` walk per run, the step passed by value: walks inlined into the runner exhaust its inlining budget,
-  a walk per width costs a call per width on small tables); the exact test is `SystemGenerator.LaneStepOf`
+  loop over fields alike), with constants and uniform scalars (a singleton's value) for its setup and no mask kept
+  across statements, reduction, structural change, record, bail, gather, draw, prefetch, streamed column, wide or
+  interleaved component, is one `Walk` over Core's lane types (`ILane`, `Lane512/256/128<T>`) and Core's `LaneKernel`
+  inlines it at 512, 256, then 128 bits: a whole run's walks into one `NoInlining` method per run, the job passed by
+  value (walks inlined into the runner exhaust its inlining budget, a method per width costs a call per width on small
+  tables), a masked word's walks into the runner's walk over words (`MaskedRuns`, a root holding nothing else of the
+  job: a call per word of at most 64 rows cost as much as its vectors); the exact test is `SystemGenerator.LaneStepOf`
   (src/EasyEcs.Generator/AGENTS.md, "The lane kernel's shape"). Every other shape keeps its loops per width. A shape
-  joins the kernel only once it measures level or better at 0 B against its emitted loops (the walk form for
-  conditions and uniforms, reductions: package F); a new lane operation goes into `ILane` and `StepText` together, and
+  joins the kernel only once it measures level or better at 0 B against its emitted loops (selects under a comparison,
+  Min / Max against constants, 8-byte lanes, reductions: package F); a value the loop does not change, a constant
+  included, is declared before the walk's loop, never left for the JIT to hoist (RyuJIT declines to hoist a cheap tree
+  such as a broadcast once its count of the loop's vector locals reaches the registers it assumes, and a lane struct's
+  inlined temporaries count; a constant written in place stays in a register only where its CSE takes it, and where
+  it does not each vector reloads it from memory: Haul's walk under SSE4.1, a fourth load per vector; lane-kernel.md,
+  package F); an operation the JIT must fuse with a select (a masked add, a mask register) is
+  one lane member holding the whole expression (`SelectEqual`, `AddWhereEqual`): a lane member's argument that is not a
+  local or a constant reaches it as the inliner's temporary, and `ConditionalSelect(m, a + b, a)` over temporaries is a
+  blend, not `vpaddd {k}` (Tally, package F); a new lane operation goes into `ILane` and `StepText` together, and
   LaneKernelTests runs bit for bit under every width setting (default, `DOTNET_PreferredVectorBitWidth=256`,
   `DOTNET_EnableAVX=0`, `DOTNET_EnableHWIntrinsic=0`).
 

@@ -96,7 +96,7 @@ record a dropped one.
 ## Vector loops
 
 The vector loops (`Kernel*.cs`: what becomes SIMD, side effects, fixable reasons, proof) have their own skill:
-`audit-vector-loops`. Which text a vector job gets (the lane kernel's one step for flat jobs, the loops per width for
+`audit-vector-loops`. Which text a vector job gets (the lane kernel's one walk for flat jobs, the loops per width for
 every other shape) is its rule too; when a change to `Kernel.Code` or its texts moves jobs in or out of
 `SystemGenerator.LaneStepOf`, the benchmark project's count of `__Lanes` structs and GeneratedTextTests show it.
 
@@ -175,7 +175,8 @@ Write it like hand-written code:
   stays at 32 IL locals or fewer: the generator counts what it declares and splits before the limit, one method per
   width (`__Loop512`, `__Loop`, `__MaskedLoop512`, ...; D135); `tools/perf/inlining.sh` proves it on the benchmarks.
 - **Say a value once**: a constant is `.Zero` / `.One` / a literal in place, not a local made per width
-  (`var __u1 = Create<int>((0))`); setup that does not depend on the width (singleton refs, `Identity`,
+  (`var __u1 = Create<int>((0))`; the lane kernel's walk is one text over every width and declares its constants
+  before its loop, `audit-vector-loops`); setup that does not depend on the width (singleton refs, `Identity`,
   `this.v0 = default`) is written once above the width blocks; a mark written once is assigned, not zeroed then OR-ed
   (`__d0 = Zero; __d0 |= x` -> `var __d0 = x`); a table or broadcast with the same value is declared once per type.
 - **Parentheses only where precedence needs them**: no `((0))`, no parentheses around a whole right-hand side or
