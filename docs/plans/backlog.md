@@ -74,6 +74,16 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       the stress world's inlining budget, so it needs a size rule: next form. Gate green (net10.0 / net11.0 full
       suite, the vector classes under the width settings, inlining.sh). Not merged. Left for F: select under one comparison, Min/Max against
       constants, 8-byte lanes, reductions, the masked walk's passing-bits constant.
+      **The size rule** (2026-11-17, branch `feat-lane-walk-inline` on 62218aef; lane-kernel.md "The call per run"):
+      `LaneKernel.RunInlined` / `RunFlatInlined` inline a whole run's walk of at most 16 lane operations over at most 6
+      components (`SystemGenerator.InlinesWalk`); larger walks keep the call. Edge from a sweep of 1-9 components at
+      Tier1 / FullOpts and three widths (`$S/walkI/out/g1-*.sum`): the runner's three call sites x three widths reach
+      the JIT's 512 locals, first lane call at 21 operations for 5-6 components, 17 for 7-9 (whose scalar tail leaves
+      from 9); under the rule every Tier1 runner holds base's calls less the walk's (`g2-*.sum`); FullOpts leaves one
+      site's scalar tail a call (profitability falls with the root's locals). A/B three rounds (`$S/walkI/ab/ab.txt`):
+      SSE 58 level, HaulGenerated 1,000 -2.7 / -4.1 / -1.6 % (131 ns, the emitted loop's); default 60 level, BattleServer
+      +4.1-4.8 % rerun alone in six rounds level (-4.1 / +8.7 / -4.3 / -1.9 / +3.1 / +27.8 %, spread 23 %; only
+      Move's runner changed, its walk calls gone). inlining.sh now reports lane operations left as calls. Not merged.
 - [x] **`fix-no-simd-structural`** merged 2026-11-16 (5ddc511a): a lambda calling a generated writer (`e.SetDaze`) was
       marked free of structural changes, so its row-by-row job (no SIMD) froze the gate; `Symbols.UnboundEntityWriter`
       reads such calls by name.

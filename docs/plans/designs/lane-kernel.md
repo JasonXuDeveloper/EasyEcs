@@ -543,7 +543,85 @@ takes HaulGenerated 1,000 to 130.8 / 131.0 ns under SSE4.1 (the emitted loop's 1
 (`$S/kernelF2/stressM`, six statements over seven components) leaves 11 lane operations as calls at AVX-512 and 14
 under SSE4.1 (the runner's inlining budget, package D's reason for the call). A walk small enough to inline
 (Haul's, Integrate's) needs a size rule the generator can read (lane operations times the runner's three call sites
-and three widths) and its own A/B at the rule's edge: the next form of package F.
+and three widths) and its own A/B at the rule's edge: below.
+
+### The call per run: small walks inlined (branch feat-lane-walk-inline)
+
+**The form.** Core's `LaneKernel.RunInlined` / `RunFlatInlined` inline a whole run's three widths into the caller
+(the job's copy as a local, so its refs stay in registers; no broadcast for a run under one vector); `Run` / `RunFlat`
+keep the `NoInlining` `Walk`. The generator picks the inlined entry when `InlinesWalk` holds: at most 16 lane
+operations (`LaneOperations`: each `LF.` / `LI.` member of the step text, a masked step's `Keep` included, each
+operator, each constant and uniform broadcast before the loop) over at most 6 components (Execute's spans).
+
+**Why the edge is there.** `ForEachBatchRuns` calls Execute at three sites (filtered runs, a dense table, runs past
+tombstones), so an inlined walk lands nine times at AVX-512 (three widths a site), six at 256 bits, three under
+SSE4.1, and each lane operation brings its argument and return temporaries. The runtime's inlining events
+(`MethodJitInliningFailed`, the sweep's listener) name the limits: "too many locals" (the root reaching the 512 locals
+the JIT inlines into one method) and "inline exceeds budget". Past them the runner leaves lane operations, the walk of a
+width or the scalar tail (`Run_0`, the method for the rows after the vectors) as calls. Each component adds its column
+ref, span and stamp at each site, so the edge falls with the components.
+
+**The sweep** (`$S/walkI`: `gen/sweep.py` writes one system per method, `ref A a` plus 0 to 8 `in` components, 1 to
+7 terms `x.Value * k` in statements of four, fusion off, parallel twins of 3 and 9 components; `gen/matrix.sh` builds
+it twice, base = every walk called, exp = every walk inlined, and runs each at Tier1 (`DOTNET_TC_CallCountingDelayMs=0`,
+3,200 updates with pauses for the background compiles) and FullOpts (`DOTNET_TieredCompilation=0`) under the default
+(AVX-512), `DOTNET_PreferredVectorBitWidth=256` and `DOTNET_EnableAVX=0`, `DOTNET_JitDisasm` of every runner;
+`gen/diff.py` / `gen/sum.py` list each call the exp runner holds that base's does not; `out/g1-*.sum`). The first
+lane operation or walk left as a call, in lane operations:
+
+| components | Tier1 AVX-512 | Tier1 256 bits | FullOpts AVX-512 |
+|---|---|---|---|
+| 1 | 24 | none to 27 | 27 (the runner's own span helpers from 21) |
+| 2 | 25 | none to 28 | 25 |
+| 3 | 23 | none to 29 | 23 |
+| 4 | 24 | none to 30 | 24 |
+| 5 | 21 | 31 | 21 |
+| 6 | 21 | 29 | 21 |
+| 7 | 17 (the scalar tail from 9) | 26 (the tail from 9) | 17 (the tail from 9) |
+| 8 | 17 (the tail at 9) | 26 | 17 (the tail from 9) |
+| 9 | 17 (the tail from 9) | 21 (the tail at 13) | 13 (the tail from 9) |
+
+Under SSE4.1 (one width a site) no lane operation stays a call up to 34 operations; seven components push the tail out
+from 17 at Tier1, seven to nine from 17 at FullOpts. At FullOpts most walks also leave one site's tail a call at any
+size (below).
+
+The rule takes the edge of 5 and 6 components (21) less a margin of five operations, and leaves 7 to 9 components to
+the call, where even a walk of 9 operations pushed the scalar tail out of the runner. Rerun with the rule
+(`out/g2-*.sum`): every Tier1 runner at every width holds exactly base's calls less the walk's (parallel chunks
+included; a few listing differences between runs of identical code are Tier1's timing).
+
+**FullOpts keeps one call.** Without a profile (`DOTNET_TieredCompilation=0`, the inlining tool, an AOT-like compile)
+most walks within the rule make one site's scalar tail a call (the user's method, "unprofitable inline", at every
+width; `out/g2-full-*.sum`): the inliner's profitability falls with the root's locals, and
+`DOTNET_JitMaxLocalsToTrack=0x800` removes the call from every case but one (`out/lt.txt`). It costs a call per row
+for the 0-3 rows after the vectors of a run, where the inlined walk saves a call per run; at Tier1 the profile keeps
+the tail inlined. No lane operation stays a call at FullOpts within the rule (`tools/perf/inlining.sh`, which now
+reports lane operations and walks left as calls, over KernelBenchmark, the headline worlds, FusionBenchmark,
+LookupGatherBenchmark, LaneKernelBenchmark, VectorFormsBenchmark, ViewBenchmark and AccessBenchmark: every job
+inlined).
+
+**Where it applies.** Every lane job of the benchmark project is within the rule (4 to 11 operations over 1 to 3
+components: Haul, Integrate, Move, the flat MoveVector / Move2-4 / Push, the views' and lambdas'), 11 in the generator
+test corpus. The stress world's Mix (`$S/kernelF2/stressM`, seven components) keeps the call. BattleServer's Move
+(Tier1, `gen/bsd.sh`, `out/bs-*.asm`): its `ForEachBatchRuns`, `Masked` and `MaskedRun` hold base's calls less the
+three, two and one `LaneKernel:Walk` calls; nothing else of the tick's code changes.
+
+**A/B** (`$S/walkI/ab/ab.sh`, base 62218aef, head = base + the Core and generator change; three interleaved rounds
+of KernelBenchmark's Haul / HolesHaul / Fragments rows and LaneKernelBenchmark under `DOTNET_EnableAVX=0`, the same
+plus BattleServer and WorldSimulation under the default; `ab/ab.txt`). SSE4.1: all 58 rows level at 0 B;
+HaulGenerated 1,000 135.5 / 135.7 / 134.8 -> 131.9 / 130.1 / 132.7 ns (-2.7 / -4.1 / -1.6 %, the emitted loop's 131:
+package F's last gap closed), IntegrateGenerated 37 -5.6 / -6.5 / -2.9 %. Default: 60 rows level at 0 B, HaulGenerated
+1,000 -1.2 / +0.2 / -0.3 %; one row past the bar, BattleServer Tick +4.3 / +4.1 / +4.8 % (base spread 2.4). Its only
+changed code is Move's runner losing its calls, a pass of about 1 % of the tick, so it was rerun alone
+(`ab/bs.sh`, six interleaved rounds of base, head and a control with head's Core and base's text): head -4.1 / +8.7 /
+-4.3 / -1.9 / +3.1 / +27.8 % (base 2.36-2.90 ms, spread 23 %), the control -2.6 / -1.9 / -1.2 / -16.7 / +16.1 %
+(`ab/bs.txt`): level, the round-to-round swing audit-perf records for BattleServer. Fragments' rows swing 20-100 %
+between rounds on both sides (their scalar twins too). Ships: level or faster everywhere at 0 B, Haul's gap closed.
+
+**Proof.** GeneratorTests.ARunnerInlinesOnlyASmallWalk (16 operations inlined, 17 called; 6 components inlined, 7
+called); the full suite on net10.0 and net11.0 (4,492 passed each, `$S/walkI/gate.log`); the vector-loop classes under
+`DOTNET_PreferredVectorBitWidth=256`, `DOTNET_EnableAVX=0` and `DOTNET_EnableHWIntrinsic=0`; `tools/perf/inlining.sh`
+over the ten benchmark classes: every job inlined, no lane operation left as a call.
 
 ### The forms left, and what form 1 showed about them
 
