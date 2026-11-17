@@ -347,13 +347,18 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith("S.ForEach.g.cs") || t.FilePath.Contains("/S.") && IsCode(t)).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated.Contains("for (nint last = rows - __Vec_"), Is.EqualTo(vectorized), generated);
-        // Vector512 first where the hardware runs it, then Vector<T> for the rows left.
-        Assert.That(generated.Contains("for (nint last = rows - __V512_"), Is.EqualTo(vectorized), generated);
-        // (In the job's Execute: a job that marks rows also names Vector.IsHardwareAccelerated in its Vectorizes.)
-        int execute = System.Math.Max(0, generated.IndexOf("public void Execute(global::EasyEcs.EntitySpan", System.StringComparison.Ordinal));
-        Assert.That(generated.IndexOf("Vector512.IsHardwareAccelerated", execute, System.StringComparison.Ordinal)
-            < generated.IndexOf("__Vec.IsHardwareAccelerated", execute, System.StringComparison.Ordinal), Is.EqualTo(vectorized), generated);
+        // A flat job is one step over Core's lane kernel (SystemGenerator.Lanes.cs), its widths Core's; any other shape
+        // gets its loops per width: Vector512 first where the hardware runs it, then Vector<T> for the rows left.
+        bool kernel = generated.Contains("ILaneStep4.Step<LF, LI, M>(nint i, LI pass, LF passF)") && generated.Contains("LaneKernel.Run(ref __lanes, rows)");
+        Assert.That(kernel || generated.Contains("for (nint last = rows - __Vec_"), Is.EqualTo(vectorized), generated);
+        if (!kernel)
+        {
+            Assert.That(generated.Contains("for (nint last = rows - __V512_"), Is.EqualTo(vectorized), generated);
+            // (In the job's Execute: a job that marks rows also names Vector.IsHardwareAccelerated in its Vectorizes.)
+            int execute = System.Math.Max(0, generated.IndexOf("public void Execute(global::EasyEcs.EntitySpan", System.StringComparison.Ordinal));
+            Assert.That(generated.IndexOf("Vector512.IsHardwareAccelerated", execute, System.StringComparison.Ordinal)
+                < generated.IndexOf("__Vec.IsHardwareAccelerated", execute, System.StringComparison.Ordinal), Is.EqualTo(vectorized), generated);
+        }
         // A vector loop also takes words of rows of which some pass, as a lane mask (IForEachMasked); a parallel one
         // runs each chunk's runs of rows (ForEachBatchParallel).
         bool parallel = members.Contains("Parallel = true");
@@ -564,9 +569,12 @@ public class GeneratorTests
             out var output, out _);
         string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("Name = \"A\"")).ToString();
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty, generated);
-        Assert.That(generated.Contains("lanes = rows * 2;"), Is.EqualTo(flat), generated);
+        // a flat loop of straight-line arithmetic is the lane kernel's (SystemGenerator.Lanes.cs), one under a condition
+        // the generator's own
+        bool kernel = generated.Contains("LaneKernel.RunFlat(ref __lanes, rows * 2, 2) / 2;");
+        Assert.That(kernel || generated.Contains("lanes = rows * 2;"), Is.EqualTo(flat), generated);
         Assert.That(generated.Contains("for (nint last = rows - __Vec_"), Is.True, generated); // masked words, or the loop
-        if (flat) Assert.That(generated, Does.Contain("i /= 2;").And.Contain("Interleaved.Load2("), generated);   // the masked Execute deinterleaves
+        if (flat) Assert.That(generated, Does.Contain(kernel ? "LF.Load(ref e1, i)" : "i /= 2;").And.Contain("Interleaved.Load2("), generated); // the masked Execute deinterleaves
     }
 
     // A parallel method's vector loop runs in each chunk's batch job: its singletons are the job's SingletonRefs, its

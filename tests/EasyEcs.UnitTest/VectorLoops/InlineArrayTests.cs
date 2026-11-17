@@ -358,9 +358,9 @@ public class InlineArrayTests
         // without NEON, AVX2 or AVX-512 the interleaved loop's line adds "; rows on this hardware"
         Assert.That(world.DescribeSchedule().Groups[0].Stages[0].Systems[0].Loops.Select(l => l.Split("; rows on this hardware")[0]), Is.EqualTo(new[]
         {
-            "Fade4: vector (Vector512 or Vector<float>), flat, masked words vector",
-            "Fade8: vector (Vector512 or Vector<float>), flat, masked words scalar",
-            "Fade16: vector (Vector512 or Vector<float>), flat, masked words scalar",
+            "Fade4: vector (lane kernel: Vector512, Vector256, Vector128), flat, masked words vector",
+            "Fade8: vector (lane kernel: Vector512, Vector256, Vector128), flat, masked words scalar",
+            "Fade16: vector (lane kernel: Vector512, Vector256, Vector128), flat, masked words scalar",
             "Mix: vector (Vector512 or Vector<float>), interleaved fields, masked words vector",
             "Nearest: vector (Vector512 or Vector<float>), interleaved fields, write-only columns streamed past the last-level cache, masked words vector",
         }));

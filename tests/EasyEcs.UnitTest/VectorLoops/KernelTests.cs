@@ -1485,7 +1485,7 @@ public class KernelTests
         string rows = Vector.IsHardwareAccelerated || Vector512.IsHardwareAccelerated ? "" : "; rows on this hardware";
         Assert.That(system.Loops, Is.EqualTo(new[]
         {
-            "Move: vector (Vector512 or Vector<float>), flat, masked words vector" + rows,
+            "Move: vector (lane kernel: Vector512, Vector256, Vector128), flat, masked words vector" + rows,
             "Hurt: vector (Vector512 or Vector<float>), masked words vector, cold branch (it calls Console.WriteLine, which is defined in another assembly)" + rows,
             "Mark: scalar (it uses the Entity in 'entity.Id.Index': a vector loop takes the entity's id in a record and its own Set, Remove, Disable, Enable or Destroy; read components as parameters (a tag as [With<T>] / [Without<T>], or a Maybe<T>))",
         }));

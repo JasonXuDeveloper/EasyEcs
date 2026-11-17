@@ -316,6 +316,12 @@ VectorLoops/InlineArrayBenchmark.cs         loops over a row's inline arrays unr
                                             value's waypoints; each against SimdMode.Off
 VectorLoops/KernelBenchmark.cs              a [ForEach] method for one row as the per-row loop, the batch method and the vector
                                             loop the generator writes
+VectorLoops/LaneKernelBenchmark.cs          package C's study (docs/plans/designs/lane-kernel.md): Integrate, Step (and its
+                                            masked words) and Tally as one body per job, in the width form, the typed form
+                                            (Core's lane kernel) and the walk form, against KernelBenchmark's generated jobs;
+                                            setup checks them bit for bit
+VectorLoops/LaneKernelStudy.cs              the study's forms Core does not ship: the width form (IWidth, W512 / W256 /
+                                            W128, Lane<W, T>, WidthKernel) and the typed walk form (ILaneWalk4, LaneWalk4)
 VectorLoops/LateHolesBenchmark.cs           vector loops whose runner reached Tier1 before their table had holes: the masked
                                             words' tables and lane masks
 VectorLoops/StreamingStoreBenchmark.cs      borrowed-ideas.md item 5: a write-only column with plain against non-temporal

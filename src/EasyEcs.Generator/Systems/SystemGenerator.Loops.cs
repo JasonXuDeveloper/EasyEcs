@@ -49,6 +49,12 @@ public sealed partial class SystemGenerator
     private static void EmitLoops(StringBuilder sb, StringBuilder members, Kernel.Code simd, string[] components, string indent, string call,
         bool masked, string? rows, IReadOnlyList<Scoped> scope, int start)
     {
+        // A flat job: one step over Core's lane types, the widths and masked words Core's (SystemGenerator.Lanes.cs).
+        if (LaneStepOf(simd) is { } step && (!masked || step.Masked))
+        {
+            EmitLanes(sb, members, step, simd, components, indent, masked);
+            return;
+        }
         var flat = masked ? null : simd.Flat;
         string head = flat != null ? $"nint i = 0, lanes = rows * {flat.Fields}; // i counts lanes: {flat.Fields} per row\n" : "nint i = 0;\n";
         string after = flat != null ? $"i /= {flat.Fields}; // whole rows: the row the rows left start at\n" : "";
@@ -371,6 +377,8 @@ public sealed partial class SystemGenerator
     internal static string? RunsVector(Kernel.Code? simd)
     {
         if (simd == null) return null;
+        // the lane kernel runs at 128 bits wherever a width runs (and the masked words' loops it leaves need as much)
+        if (LaneStepOf(simd) != null) return "global::System.Runtime.Intrinsics.Vector128.IsHardwareAccelerated";
         var widths = new List<string>();
         if (simd.Flat != null) widths.Add($"{Vector}.IsHardwareAccelerated");
         if (simd.FlatOnly) return widths[0];

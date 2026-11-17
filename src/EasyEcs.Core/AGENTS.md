@@ -372,6 +372,12 @@ VectorLoops/RandomLanes.cs      EntityRandom's draws in generated vector loops: 
                                 Range at Vector512, Vector256 and Vector128 (TVector picks), bit for bit with the scalar draw
 VectorLoops/TableLanes.cs       a uniform table of up to 16 values read at a lane index: Load (a column of the elements' field
                                 into the vectors it fills, once per run), Pick (VPERMD over 16 or 8, a shuffle per vector of 4)
+VectorLoops/LaneKernel.cs       the lane kernel of generated flat jobs (docs/plans/designs/lane-kernel.md, hidden): ILane<TSelf, T>
+                                and Lane512 / Lane256 / Lane128<T> (a vector of T as a struct type argument the JIT specializes per
+                                width; operators, Keep<M>: a masked word's write), ILaneStep4 (a job's step over its float and int
+                                lanes, written once), LaneKernel (Run / RunFlat / RunMasked: the width chain 512 -> 256 -> 128,
+                                its ends computed inline and one NoInlining walk per run over the step passed by value,
+                                returning the row the method takes from)
 VectorLoops/Lanes.cs            Lanes.Compact: stream compaction of the elements a lane mask selects (AVX-512 compress,
                                 AVX2 permutation table, 128-bit byte shuffle: NEON TBL / PSHUFB, picked at run time), for
                                 batch methods, Emit and CollectIds; Lanes.Selection: a mask to row numbers over it (the one

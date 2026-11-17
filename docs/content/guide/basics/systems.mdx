@@ -889,7 +889,7 @@ last bits nobody compares (steering noise, particles, visual decay).
 `world.DescribeSchedule()` names the loop each method of a system got, one line per method (`SystemInfo.Loops`):
 
 ```text
-      loop Move: vector (Vector512 or Vector<float>), flat, masked words vector
+      loop Move: vector (lane kernel: Vector512, Vector256, Vector128), flat, masked words vector
       loop Steer: vector (Vector512 only), wide component (permutes), masked words scalar
       loop Spawn: scalar (it takes the Entity)
 ```

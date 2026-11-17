@@ -485,7 +485,7 @@ public class ViewRuleTests
         Assert.That(found[0].GetMessage(), Does.Contain(text));
     }
 
-    // A lambda pass taking a view gets the vector loop the same body written over its fields gets.
+    // A lambda pass taking a view gets the vector loop the same body written over its fields gets (flat: the lane kernel's step).
     [Test]
     public void ALambdaPassTakingAViewGetsAVectorLoop()
     {
@@ -493,7 +493,7 @@ public class ViewRuleTests
             "public static class Run { public static void F(World world) => world.ForEach(static (PQ v) => v.Add()); }"), out var output, out _);
         Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
         string generated = string.Concat(output.SyntaxTrees.Where(t => t.FilePath.EndsWith(".Lambdas.g.cs")).Select(t => t.ToString()));
-        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("internal ref struct LambdaJob0").And.Contain("__V512.LoadUnsafe(ref e1, (nuint)i)")
+        Assert.That(generated + GeneratorTests.Unaliased(generated), Does.Contain("internal ref struct LambdaJob0").And.Contain("LI.Load(ref e1, i)")
             .And.Contain("__c1_0 + __c2_0"), generated);
     }
 
