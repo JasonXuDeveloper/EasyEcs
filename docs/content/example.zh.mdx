@@ -55,7 +55,7 @@ flowchart LR
 | [分帧](/zh/docs/guide/basics/systems#slices)（`[ForEach(Slices = N)]`、`RunCount`） | `PlanningSystem` 每次只规划四分之一的 NPC |
 | [`Mut<T>`](/zh/docs/guide/changes/change-tracking#set-if-changed) 与 [`SetIfChanged`](/zh/docs/guide/changes/change-tracking#set-if-changed) | `PlanningSystem.Plan` 只在目标变了时才写；`CombatSystem` 和 `RegenerationSystem` 只在命中或回血时给 `Health` 打 tick |
 | 批处理方法（`Span<T>`）、SIMD | `MovementSystem`；`Reports.SumHealth` |
-| 系统之外的 `[ForEach]` runner、归约（`[MinBy]`）与[配对方法](/zh/docs/samples/multi-world)（`[Neighbor]`） | `Reports`：`NearestPlayer` 背后的 `FindNearest`，`Sightings` 背后的 `See` |
+| 系统之外的 `[ForEach]` runner、归约（`[MinBy]`） | `Reports`：`NearestPlayer` 背后的 `FindNearest` |
 | `[View]`、lambda pass | `CombatSystem` 接收的 `Fighter`；`NewRound` 里的回血 |
 | `Emit<T>` 与 `[Drain]` | `DeathSystem` 发出 `Kill`，`KillFeedSystem` 排空它们 |
 | `Maybe<T>` | `RegenerationSystem`：着火的玩家回血更少 |
@@ -169,8 +169,7 @@ NPC），以及通过 `ref` 写过的背包（`[Changed<DynamicBuffer<Loot>>]`�
 
 普通静态类里的静态 `[ForEach]` 方法就是一个 runner：生成器会写一个入口，参数是 World 加上方法的其余参数
 （`Reports.SumMana(world, ref total)`）。宿主在两次 tick 之间调用它们。`SumHealth` 和 `SumMana` 累加进归约，`Scatter` 分块并行。`FindNearest` 保留离某个点最近的活着的玩家：它的结果 `Nearest` 是一个 `[MinBy]` 归约，
-点是调用者传入的值。`See` 是配对方法：`[Neighbor]` 标出配对的另一个单位，生成器根据距离判断写出邻居搜索，
-所以 `Sightings` 不必比较每一对就能数出每个活着的玩家会被告知哪些单位。`Dice` 只取决于 tick 和实体，所以在哪个线程上掷出的结果都一样。
+点是调用者传入的坐标。`Dice` 只取决于 tick 和实体，所以在哪个线程上掷出的结果都一样。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#reports</include>
 
@@ -226,7 +225,7 @@ tick 中表不会再扩容。`SpawnNpc` 实例化重生的 NPC 时直接给出�
 ### 背包、克隆、击杀榜和好友 [#buffers-and-indexes]
 
 `Mirror` 原样克隆一个活着的单位，索引、分组和下一次同步都会知道这个副本。英雄的副本会和它共用账号，唯一键不允许这样
-（`Clone` 会抛异常），所以只克隆机器人和 NPC。`LootValue` 读背包，不算写入（一个 `[EntityMethod]`，把物品加进调用者传入的值）；`Give` 先用读操作校验，
+（`Clone` 会抛异常），所以只克隆机器人和 NPC。`LootValue` 读背包，不算写入；`Give` 先用读操作校验，
 再同时写两个背包。`TopKillers` 从顶部遍历有序的 `Kills` 索引，`FriendsOf` 向关系索引查询有谁把这个玩家加为好友。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#buffers-and-indexes</include>
@@ -240,7 +239,7 @@ tick 中表不会再扩容。`SpawnNpc` 实例化重生的 NPC 时直接给出�
 
 ### 人口统计 [#census]
 
-`NearestPlayer` 和 `Sightings` 运行 `Reports` 的 runner 并读取结果；统计把几个 runner 和计数的结果汇总起来。
+`NearestPlayer` 运行 `Reports` 的一个 runner 并读取结果；统计把几个 runner 和计数的结果汇总起来。
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#census</include>
 

@@ -61,7 +61,7 @@ EasyEcs' features to their place in this file.
 | [Slices](/en/docs/guide/basics/systems#slices) (`[ForEach(Slices = N)]`, `RunCount`) | `PlanningSystem` plans a quarter of the NPCs per run |
 | [`Mut<T>`](/en/docs/guide/changes/change-tracking#set-if-changed) and [`SetIfChanged`](/en/docs/guide/changes/change-tracking#set-if-changed) | `PlanningSystem.Plan` writes a goal only when it changes; `CombatSystem` and `RegenerationSystem` stamp `Health` only on a hit or a heal |
 | Batch methods (`Span<T>`), SIMD | `MovementSystem`; `Reports.SumHealth` |
-| `[ForEach]` runners outside systems, reductions (`[MinBy]`) and [pair methods](/en/docs/samples/multi-world) (`[Neighbor]`) | `Reports`: `FindNearest` behind `NearestPlayer`, `See` behind `Sightings` |
+| `[ForEach]` runners outside systems, reductions (`[MinBy]`) | `Reports`: `FindNearest` behind `NearestPlayer` |
 | `[View]`, lambda passes | `Fighter` taken by `CombatSystem`; the heal of `NewRound` |
 | `Emit<T>` and `[Drain]` | `DeathSystem` emits a `Kill`, `KillFeedSystem` drains them |
 | `Maybe<T>` | `RegenerationSystem` heals burning players less |
@@ -194,9 +194,7 @@ Why it pays and what counts as a write: [Change tracking](/en/docs/guide/changes
 A static `[ForEach]` method of an ordinary static class is a runner: the generator writes an entry point that takes
 the world and the method's other arguments (`Reports.SumMana(world, ref total)`). The host calls them between ticks.
 `SumHealth` and `SumMana` add into reductions, and `Scatter` runs in parallel chunks. `FindNearest` keeps the living player with the lowest
-distance to a point: its `Nearest` result is a `[MinBy]` reduction, and the point is the caller's value. `See` is a pair
-method: `[Neighbor]` marks the other unit of the pair, and the generator writes the search for the neighbors from the
-distance test, so `Sightings` counts who each living player would be told about without comparing every pair.
+distance to a point: its `Nearest` result is a `[MinBy]` reduction, and the point is the caller's coordinates.
 `Dice` is a pure function of the tick and the entity, so a roll is the same on any thread.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#reports</include>
@@ -260,7 +258,7 @@ takes `Health` by `ref`, so the hit is stamped for the next replication.
 `Mirror` clones a living unit with everything it has; indexes, groups and the next replication learn about the copy.
 A copy of a hero would share its account, which a unique key refuses (`Clone` throws), so only bots and NPCs are
 mirrored.
-`LootValue` reads a bag without counting as a write (an `[EntityMethod]` that adds the items into the caller's value); `Give` checks with reads first, then writes both bags.
+`LootValue` reads a bag without counting as a write; `Give` checks with reads first, then writes both bags.
 `TopKillers` walks the ordered `Kills` index from the top, and `FriendsOf` asks the relation index who links to a
 player.
 
@@ -276,7 +274,7 @@ thread with `MoveEntities`: they arrive as new entities, the shots still its chi
 
 ### A census [#census]
 
-`NearestPlayer` and `Sightings` run the runners of `Reports` and read their results; the census adds up runners and counts.
+`NearestPlayer` runs a runner of `Reports` and reads its result; the census adds up runners and counts.
 
 <include lang="csharp" meta='title="BattleServer.cs"'>../../benchmarks/EasyEcs.Benchmark/BattleServer.cs#census</include>
 

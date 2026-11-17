@@ -917,9 +917,11 @@ numbers are written once about the final code).
       c. **Benchmark worlds** (branch exemplar-worlds, 2026-11-17): BattleServer's `Battle` `[Accumulate]` (EECS086 exception
          already gone from GeneratorCorpus), `Weakest` `[MinBy]` and the kill feed were done before; now `KillFeedSystem`
          a `[Drain]` method, `Grunt` a `[Prefab]` type (Brute its variant, Hero a builder: a declaration holds no buffer),
-         `CombatSystem` takes a `Fighter` `[View]`, `NearestPlayer` a runner over a `[MinBy] Nearest`, `LootValue` an
-         `[EntityMethod]` with a `ref int` result, `Reports.See` a `[Neighbor]` pair method behind `Sightings`, `NewRound`'s
-         heal a lambda pass; regions kept, `kinds` added. Not done: `PlanningSystem.Plan` stays a `Mut<Goal>` with
+         `CombatSystem` takes a `Fighter` `[View]`, `NearestPlayer` a runner over a `[MinBy] Nearest`, `NewRound`'s
+         heal a lambda pass; regions kept, `kinds` added. Not done: `[Neighbor]` (Reports.See behind a Sightings count: the pair job
+         writes two empty methods, CutoffsSquared and Stamp, over GeneratedTextTests' `empty methods` budget of 1: a generator
+         question), `LootValue` as an `[EntityMethod]` with a `ref int` result (its foreach writes `(bag).AsReadOnlySpan()`,
+         a parentheses line over a budget of 0), and `PlanningSystem.Plan` stays a `Mut<Goal>` with
          `SetIfChanged` (a `ref Goal` stamps every goal and replicates all of them; the page teaches Mut there, and the
          unrolled argmin needs a plain ref); WorldSimulation unchanged (no analyzer finding at any EECS id; its `Rng` and
          totals are the rules the Comparison ports share). A/B in the branch's report.

@@ -396,12 +396,6 @@ public static class Requests
 {
     [EntityMethod, Without<Dead>]
     static void TakeHit(ref Health hp, int damage) => hp.Value -= damage;
-
-    [EntityMethod]
-    static void SumLoot(in DynamicBuffer<Loot> bag, ref int value)
-    {
-        foreach (var loot in bag) value += loot.Item;
-    }
 }
 // #endregion requests
 
@@ -423,9 +417,6 @@ public partial record struct Weakest(EntityId Player, [MinBy] int Health) : ISin
 /// the lowest key wins, the earlier row on a tie).
 /// </summary>
 public partial record struct Nearest(EntityId Player, [MinBy] float Distance) : ISingletonComponent;
-
-/// <summary>The pairs of a player and a unit within its sight: a sum of one per pair.</summary>
-public partial struct Sightings : ISingletonComponent { [Sum] public long Count; }
 
 /// <summary>
 /// [ForEach] methods outside systems: the generator writes the job and an entry point taking the world and the
@@ -453,17 +444,6 @@ public static class Reports
     {
         float dx = p.X - x, dy = p.Y - y, distance = dx * dx + dy * dy;
         if (distance < nearest.Value.Distance) nearest.Value = new Nearest(player.Id, distance);
-    }
-
-    // A pair method: [Neighbor] is the other unit of the pair, and the generator writes the search for the neighbors
-    // from the distance test (rows kept in space order, only the clusters within sight compared). The interest of a
-    // player's client: who it would be told about
-    [ForEach, With<Player>, Without<Dead>]
-    static void See(in Position p, [Neighbor] in Position other, ref Reduce<Sightings> sightings)
-    {
-        float dx = p.X - other.X, dy = p.Y - other.Y, distanceSquared = dx * dx + dy * dy;
-        if (distanceSquared >= BattleServer.Sight * BattleServer.Sight || distanceSquared == 0) return;   // 0: itself
-        sightings.Value.Count++;
     }
 
     // NPCs start the round anywhere: drawn for the round the caller names (EntityRandom's static form takes the seed
@@ -503,7 +483,6 @@ public sealed class BattleServer : IDisposable
     public const int ShotCost = 30;
     public const int BagSize = 8;
     public const ulong Seed = 1;
-    public const float Sight = 128;                                           // how far a player sees
 
     private static readonly QueryFilter Players = QueryFilter.Create().With<Player>();     // build filters once
     private static readonly QueryFilter AlivePlayers = Players.Without<Dead>();
@@ -700,7 +679,7 @@ public sealed class BattleServer : IDisposable
     public int LootValue(Entity player)
     {
         int value = 0;
-        Requests.SumLoot(player, ref value);
+        foreach (var loot in player.Loot) value += loot.Item;
         return value;
     }
 
@@ -763,13 +742,6 @@ public sealed class BattleServer : IDisposable
         Reports.FindNearest(World, at.X, at.Y);
         World.TryGetEntity(World.Nearest.Player, out var nearest);            // none when every player is dead
         return nearest;
-    }
-
-    /// <summary>How many units players see in all: the pairs within <see cref="Sight"/> of a living player.</summary>
-    public long Sightings()
-    {
-        Reports.See(World);
-        return World.Sightings.Count;
     }
 
     public Census Census()
