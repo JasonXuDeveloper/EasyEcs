@@ -1076,21 +1076,46 @@ public partial class TileTests
     {
         // The chunks around players reach a new peak long after the first tick: a world that reserved that peak (its
         // tables, the lists of their buffers) steps each new tile, at an index no tile had, without allocating (a tile's
-        // row sets taken in the pass: 238,400 B in 100 new tiles before).
-        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 1 });
-        world.AddSystem<KeyedHeatSystem>();
-        const int peak = 10_000; // the warm-up runs until it settles (up to 30 s): room for every step
-        world.EnsureEntityCapacity(peak);
+        // row sets taken in the pass: 25,712 B in 100 new tiles before).
+        // The warm-up runs until the process is quiet, which can take more steps than any reserve holds (10,000 new
+        // tiles in about a second here, 2,160 B a tile past it): so it runs on a world whose tiles come and go at a
+        // bounded count, and the measurement on a second world growing to its peak through the same step.
+        const int peak = 10_000, live = 2_000;
+        using var warm = Reserved();
+        using var growing = Reserved();
         var prefab = new Prefab().Set(new KeyedPlate(default)).SetBuffer<Heat>();
-        world.Reserve(prefab, peak);
-        world.ReserveBuffers(prefab, peak);
+        var plates = new Entity[live];
+        var world = warm;
         int x = 0;
-        Assert.That(Allocations.Steady(Step, 2, 100), Is.Zero);
+        Allocations.WarmUp(Step, live + 2);
+        world = growing;
+        x = 0;
+        Step(); // the first pass sizes the step's state for the tables' room
+        Step();
+        long allocated = 0;
+        for (int i = 0; i < 100; i++) allocated += Allocations.Of(Step);
+        Assert.That(allocated, Is.Zero);
         Assert.That(x, Is.LessThan(peak), "the grid stayed within its reserve");
+
+        World Reserved()
+        {
+            var w = new World(new WorldOptions { MaxDegreeOfParallelism = 1 });
+            w.AddSystem<KeyedHeatSystem>();
+            w.EnsureEntityCapacity(peak);
+            var p = new Prefab().Set(new KeyedPlate(default)).SetBuffer<Heat>();
+            w.Reserve(p, peak);
+            w.ReserveBuffers(p, peak);
+            return w;
+        }
 
         void Step()
         {
-            var plate = world.Instantiate(prefab, new KeyedPlate(new TilePos(x % 40, 0, x / 40)));
+            // The warm world keeps `live` tiles: the oldest leaves as the next joins at its index.
+            int slot = x % live;
+            if (world == warm && x >= live) plates[slot].Destroy();
+            int key = world == warm ? slot : x;
+            var plate = world.Instantiate(prefab, new KeyedPlate(new TilePos(key % 40, 0, key / 40)));
+            plates[slot] = plate;
             x++;
             plate.Get<DynamicBuffer<Heat>>().SetCount(256)[0] = new Heat(1f);
             world.Update();
