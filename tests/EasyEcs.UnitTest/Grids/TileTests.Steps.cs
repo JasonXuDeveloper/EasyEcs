@@ -426,8 +426,8 @@ public partial class TileTests
         Assert.That(block.Read<DynamicBuffer<Life>>().AsReadOnlySpan().ToArray().Count(c => c.Alive != 0), Is.EqualTo(4), "the block stays");
     }
 
-    // A field that moves everywhere, then settles: the pass steps every tile unseen while nearly all change, and the
-    // tiles sleep again once it looks and finds them settled.
+    // A field that moves everywhere, then settles: the pass steps every tile awake while nearly all change, and the
+    // tiles sleep again once it looks and finds them settled. Every pass stamps only the tiles whose cells changed.
 
     public record struct Flood(int Level);
 
@@ -438,6 +438,9 @@ public partial class TileTests
         static int ITileShape.Depth => 16;
         static TilePos ITile<TilePos>.Beside(TilePos p, TileFaces face) => Wrap(p, face);
     }
+
+    /// <summary>A floor under the flood, the same everywhere: untracked, so <see cref="AwakeFloodSystem"/>'s pass never sleeps.</summary>
+    public record struct FloodFloor(int Level) : IComponent;
 
     [EcsSystem]
     public ref struct FloodSystem
@@ -456,6 +459,24 @@ public partial class TileTests
         }
     }
 
+    /// <summary><see cref="FloodSystem"/> reading an untracked component of its tile: a pass that steps every tile.</summary>
+    [EcsSystem]
+    public ref struct AwakeFloodSystem
+    {
+        [ForEach(Parallel = true, ChunkSize = 2)]
+        static void Step(ref Tile<Flood, FloodPlate> flood, in FloodFloor floor)
+        {
+            flood.ExchangeHalo();
+            foreach (var row in flood.Rows(TileStencil.Layer))
+            {
+                var c = flood.At(row);
+                var into = flood.Write(row);
+                for (int x = 0; x < 16; x++)
+                    into[x] = new Flood(Math.Max(floor.Level, Math.Max(Math.Max(Math.Max(c[x, 0, 0].Level, c[x - 1, 0, 0].Level), Math.Max(c[x + 1, 0, 0].Level, c[x, 0, -1].Level)), c[x, 0, 1].Level)));
+            }
+        }
+    }
+
     [TestCase(1, 256)]
     [TestCase(4, 256)]
     [TestCase(4, 0)] // the swaps of the passes that step every tile on every thread
@@ -465,7 +486,7 @@ public partial class TileTests
         TileWalk.Swaps = swaps;
         try
         {
-            FieldMovingEverywhere(threads);
+            FieldMovingEverywhere<FloodSystem>(threads);
         }
         finally
         {
@@ -473,7 +494,27 @@ public partial class TileTests
         }
     }
 
-    private static void FieldMovingEverywhere(int threads)
+    [TestCase(1, 256)]
+    [TestCase(4, 256)]
+    [TestCase(4, 0)]
+    public void APassThatNeverSleepsStampsOnlyTheTilesThatChanged(int threads, int swaps)
+    {
+        // A Jacobi pass that cannot sleep (its method reads what the pass cannot see change) steps every tile every
+        // pass; a tile whose step wrote back its cells is not swapped or stamped, so a [Changed] reader of the cells
+        // (replication) visits only the tiles that changed.
+        int shipped = TileWalk.Swaps;
+        TileWalk.Swaps = swaps;
+        try
+        {
+            FieldMovingEverywhere<AwakeFloodSystem>(threads);
+        }
+        finally
+        {
+            TileWalk.Swaps = shipped;
+        }
+    }
+
+    private static void FieldMovingEverywhere<TSystem>(int threads) where TSystem : struct, allows ref struct
     {
         const int cells = Torus * 16;
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
@@ -481,12 +522,12 @@ public partial class TileTests
         var plates = new Dictionary<TilePos, Entity>();
         foreach (var place in Box(Torus, 1, Torus))
         {
-            var plate = world.CreateEntity(new FloodPlate(place));
+            var plate = world.CreateEntity(new FloodPlate(place), new FloodFloor(0));
             var levels = plate.GetOrAdd<DynamicBuffer<Flood>>().SetCount(256);
             for (int i = 0; i < 256; i++) levels[i] = new Flood(random.Next(1_000_000));
             plates.Add(place, plate);
         }
-        world.AddSystem<FloodSystem>();
+        world.AddSystem<TSystem>();
         var grid = Whole(plates, 16, 16, (Entity e, int i) => e.Read<DynamicBuffer<Flood>>()[i].Level, Torus);
         int stamped = 0;
         for (int step = 0; step < 120; step++)
@@ -498,8 +539,18 @@ public partial class TileTests
             for (int z = 0; z < cells; z++)
             for (int x = 0; x < cells; x++)
                 next[x, z] = Math.Max(Math.Max(Math.Max(grid[x, z], grid[(x + cells - 1) % cells, z]), Math.Max(grid[(x + 1) % cells, z], grid[x, (z + cells - 1) % cells])), grid[x, (z + 1) % cells]);
+            int moved = 0;
+            foreach (var place in plates.Keys)
+            {
+                bool changed = false;
+                for (int z = 0; z < 16 && !changed; z++)
+                for (int x = 0; x < 16 && !changed; x++)
+                    changed = next[place.X * 16 + x, place.Z * 16 + z] != grid[place.X * 16 + x, place.Z * 16 + z];
+                if (changed) moved++;
+            }
             grid = next;
             Same(plates, 16, 16, grid, (Entity e, int i) => e.Read<DynamicBuffer<Flood>>()[i].Level, $"step {step}");
+            Assert.That(stamped, Is.EqualTo(moved), $"step {step}: the tiles stamped are the tiles that changed");
             if (step == 0) Assert.That(stamped, Is.EqualTo(Torus * Torus), "every tile moves");
         }
         Assert.That(stamped, Is.Zero, "settled: no tile steps, none is stamped");
