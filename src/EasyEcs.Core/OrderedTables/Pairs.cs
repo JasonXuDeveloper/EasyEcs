@@ -506,6 +506,15 @@ public sealed partial class World
         return count;
     }
 
+    /// <summary>The widest margin the pair states keep their boxes with, over every pair job (tests; NaN before a pass).</summary>
+    internal float PairMargin()
+    {
+        float margin = float.NaN;
+        foreach (var state in _pairStates)
+            if (state != null && (float.IsNaN(margin) || state.Margin > margin)) margin = state.Margin;
+        return margin;
+    }
+
     private PairState PairStateOf(int id)
     {
         var states = _pairStates;
@@ -546,6 +555,12 @@ internal sealed class PairState
 {
     /// <summary>Updates between sorts of the ordered tables (GROMACS's nstlist).</summary>
     public const int Interval = 10;
+
+    /// <summary>
+    /// The margin grows only when one box in this many or more left at once (<see cref="Refresh{T, TOrder}"/>): motion
+    /// carries out a share of the boxes, a jump one or two.
+    /// </summary>
+    private const int MovingShare = 32;
 
     /// <summary>The margin a box is widened by at first, as a share of the reach (GROMACS's buffer: rlist = 1.1 rc).</summary>
     public const float MarginShare = 0.1f;
@@ -746,10 +761,15 @@ internal sealed class PairState
         clusters.ClusterCount = n;
         clusters.Axes = axes;
         bool escaped = clusters.Draw<T, TOrder>(table, bit, !changed);
+        // Rows that move carry a share of the boxes out together; a box or two leaving alone had a row jump (a respawn,
+        // a teleport, a row moved into a removed one's place), which no margin holds: those boxes are kept again, the
+        // margin stays. Grown for every lone jump, a crowd's respawns kept it near the reach, every box that much wider
+        // (VoxelServer's zombie search: a margin of 19-34 blocks where 3.5 was set, 3.8 times the cluster pairs).
+        bool moved = escaped && clusters.Escaped * MovingShare >= clusters.ClusterCount;
         clusters.Passes++;
         if (float.IsFinite(_margin))
         {
-            if (escaped && clusters.Passes < Interval / 2) _margin = Math.Min(_margin * 1.5f, _largest); // the rows move fast
+            if (moved && clusters.Passes < Interval / 2) _margin = Math.Min(_margin * 1.5f, _largest); // the rows move fast
             else if (changed && clusters.Kept && !clusters.Escapes) _margin = Math.Max(_margin * 0.9f, _largest * 0.02f); // a sort came first
         }
 
@@ -818,6 +838,9 @@ internal sealed class PairState
     /// <summary>How many tables this job keeps clusters of (tests: bounded by the world's tables).</summary>
     internal int TableCount => _byTable.Count;
 
+    /// <summary>The margin the boxes are kept with (tests).</summary>
+    internal float Margin => _margin;
+
     private void Keep(Clusters clusters) => clusters.Keep(float.IsFinite(_margin) ? _margin : 0);
 
     /// <summary>The clusters of <paramref name="other"/> each cluster of <paramref name="table"/> meets, drawn again when either was kept again.</summary>
@@ -833,8 +856,8 @@ internal sealed class PairState
 
     /// <summary>
     /// The pairs (cluster of the table, cluster of the other) where the table's kept box widened by the cluster's kept
-    /// reach meets the other's kept box on every axis (a sweep over both sets of boxes sorted by their low side on axis
-    /// 0, as <see cref="RowClusters.Pairs(float, Span{ClusterPair})"/>), then per cluster of the table the other's clusters
+    /// reach meets the other's kept box on every axis (a sweep over both sets of boxes sorted by their low side on the
+    /// axis they spread the most along, <see cref="SweepAxis"/>), then per cluster of the table the other's clusters
     /// in row order, as row ranges (neighboring clusters merged). One table against itself sweeps its boxes twice, once
     /// widened, once not, so a cluster meets itself and each direction of a pair is tested with its own reach; a half
     /// list (a symmetric job's, <see cref="PairList.Half"/>) keeps the clusters at or after each cluster, tested with its
@@ -853,17 +876,19 @@ internal sealed class PairState
             _sides = new float[n * 2 * 5];
         }
 
+        // The sweep's axis, then the two others (an axis past the boxes' reads as 0 on both sides: the test passes).
+        int s0 = SweepAxis(a, b, axes), s1 = (s0 + 1) % 3, s2 = (s0 + 2) % 3, ca = a.Capacity, cb = b.Capacity;
         for (int i = 0; i < na; i++)
-            if (a.Low[i] <= a.High[i]) // an inverted box holds no row
+            if (a.Low[s0 * ca + i] <= a.High[s0 * ca + i]) // an inverted box holds no row
             {
-                _keys[m] = a.Low[i] - a.KeptCutoff[i];
+                _keys[m] = a.Low[s0 * ca + i] - a.KeptCutoff[i];
                 _ids[m++] = i;
             }
 
         for (int i = 0; i < nb; i++)
-            if (b.Low[i] <= b.High[i])
+            if (b.Low[s0 * cb + i] <= b.High[s0 * cb + i])
             {
-                _keys[m] = b.Low[i];
+                _keys[m] = b.Low[s0 * cb + i];
                 _ids[m++] = ~i;
             }
 
@@ -879,11 +904,11 @@ internal sealed class PairState
             var w = id >= 0 ? a : b;
             int i = id >= 0 ? id : ~id, c = w.Capacity;
             float r = id >= 0 ? a.KeptCutoff[i] : 0;
-            high0[k] = w.High[i] + r;
-            low1[k] = axes > 1 ? w.Low[c + i] - r : 0;
-            high1[k] = axes > 1 ? w.High[c + i] + r : 0;
-            low2[k] = axes > 2 ? w.Low[2 * c + i] - r : 0;
-            high2[k] = axes > 2 ? w.High[2 * c + i] + r : 0;
+            high0[k] = w.High[s0 * c + i] + r;
+            low1[k] = s1 < axes ? w.Low[s1 * c + i] - r : 0;
+            high1[k] = s1 < axes ? w.High[s1 * c + i] + r : 0;
+            low2[k] = s2 < axes ? w.Low[s2 * c + i] - r : 0;
+            high2[k] = s2 < axes ? w.High[s2 * c + i] + r : 0;
         }
 
         int found = 0;
@@ -937,6 +962,44 @@ internal sealed class PairState
         list.Builds = a.Builds;
         list.OtherBuilds = b.Builds;
         list.Draws++;
+    }
+
+    /// <summary>
+    /// The axis a draw's sweep sorts the boxes along: the one the lows of both tables' boxes spread the most along, so
+    /// the fewest boxes overlap on it (each overlap a step of the sweep). A crowd on a strip, swept across it, overlaps
+    /// everywhere: every box against every box of the other side, O(clusters²) per draw (VoxelServer's players start
+    /// on a strip 48 blocks wide along x and 375 long along z: three times the steps of the sweep along z). O(clusters).
+    /// </summary>
+    private static int SweepAxis(Clusters a, Clusters b, int axes)
+    {
+        int best = 0;
+        float widest = -1;
+        for (int k = 0; k < axes; k++)
+        {
+            float low = float.PositiveInfinity, high = float.NegativeInfinity;
+            Spread(a, k, ref low, ref high);
+            Spread(b, k, ref low, ref high);
+            if (high - low > widest) // no finite box: -infinity, never wider
+            {
+                widest = high - low;
+                best = k;
+            }
+        }
+
+        return best;
+
+        // The lowest and highest low side on one axis of the finite boxes (an inverted box holds no row).
+        static void Spread(Clusters clusters, int axis, ref float low, ref float high)
+        {
+            var lows = clusters.Low.AsSpan(axis * clusters.Capacity, clusters.ClusterCount);
+            var highs = clusters.High.AsSpan(axis * clusters.Capacity, clusters.ClusterCount);
+            for (int i = 0; i < lows.Length; i++)
+                if (lows[i] <= highs[i] && float.IsFinite(lows[i]))
+                {
+                    low = Math.Min(low, lows[i]);
+                    high = Math.Max(high, lows[i]);
+                }
+        }
     }
 
     /// <summary>How a pass picks the lists of each row's neighbors: by their cost (Auto), never, or whenever they hold (On: tests, benchmarks).</summary>
@@ -1077,6 +1140,11 @@ internal sealed class PairState
         if (list.NearStarts.Length < count + 1) list.NearStarts = new int[Math.Max(count + 1, list.NearStarts.Length * 2)];
         var starts = list.NearStarts;
         var near = list.Near;
+        // Room for the entries the pick estimated and a quarter more, at once: grown by doubling from nothing, a first
+        // list of 300,000 entries left 2 MB of smaller arrays behind (VoxelServer's zombie search). Never less than
+        // double: an estimate creeping up would replace the list at every build (44 KB a tick, PairListsBenchmark).
+        float expected = list.Entries * 1.25f;
+        if (expected > near.Length) near = new int[(int)Math.Min(Math.Max(expected, 2f * near.Length), Array.MaxLength)];
         for (int w = 0; w < n; w++)
         {
             float reach = own.KeptCutoff[w];
@@ -1197,6 +1265,9 @@ internal sealed class PairState
         /// <summary>This table's lists against each other table, by the other's <see cref="Slot"/> (null: not met).</summary>
         public PairList[] Lists = [];
         public bool Kept, Escapes;
+
+        /// <summary>The boxes that left their kept ones in the last <see cref="Draw{T, TOrder}"/>.</summary>
+        public int Escaped;
         public int Count, Size, ClusterCount, Builds, Passes, Pass, Axes, Capacity;
         public long Version;
         public float[] Low = [], High = [], Cutoff = [], KeptCutoff = [];
@@ -1224,7 +1295,8 @@ internal sealed class PairState
 
         /// <summary>
         /// The box of each cluster over the points of its rows that hold the component, into this pass's boxes; when
-        /// <paramref name="check"/>, whether some cluster's box left the kept one (its rows moved past the margin).
+        /// <paramref name="check"/>, whether some cluster's box left the kept one (its rows moved past the margin), and how many
+        /// did (<see cref="Escaped"/>).
         /// O(rows).
         /// </summary>
         public bool Draw<T, TOrder>(Archetype table, int bit, bool check)
@@ -1234,7 +1306,7 @@ internal sealed class PairState
             if (column < 0) return Everywhere(clusters: ClusterCount); // no point: a method without a cutoff test, every pair runs
             ref T row0 = ref table.Data<T>(column);
             var present = table.Bits(column);
-            bool escaped = false;
+            int escaped = 0;
             var infinity = Vector128.Create(float.PositiveInfinity);
             for (int w = 0, clusters = ClusterCount; w < clusters; w++)
             {
@@ -1256,16 +1328,20 @@ internal sealed class PairState
                     high = infinity;
                 }
 
+                bool left = false;
                 for (int k = 0; k < axes; k++)
                 {
                     float l = low[k], h = high[k];
                     _low[k * c + w] = l;
                     _high[k * c + w] = h;
-                    escaped |= check && l <= h && (l < Low[k * c + w] || h > High[k * c + w]);
+                    left |= check && l <= h && (l < Low[k * c + w] || h > High[k * c + w]);
                 }
+
+                if (left) escaped++;
             }
 
-            return escaped;
+            Escaped = escaped;
+            return escaped != 0;
         }
 
         /// <summary>Boxes over everything for every cluster (their rows have no point): never left.</summary>
