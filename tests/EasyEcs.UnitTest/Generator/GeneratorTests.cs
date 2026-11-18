@@ -5,6 +5,7 @@ using EasyEcs.Benchmark;
 using EasyEcs.Generator;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using NUnit.Framework;
 using static EasyEcs.UnitTest.AnalyzerTests;
@@ -194,6 +195,48 @@ public class GeneratorTests
         "world.ForPairsParallel<__Fp, ", "static bool __IPairJob.Symmetric => true;", "access.RunAlone();")]
     public void AccessIsDeclaredFromParametersBeside(string declarations, string members, params string[] expected)
         => AccessOf(declarations, members, expected);
+
+    // A pair job writes only the members its pass reads: no Stamp without a component of the row by ref, no
+    // CutoffsSquared without a cutoff per row (IPairJob's static defaults; a ref struct job implements every instance
+    // member, so these are static and a per-row cutoff reaches the job's fields through Cutoffs).
+    [TestCase("[ForEach] static void N(in Fp p, [Neighbor] in Fp o, ref Reduce<Seen> seen) { float dx = p.X - o.X; if (dx * dx >= 4f) return; seen.Value.Count++; }",
+        new string[0], new[] { "Stamp(", "CutoffsSquared", "Cutoffs(" })]
+    [TestCase("[ForEach] static void N(in Fp p, ref Q q, [Neighbor] in Fp o) { float dx = p.X - o.X; if (dx * dx >= 4f) return; q.V++; }",
+        new[] { "static void global::EasyEcs.IPairJob.Stamp(in global::EasyEcs.PairRun run)\n        {\n            run.Stamp<global::Q>();\n        }" },
+        new[] { "CutoffsSquared", "Cutoffs(" })]
+    [TestCase("[ForEach] static void N(in Fp p, in Rg r, [Neighbor] in Fp o, ref Reduce<Seen> seen) { float dx = p.X - o.X; if (dx * dx >= r.R * r.R) return; seen.Value.Count++; }",
+        new[] { "static void global::EasyEcs.IPairJob.CutoffsSquared<TSelf>(in TSelf job, in global::EasyEcs.PairRun table, global::System.Span<double> into) =>",
+            ".Cutoffs(in table, into);", "private void Cutoffs(in global::EasyEcs.PairRun table, global::System.Span<double> into)" },
+        new[] { "Stamp(" })]
+    public void APairJobWritesNoEmptyMember(string members, string[] expected, string[] absent)
+    {
+        const string declarations = "public struct Fp : IComponent { public float X, Y; } public struct Rg : IComponent { public float R; } "
+            + "public partial struct Seen : ISingletonComponent { [Sum] public long Count; }";
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, $"{declarations} [EcsSystem] public ref struct S {{ {members} }}"),
+            out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        string generated = output.SyntaxTrees.Single(t => IsCode(t) && t.ToString().Contains("struct __S_SystemCode")).ToString();
+        string unaliased = Unaliased(generated);
+        foreach (var line in expected) Assert.That(unaliased, Does.Contain(line), generated);
+        foreach (var line in absent) Assert.That(unaliased, Does.Not.Contain(line), generated);
+        var empty = CSharpSyntaxTree.ParseText(generated).GetRoot().DescendantNodes().OfType<MethodDeclarationSyntax>()
+            .Where(m => m.Body is { Statements.Count: 0 }).Select(m => m.Identifier.Text);
+        Assert.That(empty, Is.Empty, generated);
+    }
+
+    // A foreach over a buffer with a vector form takes its span from the collection as written: no parentheses around a
+    // name (the generated text holds no parentheses precedence does not need); an expression a member access would bind
+    // into keeps them.
+    [TestCase("bag", "var __span0 = bag.AsReadOnlySpan();")]
+    [TestCase("bag.Count > 0 ? bag : default", "var __span0 = (bag.Count > 0 ? bag : default).AsReadOnlySpan();")]
+    public void AnElementLoopOverABufferNamesItWithoutParentheses(string items, string expected)
+    {
+        string source = $"public static class R {{ [EntityMethod] static void Sum(in DynamicBuffer<int> bag, ref int value) {{ foreach (var x in {items}) value += x; }} }}";
+        Driver().RunGeneratorsAndUpdateCompilation(Compile(Components, source), out var output, out _);
+        Assert.That(output.GetDiagnostics().Where(d => d.Severity == DiagnosticSeverity.Error), Is.Empty);
+        string generated = output.SyntaxTrees.Single(t => t.FilePath.EndsWith(".EntityMethod.g.cs")).ToString();
+        Assert.That(generated, Does.Contain(expected), generated);
+    }
 
     private void AccessOf(string declarations, string members, string[] expected)
     {
