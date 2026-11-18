@@ -512,8 +512,9 @@ gate; the vertical forms stay dropped.
   the `[Neighbor]` components (a tag as `[Neighbor] in Quarry _`).
 - **The pass's own cluster boxes.** The pass keeps clusters of `Vector<float>.Count` rows over each table's rows in
   order (8 with AVX2, 4 on ARM64: the cluster size comes with the width), draws their boxes every pass (O(n), cheap
-  next to the pairs) and redraws the lists only when a cluster left its kept box widened by an adaptive margin (x1.5 on
-  an early escape, x0.9 when a re-sort came first), not L1's boxes drawn by the sort. L1's order (requested on the
+  next to the pairs) and redraws the lists only when a cluster left its kept box widened by an adaptive margin (x1.5 when
+  one box in 32 or more left soon after a keep, a lone jump never; x0.9 when a re-sort came first; the sweep runs along
+  the axis the boxes spread the most along: research-voxel-pairs), not L1's boxes drawn by the sort. L1's order (requested on the
   first pass, cell = the reach, margin 0.1 cell, re-sorted every 10 updates) only keeps the clusters tight; the pairs
   are right in any order.
 - **Bit for bit.** Each lane meets the neighbors' tables in query order and their rows in order, the same order as the

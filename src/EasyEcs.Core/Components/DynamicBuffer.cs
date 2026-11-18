@@ -598,8 +598,16 @@ internal class BufferStore<T>(int capacity) : BufferStore
         return start < end ? Items.AsSpan(start, end - start) : default;
     }
 
-    /// <summary>Grow to hold at least <paramref name="needed"/> elements (doubling, at least 4).</summary>
-    public void Grow(int needed) => Resize(Math.Max(needed, Math.Max(4, Items.Length * 2)));
+    /// <summary>Grow to hold at least <paramref name="needed"/> elements (doubling, at least <see cref="Least"/>).</summary>
+    public void Grow(int needed) => Resize(Math.Max(needed, Math.Max(Least, Items.Length * 2)));
+
+    /// <summary>
+    /// The room of a list made from nothing: an append's (<see cref="Grow"/>), and a copy's of a shorter list (a
+    /// copy-on-write, a restore, a load). A copy of exactly its count left lists of one or two elements in the pool, and
+    /// a pooled list's room depends on the order lists came back, which the threads of parallel passes decide: a
+    /// replay's inventory rented one of them and grew where its rehearsal had not (VoxelServer's Steady, 336 B).
+    /// </summary>
+    private const int Least = 4;
 
     /// <summary>Move the elements to an array of <paramref name="capacity"/> (at least <see cref="Count"/>).</summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -615,7 +623,7 @@ internal class BufferStore<T>(int capacity) : BufferStore
         var from = Unsafe.As<BufferStore<T>>(source);
         if (from == null || from.Count == 0) return false;
         if (from.Shares == Segmented) from.Settle(); // a capture of an Emitted<T> whose records are in its passes' lists
-        if (Items.Length < from.Count) Resize(from.Count);
+        if (Items.Length < from.Count) Resize(Math.Max(from.Count, Least));
         if (RuntimeHelpers.IsReferenceOrContainsReferences<T>() && Count > from.Count) Array.Clear(Items, from.Count, Count - from.Count);
         Array.Copy(from.Items, Items, from.Count);
         Count = from.Count;
@@ -654,7 +662,7 @@ internal class BufferStore<T>(int capacity) : BufferStore
     private BufferStore<T> Copied()
     {
         var copy = Rent();
-        if (copy.Items.Length < Count) copy.Resize(Count);
+        if (copy.Items.Length < Count) copy.Resize(Math.Max(Count, Least));
         Items.AsSpan(0, Count).CopyTo(copy.Items); // a span copy: Array.Copy checks the element types first
         copy.Count = Count;
         return copy;
@@ -700,7 +708,7 @@ internal class BufferStore<T>(int capacity) : BufferStore
 
         var store = reuse ?? Rent();
         store.Count = 0;
-        if (store.Items.Length < count) store.Resize(count);
+        if (store.Items.Length < count) store.Resize(Math.Max(count, Least));
         store.Count = count;
         var items = store.Items.AsSpan(0, count);
         if (!RuntimeHelpers.IsReferenceOrContainsReferences<T>()) TypeRegistry.ReadRows<T>(ref reader, Bytes(items));

@@ -592,6 +592,67 @@ public class NeighborTests
         }
     }
 
+    /// <summary>
+    /// Rows that stand still while one of them jumps across the map each tick (a respawn, a teleport): the box it left
+    /// is kept again, the margin stays as it was set (it grew to the reach for every lone jump, VoxelServer's zombie
+    /// search a margin of 19-34 blocks where 3.5 was set); rows that all move carry it up still.
+    /// </summary>
+    [Test]
+    public void ALoneJumpDoesNotWidenTheMarginRowsThatMoveDo()
+    {
+        using var world = Crowd(2000, 40f, 4);
+        var all = Entities<PairSpot>(world);
+        var random = new Random(2);
+        Neighbors.Separate(world);
+        float set = world.PairMargin();
+        Assert.That(set, Is.EqualTo(0.1f * Neighbors.Range).Within(1e-3f), "a tenth of the cutoff at first");
+        for (int tick = 0; tick < 60; tick++)
+        {
+            all[random.Next(all.Count)].Get<PairSpot>() = new PairSpot((float)random.NextDouble() * 40, (float)random.NextDouble() * 40);
+            world.Update();
+            Neighbors.Reset(world);
+            Neighbors.Separate(world);
+        }
+
+        Assert.That(world.PairMargin(), Is.LessThanOrEqualTo(set), "the jumps left the margin where it was");
+        var got = Pushes(world);
+        foreach (var (id, push) in Reference(world)) Assert.That(got[id], Is.EqualTo(push), $"entity {id}");
+
+        for (int tick = 0; tick < 20; tick++)
+        {
+            foreach (var item in world.Query<PairSpot>()) item.Component1 = item.Component1 with { X = item.Component1.X + 0.06f };
+            world.Update();
+            Neighbors.Reset(world);
+            Neighbors.Separate(world);
+        }
+
+        Assert.That(world.PairMargin(), Is.GreaterThan(set), "a crowd walking out of its boxes in two passes widens it");
+    }
+
+    /// <summary>
+    /// A crowd on a strip, along either axis: the draw sweeps the boxes along the strip (swept across it, every box
+    /// overlapped every other, O(clusters²) per draw), and the pairs are every pair's, bit for bit.
+    /// </summary>
+    [TestCase(false)]
+    [TestCase(true)]
+    public void ACrowdOnAStripMeetsEveryPair(bool alongX)
+    {
+        using var world = new World();
+        var random = new Random(alongX ? 5 : 6);
+        for (int i = 0; i < 3000; i++)
+        {
+            float along = (float)random.NextDouble() * 300, across = (float)random.NextDouble() * 4;
+            world.CreateEntity(alongX ? new PairSpot(along, across) : new PairSpot(across, along),
+                new PairDrift((float)random.NextDouble() - 0.5f, (float)random.NextDouble() - 0.5f), new PairShove());
+        }
+
+        Neighbors.Separate(world);
+        Neighbors.Reset(world);
+        Neighbors.Separate(world);
+        var got = Pushes(world);
+        foreach (var (id, push) in Reference(world)) Assert.That(got[id], Is.EqualTo(push), $"entity {id}");
+    }
+
     [Test]
     public void ThreeAxesThroughDistanceSquared()
     {

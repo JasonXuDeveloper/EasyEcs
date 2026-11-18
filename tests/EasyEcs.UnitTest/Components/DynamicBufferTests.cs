@@ -15,6 +15,7 @@ public class DynamicBufferTests
     public record struct Spare(int Value);    // the pool of this one serves only the last-holder test
     public record struct Replayed(int Value); // and this one's only the replay test
     public record struct Sown(int Value);     // and this one's only the reserved-pool test
+    public record struct Copied(int Value);   // and this one's only the copied-list test
 
     /// <summary>Counts, per entity, the runs in which its bag had changed since the system's previous run.</summary>
     [EcsSystem]
@@ -879,6 +880,31 @@ public class DynamicBufferTests
         for (int i = 0; i < 5; i++) Cycle();
         long before = Allocations.Baseline();
         for (int i = 0; i < 50; i++) Cycle();
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+    }
+
+    /// <summary>
+    /// A shared list's copy (copy-on-write, a restore, a load) gets at least the room an append gives a list from
+    /// nothing: a pool's copy of one element, rented again for a list that grows to two, allocated in a replay the
+    /// rehearsal had not (VoxelServer's inventories: 336 bytes in Steady's replay). Which pooled list a write gets
+    /// depends on the order lists came back, which the threads of parallel passes decide.
+    /// </summary>
+    [Test]
+    public void ACopiedListHasTheRoomAnAppendGives()
+    {
+        using var world = new World();
+        var e = world.CreateEntity(new DynamicBuffer<Copied>());
+        e.Get<DynamicBuffer<Copied>>().Add(new Copied(1));
+        var snapshot = world.Capture();                                   // shared with the snapshot
+        e.Get<DynamicBuffer<Copied>>().AsSpan()[0] = new Copied(2);       // a write: a copy of its own, from an empty pool
+        Assert.That(e.Get<DynamicBuffer<Copied>>().Store.Items, Has.Length.GreaterThanOrEqualTo(4));
+        long before = Allocations.Baseline();
+        e.Get<DynamicBuffer<Copied>>().Add(new Copied(3));                // the copy has room
+        Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
+
+        world.Restore(snapshot);                                          // written since: its own list takes the one back
+        before = Allocations.Baseline();
+        e.Get<DynamicBuffer<Copied>>().Add(new Copied(4));
         Assert.That(GC.GetAllocatedBytesForCurrentThread() - before, Is.Zero);
     }
 
