@@ -168,7 +168,10 @@ Write it like hand-written code:
 - **No line that does nothing**: no identity copy (`var __c = __s;`), no temporary that no aliasing needs (`__t`),
   no local nobody reads (deinterleaved fields, broadcasts, pair masks, accumulator holds a body never uses), no empty
   method (an empty `Create` / `Destroy` hook: interface defaults instead), no `x = default` the constructor already
-  gives, no `(object __owner)` parameter nobody reads.
+  gives, no `(object __owner)` parameter nobody reads. A job that is a `ref struct` implements every instance member
+  of its interface, defaults included (CS9245), so a member some jobs leave empty is a `static virtual` with an empty
+  default, taking the job as a `TSelf` parameter when it reads the job's fields (`IPairJob.Stamp`, `CutoffsSquared`,
+  `Merge`), and the core calls it through the type parameter (`TJob.Stamp(in run)`).
   A copy is not free in IL: each local counts toward the JIT's limit of 32 per inlined method (`audit-vector-loops`,
   "The JIT never inlines a method that declares more than 32 IL locals"); the loads' `out __s` -> `__c` copy alone
   took Move3's masked `Execute` from 24 to 36 locals and out of the runner. Every generated method a runner inlines
