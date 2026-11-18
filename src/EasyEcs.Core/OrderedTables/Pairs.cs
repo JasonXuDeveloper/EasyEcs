@@ -1140,11 +1140,12 @@ internal sealed class PairState
         if (list.NearStarts.Length < count + 1) list.NearStarts = new int[Math.Max(count + 1, list.NearStarts.Length * 2)];
         var starts = list.NearStarts;
         var near = list.Near;
-        // Room for the entries the pick estimated and a quarter more, at once: grown by doubling from nothing, a first
-        // list of 300,000 entries left 2 MB of smaller arrays behind (VoxelServer's zombie search). Never less than
-        // double: an estimate creeping up would replace the list at every build (44 KB a tick, PairListsBenchmark).
-        float expected = list.Entries * 1.25f;
-        if (expected > near.Length) near = new int[(int)Math.Min(Math.Max(expected, 2f * near.Length), Array.MaxLength)];
+        // A first list gets room for the entries the pick estimated and a quarter more, at once: grown by doubling from
+        // nothing, a first list of 300,000 entries left 2 MB of smaller arrays behind (VoxelServer's zombie search).
+        // Later lists grow only when their entries overflow: the estimate (Share * Candidates) jumps with the candidates
+        // when a margin grows or boxes escape, and a list replaced for an estimate its entries never reach allocates
+        // after warm-up (an allocation test failed once that way) or at every build (44 KB a tick, PairListsBenchmark).
+        if (near.Length == 0 && list.Entries > 0) near = new int[(int)Math.Min(list.Entries * 1.25f, Array.MaxLength)];
         for (int w = 0; w < n; w++)
         {
             float reach = own.KeptCutoff[w];
