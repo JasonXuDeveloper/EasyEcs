@@ -130,9 +130,22 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       rows (`With<Seeking>`: ~11 of 4,000 zombies) still draws boxes, ranges and lists for every row: 0.52 ms where the
       old sliced search cost 0.17. Draw only the clusters holding a passing row, then re-try step 4's Keep + Acquire
       with `Seeking` (the form in voxel-rewrite.md section 11).
-- [ ] **`research-voxel-pingpong`** (exemplar 2a step 5; step5.patch): the tile swap stamps `Fluid` changed on every
-      step, settled tiles too (block updates 33,714 -> 101,949), and 16,496 B in 100 ticks. Find whether the ping-pong
-      form should stamp only changed cells (or the sample's form is wrong), then steps 5 and 6. Opus.
+- [x] **`research-voxel-pingpong`** closed 2026-11-18 (branch `research-voxel-pingpong`, not merged): steps 5 and 6
+      kept (`voxel-rewrite.md` section 12). Causes: a Jacobi pass that does not sleep took every stepped tile as changed
+      (swapped and stamped all: 101,949 block updates), fixed in core (only tiles that changed are stamped); a tile
+      step's state per entity index, then row sets taken in the pass at new peaks of the grid (16,496 B, then 39,672 B
+      after warm-up), fixed (the peak of the tiles; a row set for every row the tables have room for). The scent's
+      `[GaussSeidel]` step is level with the red-black systems in TickBenchmark; its higher time in the sample's
+      `MeasureSystems` is Tier0 code early in a short run (level with tiering off).
+- [ ] **`research-tile-step-tiering`** (from research-voxel-pingpong; Opus): a `[GaussSeidel]` method of Vector128 code
+      (the voxel scent) runs at Tier0 for a part of a short run (13 us a sweep against 4 us), where the hand-written form
+      with `stackalloc` was optimized at once (no OSR): the sample's `MeasureSystems` shows 0.40 against 0.17 ms. Find
+      whether the generated job can get the method optimized sooner (tiering of the method behind its UnsafeAccessor,
+      or a hint) without losing PGO, measured over the sample's first 300 ticks.
+- [ ] **`docs-grids-red-black`** (docs pass; from research-voxel-pingpong): `guide/performance/grids.mdx` (+ zh)
+      still teaches red-black ordering by hand (`Red` / `Black` tags, two systems) and says plain Gauss-Seidel is not
+      parallel; `[GaussSeidel]` does it (colors from the keys, sweeps in place, sleeping tiles): rewrite the bullet
+      around it, the voxel server's scent as the example.
 - [ ] **`fix-generated-dead-lines`** (exemplar 2c): two forms the battle server could not use because their generated
       text is over GeneratedTextTests' budgets. A `[Neighbor]` pair method (`SeeJob4`) writes two empty methods,
       `CutoffsSquared` and `Stamp` (empty methods: 3, budget 1). An `[EntityMethod]` with a `foreach` over a buffer
@@ -956,8 +969,9 @@ numbers are written once about the final code).
 - [ ] **2. The exemplar pass** (#169, `audit-code`; owner, 2026-10-27): every piece of code users read or copy in the
       most fitting form, new features included. Proof: outputs and README / page output blocks match, 0 B steady
       state, tests three ways, A/B no slower.
-      a. **VoxelServer** (steps 1-3 and finish-scan 3 merged 2026-11-17 from exemplar-voxel; steps 4-6 wait on
-         research-voxel-pairs / research-voxel-pingpong; step 8: Terrain as a cell method not tried) (`voxel-rewrite.md` steps 1-6, 8, 9, owner answers in its section 9): bool splits
+      a. **VoxelServer** (steps 1-3 and finish-scan 3 merged 2026-11-17 from exemplar-voxel; step 4 waits on
+         research-pair-filtered-rows; steps 5 and 6 done on research-voxel-pingpong (water and scent cell forms, Q6 /
+         WP5b, not tried); step 8: Terrain as a cell method not tried) (`voxel-rewrite.md` steps 1-6, 8, 9, owner answers in its section 9): bool splits
          (`Body.OnGround`, `Exposure.Sunlit`, Input, Visible), Viewers long, SetAbsent, FireDamage per row; `[Accumulate,
          Sum] Stats`, `SendPackets` -> `[Drain]`, `ReserveBuffers`; AOI without the World; pairs (Keep + Acquire,
          ChunkRing deleted, Pickup with `[Neighbor] ref`, item merging through symmetric pairs); water in the ping-pong
