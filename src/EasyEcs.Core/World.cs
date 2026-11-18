@@ -101,7 +101,8 @@ public sealed partial class World : IDisposable
     /// Fill the pools of the <see cref="DynamicBuffer{T}"/> lists <paramref name="prefab"/>'s instances hold, so the
     /// first writes to the buffers of the next <paramref name="count"/> instances take a list instead of allocating one:
     /// each type's pool is filled (<see cref="DynamicBuffer{T}.FillPool"/>) until it holds one list per instance and
-    /// per member holding the buffer. The lists have <see cref="DynamicBuffer{T}.MaxPooledLength"/> elements (set it first
+    /// per member holding the buffer, two for the cells of a tile a Jacobi step steps (a <c>ref Tile</c> parameter or a
+    /// cell method stepping its tile, without <c>[GaussSeidel]</c>: the step's second buffer is a list of the cells too). The lists have <see cref="DynamicBuffer{T}.MaxPooledLength"/> elements (set it first
     /// to the length the buffers reach), so a large count of a buffer that stays short costs memory for nothing.
     /// Process-wide like the pools, and not cumulative: prefabs holding the same buffer type share its pool, which this
     /// fills up to the larger of their counts. O(components + lists) allocations once. Owner thread only.
@@ -127,7 +128,7 @@ public sealed partial class World : IDisposable
                     for (int slot = 0; slot < tables[t].Count; slot++)
                         if (tables[t].Has(column, slot)) rows++;
                 }
-                if (rows > 0) info.FillPool((int)Math.Min((long)rows * count, Array.MaxLength));
+                if (rows > 0) info.ReservePool((int)Math.Min((long)rows * count, Array.MaxLength));
             }
         }
     }

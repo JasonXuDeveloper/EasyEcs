@@ -76,7 +76,7 @@ public struct DynamicBuffer<T> : IComponent, ITracked, IBuffer
 
     readonly BufferStore IBuffer.Read(ref Reader reader, BufferStore reuse) => BufferStore<T>.Read(ref reader, reuse as BufferStore<T>);
 
-    readonly void IBuffer.FillPool(int lists) => BufferStore<T>.Fill(lists);
+    readonly void IBuffer.ReservePool(int buffers) => BufferStore<T>.Fill((int)Math.Min((long)buffers * BufferStore<T>.ListsPerBuffer, Array.MaxLength));
 
     readonly void IBuffer.Remap(ref BufferStore store, IdMap map)
     {
@@ -304,8 +304,11 @@ internal interface IBuffer
     /// </summary>
     BufferStore Read(ref Reader reader, BufferStore reuse);
 
-    /// <summary>Fill the pool of this type's lists until it holds <paramref name="lists"/> (<see cref="DynamicBuffer{T}.FillPool"/>).</summary>
-    void FillPool(int lists);
+    /// <summary>
+    /// Fill the pool of this type's lists until it holds the lists of <paramref name="buffers"/> buffers
+    /// (<see cref="DynamicBuffer{T}.FillPool"/>): one each, two for the cells of a tile a Jacobi step steps (its second buffer).
+    /// </summary>
+    void ReservePool(int buffers);
 
     /// <summary>
     /// Point the <see cref="EntityId"/> fields of the elements of <paramref name="store"/> at a migration's entities,
@@ -454,6 +457,13 @@ internal class BufferStore<T>(int capacity) : BufferStore
     // fewer at a time instead (one list, or 8, per lock) cost a parallel pass taking 100k lists on the helpers 5x or
     // 1.5x its time (ParallelBufferChurnBenchmark): the share costs memory, never time.
     internal static int MaxPooledLength = 4096 / Unsafe.SizeOf<T>();
+
+    // The lists one buffer of T holds: 2 when it is the cells of a tile a Jacobi step steps (TileCells.Steps, from generated
+    // code when the assembly loads), whose second buffer is a list of T too; World.ReserveBuffers reserves that many.
+    internal static int ListsPerBuffer = 1;
+
+    /// <summary>The stores the shared pool and this thread's own hold (the tests' view of a reserve).</summary>
+    internal static int Pooled => Volatile.Read(ref s_freeCount) + (t_free?.Count ?? 0);
 
     private static bool s_filled;  // Fill ran: a thread set up from then on adds its share (under s_gate)
     private static int s_threads;  // the threads with stores of their own (under s_gate)

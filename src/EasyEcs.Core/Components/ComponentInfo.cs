@@ -125,8 +125,8 @@ internal abstract class ComponentInfo
     /// <summary>Whether the type is a <see cref="DynamicBuffer{T}"/> (its column holds lists).</summary>
     public abstract bool IsBuffer { get; }
 
-    /// <summary>A <see cref="DynamicBuffer{T}"/>'s: fill the pool of its lists until it holds <paramref name="lists"/>; else nothing.</summary>
-    public abstract void FillPool(int lists);
+    /// <summary>A <see cref="DynamicBuffer{T}"/>'s: fill the pool of its lists until it holds the lists of <paramref name="buffers"/> buffers (IBuffer.ReservePool); else nothing.</summary>
+    public abstract void ReservePool(int buffers);
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static ComponentInfo Of(int bit) => Volatile.Read(ref _all)[bit];
@@ -359,7 +359,7 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
 
     public override bool IsBuffer => default(T) is IBuffer;
 
-    public override void FillPool(int lists) => Buffer?.FillPool(lists);
+    public override void ReservePool(int buffers) => Buffer?.ReservePool(buffers);
 
     public override void Write(ref Writer writer, Array column, int start, int count)
     {

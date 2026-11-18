@@ -257,6 +257,18 @@ public static class TileCells
         if (cells > Array.MaxLength) return;
         if (BufferStore<TCell>.MaxPooledLength < cells) BufferStore<TCell>.MaxPooledLength = (int)cells;
     }
+
+    /// <summary>
+    /// <see cref="SizePool{TCell, TTile}"/> for a tile a Jacobi step steps (a <c>ref Tile</c> or a cell method stepping
+    /// its tile, without <c>[GaussSeidel]</c>): each buffer of its cells also holds the step's second buffer, a list of
+    /// <typeparamref name="TCell"/> from the same pool, so <see cref="World.ReserveBuffers"/> reserves two lists per
+    /// buffer of <typeparamref name="TCell"/>. O(1).
+    /// </summary>
+    public static void Steps<TCell, TTile>() where TCell : unmanaged where TTile : struct, ITileShape
+    {
+        SizePool<TCell, TTile>();
+        BufferStore<TCell>.ListsPerBuffer = 2;
+    }
 }
 
 /// <summary>The offsets around a tile of <typeparamref name="TTile"/>'s shape: slot (dx + 1) + 3 (dz + 1) + 9 (dy + 1).</summary>
