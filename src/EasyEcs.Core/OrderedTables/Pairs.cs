@@ -69,11 +69,13 @@ public interface IPairJob
     double CutoffSquared { get; }
 
     /// <summary>
-    /// The square of each row's cutoff (as <see cref="CutoffSquared"/>) for the rows of <paramref name="table"/>'s
-    /// table (<see cref="PairRun.Rows{T}"/>; it has no clusters): row r into <paramref name="into"/>[r]. Read once per
-    /// pass when <see cref="CutoffPerRow"/>.
+    /// The square of each row's cutoff (as <see cref="CutoffSquared"/>) of <paramref name="job"/> (the job itself, of
+    /// type <typeparamref name="TSelf"/>) for the rows of <paramref name="table"/>'s table (<see cref="PairRun.Rows{T}"/>;
+    /// it has no clusters): row r into <paramref name="into"/>[r]. Read once per pass when <see cref="CutoffPerRow"/>,
+    /// so only such a job implements it (static: a job that is a ref struct implements every instance member, and the
+    /// others would write it empty).
     /// </summary>
-    void CutoffsSquared(in PairRun table, Span<double> into);
+    static virtual void CutoffsSquared<TSelf>(in TSelf job, in PairRun table, Span<double> into) where TSelf : allows ref struct { }
 
     /// <summary>
     /// The rows of the method's table one step of <see cref="Run"/> handles at once when it runs cluster by cluster:
@@ -91,9 +93,10 @@ public interface IPairJob
 
     /// <summary>
     /// Stamp the rows of the method's table the run's clusters ran for in the tracked components the method writes of
-    /// its row, after <see cref="Run"/> (after every chunk of a parallel pass, on the calling thread).
+    /// its row, after <see cref="Run"/> (after every chunk of a parallel pass, on the calling thread). Default: none, a
+    /// method that writes no tracked component of its row by <c>ref</c>.
     /// </summary>
-    void Stamp(in PairRun run);
+    static virtual void Stamp(in PairRun run) { }
 
     /// <summary>
     /// The job keeps partial results in its fields (<see cref="Reduce{T}"/>; default false): a parallel pass keeps each
@@ -351,7 +354,7 @@ public sealed partial class World
             while (state.Next<T, TOrder, TJob>(this, ref job, axes, reach, out var run))
             {
                 job.Run(in run);
-                job.Stamp(in run);
+                TJob.Stamp(in run);
             }
         }
         finally
@@ -406,7 +409,7 @@ public sealed partial class World
                     work.Release();
                 }
 
-                job.Stamp(in run);
+                TJob.Stamp(in run);
             }
         }
         finally
@@ -717,7 +720,7 @@ internal sealed class PairState
         else
         {
             if (_cutoffs.Length < count) _cutoffs = new double[Math.Max(count, _cutoffs.Length * 2)]; // warm-up only
-            job.CutoffsSquared(new PairRun(world, table, table, _rows, null, null, null, null, 0, 0, size), _cutoffs.AsSpan(0, count));
+            TJob.CutoffsSquared(in job, new PairRun(world, table, table, _rows, null, null, null, null, 0, 0, size), _cutoffs.AsSpan(0, count));
             for (int w = 0; w < n; w++)
             {
                 int first = w * size;

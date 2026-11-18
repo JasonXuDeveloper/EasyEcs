@@ -157,12 +157,13 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       still teaches red-black ordering by hand (`Red` / `Black` tags, two systems) and says plain Gauss-Seidel is not
       parallel; `[GaussSeidel]` does it (colors from the keys, sweeps in place, sleeping tiles): rewrite the bullet
       around it, the voxel server's scent as the example.
-- [ ] **`fix-generated-dead-lines`** (exemplar 2c): two forms the battle server could not use because their generated
-      text is over GeneratedTextTests' budgets. A `[Neighbor]` pair method (`SeeJob4`) writes two empty methods,
-      `CutoffsSquared` and `Stamp` (empty methods: 3, budget 1). An `[EntityMethod]` with a `foreach` over a buffer
-      writes `var __span0 = (bag).AsReadOnlySpan();` (needless parentheses: 1, budget 0). Make the generator skip
-      empty members and drop the parentheses around a plain name; then give the battle server its `Sightings` pair
-      pass and `LootValue` entity method back (2c's 2fdb8445 has both). Opus.
+- [x] **`fix-generated-dead-lines`** (exemplar 2c; branch `fix-generated-dead-lines`, ready to merge): `IPairJob.Stamp` and
+      `CutoffsSquared` are `static virtual` members with empty defaults (a ref struct job implements every instance member,
+      CS9245), written only when the pass reads them (a ref component of the row; a cutoff per row); an element loop's
+      span names a plain collection without parentheses. The battle server has its `Sightings` pair pass and `LootValue`
+      entity method back (page en + zh); GeneratedTextTests: empty methods 1 (an interceptor of LambdaPassTests), both
+      parentheses kinds 0. A/B (PairLists, PairHalves, BattleServer Tick, two rounds; PairLists' Generated three more): no row slower
+      in every round, 0 B; ForPairs and Reaches of the PairLists jobs compile to the same machine code as base (FullOpts).
 - [ ] **`feat-lane1-core`**: the first run (from 3315196) was **lost with its container on 2026-11-09** before any
       push; only its interim reports survive. Rule since then: a lane hands back per item, each item is gated,
       merged and pushed before the next. What the lost run found (to rebuild or to record, not to re-research):
@@ -1002,10 +1003,8 @@ numbers are written once about the final code).
          already gone from GeneratorCorpus), `Weakest` `[MinBy]` and the kill feed were done before; now `KillFeedSystem`
          a `[Drain]` method, `Grunt` a `[Prefab]` type (Brute its variant, Hero a builder: a declaration holds no buffer),
          `CombatSystem` takes a `Fighter` `[View]`, `NearestPlayer` a runner over a `[MinBy] Nearest`, `NewRound`'s
-         heal a lambda pass; regions kept, `kinds` added. Not done: `[Neighbor]` (Reports.See behind a Sightings count: the pair job
-         writes two empty methods, CutoffsSquared and Stamp, over GeneratedTextTests' `empty methods` budget of 1: a generator
-         question), `LootValue` as an `[EntityMethod]` with a `ref int` result (its foreach writes `(bag).AsReadOnlySpan()`,
-         a parentheses line over a budget of 0), and `PlanningSystem.Plan` stays a `Mut<Goal>` with
+         heal a lambda pass; regions kept, `kinds` added; `Reports.See` (`[Neighbor]`) behind `Sightings` and `LootValue` as an
+         `[EntityMethod]` came back with fix-generated-dead-lines. Not done: `PlanningSystem.Plan` stays a `Mut<Goal>` with
          `SetIfChanged` (a `ref Goal` stamps every goal and replicates all of them; the page teaches Mut there, and the
          unrolled argmin needs a plain ref); WorldSimulation unchanged (no analyzer finding at any EECS id; its `Rng` and
          totals are the rules the Comparison ports share). A/B in the branch's report.

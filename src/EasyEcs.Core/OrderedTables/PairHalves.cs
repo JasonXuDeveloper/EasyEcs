@@ -27,7 +27,7 @@ public sealed partial class World
                 if (chunks < PairHalves.Least)
                 {
                     job.Run(in run); // a small table: the serial pass
-                    job.Stamp(in run);
+                    TJob.Stamp(in run);
                     continue;
                 }
 
@@ -44,7 +44,7 @@ public sealed partial class World
                     work.Release();
                 }
 
-                job.Stamp(in run);
+                TJob.Stamp(in run);
             }
         }
         finally
