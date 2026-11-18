@@ -294,6 +294,26 @@ public class BattleServerTests
     }
 
     [Test]
+    public void SightingsAreThePairsWithinSightOfALivingPlayer()
+    {
+        using var server = Run(100);
+        long expected = 0;
+        foreach (var e in server.World.Entities)
+        {
+            if (!e.Has<Player>() || e.Has<Dead>() || !e.TryGet<Position>(out var p)) continue;
+            foreach (var o in server.World.Entities)
+            {
+                if (!o.TryGet<Position>(out var q)) continue;
+                float dx = p.X - q.X, dy = p.Y - q.Y, d = dx * dx + dy * dy;
+                if (d < BattleServer.Sight * BattleServer.Sight && d != 0) expected++;
+            }
+        }
+
+        Assert.That(expected, Is.GreaterThan(0));
+        Assert.That(server.Sightings(), Is.EqualTo(expected));
+    }
+
+    [Test]
     public void ShootingCostsManaAndACeasefireStopsIt()
     {
         using var server = Run(100);
