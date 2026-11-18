@@ -228,7 +228,9 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         // twice the peak of the tiles (doubled, so a grid growing a tile at a time does not copy them each time); Wake's
         // growth stays for the indexes of tiles that left, which may sit in a queue until it is walked. A method that
         // never sleeps walks every tile and queues none: it has neither.
-        int tiles = _world.Count<DynamicBuffer<TCell>, TGrid>();
+        // Sized for the tiles the grid's tables have room for, not only those there now: a world that reserved its peak
+        // (World.Reserve) takes tiles up to it without a tick allocating (the chunks around players reaching a new peak).
+        int tiles = Math.Max(_world.Count<DynamicBuffer<TCell>, TGrid>(), Room());
         if (_maySleep)
         {
             if (_walk.Length < tiles) _walk = new EntityId[Math.Max(tiles, _walk.Length * 2)];
@@ -250,6 +252,24 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
             Forget(ref entry);
             Spare(ref entry);
         }
+        // Row sets for every tile there is room for, held by a tile or spare: a tile joining at an index that never held
+        // one takes a spare instead of allocating in the pass.
+        int sets = Math.Max(_spareCount, 0);
+        for (int i = 0; i < entries.Length; i++)
+            if (entries[i].FrontRows != null) sets++;
+        if (sets >= tiles) return;
+        if (_spares.Length < _spareCount + tiles - sets) Array.Resize(ref _spares, _spareCount + tiles - sets);
+        for (; sets < tiles; sets++)
+            _spares[_spareCount++] = new Rows { Front = new ulong[TTile.Height], Next = new ulong[TTile.Height], Around = new EntityId[AroundSlots] };
+    }
+
+    /// <summary>The rows the tables holding the grid's tiles have room for (their capacity, reserved or reached).</summary>
+    private int Room()
+    {
+        var match = _world.Match<DynamicBuffer<TCell>, TGrid>(default, out _, out _);
+        int room = 0;
+        for (int i = 0; i < match.Archetypes.Length; i++) room += match.Archetypes[i].Slots.Length;
+        return room;
     }
 
     /// <summary>
