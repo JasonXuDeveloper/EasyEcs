@@ -125,7 +125,7 @@ public class VoxelServerTests
         world.Instantiate(world.Prefabs.Zombie, new Position(at), new InChunk(Terrain.ChunkOf(at)));
 
     private static int ScentAt(World world, int x, int z) =>
-        world.GroundIndex.Get(Terrain.ChunkOf(x, z)).Scent[(z & 15) * Terrain.Size + (x & 15)].Strength;
+        world.GroundIndex.Get(Terrain.ChunkOf(x, z)).Read<DynamicBuffer<Scent>>()[(z & 15) * Terrain.Size + (x & 15)].Strength;
 }
 
 /// <summary>
