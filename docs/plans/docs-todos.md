@@ -3917,3 +3917,10 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
       (regenerated), `guide/performance/threading` where it says how a reducing pass is cut, D125's text.
 - [ ] **Changelog (Performance or Fixes, by the numbers):** a parallel `Reduce<T>` / `Emit<T>` pass cuts its chunks
       from its rows and the bytes each row reads; a float result is still the same at any thread count.
+- [ ] **DocCheck: 28 problems on ffcc09a4 (fix-generated-dead-lines merged), none on the pages that branch touched.**
+      The 16 above (guide/help/analyzer, guide/performance/grids), plus 12 EECS055 warnings on pages whose fences use the
+      entity in the method: ecs-principles (en + zh, `Tick`: two structural changes, `RemoveBurning` and `SetDead`: split
+      the method), migrate-from-arch and vs-arch (en + zh, `Fight`: `entity.Id.Index`), migrate-from-arch, migrate-from-friflo
+      and vs-friflo (en + zh, `CheckDeath`: `entity.HasNpc`; read the tag as `[With<Npc>]` or a `Maybe<Npc>`). For the docs
+      pass: a migration or comparison page may keep the scalar form on purpose (mark the fence `doccheck=expect-EECS055`
+      and say why), a principles page shows the form users should copy.
