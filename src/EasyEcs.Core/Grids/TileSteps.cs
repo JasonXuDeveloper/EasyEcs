@@ -137,12 +137,13 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     private int _membership = -1;        // the index's membership count when the tiles were last checked
     private ulong _lastTick;             // the tick the pass stamped its writes with: later writes are others'
     private bool _sleeps;                // this pass keeps tiles asleep (the method may sleep, and the field is not moving everywhere)
-    private int _awake;                  // Jacobi: passes left that step every tile, unseen, before one looks again
+    private int _awake;                  // Jacobi: passes left that step every tile, waking none, before one sleeps again
 
     /// <summary>
-    /// Passes a Jacobi step runs with every tile awake once a pass that looked saw nearly every tile change: comparing
-    /// each tile's rows and waking its neighbors costs more than the sleep it allows when the whole field moves (a wave,
-    /// heat spreading everywhere). The step of an unchanged tile writes the same cells, so the result is the same.
+    /// Passes a Jacobi step runs with every tile awake once a pass that slept saw nearly every tile change: finding each
+    /// tile's changed edges and waking its neighbors costs more than the sleep it allows when the whole field moves (a
+    /// wave, heat spreading everywhere). The step of an unchanged tile writes the same cells, so the result is the same;
+    /// such a pass still compares each tile up to its first changed row, and swaps and stamps only the tiles that changed.
     /// </summary>
     private const int AwakePasses = 15;
     private int _maxSweeps, _color;
@@ -597,8 +598,12 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         var cells = buffer.Store is { Count: > 0 } store ? store.Items : TileMemory<TCell, TTile>.Blank(default, true);
         if (cells.Length < Cells) Tile<TCell, TTile>.ThrowCells(default, buffer.Count, Cells);
         var edges = TileFaces.None;
-        bool changed = !_sleeps; // a pass that does not sleep swaps every tile it steps, unseen
-        bool compare = _sleeps;
+        bool changed = false;
+        bool compare = true;
+        // A tile whose step wrote back its cells is no write: it is not swapped or stamped, so a [Changed] reader of
+        // the cells (replication) sees only the tiles that changed, in a pass that sleeps or not. A pass that does not
+        // sleep wakes no neighbor, so it needs no edges: the first row that differs ends the comparison.
+        bool edgesWanted = _sleeps;
         // The first and last layer first, and in each the last row first: once every face's edge changed, the other
         // rows can tell nothing more (a field that moves everywhere compares a few rows per tile, not all of them).
         for (int k = 0, height = TTile.Height; k < height; k++)
@@ -618,7 +623,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
                 if (TileLayout.RowEdges<TCell, TTile>(new ReadOnlySpan<TCell>(cells, at, width), new ReadOnlySpan<TCell>(next, at, width), y, z, ref edges))
                 {
                     changed = true;
-                    if (edges == AllEdges)
+                    if (!edgesWanted || edges == AllEdges)
                     {
                         compare = false;
                         break;
@@ -629,7 +634,13 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
             }
         }
         if (changed) entry.Edges = edges;
-        else entry.NextRows.AsSpan().CopyTo(entry.FrontRows); // the same cells: what the step wrote is all they hold
+        else
+        {
+            entry.NextRows.AsSpan().CopyTo(entry.FrontRows); // the same cells: what the step wrote is all they hold
+            // A pass that does not sleep wakes no tile across an edge that changed: a tile of it stays awake, so a pass
+            // that sleeps after it (AwakePasses run out) steps it again, as it steps the tiles that changed.
+            if (!_sleeps) entry.Dirty = true;
+        }
         return changed;
     }
 
@@ -683,7 +694,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         }
         else
         {
-            // A Jacobi pass of every tile that does not sleep changed every tile: their swaps (each its own tile's
+            // A Jacobi pass of every tile that does not sleep: the swaps of the tiles that changed (each its own tile's
             // state and lists, the pool per thread) run on every thread, the stamps (rows of shared words) after.
             bool swapped = Jacobi && !_sleeps && world.ChunkThreads > 1 && _entries.Length >= TileWalk.Swaps;
             if (swapped)
