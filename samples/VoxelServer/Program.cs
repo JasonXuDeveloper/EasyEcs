@@ -60,10 +60,10 @@ public static class Startup
     public static World Create(RegionFiles regions, in Capacity capacity, bool measure)
     {
         // #region options
-        // The water's next step is 8 KB, more than a buffer's pool keeps by default: let each chunk loaded reuse the
-        // lists of one that was unloaded. (The blocks and the water are a chunk's tiles, Tile<Block, Chunk>: their pools
-        // are sized from the tile's shape when the program loads.)
-        DynamicBuffer<NextFluid>.MaxPooledLength = Terrain.BlocksPerChunk;
+        // A chunk's height map and a player's inventory are longer than a buffer's pool keeps by default: let each chunk
+        // or player made reuse the lists of one that went. (The blocks and the water are a chunk's tiles, Tile<Block,
+        // Chunk>: their pools are sized from the tile's shape when the program loads, the water's with the second list
+        // its step writes.)
         DynamicBuffer<Surface>.MaxPooledLength = Terrain.Size * Terrain.Size;
         DynamicBuffer<ItemStack>.MaxPooledLength = Rules.InventorySlots;
 
@@ -100,8 +100,7 @@ public static class Startup
         world.AddSystem<WaterWakeSystem>();
         world.AddSystem<WaterFlowSystem>();                  // a stage of two
         world.AddSystem<ZombieChaseSystem>();
-        world.AddSystem<WaterSleepSystem>();
-        world.AddSystem<WaterCommitSystem>();
+        world.AddSystem<WaterSettleSystem>();
         world.AddSystem<ZombieAttackSystem>();
         world.AddSystem<PlayerRespawnSystem>();
         world.AddSystem<FloatSystem>();
@@ -109,12 +108,9 @@ public static class Startup
         world.AddSystem<GridSystem>();
         world.AddSystem<FootprintSystem>();
         world.AddSystem<FootingSystem>();
-        world.AddSystem<ScentWakeSystem>();
         world.AddSystem<HuntSystem>();
-        world.AddSystem<ScentStepSystem<Red>>();             // red-black: the red half, then the black from its edges
-        world.AddSystem<ScentSettleSystem<Red>>();
-        world.AddSystem<ScentStepSystem<Black>>();
-        world.AddSystem<ScentSettleSystem<Black>>();
+        world.AddSystem<SeedSystem>();
+        world.AddSystem<ScentStepSystem>();
         world.AddSystem<DigSystem>();
         world.AddSystem<PickupSystem>();
         world.AddSystem<ItemExpirySystem>();
@@ -175,12 +171,10 @@ public static class Startup
     public static void SetPrefabs(World world) =>
         world.SetPrefabs(
             Chunk: new Prefab()
-                .SetChunk(default).SetBuffer<Block>().SetBuffer<Fluid>().SetBuffer<NextFluid>().SetBuffer<Surface>()
-                .SetViewers(0, 0).Set(FluidCount.Dry).SetFluidStep(StepResult.None, FluidCount.Dry, 0, 0)
+                .SetChunk(default).SetBuffer<Block>().SetBuffer<Fluid>().SetBuffer<Surface>()
+                .SetViewers(0, 0).Set(FluidCount.Dry).SetFluidStep(TileFaces.None).SetStepped(StepResult.None).SetFluidAhead(FluidCount.Dry)
                 .Set(new Fresh(), new Flowing()).SetAbsent<Unloading>()
-                .SetGround(default).SetBuffer<Footing>().SetBuffer<Scent>().SetBuffer<NextScent>().SetBuffer<Trail>()
-                .SetScentStep(TileFaces.None, false)
-                .Set(new Spreading(), new Red(), new Black()),
+                .SetGround(default).SetBuffer<Footing>().SetBuffer<Scent>().SetBuffer<Seed>().SetBuffer<Trail>(),
             Player: new Prefab()
                 .SetPlayer(0).SetInChunk(default).SetAbsent<Visible>().SetScore(0).SetFootprint(default, 0)
                 .SetPosition(default).SetVelocity(default).SetOnGround(false).SetBlocked(false)

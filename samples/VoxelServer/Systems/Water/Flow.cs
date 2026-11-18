@@ -12,35 +12,34 @@ namespace VoxelServer;
 // (Simplified: no new sources between two springs, and water spreads every way rather than toward the nearest drop.)
 //
 // It runs as a GPU runs a shader, in passes that hand data to each other, on the chunks that may still move (Flowing):
-// WaterFlowSystem shades every block into NextFluid, in parallel; WaterSleepSystem lets the chunks whose step moved
-// nothing sleep; WaterCommitSystem makes the step the water once every chunk has stepped (each chunk steps from its
-// neighbors' water before the step, as a GPU ping-pongs two buffers), in parallel too; WaterWakeSystem wakes the
-// chunks beside the edges that changed, at the start of the next tick.
+// WaterFlowSystem shades every block into the tile's second buffer, in parallel, and the pass swaps it in when it ends
+// (a GPU's ping-pong of two buffers: each chunk steps from its neighbors' water before the step); WaterSettleSystem
+// keeps the step's summary and lets the chunks whose step moved nothing sleep; WaterWakeSystem wakes the chunks beside
+// the edges that changed, at the start of the next tick.
 //
 // The shader. Shade computes one block's next level from its own and its six neighbors', nothing else, and runs on
 // 16 blocks at once (a row of the chunk, one Vector128<byte>). Each chunk first loads its tile and the halo around it,
 // as a CUDA block loads its tile and halo into shared memory: a Tile<Fluid, Chunk> parameter is the chunk's water with
 // its neighbors' (Chunk is a tile of the grid, ITile), and ExchangeHalo copies the layers in reach into a texture with a ring of
 // one block around each layer, from the facing row or column of each neighbor (read as they were before the pass, so
-// the method stays parallel, and only NextFluid is written), and a layer under and over them. The loop then has no
+// the method stays parallel, and only the second buffer is written), and a layer under and over them. The loop then has no
 // edge cases. Byte lanes are integer arithmetic: the same water on every machine.
 //
 // The stencil, as a GPU's early stencil test skips the fragments a mask rules out: while padding, the tile records
 // which rows of the texture hold water (with the halo block at each end); Rows visits the rows a step can wet, those
 // whose stencil (the row, the rows north and south, the row above: TileStencil.Layer | Above) holds some, the next one
-// found by counting trailing zeros. The others are not written at all: the step's buffer equals the water after every
-// commit (a moved step is copied into it, a settled one wrote back what was there), so a row whose stencil is dry is
-// already zero in it.
+// found by counting trailing zeros. The others are not written at all: the pass zeroes the rows of the second buffer
+// that no Write reached, which is right for a row whose stencil is dry.
 [EcsSystem, UpdateInterval(Rules.FlowDelay)]
 public ref struct WaterFlowSystem
 {
-    const int Size = Terrain.Size, Blocks = Terrain.BlocksPerChunk;
+    const int Size = Terrain.Size;
 
     // A few hundred chunks of 16 x 16 x 32 blocks: far under the 4,096 rows of a default chunk of a pass that writes a
     // tracked component, so the threads take 64 chunks at a time (OpenMP's schedule(dynamic, 64)) instead of one taking all.
     [ForEach(Parallel = true, ChunkSize = 64), With<Flowing>]
-    static void Flow(in FluidCount count, Lookup<FluidCount> counts, Tile<Fluid, Chunk> fluid, Tile<Block, Chunk> blocks,
-        Mut<DynamicBuffer<NextFluid>> step, ref FluidStep summary)
+    static void Flow(in FluidCount count, Lookup<FluidCount> counts, ref Tile<Fluid, Chunk> fluid, Tile<Block, Chunk> blocks,
+        ref FluidStep summary, ref Stepped result, ref FluidAhead ahead, ref Reduce<Stats> stats)
     {
         // The layers to shade: those with water here and beside (FluidCount, no search), and one below, where water falls.
         int low = count.Low, high = count.High;
@@ -55,7 +54,8 @@ public ref struct WaterFlowSystem
         int from = Math.Max(low - 1, 1), to = high;
         if (from > to)
         {
-            summary = new FluidStep(StepResult.Settled, default, 0, 0); // no water here or beside: nothing moves
+            summary = new FluidStep(TileFaces.None);
+            result = new Stepped(StepResult.Settled); // no water here or beside: nothing moves
             return;
         }
         // The textures: the water with its stencil, the blocks (only sampled). Above the world's top, no chunk holds a
@@ -63,9 +63,8 @@ public ref struct WaterFlowSystem
         fluid.ExchangeHalo(from, to);
         blocks.ExchangeHalo(from, to, mask: false);
 
-        // The rows the stencil keeps, 16 blocks at a time, written straight into the step. The layers outside hold no
-        // water before the step or after it, so the buffer keeps its count between steps.
-        var next = MemoryMarshal.Cast<NextFluid, byte>(step.Write().SetCount(Blocks));
+        // The rows the stencil keeps, 16 blocks at a time, written straight into the tile's second buffer (Write(row)): it
+        // is swapped in when the pass ends, and the rows no Write reached are zero in it, so the layers outside hold no water.
         int filled = 0, wet = 0, first = Terrain.Height, last = 0;
         var edges = TileFaces.None;
         bool changed = false;
@@ -79,7 +78,7 @@ public ref struct WaterFlowSystem
                 w.Load128<byte>(-1), g.Load128<byte>(-1, -1), w.Load128<byte>(1), g.Load128<byte>(1, -1),
                 w.Load128<byte>(0, 0, -1), g.Load128<byte>(0, -1, -1), w.Load128<byte>(0, 0, 1), g.Load128<byte>(0, -1, 1),
                 g.Load128<byte>());
-            level.CopyTo(next.Slice(row.Index, Size));
+            level.CopyTo(MemoryMarshal.Cast<Fluid, byte>(fluid.Write(row)));
 
             uint lanes = (~Vector128.Equals(level, Vector128<byte>.Zero)).ExtractMostSignificantBits();
             wet += BitOperations.PopCount(lanes);
@@ -93,8 +92,10 @@ public ref struct WaterFlowSystem
             if ((moved & 1) != 0) edges |= TileFaces.West;
             if ((moved & 1u << (Size - 1)) != 0) edges |= TileFaces.East;
         }
-        summary = new FluidStep(changed ? StepResult.Moved : StepResult.Settled, new FluidCount(wet, (byte)first, (byte)last),
-            filled, edges);
+        summary = new FluidStep(edges);
+        result = new Stepped(changed ? StepResult.Moved : StepResult.Settled);
+        ahead = new FluidAhead(new FluidCount(wet, (byte)first, (byte)last));
+        stats.Value.WaterCells += filled;
     }
 
     // One block's next level from its own, the one above and the four beside, with the block under each of those

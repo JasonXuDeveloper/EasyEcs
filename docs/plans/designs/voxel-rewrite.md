@@ -379,9 +379,57 @@ Stopped, with the numbers (the patches are not kept):
   returned lists in another order (`DynamicBufferTests.ACopiedListHasTheRoomAnAppendGives` fails without the fix).
   Result: step 4 not kept. TickBenchmark (100 ticks, 2,000 players): the old sample 84.5 / 83.3 ms base, 86.2 / 83.6 ms
   with the fixes (level, 0 B); step 4 on the fixes 325.6 / 305.8 ms (base 296 / 300 ms before them).
-- Step 5 (water in ping-pong form, Sleep + Commit merged into WaterSettleSystem, FluidStep split): output changed (block
-  updates 33,714 -> 101,949: the swap stamps `Fluid` on every step, settled ones too; cells filled 16,069 -> 16,059) and
-  Steady.Check failed (16,496 B in 100 ticks).
-- Step 6 (scent as one `[GaussSeidel]` step): not started, it follows step 5.
+- Step 5 and step 6: done on research-voxel-pingpong (section 12).
 - Step 8: HeightMap and Footing are already plain element loops; Terrain's hand `Vector128` as a cell method (Q5) not
   attempted.
+
+## 12. Steps 5 and 6, branch research-voxel-pingpong (2026-11-18)
+
+Step 5 (water in the ping-pong form: Commit and NextFluid deleted, Sleep + Commit merged into `WaterSettleSystem`,
+FluidStep split) is kept, with three core fixes it needed:
+- The swap stamped every stepped tile. `WaterFlowSystem`'s pass does not sleep (it reads `Lookup<FluidCount>`, ins
+  that are not tracked, and a `Reduce`), and `LeaveJacobi` took a pass that does not sleep as "changed": every stepped
+  chunk was swapped and stamped, and `SendChunks` sent 101,949 block updates where the old sample sent 33,714. The pass
+  now compares each tile up to its first changed row and stamps only the tiles that changed, sleeping pass or not
+  (fb8a2274, test 2bc65811). Block updates are back to 33,714. Cells filled 16,069 -> 16,059: the water is bit for bit
+  the old one every tick (a hash probe over the run); the old `Commit` (`[Changed<FluidStep>]`) replayed the saved step
+  of a chunk read back (tick 438) and counted its cells twice.
+- A tile step's state held a set of rows per entity index a tile ever had: 443cbffd keeps the peak of the tiles
+  (spares from tiles that left), and ReserveBuffers reserves the second buffer of a Jacobi-stepped tile (886f892b,
+  e6a1c126: generated `TileCells.Steps`). Steady.Check: 16,496 B -> 0 B.
+- The water still allocated 39,672 B after the warm-up at 50 players (125,048 B at 2,000): 54 chunks joining the grid at
+  entity indexes that never held a tile, at new peaks of the loaded chunks, took new row sets in the pass. The state now
+  keeps a row set for every row the grid's tables have room for (73a56430; `AGridGrowingToItsReservedPeakAllocatesNothing`
+  238,400 B -> 0 B, dbe9dcd6).
+TickBenchmark (100 ticks; base be929ed3 / head, two rounds, pp results in the session): 50 players 20.95 / 20.29 ms
+against 22.38 / 18.89, 500 players 39.35 / 33.94 against 42.19 / 37.41 (spread 8-12 ms), 2,000 players 81.60 / 81.17
+against 88.26 / 74.44; 0 B. Not slower: no row is slower in both rounds.
+
+Step 6 (the scent as one `[GaussSeidel]` step: `ref Tile<Scent, Ground>`, `ColdStart`, sweeps turned by `tile.Sweep`,
+the ways and seeds of a step in a `Scratch<ScentWays>`; a `Seed` buffer written by `SeedSystem` where it changed; Red /
+Black, the generic step and settle, NextScent, ScentStep, Spreading and ScentWakeSystem deleted) is kept. Output changed
+as planned (block updates 33,714 -> 33,645: the zombies follow the field in another order while it settles);
+VoxelServerTests and check-sample pass, Steady.Check 0 B. TickBenchmark (head / head6, two rounds): 50 players 23.01 / 24.10 ms
+against 21.57 / 18.20, 500 players 39.57 / 37.76 against 40.94 / 37.32 (spread 5-10 ms), 2,000 players 105.51 / 111.16
+against 100.90 / 97.84; 0 B. Faster or level in both rounds. With 73a56430 the sample allocates nothing after its
+warm-up in the water at 50 players (39,672 B before) and 4,088 B at 2,000 (125,048 B before; the old form 29,080 B),
+and nothing in the scent (19,904 / 41,112 B before). The 4,088 B are the part boxes of the pass's `Reduce<Stats>`
+(ForEachEntityChunks' `_parts`, one per chunk of the pass) growing to 16 when the loaded chunks reach a new peak, as
+`FloatSystem`'s and `SendEntitiesSystem`'s do (a probe on their growth, 2,000 players): backlog `research-parts-peak`.
+The core commits' A/B (Jacobi and [GaussSeidel] tile classes, base be929ed3 against head, two rounds; tables in the session's pp/cb/ab.md): of 108
+rows, 96 level, 7 faster (Active Cell at 32, Ground Cross / Box 512 at 1 thread, ColdStartColumns 1 thread 4, settle Hand
+1 thread 256: hand-written, the control), 5 over the rule in both rounds, none from the change: Laplacian_PingPong 1 thread 32 (+5.3 / +5.7 %; a third round 571 -> 510
+us, head faster), Blur9_PingPong 4 threads 512 (+9 / +6 %; head with the old unseen swap measured the same, 79.2 against
+78.2 ms), woken Auto 1 thread 32 at 25 % (a sleeping pass, whose code did not change), cold Linger 1 thread 256 (a
+`[GaussSeidel]` pass, whose code did not change), and settle Hand 1 thread 4 (+13 / +6 %: hand-written code, the
+control). The generated code of the benchmarks differs only in the module initializer (`TileCells.Steps` for
+`SizePool`). Comparing the rows of a pass that does not sleep costs a row per tile when the field moves everywhere: a
+cheaper form (each run of rows compared as one span, no edges) was measured level and not kept. Three runs of 1 B
+(an allocation once in a run, in head runs only: ColdStart 4 / 256 / 1, ColdStart 1 / 4 / 1, Laplacian_PingPong 4 /
+32) were not found by the unit tests' 0 B checks of the same passes; see the backlog item `research-tile-bdn-1b`.
+The sample's own per-system times (`MeasureSystems`, 1,200 ticks) show the new step at 0.40 ms against 0.17 ms for the
+old four systems at 50 players (0.50-0.64 against 0.37 at 2,000): the cause is tiering, not the form. The old step's
+`stackalloc` kept it from on-stack replacement, so the JIT optimized it at once; the new method's Vector128 code runs at
+Tier0 for a part of the short run (its body measured 13 us a sweep at 50 players, 4.2 us at 2,000). With
+`DOTNET_TieredCompilation=0` the two are level: 0.1055 against 0.112 ms at 50 players, 0.2136 against 0.2215 ms at
+2,000.

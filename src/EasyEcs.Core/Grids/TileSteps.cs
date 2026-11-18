@@ -107,6 +107,13 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     private static TileFaces AllEdges => TileFaces.North | TileFaces.South | TileFaces.West | TileFaces.East
         | (TTile.Height > 1 ? TileFaces.Above | TileFaces.Below : TileFaces.None); // what RowEdges can find
 
+    /// <summary>The row sets and the ids around of a tile's state, kept for another tile once it left.</summary>
+    private struct Rows
+    {
+        public ulong[] Front, Next;
+        public EntityId[] Around;
+    }
+
     private struct Entry
     {
         public BufferStore<TCell> Next;  // a Jacobi step's second buffer, its Count the tile's cells; null until the first
@@ -137,12 +144,16 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     private int _membership = -1;        // the index's membership count when the tiles were last checked
     private ulong _lastTick;             // the tick the pass stamped its writes with: later writes are others'
     private bool _sleeps;                // this pass keeps tiles asleep (the method may sleep, and the field is not moving everywhere)
-    private int _awake;                  // Jacobi: passes left that step every tile, unseen, before one looks again
+    private bool _maySleep;              // the method may sleep: its passes keep the queues and the walk
+    private Rows[] _spares = [];         // the row sets of tiles that left, for the next tile joining at another index
+    private int _spareCount;             // how many (Check gives them on the system's thread; Join takes them on any)
+    private int _awake;                  // Jacobi: passes left that step every tile, waking none, before one sleeps again
 
     /// <summary>
-    /// Passes a Jacobi step runs with every tile awake once a pass that looked saw nearly every tile change: comparing
-    /// each tile's rows and waking its neighbors costs more than the sleep it allows when the whole field moves (a wave,
-    /// heat spreading everywhere). The step of an unchanged tile writes the same cells, so the result is the same.
+    /// Passes a Jacobi step runs with every tile awake once a pass that slept saw nearly every tile change: finding each
+    /// tile's changed edges and waking its neighbors costs more than the sleep it allows when the whole field moves (a
+    /// wave, heat spreading everywhere). The step of an unchanged tile writes the same cells, so the result is the same;
+    /// such a pass still compares each tile up to its first changed row, and swaps and stamps only the tiles that changed.
     /// </summary>
     private const int AwakePasses = 15;
     private int _maxSweeps, _color;
@@ -171,7 +182,9 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     {
         TileShapeCheck<TTile>.Check();
         _sleeps = sleeps && _awake == 0;
+        _maySleep = sleeps;
         if (sleeps && _awake > 0) _awake--;
+        if (_spareCount < 0) _spareCount = 0; // the joins of the last pass took more than there were
         _maxSweeps = maxSweeps > 0 ? maxSweeps : Cells;
         _color = 0;
         var index = LookupExtensions.Prepared<TGrid, TKey>(_world) as ValueIndex<TGrid, TKey>;
@@ -211,12 +224,19 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         _wokenOnly = false; // a tile that joined steps first in a walk of every tile
         // The queues and the walk sized for every tile of the grid: a tile is queued once per color until walked, so
         // however many tiles of a color wake at once (a source reaching a part of the grid it never reached), a pass
-        // never grows them. 8 bytes per tile for the walk and 4 per tile and color, next to a tile's cells; Wake's
-        // growth stays for the indexes of tiles that left, which may sit in a queue until it is walked.
-        int tiles = _world.Count<DynamicBuffer<TCell>, TGrid>();
-        if (_walk.Length < tiles) _walk = new EntityId[tiles];
-        for (int c = 0; c < _queues.Length; c++)
-            if (_queues[c].Length < tiles) Array.Resize(ref _queues[c], tiles);
+        // never grows them. 8 bytes per tile for the walk and 4 per tile and color, next to a tile's cells, at most
+        // twice the peak of the tiles (doubled, so a grid growing a tile at a time does not copy them each time); Wake's
+        // growth stays for the indexes of tiles that left, which may sit in a queue until it is walked. A method that
+        // never sleeps walks every tile and queues none: it has neither.
+        // Sized for the tiles the grid's tables have room for, not only those there now: a world that reserved its peak
+        // (World.Reserve) takes tiles up to it without a tick allocating (the chunks around players reaching a new peak).
+        int tiles = Math.Max(_world.Count<DynamicBuffer<TCell>, TGrid>(), Room());
+        if (_maySleep)
+        {
+            if (_walk.Length < tiles) _walk = new EntityId[Math.Max(tiles, _walk.Length * 2)];
+            for (int c = 0; c < _queues.Length; c++)
+                if (_queues[c].Length < tiles) Array.Resize(ref _queues[c], Math.Max(tiles, _queues[c].Length * 2));
+        }
         var entries = _entries;
         for (int i = 0; i < entries.Length; i++)
         {
@@ -230,7 +250,40 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
             }
             WakeAround(entry.Key, uint.MaxValue);
             Forget(ref entry);
+            Spare(ref entry);
         }
+        // Row sets for every tile there is room for, held by a tile or spare: a tile joining at an index that never held
+        // one takes a spare instead of allocating in the pass.
+        int sets = Math.Max(_spareCount, 0);
+        for (int i = 0; i < entries.Length; i++)
+            if (entries[i].FrontRows != null) sets++;
+        if (sets >= tiles) return;
+        if (_spares.Length < _spareCount + tiles - sets) Array.Resize(ref _spares, _spareCount + tiles - sets);
+        for (; sets < tiles; sets++)
+            _spares[_spareCount++] = new Rows { Front = new ulong[TTile.Height], Next = new ulong[TTile.Height], Around = new EntityId[AroundSlots] };
+    }
+
+    /// <summary>The rows the tables holding the grid's tiles have room for (their capacity, reserved or reached).</summary>
+    private int Room()
+    {
+        var match = _world.Match<DynamicBuffer<TCell>, TGrid>(default, out _, out _);
+        int room = 0;
+        for (int i = 0; i < match.Archetypes.Length; i++) room += match.Archetypes[i].Slots.Length;
+        return room;
+    }
+
+    /// <summary>
+    /// The row sets of a tile that left go to the next tile that joins at another index (a grid whose tiles come and go,
+    /// the chunks around players, holds those of its peak, not one set per entity index a tile ever had). On the
+    /// system's thread, before the pass.
+    /// </summary>
+    private void Spare(ref Entry entry)
+    {
+        if (entry.FrontRows == null) return;
+        if (_spareCount == _spares.Length) Array.Resize(ref _spares, Math.Max(16, _spares.Length * 2));
+        _spares[_spareCount++] = new Rows { Front = entry.FrontRows, Next = entry.NextRows, Around = entry.Around };
+        entry.FrontRows = entry.NextRows = null;
+        entry.Around = null;
     }
 
     /// <summary>The tile at entity index of <paramref name="entry"/> left: its second buffer goes back to the pool.</summary>
@@ -483,13 +536,32 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         entry.Version = tile.Version;
         entry.Live = true;
         entry.Dirty = true;
-        entry.FrontRows ??= new ulong[TTile.Height];
-        entry.NextRows ??= new ulong[TTile.Height];
-        // The ids across its edges a step keeps for Next, set up here with the rest: a tile may change for the first
+        // Its row sets and the ids across its edges a step keeps for Next, set up here: a tile may change for the first
         // time long after it joined (a source wandering into it), which must not allocate in the pass.
-        entry.Around ??= new EntityId[AroundSlots];
+        if (entry.FrontRows == null) TakeSpare(ref entry);
         entry.FrontRows.AsSpan().Fill(AllRows);
         entry.NextRows.AsSpan().Fill(AllRows);
+    }
+
+    /// <summary>
+    /// A tile joins at an index that never held one: the row sets of a tile that left, else new ones. On the thread
+    /// stepping it: the spares only shrink during a pass (Check fills them before it), so each decrement owns its slot;
+    /// one that finds none allocates and leaves the count below zero, which the next pass sets back.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void TakeSpare(ref Entry entry)
+    {
+        int n = Volatile.Read(ref _spareCount) > 0 ? Interlocked.Decrement(ref _spareCount) : -1;
+        if (n >= 0)
+        {
+            ref var spare = ref _spares[n];
+            (entry.FrontRows, entry.NextRows, entry.Around) = (spare.Front, spare.Next, spare.Around);
+            spare = default;
+            return;
+        }
+        entry.FrontRows = new ulong[TTile.Height];
+        entry.NextRows = new ulong[TTile.Height];
+        entry.Around = new EntityId[AroundSlots];
     }
 
     /// <summary>No tile around the one at <paramref name="key"/> (that the grid holds) has its color: tiles of one color step at once.</summary>
@@ -597,8 +669,12 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         var cells = buffer.Store is { Count: > 0 } store ? store.Items : TileMemory<TCell, TTile>.Blank(default, true);
         if (cells.Length < Cells) Tile<TCell, TTile>.ThrowCells(default, buffer.Count, Cells);
         var edges = TileFaces.None;
-        bool changed = !_sleeps; // a pass that does not sleep swaps every tile it steps, unseen
-        bool compare = _sleeps;
+        bool changed = false;
+        bool compare = true;
+        // A tile whose step wrote back its cells is no write: it is not swapped or stamped, so a [Changed] reader of
+        // the cells (replication) sees only the tiles that changed, in a pass that sleeps or not. A pass that does not
+        // sleep wakes no neighbor, so it needs no edges: the first row that differs ends the comparison.
+        bool edgesWanted = _sleeps;
         // The first and last layer first, and in each the last row first: once every face's edge changed, the other
         // rows can tell nothing more (a field that moves everywhere compares a few rows per tile, not all of them).
         for (int k = 0, height = TTile.Height; k < height; k++)
@@ -618,7 +694,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
                 if (TileLayout.RowEdges<TCell, TTile>(new ReadOnlySpan<TCell>(cells, at, width), new ReadOnlySpan<TCell>(next, at, width), y, z, ref edges))
                 {
                     changed = true;
-                    if (edges == AllEdges)
+                    if (!edgesWanted || edges == AllEdges)
                     {
                         compare = false;
                         break;
@@ -629,7 +705,13 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
             }
         }
         if (changed) entry.Edges = edges;
-        else entry.NextRows.AsSpan().CopyTo(entry.FrontRows); // the same cells: what the step wrote is all they hold
+        else
+        {
+            entry.NextRows.AsSpan().CopyTo(entry.FrontRows); // the same cells: what the step wrote is all they hold
+            // A pass that does not sleep wakes no tile across an edge that changed: a tile of it stays awake, so a pass
+            // that sleeps after it (AwakePasses run out) steps it again, as it steps the tiles that changed.
+            if (!_sleeps) entry.Dirty = true;
+        }
         return changed;
     }
 
@@ -683,7 +765,7 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         }
         else
         {
-            // A Jacobi pass of every tile that does not sleep changed every tile: their swaps (each its own tile's
+            // A Jacobi pass of every tile that does not sleep: the swaps of the tiles that changed (each its own tile's
             // state and lists, the pool per thread) run on every thread, the stamps (rows of shared words) after.
             bool swapped = Jacobi && !_sleeps && world.ChunkThreads > 1 && _entries.Length >= TileWalk.Swaps;
             if (swapped)

@@ -163,6 +163,17 @@ public class GeneratorTests
         "[ForEach] static void A(Tile<byte, G> t, ref P p) => p.V = t.Cells.Length;",
         "public global::EasyEcs.TileNeighbors n0;", "(k0, entity, out n0);", "h0.Around(k0, entity, out n0);", "new __Tile_byte_G(entity, in n0)",
         "file static class __TilePools\n{\n    [global::System.Runtime.CompilerServices.ModuleInitializer]\n    internal static void Pool()\n    {\n        global::EasyEcs.TileCells.SizePool<byte, global::G>();\n    }\n}")]
+    // A tile a Jacobi step steps holds a second list of its cells: its pool says so, for World.ReserveBuffers. A
+    // [GaussSeidel] step writes the cells in place.
+    [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 16; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }",
+        "[ForEach] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); foreach (var row in t.Rows(TileStencil.Layer)) t.Write(row)[0] = 1; }",
+        "        global::EasyEcs.TileCells.Steps<byte, global::G>();\n")]
+    [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 16; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }",
+        "[ForEach] static void A(Cell<byte, G> c, out byte next) => next = c.Value;",
+        "        global::EasyEcs.TileCells.Steps<byte, global::G>();\n")]
+    [TestCase("public record struct G(int Pos) : IComponent, ITile<int> { int IIndexed<int>.Key => Pos; static int ITileShape.Width => 16; static int ITileShape.Depth => 4; static int ITile<int>.Beside(int k, TileFaces f) => k + 1; }",
+        "[ForEach, GaussSeidel] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); foreach (var row in t.Rows(TileStencil.Layer)) t.Write(row)[0] = 1; }",
+        "        global::EasyEcs.TileCells.SizePool<byte, global::G>();\n")]
     // A pair method: the pass orders and pairs the neighbors' tables (2 axes), the cutoff read from its test, a vector loop
     // of a cluster of rows against each neighbor; with the neighbor's entity, one pair at a time. The system runs alone.
     [TestCase("public struct Fp : IComponent { public float X, Y; }",

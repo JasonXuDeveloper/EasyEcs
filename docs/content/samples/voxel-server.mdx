@@ -72,9 +72,10 @@ The differences are listed [below](#vanilla).
 - A *stencil* is a mask that decides which pixels the shader runs on at all. Here a dry row of 16 blocks with no
   water above or beside it is skipped: nothing can flow into it.
 - *Ping-pong buffers*: a pass reads one buffer and writes another, then the two swap, so no pixel reads a neighbor
-  already updated in the same pass. The step reads `Fluid` and writes `NextFluid`, and a commit copies it back once
-  every chunk has stepped. Like a GPU's targets, neither is cleared between passes: the shader writes every texel
-  it later reads.
+  already updated in the same pass. The step takes the chunk's water by `ref`: it reads `Fluid` and writes each row
+  into the tile's second buffer, and the pass swaps the two once every chunk has stepped. Like a GPU's targets,
+  neither is cleared between passes: the shader writes every texel it later reads, and the pass zeroes only the rows
+  of the second buffer that held water and that no write reached.
 
 **Data-oriented ECS.** "Who is near whom" is an index from a cell to the entities in it, kept by the system that
 moves them, and every change of state is data another system reacts to, not a call.
@@ -131,8 +132,8 @@ two systems.
 The components, one file per part of the world. Comments say what each value means and who writes it. A chunk is an
 entity: its `Chunk` key is a [direct-indexed](/en/docs/guide/data/indexes-and-relations#direct-index) unique key
 (`world.ChunkIndex`, a chunk's slot its position modulo 64, so a lookup reads one array entry),
-its 8,192 blocks and their water two byte buffers, and the water passes keep their own data on it (`NextFluid`,
-`FluidStep`); `Chunk` is also the grid's tile shape (`ITile<ChunkPos>`).
+its 8,192 blocks and their water two byte buffers, and the water passes keep their own data on it (`FluidStep`,
+`Stepped`, `FluidAhead`); `Chunk` is also the grid's tile shape (`ITile<ChunkPos>`).
 
 <include lang="csharp" meta='tab="Chunks"'>../../../samples/VoxelServer/Components/Chunks.cs</include>
 
@@ -252,15 +253,14 @@ spring goes.
 
 It runs in passes, as a GPU draws ([where the ideas come from](#ideas)), and only on the chunks tagged `Flowing`, the
 ones whose water may still move: a settled lake is not visited again until something wakes it. Each pass is its own
-system in its own file (`Systems/Water/`), with one job: they hand each other data (`NextFluid`, `FluidStep`,
-the `Flowing` tag) and never call one another.
+system in its own file (`Systems/Water/`), with one job: they hand each other data (`FluidStep`, `Stepped`,
+`FluidAhead`, the `Flowing` tag) and never call one another.
 
 ```mermaid
 flowchart LR
-  wake[WaterWakeSystem: blocks changed, Flowing] --> flow[WaterFlowSystem: the tile and its halo, the shader, in parallel, into NextFluid]
-  flow --> sleep[WaterSleepSystem: moved nothing, sleep]
-  flow --> commit[WaterCommitSystem: NextFluid into Fluid, wake the edges]
-  commit -.-> flow
+  wake[WaterWakeSystem: blocks changed, Flowing] --> flow[WaterFlowSystem: the tile and its halo, the shader, in parallel, into the second buffer, swapped in]
+  flow --> settle[WaterSettleSystem: the count; moved nothing, sleep]
+  settle -.->|the edges that changed, next tick| wake
 ```
 
 **Waking.** A block change, whatever made it, is seen through the change of the block buffer
@@ -280,31 +280,31 @@ The layers to shade come from the `FluidCount` of the chunk and of its neighbors
 `Lookup<FluidCount>`, no search); `ExchangeHalo(from, to)` copies them into a texture of the thread, a ring of one block around
 each layer from the facing row or column of each neighbor, and a layer under and over, as a CUDA block loads its tile
 and halo into shared memory. The loop samples neighbors with no edge case and computes each row of 16 blocks in one
-`Vector128<byte>`. Its neighbors are read as they were before the pass and only `NextFluid` is written, so it is a
+`Vector128<byte>`. Its neighbors are read as they were before the pass and only the tile's second buffer is written
+(`Write(row)`), so it is a
 [parallel method](/en/docs/guide/basics/systems#parallel-methods). A few hundred chunks flow at a time, each one costing
 microseconds, far under the 4,096 rows of a default chunk of a pass that writes a tracked component, so it sets
 `ChunkSize = 64` and the threads take 64 chunks at a time ([chunk size](/en/docs/guide/performance/threading#chunk-rows)). Byte
 lanes are integer arithmetic: the same water on every machine.
 
 Nothing is cleared that does not have to be. The stencil (`Rows(TileStencil.Layer | TileStencil.Above)`) visits only a row
-with water in it, beside it or above it, and the others are not written: the step's buffer equals the water after
-every commit, so a dry row is zero in it already. The texture is allocated once per thread, and the load writes every
-texel the loop samples. `NextFluid` keeps its count from one step to the next, so `SetCount` neither allocates nor
-clears it, and the layers the step does not shade are zero already: the steps before wrote water only on layers this
-one's reach covers.
+with water in it, beside it or above it, and the others are not written: the pass zeroes the rows of the second buffer
+that held water and that no `Write` reached, which is what a dry row is. The texture is allocated once per thread, and
+the load writes every texel the loop samples. A chunk whose step wrote back the water it had is neither swapped nor
+stamped, so replication sends only the chunks whose water changed. The second buffer is a list of `Fluid` from the
+buffers' pool, kept by the chunk while it is loaded: `ReserveBuffers` reserves two lists per chunk for its water.
 
-The step's result is data, `FluidStep`: `WaterSleepSystem` takes the chunks whose water moved nothing out of the
-passes and gives their scratch buffer (`NextFluid`) back to the pool with `TrimExcess`, so only flowing
-chunks hold them; it runs before the commit, so a chunk that settled is still woken by a neighbor whose water reached
-it in the same step. `WaterCommitSystem` copies the step into the water once every chunk has stepped (each chunk steps
-from its neighbors' water before the step, whatever order the chunks are visited in), updates `FluidCount` and wakes
-the chunks beside the edges that changed.
+The step's result is data: `FluidStep`, the edges whose water changed (tracked, so the systems after it visit only
+the chunks that stepped), `Stepped`, whether the water moved, and `FluidAhead`, the water after the step as
+`FluidCount` counts it. The cells the step filled go into `Stats` through a `Reduce<Stats>`. `WaterSettleSystem` makes
+the count the chunk's `FluidCount` once every chunk has stepped (the chunks beside read their neighbors' counts while
+the pass runs) and takes the chunks whose water moved nothing out of the passes. A chunk that settled is still woken
+by a neighbor whose water reached it in the same step: `WaterWakeSystem` reads the steps at the start of the next tick
+and wakes the chunks beside the edges that changed.
 
 <include lang="csharp" meta='tab="Water/Flow.cs"'>../../../samples/VoxelServer/Systems/Water/Flow.cs</include>
 
-<include lang="csharp" meta='tab="Water/Sleep.cs"'>../../../samples/VoxelServer/Systems/Water/Sleep.cs</include>
-
-<include lang="csharp" meta='tab="Water/Commit.cs"'>../../../samples/VoxelServer/Systems/Water/Commit.cs</include>
+<include lang="csharp" meta='tab="Water/Settle.cs"'>../../../samples/VoxelServer/Systems/Water/Settle.cs</include>
 
 {/* TODO(water overlap): the planned push-halo design (a chunk hands its edges to its neighbors when they change,
 instead of each flowing chunk gathering them every step) and the MPI-style interior/ring overlap go here, with the
@@ -458,15 +458,15 @@ tick   400 (night): 50 players, 121 chunks, 8506 water, 46 zombies, 107 items
 tick   600 (day  ): 50 players, 148 chunks, 9809 water, 127 zombies, 112 items
 tick   800 (day  ): 50 players, 157 chunks, 10880 water, 0 zombies, 117 items
 tick  1000 (night): 50 players, 168 chunks, 14045 water, 41 zombies, 89 items
-tick  1200 (day  ): 50 players, 172 chunks, 12680 water, 123 zombies, 79 items
+tick  1200 (day  ): 50 players, 172 chunks, 12679 water, 123 zombies, 80 items
 chunks: 196 generated, 60 unloaded, 36 loaded back
-blocks dug: 603; items: 350 picked up, 238 expired
+blocks dug: 602; items: 348 picked up, 238 expired
 zombies: 250 spawned, 125 burned, 334 hits; player deaths: 35
-water: 16069 cells filled, 9952 ticks of bodies carried
-view: 4072 chunks sent, 2827 forgotten; 40547 entities came into view, 12605 left it, 21503 despawned
-sent: 33714 block updates, 2713660 entity updates (47285 KiB)
+water: 16058 cells filled, 9911 ticks of bodies carried
+view: 4072 chunks sent, 2827 forgotten; 40475 entities came into view, 12601 left it, 21433 despawned
+sent: 33645 block updates, 2706767 entity updates (47165 KiB)
 top diggers: player 36 (26) player 42 (22) player 48 (21)
-restarted from the save: 50 players, 172 chunks, 12680 water, 123 zombies; 24 chunks in the region files
+restarted from the save: 50 players, 172 chunks, 12679 water, 123 zombies; 24 chunks in the region files
 ```
 
 The world, the springs, the bots and the spawns come from integer hashes, so every run prints the same. The chunks

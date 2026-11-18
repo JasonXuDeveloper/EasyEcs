@@ -55,8 +55,9 @@ import { Boxes, FlaskConical, Network, Save } from 'lucide-react';
   按方块的函数：一个方块的下一个水位，只由它自己和六个邻居的水位决定，别的都不看，所以 16 个方块走一个 `Vector128<byte>`，
   各个地形也能在多个线程上跑。
 - *模板（stencil）*是一张遮罩，决定着色器到底在哪些像素上运行。这里一行 16 个方块如果自己、上面和旁边都没有水，就直接跳过：水不可能流进来。
-- *乒乓缓冲*：一趟读一个缓冲、写另一个，然后两者交换，所以没有像素会读到同一趟里已经更新过的邻居。这一步读 `Fluid`、写 `NextFluid`，
-  等所有地形都走完，提交再把它拷回去。和 GPU 的渲染目标一样，两趟之间都不清零：着色器会写满它之后要读的每个纹素。
+- *乒乓缓冲*：一趟读一个缓冲、写另一个，然后两者交换，所以没有像素会读到同一趟里已经更新过的邻居。这一步以 `ref` 接收地形的水：
+  读 `Fluid`，把每一行写进瓦片的第二个缓冲，等所有地形都走完，这一趟把两个缓冲交换。和 GPU 的渲染目标一样，两趟之间都不清零：
+  着色器会写满它之后要读的每个纹素，这一趟只把第二个缓冲里原来有水、这次又没写到的行清零。
 
 **面向数据的 ECS。** “谁在谁附近”是一个从格子到其中实体的索引，由移动它们的系统维护；每次状态变化都是另一个系统响应的数据，而不是一次调用。
 
@@ -107,7 +108,7 @@ flowchart LR
 
 组件按世界的各个部分分文件。注释说明每个值的含义和谁来写。地形是实体：它的键 `Chunk` 是
 [直接映射](/zh/docs/guide/data/indexes-and-relations#direct-index)的唯一键（`world.ChunkIndex`，地形的槽位是它的坐标对 64 取模，查找只读一个数组元素），8,192 个方块和对应的水是两个字节缓冲，
-水的各趟把自己的数据也放在它上面（`NextFluid`、`FluidStep`）；`Chunk` 也是网格的瓦片形状（`ITile<ChunkPos>`）。
+水的各趟把自己的数据也放在它上面（`FluidStep`、`Stepped`、`FluidAhead`）；`Chunk` 也是网格的瓦片形状（`ITile<ChunkPos>`）。
 
 <include lang="csharp" meta='tab="地形"'>../../../samples/VoxelServer/Components/Chunks.cs</include>
 
@@ -210,15 +211,14 @@ stateDiagram-v2
 水位比它低一级；其余的都变空，所以泉眼没了水就会退。
 
 它像 GPU 画图一样分趟运行（见[思路来自哪里](#ideas)），而且只在打了 `Flowing` 标签、水还可能动的地形上跑：静止的湖在被唤醒之前不会再被访问。
-每一趟是一个单独的系统、一个单独的文件（`Systems/Water/`），只做一件事：它们靠数据交接（`NextFluid`、`FluidStep` 和
+每一趟是一个单独的系统、一个单独的文件（`Systems/Water/`），只做一件事：它们靠数据交接（`FluidStep`、`Stepped`、`FluidAhead` 和
 `Flowing` 标签），从不互相调用。
 
 ```mermaid
 flowchart LR
-  wake[WaterWakeSystem：方块变了，Flowing] --> flow[WaterFlowSystem：瓦片和光环，着色器，并行，写入 NextFluid]
-  flow --> sleep[WaterSleepSystem：什么都没动，休眠]
-  flow --> commit[WaterCommitSystem：NextFluid 写回 Fluid，唤醒边上的地形]
-  commit -.-> flow
+  wake[WaterWakeSystem：方块变了，Flowing] --> flow[WaterFlowSystem：瓦片和光环，着色器，并行，写入第二个缓冲，再换进来]
+  flow --> settle[WaterSettleSystem：水量；什么都没动，休眠]
+  settle -.->|变化的边，下一刻| wake
 ```
 
 **唤醒。** 方块一变，不管是谁改的，都会从方块缓冲的变化看到（`[Changed<DynamicBuffer<Block>>]`），所以挖掘本身不用知道水，也不用知道天空。
@@ -234,24 +234,23 @@ flowchart LR
 生成器每片地形找一次四个邻居。要算的层来自这片地形和邻居的 `FluidCount`（通过 `Beside` 和 `Lookup<FluidCount>`，不用搜索）；
 `ExchangeHalo(from, to)` 把这些层填进这个线程的一张纹理，每层外面一圈一格宽的方块取自每个邻居朝向这边的那一行或一列，下面和上面各多一层，
 就像 CUDA 的线程块把它的瓦片和光环载入共享内存。循环采样邻居没有边界情况；每行 16 个方块用一个 `Vector128<byte>` 算。
-它读到的邻居都是这一遍之前的样子，只写 `NextFluid`，所以是[并行方法](/zh/docs/guide/basics/systems#parallel-methods)。同时流动的地形只有几百个，
+它读到的邻居都是这一遍之前的样子，只写瓦片的第二个缓冲（`Write(row)`），所以是[并行方法](/zh/docs/guide/basics/systems#parallel-methods)。同时流动的地形只有几百个，
 每个要花几微秒，远少于写被追踪组件的遍历默认每块的 4,096 行，所以它设了 `ChunkSize = 64`，线程每次领 64 片地形
 （[块大小](/zh/docs/guide/performance/threading#chunk-rows)）。字节通道是整数运算：每台机器上的水都一样。
 
-不必清零的都不清零。模板（`Rows(TileStencil.Layer | TileStencil.Above)`）只访问自己、旁边或上面有水的行，其余的行不写：每次提交后这一步的缓冲
-就等于水，所以干的行在里面本来就是零。纹理每个线程只分配一次，加载会写满循环要采样的每个纹素。
-`NextFluid` 在两步之间保留它的长度，所以 `SetCount` 既不分配也不清零；这一步不算的层本来就是零：之前的各步只在这一步的范围覆盖的层上写过水。
+不必清零的都不清零。模板（`Rows(TileStencil.Layer | TileStencil.Above)`）只访问自己、旁边或上面有水的行，其余的行不写：这一趟把第二个缓冲里
+原来有水、又没有 `Write` 写到的行清零，干的行本来就该是零。纹理每个线程只分配一次，加载会写满循环要采样的每个纹素。
+一片地形这一步写回的水和原来一样，就既不交换也不盖戳，所以同步只发送水变了的地形。第二个缓冲是缓冲池里的一个 `Fluid` 列表，
+地形加载期间一直持有：`ReserveBuffers` 为每片地形的水预留两个列表。
 
-这一步的结果是数据 `FluidStep`：`WaterSleepSystem` 把水什么都没动的地形移出各趟，用 `TrimExcess` 把它们的临时缓冲（`NextFluid`）
-还给缓冲池，所以只有还在流动的地形持有它们；它在提交之前运行，所以同一步里刚静下来的地形，仍会被水流到它这里的邻居唤醒。
-`WaterCommitSystem` 等所有地形都走完这一步，再把结果拷成水（每片地形都用邻居这一步之前的水来算，与地形的访问顺序无关），
-更新 `FluidCount`，并唤醒变化的边旁边的地形。
+这一步的结果是数据：`FluidStep` 是水变了的边（被追踪，所以后面的系统只访问走过这一步的地形），`Stepped` 是水动没动，
+`FluidAhead` 是这一步之后按 `FluidCount` 计的水。这一步填满的格子通过 `Reduce<Stats>` 计入 `Stats`。`WaterSettleSystem` 等所有地形都走完，
+再把这个水量设为地形的 `FluidCount`（这一趟运行时，旁边的地形要读邻居的水量），并把水什么都没动的地形移出各趟。
+同一步里刚静下来的地形，仍会被水流到它这里的邻居唤醒：`WaterWakeSystem` 在下一刻开始时读这些步，唤醒变化的边旁边的地形。
 
 <include lang="csharp" meta='tab="Water/Flow.cs"'>../../../samples/VoxelServer/Systems/Water/Flow.cs</include>
 
-<include lang="csharp" meta='tab="Water/Sleep.cs"'>../../../samples/VoxelServer/Systems/Water/Sleep.cs</include>
-
-<include lang="csharp" meta='tab="Water/Commit.cs"'>../../../samples/VoxelServer/Systems/Water/Commit.cs</include>
+<include lang="csharp" meta='tab="Water/Settle.cs"'>../../../samples/VoxelServer/Systems/Water/Settle.cs</include>
 
 {/* TODO(water overlap): 计划中的推送光环（地形的边变了时推给邻居，而不是每个流动的地形每一步都去收集）和 MPI 式的内部/外圈重叠写在这里，
 连同 Flow 的改动；再更新 guide/performance/grids。只拷贝变化过的边测过、已放弃（decisions#d73-survey-items-not-added）。 */}
@@ -377,15 +376,15 @@ tick   400 (night): 50 players, 121 chunks, 8506 water, 46 zombies, 107 items
 tick   600 (day  ): 50 players, 148 chunks, 9809 water, 127 zombies, 112 items
 tick   800 (day  ): 50 players, 157 chunks, 10880 water, 0 zombies, 117 items
 tick  1000 (night): 50 players, 168 chunks, 14045 water, 41 zombies, 89 items
-tick  1200 (day  ): 50 players, 172 chunks, 12680 water, 123 zombies, 79 items
+tick  1200 (day  ): 50 players, 172 chunks, 12679 water, 123 zombies, 80 items
 chunks: 196 generated, 60 unloaded, 36 loaded back
-blocks dug: 603; items: 350 picked up, 238 expired
+blocks dug: 602; items: 348 picked up, 238 expired
 zombies: 250 spawned, 125 burned, 334 hits; player deaths: 35
-water: 16069 cells filled, 9952 ticks of bodies carried
-view: 4072 chunks sent, 2827 forgotten; 40547 entities came into view, 12605 left it, 21503 despawned
-sent: 33714 block updates, 2713660 entity updates (47285 KiB)
+water: 16058 cells filled, 9911 ticks of bodies carried
+view: 4072 chunks sent, 2827 forgotten; 40475 entities came into view, 12601 left it, 21433 despawned
+sent: 33645 block updates, 2706767 entity updates (47165 KiB)
 top diggers: player 36 (26) player 42 (22) player 48 (21)
-restarted from the save: 50 players, 172 chunks, 12680 water, 123 zombies; 24 chunks in the region files
+restarted from the save: 50 players, 172 chunks, 12679 water, 123 zombies; 24 chunks in the region files
 ```
 
 世界、泉眼、bot 和刷怪都来自整数哈希，所以每次运行输出都一样。bot 往外走，地形越来越多；留在身后的地形存进区域文件，

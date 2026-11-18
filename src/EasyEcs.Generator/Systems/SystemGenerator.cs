@@ -207,13 +207,15 @@ public sealed partial class SystemGenerator : IIncrementalGenerator
     /// <summary>
     /// The pools of the tiles' cells, raised when the assembly loads (TileCells.SizePool) for each closed
     /// <c>Tile&lt;TCell, TTile&gt;</c> the type's methods take: a buffer of a tile's cells comes back to the pool, and a
-    /// FillPool at startup fills it with lists of that length, with no MaxPooledLength line in user code.
+    /// FillPool at startup fills it with lists of that length, with no MaxPooledLength line in user code. A tile a Jacobi
+    /// step steps (by ref, no colors) takes TileCells.Steps: its second buffer is a list of the cells too, which
+    /// World.ReserveBuffers then reserves.
     /// </summary>
     private static void EmitTilePools(StringBuilder sb, UpdateModel model)
     {
         var pools = model.Methods.SelectMany(m => m.Parameters)
             .Where(p => p.Kind == Symbols.ParamKind.Tile && p.Pooled)
-            .Select(p => $"global::EasyEcs.TileCells.SizePool<{p.Cell}, {p.Shape}>();")
+            .Select(p => $"global::EasyEcs.TileCells.{(p is { RefKind: "ref", Colors.Length: 0 } ? "Steps" : "SizePool")}<{p.Cell}, {p.Shape}>();")
             .Distinct().OrderBy(p => p, System.StringComparer.Ordinal).ToArray();
         if (pools.Length == 0) return;
         sb.Append($"\nfile static class __TilePools\n{{\n    {Code.ModuleInitializer}\n    internal static void Pool()\n    {{\n");

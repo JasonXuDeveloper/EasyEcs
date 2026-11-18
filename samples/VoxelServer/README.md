@@ -15,13 +15,13 @@ What each file teaches, with its code, is on the docs site:
 
 | File | What it holds |
 |---|---|
-| [Components/](Components) | the data, one file per part of the world: [Chunks.cs](Components/Chunks.cs) (blocks, chunks, load requests, `Fresh`, `Unloading`, `Viewers`), [Water.cs](Components/Water.cs) (the water, its height map and the data of its passes), [Bodies.cs](Components/Bodies.cs), [Players.cs](Components/Players.cs) (`Input`, `Score`, the inventory, `ViewCenter`, `Visible`), [Mobs.cs](Components/Mobs.cs) (zombies, items), [Scent.cs](Components/Scent.cs) (the zombies' distance field: `Ground`, `Footing`, `Scent`, `Trail`, `Footprint`), [Singletons.cs](Components/Singletons.cs) |
+| [Components/](Components) | the data, one file per part of the world: [Chunks.cs](Components/Chunks.cs) (blocks, chunks, load requests, `Fresh`, `Unloading`, `Viewers`), [Water.cs](Components/Water.cs) (the water, its height map and the data of its passes), [Bodies.cs](Components/Bodies.cs), [Players.cs](Components/Players.cs) (`Input`, `Score`, the inventory, `ViewCenter`, `Visible`), [Mobs.cs](Components/Mobs.cs) (zombies, items), [Scent.cs](Components/Scent.cs) (the zombies' distance field: `Ground`, `Footing`, `Scent`, `Seed`, `Trail`, `Footprint`), [Singletons.cs](Components/Singletons.cs) |
 | [Groups.cs](Groups.cs) | the groups around the simulation (the default group): `ClientInput`, `Replication` |
 | [Rules.cs](Rules.cs) | the numbers of the game (ticks, speeds, damage, ranges) and the spawn points |
 | [Terrain.cs](Terrain.cs) | chunk coordinates, terrain generation, `Nearby` (the blocks, water and height map around a body, one chunk lookup), the square of chunks around a point and the strip a view gains |
 | [Systems/Chunks.cs](Systems/Chunks.cs) | `ChunkReadSystem`, `ChunkGenerateSystem`, `ChunkUnloadSystem`, `ChunkSaveSystem`: a chunk's life |
-| [Systems/Water/](Systems/Water) | one system per file: [HeightMap.cs](Systems/Water/HeightMap.cs) and [Wake.cs](Systems/Water/Wake.cs) (a block update), then the passes: [Flow.cs](Systems/Water/Flow.cs) (the shader, which reads its halo from the neighbors), [Sleep.cs](Systems/Water/Sleep.cs), [Commit.cs](Systems/Water/Commit.cs); [Float.cs](Systems/Water/Float.cs) |
-| [Systems/Scent/](Systems/Scent) | the zombies' distance field, one system per file: [Footing.cs](Systems/Scent/Footing.cs) (where a zombie can stand), [Wake.cs](Systems/Scent/Wake.cs) (the ground or a player's column changed), [Hunt.cs](Systems/Scent/Hunt.cs) (the field sleeps by day), then the passes: [Step.cs](Systems/Scent/Step.cs) (the shader, settling a chunk in place), [Settle.cs](Systems/Scent/Settle.cs) |
+| [Systems/Water/](Systems/Water) | one system per file: [HeightMap.cs](Systems/Water/HeightMap.cs) and [Wake.cs](Systems/Water/Wake.cs) (a block update), then the passes: [Flow.cs](Systems/Water/Flow.cs) (the shader, which reads its halo from the neighbors and writes the next water into the tile's second buffer, swapped in after the pass), [Settle.cs](Systems/Water/Settle.cs) (the step's count, and sleep); [Float.cs](Systems/Water/Float.cs) |
+| [Systems/Scent/](Systems/Scent) | the zombies' distance field, one system per file: [Footing.cs](Systems/Scent/Footing.cs) (where a zombie can stand), [Footprint.cs](Systems/Scent/Footprint.cs) (the column a player stands on), [Hunt.cs](Systems/Scent/Hunt.cs) (the field sleeps by day), [Seed.cs](Systems/Scent/Seed.cs) (the scent under the players), then the pass: [Step.cs](Systems/Scent/Step.cs) (the shader, a `[GaussSeidel]` step settling each chunk in place) |
 | [Systems/Movement.cs](Systems/Movement.cs) | `PlayerMoveSystem`, `PhysicsSystem` (steps, walls, gravity), `GridSystem` (the entities by chunk) |
 | [Systems/Aoi.cs](Systems/Aoi.cs) | the areas of interest: `AoiViewSystem` (a player's view), `AoiChunkSystem` (a chunk loaded), `AoiSpawnSystem` (an entity crossing), `AoiDespawnSystem` (an entity gone) |
 | [Systems/Zombies.cs](Systems/Zombies.cs) | `NightSpawnSystem`, `ZombieTargetSystem`, `ZombieChaseSystem` (down the scent's trail), `ZombieAttackSystem`, `FireSystem` (the sun, the fire, the water) |
@@ -49,15 +49,15 @@ tick   400 (night): 50 players, 121 chunks, 8506 water, 46 zombies, 107 items
 tick   600 (day  ): 50 players, 148 chunks, 9809 water, 127 zombies, 112 items
 tick   800 (day  ): 50 players, 157 chunks, 10880 water, 0 zombies, 117 items
 tick  1000 (night): 50 players, 168 chunks, 14045 water, 41 zombies, 89 items
-tick  1200 (day  ): 50 players, 172 chunks, 12680 water, 123 zombies, 79 items
+tick  1200 (day  ): 50 players, 172 chunks, 12679 water, 123 zombies, 80 items
 chunks: 196 generated, 60 unloaded, 36 loaded back
-blocks dug: 603; items: 350 picked up, 238 expired
+blocks dug: 602; items: 348 picked up, 238 expired
 zombies: 250 spawned, 125 burned, 334 hits; player deaths: 35
-water: 16069 cells filled, 9952 ticks of bodies carried
-view: 4072 chunks sent, 2827 forgotten; 40547 entities came into view, 12605 left it, 21503 despawned
-sent: 33714 block updates, 2713660 entity updates (47285 KiB)
+water: 16058 cells filled, 9911 ticks of bodies carried
+view: 4072 chunks sent, 2827 forgotten; 40475 entities came into view, 12601 left it, 21433 despawned
+sent: 33645 block updates, 2706767 entity updates (47165 KiB)
 top diggers: player 36 (26) player 42 (22) player 48 (21)
-restarted from the save: 50 players, 172 chunks, 12680 water, 123 zombies; 24 chunks in the region files
+restarted from the save: 50 players, 172 chunks, 12679 water, 123 zombies; 24 chunks in the region files
 ```
 
 The world, the springs, the bots and the spawns come from integer hashes, so every run prints the same. The chunks

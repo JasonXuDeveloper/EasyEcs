@@ -48,8 +48,10 @@ public static partial class EasyEcsAnalyzer
         "one cell per pass and needs as many passes as cells it crosses. [GaussSeidel] writes the cells in place: each " +
         "sweep reads the rows it already wrote, the tile sweeps until it settles, the tiles step color by color so " +
         "each color reads the ones before it, and a settled tile sleeps. The result after one pass is not a Jacobi " +
-        "step: keep Jacobi when another system reads the field after each pass as a step in time (a wave, heat).",
-        helpLinkUri: Help("EECS117"));
+        "step: keep Jacobi when another system reads the field after each pass as a step in time (a wave, heat, water). " +
+        "Reported at the end of the compilation, only when no other [ForEach], [EntityMethod] or [Drain] method names the " +
+        "cells (a parameter of their buffer, a tile, a cell, a lookup of the buffer, or a filter on it).",
+        helpLinkUri: Help("EECS117"), customTags: WellKnownDiagnosticTags.CompilationEnd);
 
     public static readonly DiagnosticDescriptor CheckedTileLoad = new("EECS120", "A tile load checked on every call",
         "{0} at a column the generator cannot follow is checked on every call: {1}; write the loop as 'for (int x = 0; x < TTile.Width; x += step)' with nothing else writing x, or walk the row's columns with c.Columns(step)",
@@ -89,11 +91,22 @@ public static partial class EasyEcsAnalyzer
         var written = new ConcurrentDictionary<ITypeSymbol, byte>(SymbolEqualityComparer.Default);
         var overwrites = new ConcurrentQueue<(ITypeSymbol Next, ITypeSymbol Cells, IMethodSymbol Method, Location At)>();
 
+        // EECS117: the relaxations stepped by Jacobi, and the methods naming each cell type (its readers between passes).
+        var relaxations = new ConcurrentQueue<(IMethodSymbol Method, ITypeSymbol Cells, bool Colors)>();
+        var readers = new ConcurrentQueue<(ITypeSymbol Cells, IMethodSymbol Method)>();
+
         start.RegisterSymbolAction(context =>
         {
             var method = (IMethodSymbol)context.Symbol;
             foreach (var p in method.Parameters)
                 if (p.Type is INamedTypeSymbol { Name: "Mut" or "DynamicBuffer" } && WrittenBuffer(p) is { } buffer) written.TryAdd(buffer, 0);
+            if (Symbols.IsForEach(method) || Symbols.IsEntityMethod(method) || Symbols.IsDrain(method))
+            {
+                foreach (var p in method.Parameters)
+                    if (CellsNamed(p.Type) is { } named) readers.Enqueue((named, method));
+                foreach (var (_, type, _) in Symbols.AttributeFilters(method))
+                    if (CellsNamed(type) is { } named) readers.Enqueue((named, method));
+            }
             if (!Symbols.IsForEach(method) && !Symbols.IsEntityMethod(method)) return;
             foreach (var p in method.Parameters)
                 if (Symbols.TileElements(p.Type) is { } cells) cellTypes.TryAdd(cells.Cell, 0);
@@ -125,9 +138,9 @@ public static partial class EasyEcsAnalyzer
             {
                 if (PlainCopy(method, block) is { } copy) copies.Enqueue((copy.Next, copy.Cells, method));
                 foreach (var over in Overwrites(method, block)) overwrites.Enqueue((over.Next, over.Cells, method, over.At));
-                if (method.Parameters.FirstOrDefault(Symbols.IsSteppingTile) is { } stepped && !Symbols.IsGaussSeidel(method) && Relaxes(block))
-                    context.ReportDiagnostic(Diagnostic.Create(SuggestGaussSeidel, method.Locations.FirstOrDefault(),
-                        CanColor(method, stepped) ? GaussSeidelFix : null, Symbols.Describe(method)));
+                if (method.Parameters.FirstOrDefault(Symbols.IsSteppingTile) is { } stepped && !Symbols.IsGaussSeidel(method) && Relaxes(block)
+                    && CellsNamed(stepped.Type) is { } cells)
+                    relaxations.Enqueue((method, cells, CanColor(method, stepped)));
             }
         });
 
@@ -179,6 +192,11 @@ public static partial class EasyEcsAnalyzer
 
         start.RegisterCompilationEndAction(context =>
         {
+            // EECS117 only where nothing else reads the field: a reader between passes sees each pass as a step in time.
+            foreach (var (method, cells, colors) in relaxations)
+                if (!readers.Any(r => SymbolEqualityComparer.Default.Equals(r.Cells, cells) && !SymbolEqualityComparer.Default.Equals(r.Method, method)))
+                    context.ReportDiagnostic(Diagnostic.Create(SuggestGaussSeidel, method.Locations.FirstOrDefault(),
+                        colors ? GaussSeidelFix : null, Symbols.Describe(method)));
             foreach (var (next, cells, method, at) in overwrites)
                 if (cellTypes.ContainsKey(cells) && !written.ContainsKey(next))
                     context.ReportDiagnostic(Diagnostic.Create(StaleCommit, at, Symbols.Describe(method), next.Name, cells.Name));
@@ -408,6 +426,20 @@ public static partial class EasyEcsAnalyzer
     private static bool CanColor(IMethodSymbol method, IParameterSymbol stepped) =>
         Symbols.StepProblem(method) == null && Symbols.TileElements(stepped.Type) is { } tile
         && Symbols.TileKey(tile.Grid) is { } key && Symbols.KeyParities(key, "key") is { Count: > 0 };
+
+    /// <summary>
+    /// The cells <paramref name="type"/> names, for EECS117's readers: T of a <c>DynamicBuffer&lt;T&gt;</c>, of a
+    /// <c>Tile</c>, <c>Cell</c> or <c>Layer</c> of T, and of those inside another generic (Mut, Lookup, Maybe); else null.
+    /// </summary>
+    private static ITypeSymbol? CellsNamed(ITypeSymbol type)
+    {
+        if (type is not INamedTypeSymbol { IsGenericType: true } named) return null;
+        if (Symbols.BufferElement(named) is { } element) return element;
+        if (named.Name is "Tile" or "Cell" or "Layer" && named.ContainingNamespace?.Name == "EasyEcs") return named.TypeArguments[0];
+        foreach (var argument in named.TypeArguments)
+            if (CellsNamed(argument) is { } inner) return inner;
+        return null;
+    }
 
     /// <summary>A body that takes the Min or Max of values (Math, MathF, the vector types): a relaxation's shape.</summary>
     private static bool Relaxes(IOperation block) => block.Descendants().OfType<IInvocationOperation>().Any(i =>
