@@ -231,6 +231,16 @@ public partial class AnalyzerTests
     public Task ARelaxationThatSweepsIsClean() => AssertClean(GeneratorTests.Components, TileParts,
         "[EcsSystem] public ref struct S { [ForEach, GaussSeidel] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); foreach (var row in t.Rows()) { var c = t.At(row); var into = t.Write(row); for (int x = 0; x < 4; x++) into[x] = (byte)System.Math.Min(c[x, 0, 0], c[x - 1, 0, 0] + 1); } } }");
 
+    // A step in time: another system reads the cells after each pass (the voxel water's footing, its replication), so a
+    // Gauss-Seidel pass would change what it sees. Each way a method names the cells counts.
+    [TestCase("[ForEach] static void B(in DynamicBuffer<byte> cells, ref P p) => p.V = cells.Count;")]
+    [TestCase("[ForEach] static void B(Tile<byte, G> t, ref P p) => p.V = t.Cells.Length;")]
+    [TestCase("[ForEach] static void B(ref P p, Lookup<DynamicBuffer<byte>> cells) => p.V = 1;")]
+    [TestCase("[ForEach, Changed<DynamicBuffer<byte>>] static void B(ref P p) => p.V++;")]
+    public Task ARelaxationAnotherSystemReadsIsClean(string reader) => AssertClean(GeneratorTests.Components, TileParts,
+        "[EcsSystem] public ref struct S { [ForEach] static void A(ref Tile<byte, G> t) { t.ExchangeHalo(); foreach (var row in t.Rows()) { var c = t.At(row); var into = t.Write(row); for (int x = 0; x < 4; x++) into[x] = (byte)System.Math.Min(c[x, 0, 0], c[x - 1, 0, 0] + 1); } } }"
+        + " [EcsSystem] public ref struct R { " + reader + " }");
+
     private static string Loading(string loop) =>
         "[EcsSystem] public ref struct S { [ForEach] static void A(Tile<byte, G> t, ref P p) { t.ExchangeHalo(); foreach (var row in t.Rows()) { var c = t.At(row); " + loop + " } } }";
 
