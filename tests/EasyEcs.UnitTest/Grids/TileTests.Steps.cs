@@ -1019,6 +1019,51 @@ public partial class TileTests
         }
     }
 
+    /// <summary>What takes the index a plate left, so the plate made next joins the grid at an index no tile had.</summary>
+    public record struct SpareFiller(int V) : IComponent;
+
+    [Test]
+    public void ATileJoiningAtANewIndexTakesTheStateOfOneThatLeft()
+    {
+        // A grid whose tiles come and go (the chunks around players) at indexes other entities took meanwhile: the
+        // state a tile's step keeps (its row sets, the ids around it) goes from the tile that left to the next one that
+        // joins, so a tile at a new index allocates nothing, however many indexes tiles had over time.
+        var (world, plates) = PingHeatWorld(1, 3, [], []);
+        using var _ = world;
+        world.EnsureEntityCapacity(50_000);
+        world.Reserve<SpareFiller>(50_000);
+        var prefab = new Prefab().Set(new PingPlate(default)).SetBuffer<Heat>();
+        world.Reserve(prefab, 4);
+        var center = new TilePos(1, 0, 1);
+        var moving = plates[center];
+        int fresh = 0;
+        Assert.That(Allocations.Steady(Step, 200, 100), Is.Zero);
+        Assert.That(fresh, Is.GreaterThan(300), "the plate joined at a new index every step");
+
+        void Step()
+        {
+            int was = moving.Index;
+            moving.Destroy();
+            world.CreateEntity(new SpareFiller(0));            // takes the index the plate left
+            moving = world.Instantiate(prefab, new PingPlate(center));
+            if (moving.Index > was) fresh++;
+            world.Update();
+        }
+    }
+
+    [Test]
+    public void ReserveBuffersKeepsTheSecondBufferOfASteppedTile()
+    {
+        // PingHeatSystem steps Heat by Jacobi: each plate's buffer of Heat also holds the step's second buffer, a list of
+        // Heat from the same pool (TileCells.Steps, called when this assembly loads), so a reserve of n plates is 2n lists.
+        Assert.That(BufferStore<Heat>.ListsPerBuffer, Is.EqualTo(2));
+        Assert.That(BufferStore<Dist>.ListsPerBuffer, Is.EqualTo(1), "a [GaussSeidel] step writes its cells in place");
+        using var world = new World();
+        int plates = BufferStore<Heat>.Pooled + 1_000;
+        world.ReserveBuffers(new Prefab().Set(new PingPlate(default)).SetBuffer<Heat>(), plates);
+        Assert.That(BufferStore<Heat>.Pooled, Is.GreaterThanOrEqualTo(2 * plates));
+    }
+
     /// <summary>A tile's cells and grid first used after 256 component types: their bits live past the inline 256.</summary>
     public record struct FarHeat(float Value) : IComponent;
 
