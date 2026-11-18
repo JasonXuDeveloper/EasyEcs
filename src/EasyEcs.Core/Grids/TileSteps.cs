@@ -107,6 +107,13 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     private static TileFaces AllEdges => TileFaces.North | TileFaces.South | TileFaces.West | TileFaces.East
         | (TTile.Height > 1 ? TileFaces.Above | TileFaces.Below : TileFaces.None); // what RowEdges can find
 
+    /// <summary>The row sets and the ids around of a tile's state, kept for another tile once it left.</summary>
+    private struct Rows
+    {
+        public ulong[] Front, Next;
+        public EntityId[] Around;
+    }
+
     private struct Entry
     {
         public BufferStore<TCell> Next;  // a Jacobi step's second buffer, its Count the tile's cells; null until the first
@@ -137,6 +144,9 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     private int _membership = -1;        // the index's membership count when the tiles were last checked
     private ulong _lastTick;             // the tick the pass stamped its writes with: later writes are others'
     private bool _sleeps;                // this pass keeps tiles asleep (the method may sleep, and the field is not moving everywhere)
+    private bool _maySleep;              // the method may sleep: its passes keep the queues and the walk
+    private Rows[] _spares = [];         // the row sets of tiles that left, for the next tile joining at another index
+    private int _spareCount;             // how many (Check gives them on the system's thread; Join takes them on any)
     private int _awake;                  // Jacobi: passes left that step every tile, waking none, before one sleeps again
 
     /// <summary>
@@ -172,7 +182,9 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
     {
         TileShapeCheck<TTile>.Check();
         _sleeps = sleeps && _awake == 0;
+        _maySleep = sleeps;
         if (sleeps && _awake > 0) _awake--;
+        if (_spareCount < 0) _spareCount = 0; // the joins of the last pass took more than there were
         _maxSweeps = maxSweeps > 0 ? maxSweeps : Cells;
         _color = 0;
         var index = LookupExtensions.Prepared<TGrid, TKey>(_world) as ValueIndex<TGrid, TKey>;
@@ -212,12 +224,17 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         _wokenOnly = false; // a tile that joined steps first in a walk of every tile
         // The queues and the walk sized for every tile of the grid: a tile is queued once per color until walked, so
         // however many tiles of a color wake at once (a source reaching a part of the grid it never reached), a pass
-        // never grows them. 8 bytes per tile for the walk and 4 per tile and color, next to a tile's cells; Wake's
-        // growth stays for the indexes of tiles that left, which may sit in a queue until it is walked.
+        // never grows them. 8 bytes per tile for the walk and 4 per tile and color, next to a tile's cells, at most
+        // twice the peak of the tiles (doubled, so a grid growing a tile at a time does not copy them each time); Wake's
+        // growth stays for the indexes of tiles that left, which may sit in a queue until it is walked. A method that
+        // never sleeps walks every tile and queues none: it has neither.
         int tiles = _world.Count<DynamicBuffer<TCell>, TGrid>();
-        if (_walk.Length < tiles) _walk = new EntityId[tiles];
-        for (int c = 0; c < _queues.Length; c++)
-            if (_queues[c].Length < tiles) Array.Resize(ref _queues[c], tiles);
+        if (_maySleep)
+        {
+            if (_walk.Length < tiles) _walk = new EntityId[Math.Max(tiles, _walk.Length * 2)];
+            for (int c = 0; c < _queues.Length; c++)
+                if (_queues[c].Length < tiles) Array.Resize(ref _queues[c], Math.Max(tiles, _queues[c].Length * 2));
+        }
         var entries = _entries;
         for (int i = 0; i < entries.Length; i++)
         {
@@ -231,7 +248,22 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
             }
             WakeAround(entry.Key, uint.MaxValue);
             Forget(ref entry);
+            Spare(ref entry);
         }
+    }
+
+    /// <summary>
+    /// The row sets of a tile that left go to the next tile that joins at another index (a grid whose tiles come and go,
+    /// the chunks around players, holds those of its peak, not one set per entity index a tile ever had). On the
+    /// system's thread, before the pass.
+    /// </summary>
+    private void Spare(ref Entry entry)
+    {
+        if (entry.FrontRows == null) return;
+        if (_spareCount == _spares.Length) Array.Resize(ref _spares, Math.Max(16, _spares.Length * 2));
+        _spares[_spareCount++] = new Rows { Front = entry.FrontRows, Next = entry.NextRows, Around = entry.Around };
+        entry.FrontRows = entry.NextRows = null;
+        entry.Around = null;
     }
 
     /// <summary>The tile at entity index of <paramref name="entry"/> left: its second buffer goes back to the pool.</summary>
@@ -484,13 +516,32 @@ public sealed class TileSteps<TCell, TTile, TGrid, TKey, TColors>
         entry.Version = tile.Version;
         entry.Live = true;
         entry.Dirty = true;
-        entry.FrontRows ??= new ulong[TTile.Height];
-        entry.NextRows ??= new ulong[TTile.Height];
-        // The ids across its edges a step keeps for Next, set up here with the rest: a tile may change for the first
+        // Its row sets and the ids across its edges a step keeps for Next, set up here: a tile may change for the first
         // time long after it joined (a source wandering into it), which must not allocate in the pass.
-        entry.Around ??= new EntityId[AroundSlots];
+        if (entry.FrontRows == null) TakeSpare(ref entry);
         entry.FrontRows.AsSpan().Fill(AllRows);
         entry.NextRows.AsSpan().Fill(AllRows);
+    }
+
+    /// <summary>
+    /// A tile joins at an index that never held one: the row sets of a tile that left, else new ones. On the thread
+    /// stepping it: the spares only shrink during a pass (Check fills them before it), so each decrement owns its slot;
+    /// one that finds none allocates and leaves the count below zero, which the next pass sets back.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void TakeSpare(ref Entry entry)
+    {
+        int n = Volatile.Read(ref _spareCount) > 0 ? Interlocked.Decrement(ref _spareCount) : -1;
+        if (n >= 0)
+        {
+            ref var spare = ref _spares[n];
+            (entry.FrontRows, entry.NextRows, entry.Around) = (spare.Front, spare.Next, spare.Around);
+            spare = default;
+            return;
+        }
+        entry.FrontRows = new ulong[TTile.Height];
+        entry.NextRows = new ulong[TTile.Height];
+        entry.Around = new EntityId[AroundSlots];
     }
 
     /// <summary>No tile around the one at <paramref name="key"/> (that the grid holds) has its color: tiles of one color step at once.</summary>
