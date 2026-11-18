@@ -103,15 +103,20 @@ public sealed partial class SystemGenerator
         // The cutoff: once per pass, or each row's (its components at row __r).
         sb.Append($"        public bool CutoffPerRow => {(pair.PerRow ? "true" : "false")};\n\n");
         sb.Append($"        public double CutoffSquared => {(pair.Cutoff.Length == 0 ? "double.PositiveInfinity" : pair.PerRow ? "double.NaN" : $"(double)({pair.Cutoff})")};\n\n");
-        sb.Append("        public void CutoffsSquared(in global::EasyEcs.PairRun table, global::System.Span<double> into)\n        {\n");
+        // Each row's cutoff, only where the pass reads it (IPairJob's default is none). The interface's member is static
+        // (a ref struct job implements every instance member), so it hands the job to the instance method the cutoff's
+        // fields need.
         if (pair.PerRow)
         {
+            sb.Append($"        static void global::EasyEcs.IPairJob.CutoffsSquared<TSelf>(in TSelf job, in global::EasyEcs.PairRun table, global::System.Span<double> into) =>\n");
+            sb.Append($"            {unsafeType}.As<TSelf, {method.Name}Job{number}>(ref {unsafeType}.AsRef(in job)).Cutoffs(in table, into);\n\n");
+            sb.Append("        private void Cutoffs(in global::EasyEcs.PairRun table, global::System.Span<double> into)\n        {\n");
             for (int i = 0; i < method.Parameters.Length; i++)
                 if (pair.Cutoff.Contains($"__k{i},"))
                     sb.Append($"            ref {method.Parameters[i].Type} __k{i} = ref table.Rows<{method.Parameters[i].Type}>();\n");
             sb.Append($"            for (int __r = 0; __r < into.Length; __r++) into[__r] = (double)({pair.Cutoff});\n");
+            sb.Append("        }\n\n");
         }
-        sb.Append("        }\n\n");
 
         // The rows of each kind of parameter: the method's columns r{k} in query order, a neighbor's o{i}.
         string Columns(string indent)
@@ -138,10 +143,14 @@ public sealed partial class SystemGenerator
         if (accelerated != null) sb.Append($"            if (!run.Listed && {accelerated} && run.ClusterSize == {vector}<float>.Count) Vectors(in run);\n            else Rows(in run);\n");
         else sb.Append("            Rows(in run);\n");
         sb.Append("        }\n\n");
-        sb.Append("        public void Stamp(in global::EasyEcs.PairRun run)\n        {\n");
-        foreach (var p in method.Parameters.Where(p => p is { Kind: Symbols.ParamKind.Component, RefKind: "ref" }).Select(p => p.Type).Distinct())
-            sb.Append($"            run.Stamp<{p}>(); // the rows the method ran for, as a ref parameter stamps them\n");
-        sb.Append("        }\n\n");
+        // The rows the method ran for, stamped as a ref parameter stamps them; IPairJob's default stamps none.
+        var stamped = method.Parameters.Where(p => p is { Kind: Symbols.ParamKind.Component, RefKind: "ref" }).Select(p => p.Type).Distinct().ToArray();
+        if (stamped.Length > 0)
+        {
+            sb.Append("        static void global::EasyEcs.IPairJob.Stamp(in global::EasyEcs.PairRun run)\n        {\n");
+            foreach (var p in stamped) sb.Append($"            run.Stamp<{p}>();\n");
+            sb.Append("        }\n\n");
+        }
 
         // The method per pair: each row of a cluster against its neighbors, in row order.
         int column = 0;

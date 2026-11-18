@@ -99,7 +99,12 @@ public sealed partial class SystemGenerator
             string values = string.Concat(loop.Values.Select(v => (v.Sum ? ", ref " : ", ") + v.Name));
             if (rewritten is ForEachStatementSyntax each)
             {
-                call.Append($"{{\n{hidden}var __span{k} = ({each.Expression.WithoutTrivia()}){loop.Streams[0].Span};\n");
+                // The collection as written, in parentheses only where a member access after it would bind tighter than it
+                string items = each.Expression.WithoutTrivia().ToString();
+                if (loop.Streams[0].Span.Length > 0 && each.Expression is not (IdentifierNameSyntax or MemberAccessExpressionSyntax
+                        or InvocationExpressionSyntax or ElementAccessExpressionSyntax or ThisExpressionSyntax or ParenthesizedExpressionSyntax))
+                    items = $"({items})";
+                call.Append($"{{\n{hidden}var __span{k} = {items}{loop.Streams[0].Span};\n");
                 call.Append($"int __at{k} = {Whole(loop, $"__span{k}.Length")} ? (int)__Elements{k}(ref {Marshal}.GetReference(__span{k}), 0, __span{k}.Length, 0{values}) : 0;\n");
                 call.Append(Line(original));
                 call.Append(each.WithExpression(SyntaxFactory.ParseExpression($"__span{k}.Slice(__at{k})")).WithoutLeadingTrivia().WithoutTrailingTrivia().ToFullString());
