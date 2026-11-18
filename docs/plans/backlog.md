@@ -142,6 +142,17 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       with `stackalloc` was optimized at once (no OSR): the sample's `MeasureSystems` shows 0.40 against 0.17 ms. Find
       whether the generated job can get the method optimized sooner (tiering of the method behind its UnsafeAccessor,
       or a hint) without losing PGO, measured over the sample's first 300 ticks.
+- [ ] **`research-tile-bdn-1b`** (from research-voxel-pingpong; Sonnet to reproduce, Opus for the cause): three
+      BenchmarkDotNet runs of the tile classes on research-voxel-pingpong's head showed 1 B a run (TileColdStart
+      ColdStart 4 threads 256 springs 1 hop and 1 / 4 / 1, TileStencil Laplacian_PingPong 4 threads 32), none on its base
+      and none in the unit tests' 0 B checks of the same passes. Find whether it is a late tier-up or OSR in the run
+      (the JIT's allocations) or a real allocation: run those classes with an allocation listener over the measured
+      iterations.
+- [ ] **`research-parts-peak`** (from research-voxel-pingpong; Opus): a parallel pass of a merging job (a `Reduce<T>`,
+      Emit) keeps a box per chunk (ArityGenerator's ForEachEntityChunks `_parts`), grown when the pass is cut into more
+      chunks than ever: the voxel server at 2,000 players allocates 4,088 B after its warm-up in WaterFlowSystem, and in
+      FloatSystem and SendEntitiesSystem, as the loaded chunks reach a new peak. Size the boxes from the tables' room (as
+      the tile step's row sets, 73a56430) or the reserve, so a world that reserved its peak allocates nothing.
 - [ ] **`docs-grids-red-black`** (docs pass; from research-voxel-pingpong): `guide/performance/grids.mdx` (+ zh)
       still teaches red-black ordering by hand (`Red` / `Black` tags, two systems) and says plain Gauss-Seidel is not
       parallel; `[GaussSeidel]` does it (colors from the keys, sweeps in place, sleeping tiles): rewrite the bullet

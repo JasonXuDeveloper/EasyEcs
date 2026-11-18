@@ -413,7 +413,20 @@ VoxelServerTests and check-sample pass, Steady.Check 0 B. TickBenchmark (head / 
 against 21.57 / 18.20, 500 players 39.57 / 37.76 against 40.94 / 37.32 (spread 5-10 ms), 2,000 players 105.51 / 111.16
 against 100.90 / 97.84; 0 B. Faster or level in both rounds. With 73a56430 the sample allocates nothing after its
 warm-up in the water at 50 players (39,672 B before) and 4,088 B at 2,000 (125,048 B before; the old form 29,080 B),
-and nothing in the scent (19,904 / 41,112 B before).
+and nothing in the scent (19,904 / 41,112 B before). The 4,088 B are the part boxes of the pass's `Reduce<Stats>`
+(ForEachEntityChunks' `_parts`, one per chunk of the pass) growing to 16 when the loaded chunks reach a new peak, as
+`FloatSystem`'s and `SendEntitiesSystem`'s do (a probe on their growth, 2,000 players): backlog `research-parts-peak`.
+The core commits' A/B (Jacobi and [GaussSeidel] tile classes, base be929ed3 against head, two rounds; tables in the session's pp/cb/ab.md): of 108
+rows, 96 level, 7 faster (Active Cell at 32, Ground Cross / Box 512 at 1 thread, ColdStartColumns 1 thread 4, settle Hand
+1 thread 256: hand-written, the control), 5 over the rule in both rounds, none from the change: Laplacian_PingPong 1 thread 32 (+5.3 / +5.7 %; a third round 571 -> 510
+us, head faster), Blur9_PingPong 4 threads 512 (+9 / +6 %; head with the old unseen swap measured the same, 79.2 against
+78.2 ms), woken Auto 1 thread 32 at 25 % (a sleeping pass, whose code did not change), cold Linger 1 thread 256 (a
+`[GaussSeidel]` pass, whose code did not change), and settle Hand 1 thread 4 (+13 / +6 %: hand-written code, the
+control). The generated code of the benchmarks differs only in the module initializer (`TileCells.Steps` for
+`SizePool`). Comparing the rows of a pass that does not sleep costs a row per tile when the field moves everywhere: a
+cheaper form (each run of rows compared as one span, no edges) was measured level and not kept. Three runs of 1 B
+(an allocation once in a run, in head runs only: ColdStart 4 / 256 / 1, ColdStart 1 / 4 / 1, Laplacian_PingPong 4 /
+32) were not found by the unit tests' 0 B checks of the same passes; see the backlog item `research-tile-bdn-1b`.
 The sample's own per-system times (`MeasureSystems`, 1,200 ticks) show the new step at 0.40 ms against 0.17 ms for the
 old four systems at 50 players (0.50-0.64 against 0.37 at 2,000): the cause is tiering, not the form. The old step's
 `stackalloc` kept it from on-stack replacement, so the JIT optimized it at once; the new method's Vector128 code runs at
