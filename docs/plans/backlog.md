@@ -424,7 +424,7 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       headline worlds. (b) the first lines of a long run (the streamer needs a few misses to start, and does not cross a
       4 KB page on every core): prefetch the next page's first line per column; measure, drop if level. (c) check by
       listing that no generated 512-bit loop loads across a line where rows are 12 or 24 bytes (interleaved forms).
-- [ ] **`feat-ground-layer`** (owner, L19; L34) built, ready to merge (branch head 6c594ca3 + this Plans commit, from
+- [x] **`feat-ground-layer`** (owner, L19; L34) merged (e87d5bdc) (branch head 6c594ca3 + this Plans commit, from
       ff4baa8d): `Layer<TCell, TTile, TLayer>` (TLayer : ILayer, a static Index) beside a `Cell<TCell, Ground<TTile>>`,
       its layer exchanged alone (`Tile.ExchangeLayer`) and read as one more stream of the row's vector loop; EECS115 for a
       layer it cannot read (another tile, past its layers, no ground cell); EECS073 for two layers of the same cells (the
