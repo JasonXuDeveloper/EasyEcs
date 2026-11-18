@@ -116,10 +116,20 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       it, both runtimes); the old form of the view test passes in the full Debug suite with it; tests/AGENTS.md
       records the rule. The Steady form passed only because a cast before the window (the warm-up's, a finalizer's)
       happened to rebuild the table first.
-- [ ] **`research-voxel-pairs`** (exemplar 2a step 4, voxel-rewrite.md section 11; patch in scratchpad/vx/step4.patch):
-      the pair forms (Keep + Acquire, Pickup with `[Neighbor] ref Item`, item merging as a symmetric pair) built clean
-      but ZombieTarget went 0.17 -> 2.00 ms with 9.6 MB allocated after warm-up, Pickup 0.20 -> 1.16 ms, Steady 336 B
-      in 100 ticks. A pair pass allocating in steady state is a core bug: find it, then re-try step 4. Opus.
+- [x] **`research-voxel-pairs`** (branch research-voxel-pairs): causes in voxel-rewrite.md section 11. Core fixed (a
+      copied buffer list gets the room of an append; the pair margin is not grown by a lone jump; the sweep runs along
+      the widest axis; a neighbor list is sized once), A/B level at 0 B (PairsBenchmark Both / Parallel, PairListsBenchmark,
+      PairGroups, PairHalves, BufferSharing / Snapshot), the old sample's tick level. Step 4 not kept: the form searches
+      every zombie every tick (99.4 % keep their target) and the item pairs pay for the churned item table.
+- [ ] **`research-pair-churn`** (from research-voxel-pairs; Opus): a table whose rows come and go every tick (items)
+      keeps clusters spanning the map until the next sort (every 10 updates): 400x the candidates of its pairs. A probe
+      sorting a table once one cluster in 32 was disturbed (RowOrder counts `Moved` and the rows past `SortedRows`)
+      halved VoxelServer's Pickup and merge; it needs a rule that stays cheap for a large table with churn (a 100,000
+      row sort every tick) and a benchmark with churn before it ships.
+- [ ] **`research-pair-filtered-rows`** (from research-voxel-pairs; Opus): a pair method whose row filter passes few
+      rows (`With<Seeking>`: ~11 of 4,000 zombies) still draws boxes, ranges and lists for every row: 0.52 ms where the
+      old sliced search cost 0.17. Draw only the clusters holding a passing row, then re-try step 4's Keep + Acquire
+      with `Seeking` (the form in voxel-rewrite.md section 11).
 - [ ] **`research-voxel-pingpong`** (exemplar 2a step 5; step5.patch): the tile swap stamps `Fluid` changed on every
       step, settled tiles too (block updates 33,714 -> 101,949), and 16,496 B in 100 ticks. Find whether the ping-pong
       form should stamp only changed cells (or the sample's form is wrong), then steps 5 and 6. Opus.

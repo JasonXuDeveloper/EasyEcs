@@ -358,6 +358,27 @@ Stopped, with the numbers (the patches are not kept):
   at 2,000 players the tick went 4.86 -> 5.84 ms (ZombieTarget 0.17 -> 2.00 ms with 9.6 MB allocated after the warm-up,
   Pickup 0.20 -> 1.16 ms, Merge +0.58 ms; Physics 0.78 -> 0.24, Float 0.66 -> 0.24, Chase 0.57 -> 0.14 from the row
   order) and `Steady.Check` failed (336 B in 100 ticks).
+  research-voxel-pairs (2026-11-18) found three causes. (1) The form, not the core: Keep + Acquire searches for every
+  zombie every tick, and 99.4 % of those searches find the target kept (counted at 2,000 players: 2,142,132 zombie
+  ticks, 2,129,170 kept; 4.28e9 calls of Acquire, 9 % within the Vision), where Pick looked a tenth of the zombies a
+  tick and returned at once for a kept target. Acquire costs 0.56 ns a call (a vector loop): the 2 ms is the work.
+  Restricting Acquire to the zombies that lost their target (a presence-flipped `Seeking`, `With<Seeking>` on the pair
+  method, set by a serial Lose and cleared by Found) takes it to 0.52 ms (6.2 MB after warm-up), still 3x Pick's: the
+  pair pass draws boxes, ranges and lists for every zombie however few rows pass its filter. (2) Pickup and the merge:
+  the item table changes count almost every tick (809 of 900), so between the sorts (every 10 updates) the rows moved
+  into holes and the new rows leave clusters spanning the map: 200,000-500,000 candidates a tick for 500-2,000 pairs.
+  Sorting a table as soon as one cluster in 32 was disturbed (a probe, not kept) halves both (Pickup 1.32 -> 0.61 ms,
+  merge 0.70 -> 0.30); sorting every update 0.51 / 0.27. Pickup stays above the old 0.20 ms (every player against the
+  items every tick, serial, where the old one walked half the items through the view-center index), and the merge is
+  a new cost. (3) Core, fixed: the margin grew x1.5 for every box that left soon after a keep, and a crowd's respawns
+  left one or two every pass, so the zombie search kept a margin of 20-35 blocks (the reach) where 3.5 was set (with
+  the fix: 0.7-3.4); the sweep sorted the boxes along x, across the players' strip (48 x 375 blocks), so every box
+  overlapped every other; a first neighbor list of 300,000 entries grew by doubling (9.6 -> 7.6 MB after warm-up at
+  2,000 players, the rest the lists reaching new peaks as the zombies grow to 4,245); a buffer's copy-on-write copy
+  had the room of its count (1), so the next append grew it, which the Steady replay hit (336 B) when the threads
+  returned lists in another order (`DynamicBufferTests.ACopiedListHasTheRoomAnAppendGives` fails without the fix).
+  Result: step 4 not kept. TickBenchmark (100 ticks, 2,000 players): the old sample 84.5 / 83.3 ms base, 86.2 / 83.6 ms
+  with the fixes (level, 0 B); step 4 on the fixes 325.6 / 305.8 ms (base 296 / 300 ms before them).
 - Step 5 (water in ping-pong form, Sleep + Commit merged into WaterSettleSystem, FluidStep split): output changed (block
   updates 33,714 -> 101,949: the swap stamps `Fluid` on every step, settled ones too; cells filled 16,069 -> 16,059) and
   Steady.Check failed (16,496 B in 100 ticks).
