@@ -13,9 +13,9 @@ namespace VoxelServer;
 // hunts in costs nothing to load, compare or skip.
 public record struct Scent(byte Strength);
 
-// The field after the next step: the shader writes it, the settle copies it into the Scent buffer once the half of the
-// chunks that stepped are done (Systems/Scent/Settle.cs), as the water ping-pongs its tile.
-public record struct NextScent(byte Strength);
+// Where the players stand, one byte per column beside the field (DynamicBuffer<Seed>): Rules.ScentReach under a player
+// while zombies hunt, 0 elsewhere and by day. SeedSystem writes it where it changed, which wakes the field of the chunk.
+public record struct Seed(byte Strength);
 
 // The side a zombie on a column walks toward to follow the scent up, one byte per column beside the field
 // (DynamicBuffer<Trail>): the shader writes it once the field settled, so ZombieChaseSystem reads one byte, not the
@@ -25,8 +25,8 @@ public record struct Trail(byte Toward)
     public const byte None = 0, West = 1, East = 2, North = 3, South = 4, Player = 5;
 }
 
-// Whether any zombie hunts: none by day once the night's have burned. The field sleeps then (ScentStepSystem), and
-// HuntSystem wakes every chunk's field when the first zombie of a night rises.
+// Whether any zombie hunts: none by day once the night's have burned. The seeds go then (SeedSystem), the field fades
+// to nothing and sleeps, and the first zombie of a night brings the seeds back.
 public record struct Hunt(bool On) : ISingletonComponent;
 
 // The ground of a column as a path sees it, one byte per column: the height a body stands at (the surface's top + 1, the
@@ -58,26 +58,9 @@ public record struct Footing(byte Value)
 [Tile(Width = Terrain.Size, Depth = Terrain.Size)]
 public partial record struct Ground([UniqueKey(SlotsPerAxis = 64)] ChunkPos Pos) : IComponent;
 
-// What a chunk's last step of the field did: whether any column changed, and the edges whose columns changed, which the
-// chunks across them read into their halo.
-public record struct ScentStep(TileFaces Edges, bool Changed) : IComponent;
-
-// A tag on a chunk whose field may still change: the field's systems visit only these. A chunk loses it when its step
-// changed nothing, and gets it back when a player steps onto another column in it (FootprintSystem), its ground changed
-// in it or beside it, or the edge of a neighbor's field changed (ScentWakeSystem, the settle).
-public struct Spreading : IComponent;
-
-// The two colors of a checkerboard of chunks, by the parity of the chunk's position: no chunk touches a chunk of its
-// own color across a face. The red chunks step, then the black ones from the red ones' new edges (red-black
-// Gauss-Seidel), so the scent crosses two chunks per update instead of one. Every chunk has both in the prefab and loses
-// one when it is generated: a presence bit, all chunks in one table.
-public struct Red : IComponent;
-
-public struct Black : IComponent;
-
-// The column a player stands on, by chunk: an index of the players by it (Lookup<Footprint>.Find(chunk)) gives the
-// shader the players of its chunk, the sources of its scent, without walking the zombies and items of InChunk.
-// FootprintSystem writes it when the player steps onto another column, and wakes the chunks that lost or gained it.
+// The column a player stands on, by chunk: an index of the players by it (Lookup<Footprint>.Find(chunk)) gives
+// SeedSystem the players of a chunk, the sources of its scent, without walking the zombies and items of InChunk.
+// FootprintSystem writes it when the player steps onto another column.
 public partial record struct Footprint([LookupKey] ChunkPos Chunk, byte Column) : IComponent
 {
     // The footprint of a body at `p`: its chunk, and its column there (x + 16 z, the layout of the field).

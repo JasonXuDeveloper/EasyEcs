@@ -108,12 +108,9 @@ public static class Startup
         world.AddSystem<GridSystem>();
         world.AddSystem<FootprintSystem>();
         world.AddSystem<FootingSystem>();
-        world.AddSystem<ScentWakeSystem>();
         world.AddSystem<HuntSystem>();
-        world.AddSystem<ScentStepSystem<Red>>();             // red-black: the red half, then the black from its edges
-        world.AddSystem<ScentSettleSystem<Red>>();
-        world.AddSystem<ScentStepSystem<Black>>();
-        world.AddSystem<ScentSettleSystem<Black>>();
+        world.AddSystem<SeedSystem>();
+        world.AddSystem<ScentStepSystem>();
         world.AddSystem<DigSystem>();
         world.AddSystem<PickupSystem>();
         world.AddSystem<ItemExpirySystem>();
@@ -177,9 +174,7 @@ public static class Startup
                 .SetChunk(default).SetBuffer<Block>().SetBuffer<Fluid>().SetBuffer<Surface>()
                 .SetViewers(0, 0).Set(FluidCount.Dry).SetFluidStep(TileFaces.None).SetStepped(StepResult.None).SetFluidAhead(FluidCount.Dry)
                 .Set(new Fresh(), new Flowing()).SetAbsent<Unloading>()
-                .SetGround(default).SetBuffer<Footing>().SetBuffer<Scent>().SetBuffer<NextScent>().SetBuffer<Trail>()
-                .SetScentStep(TileFaces.None, false)
-                .Set(new Spreading(), new Red(), new Black()),
+                .SetGround(default).SetBuffer<Footing>().SetBuffer<Scent>().SetBuffer<Seed>().SetBuffer<Trail>(),
             Player: new Prefab()
                 .SetPlayer(0).SetInChunk(default).SetAbsent<Visible>().SetScore(0).SetFootprint(default, 0)
                 .SetPosition(default).SetVelocity(default).SetOnGround(false).SetBlocked(false)

@@ -5,9 +5,9 @@ namespace VoxelServer;
 // #region load
 // A chunk's life, each step one system and each state data: a player's view asks for it (a LoadRequest, AoiViewSystem),
 // ChunkReadSystem reads it back from the region files or ChunkGenerateSystem generates it, it is Fresh for a tick
-// (AoiChunkSystem sends it whole), its water steps while it is Flowing and the players' scent while it is Spreading (both
-// from the start: what was saved has moved on since), it is marked Unloading once nobody has seen it for a while, and
-// ChunkSaveSystem writes it to the region files with what is in it.
+// (AoiChunkSystem sends it whole), its water steps while it is Flowing (from the start: what was saved has moved on
+// since) and the players' scent while it may change (ScentStepSystem: a chunk joining the grid steps), it is marked
+// Unloading once nobody has seen it for a while, and ChunkSaveSystem writes it to the region files with what is in it.
 //
 // Every chunk is an instance of the chunk prefab (Program.cs), which has every component and tag a chunk ever has,
 // the tags absent. So all chunks share one table, a read chunk included (its save keeps the columns), and each change
@@ -25,7 +25,7 @@ public ref struct ChunkReadSystem
     {
         regions.Files.TryRead(request.Pos, out var bytes);
         world.LoadEntities(bytes);                                               // the chunk and what was in it
-        world.ChunkIndex.Get(request.Pos).Set(new Fresh(), new Flowing(), new Spreading());   // presence bits
+        world.ChunkIndex.Get(request.Pos).Set(new Fresh(), new Flowing());     // presence bits
         stats.Value.ChunksLoaded++;
     }
 }
@@ -44,17 +44,15 @@ public ref struct ChunkGenerateSystem
         bool spring = Rules.HasSpring(pos);
         var chunk = world.Instantiate(prefabs.Chunk, new Chunk(pos), new Ground(pos),
             spring ? new FluidCount(1, (byte)y, (byte)y) : FluidCount.Dry);
-        if (((pos.X + pos.Z) & 1) == 0) chunk.RemoveBlack();                     // a square of the checkerboard: a presence bit
-        else chunk.RemoveRed();
         Terrain.Generate(pos, chunk.WriteBlock().SetCount(Terrain.BlocksPerChunk));
         var water = chunk.WriteFluid().SetCount(Terrain.BlocksPerChunk);        // zeroed: no water
         if (spring) water[Terrain.IndexOf(x, y, z)] = new Fluid(Fluid.Spring);
-        // The field's buffers, zeroed (no scent; the footing is FootingSystem's, later this tick), taken here on the
-        // owner thread: the pool keeps its lists per thread, and the field's first writes are on helper threads.
+        // The field's buffers, zeroed (no seed; the footing is FootingSystem's, later this tick), taken here on the
+        // owner thread: the pool keeps its lists per thread, and the field's first writes are on helper threads. (The
+        // scent itself is the field's step's: the pass sizes the cells of a chunk joining it, on the system's thread.)
         const int columns = Terrain.Size * Terrain.Size;
         chunk.WriteFooting().SetCount(columns);
-        chunk.WriteScent().SetCount(columns);
-        chunk.WriteNextScent().SetCount(columns);
+        chunk.WriteSeed().SetCount(columns);
         chunk.WriteTrail().SetCount(columns);
         stats.Value.ChunksGenerated++;
     }
