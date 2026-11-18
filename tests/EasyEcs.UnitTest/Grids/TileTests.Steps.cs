@@ -1051,6 +1051,52 @@ public partial class TileTests
         }
     }
 
+    /// <summary>A plate keyed as a server's chunks are: a [UniqueKey] window, whose new keys allocate nothing.</summary>
+    [Tile(Width = 16, Depth = 16)]
+    public partial record struct KeyedPlate([UniqueKey(SlotsPerAxis = 64)] TilePos Pos) : IComponent;
+
+    /// <summary>The heat of a <see cref="KeyedPlate"/>, carried over by a Jacobi step.</summary>
+    [EcsSystem]
+    public ref struct KeyedHeatSystem
+    {
+        [ForEach]
+        static void Carry(ref Tile<Heat, KeyedPlate> heat)
+        {
+            heat.ExchangeHalo();
+            foreach (var row in heat.Rows(TileStencil.Layer))
+            {
+                var into = heat.Write(row);
+                for (int x = 0; x < into.Length; x++) into[x] = heat.At(row)[x, 0, 0];
+            }
+        }
+    }
+
+    [Test]
+    public void AGridGrowingToItsReservedPeakAllocatesNothing()
+    {
+        // The chunks around players reach a new peak long after the first tick: a world that reserved that peak (its
+        // tables, the lists of their buffers) steps each new tile, at an index no tile had, without allocating (a tile's
+        // row sets taken in the pass: 238,400 B in 100 new tiles before).
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 1 });
+        world.AddSystem<KeyedHeatSystem>();
+        const int peak = 10_000; // the warm-up runs until it settles (up to 30 s): room for every step
+        world.EnsureEntityCapacity(peak);
+        var prefab = new Prefab().Set(new KeyedPlate(default)).SetBuffer<Heat>();
+        world.Reserve(prefab, peak);
+        world.ReserveBuffers(prefab, peak);
+        int x = 0;
+        Assert.That(Allocations.Steady(Step, 2, 100), Is.Zero);
+        Assert.That(x, Is.LessThan(peak), "the grid stayed within its reserve");
+
+        void Step()
+        {
+            var plate = world.Instantiate(prefab, new KeyedPlate(new TilePos(x % 40, 0, x / 40)));
+            x++;
+            plate.Get<DynamicBuffer<Heat>>().SetCount(256)[0] = new Heat(1f);
+            world.Update();
+        }
+    }
+
     [Test]
     public void ReserveBuffersKeepsTheSecondBufferOfASteppedTile()
     {
