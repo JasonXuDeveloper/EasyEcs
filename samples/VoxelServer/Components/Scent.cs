@@ -14,7 +14,7 @@ namespace VoxelServer;
 public record struct Scent(byte Strength);
 
 // The field after the next step: the shader writes it, the settle copies it into the Scent buffer once the half of the
-// chunks that stepped are done (Systems/Scent/Settle.cs), as the water ping-pongs NextFluid.
+// chunks that stepped are done (Systems/Scent/Settle.cs), as the water ping-pongs its tile.
 public record struct NextScent(byte Strength);
 
 // The side a zombie on a column walks toward to follow the scent up, one byte per column beside the field
