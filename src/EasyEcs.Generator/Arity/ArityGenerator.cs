@@ -583,7 +583,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     /// <summary>
                     /// Rows of one word: row i (of <paramref name="entities"/> and of every span) passes when bit i of
                     /// <paramref name="rows"/> is set; the job leaves the other rows as they are (it may store their values
-                    /// back unchanged). Bit 0 is set, and no bit at or past the spans' length.
+                    /// back unchanged). The spans may start before the first passing row (on a cache line); no bit is at or past their length.
                     /// </summary>
                     void Execute(EntitySpan entities, ulong rows, {{List(n, i => $"Span<T{i}> c{i}")}});
                 }
@@ -737,6 +737,9 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     {
                         ref EntityId slots = ref MemoryMarshal.GetArrayDataReference(archetype.Slots);
                 {{Lines(n, i => $"        ref T{i} r{i} = ref archetype.Base<T{i}>(b{i});")}}
+                        // The rows of a cache line in every column (row 0 of each is on a line): 64 bytes over the largest
+                        // power of two dividing each size, the largest of them. A JIT-time constant.
+                        int line = 1 << (31 - BitOperations.LeadingZeroCount((uint)({{List(n, i => $"(64 >> Math.Min(6, BitOperations.TrailingZeroCount(Unsafe.SizeOf<T{i}>())))", " | ")}})));
                         // Word by word: whole words make runs, the others go to the job with their passing rows.
                         bool tombstones = archetype.Count != archetype.AliveCount;
                         int words = (count + 63) >> 6, start = first, end = first; // the pending run: start .. end
@@ -776,7 +779,10 @@ public sealed class ArityGenerator : IIncrementalGenerator
                                 continue;
                             }
 
-                            int low = (w << 6) + BitOperations.TrailingZeroCount(bits), high = (w << 6) + 64 - BitOperations.LeadingZeroCount(bits);
+                            // From the line of its first passing row (not before the pass's first row): the job's vectors
+                            // load and store whole lines; from the row itself, every 512-bit one split across two
+                            // (KernelBenchmark.Move2Gaps, 0.84-0.90x).
+                            int low = Math.Max(at, ((w << 6) + BitOperations.TrailingZeroCount(bits)) & -line), high = (w << 6) + 64 - BitOperations.LeadingZeroCount(bits);
                             ulong passing = bits >> (low & 63);
                 {{StampWord(n, "            ", "w", "bits")}}
                             job.Execute(new EntitySpan(this, archetype, low, ref Unsafe.Add(ref slots, low), high - low), passing, {{List(n, i => $"MemoryMarshal.CreateSpan(ref Unsafe.Add(ref r{i}, low), high - low)")}});
