@@ -563,11 +563,44 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       Emit 10k (0.79x serial, was 1.23x), ParallelQueryComparison (first, ahead of Friflo / Arch), EntityBatch (1.48x
       faster than per-row, level with Friflo), SingleEntity Structural (0.92-1.09, inside RatioSD 0.10-0.21). Still
       losing, each an item below: C0a-C0d.
-- [ ] **C0a. ParallelFor LightParallelFor at 10k is 1.36x serial** (5.6 vs 4.1 us), and its lambda form LightLambda
+- [x] **C0a. ParallelFor LightParallelFor at 10k is 1.36x serial** (5.6 vs 4.1 us), and its lambda form LightLambda
       is 1.64 us: find why the struct form costs 3.4x the lambda form at 10k (and 1.8x at 100k). Opus.
-- [ ] **C0b. Laplacian_Tile at Side 32 is 1.10x Hand (1 thread) and 1.16x (4 threads)**; Laplacian_Cell beats Hand
+      **Done (perf-c0ab, 4027dbfe).** Re-measured on c9bb1b7c: 5.69 / 4.18 us (1.36x), LightLambda 2.01 us. Two causes.
+      (1) Dynamic PGO devirtualized `ParallelWork.Run` at the runner's call sites and inlined the job there; inlined into
+      `RunChunks`' one-chunk branch (inside its try / finally) the job's loop reloaded its two constants from memory at
+      every element (9 instructions against 7, three loads against one): 1.35x its serial loop, in a process whose
+      first calls were one chunk (a probe alternating chunk sizes in one process: 5.6 us against 3.95 serial; 4.0-4.3
+      once a two-chunk call had come first). `RunItem` (NoInlining, no handler) is now the runner's one call of an
+      item: PGO devirtualizes `Run` there and calls `Execute`, compiled as alone. A/B (default job, two interleaved
+      rounds, base / head): LightParallelFor 10k 4.84 / 4.03, 5.79 / 3.82 us, 100k 31.9 / 25.3, 32.3 / 25.8; LightLambda
+      10k 1.89 / 1.65, 1.97 / 1.74; ChunkSize, ParallelPass, ParallelRunner, ParallelSystems, BattleServer and TileStencil
+      (two extra rounds for Blur9_Hand at 4 threads, 0.97 / 0.96) no row slower, 0 B. (2) What is left between the two
+      forms is the job: LightJob's `Light` is a scalar loop (0.42 ns per element) and the lambda's job the vector loop
+      (0.19 ns); at 10k both run on the caller alone (the runner finds helpers never pay: a run with them 13-17 us).
+      EECS133 rewrites such a job as the lambda pass, but not this one: its Execute calls a helper holding the loop
+      (a possible extension of EECS133, not done). Seen on the way: a measured cost near the 5 us floor flips the pass
+      between one chunk and two (9,792 + 208 rows) run alone; with `RunItem` both cost the serial loop.
+- [x] **C0b. Laplacian_Tile at Side 32 is 1.10x Hand (1 thread) and 1.16x (4 threads)**; Laplacian_Cell beats Hand
       (371 / 252 us). Find the Tile form's extra cost against Blur9_Tile, which beats Hand; or teach EECS116 to
       point the tile method to its cell form. Opus.
+      **Done (perf-c0ab).** Re-measured on c9bb1b7c: 546 / 475 us (1.15x) at 1 thread, 311 / 271 (1.15x) at 4. Cause
+      (Tier1 listing of WaveSystem.Step): each intercepted load computed `(uint)(dx + r)`, dx a temp of `x + k` (the
+      interceptor used dx in both branches, so the inliner spilled it): a 32-bit add and a zero extension per load
+      (`lea eax,[rdi+k]; add eax,2`), 26 instructions per column of the Laplacian's 13 loads, while the hand form folds
+      each offset into the load's displacement. Fix (TileLoads): a loop from 0 or later takes its column back out of dx
+      once (`int x = dx - k`), and `Column` adds x zero-extended plus `k + r` in 64 bits: every load of a column is
+      `[base + 4*x + disp]` off one index (Blur9_Tile's 9 loads share one register too). A first form (two nested
+      `Unsafe.Add`, and the local kept for k = 0) grew the interceptors past the stencil method's inline budget:
+      `TileRows.MoveNext` and `MemoryMarshal.GetReference` stayed calls, Laplacian_Tile 1.18 / 1.02 (1 thread) and 1.10
+      / 1.24 (4 threads) slower, dropped; the shipped form writes k = 0 without the local and checks a loop with a
+      numeric bound through `Fits` over the first and last column the generator works out (less code than `Covers`),
+      and every call of the method is inlined again (116 inlinees). A/B head (Core change only) / head + TileLoads, six
+      interleaved default-job rounds: Laplacian_Tile 1 thread 0.894, 0.993, 0.885, 0.950, 0.960, 0.990, 4 threads
+      0.918, 0.947, 0.941, 0.954, 1.080, 1.003; no row slower in every round, 0 B; the controls of unchanged code moved
+      as much (Laplacian_Hand 0.86-1.10). What is left against Hand (about 1.05x at 1 thread): the exchange of the halo
+      per tile and the store's row index read back from the stack each column. The cell form is the answer and needs no
+      new rule: EECS103 v2 (HandStencil) already reports such a tile method with its cell rewrite (Laplacian_Cell 350-410
+      us, 0.8x Hand); EECS116 stays about the second buffer.
 - [ ] **C0c. MassParallelReduce at 1k / 10k is 1.12x / 1.06x MassSerialRef**: the parallel pass should fall back to
       the serial form below its break-even, as Sum does; and Mass has no serial Reduce row to compare. Sonnet for the
       row, Opus for the threshold.
