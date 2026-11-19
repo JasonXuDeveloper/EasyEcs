@@ -3917,3 +3917,14 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
       (regenerated), `guide/performance/threading` where it says how a reducing pass is cut, D125's text.
 - [ ] **Changelog (Performance or Fixes, by the numbers):** a parallel `Reduce<T>` / `Emit<T>` pass cuts its chunks
       from its rows and the bytes each row reads; a float result is still the same at any thread count.
+
+## perf-align-prefetch (owner, 2026-11-16: alignment and prefetch of the vector loops)
+
+- [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`): a masked word goes to its job from the cache line of its
+      first passing row (`max(first, low & -line)`, `line` the rows of a line in every column), so the job's vectors
+      load and store whole lines; not from the word's first row (scans rows that do not pass: HurtHot 1k 1.28 / 1.15).
+      Considered and dropped, with their causes: prefetching the next small table's columns (the chase to its metadata
+      costs more than the head lines save, in the L2 and past it) and prefetching the next page's first line per column
+      (level to slower). Numbers: microarch.md, "perf-align-prefetch".
+- [ ] **Guide** (`guide/performance`, where memory layout or alignment is described): columns start on a cache line and
+      every vector of a walk loads whole lines, holes included; sequential reads are left to the hardware prefetcher.
