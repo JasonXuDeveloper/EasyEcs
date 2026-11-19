@@ -275,3 +275,75 @@ Ablations (same head, one change off): the masked skip on the word's bits agains
 BattleServer 1.10 / 1.09, WorldSimulation 100k 1.06 / 0.92, 10k 0.99 / 0.95, CycleHoles 100k 1.04 / 1.11, Holes 100k
 0.84 / 0.95, Move2Gaps 1k 0.85 / 0.85: reverted. The module initializer against none, on the worlds: 1.03 / 1.00 /
 0.94 (WorldSimulation 10k / 100k, BattleServer): neutral where the tables are initialized before Tier1 anyway.
+
+### perf-align-prefetch: alignment and prefetch of the generated walks (2026-11-19)
+
+The owner asked whether the vector loops take alignment and prefetch into account (2026-11-16). What already held:
+unmanaged columns start row 0 on a 64-byte line (`Archetype.Aligned`), runs and chunks start on 64-row words, so
+every vector load of a whole run starts on a line for 4, 8 and 16-byte rows, and a 12 or 24-byte row's 512-bit loop
+steps 192 bytes (16 or 8 rows) from a line too (Tier1 listings of Travel and Move3Gaps: loads at +0 / +0x40 / +0x80
+from `col + size * start`). Sequential column reads are the hardware prefetcher's (candidate 9). Three ideas were
+tried on this machine (Sapphire Rapids KVM, 4 cores, L1d 48 KB, L2 2 MB, no PMU), BenchmarkDotNet default job, base
+ffcc09a4 against each variant built from its own `git archive` tree, two rounds or more with the order alternated,
+every row 0 B.
+
+**Shipped: (c) a masked word's spans start on the cache line of its first passing row** (`ArityGenerator`, the
+`Masked` runner; commit 41d4e3bf). A word that is not whole went to the job from its first passing row
+(`low = w * 64 + tzcnt(bits)`), so for any row size every 512-bit load of the word was split across two lines unless
+that row happened to start one. The span now starts at `max(first, low & -line)`, `line` the rows of a cache line in
+every column (64 bytes over the largest power of two dividing each size, the largest of them: a JIT-time constant),
+so the job's vectors load and store whole lines; the rows before `low` have no bit and are left as they were (the
+`IForEachMasked.Execute` contract no longer says bit 0 is set). Starting from the word's first row instead (the first
+form tried) scanned up to 63 rows that do not pass: HurtHot 1k 1.28 / 1.15 (1 % of rows pass) and VectorForms
+MaskedNarrow 1.10 / 1.10 slower; the line bound limits that to less than one line.
+
+| Benchmark (headc / base) | Rows | fin r1 | fin r2 | conf r1 | conf r2 |
+|---|---|---|---|---|---|
+| Kernel Halves | 1k | 0.927 | 0.908 | 0.901 | 1.015 |
+| Kernel Halves | 100k | 0.859 | 0.878 | 0.818 | 0.829 |
+| Kernel Move2Gaps | 1k | 0.879 | 0.934 | 0.933 | 0.893 |
+| Kernel Move2Gaps | 100k | 1.065 | 0.824 | 0.880 | 1.164 |
+| Kernel Move3Gaps | 1k | 0.880 | 0.919 | | |
+| Kernel HolesHaul | 1k | 0.941 | 0.958 | | |
+| LateHoles Move2 | 1k | 1.041 | 1.060 | 0.978 | 1.007 |
+| LateHoles Move2 | 100k | 0.956 | 0.903 | 0.879 | 0.914 |
+| LateHoles Move3 | 100k | 0.978 | 0.924 | 0.897 | 0.949 |
+| LateHoles Step | 1k | 1.148 | 1.002 | 2.069 | 0.939 |
+
+An earlier pair of default-job rounds (mkC) gave Move2Gaps 1k 0.842 / 0.864, 100k 0.871 / 0.896, Move3Gaps 100k
+0.930 / 0.948, Halves 100k 0.714 / 0.840. Move2Gaps 100k is slower in two of six rounds (base StdDev up to 8 %);
+LateHoles Move2 1k leaned slower in the first pair only (StdDev 3.9 / 1.2 %) and not in the confirm pair.
+LateHoles Step 1k's 2.069 is one launch of the two at 1.42 us against 0.46 us in the other: rerun with eight launches
+a side, two rounds, order alternated, no launch of either tree was slow (headc 457-523 ns, base 387-493 ns), Step 1k
+1.033 / 1.023 (base StdDev 4.5 / 5.0 %), 100k 0.998 / 0.977. (c) changes little there: every third row is a hole, so a
+third of the words start their passing rows at their second row, and those spans now start one row earlier, on the
+word's first line (64 rows instead of 63, every vector on a line).
+Rows that do not run (c) (tables without holes: Fragments*, TablePrefetch, HurtHot at 100k, Integrate, the
+VectorForms Scalar rows that run `world.ForEach`) moved 0.89-1.24 between the trees with nothing changed in their
+code: TablePrefetch Integrate 1000's masked runner has the same IL on both sides and the JIT placed its 256 / 128-bit
+tail loops differently (Tier1 listings), the assembly's layout.
+
+**Dropped: (a) prefetching the next table while walking one.** Many small tables (KernelBenchmark's fragmented
+world, tables of 5-20 rows) start each table's columns cold. Forms tried, each against no prefetch: the next table's
+column heads (`ByBit[b].Rows`, one `PREFETCHT0` per column), at distance 1 and 2; the same loads without the prefetch
+instruction; every line of each column (up to 256 / 512 B); stages (the archetype at +4, its arrays at +2, the rows at
++1); and the shipped candidate, gated to worlds past the L2 (`EntityCount * (16 + row bytes)` over the L2, more than
+one table). In the L2 (1,000 tables, `TablePrefetchBenchmark`) every form was slower (head lines 1.06-1.51, all lines
+1.19-1.65, stages 1.07-1.65), and loads-only was as slow as the prefetch: the cost is the extra L1 misses on the next
+table's metadata (two dependent loads, the archetype's `ByBit` array then the column's address), not the prefetch.
+Past the L2 (16,384 tables) the head-line form swung over eight rounds (Integrate 0.73-1.26, Move2 0.82-1.10, Move3
+0.81-1.09), and the gated build against the same tree without it, default job, two rounds: TablePrefetch 16,384
+Integrate 1.147 / 1.083 (base StdDev 3.1 / 2.5 %), Move2 1.112 / 1.079, Move3 1.004 / 1.021; Fragments 1k Integrate
+1.098 / 1.135. Cause: the head lines cover one or two of a table's 3-4 lines per column, while reaching them costs a
+chase of the next table's metadata on every table. What would change it: a table list that holds each table's column
+addresses inline (no chase), measured past the L2 again. `TablePrefetchBenchmark` stays as the evidence.
+
+**Dropped: (b) prefetching the next 4 KB page's first line per column** in long runs (a prototype and its
+`PagePrefetchBenchmark`, not kept; distance 1 and 2 pages, 4M and 16M rows, dev job, two rounds): Integrate 4M 1.031 / 1.062 and 1.091 /
+1.048, Move2 4M 1.050 / 1.017 and 0.989 / 1.045, Integrate 16M 1.003 / 1.000 and 0.760 / 1.048, Move2 16M 1.070 /
+0.979 and 1.047 / 1.105: level to slower. The hardware prefetchers leave no stall at a page crossing of a sequential
+column on this machine for the instruction to hide, so it only adds a load-port slot per page per column. Not
+measured on Zen 4 or ARM64 (an item for the M4 run if a long walk ever shows a page-crossing stall there).
+
+Aside from the listings: Travel's 512-bit loop (24-byte rows) reloads its 12 permutation index vectors from memory
+every iteration; it is bound on port 5 anyway (12 `vpermt2pd` per 8 rows), so hoisting them would not move it.

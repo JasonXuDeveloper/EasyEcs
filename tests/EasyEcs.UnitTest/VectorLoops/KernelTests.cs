@@ -1918,6 +1918,10 @@ public class KernelTests
         ("all but one per word", i => (i & 63) != 40),
         ("after row 70", i => i >= 70),
         ("one per 300 rows", i => i % 300 != 7), // words without a passing row between them: skipped
+        // A word's first passing row (37) past the first row of its line (32 for rows of 4, 8 and 12 bytes, 36 for 16)
+        // and a row inside the passing ones that does not pass: the job's span starts on the line, before row 37, and
+        // leaves the rows before it as they were.
+        ("from row 37 of each word", i => (i & 63) < 37 || (i & 63) == 50),
     ];
 
     internal static readonly int[] HoleCounts = [1, 8, 17, 64, 65, 130, 1000];

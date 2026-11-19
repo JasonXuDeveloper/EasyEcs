@@ -30,4 +30,4 @@ One type per number of components, 1 to 9 (generated from one template); the mem
 void Execute(EntitySpan entities, ulong rows, Span<T1> c1);
 ```
 
-Rows of one word: row i (of `entities` and of every span) passes when bit i of `rows` is set; the job leaves the other rows as they are (it may store their values back unchanged). Bit 0 is set, and no bit at or past the spans' length.
+Rows of one word: row i (of `entities` and of every span) passes when bit i of `rows` is set; the job leaves the other rows as they are (it may store their values back unchanged). The spans may start before the first passing row (on a cache line); no bit is at or past their length.

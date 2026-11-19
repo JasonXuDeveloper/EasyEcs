@@ -414,17 +414,22 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       `GeneratedRead`) in `LambdaPass.IsStable`; test `ALambdaPassChangingStructureRowByRowRunsUnfrozen` (scalar on any
       hardware, failed before the fix). `TheScheduleNamesEachMethodsLoop` expects "; rows on this hardware" where the
       machine has neither width. Gate from the scratchpad `nosimd/gate.sh`; branch not merged.
-- [ ] **`perf-align-prefetch`** (owner asked 2026-11-16: "simd 有没有考虑内存对齐和 prefetch"). What holds: unmanaged
-      columns start row 0 on a 64-byte line (`Archetype.Aligned`), runs and chunks start on 64-row words, so every
-      vector load of a walk starts on a line for 4/8/16-byte rows; sequential column reads are left to the hardware
-      prefetcher (microarch.md M3 candidate 9: at most nine columns plus words, under the L2 streamer's 32 streams);
-      software prefetch exists for chases (lookups, index probes) and streamed copies, gated past the last-level cache.
-      Open, to try (Opus, after the lane-walk agent): (a) many small tables (FragmentsIntegrate, 1,000 tables of 5-20
-      rows): each table's columns are cold starts the streamer has not trained on; prefetch the next table's column
-      heads (and its words) while walking the current one, gated like the chase prefetch; A/B on Fragments* and the
-      headline worlds. (b) the first lines of a long run (the streamer needs a few misses to start, and does not cross a
-      4 KB page on every core): prefetch the next page's first line per column; measure, drop if level. (c) check by
-      listing that no generated 512-bit loop loads across a line where rows are 12 or 24 bytes (interleaved forms).
+- [x] **`perf-align-prefetch`** (owner asked 2026-11-16: "simd 有没有考虑内存对齐和 prefetch"), closed 2026-11-19 on
+      branch `perf-align-prefetch` (from ffcc09a4; not merged). Results, numbers and causes: microarch.md,
+      "perf-align-prefetch". What held already: unmanaged columns start row 0 on a line (`Archetype.Aligned`), runs and
+      chunks on 64-row words, so whole runs load whole lines (Tier1 listings, 12 and 24-byte rows included); sequential
+      reads are the hardware prefetcher's. **Shipped (c)** (41d4e3bf, tests d979e81a): a masked word's spans start on
+      the cache line of its first passing row, not on the row (every 512-bit load of the word was split across two
+      lines): default job, four rounds against base, Halves 100k 0.82-0.88, 1k 0.90-1.02; Move2Gaps 1k 0.88-0.93;
+      LateHoles Move2 / Move3 100k 0.88-0.98; LateHoles Move2 1k 1.04 / 1.06 then 0.98 / 1.01 (not slower in every
+      round); Move2Gaps 100k slower in two of six rounds (base StdDev to 8 %). `IForEachMasked.Execute` no longer says
+      bit 0 is set (reference regenerated, 72b26a0f). **Dropped (a)**, prefetching the next small table's columns: in
+      the L2 every form slower (1.06-1.65; loads without the prefetch as slow: the next table's metadata chase costs),
+      gated past the L2 slower both rounds (TablePrefetch 16,384 Integrate 1.147 / 1.083, Move2 1.112 / 1.079);
+      `TablePrefetchBenchmark` (48b06f34) kept as the evidence. **Dropped (b)**, prefetching the next page's first line
+      per column: level to slower at 4M and 16M rows (0.98-1.11 but one 0.76). Gate: tests net10.0 and net11.0 4577
+      passed each (2 skipped); ApiDocs: no new problem (World.ReserveBuffers' stale zh entry is from before). Docs:
+      docs-todos "perf-align-prefetch".
 - [x] **`feat-ground-layer`** (owner, L19; L34) merged (e87d5bdc) (branch head 6c594ca3 + this Plans commit, from
       ff4baa8d): `Layer<TCell, TTile, TLayer>` (TLayer : ILayer, a static Index) beside a `Cell<TCell, Ground<TTile>>`,
       its layer exchanged alone (`Tile.ExchangeLayer`) and read as one more stream of the row's vector loop; EECS115 for a

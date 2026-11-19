@@ -3924,3 +3924,14 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
       and vs-friflo (en + zh, `CheckDeath`: `entity.HasNpc`; read the tag as `[With<Npc>]` or a `Maybe<Npc>`). For the docs
       pass: a migration or comparison page may keep the scalar form on purpose (mark the fence `doccheck=expect-EECS055`
       and say why), a principles page shows the form users should copy.
+
+## perf-align-prefetch (owner, 2026-11-16: alignment and prefetch of the vector loops)
+
+- [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`): a masked word goes to its job from the cache line of its
+      first passing row (`max(first, low & -line)`, `line` the rows of a line in every column), so the job's vectors
+      load and store whole lines; not from the word's first row (scans rows that do not pass: HurtHot 1k 1.28 / 1.15).
+      Considered and dropped, with their causes: prefetching the next small table's columns (the chase to its metadata
+      costs more than the head lines save, in the L2 and past it) and prefetching the next page's first line per column
+      (level to slower). Numbers: microarch.md, "perf-align-prefetch".
+- [ ] **Guide** (`guide/performance`, where memory layout or alignment is described): columns start on a cache line and
+      every vector of a walk loads whole lines, holes included; sequential reads are left to the hardware prefetcher.

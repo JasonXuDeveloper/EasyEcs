@@ -335,6 +335,8 @@ VectorLoops/StreamingStoreGateBenchmark.cs  the generated loops' streaming store
                                             Auto / Off / On
 VectorLoops/StructuralLoopBenchmark.cs      a tag set under a condition: vector loop + marked rows (a [ForEach] method and a lambda pass) against the scalar method, a
                                             command buffer and SetAll
+VectorLoops/TablePrefetchBenchmark.cs       many small tables (5 to 20 rows) in the L2 and past it: what a generated pass pays
+                                            per table; measured a prefetch of the next table's columns (dropped)
 VectorLoops/VectorFormsBenchmark.cs         masked words in parallel chunks, Maybe<T> in parallel and of byte lanes, masked words
                                             of byte lanes, Pow of floats under FloatMode.Fast: each method against SimdMode.Off
 ```
