@@ -3935,3 +3935,19 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
       (level to slower). Numbers: microarch.md, "perf-align-prefetch".
 - [ ] **Guide** (`guide/performance`, where memory layout or alignment is described): columns start on a cache line and
       every vector of a walk loads whole lines, holes included; sequential reads are left to the hardware prefetcher.
+
+## perf-c0ab (backlog C0a, C0b)
+
+- [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`, beside D22 / D130): the runner calls every item through one
+      NoInlining call (`RunItem`): dynamic PGO otherwise inlines a monomorphic job into the runner's try / finally, where
+      its loop kept its constants in memory (a light ParallelFor 1.35x its serial loop). Numbers: backlog C0a.
+- [ ] **Decision record** (or the tiles' record of the tile-load interceptors): a column loop from 0 or later loads at
+      its column zero-extended plus a constant (one index per column, the offsets in the displacements); the first form
+      overran the stencil method's inline budget and was dropped, the shipped one checks a numeric bound with `Fits`.
+      Numbers: backlog C0b.
+- [ ] **Guide** (`guide/performance/threading`, ParallelFor): a job whose Execute is one loop over its elements runs that
+      loop scalar; the lambda form gets the vector loop (LightLambda 2.3x faster than LightParallelFor at 10k, 1.6x at 100k, once
+      the runner's cost is gone). Already the advice of EECS133; say it also where `IForSpan<T>` is introduced.
+- [ ] **Changelog (Performance):** a parallel pass or ParallelFor whose job dynamic PGO inlined into the runner ran its
+      loop slower than alone (up to 1.35x for light jobs); tile loads in a column loop share one index per column.
+

@@ -2487,13 +2487,13 @@ public class GeneratorTests
     }
 
     [TestCase("static float F(TileCursor<float, Sh> c) { float s = 0; for (int x = 0; x < 16; x += 4) s += c.Load128<float>(x - 1).GetElement(0) + c.Load128<float>(x + 1, 0, 1).GetElement(0); return s; }", 2,
-        "Covers<TCell, TTile>(0, 16L, 4, -1, 16)")]
+        "Fits<TCell, TTile>(-1, 11, 16)")]
     [TestCase("static float F<T>(TileCursor<float, T> c) where T : struct, ITileShape { float s = 0; for (int x = 0; x < T.Width; x++) { s += c.Load256<float>(1 + x).GetElement(0); } return s; }", 1,
         "Covers<TCell, TTile>(0, TTile.Width, 1, 1, 32)")]
     [TestCase("static float F(TileCursor<float, Sh> c) { float s = 0; for (int x = 0; x < 16; x += 16) s += c.Load512<float>(x).GetElement(0); return s; }", 1,
-        "Covers<TCell, TTile>(0, 16L, 16, 0, 64)")]
+        "Fits<TCell, TTile>(0, 0, 64)")]
     [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = -1; x <= 12; x = x + 4) s += c.LoadVector<int>(x)[0]; return s; }", 1,
-        "Covers<TCell, TTile>(-1, 12L + 1L, 4, 0, global::System.Numerics.Vector<byte>.Count)")]
+        "Fits<TCell, TTile>(-1, 11, global::System.Numerics.Vector<byte>.Count)")]
     [TestCase("static int F(TileCursor<int, Sh> c, int dy) { int s = 0; for (int x = 0; x < 16; ++x) s += c.Load128<int>(x, dy, 0).GetElement(0); return s; }", 1,
         "c.Load128<TLane>(dx, dy, dz)")]
     public void TileLoadsInAProvenLoopAreIntercepted(string body, int calls, string expected)
@@ -2501,6 +2501,23 @@ public class GeneratorTests
         var (text, intercepted) = TileLoads(body);
         Assert.That(intercepted, Is.EqualTo(calls), text);
         Assert.That(text, Does.Contain(expected).And.Contain("this in global::EasyEcs.TileCursor<TCell, TTile> c").And.Contain("AggressiveInlining"));
+    }
+
+    // A loop from 0 or later takes its column back out of dx and loads at it zero-extended plus the constant (Column: one
+    // index per column, the constant in each load's displacement); a loop from a negative column keeps dx + r zero-extended (At).
+    [TestCase("for (int x = 0; x < 16; x += 4) s += c.Load128<float>(x - 2).GetElement(0) + c.Load128<float>(x + 1, 0, 1).GetElement(0);",
+        "int x = dx + 2;", "ref Column(in c, x, -2, dy, dz)", "int x = dx - 1;", "ref Column(in c, x, 1, dy, dz)")]
+    [TestCase("for (int x = 0; x < 16; x += 4) s += c.Load128<float>(x, 0, 1).GetElement(0);", null, "ref Column(in c, dx, 0, dy, dz)", null, null)]
+    [TestCase("for (int x = -1; x < 12; x += 4) s += c.Load128<float>(x + 1).GetElement(0);", null, "ref At(in c, dx, dy, dz)", null, null)]
+    [TestCase("for (int x = 0; x < 0; x += 4) s += c.Load128<float>(x + 100).GetElement(0);", "return true", "ref Column(in c, x, 100, dy, dz)", null, null)]
+    public void ALoopFromZeroLoadsAtItsColumnPlusAConstant(string loop, string firstColumn, string first, string secondColumn, string second)
+    {
+        var (text, intercepted) = TileLoads($"static float F(TileCursor<float, Sh> c) {{ float s = 0; {loop} return s; }}");
+        Assert.That(intercepted, Is.EqualTo(second == null ? 1 : 2), text);
+        Assert.That(text, Does.Contain(first), text);
+        if (second != null) Assert.That(text, Does.Contain(firstColumn).And.Contain(secondColumn).And.Contain(second), text);
+        else if (firstColumn != null) Assert.That(text, Does.Contain(firstColumn), text); // a loop that never runs: no check
+        else Assert.That(text, Does.Not.Contain("int x = "), text);
     }
 
     [TestCase("static int F(TileCursor<int, Sh> c) { int s = 0; for (int x = 0; x < 16; x += 4) { s += c.Load128<int>(x).GetElement(0); x--; } return s; }")]          // written in the body

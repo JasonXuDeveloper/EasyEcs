@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -203,12 +204,12 @@ public sealed partial class World
                 if (chunks == 1 && work.Samples())
                 {
                     long start = Stopwatch.GetTimestamp();
-                    work.Run(0);
+                    RunItem(work, 0);
                     work.Cost(Stopwatch.GetTimestamp() - start); // a pass cut into one chunk keeps learning its cost
                 }
                 else if (chunks == 1)
                 {
-                    work.Run(0);
+                    RunItem(work, 0);
                 }
             }
             finally
@@ -224,7 +225,7 @@ public sealed partial class World
         try
         {
             if (!TryRunChunks(work, chunks))
-                for (int i = 0; i < chunks; i++) work.Run(i);
+                for (int i = 0; i < chunks; i++) RunItem(work, i);
         }
         finally
         {
@@ -254,6 +255,16 @@ public sealed partial class World
         if (allocated != 0) HelperAllocated += allocated;
         return true;
     }
+
+    /// <summary>
+    /// Run item <paramref name="index"/> of <paramref name="work"/>: every call of a chunk or a stage's system from the
+    /// runner goes through here. Out of line on purpose: dynamic PGO devirtualizes a call site that sees one work type
+    /// and inlines the job there, and inlined into the runner's try / finally (or try / catch) the job's loop kept its
+    /// invariants in memory, a constant reloaded at every element (a light ParallelFor ran 1.36x its serial loop); in a
+    /// method of its own, with no handler, the job's loop compiles as it does alone.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void RunItem(ParallelWork work, int index) => work.Run(index);
 
     /// <summary>The cached instance of <typeparamref name="TWork"/> for this world.</summary>
     internal TWork WorkOf<TWork>() where TWork : ParallelWork, new()
@@ -592,7 +603,7 @@ public sealed partial class World
             {
                 try
                 {
-                    work.Run(i);
+                    RunItem(work, i);
                 }
                 catch (Exception e)
                 {
@@ -623,7 +634,7 @@ public sealed partial class World
                 long start = Stopwatch.GetTimestamp();
                 try
                 {
-                    _work.Run(index);
+                    RunItem(_work, index);
                 }
                 catch (Exception e)
                 {
