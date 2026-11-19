@@ -181,8 +181,10 @@ OrderedTables/Pairs.cs        [Neighbor] (a pair method's other entity) and the 
                               chunk order; PairState.Next walks the pairs of tables) (the order requested once,
                               then PairState: cluster boxes drawn every pass and checked against the kept ones widened
                               by an adaptive margin (grown when a share of the boxes left at once, not for a lone
-                              jump), a sweep of the boxes widened by the clusters' reach when one left, along the axis
-                              they spread the most along (SweepAxis);
+                              jump), the boxes that meet found again when one left: a grid over the two axes the boxes
+                              spread the most along (Grid: each side's boxes by cell, CellBoxes; boxes wider than four
+                              cells apart), a sweep along one (Sweep, SweepAxis); the lists of clusters by two counting
+                              sorts;
                               lists of each row's neighbors, Verlet's, where they cost less than the ranges for the
                               method's width: PairRun.Listed / Near, kept while the rows moved less than the margin;
                               a job writing both sides, IPairJob.Symmetric: each pair of tables once, a table against

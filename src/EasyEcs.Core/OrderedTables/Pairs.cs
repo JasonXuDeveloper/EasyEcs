@@ -591,6 +591,9 @@ internal sealed class PairState
     private int[] _ids = new int[64];
     private int[] _pairA = new int[64], _pairB = new int[64];
 
+    // Scratch of a draw's lists: the pairs by cluster of the other table, and the count of each such cluster.
+    private int[] _byA = new int[64], _byB = new int[64], _counts = new int[64];
+
     /// <summary>
     /// The distance on one axis beyond which no pair passes a test of <paramref name="squared"/>, widened a little
     /// against the rounding of the method's float arithmetic (a pair whose distance on one axis is past the reach has a
@@ -859,14 +862,79 @@ internal sealed class PairState
 
     /// <summary>
     /// The pairs (cluster of the table, cluster of the other) where the table's kept box widened by the cluster's kept
-    /// reach meets the other's kept box on every axis (a sweep over both sets of boxes sorted by their low side on the
-    /// axis they spread the most along, <see cref="SweepAxis"/>), then per cluster of the table the other's clusters
-    /// in row order, as row ranges (neighboring clusters merged). One table against itself sweeps its boxes twice, once
-    /// widened, once not, so a cluster meets itself and each direction of a pair is tested with its own reach; a half
-    /// list (a symmetric job's, <see cref="PairList.Half"/>) keeps the clusters at or after each cluster, tested with its
-    /// reach. O(clusters log clusters + pairs).
+    /// reach meets the other's kept box on every axis (through a grid over the two axes the boxes spread the most along,
+    /// <see cref="Grid"/>; a sweep along one axis, <see cref="Sweep"/>, when they spread along one), then per cluster of
+    /// the table the other's clusters in row order, as row ranges (neighboring clusters merged). One table against itself
+    /// tests each box widened against every box not widened, so a cluster meets itself and each direction of a pair is
+    /// tested with its own reach; a half list (a symmetric job's, <see cref="PairList.Half"/>) keeps the clusters at or
+    /// after each cluster, tested with its reach. O(clusters + pairs) through the grid.
     /// </summary>
     private void Draw(PairList list)
+    {
+        var a = list.Table;
+        var b = list.Other;
+        int na = a.ClusterCount, axes = a.Axes;
+        int found = axes >= 2 && Spreads(a, b, axes, out int g0, out int g1) ? Grid(list, g0, g1) : Sweep(list);
+
+        // Per cluster of a: its clusters of b in row order (two counting sorts: by cluster of b, then stably by cluster
+        // of a; sorting each cluster's list instead cost 6 ms a draw of 281,000 pairs at 100,000 rows).
+        int nb = b.ClusterCount;
+        if (_counts.Length < nb + 1) _counts = new int[Math.Max(nb + 1, _counts.Length * 2)]; // warm-up only
+        if (_byA.Length < found)
+        {
+            _byA = new int[_pairA.Length];
+            _byB = new int[_pairA.Length];
+        }
+
+        var counts = _counts;
+        Array.Clear(counts, 0, nb + 1);
+        for (int k = 0; k < found; k++) counts[_pairB[k] + 1]++;
+        for (int j = 0; j < nb; j++) counts[j + 1] += counts[j];
+        for (int k = 0; k < found; k++)
+        {
+            int to = counts[_pairB[k]]++;
+            _byA[to] = _pairA[k];
+            _byB[to] = _pairB[k];
+        }
+
+        list.Reserve(na, found);
+        var starts = list.Starts;
+        Array.Clear(starts, 0, na + 2);
+        for (int k = 0; k < found; k++) starts[_byA[k] + 2]++;
+        for (int i = 0; i < na; i++) starts[i + 2] += starts[i + 1];
+        var order = list.Order;
+        for (int k = 0; k < found; k++) order[starts[_byA[k] + 1]++] = _byB[k];
+        // starts[i + 1] is now the end of cluster i's clusters, starts[i] its start.
+        int size = b.Size, rows = b.Count, at = 0;
+        var ranges = list.Ranges;
+        for (int i = 0; i < na; i++)
+        {
+            int from = starts[i], to = starts[i + 1];
+            starts[i] = at;
+            for (int k = from; k < to; k++)
+            {
+                int first = order[k] * size, end = Math.Min(first + size, rows);
+                if (at > starts[i] && ranges[at - 1] == first) ranges[at - 1] = end; // the cluster after the last: one range
+                else
+                {
+                    ranges[at++] = first;
+                    ranges[at++] = end;
+                }
+            }
+        }
+
+        starts[na] = at;
+        list.Builds = a.Builds;
+        list.OtherBuilds = b.Builds;
+        list.Draws++;
+    }
+
+    /// <summary>
+    /// The pairs of boxes that meet, by a sweep over both sets sorted by their low side on the axis they spread the most
+    /// along (<see cref="SweepAxis"/>), for boxes of one axis or spread along one. O(boxes log boxes + the boxes meeting
+    /// on that axis), which on a map of two axes would be O(boxes^1.5) (<see cref="Grid"/>).
+    /// </summary>
+    private int Sweep(PairList list)
     {
         var a = list.Table;
         var b = list.Other;
@@ -933,38 +1001,321 @@ internal sealed class PairState
             }
         }
 
-        // Per cluster of a: its clusters of b in row order (a counting sort by cluster of a, then each list sorted).
-        list.Reserve(na, found);
-        var starts = list.Starts;
-        Array.Clear(starts, 0, na + 2);
-        for (int k = 0; k < found; k++) starts[_pairA[k] + 2]++;
-        for (int i = 0; i < na; i++) starts[i + 2] += starts[i + 1];
-        var order = list.Order;
-        for (int k = 0; k < found; k++) order[starts[_pairA[k] + 1]++] = _pairB[k];
-        // starts[i + 1] is now the end of cluster i's clusters, starts[i] its start.
-        int size = b.Size, rows = b.Count, at = 0;
-        var ranges = list.Ranges;
-        for (int i = 0; i < na; i++)
+        return found;
+    }
+
+    // Scratch of a draw's grids: the table's boxes (widened by their reach) and the other's, by cell; the other's wide boxes.
+    private readonly CellBoxes _gridA = new(), _gridB = new();
+    private int[] _wide = new int[64];
+
+    /// <summary>
+    /// The pairs of boxes that meet, found through a grid over the two axes the boxes spread the most along, its cells
+    /// about the size of a box (about one box a cell). Each box goes into the cell of its low corner, the table's widened
+    /// by its reach; a box finds the boxes that could meet it in the cells from its low side less the largest box of the
+    /// other grid to its high side. A box wider than four cells (a cluster spread across the map: rows that joined since
+    /// the sort, or moved into removed ones' places; a jump in the Morton order) stays out of the grids: one of the
+    /// other table walks the table's grid, one of the table the other's grid and the other's wide boxes, and one
+    /// covering more cells than there are boxes tests every box. The same pairs as <see cref="Sweep"/>, which a map of
+    /// two axes made O(boxes^1.5): a box met every box of its strip across the map on the sweep's axis (100,000 rows:
+    /// 12,500 clusters, 330 boxes each). O(boxes + pairs + the cells of wide boxes).
+    /// </summary>
+    private int Grid(PairList list, int g0, int g1)
+    {
+        Clusters a = list.Table, b = list.Other;
+        int na = a.ClusterCount, nb = b.ClusterCount, axes = a.Axes, ca = a.Capacity, cb = b.Capacity;
+        bool half = list.Half;
+        // The cells: the mean extent of the other table's finite boxes, at least their spread over the square root of
+        // the boxes, at most that many cells a side.
+        float origin0 = float.PositiveInfinity, origin1 = float.PositiveInfinity, top0 = float.NegativeInfinity, top1 = float.NegativeInfinity;
+        double extent0 = 0, extent1 = 0;
+        int finite = 0;
+        for (int j = 0; j < nb; j++)
         {
-            int from = starts[i], to = starts[i + 1];
-            starts[i] = at;
-            order.AsSpan(from, to - from).Sort();
-            for (int k = from; k < to; k++)
+            float l0 = b.Low[g0 * cb + j], h0 = b.High[g0 * cb + j], l1 = b.Low[g1 * cb + j], h1 = b.High[g1 * cb + j];
+            if (!(l0 <= h0) || !float.IsFinite(h0 - l0) || !float.IsFinite(h1 - l1)) continue;
+            origin0 = Math.Min(origin0, l0);
+            origin1 = Math.Min(origin1, l1);
+            top0 = Math.Max(top0, l0);
+            top1 = Math.Max(top1, l1);
+            extent0 += h0 - l0;
+            extent1 += h1 - l1;
+            finite++;
+        }
+
+        var grid = new BoxGrid();
+        if (finite > 0)
+        {
+            float side = MathF.Sqrt(finite);
+            grid.Size0 = Math.Max(Math.Max((float)(extent0 / finite), (top0 - origin0) / side), 1e-30f);
+            grid.Size1 = Math.Max(Math.Max((float)(extent1 / finite), (top1 - origin1) / side), 1e-30f);
+            grid.Count0 = (int)Math.Min((top0 - origin0) / grid.Size0, side) + 1;
+            grid.Count1 = (int)Math.Min((top1 - origin1) / grid.Size1, side) + 1;
+        }
+        else
+        {
+            grid.Size0 = grid.Size1 = 1;
+            grid.Count0 = grid.Count1 = 1;
+        }
+
+        grid.Origin0 = finite > 0 ? origin0 : 0;
+        grid.Origin1 = finite > 0 ? origin1 : 0;
+        grid.Inverse0 = 1 / grid.Size0;
+        grid.Inverse1 = 1 / grid.Size1;
+        float wide0 = 4 * grid.Size0, wide1 = 4 * grid.Size1;
+        int cells = grid.Count0 * grid.Count1;
+        CellBoxes gridA = _gridA, gridB = _gridB;
+        gridB.Reserve(nb, cells);
+        gridA.Reserve(na, cells);
+        if (_wide.Length < nb) _wide = new int[gridB.Cells.Length]; // warm-up only
+        int[] cellsA = gridA.Cells, cellsB = gridB.Cells;
+
+        // The other table's boxes into their cells, its wide ones (and those with an infinite side) apart.
+        int wide = 0;
+        float reachB0 = 0, reachB1 = 0; // the largest box in each grid, per axis
+        for (int j = 0; j < nb; j++)
+        {
+            float l0 = b.Low[g0 * cb + j], h0 = b.High[g0 * cb + j], l1 = b.Low[g1 * cb + j], h1 = b.High[g1 * cb + j];
+            cellsB[j] = -1;
+            if (!(l0 <= h0)) continue; // an inverted box holds no row
+            if (!(h0 - l0 <= wide0) || !(h1 - l1 <= wide1)) _wide[wide++] = j; // NaN, infinite or wide
+            else
             {
-                int first = order[k] * size, end = Math.Min(first + size, rows);
-                if (at > starts[i] && ranges[at - 1] == first) ranges[at - 1] = end; // the cluster after the last: one range
-                else
-                {
-                    ranges[at++] = first;
-                    ranges[at++] = end;
-                }
+                reachB0 = Math.Max(reachB0, h0 - l0);
+                reachB1 = Math.Max(reachB1, h1 - l1);
+                cellsB[j] = grid.Cell(l0, l1);
             }
         }
 
-        starts[na] = at;
-        list.Builds = a.Builds;
-        list.OtherBuilds = b.Builds;
-        list.Draws++;
+        // The table's boxes widened by their reach into their cells, its wide ones apart (marked -2).
+        float reachA0 = 0, reachA1 = 0;
+        for (int i = 0; i < na; i++)
+        {
+            float lo0 = a.Low[g0 * ca + i], hi0 = a.High[g0 * ca + i], lo1 = a.Low[g1 * ca + i], hi1 = a.High[g1 * ca + i];
+            cellsA[i] = -1;
+            if (!(lo0 <= hi0)) continue;
+            float r = a.KeptCutoff[i];
+            float l0 = lo0 - r, h0 = hi0 + r, l1 = lo1 - r, h1 = hi1 + r;
+            if (!(hi0 - lo0 <= wide0) || !(hi1 - lo1 <= wide1) || !float.IsFinite(h0 - l0) || !float.IsFinite(h1 - l1)) cellsA[i] = -2;
+            else
+            {
+                reachA0 = Math.Max(reachA0, h0 - l0);
+                reachA1 = Math.Max(reachA1, h1 - l1);
+                cellsA[i] = grid.Cell(l0, l1);
+            }
+        }
+
+        gridB.Bucket(b, nb, cells, widen: false);
+        gridA.Bucket(a, na, cells, widen: true);
+
+        int found = 0;
+        for (int i = 0; i < na; i++) // each box of the table against the other's grid; a wide one against its wide boxes too
+        {
+            if (cellsA[i] == -1) continue;
+            float r = a.KeptCutoff[i];
+            float l0 = a.Low[g0 * ca + i] - r, h0 = a.High[g0 * ca + i] + r, l1 = a.Low[g1 * ca + i] - r, h1 = a.High[g1 * ca + i] + r;
+            if (cellsA[i] == -2)
+            {
+                if (!grid.Covers(l0 - reachB0, h0, l1 - reachB1, h1, nb, out var range))
+                {
+                    for (int j = half ? i : 0; j < nb; j++) // every box of the other table, the wide ones with them
+                        if (b.Low[g0 * cb + j] <= b.High[g0 * cb + j] && Meets(a, i, r, b, j, axes)) Add(ref found, i, j);
+                    continue;
+                }
+
+                Walk(a, i, r, gridB, half, false, range, grid.Count0, ref found);
+                for (int w = 0; w < wide; w++)
+                {
+                    int j = _wide[w];
+                    if ((!half || j >= i) && Meets(a, i, r, b, j, axes)) Add(ref found, i, j);
+                }
+
+                continue;
+            }
+
+            grid.Covers(l0 - reachB0, h0, l1 - reachB1, h1, int.MaxValue, out var cellsOf);
+            Walk(a, i, r, gridB, half, false, cellsOf, grid.Count0, ref found);
+        }
+
+        for (int w = 0; w < wide; w++) // each wide box of the other table against the table's grid
+        {
+            int j = _wide[w];
+            float l0 = b.Low[g0 * cb + j], h0 = b.High[g0 * cb + j], l1 = b.Low[g1 * cb + j], h1 = b.High[g1 * cb + j];
+            if (!grid.Covers(l0 - reachA0, h0, l1 - reachA1, h1, na, out var range))
+            {
+                for (int i = 0, end = half ? Math.Min(j + 1, na) : na; i < end; i++)
+                    if (cellsA[i] >= 0 && Meets(a, i, a.KeptCutoff[i], b, j, axes)) Add(ref found, i, j);
+                continue;
+            }
+
+            Walk(b, j, 0, gridA, half, true, range, grid.Count0, ref found);
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// The boxes of <paramref name="range"/>'s cells of <paramref name="grid"/> (<paramref name="count0"/> cells wide)
+    /// that meet box <paramref name="at"/> of <paramref name="from"/> widened by <paramref name="r"/>: a box of the table
+    /// against the other's grid, or (<paramref name="reverse"/>) a wide box of the other table against the table's grid
+    /// of widened boxes; a half list keeps the pairs whose other cluster is at or after the table's. Each cell's boxes
+    /// lie side by side: the walk reads them in order.
+    /// </summary>
+    private void Walk(Clusters from, int at, float r, CellBoxes grid, bool half, bool reverse, CellRange range, int count0, ref int found)
+    {
+        int c = from.Capacity, capacity = grid.Capacity;
+        float l0 = from.Low[at] - r, h0 = from.High[at] + r;
+        float l1 = from.Low[c + at] - r, h1 = from.High[c + at] + r;
+        float l2 = from.Low[2 * c + at] - r, h2 = from.High[2 * c + at] + r;
+        var starts = grid.Starts;
+        var boxes = grid.Boxes;
+        // Sides past the boxes' axes read 0 on both sides: the test passes.
+        var low0 = grid.Low.AsSpan(0, capacity);
+        var high0 = grid.High.AsSpan(0, capacity);
+        var low1 = grid.Low.AsSpan(capacity, capacity);
+        var high1 = grid.High.AsSpan(capacity, capacity);
+        var low2 = grid.Low.AsSpan(2 * capacity, capacity);
+        var high2 = grid.High.AsSpan(2 * capacity, capacity);
+        for (int y = range.First1; y <= range.Last1; y++)
+            for (int k = starts[y * count0 + range.First0], end = starts[y * count0 + range.Last0 + 1]; k < end; k++)
+            {
+                if (!(l0 <= high0[k]) | !(low0[k] <= h0) | !(l1 <= high1[k]) | !(low1[k] <= h1) | !(l2 <= high2[k]) | !(low2[k] <= h2)) continue;
+                int other = boxes[k];
+                if (reverse)
+                {
+                    if (!half || at >= other) Add(ref found, other, at);
+                }
+                else if (!half || other >= at) Add(ref found, at, other);
+            }
+    }
+
+    /// <summary>
+    /// One side's boxes of a draw's grid, by cell: each box's cell (-1 for none, -2 for a wide box of the table), the
+    /// start of each cell in cell order, the boxes in cell order and their sides there (widened by their reach for the
+    /// table), axis-major. Kept by the pair state; grown in warm-up only.
+    /// </summary>
+    private sealed class CellBoxes
+    {
+        public int[] Cells = new int[64], Boxes = new int[64], Starts = new int[64];
+        public float[] Low = new float[3 * 64], High = new float[3 * 64];
+        public int Capacity = 64;
+
+        public void Reserve(int boxes, int cells)
+        {
+            if (Starts.Length < cells + 1) Starts = new int[Math.Max(cells + 1, Starts.Length * 2)];
+            if (boxes <= Capacity) return;
+            Capacity = Math.Max(boxes, Capacity * 2);
+            Cells = new int[Capacity];
+            Boxes = new int[Capacity];
+            Low = new float[3 * Capacity];
+            High = new float[3 * Capacity];
+        }
+
+        /// <summary>
+        /// The boxes of <paramref name="clusters"/> with a cell (<see cref="Cells"/> at or above 0) in cell order, cell
+        /// c's from <see cref="Starts"/>[c] to <see cref="Starts"/>[c + 1] (a counting sort, boxes of a cell in their
+        /// order), and their sides (<paramref name="widen"/>: less and plus each cluster's kept reach); the axes past
+        /// the boxes' 0. O(boxes + cells).
+        /// </summary>
+        public void Bucket(Clusters clusters, int count, int cells, bool widen)
+        {
+            var starts = Starts;
+            Array.Clear(starts, 0, cells + 1);
+            for (int k = 0; k < count; k++)
+                if (Cells[k] >= 0)
+                    starts[Cells[k] + 1]++;
+            for (int cell = 0; cell < cells; cell++) starts[cell + 1] += starts[cell];
+            for (int k = 0; k < count; k++)
+                if (Cells[k] >= 0)
+                    Boxes[starts[Cells[k]]++] = k;
+            for (int cell = cells; cell > 0; cell--) starts[cell] = starts[cell - 1]; // starts[c] is the start of cell c again
+            starts[0] = 0;
+            int placed = starts[cells], c = clusters.Capacity, axes = clusters.Axes;
+            for (int t = 0; t < 3; t++)
+            {
+                var low = Low.AsSpan(t * Capacity, placed);
+                var high = High.AsSpan(t * Capacity, placed);
+                if (t >= axes)
+                {
+                    low.Clear();
+                    high.Clear();
+                    continue;
+                }
+
+                for (int k = 0; k < placed; k++)
+                {
+                    int box = Boxes[k];
+                    float r = widen ? clusters.KeptCutoff[box] : 0;
+                    low[k] = clusters.Low[t * c + box] - r;
+                    high[k] = clusters.High[t * c + box] + r;
+                }
+            }
+        }
+    }
+
+    /// <summary>The cells of a draw's grids: an origin, a size and a count per axis.</summary>
+    private struct BoxGrid
+    {
+        public float Origin0, Origin1, Size0, Size1, Inverse0, Inverse1;
+        public int Count0, Count1;
+
+        /// <summary>The cell of the point (<paramref name="x0"/>, <paramref name="x1"/>), clamped to the grid.</summary>
+        public readonly int Cell(float x0, float x1) => Index(x1, Origin1, Inverse1, Count1) * Count0 + Index(x0, Origin0, Inverse0, Count0);
+
+        /// <summary>
+        /// The cells of the box [<paramref name="l0"/>, <paramref name="h0"/>] × [<paramref name="l1"/>,
+        /// <paramref name="h1"/>], clamped to the grid; false when its sides are not finite or it covers more than
+        /// <paramref name="most"/> cells (testing every box costs less).
+        /// </summary>
+        public readonly bool Covers(float l0, float h0, float l1, float h1, int most, out CellRange range)
+        {
+            range = default;
+            if (!float.IsFinite(l0) || !float.IsFinite(h0) || !float.IsFinite(l1) || !float.IsFinite(h1)) return false;
+            range = new CellRange(Index(l0, Origin0, Inverse0, Count0), Index(h0, Origin0, Inverse0, Count0),
+                Index(l1, Origin1, Inverse1, Count1), Index(h1, Origin1, Inverse1, Count1));
+            return (long)(range.Last0 - range.First0 + 1) * (range.Last1 - range.First1 + 1) <= most;
+        }
+
+        private static int Index(float x, float origin, float inverse, int count)
+        {
+            float c = (x - origin) * inverse;
+            return c <= 0 ? 0 : c >= count - 1 ? count - 1 : (int)c;
+        }
+    }
+
+    /// <summary>A rectangle of a grid's cells, both ends included.</summary>
+    private readonly record struct CellRange(int First0, int Last0, int First1, int Last1);
+
+    /// <summary>Whether box <paramref name="i"/> of <paramref name="a"/> widened by <paramref name="r"/> meets box <paramref name="j"/> of <paramref name="b"/> on every axis (an inverted box of b meets none).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool Meets(Clusters a, int i, float r, Clusters b, int j, int axes)
+    {
+        int ca = a.Capacity, cb = b.Capacity;
+        for (int k = 0; k < axes; k++)
+            if (!(a.Low[k * ca + i] - r <= b.High[k * cb + j]) || !(b.Low[k * cb + j] <= a.High[k * ca + i] + r))
+                return false;
+        return true;
+    }
+
+    /// <summary>
+    /// The two axes a draw's grid spans (the boxes spread the most along them, <see cref="SweepAxis"/>'s measure), first
+    /// the wider; false when the second spreads nowhere (a crowd on a line: the sweep).
+    /// </summary>
+    private static bool Spreads(Clusters a, Clusters b, int axes, out int first, out int second)
+    {
+        first = second = -1;
+        float widest = -1, next = -1;
+        for (int k = 0; k < axes; k++)
+        {
+            float spread = Spread(a, b, k);
+            if (spread > widest)
+            {
+                (second, next) = (first, widest);
+                (first, widest) = (k, spread);
+            }
+            else if (spread > next) (second, next) = (k, spread);
+        }
+
+        return second >= 0 && next > 0;
     }
 
     /// <summary>
@@ -979,20 +1330,26 @@ internal sealed class PairState
         float widest = -1;
         for (int k = 0; k < axes; k++)
         {
-            float low = float.PositiveInfinity, high = float.NegativeInfinity;
-            Spread(a, k, ref low, ref high);
-            Spread(b, k, ref low, ref high);
-            if (high - low > widest) // no finite box: -infinity, never wider
+            float spread = Spread(a, b, k);
+            if (spread > widest) // no finite box: -infinity, never wider
             {
-                widest = high - low;
+                widest = spread;
                 best = k;
             }
         }
 
         return best;
+    }
 
-        // The lowest and highest low side on one axis of the finite boxes (an inverted box holds no row).
-        static void Spread(Clusters clusters, int axis, ref float low, ref float high)
+    /// <summary>How far apart the low sides of both tables' finite boxes lie on <paramref name="axis"/> (an inverted box holds no row): -infinity without one.</summary>
+    private static float Spread(Clusters a, Clusters b, int axis)
+    {
+        float low = float.PositiveInfinity, high = float.NegativeInfinity;
+        Lows(a, axis, ref low, ref high);
+        Lows(b, axis, ref low, ref high);
+        return high - low;
+
+        static void Lows(Clusters clusters, int axis, ref float low, ref float high)
         {
             var lows = clusters.Low.AsSpan(axis * clusters.Capacity, clusters.ClusterCount);
             var highs = clusters.High.AsSpan(axis * clusters.Capacity, clusters.ClusterCount);
