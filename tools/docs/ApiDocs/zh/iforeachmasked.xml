@@ -7,10 +7,10 @@
     </summary>
   </member>
 
-  <member name="M:EasyEcs.IForEachMasked`1.Execute(EasyEcs.EntitySpan,System.UInt64,System.Span{`0})" source="db1616c853b6">
+  <member name="M:EasyEcs.IForEachMasked`1.Execute(EasyEcs.EntitySpan,System.UInt64,System.Span{`0})" source="66e4d9d42c23">
     <summary>
       一个字里的行：<paramref name="rows" /> 的第 i 位为 1 时，第 i 行（<paramref name="entities" /> 和每个 span 的第 i 个元素）通过；
-      job 保持其余各行不变（可以把它们的值原样写回）。第 0 位一定为 1，span 长度及之后的位一定为 0。
+      job 保持其余各行不变（可以把它们的值原样写回）。span 可能从第一个通过的行之前（它所在缓存行的第一行）开始；span 长度及之后的位一定为 0。
     </summary>
   </member>
 </doc>
