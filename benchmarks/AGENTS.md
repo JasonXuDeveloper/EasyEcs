@@ -173,6 +173,9 @@ Lookups/PrefetchFormsBenchmark.cs  ProbePrefetch: index probes, unique and share
 OrderedTables/NearestPlayerBenchmark.cs  the sample's nearest search against a search of sorted clusters
                                          (Locality/Nearest.cs, Locality/SortedClusters.cs)
 OrderedTables/NearestZombieBenchmark.cs  the same for the zombies' search
+OrderedTables/PairChurnBenchmark.cs      the generated pair method over a moving crowd whose rows are replaced every tick
+                                         (0.1, 1 and 10 % of 10,000 rows, 0.1 and 1 % of 100,000), one direction and both
+                                         sides: the clusters spread by rows that came and went, the sorts they ask for
 OrderedTables/PairHalvesBenchmark.cs     the method writing both sides on 1 and 4 threads: serial, its parallel pass of
                                          colored chunks, and the parallel method writing its row only over every ordered
                                          pair
