@@ -676,6 +676,7 @@ internal sealed class PairState
             bool skips = otherMode == RowFilter.Test || other.Count != other.AliveCount;
             if (skips) Passing(other, otherFilter, otherMode, ref _neighbors);
             var list = ListOf(own, their);
+            Disturbed(list);
             bool listed = Listed<T, TOrder>(list, bit, job.Width);
             PairSchedule schedule = null;
             if (_half) (schedule = list.Schedule ??= new PairSchedule()).Drawn(list.Draws); // warm-up: one per list
@@ -789,6 +790,33 @@ internal sealed class PairState
         }
 
         return clusters;
+    }
+
+    /// <summary>
+    /// Count what <paramref name="list"/>'s pass pays past the least it paid since its tables were sorted (rows that
+    /// joined a table wait past its sorted rows, a row moved into a removed one's place widens its cluster's box across
+    /// the map: a table whose rows come and go grows its pairs until the next sort) into the tables' orders, with what
+    /// it paid per row so disturbed (<see cref="RowOrder.Paid"/>): the next update weighs them against a sort. O(1).
+    /// </summary>
+    private static void Disturbed(PairList list)
+    {
+        RowOrder a = list.Table.Table.Order, b = list.Other.Table.Order;
+        if (a == null || b == null) return;
+        if (list.SortsA != a.Sorts || list.SortsB != b.Sorts)
+        {
+            list.SortsA = a.Sorts;
+            list.SortsB = b.Sorts;
+            list.Least = list.Drawn;
+            return;
+        }
+
+        if (list.Drawn < list.Least) list.Least = list.Drawn;
+        long excess = list.Drawn - list.Least;
+        int da = a.Disturbance(list.Table.Table), db = ReferenceEquals(a, b) ? 0 : b.Disturbance(list.Other.Table);
+        if (da + db == 0) return; // rows that moved, not rows that came and went: the cadence's
+        double perRow = (double)excess / (da + db);
+        a.Paid(excess * (double)da / (da + db), perRow);
+        if (db > 0) b.Paid(excess * (double)db / (da + db), perRow);
     }
 
     /// <summary>The first pass to meet <paramref name="table"/>: its clusters, in the first free slot (cold).</summary>
@@ -907,13 +935,16 @@ internal sealed class PairState
         // starts[i + 1] is now the end of cluster i's clusters, starts[i] its start.
         int size = b.Size, rows = b.Count, at = 0;
         var ranges = list.Ranges;
+        long candidates = 0;
         for (int i = 0; i < na; i++)
         {
             int from = starts[i], to = starts[i + 1];
             starts[i] = at;
+            long span = 0;
             for (int k = from; k < to; k++)
             {
                 int first = order[k] * size, end = Math.Min(first + size, rows);
+                span += end - first;
                 if (at > starts[i] && ranges[at - 1] == first) ranges[at - 1] = end; // the cluster after the last: one range
                 else
                 {
@@ -921,8 +952,11 @@ internal sealed class PairState
                     ranges[at++] = end;
                 }
             }
+
+            candidates += span * Math.Min(a.Size, a.Count - i * a.Size);
         }
 
+        list.Drawn = candidates;
         starts[na] = at;
         list.Builds = a.Builds;
         list.OtherBuilds = b.Builds;
@@ -1744,6 +1778,11 @@ internal sealed class PairState
         public bool Half;
         public int Builds = -1, OtherBuilds = -1, Draws;
         public int[] Starts = [], Ranges = [], Order = [];
+
+        // What a pass over the ranges costs (row pairs: each cluster's rows times its ranges' rows, Drawn), the least
+        // since either table was last sorted, and the sorts it was counted from (RowOrder.Sorts of each table).
+        public long Drawn, Least;
+        public int SortsA = -1, SortsB = -1;
 
         /// <summary>A symmetric job's: what its parallel pass works out once per draw (made by its first pass).</summary>
         public PairSchedule Schedule;
