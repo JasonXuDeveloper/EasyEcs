@@ -3973,3 +3973,21 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
 - [ ] **Changelog (Performance):** pair passes over tables whose rows come and go every tick (2.7x at 0.1 % of 10,000
       rows a tick, up to 87x at 1 % of 100,000), and a moving crowd's redraws of its cluster pairs (the grid).
 - [ ] **Roadmap:** none (a fix of an existing feature).
+
+## research-pair-filtered-rows (backlog research-pair-filtered-rows: a filter that passes few rows)
+
+- [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`, beside the pair records and research-pair-churn's): a pair
+      pass whose row filter passes few rows draws its lists for the clusters holding a passing row only, while they
+      are fewer than one in four of the table's (`PartialShare`), and draws again when a cluster outside them gains one;
+      such a list does not feed the early sort. Why: a cluster gaining a passing row raises its reach, which kept the
+      boxes again and drew every cluster's list every pass (the draw 0.21 of a 0.39 ms pass at 4,000 rows, 12 passing).
+      Considered: keeping every cluster drawn (the cost), a share of 1/4 (the full draw is cheaper once most clusters
+      pass and a partial list redraws on every new one). Numbers: backlog research-pair-filtered-rows (PairFilter 0.28-0.30
+      of base at 3 per mille, 0.68-0.73 at 30, level when every row passes).
+- [ ] **Guide** (`guide/pairs`, filters and costs): a `With<T>` filter on a pair method that few rows pass (a presence
+      bit: hunters that lost their target) now costs about its passing clusters, not the table: the search for the
+      few is the form to write (no hand-kept list of seekers). Name what still scales with the tables (each pass
+      reads both tables' boxes; research-pair-draw-few).
+- [ ] **Changelog (Performance):** pair methods whose filter passes few rows (3.4x at 3 of 1,000 rows passing, 1.4x at
+      30), and pair passes whose lists are drawn often (churned tables: up to 1.1x).
+- [ ] **Roadmap:** none (a fix of an existing feature).

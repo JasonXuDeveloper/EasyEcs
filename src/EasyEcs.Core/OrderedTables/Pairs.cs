@@ -518,6 +518,20 @@ public sealed partial class World
         return margin;
     }
 
+    /// <summary>The draws of the pair states' lists, over every pair job, and those of a few clusters only (tests; <see cref="PairState.Draws"/>).</summary>
+    internal (long All, long Partial) PairDraws()
+    {
+        long all = 0, partial = 0;
+        foreach (var state in _pairStates)
+        {
+            if (state == null) continue;
+            all += state.Draws;
+            partial += state.PartialDraws;
+        }
+
+        return (all, partial);
+    }
+
     private PairState PairStateOf(int id)
     {
         var states = _pairStates;
@@ -585,6 +599,20 @@ internal sealed class PairState
     // Scratch of one pass: the method's rows that pass (a word per 64 rows), the neighbors' that pass, the rows' cutoffs.
     private ulong[] _rows = new ulong[64], _neighbors = new ulong[64];
     private double[] _cutoffs = new double[64];
+
+    // The clusters of the method's table holding a row that passes (a bit per cluster) and their count; -1 when every
+    // row passes (every cluster holds one). Found only for a draw or a partial list's check (Active), after the
+    // table's filter mode is noted: a pass that keeps its lists pays nothing for them.
+    private ulong[] _active = new ulong[1];
+    private int _activeCount, _ownMode;
+    private bool _activeKnown;
+
+    /// <summary>
+    /// A list draws only the clusters holding a passing row while they are fewer than one in this many of the table's
+    /// (<see cref="PairList.Partial"/>): a filter that passes few rows (hunters that lost their target) pays for its
+    /// clusters, not the table's, and draws again when a cluster outside the ones drawn gains a passing row.
+    /// </summary>
+    private const int PartialShare = 4;
 
     // Scratch of the sweep that finds the clusters within reach.
     private float[] _keys = new float[64], _sides = new float[64 * 5];
@@ -656,6 +684,8 @@ internal sealed class PairState
                 int mode = filter.Mode(table);
                 if (table.AliveCount == 0 || mode == RowFilter.None) continue;
                 Passing(table, filter, mode, ref _rows);
+                _ownMode = mode;
+                _activeKnown = false;
                 _own = Refresh<T, TOrder>(table, bit, axes, size);
                 if (Reaches(world, ref job, _own, reach)) Keep(_own); // a cutoff grew past the one the lists were drawn for
                 _b = _half ? _a - 1 : 0; // each unordered pair of tables once: the table itself, then the ones after it
@@ -703,6 +733,41 @@ internal sealed class PairState
             if (tombstones && bits != 0) bits &= World.AliveRows(ref Unsafe.Add(ref slots, w << 6), Math.Min(64, count - (w << 6)));
             into[w] = bits;
         }
+    }
+
+    /// <summary>
+    /// The clusters of the method's table (<see cref="_own"/>) holding a row that passes (after <see cref="Passing"/>),
+    /// into <see cref="_active"/>, once per table of the pass: none counted when every row passes. O(clusters).
+    /// </summary>
+    private void Active()
+    {
+        if (_activeKnown) return;
+        _activeKnown = true;
+        var table = _own.Table;
+        int count = table.Count, size = _own.Size;
+        if (_ownMode != RowFilter.Test && count == table.AliveCount)
+        {
+            _activeCount = -1;
+            return;
+        }
+
+        int n = (count + size - 1) / size, words = (n + 63) >> 6, active = 0;
+        if (_active.Length < words) _active = new ulong[Math.Max(words, _active.Length * 2)]; // warm-up only
+        ulong lanes = ulong.MaxValue >> (64 - size);
+        for (int k = 0; k < words; k++)
+        {
+            ulong bits = 0;
+            for (int w = k << 6, end = Math.Min(n, w + 64); w < end; w++)
+            {
+                int first = w * size; // size divides 64: a cluster's rows lie in one word
+                if (((_rows[first >> 6] >> (first & 63)) & lanes) != 0) bits |= 1UL << w; // shift is mod 64
+            }
+
+            _active[k] = bits;
+            active += BitOperations.PopCount(bits);
+        }
+
+        _activeCount = active;
     }
 
     /// <summary>
@@ -801,7 +866,9 @@ internal sealed class PairState
     private static void Disturbed(PairList list)
     {
         RowOrder a = list.Table.Table.Order, b = list.Other.Table.Order;
-        if (a == null || b == null) return;
+        // A list of a few clusters (Partial) pays for those, which come and go with the filter: its count says nothing of
+        // the rows out of place, and its pairs are few against a sort.
+        if (a == null || b == null || list.Partial) return;
         if (list.SortsA != a.Sorts || list.SortsB != b.Sorts)
         {
             list.SortsA = a.Sorts;
@@ -875,6 +942,9 @@ internal sealed class PairState
     /// <summary>The margin the boxes are kept with (tests).</summary>
     internal float Margin => _margin;
 
+    /// <summary>The lists drawn, and those drawn for the clusters holding a passing row only (<see cref="PairList.Partial"/>; tests).</summary>
+    internal long Draws, PartialDraws;
+
     private void Keep(Clusters clusters) => clusters.Keep(float.IsFinite(_margin) ? _margin : 0);
 
     /// <summary>The clusters of <paramref name="other"/> each cluster of <paramref name="table"/> meets, drawn again when either was kept again.</summary>
@@ -884,8 +954,20 @@ internal sealed class PairState
         int slot = other.Slot;
         var list = (uint)slot < (uint)lists.Length ? lists[slot] : null;
         list ??= AddList(table, other);
-        if (list.Builds != table.Builds || list.OtherBuilds != other.Builds) Draw(list);
+        if (list.Builds != table.Builds || list.OtherBuilds != other.Builds || list.Partial && !Covers(list)) Draw(list);
         return list;
+    }
+
+    /// <summary>Whether every cluster holding a passing row this pass is one <paramref name="list"/> drew. O(clusters / 64).</summary>
+    private bool Covers(PairList list)
+    {
+        Active();
+        if (_activeCount < 0) return false;
+        var covered = list.Covered;
+        for (int k = 0, words = (list.Table.ClusterCount + 63) >> 6; k < words; k++)
+            if ((_active[k] & ~covered[k]) != 0)
+                return false;
+        return true;
     }
 
     /// <summary>
@@ -902,6 +984,19 @@ internal sealed class PairState
         var a = list.Table;
         var b = list.Other;
         int na = a.ClusterCount, axes = a.Axes;
+        // A filter passing few rows: only the clusters holding one (the job skips the others), the list drawn again when
+        // another gains one (Covers).
+        Active();
+        list.Partial = _activeCount >= 0 && _activeCount * PartialShare < na;
+        Draws++;
+        if (list.Partial)
+        {
+            PartialDraws++;
+            int words = (na + 63) >> 6;
+            if (list.Covered.Length < words) list.Covered = new ulong[Math.Max(words, list.Covered.Length * 2)]; // warm-up only
+            Array.Copy(_active, list.Covered, words);
+        }
+
         int found = axes >= 2 && Spreads(a, b, axes, out int g0, out int g1) ? Grid(list, g0, g1) : Sweep(list);
 
         // Per cluster of a: its clusters of b in row order (two counting sorts: by cluster of b, then stably by cluster
@@ -983,8 +1078,10 @@ internal sealed class PairState
 
         // The sweep's axis, then the two others (an axis past the boxes' reads as 0 on both sides: the test passes).
         int s0 = SweepAxis(a, b, axes), s1 = (s0 + 1) % 3, s2 = (s0 + 2) % 3, ca = a.Capacity, cb = b.Capacity;
+        bool partial = list.Partial;
+        var covered = list.Covered;
         for (int i = 0; i < na; i++)
-            if (a.Low[s0 * ca + i] <= a.High[s0 * ca + i]) // an inverted box holds no row
+            if (a.Low[s0 * ca + i] <= a.High[s0 * ca + i] && (!partial || ((covered[i >> 6] >> i) & 1) != 0)) // an inverted box holds no row
             {
                 _keys[m] = a.Low[s0 * ca + i] - a.KeptCutoff[i];
                 _ids[m++] = i;
@@ -1122,11 +1219,13 @@ internal sealed class PairState
 
         // The table's boxes widened by their reach into their cells, its wide ones apart (marked -2).
         float reachA0 = 0, reachA1 = 0;
+        bool partial = list.Partial;
+        var covered = list.Covered;
         for (int i = 0; i < na; i++)
         {
             float lo0 = a.Low[g0 * ca + i], hi0 = a.High[g0 * ca + i], lo1 = a.Low[g1 * ca + i], hi1 = a.High[g1 * ca + i];
             cellsA[i] = -1;
-            if (!(lo0 <= hi0)) continue;
+            if (!(lo0 <= hi0) || partial && ((covered[i >> 6] >> i) & 1) == 0) continue; // no row, or none passing in a partial list
             float r = a.KeptCutoff[i];
             float l0 = lo0 - r, h0 = hi0 + r, l1 = lo1 - r, h1 = hi1 + r;
             if (!(hi0 - lo0 <= wide0) || !(hi1 - lo1 <= wide1) || !float.IsFinite(h0 - l0) || !float.IsFinite(h1 - l1)) cellsA[i] = -2;
@@ -1170,14 +1269,26 @@ internal sealed class PairState
             Walk(a, i, r, gridB, half, false, cellsOf, grid.Count0, ref found);
         }
 
-        for (int w = 0; w < wide; w++) // each wide box of the other table against the table's grid
+        // Each wide box of the other table against the table's grid, or against the table's boxes when its cells
+        // outnumber them: a partial list's few boxes in the grid (walking the cells cost a draw of VoxelServer's zombie
+        // search more than its five boxes), else every cluster up to the box's own for a half list.
+        int placedA = gridA.Starts[cells];
+        var boxesA = gridA.Boxes;
+        for (int w = 0; w < wide; w++)
         {
             int j = _wide[w];
             float l0 = b.Low[g0 * cb + j], h0 = b.High[g0 * cb + j], l1 = b.Low[g1 * cb + j], h1 = b.High[g1 * cb + j];
-            if (!grid.Covers(l0 - reachA0, h0, l1 - reachA1, h1, na, out var range))
+            if (!grid.Covers(l0 - reachA0, h0, l1 - reachA1, h1, partial ? placedA : na, out var range))
             {
-                for (int i = 0, end = half ? Math.Min(j + 1, na) : na; i < end; i++)
-                    if (cellsA[i] >= 0 && Meets(a, i, a.KeptCutoff[i], b, j, axes)) Add(ref found, i, j);
+                if (partial)
+                    for (int k = 0; k < placedA; k++)
+                    {
+                        int i = boxesA[k];
+                        if ((!half || i <= j) && Meets(a, i, a.KeptCutoff[i], b, j, axes)) Add(ref found, i, j);
+                    }
+                else
+                    for (int i = 0, end = half ? Math.Min(j + 1, na) : na; i < end; i++)
+                        if (cellsA[i] >= 0 && Meets(a, i, a.KeptCutoff[i], b, j, axes)) Add(ref found, i, j);
                 continue;
             }
 
@@ -1471,15 +1582,26 @@ internal sealed class PairState
         if (a < 0 || b < 0) return;
         ref T rows = ref table.Data<T>(a);
         ref T others = ref their.Table.Data<T>(b);
-        int count = table.Count, size = own.Size, n = own.ClusterCount, step = sample ? Math.Max(1, n / Samples) : int.MaxValue;
+        // A partial list samples among the clusters it drew (the others have no ranges).
+        int count = table.Count, size = own.Size, n = own.ClusterCount, drawn = n;
+        bool partial = list.Partial;
+        var covered = list.Covered;
+        if (partial)
+        {
+            drawn = 0;
+            for (int k = 0, words = (n + 63) >> 6; k < words; k++) drawn += BitOperations.PopCount(covered[k]);
+        }
+
+        int step = sample ? Math.Max(1, drawn / Samples) : int.MaxValue, index = 0;
         double candidates = 0, sampled = 0, entries = 0;
         for (int w = 0; w < n; w++)
         {
+            if (partial && ((covered[w >> 6] >> w) & 1) == 0) continue;
             int first = w * size, end = Math.Min(first + size, count), at = list.Starts[w], to = list.Starts[w + 1];
             long span = 0;
             for (int k = at; k < to; k += 2) span += list.Ranges[k + 1] - list.Ranges[k];
             candidates += (double)span * (end - first);
-            if (w % step != 0) continue;
+            if (!sample || index++ % step != 0) continue; // between samples, the candidates only
             float reach = own.KeptCutoff[w];
             if (!float.IsFinite(reach)) // every pair of the cluster runs: no list
             {
@@ -1776,6 +1898,13 @@ internal sealed class PairState
 
         /// <summary>A symmetric job's list of a table against itself: each cluster's ranges start at its own, each row's list after it.</summary>
         public bool Half;
+
+        /// <summary>
+        /// Drawn for the clusters holding a passing row only (<see cref="Covered"/>, a bit per cluster of the table; the
+        /// others have no ranges): fewer than one in <see cref="PartialShare"/>.
+        /// </summary>
+        public bool Partial;
+        public ulong[] Covered = [];
         public int Builds = -1, OtherBuilds = -1, Draws;
         public int[] Starts = [], Ranges = [], Order = [];
 

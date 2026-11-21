@@ -16,6 +16,7 @@ public partial record struct PairSight(float Range) : IComponent;
 public partial record struct PairPrey(int Index, float Distance) : IComponent;
 public partial record struct PairHunter : IComponent;
 public partial record struct PairQuarry : IComponent;
+public partial record struct PairSeeking : IComponent;
 public partial record struct PairSpot3(System.Numerics.Vector3 At) : IComponent;
 public partial record struct PairCount(int Value) : IComponent;
 public partial record struct PairReach(float Value) : ISingletonComponent;
@@ -314,6 +315,26 @@ public static class Neighbors
 
     [ForEach]
     public static void ResetPrey(ref PairPrey prey) => prey = new PairPrey(-1, float.PositiveInfinity);
+
+    /// <summary><see cref="Hunt"/> for the hunters that seek only (a presence bit): a filter that passes few rows.</summary>
+    [ForEach]
+    [With<PairHunter>, With<PairSeeking>]
+    public static void Seek(in PairSpot p, in PairSight sight, ref PairPrey prey, [Neighbor] in PairSpot q, [Neighbor] in PairQuarry _, [Neighbor] Entity other)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= sight.Range * sight.Range || d2 > prey.Distance || d2 == prey.Distance && other.Id.Index >= prey.Index) return;
+        prey = new PairPrey(other.Id.Index, d2);
+    }
+
+    /// <summary><see cref="Seek"/> on several threads.</summary>
+    [ForEach(Parallel = true)]
+    [With<PairHunter>, With<PairSeeking>]
+    public static void SeekParallel(in PairSpot p, in PairSight sight, ref PairPrey prey, [Neighbor] in PairSpot q, [Neighbor] in PairQuarry _, [Neighbor] Entity other)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= sight.Range * sight.Range || d2 > prey.Distance || d2 == prey.Distance && other.Id.Index >= prey.Index) return;
+        prey = new PairPrey(other.Id.Index, d2);
+    }
 }
 
 /// <summary>
@@ -611,6 +632,126 @@ public class NeighborTests
             }
         }
         Assert.That(hunters[^1].Get<PairPrey>().Index, Is.EqualTo(Math.Min(quarries[5].Id.Index, quarries[^1].Id.Index)));
+    }
+
+    /// <summary>
+    /// Hunters seeking (a presence bit, few of them: the lists draw only the clusters holding a seeker) find the nearest
+    /// quarry as a walk over every quarry does, tick after tick while the seekers change (clusters outside the drawn
+    /// ones gaining a seeker), the rows move and jump, hunters come and go (tombstones, a count that changes), and on
+    /// ticks where most hunters seek (every cluster drawn); the parallel pass bit for bit with the serial one. A strip
+    /// (every row on one line) draws through the sweep, a map through the grid.
+    /// </summary>
+    [TestCase(1, false)]
+    [TestCase(4, false)]
+    [TestCase(1, true)]
+    [TestCase(4, true)]
+    public void AFilterPassingFewRowsMeetsEveryPairAsItsRowsChange(int threads, bool strip)
+    {
+        using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+        var random = new Random(21);
+        const float extent = 60;
+        PairSpot Place() => new((float)random.NextDouble() * extent, strip ? 1 : (float)random.NextDouble() * extent);
+        var quarries = new List<Entity>();
+        for (int i = 0; i < 2500; i++) quarries.Add(world.CreateEntity(Place(), new PairQuarry()));
+        var hunters = new List<Entity>();
+        Entity Hunter()
+        {
+            var e = world.CreateEntity(Place(), new PairSight(0.5f + (float)random.NextDouble() * 4), new PairPrey(), new PairHunter(), new PairSeeking());
+            e.Remove<PairSeeking>();
+            return e;
+        }
+
+        for (int i = 0; i < 4000; i++) hunters.Add(Hunter());
+        long full = 0;
+        for (int tick = 0; tick < 40; tick++)
+        {
+            foreach (var item in world.Query<PairSpot>())
+            {
+                ref var p = ref item.Component1;
+                p = random.Next(200) == 0 ? Place() : new PairSpot(p.X + 0.05f * ((float)random.NextDouble() - 0.5f), p.Y);
+            }
+
+            if (tick % 13 == 5)
+                for (int i = 0; i < 30; i++)
+                {
+                    int at = random.Next(hunters.Count);
+                    hunters[at].Destroy();
+                    hunters[at] = random.Next(3) == 0 ? hunters[^1] : Hunter();
+                }
+
+            foreach (var hunter in hunters)
+                if (hunter.IsAlive && hunter.Has<PairSeeking>()) hunter.Remove<PairSeeking>();
+            int seekers = tick % 10 == 9 ? 3000 : 3 + tick % 7 * 5;
+            for (int i = 0; i < seekers; i++)
+                if (hunters[random.Next(hunters.Count)] is { IsAlive: true } h) h.Set(new PairSeeking());
+            world.Update();
+
+            Neighbors.ResetPrey(world);
+            Neighbors.Seek(world);
+            var serial = new Dictionary<EntityId, PairPrey>();
+            foreach (var item in world.Query<PairPrey>()) serial[item.Entity.Id] = item.Component1;
+            foreach (var item in world.Query<PairSpot, PairSight, PairPrey, PairSeeking>())
+            {
+                var p = item.Component1;
+                float sight = item.Component2.Range, bestD = float.PositiveInfinity;
+                int best = -1;
+                foreach (var quarry in quarries)
+                {
+                    var q = quarry.Get<PairSpot>();
+                    float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+                    if (d2 >= sight * sight || d2 > bestD || d2 == bestD && quarry.Id.Index >= best) continue;
+                    (best, bestD) = (quarry.Id.Index, d2);
+                }
+
+                Assert.That(item.Component3.Index, Is.EqualTo(best), $"tick {tick}, hunter {item.Entity.Id}");
+            }
+
+            foreach (var hunter in hunters)
+                if (hunter.IsAlive && !hunter.Has<PairSeeking>())
+                    Assert.That(serial[hunter.Id].Index, Is.EqualTo(-1), $"tick {tick}: a hunter that does not seek ran");
+            Neighbors.ResetPrey(world);
+            Neighbors.SeekParallel(world);
+            foreach (var item in world.Query<PairPrey>())
+                Assert.That(item.Component1, Is.EqualTo(serial[item.Entity.Id]), $"tick {tick}, the parallel pass");
+            if (tick % 10 == 9) full = world.PairDraws().All - world.PairDraws().Partial;
+        }
+
+        long partial = world.PairDraws().Partial;
+        Assert.That(partial, Is.GreaterThan(30), "the few seekers' clusters drawn alone");
+        Assert.That(full, Is.GreaterThan(0), "every cluster drawn when most hunters seek");
+    }
+
+    [Test]
+    public void APassOverAFilterPassingFewRowsAllocatesNothingOnceWarm()
+    {
+        using var world = new World();
+        var random = new Random(3);
+        world.Reserve<PairSpot, PairQuarry>(2000);
+        world.Reserve<PairSpot, PairSight, PairPrey, PairHunter, PairSeeking>(4000);
+        for (int i = 0; i < 2000; i++)
+            world.CreateEntity(new PairSpot((float)random.NextDouble() * 60, (float)random.NextDouble() * 60), new PairQuarry());
+        var hunters = new Entity[4000];
+        for (int i = 0; i < hunters.Length; i++)
+        {
+            hunters[i] = world.CreateEntity(new PairSpot((float)random.NextDouble() * 60, (float)random.NextDouble() * 60),
+                new PairSight(0.5f + (float)random.NextDouble() * 4), new PairPrey(), new PairHunter(), new PairSeeking());
+            hunters[i].Remove<PairSeeking>();
+        }
+
+        int tick = 0;
+        void Step()
+        {
+            // Other hunters seek every tick: clusters outside the drawn ones gain a seeker.
+            for (int i = 0; i < 12; i++) hunters[(tick * 12 + i) * 337 % hunters.Length].Remove<PairSeeking>();
+            tick++;
+            for (int i = 0; i < 12; i++) hunters[(tick * 12 + i) * 337 % hunters.Length].Set(new PairSeeking());
+            foreach (var item in world.Query<PairSpot>()) item.Component1 = new PairSpot(item.Component1.X + (tick % 2 == 0 ? 0.05f : -0.05f), item.Component1.Y);
+            world.Update();
+            Neighbors.ResetPrey(world);
+            Neighbors.Seek(world);
+        }
+
+        Assert.That(Allocations.Steady(Step, 200, 20), Is.Zero);
     }
 
     [Test]

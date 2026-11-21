@@ -176,6 +176,9 @@ OrderedTables/NearestZombieBenchmark.cs  the same for the zombies' search
 OrderedTables/PairChurnBenchmark.cs      the generated pair method over a moving crowd whose rows are replaced every tick
                                          (0.1, 1 and 10 % of 10,000 rows, 0.1 and 1 % of 100,000), one direction and both
                                          sides: the clusters spread by rows that came and went, the sorts they ask for
+OrderedTables/PairFilterBenchmark.cs     the generated pair method whose row filter passes few rows: hunters seeking the
+                                         nearest quarry within their sight (With<Seeking>, a presence bit), 3 and 30 per
+                                         mille of 4,000 and 3 per mille of 40,000 seeking a tick, against every hunter
 OrderedTables/PairHalvesBenchmark.cs     the method writing both sides on 1 and 4 threads: serial, its parallel pass of
                                          colored chunks, and the parallel method writing its row only over every ordered
                                          pair

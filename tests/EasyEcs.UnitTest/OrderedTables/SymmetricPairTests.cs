@@ -10,6 +10,7 @@ public partial record struct BodyForce(float X, float Y) : IComponent;
 public partial record struct BodySight(float Range) : IComponent;
 public partial record struct BodyContacts(int Count) : IComponent, ITracked;
 public partial record struct BodyHeavy : IComponent;
+public partial record struct BodyAwake : IComponent;
 public partial record struct ItemStack(int Kind, int Count) : IComponent, ITracked;
 
 /// <summary>The unordered pairs a symmetric pass met: their count.</summary>
@@ -65,6 +66,19 @@ public static class SymmetricPairs
         if (dx * dx + dy * dy >= Range * Range) return;
         c.Count += dx > 0 ? 3 : 1;
         k.Count += dx > 0 ? 1 : 2;
+    }
+
+    /// <summary><see cref="Repel"/> between bodies that are awake (a presence bit): both sides pass the filter.</summary>
+    [ForEach, With<BodyAwake>]
+    public static void RepelAwake(in BodyAt p, ref BodyForce f, [Neighbor] in BodyAt q, [Neighbor] ref BodyForce g)
+    {
+        float dx = p.X - q.X, dy = p.Y - q.Y, d2 = dx * dx + dy * dy;
+        if (d2 >= Range * Range) return;
+        float w = Range * Range - d2;
+        f.X += w * dx;
+        f.Y += w * dy;
+        g.X -= w * dx;
+        g.Y -= w * dy;
     }
 
     /// <summary>The same, one pair at a time.</summary>
@@ -342,6 +356,56 @@ public class SymmetricPairTests
             Same(auto, Reference(world), $"pass {pass}");
             Same(Repelled(world, rows: true), auto, $"pass {pass}, SimdMode.Off");
         }
+    }
+
+    /// <summary>
+    /// A filter that few rows pass (bodies awake: the half lists draw only the clusters holding one): the half walk of
+    /// the rows that pass, tick after tick while other bodies wake (clusters outside the drawn ones) and the rows move;
+    /// on ticks where most are awake, every cluster drawn.
+    /// </summary>
+    [Test]
+    public void AFilterPassingFewRowsKeepsTheHalfWalkOfItsRows()
+    {
+        using var world = Bodies(3000, 40f, 13, tables: true);
+        var all = new List<Entity>();
+        foreach (var item in world.Query<BodyAt>()) all.Add(item.Entity);
+        foreach (var e in all)
+        {
+            e.Set(new BodyAwake());
+            e.Remove<BodyAwake>();
+        }
+
+        var random = new Random(2);
+        for (int tick = 0; tick < 30; tick++)
+        {
+            foreach (var e in all)
+            {
+                if (e.Has<BodyAwake>()) e.Remove<BodyAwake>();
+                ref var p = ref e.Get<BodyAt>();
+                p = new BodyAt(p.X + 0.03f * ((float)random.NextDouble() - 0.5f), p.Y);
+            }
+
+            int awake = tick % 10 == 9 ? 2500 : 20 + tick % 4 * 60;
+            for (int i = 0; i < awake; i++) all[random.Next(all.Count)].Set(new BodyAwake());
+            world.Update();
+            SymmetricPairs.ResetForce(world);
+            SymmetricPairs.RepelAwake(world);
+            var tables = Tables<BodyAt, BodyForce>(world).Select(t => t.Where(e => e.Has<BodyAwake>()).ToList()).ToList();
+            var expected = tables.SelectMany(t => t).ToDictionary(e => e.Id, _ => new BodyForce());
+            HalfWalk(tables, (e, o) =>
+            {
+                var f = expected[e.Id];
+                var g = expected[o.Id];
+                SymmetricPairs.Repel(e.Read<BodyAt>(), ref f, o.Read<BodyAt>(), ref g);
+                expected[e.Id] = f;
+                expected[o.Id] = g;
+            });
+            foreach (var e in all)
+                if (!e.Has<BodyAwake>()) expected[e.Id] = new BodyForce();
+            Same(Forces(world), expected, $"tick {tick}");
+        }
+
+        Assert.That(world.PairDraws().Partial, Is.GreaterThan(10), "the few awake bodies' clusters drawn alone");
     }
 
     [Test]
