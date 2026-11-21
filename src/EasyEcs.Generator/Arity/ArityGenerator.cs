@@ -1587,11 +1587,13 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     where TJob : struct, {{job}}<{{tps}}>, INoStructuralChanges
                 {
                     var match = Match<{{tps}}, TJob>(TJob.OneQuery, in filter, {{List(n, i => $"out var b{i}")}});
-                    if (SmallPass(match, in filter, out var table, out var rows, out int first, out int end) is var small and >= 0)
+                    // A job that merges is cut by count: rows that fit one chunk of it are its serial pass.
+                    int most = TJob.Merges ? MergedChunkRows(match.Archetypes, {{name}}Stamps<{{tps}}, TJob>(), TJob.RowBytes, filter.SliceCount, chunkSize) : 64;
+                    if (SmallPass(match, in filter, most, out var table, out var rows, out int first, out int end) is var small and >= 0)
                     {
                         if (small == 0) return;
-                        // One chunk whatever the rows cost: run it here as the chunk would run, on a copy of the job, merged
-                        // after (the result a cut into one chunk gives), frozen as a serial pass is (RunChunks).
+                        // One chunk: run it here as the chunk would run, on a copy of the job, merged after (the result a
+                        // cut into one chunk gives), frozen as a serial pass is (RunChunks).
                         var part = job;
                         bool froze = Gate.FreezeAlone();
                         try
@@ -1608,7 +1610,7 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
-                    int chunks = work.Cut(this, match, in filter, chunkSize, ref job, {{bits}});
+                    int chunks = work.Cut(this, match, in filter, chunkSize, most, ref job, {{bits}});
                     try
                     {
                         RunChunks(work, chunks);
@@ -1619,6 +1621,16 @@ public sealed class ArityGenerator : IIncrementalGenerator
                         work.Release();
                     }
                 }
+
+                /// <summary>
+                /// Whether <typeparamref name="TJob"/> writes a tracked component, stamping change-tick summaries shared by
+                /// 4,096 rows (<see cref="ChunkRows(ParallelWork, Archetype[], bool, int, int)"/>): a JIT-time constant.
+                /// </summary>
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                private static bool {{name}}Stamps<{{tps}}, TJob>()
+            {{Constraints(n, "        ")}}
+                    where TJob : struct, {{job}}<{{tps}}>
+                    => {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}} || TJob.OptionalWrites.HasComponents;
 
                 /// <summary>The chunks of one <see cref="{{name}}Parallel{{{tps}}, TJob}(ref TJob, in QueryFilter, int)"/> call: (table, first row) pairs.</summary>
                 private sealed class {{name}}Chunks<{{tps}}, TJob> : ParallelWork
@@ -1636,17 +1648,17 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private int _cut; // chunks of the last Cut: Release clears those, not the whole reserve
             {{Lines(n, i => $"            private ushort _b{i};")}}
 
-                    /// <summary>Cut the matching rows into chunks; returns how many.</summary>
-                    public int Cut(World world, QueryMatch match, in QueryFilter filter, int chunkSize, ref TJob job, {{ushorts}})
+                    /// <summary>Cut the matching rows into chunks (a job that merges: of <paramref name="merged"/> rows); returns how many.</summary>
+                    public int Cut(World world, QueryMatch match, in QueryFilter filter, int chunkSize, int merged, ref TJob job, {{ushorts}})
                     {
                         _world = world;
                         Job = job;
             {{Lines(n, i => $"            _b{i} = b{i};")}}
                         int chunks = 0;
                         var archetypes = match.Archetypes;
-                        // A job writing a tracked component stamps change-tick summaries shared by 4,096 rows (a JIT-time constant).
-                        bool stamps = {{List(n, i => $"(TJob.WriteMask & {1 << (i - 1)}) != 0 && default(T{i}) is ITracked", " || ")}} || TJob.OptionalWrites.HasComponents;
-                        int size = world.ChunkRows(this, archetypes, stamps, TJob.Merges, TJob.RowBytes, filter.SliceCount, chunkSize);
+                        bool stamps = {{name}}Stamps<{{tps}}, TJob>();
+                        if (TJob.Merges) Items = 0; // cut by count: nothing to learn
+                        int size = TJob.Merges ? merged : world.ChunkRows(this, archetypes, stamps, filter.SliceCount, chunkSize);
                         bool open = stamps && (size & 4095) != 0; // chunks split blocks: open them first (Archetype.OpenBlocks)
                         for (int a = 0; a < archetypes.Length; a++)
                         {

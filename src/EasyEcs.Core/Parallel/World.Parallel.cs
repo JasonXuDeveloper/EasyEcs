@@ -45,17 +45,14 @@ public sealed partial class World
     /// <see cref="MaxChunkSize"/>. Always a multiple of 64: presence-bit words and change-tick words never straddle
     /// chunks. A pass that <paramref name="stamps"/> a tracked component gets a multiple of 4,096 rows unless its chunks
     /// are smaller: each block of 4,096 rows shares one change-tick summary per column (<see cref="Archetype.Blocks"/>),
-    /// which chunks splitting a block share through <see cref="Archetype.OpenBlocks{T}"/>. A pass that
-    /// <paramref name="merges"/> partial results per chunk is cut by its row count and <paramref name="rowBytes"/> alone
-    /// (<see cref="MergedChunkRows"/>), whatever the threads and the cost, so its result does not depend on them.
+    /// which chunks splitting a block share through <see cref="Archetype.OpenBlocks{T}"/>. A pass that merges partial
+    /// results per chunk is cut by count instead (<see cref="MergedChunkRows(Archetype[], bool, int, int, int)"/>),
+    /// whatever the threads and the cost, so its result does not depend on them.
     /// </summary>
-    internal int ChunkRows(ParallelWork work, Archetype[] tables, bool stamps, bool merges, int rowBytes, int slices = 0, int chunkSize = 0)
+    internal int ChunkRows(ParallelWork work, Archetype[] tables, bool stamps, int slices = 0, int chunkSize = 0)
     {
         if (chunkSize > 0) return ChunkRows(work, 0, chunkSize);
-        long rows = 0;
-        for (int i = 0; i < tables.Length; i++) rows += tables[i].Count;
-        if (slices > 1) rows /= slices; // a sliced pass visits about 1 / slices of them
-        if (merges) return MergedChunkRows(work, rows, stamps, rowBytes);
+        long rows = VisitedRows(tables, slices);
         int size = ChunkRows(work, rows, 0);
         if (!stamps) return size;
         if (work.Measured) return size >= 4096 ? (size + 4095) & ~4095 : size; // small chunks of heavy rows open their blocks
@@ -93,6 +90,30 @@ public sealed partial class World
     internal static int MergedChunkRows(ParallelWork work, long rows, bool stamps, long rowBytes)
     {
         work.Items = 0;
+        return MergedChunkRows(rows, stamps, rowBytes);
+    }
+
+    /// <summary>
+    /// Rows per chunk of a pass over <paramref name="tables"/> that merges per chunk, as its cut takes them:
+    /// <paramref name="chunkSize"/> rounded up to 64 when given, else <see cref="MergedChunkRows(long, bool, long)"/> of
+    /// the rows it visits. Known before the cut, so a pass whose rows fit one chunk runs it without cutting
+    /// (<see cref="SmallPass"/>).
+    /// </summary>
+    internal static int MergedChunkRows(Archetype[] tables, bool stamps, int rowBytes, int slices, int chunkSize) =>
+        chunkSize > 0
+            ? (int)Math.Min((chunkSize + 63L) & ~63L, int.MaxValue & ~63)
+            : MergedChunkRows(VisitedRows(tables, slices), stamps, rowBytes);
+
+    /// <summary>The rows of <paramref name="tables"/>, about 1 / <paramref name="slices"/> of them for a sliced pass.</summary>
+    private static long VisitedRows(Archetype[] tables, int slices)
+    {
+        long rows = 0;
+        for (int i = 0; i < tables.Length; i++) rows += tables[i].Count;
+        return slices > 1 ? rows / slices : rows;
+    }
+
+    private static int MergedChunkRows(long rows, bool stamps, long rowBytes)
+    {
         long floor = rowBytes > 0 ? MinChunkBytes / rowBytes : 0; // 0: unknown (a hand-written pair job), one word
         floor = floor <= 64 ? 64 : (long)BitOperations.RoundUpToPowerOf2((ulong)floor);
         long size = Math.Max(floor, (long)(BitOperations.RoundUpToPowerOf2((ulong)Math.Max(rows, 1L)) / MergedChunks));
@@ -159,12 +180,17 @@ public sealed partial class World
 
     /// <summary>
     /// Whether a parallel pass over <paramref name="match"/> is one chunk whatever its rows cost: 1 when the rows it
-    /// visits lie in one table and number at most 64 (chunks are whole multiples of 64 rows from a word's first row, and
-    /// each table starts its own), with that table and its rows; 0 when it visits no row; -1 otherwise (the pass is cut).
-    /// The pass then runs that chunk on the calling thread without cutting (<c>ChunkRows</c>, the work's chunk arrays,
-    /// their release), as one chunk would run. Its rows are too few for their cost to say anything a cut would use.
+    /// visits lie in one table and in one block of <paramref name="size"/> rows (chunks end on multiples of the chunk
+    /// size, and each table starts its own), with that table and its rows; 0 when it visits no row; -1 otherwise (the
+    /// pass is cut). The pass then runs that chunk on the calling thread without cutting (<c>ChunkRows</c>, the work's
+    /// chunk arrays, the runner, their release), as one chunk would run. A pass cut by its rows' cost passes 64 (one
+    /// presence word: too few rows for their cost to say anything a cut would use); a pass that merges per chunk, cut by
+    /// count, passes its chunk size (<see cref="MergedChunkRows(Archetype[], bool, int, int, int)"/>): one chunk of it
+    /// is its serial form, the same partial result from Identity (cut and run, a light pass of fewer rows than
+    /// <see cref="MinChunkBytes"/> takes cost 1.1x its serial pass as a float sum of 1,000 rows, 1.35x as an integer
+    /// sum's vector loop).
     /// </summary>
-    internal static int SmallPass(QueryMatch match, in QueryFilter filter, out Archetype table, out RowFilter rows, out int first, out int end)
+    internal static int SmallPass(QueryMatch match, in QueryFilter filter, int size, out Archetype table, out RowFilter rows, out int first, out int end)
     {
         table = null;
         rows = default;
@@ -177,7 +203,7 @@ public sealed partial class World
             if (archetype.AliveCount == 0 || filtered.Mode(archetype) == RowFilter.None) continue;
             var (start, stop) = filter.Rows(a, archetype.Count);
             if (start >= stop) continue;
-            if (table != null || stop - start > 64) return -1;
+            if (table != null || start / size != (stop - 1) / size) return -1;
             table = archetype;
             rows = filtered;
             first = start;
