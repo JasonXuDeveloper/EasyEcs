@@ -212,6 +212,8 @@ public class SymmetricPairParallelTests
             Move(one, random.Item1);
             Move(four, random.Item2);
             SameOnAnyThreads(one, four, $"tick {tick}");
+            // Both worlds run the same passes: what they pay for their rows' jumps decides when the next update sorts.
+            AsTheSerialPass(one, $"tick {tick}, 1 thread");
             AsTheSerialPass(four, $"tick {tick}");
         }
 

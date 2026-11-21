@@ -3951,3 +3951,25 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
 - [ ] **Changelog (Performance):** a parallel pass or ParallelFor whose job dynamic PGO inlined into the runner ran its
       loop slower than alone (up to 1.35x for light jobs); tile loads in a column loop share one index per column.
 
+## research-pair-churn (backlog research-pair-churn: rows that come and go every tick)
+
+- [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`, beside D137 and the pair records): a pair pass finds its cluster
+      pairs through a grid over the two axes the boxes spread the most along (cells about a box wide; boxes wider than
+      four cells walk the other side's grid), not a sweep along one axis: the sweep met every box of its strip across
+      the map, O(boxes^1.5) (330 boxes walked per box at 100,000 rows); the lists by two counting sorts. Numbers: backlog
+      research-pair-churn (draw 27.8 -> 12 ms per draw at 100,000 churned rows, 3.1 -> 1.1 ms at 10,000; PairLists 0.52-0.98 of base).
+- [ ] **Decision record**: an ordered table is sorted sooner than its cadence when the pair passes paid, since its sort,
+      for its rows out of place (joined past the sorted rows or moved into a removed one's place) what a sort costs, the
+      next update's passes counted at the last update's cost per such row (ski rental, `RowOrder.SortCost` = 100 row
+      pairs a row, screened against 30 / 300 / 1,000 and a sort every update); rows that only move never ask. What was
+      considered: a sort once one cluster in 32 is disturbed (the probe), a sort every update, inserting new rows into
+      their clusters or sorting only the disturbed part (any permutation within the holes moves a row n/sqrt(k) places
+      on average; an order-keeping repair moves O(n) rows, as a sort does). Numbers: backlog research-pair-churn.
+- [ ] **Guide** (`guide/pairs`, the order's cadence and its costs): rows that come and go (items, shots, spawns) leave
+      clusters spanning the map until a sort; the world now sorts such a table as soon as its pairs cost more than a
+      sort (a large table with churn every tick is sorted every update: cheaper there, measured), so nothing to set.
+      Mention it where `Interval` / `OrderRows` is described, and in the pitfalls (a table no pair pass reads keeps its
+      cadence).
+- [ ] **Changelog (Performance):** pair passes over tables whose rows come and go every tick (2.7x at 0.1 % of 10,000
+      rows a tick, up to 87x at 1 % of 100,000), and a moving crowd's redraws of its cluster pairs (the grid).
+- [ ] **Roadmap:** none (a fix of an existing feature).

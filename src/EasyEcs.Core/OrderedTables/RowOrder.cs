@@ -124,7 +124,9 @@ internal readonly struct DeclaredOrder<T, TKey> : IRowOrder<T> where T : struct,
 /// or <see cref="OrderByAttribute">[OrderBy]</see> for every world), re-sorted by its world on the cadence (<see cref="World.SortRows{T}"/>
 /// for one now). Between sorts the rows drift: a row that moves into a cluster's row (a swap-remove, closed tombstones)
 /// widens that cluster's box to hold it, rows that join the table wait past <see cref="SortedRows"/>, and a row's own
-/// point may move up to the margin before its cluster's box stops covering it.
+/// point may move up to the margin before its cluster's box stops covering it. Rows that come and go every tick leave
+/// clusters spanning the map, which pair passes pay for until the next sort: the update sorts sooner once they paid
+/// what a sort costs (<see cref="Disturbed"/>).
 /// <br/>
 /// Owner thread only, under the structural gate: sorts, widenings and shrinks happen where rows move, never during a
 /// parallel pass, so readers (<see cref="RowClusters"/>) on a pass's threads see boxes that do not change under them.
@@ -220,6 +222,7 @@ internal abstract class RowOrder
     {
         if (row >= SortedRows) return;
         Widen(table, row);
+        _moved++;
         _changes++;
     }
 
@@ -262,8 +265,53 @@ internal abstract class RowOrder
         BoxCapacity = capacity;
     }
 
+    /// <summary>Sorts so far: a pair pass counts its cost from the last one (PairState.Disturbed).</summary>
+    public int Sorts;
+
+    // Rows moved into the sorted rows since the sort; the pairs pair passes paid for the rows that came and went since
+    // (past the least each paid since the sort); what the passes of the last update paid per such row (summed over the
+    // passes: two methods over the table pay twice), and the same of the passes since.
+    private int _moved;
+    private double _excess, _perRow, _perRowNow;
+
+    /// <summary>
+    /// What a sort costs per row, in row pairs of a pair pass: the keys, their radix sort and one permutation of every
+    /// column against the pass's tests (33 ns a row of a crowd's table of 10,000 rows, 55 ns of 100,000, against
+    /// 0.35 ns a pair: PairChurnBenchmark).
+    /// </summary>
+    public const double SortCost = 100;
+
+    /// <summary>
+    /// The rows of <paramref name="table"/> out of their place since the sort: moved into a removed row's place, or
+    /// joined past the sorted rows. O(1).
+    /// </summary>
+    public int Disturbance(Archetype table) => _moved + table.Count - SortedRows;
+
+    /// <summary>A pair pass paid <paramref name="excess"/> pairs for this table's disturbed rows, <paramref name="perRow"/> per row.</summary>
+    public void Paid(double excess, double perRow)
+    {
+        _excess += excess;
+        _perRowNow += perRow;
+    }
+
+    /// <summary>
+    /// Whether sorting <paramref name="table"/> now, as an update starts, costs less than its disturbed rows: what pair
+    /// passes paid for them since the sort and what the passes of an update would pay for those there now, at what the
+    /// last update's passes paid per row (ski rental: never more than twice the better of sorting at once and never
+    /// sorting until the cadence's sort). A table no pair pass pays for is never sorted early. O(1).
+    /// </summary>
+    public bool Disturbed(Archetype table)
+    {
+        if (_perRowNow > 0) _perRow = _perRowNow; // an update without a pass over the table keeps the last one's
+        _perRowNow = 0;
+        return _perRow > 0 && _excess + _perRow * Disturbance(table) >= SortCost * table.Count;
+    }
+
     protected void Sorted(int rows)
     {
+        _moved = 0;
+        _excess = 0;
+        Sorts++;
         SortedRows = rows;
         Stale = false;
         _changes++;

@@ -30,7 +30,8 @@ public sealed partial class World
     /// <typeparamref name="TOrder"/>'s key, its boxes over <paramref name="axes"/> axes of its point: what the setup of
     /// a generated pair method calls for the component it compares positions of (the key the Morton code of the
     /// position, <paramref name="cell"/> the cutoff). The rows are sorted at the next update, then every
-    /// <paramref name="interval"/> updates; between sorts a row may move <paramref name="margin"/> and stay inside its
+    /// <paramref name="interval"/> updates, and at an update where the rows that joined or moved into removed ones'
+    /// places since the sort cost the pair passes more than a sort would; between sorts a row may move <paramref name="margin"/> and stay inside its
     /// cluster's box. A cluster holds <paramref name="clusterSize"/> rows: 0 for the machine's vector of floats (8 where
     /// 256-bit vectors are hardware, 4 on ARM64), or a power of two up to 64. The first request for a component stands; <see cref="OrderByAttribute">[OrderBy]</see> on it
     /// overrides every request; a table holding several ordered components keeps one of their orders. A table
@@ -112,7 +113,8 @@ public sealed partial class World
 
     /// <summary>
     /// Update <paramref name="update"/> of the default group starts: sort the ordered tables whose interval came round
-    /// since their last sort, and those restored or created since. O(ordered tables) when none is due.
+    /// since their last sort, those restored or created since, and those whose rows that came and went cost the pair
+    /// passes more than a sort (<see cref="RowOrder.Disturbed"/>). O(ordered tables) when none is due.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void SortDue(long update)
@@ -121,7 +123,8 @@ public sealed partial class World
         for (int i = 0; i < tables.Length; i++)
         {
             var order = tables[i].Order;
-            if (order.Stale || update - order.SortedAt >= order.Interval) Sort(tables[i], update);
+            bool disturbed = order.Disturbed(tables[i]); // every update: it takes in what the last one's passes paid
+            if (disturbed || order.Stale || update - order.SortedAt >= order.Interval) Sort(tables[i], update);
         }
     }
 
@@ -154,6 +157,15 @@ public sealed partial class World
         int bit = ComponentType<T>.Bit;
         for (int i = 0; i < tables.Length; i++)
             if (tables[i].Order.Bit == bit) Sort(tables[i], DefaultUpdateCount);
+    }
+
+    /// <summary>The sorts of the tables ordered by <typeparamref name="T"/> so far (tests).</summary>
+    internal int SortsOf<T>() where T : struct, IComponent
+    {
+        int sorts = 0, bit = ComponentType<T>.Bit;
+        foreach (var table in OrderedTableList())
+            if (table.Order.Bit == bit) sorts += table.Order.Sorts;
+        return sorts;
     }
 
     /// <summary>

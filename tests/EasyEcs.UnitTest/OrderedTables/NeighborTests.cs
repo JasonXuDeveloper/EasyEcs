@@ -444,6 +444,88 @@ public class NeighborTests
         foreach (var (id, push) in Reference(world)) Assert.That(got[id], Is.EqualTo(push), $"entity {id}");
     }
 
+    /// <summary>Replace <paramref name="churn"/> random rows of <paramref name="live"/> by rows at random places.</summary>
+    private static void Churn(World world, List<Entity> live, int churn, float extent, Random random)
+    {
+        for (int i = 0; i < churn; i++)
+        {
+            int at = random.Next(live.Count);
+            live[at].Destroy();
+            live[at] = world.CreateEntity(new PairSpot((float)random.NextDouble() * extent, (float)random.NextDouble() * extent),
+                new PairDrift((float)random.NextDouble() - 0.5f, (float)random.NextDouble() - 0.5f), new PairShove());
+        }
+    }
+
+    [TestCase(1)]
+    [TestCase(4)]
+    public void RowsThatComeAndGoKeepEveryPairAndSortTheirTableSooner(int threads)
+    {
+        // Rows replaced every tick: the new ones wait past the sorted rows, then move into removed ones' places, each
+        // widening its cluster's box across the map. The passes pay for them until their table is sorted again: sooner
+        // than the cadence (every 10 updates) once they cost what a sort would. Every pass equals every pair.
+        using var world = Crowd(1500, 20f, 11, threads: threads);
+        var live = Entities<PairSpot>(world);
+        var random = new Random(2);
+        Neighbors.Separate(world); // the first pass sorts
+        int first = world.SortsOf<PairSpot>();
+        for (int tick = 0; tick < 40; tick++)
+        {
+            Churn(world, live, 30, 20f, random);
+            world.Update(); // the cadence's sorts, and those the disturbed rows cost more than
+            Neighbors.Reset(world);
+            if (threads > 1) Neighbors.SeparateParallel(world);
+            else Neighbors.Separate(world);
+            var got = Pushes(world);
+            Neighbors.Reset(world);
+            Neighbors.SeparateAll(world);
+            Assert.That(got, Is.EqualTo(Pushes(world)), $"tick {tick}");
+        }
+
+        Assert.That(world.SortsOf<PairSpot>() - first, Is.GreaterThan(40 / 10 * 2), "a table whose rows come and go is sorted sooner than its cadence");
+    }
+
+    [Test]
+    public void RowsThatStayAreSortedOnTheCadenceOnly()
+    {
+        // Rows that move, some far, but neither come nor go: the cluster boxes of the jumps grow, which the next sort
+        // mends; no row is out of its place in the order, so no sort comes early.
+        using var world = Crowd(3000, 30f, 12);
+        var random = new Random(3);
+        Neighbors.Separate(world);
+        int first = world.SortsOf<PairSpot>();
+        for (int tick = 0; tick < 60; tick++)
+        {
+            foreach (var item in world.Query<PairSpot>())
+            {
+                ref var p = ref item.Component1;
+                p = random.Next(100) == 0 ? new PairSpot((float)random.NextDouble() * 30, (float)random.NextDouble() * 30) : new PairSpot(p.X + 0.01f, p.Y);
+            }
+
+            world.Update();
+            Neighbors.Reset(world);
+            Neighbors.Separate(world);
+        }
+
+        Assert.That(world.SortsOf<PairSpot>() - first, Is.EqualTo(60 / 10));
+    }
+
+    [Test]
+    public void APassOverRowsThatComeAndGoAllocatesNothingOnceWarm()
+    {
+        using var world = Crowd(5000, 50f, 13);
+        var live = Entities<PairSpot>(world);
+        var random = new Random(4);
+        void Step()
+        {
+            Churn(world, live, 100, 50f, random);
+            world.Update();
+            Neighbors.Reset(world);
+            Neighbors.Separate(world);
+        }
+
+        Assert.That(Allocations.Steady(Step, 200, 20), Is.Zero); // through the sorts the passes ask for
+    }
+
     [Test]
     public void MovingRowsKeepEveryPairWithinTheCutoff()
     {

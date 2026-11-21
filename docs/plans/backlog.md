@@ -121,11 +121,51 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       the widest axis; a neighbor list is sized once), A/B level at 0 B (PairsBenchmark Both / Parallel, PairListsBenchmark,
       PairGroups, PairHalves, BufferSharing / Snapshot), the old sample's tick level. Step 4 not kept: the form searches
       every zombie every tick (99.4 % keep their target) and the item pairs pay for the churned item table.
-- [ ] **`research-pair-churn`** (from research-voxel-pairs; Opus): a table whose rows come and go every tick (items)
-      keeps clusters spanning the map until the next sort (every 10 updates): 400x the candidates of its pairs. A probe
-      sorting a table once one cluster in 32 was disturbed (RowOrder counts `Moved` and the rows past `SortedRows`)
-      halved VoxelServer's Pickup and merge; it needs a rule that stays cheap for a large table with churn (a 100,000
-      row sort every tick) and a benchmark with churn before it ships.
+- [x] **`research-pair-churn`** closed 2026-11-19 (branch `research-pair-churn`, not merged; commits: Benchmarks
+      PairChurnBenchmark, Core grid draw, Core early sort, Tests). Two causes, both fixed in core, pairs bit for bit.
+      (1) Rows out of place: rows that join wait past `SortedRows`, a row moved into a removed one's place widens its
+      cluster's box across the map, so until the cadence's sort (every 10 updates) the pairs grew 10-90x (PairChurn
+      base: 5.7 ms a tick at 0.1 % of 10,000 rows, 84 ms at 10 %, 249 ms at 0.1 % of 100,000, 2.0 s at 1 %). Fix: each
+      pair pass counts the row pairs its list pays past the least since its tables' sort, per row out of place; an update
+      sorts a table early once what was paid plus what the next update's passes would pay reaches the sort's cost
+      (`RowOrder.SortCost` = 100 row pairs a row, ski rental; `RowOrder.Disturbed`). Rows that only move never ask.
+      Screened 30 / 100 / 300 / 1,000 and a sort every update (dev): 100 best or level everywhere; at 100,000 rows with
+      0.1 % churn a sort every update is the cheapest rule measured (c100 23.7 ms, every 24.9, c300 31.2, c1000 36.4):
+      the "100,000-row sort every tick" costs 5 ms where the spread clusters cost 225, so it is right there, and the
+      model stops it wherever it does not pay. Dropped (dev, still with the sweep): the probe (one cluster in 32 disturbed: 123 ms at 100k / 0.1 %
+      against 98 for the first cost model, 84 for a sort every update); feedback only after the pass (the first cost model:
+      a sort every other tick at high churn, 24.6 ms at 10k / 10 % against 3.4 for a sort every update); sorting only the disturbed rows into
+      the holes (any permutation within the holes moves a row n/sqrt(k) places of the order on average: the clusters
+      stay wide) and an order-keeping repair (moves O(n) rows as a sort does). (2) The draw: churn redraws a list every
+      pass, and the sweep along one axis met every box of its strip across the map, O(boxes^1.5): 27.8 ms a draw at
+      100,000 rows (a phase probe outside BenchmarkDotNet, for attribution only: 0.70 ms of a static 10,000-row crowd's
+      1.42 ms pass, 3.1 of 3.9 ms churned and sorted every tick). Fix: a grid over the two axes the boxes
+      spread the most along (cells about a box wide; boxes wider than four cells walk the other side's grid; one-axis
+      boxes keep the sweep), the lists by two counting sorts (the per-cluster sort was 6 ms of a draw): draw 12 ms at
+      100k (grid 9, lists 3), 0.24 ms for the static 10k crowd (the same probe). Wide threshold 1 / 2 / 3 / 4 cells: 160 / 14 / 9 / 9 ms.
+      A/B (default job, two rounds, base 402ab80e + the benchmark, grid 1e71c4de, head): head / base per round: PairChurn (ms a tick, base -> head, round 1 / 2)
+      Generated 10k 0.1 % 5.72 / 5.64 -> 2.08 / 2.12, 1 % 23.6 / 22.4 -> 2.31 / 2.17, 10 % 84.1 / 81.7 -> 2.38 / 2.39,
+      100k 0.1 % 249 / 256 -> 23.4 / 23.5, 1 % 2,035 / 2,072 -> 26.3 / 23.8; Both 10k 7.19 / 7.40 -> 4.19 / 4.06,
+      22 -> 3.9, 77-79 -> 3.7-3.8, 100k 243 / 242 -> 43.6 / 41.1, 1,796 / 1,804 -> 41.8 / 40.6 (the grid alone: 0.42-0.71
+      of base); PairLists 0.52-0.98 of base in both rounds (100k Crowd Auto 0.61 / 0.62, Sparse Auto 0.52 / 0.54); PairHalves,
+      PairsBenchmark Generated* / PairGroups (static passes: no draw after the first), RowOrder (the sort, unchanged) and
+      VoxelServer TickBenchmark (no ordered table) level: no row above max(3 %, base spread) in both rounds; the rows above
+      3 % in both (PairHalves Full 10k Sparse 4t 1.147 / 1.145, Pairs GeneratedParallelResult 1k Crowd 1.124 / 1.138,
+      GeneratedRows 10k Sparse, Generated 100k Sparse, RowOrder Sorted 100k Narrow 1.093 / 1.068) were run again in two
+      more interleaved rounds: none was above in all four (1.088 / 0.759, 1.103 / 0.973, 1.014 / 0.973, 1.007 / 1.031,
+      1.009 / 1.015), level with the control CoreClusters (unchanged code: 0.85-1.05). Their code differs from base by an
+      O(1) count per pass (static passes draw once). 0 B everywhere but one run of seven of PairHalves Full 100k Sparse 1
+      thread on head (8 B a 20-tick op, rounds 1-3 and the other trees 0); base showed the same kind once (TickBenchmark
+      2,000 players, round 2: 624 B on unchanged code), as `research-tile-bdn-1b` describes; the unit tests' Steady
+      checks of the parallel and churned passes are 0 B.
+      Open: the 354 of 12,500 boxes wider than four cells at 100,000 rows (Morton jumps: a cluster across a quadrant
+      boundary) carry most of the grid's 9 ms and of their pairs (`research-pair-wide-clusters`); VoxelServer's sample
+      has no pair method (step 4 not kept), so its Pickup / merge as pairs is for `research-pair-filtered-rows`'s re-try.
+- [ ] **`research-pair-wide-clusters`** (from research-pair-churn; Opus): after a sort, about 3 % of a crowd's clusters
+      of 8 rows span a Morton jump (a box over two quadrants, up to half the map): at 100,000 rows 354 boxes wider than
+      four grid cells, most of the draw's 9 ms in the grid and a share of the pass's pairs. Try splitting a cluster where
+      the key jumps (variable clusters break the lanes: measure first how many pairs they cost), a Hilbert key (no
+      jumps across the map), or boxes of two halves for the draw.
 - [ ] **`research-pair-filtered-rows`** (from research-voxel-pairs; Opus): a pair method whose row filter passes few
       rows (`With<Seeking>`: ~11 of 4,000 zombies) still draws boxes, ranges and lists for every row: 0.52 ms where the
       old sliced search cost 0.17. Draw only the clusters holding a passing row, then re-try step 4's Keep + Acquire

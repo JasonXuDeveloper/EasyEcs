@@ -183,7 +183,9 @@ Lookups/PrefetchTests.cs  chases prefetched past the last-level cache: entity ch
 ## OrderedTables/
 
 ```
-OrderedTables/NeighborTests.cs               pair methods: sums bit for bit against every pair, the vector loop against the method
+OrderedTables/NeighborTests.cs               pair methods: sums bit for bit against every pair (rows that come and go every tick
+                                             included: their table sorted sooner than its cadence, rows that only move never; 0 B),
+                                             the vector loop against the method
                                              per pair, a cutoff per row and from a singleton, two kinds of entity, the current target
                                              kept through a hint, writes of the neighbor ([Neighbor] ref: a pickup against the loop
                                              over both tables, its stamps), parallel passes bit for bit against the serial ones

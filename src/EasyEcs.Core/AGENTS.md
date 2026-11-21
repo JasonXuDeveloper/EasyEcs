@@ -169,7 +169,8 @@ OrderedTables/RowOrder.cs     ordered tables: IRowOrder<T> (a key and a box poin
                               generator), RowKeys (Morton codes by a cell, key bits), IOrderKey<TKey> + DeclaredOrder
                               ([OrderBy]'s part), RowOrder (Archetype.Order: the LSD radix sort of (key, row), the boxes
                               per cluster (8 rows with 256-bit vectors, 4 on ARM64, or the size a request asks), widened
-                              where a row moves in, reset by a restore)
+                              where a row moves in, reset by a restore; Disturbed: a sort sooner than the cadence once
+                              the rows out of place cost the pair passes more than it, SortCost)
 OrderedTables/RowClusters.cs  RowClusters: the read path of one ordered table (clusters, boxes per axis, columns, ids,
                               Pairs: the cluster pairs within a cutoff, a sweep over scratch kept per thread) and ClusterPair
 OrderedTables/Pairs.cs        [Neighbor] (a pair method's other entity) and the pass of a pair method: IPairJob (the
@@ -181,8 +182,11 @@ OrderedTables/Pairs.cs        [Neighbor] (a pair method's other entity) and the 
                               chunk order; PairState.Next walks the pairs of tables) (the order requested once,
                               then PairState: cluster boxes drawn every pass and checked against the kept ones widened
                               by an adaptive margin (grown when a share of the boxes left at once, not for a lone
-                              jump), a sweep of the boxes widened by the clusters' reach when one left, along the axis
-                              they spread the most along (SweepAxis);
+                              jump), the boxes that meet found again when one left: a grid over the two axes the boxes
+                              spread the most along (Grid: each side's boxes by cell, CellBoxes; boxes wider than four
+                              cells apart), a sweep along one (Sweep, SweepAxis); the lists of clusters by two counting
+                              sorts; what a pass pays past its least since the sort for the rows that came and went
+                              (Disturbed), which the next update weighs against a sort (RowOrder.Disturbed);
                               lists of each row's neighbors, Verlet's, where they cost less than the ranges for the
                               method's width: PairRun.Listed / Near, kept while the rows moved less than the margin;
                               a job writing both sides, IPairJob.Symmetric: each pair of tables once, a table against
