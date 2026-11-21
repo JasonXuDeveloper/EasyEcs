@@ -185,7 +185,8 @@ OrderedTables/Pairs.cs        [Neighbor] (a pair method's other entity) and the 
                               jump), the boxes that meet found again when one left: a grid over the two axes the boxes
                               spread the most along (Grid: each side's boxes by cell, CellBoxes; boxes wider than four
                               cells apart), a sweep along one (Sweep, SweepAxis); the lists of clusters by two counting
-                              sorts; what a pass pays past its least since the sort for the rows that came and went
+                              sorts; a filter passing few rows draws only the clusters holding one (PairList.Partial,
+                              drawn again when another gains one: Covers); what a pass pays past its least since the sort for the rows that came and went
                               (Disturbed), which the next update weighs against a sort (RowOrder.Disturbed);
                               lists of each row's neighbors, Verlet's, where they cost less than the ranges for the
                               method's width: PairRun.Listed / Near, kept while the rows moved less than the margin;
