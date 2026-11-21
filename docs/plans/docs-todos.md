@@ -3951,6 +3951,25 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
 - [ ] **Changelog (Performance):** a parallel pass or ParallelFor whose job dynamic PGO inlined into the runner ran its
       loop slower than alone (up to 1.35x for light jobs); tile loads in a column loop share one index per column.
 
+## perf-c0cd (backlog C0c, C0d)
+
+- [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`, beside the records of MergedChunks / MinChunkBytes, owner L31 /
+      L32): a parallel pass that merges (Reduce<T>, Emit<T>) and whose rows fit one chunk of its count cut runs that
+      chunk on the calling thread without cutting: its serial form, the same bits. Why: the cut, the runner and the
+      merge cost 1.1x a float sum of 1,000 rows and 1.35x an integer sum's vector loop. Considered: a cost threshold
+      (the cut by count must not follow the machine), running a few chunks without the runner (dropped: C0f's numbers).
+      Numbers: backlog C0c.
+- [ ] **Guide** (`guide/performance/threading` or the Reduce<T> page, where its chunks are described): a parallel pass
+      with Reduce<T> or Emit<T> over fewer rows than one chunk (32 KB of the columns it reads) costs what the serial
+      method does, so `Parallel = true` costs nothing on small worlds; compare a parallel pass with the same method
+      serial, not with a hand-written ref value (a sum's serial Reduce is a vector loop).
+- [ ] **Stale XML docs** (with their zh entries in `tools/docs/ApiDocs/zh`): `Reduce<T>` and `ForEachAttribute.ChunkSize`
+      say a merging pass cuts 16 chunks of 1,024 to 16,384 rows, and the generated `ForEach*Parallel` summary says "16
+      for a job that merges": it is MergedChunks (64) with the MinChunkBytes floor, and now one chunk runs uncut.
+- [ ] **Changelog (Performance):** small parallel reductions and emits (fewer rows than one chunk) run as fast as the
+      serial method (up to 1.3x faster than before at 1,000 rows).
+- [ ] **Roadmap:** none.
+
 ## research-pair-churn (backlog research-pair-churn: rows that come and go every tick)
 
 - [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`, beside D137 and the pair records): a pair pass finds its cluster

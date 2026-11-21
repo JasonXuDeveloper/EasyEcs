@@ -158,6 +158,13 @@ public partial class ReduceBenchmark
     }
 
     [Benchmark]
+    public float MassSerialReduce()
+    {
+        Totals.MassSerial(_world);
+        return _world.SpotMass.Value;
+    }
+
+    [Benchmark]
     public float MassParallelReduce()
     {
         Totals.MassParallel(_world);
@@ -366,6 +373,9 @@ public partial class ReduceBenchmark
 
         [ForEach]
         public static void MassByRef(in Spot spot, ref float mass) => mass += spot.X;
+
+        [ForEach]
+        public static void MassSerial(in Spot spot, ref Reduce<SpotMass> mass) => mass.Value.Value += spot.X;
 
         [ForEach(Parallel = true)]
         public static void MassParallel(in Spot spot, ref Reduce<SpotMass> mass) => mass.Value.Value += spot.X;

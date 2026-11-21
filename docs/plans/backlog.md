@@ -683,12 +683,64 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       per tile and the store's row index read back from the stack each column. The cell form is the answer and needs no
       new rule: EECS103 v2 (HandStencil) already reports such a tile method with its cell rewrite (Laplacian_Cell 350-410
       us, 0.8x Hand); EECS116 stays about the second buffer.
-- [ ] **C0c. MassParallelReduce at 1k / 10k is 1.12x / 1.06x MassSerialRef**: the parallel pass should fall back to
+- [x] **C0c. MassParallelReduce at 1k / 10k is 1.12x / 1.06x MassSerialRef**: the parallel pass should fall back to
       the serial form below its break-even, as Sum does; and Mass has no serial Reduce row to compare. Sonnet for the
       row, Opus for the threshold.
-- [ ] **C0d. Possible regressions to settle in a quiet round**: EmitSerial +25% at 10k and 100k (small StdDev),
+      **Done (perf-c0cd: 09bba4f2 the MassSerialReduce row, fed67810 Core, 07aa862a Tests).** Re-measured on 6458f44b
+      (default job, two interleaved rounds): MassParallelReduce 1k 619 / 552 ns against MassSerialRef 539 / 511. Sum
+      did not fall back either: its serial Reduce is the vector loop (SumSerialReduce 63 ns at 1k, SumSerialRef 288),
+      and SumParallelReduce was 84 / 93 ns, 1.35x its serial form; the comparison with the ref rows hid it. Cause: a
+      pass that merges (Reduce<T>, Emit<T>) is cut by count, at least MinChunkBytes (32 KB) of its columns a chunk,
+      so 1,000 rows (8 KB of Spot, 4 KB of Score) are one chunk, yet the pass made the whole cut: WorkOf, Cut's chunk
+      arrays, RunChunks, a virtual Run on a copy of the job, MergeInto, Release (about 60 ns of a 540 ns float sum,
+      20 ns of a 64 ns vector sum). Fix: SmallPass takes the chunk size; a merging pass works out its count cut first
+      (MergedChunkRows over the tables, handed to Cut so it is computed once) and rows inside one block of it run as
+      that chunk on the calling thread, the same partial from Identity (the same bits; the ≤ 64-row case did this
+      already). A/B head / head + Core: MassParallelReduce 1k 589 / 521, 540 / 513 (MassSerialReduce 505, 498);
+      SumParallelReduce 1k 85 / 69, 86 / 66 (SumSerialReduce 65, 64); SumParallelGenerated 0.78, 0.77; Accumulate
+      Parallel 1k 107 / 84, 106 / 84; Lowest* 1k 0.82-0.96; Bounds 1k 0.94-0.97; passes of several chunks,
+      ChunkSize, ParallelPass, ParallelRunner, Emit, Accumulate and BattleServer no row slower in both rounds beyond
+      the class's noise, 0 B. SumSerialReduce 1M (serial, code unchanged) read 1.34 / 1.34, bimodal per process
+      (111-160 against 166-238 us): six launches a side, twice, read it 0.77 / 0.87. At 10k (Mass: 3 chunks of 4,096
+      rows, the runner settled alone) the pass is 1.00-1.07x its serial form; Sum (2 chunks) still 1.33x: C0f.
+- [x] **C0d. Possible regressions to settle in a quiet round**: EmitSerial +25% at 10k and 100k (small StdDev),
       ComponentThenScan 100k +15%, the DotNetParallelFor baselines +8-27% (machine). A/B against the commit of
       bench.json's rows first; a real one becomes its own item.
+      **Done (perf-c0cd).** bench.json's rows of these classes come from 2ef8d8fd ("benchmark numbers of the full run",
+      code of fa2770f7, 2026-10-23); A/B of that commit (renamed rows mapped: ForParallelBenchmark ->
+      ParallelForBenchmark, *ParallelFor -> *DotNetParallelFor) against 6458f44b, default job, interleaved rounds,
+      base / head ratios. EmitSerial 10k 1.05, 1.03, 1.03, 0.92, 0.81, 0.98; 100k 1.00, 1.16, 1.02, 0.99, 1.07, 1.24:
+      no regression. The DotNetParallelFor baselines (the same BCL code on both sides) 0.78-1.53 in both directions
+      across rows and rounds: the machine, as noted. ComponentThenScan 10k is faster (0.53-0.73); 100k 1.09, 1.02,
+      1.13, 0.89, 1.32, 1.27: split into its two passes (PendingOnly / CollectOnly added to both copies), the parallel
+      pass is level (0.95, 1.11, 0.97) and the serial scan 1.00, 1.17, 1.09, while the parts sum to about 124 us
+      against 200-270 us whole: the case is dominated by the scan pulling the rows the parallel pass's helpers just
+      wrote from their cores, which moves with where the chunks ran: C0g. Seen on the way (not in this item):
+      contended per-row jobs on the runner are 4-13x slower at 1k-10k than at bench.json's commit: C0e.
+- [ ] **C0e. A parallel pass of contended rows stays wide**: MassParallelInterlocked 1k 8.3x / 10.4x of 2ef8d8fd,
+      BoundsParallelLock 1k 13.4x / 8.4x, EmitBenchmark.ConcurrentQueue 10k 3.2x / 6.0x, InterlockedCursor 100k 1.6x /
+      1.9x (these are users' hand-written forms, but the runner makes them worse than one thread). Cause (a probe of
+      MassParallelInterlocked reading the work's fields): at 10k the rows' measured cost is 233-285 ns contended
+      against 9.3 ns alone, so the cost cut (e3021f2e) makes 79 chunks, and `ParallelWork.Beats` keeps the helpers because
+      a wide run (about 600 us) beats the items' summed thread time of that same run (about 2,400 us), which the
+      contention inflates; a run alone (about 95 us) is never measured again. At 1k the probe settled alone (2 chunks,
+      9.8 us), BenchmarkDotNet's processes did not. Fix to try: compare a wide run with the last measured run alone
+      (and probe alone now and then while wide), and take the rows' cost from runs alone only. Proof: ReduceBenchmark
+      and EmitBenchmark's contended rows, ParallelRunner, ChunkSize, ParallelPass, BattleServer. Opus.
+- [ ] **C0f. A merging pass of a few chunks still costs its cut**: SumParallelReduce 10k 702 ns against
+      SumSerialReduce 505 (2 chunks of 8,192 rows, the runner settled alone): Cut, the runner's claim and two clock
+      reads, a job copy and the vector loop's prologue and folds per chunk. Tried in perf-c0cd: running the chunks of a
+      work settled alone in RunChunks without the runner (FreezeAlone, no ParallelPasses count, no claim): Sum 10k 0.96 /
+      0.96, Mass 10k 0.91 / 1.02, but HeavyParallelFor 10k 1.19 / 1.17 and PairsBenchmark.GeneratedParallel 10k Sparse
+      1.13 / 1.20 slower in both rounds, a work that runs wide; dropped before its cause was found (read RunChunks'
+      and the runner's Tier1 listings in both builds: the extra branch and call in RunChunks may have changed what PGO
+      inlines there, C0a's lesson): `ParallelWork.StaysAlone` consumed Wide's choice in RunChunks and left a probe for the
+      runner's Wide. Opus.
+- [ ] **C0g. ComponentThenScan 100k and its serial scan**: the parallel pass writes PendingHit on the helpers' cores
+      and the serial scan then reads every line from them (parts 36 + 88 us, whole 200-270 us); CollectOnly alone
+      1.00 / 1.17 / 1.09 of 2ef8d8fd. Settle CollectOnly in more rounds (a real slowdown of the serial row walk becomes
+      the item), and measure what the scan pays for lines another core wrote (a chunk order kept per core across passes
+      would leave them where the next pass reads them). Sonnet for the rounds.
 
 - [x] **C1. `RemoveTypes` roots the removed types** (`core.md` §1): `_orderRequests`, `_tileSteps`, `PairState`'s
       clusters and lists, `_columnSpares` survive `ForgetTypes`; `Mentions` ignores `_orderRequests`, so a reused bit
