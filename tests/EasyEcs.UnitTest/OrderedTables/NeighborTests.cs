@@ -447,6 +447,7 @@ public class NeighborTests
     /// <summary>Replace <paramref name="churn"/> random rows of <paramref name="live"/> by rows at random places.</summary>
     private static void Churn(World world, List<Entity> live, int churn, float extent, Random random)
     {
+        world.Reserve<PairSpot, PairDrift, PairShove>(churn);
         for (int i = 0; i < churn; i++)
         {
             int at = random.Next(live.Count);
