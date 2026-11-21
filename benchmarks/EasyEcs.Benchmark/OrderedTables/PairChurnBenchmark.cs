@@ -62,6 +62,7 @@ public class PairChurnBenchmark
     private void Tick(bool both)
     {
         int churn = (int)((long)Entities * ChurnPerMille / 1000);
+        _world.Reserve<Crowd.Position, Crowd.Velocity, Crowd.Push, Crowd.Neighbors>(churn);
         for (int i = 0; i < churn; i++)
         {
             int at = _random.Next(_live.Length);
