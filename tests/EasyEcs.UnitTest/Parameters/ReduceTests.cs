@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using NUnit.Framework;
 
 namespace EasyEcs.UnitTest;
@@ -129,6 +130,14 @@ public partial class ReduceTests
     public ref struct DefaultChunkMass
     {
         [ForEach(Parallel = true)]
+        static void Add(in Weight weight, ref Reduce<WeightSum> mass) => mass.Value.Total += weight.Value;
+    }
+
+    /// <summary><see cref="DefaultChunkMass"/> on one thread: one partial result.</summary>
+    [EcsSystem]
+    public ref struct SerialMass
+    {
+        [ForEach]
         static void Add(in Weight weight, ref Reduce<WeightSum> mass) => mass.Value.Total += weight.Value;
     }
 
@@ -656,6 +665,40 @@ public partial class ReduceTests
         using var small = Pointed(40);
         small.AddSystem<ParallelEnds>();
         Assert.That(Allocations.Steady(small.Update, 50, 100), Is.Zero);
+    }
+
+    /// <summary>
+    /// A pass that merges is cut by count, so rows that fit one of its chunks (<see cref="World.MinChunkBytes"/> of the
+    /// columns it reads: 8,192 rows of a 4-byte Weight) are its serial pass: run on the calling thread without being cut
+    /// (no chunks: the pass's chunked work is never made), the same float bits as the method with Parallel = false, on
+    /// 1 and 4 threads. One row more is cut into two chunks.
+    /// </summary>
+    [TestCase(1_000)]
+    [TestCase(8_192)]
+    [TestCase(8_193)]
+    public void AParallelReductionWithinOneChunkIsItsSerialPass(int rows)
+    {
+        foreach (int threads in new[] { 1, 4 })
+        {
+            using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+            var random = new Random(5);
+            var entities = new Entity[rows];
+            world.CreateEntities(entities, new Weight(0));
+            foreach (var e in entities) e.Weight = new Weight(random.NextSingle() * 1000);
+            world.AddSystem<SerialMass>();
+            world.Update();
+            float serial = world.WeightSum.Total;
+            world.RemoveSystem<SerialMass>();
+            world.AddSystem<DefaultChunkMass>();
+            for (int run = 0; run < 3; run++)
+            {
+                world.Update();
+                Assert.That(world.WeightSum.Total, Is.EqualTo(serial), $"{rows} rows on {threads} threads, run {run}");
+            }
+
+            var works = (World.ParallelWork[])typeof(World).GetField("_parallelWork", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(world)!;
+            Assert.That(Array.Exists(works, w => w != null), Is.EqualTo(rows > 8_192), $"{rows} rows cut into chunks on {threads} threads");
+        }
     }
 
     /// <summary>The entity with the fewest points ([MinBy], MINLOC): the generator writes Identity and Combine.</summary>
