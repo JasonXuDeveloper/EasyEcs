@@ -17,6 +17,12 @@ public partial class Context : IAsyncDisposable
 {
     // Entity storage
     private int _entityIdCounter;
+
+    // Recycled entity ids (LIFO). Reusing ids keeps every per-entity / per-component array bounded by the
+    // peak number of live entities instead of growing forever in long-running processes.
+    private int[] _freeEntityIds = new int[64];
+    private int _freeEntityIdCount;
+
     internal Entity[] Entities;
     internal int[] EntityVersions; // Version tracking for destroyed entities
     private bool[] _activeEntityIds;
@@ -54,6 +60,8 @@ public partial class Context : IAsyncDisposable
         Entities = new Entity[initialCapacity];
         EntityVersions = new int[initialCapacity];
         _activeEntityIds = new bool[initialCapacity];
+        EntityArchetypes = new Archetype[initialCapacity];
+        EntitySlots = new int[initialCapacity];
     }
 
     public class Options
@@ -102,6 +110,9 @@ public partial class Context : IAsyncDisposable
         Array.Resize(ref Entities, newCapacity);
         Array.Resize(ref EntityVersions, newCapacity);
         Array.Resize(ref _activeEntityIds, newCapacity);
+        Array.Resize(ref EntityArchetypes, newCapacity);
+        Array.Resize(ref EntitySlots, newCapacity);
+
 
         // Resize component arrays
         if (Components != null)
@@ -177,24 +188,29 @@ public partial class Context : IAsyncDisposable
     {
         lock (_structuralLock)
         {
-            // ID allocation inside lock to ensure capacity check is atomic
-            int id = _entityIdCounter++;
-
-            // Ensure capacity inside lock
-            if (id >= Entities.Length)
+            // Prefer a recycled id; versions were bumped on destroy so stale refs stay invalid.
+            int id;
+            if (_freeEntityIdCount > 0)
             {
-                int newCapacity = Math.Max(Entities.Length * 2, id + 1);
-                ResizeEntityArrays(newCapacity);
+                id = _freeEntityIds[--_freeEntityIdCount];
+            }
+            else
+            {
+                id = _entityIdCounter++;
+                if (id >= Entities.Length)
+                {
+                    int newCapacity = Math.Max(Entities.Length * 2, id + 1);
+                    ResizeEntityArrays(newCapacity);
+                }
             }
 
-            var entity = new Entity(this, id, EntityVersions[id]);
-            Entities[id] = entity;
+            Entities[id] = new Entity(this, id, EntityVersions[id]);
             _activeEntityIds[id] = true;
             _activeEntityCount++;
 
             // Add to empty archetype
-            var archetype = GetOrCreateArchetype(in Tag.Empty);
-            archetype.Add(id);
+            _emptyArchetype ??= GetOrCreateArchetype(in Tag.Empty);
+            MoveToArchetype(id, _emptyArchetype);
 
             return new EntityRef(id, EntityVersions[id], this);
         }
@@ -209,21 +225,54 @@ public partial class Context : IAsyncDisposable
     {
         lock (_structuralLock)
         {
-            if (!_activeEntityIds[entity.Id])
+            int id = entity.Id;
+            if (!_activeEntityIds[id] || EntityVersions[id] != entity.Version)
                 return;
 
             // Increment version to invalidate all existing references
-            EntityVersions[entity.Id]++;
+            EntityVersions[id]++;
 
-            // Remove from archetype
-            var archetype = GetOrCreateArchetype(in entity.Tag);
-            archetype.Remove(entity.Id);
+            DetachFromArchetype(id);
 
-            // Mark inactive
-            _activeEntityIds[entity.Id] = false;
+            // Release component data so managed references inside components do not outlive the entity
+            ref var stored = ref Entities[id];
+            var components = Components;
+            if (components != null)
+            {
+                for (int i = 0; i < components.Length; i++)
+                {
+                    if (components[i] != null && stored.Tag.HasBit(i))
+                        Array.Clear(components[i], id, 1);
+                }
+            }
+
+            stored = default;
+
+            // Mark inactive and recycle the id
+            _activeEntityIds[id] = false;
             _activeEntityCount--;
+
+            if (_freeEntityIdCount >= _freeEntityIds.Length)
+                Array.Resize(ref _freeEntityIds, _freeEntityIds.Length * 2);
+            _freeEntityIds[_freeEntityIdCount++] = id;
         }
     }
+
+    private Archetype _emptyArchetype;
+
+    /// <summary>
+    /// Throw when <paramref name="entity"/> is not alive or refers to an earlier occupant of a recycled id.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ThrowIfStale(in Entity entity)
+    {
+        int id = entity.Id;
+        if ((uint)id >= (uint)_activeEntityIds.Length || !_activeEntityIds[id] || EntityVersions[id] != entity.Version)
+            ThrowEntityNotFound();
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowEntityNotFound() => throw new InvalidOperationException("Entity not found");
 
     /// <summary>
     /// Destroy an entity immediately (EntityRef overload).
@@ -551,6 +600,9 @@ public partial class Context : IAsyncDisposable
         }
 
         Components = null;
+        Array.Clear(EntityArchetypes, 0, EntityArchetypes.Length);
+        _emptyArchetype = null;
+        _freeEntityIdCount = 0;
 
         _executeSystems.Clear();
         _initSystems.Clear();
