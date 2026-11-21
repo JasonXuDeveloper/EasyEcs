@@ -166,10 +166,52 @@ Every SIMD path covers ARM64 (`audit-vector-loops`, "Every vector form runs on A
       four grid cells, most of the draw's 9 ms in the grid and a share of the pass's pairs. Try splitting a cluster where
       the key jumps (variable clusters break the lanes: measure first how many pairs they cost), a Hilbert key (no
       jumps across the map), or boxes of two halves for the draw.
-- [ ] **`research-pair-filtered-rows`** (from research-voxel-pairs; Opus): a pair method whose row filter passes few
-      rows (`With<Seeking>`: ~11 of 4,000 zombies) still draws boxes, ranges and lists for every row: 0.52 ms where the
-      old sliced search cost 0.17. Draw only the clusters holding a passing row, then re-try step 4's Keep + Acquire
-      with `Seeking` (the form in voxel-rewrite.md section 11).
+- [x] **`research-pair-filtered-rows`** closed 2026-11-21 (branch `research-pair-filtered-rows`, not merged; commits:
+      Benchmarks PairFilterBenchmark, Core partial lists, Tests, Core draw costs, Plans). Cause (a probe of the pass,
+      outside BenchmarkDotNet, attribution only): every pass drew its lists for every cluster, because a cluster gaining
+      a passing row raises its reach from 0, which keeps the table's boxes again (`Reaches` -> `Keep`): the draw was
+      0.21 of a 0.39 ms pass at 4,000 hunters with 12 seeking (12 of 500 clusters), 2.0 of 2.4 ms at 40,000. Fix: while
+      fewer than one cluster in four (`PairState.PartialShare`) holds a passing row, a list is drawn for those clusters
+      only (`PairList.Partial` / `Covered`; the job skips the others), drawn again when a cluster outside them gains
+      one (`Covers`); the clusters holding a passing row are found only for a draw or that check (`Active`); the
+      estimate of the lists' entries samples the clusters drawn, and between samples counts only the candidates (it
+      still tested the first cluster, `w % int.MaxValue == 0`, for nothing); a partial list does not feed the early
+      sort (its pairs follow the filter, not the rows out of place); a wide box of the other table tests a partial
+      list's few boxes, not every cluster. Pairs bit for bit (NeighborTests: serial and parallel against every pair on
+      a map and a strip while seekers change, rows jump and come and go; SymmetricPairTests: the half walk of the rows
+      passing; 0 B). A/B (default job, base bea792c4 = 603c5b5a + the benchmark, head, rounds interleaved): PairFilter
+      (us a tick, two rounds) (4,000, 3 per mille) 247 / 235 -> 73 / 69 (0.30), (4,000, 30) 334 / 334 -> 244 / 228,
+      (4,000, every hunter) 2,727 / 2,760 -> 2,651 / 2,613, (40,000, 3) 2,711 / 2,803 -> 751 / 827 (0.28-0.30);
+      PairChurn 0.89-1.02 of base (the estimate between samples: a churned list is estimated at every draw); PairLists
+      0.91-1.08, PairHalves, PairsBenchmark / PairGroups, RowOrder (unchanged code: the control) and VoxelServer
+      TickBenchmark (the sample runs no pair method: off the path) with no row above max(3 %, base spread) in both
+      rounds but three: PairHalves Parallel 100k Sparse 1 thread 1.091 / 1.113, RowOrder Churn1 10k Narrow 1.043 /
+      1.135 (unchanged code) and TickBenchmark 50 players 1.071 / 1.142 (off the path); in two more rounds 0.983 /
+      0.915, 0.906 / 1.015 and 0.943 / 0.965, and PairHalves Parallel in rounds 11 / 12 0.930 / 1.026 (none above in
+      all four). The final commit's full-list fallback for wide boxes (a half list's loop ending at the box's own
+      cluster, as base) runs in none of these benchmarks (a probe of PairHalves' 100k Sparse pass: 0 fallbacks in 40
+      draws); its PairHalves Parallel rows in rounds 11 / 12 went as head's (10k Crowd 4 threads 1.150 / 1.090, head
+      1.126 / 1.050 in the same rounds and 0.916 / 0.879 in rounds 9 / 10: base's own spread there 0.20). 0 B everywhere but one run of TickBenchmark
+      2,000 players (624 B, head round 7; the `research-tile-bdn-1b` kind, on a sample that runs no pair code).
+      VoxelServer step 4 tried again on the fix: not kept (voxel-rewrite.md section 11: TickBenchmark 2,000 players
+      1.59-2.01 for the whole step, 1.12 / 1.19 for the zombie search alone; the pass's own cost, O(both tables) per
+      pass and per draw, against Pick's 0.12 ms; Pickup on a table whose count changes every tick). Seen on the way: the
+      sample's steady-state check at 2,000 players failed twice of nine runs (49,488 B in WaterFlowSystem's replay, the
+      core tree and the step 4 tree; base, core and head 0 B in six runs after), on code no pair method touches.
+      Open: `research-pair-draw-few` (below); the steady-state flake at 2,000 players (`research-water-steady-2000`).
+- [ ] **`research-pair-draw-few`** (from research-pair-filtered-rows; Opus): a pass whose filter passes few rows still
+      pays O(both tables) per pass and per draw: both tables' boxes refreshed and every row's cutoff read each pass,
+      and a draw of five clusters costs 0.15-0.2 ms in VoxelServer's zombie search (the bounds and the grid of the
+      other table's 250 clusters, the counting sorts over both), redone on 85 % of the passes as new seekers raise
+      their clusters' reach. Try: the other table's grid kept between draws while its boxes are, newly covered
+      clusters added to the list without a draw (the reach that grew only for them), boxes refreshed and cutoffs read
+      for the covered clusters only. Measure on PairFilterBenchmark and the zombie search (the form of voxel-rewrite.md section 11)
+      before VoxelServer step 4 is tried again.
+- [ ] **`research-water-steady-2000`** (from research-pair-filtered-rows; Sonnet to reproduce, Opus for the cause):
+      VoxelServer `--players 2000`: `Steady.Check` failed in two of nine runs (49,488 B allocated by WaterFlowSystem in
+      the replayed ticks; the other systems and the main thread 0), on trees whose sample runs no pair method; base,
+      core and head passed in six runs after on a quieter machine. Reproduce under load (the tile pass's buffers
+      reaching a new peak only in the replay?), then fix or tie it to `research-tile-bdn-1b`.
 - [x] **`research-voxel-pingpong`** closed 2026-11-18 (branch `research-voxel-pingpong`, not merged): steps 5 and 6
       kept (`voxel-rewrite.md` section 12). Causes: a Jacobi pass that does not sleep took every stepped tile as changed
       (swapped and stamped all: 101,949 block updates), fixed in core (only tiles that changed are stamped); a tile
@@ -1059,8 +1101,8 @@ numbers are written once about the final code).
 - [ ] **2. The exemplar pass** (#169, `audit-code`; owner, 2026-10-27): every piece of code users read or copy in the
       most fitting form, new features included. Proof: outputs and README / page output blocks match, 0 B steady
       state, tests three ways, A/B no slower.
-      a. **VoxelServer** (steps 1-3 and finish-scan 3 merged 2026-11-17 from exemplar-voxel; step 4 waits on
-         research-pair-filtered-rows; steps 5 and 6 done on research-voxel-pingpong (water and scent cell forms, Q6 /
+      a. **VoxelServer** (steps 1-3 and finish-scan 3 merged 2026-11-17 from exemplar-voxel; step 4 tried
+         again on research-pair-filtered-rows, not kept: waits on research-pair-draw-few and research-pair-wide-clusters; steps 5 and 6 done on research-voxel-pingpong (water and scent cell forms, Q6 /
          WP5b, not tried); step 8: Terrain as a cell method not tried) (`voxel-rewrite.md` steps 1-6, 8, 9, owner answers in its section 9): bool splits
          (`Body.OnGround`, `Exposure.Sunlit`, Input, Visible), Viewers long, SetAbsent, FireDamage per row; `[Accumulate,
          Sum] Stats`, `SendPackets` -> `[Drain]`, `ReserveBuffers`; AOI without the World; pairs (Keep + Acquire,

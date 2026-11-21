@@ -379,6 +379,20 @@ Stopped, with the numbers (the patches are not kept):
   returned lists in another order (`DynamicBufferTests.ACopiedListHasTheRoomAnAppendGives` fails without the fix).
   Result: step 4 not kept. TickBenchmark (100 ticks, 2,000 players): the old sample 84.5 / 83.3 ms base, 86.2 / 83.6 ms
   with the fixes (level, 0 B); step 4 on the fixes 325.6 / 305.8 ms (base 296 / 300 ms before them).
+  research-pair-filtered-rows (2026-11-21) fixed the filtered pass in core (a list draws only the clusters holding a
+  passing row) and tried step 4 again on it, with Lose sliced as Pick was (`Slices = Rules.LookEvery`): not kept.
+  TickBenchmark (default job, 2,000 players, step 4 / the old sample on the same core): the whole step 1.59 / 1.62 /
+  2.01 / 1.69 over four rounds, the zombie search alone 1.12 / 1.19. Causes, from a probe of the sample (2,000
+  players, a 1,200-tick run; attribution only): the search's pass costs about 0.25 ms of its own whatever the
+  seekers (both tables' boxes refreshed 0.05 ms, the cutoffs 0.03, a draw on 85 % of the passes: a new seeker raises
+  its cluster's reach, which keeps the zombies' boxes again; a draw is O(both tables' clusters), 0.15-0.2 ms at five
+  seeking clusters; the lists' estimate 0.05), where Pick cost 0.12 ms in all; Lose on every zombie every tick was
+  0.1 ms more (sliced: Target 0.44 -> 0.34 ms); the row order's gains (Chase, Float, Physics) stayed within the
+  noise. Pickup: the item table changes count every tick, so its lists are drawn every pass, 142,000 candidates a
+  pass for about 1,000 items and 2,000 players (0.64 ms against 0.36); the merge adds 0.29 ms. What would change the
+  verdict: a draw of a few clusters in O(those clusters) (the other
+  table's grid kept between draws, the newly covered clusters added to the list), and the item table's clusters
+  kept tight under churn (`research-pair-wide-clusters`).
 - Step 5 and step 6: done on research-voxel-pingpong (section 12).
 - Step 8: HeightMap and Footing are already plain element loops; Terrain's hand `Vector128` as a cell method (Q5) not
   attempted.
