@@ -717,7 +717,7 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       against 200-270 us whole: the case is dominated by the scan pulling the rows the parallel pass's helpers just
       wrote from their cores, which moves with where the chunks ran: C0g. Seen on the way (not in this item):
       contended per-row jobs on the runner are 4-13x slower at 1k-10k than at bench.json's commit: C0e.
-- [ ] **C0e. A parallel pass of contended rows stays wide**: MassParallelInterlocked 1k 8.3x / 10.4x of 2ef8d8fd,
+- [x] **C0e. A parallel pass of contended rows stays wide**: MassParallelInterlocked 1k 8.3x / 10.4x of 2ef8d8fd,
       BoundsParallelLock 1k 13.4x / 8.4x, EmitBenchmark.ConcurrentQueue 10k 3.2x / 6.0x, InterlockedCursor 100k 1.6x /
       1.9x (these are users' hand-written forms, but the runner makes them worse than one thread). Cause (a probe of
       MassParallelInterlocked reading the work's fields): at 10k the rows' measured cost is 233-285 ns contended
@@ -727,6 +727,29 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       9.8 us), BenchmarkDotNet's processes did not. Fix to try: compare a wide run with the last measured run alone
       (and probe alone now and then while wide), and take the rows' cost from runs alone only. Proof: ReduceBenchmark
       and EmitBenchmark's contended rows, ParallelRunner, ChunkSize, ParallelPass, BattleServer. Opus.
+      **Done (perf-c0e-c11, with C11).** The cause as found: `Beats` compared a wide run only with the items' summed
+      thread time of that run, which contention inflates as much as it slows the run, and nothing measured a run alone
+      while wide. Fix (`ParallelWork.Wide` / `Took` / `Pays`): while wide, one run in a period runs alone (the first
+      after four runs with helpers, the first run uncounted as cold; then 16 to 1,024 runs apart, doubling while helpers
+      keep winning), and helpers stay only while they beat D22's rule and are not a quarter slower than that run alone.
+      A work a run alone moved alone keeps that test at its probes with helpers; a work D22's rule moved alone comes
+      back by D22's rule alone. A/B (default job, base 6c7024bb / head; rounds 5-6 alternated order, 7-8 six launches):
+      MassParallelInterlocked 1k 129.4 / 9.7, 123.1 / 10.6 us; 10k 1,198 / 99, 1,597 / 101 us; 1M 153 / 9.5, 127 / 9.6 ms;
+      BoundsParallelLock 1k 204 / 17.1, 243 / 18.1 us, 100k 16.2 / 1.68, 17.4 / 1.78 ms; SumParallelInterlocked 10k 292 /
+      49.6, 333 / 49.1 us; EmitBenchmark.ConcurrentQueue 10k 2,495 / 110, 2,221 / 113 us, 100k 21.2 / 1.16, 16.5 / 1.08
+      ms; InterlockedCursor 10k 714 / 36.3, 517 / 36.4 us, 100k 5.53 / 0.40, 6.16 / 0.39 ms (0.04x to 0.21x in every
+      round, 0 B): each now costs what its job costs on one thread. No other row of the proof classes slower than
+      max(3 %, its spread over the eight base runs) in every round (scratchpad bar.py): the machine (a shared VM) moves
+      parallel rows of 100,000 rows 20-40 % between processes, base against base, and untouched rows (the DotNet
+      Parallel.For baselines, serial passes) read 1.1-1.4x slower in whole rounds; the three rows past the bar after
+      rounds 5-6 (Emit ThenRead 100k, Bounds HandWritten / Reduce 100k) read 0.96-1.05 at six launches. Two variants
+      measured and dropped on the way, with their causes from counters in the work (scratchpad probes): (v2) the
+      alone test in both directions without a margin: ChunkSize Light 100k 1.39-1.41x, the work settled alone at its
+      early probe and its probes with helpers right after runs alone (20-22 us against 15 steady: the rows move back
+      out of the caller's cache) never won; (v3) a quarter's margin both ways: ChunkSize Heavy 1k-10k 1.03-1.34x, a
+      work D22's rule moved alone (as base does, 0-25 times a process) stayed alone up to a tenth of its runs, its
+      probes paying more than the quarter for the move. Cost of the probes: a run alone right after wide runs takes
+      2-4x a steady run alone (ParallelSystems 220-370 against 147 us), one per 1,024 runs, about 0.3 % of a wide work.
 - [ ] **C0f. A merging pass of a few chunks still costs its cut**: SumParallelReduce 10k 702 ns against
       SumSerialReduce 505 (2 chunks of 8,192 rows, the runner settled alone): Cut, the runner's claim and two clock
       reads, a job copy and the vector loop's prologue and folds per chunk. Tried in perf-c0cd: running the chunks of a
@@ -771,11 +794,20 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       `WorkersTests`, 50 load / unload cycles bounded.
 - [x] **C10. `EmitPool` allocates under its spin gate** (`core.md` §10): allocate after leaving it. Files: Emit.cs.
       Proof: the Emit 0 B tests.
-- [ ] **C11. P1: helpers chosen on inflated work** (`perf.md` P1): a probe run alone every period while wide,
+- [x] **C11. P1: helpers chosen on inflated work** (`perf.md` P1): a probe run alone every period while wide,
       `perItem` learned from alone runs; P1b: a merge pass under the floor runs its 16 chunks on the caller. Files:
       World.Parallel.cs. Proof: ParallelFor, Reduce, ChunkRows, Emit, ParallelPass, ParallelRunner, ParallelSystems,
       SystemDispatch, PairsBenchmark GeneratedParallel, TileActive Sparse 4 threads, BattleServer, WorldSimulation,
       MultiWorld (`--launchCount 6` for the parallel classes); a decision record extending D22 / D130.
+      **Done (perf-c0e-c11, one change with C0e; numbers there).** The probe alone while wide shipped. `perItem` learned
+      from runs alone only was not shipped, for a cause found: the only runs alone of a work that stays wide are its
+      probes, which run right after wide runs and pay for pulling the rows into the caller's cache (2-4x a steady run
+      alone, above), so they would inflate the cost cut the other way, and the lost run's numbers of that variant
+      (light passes cut into fewer, longer chunks) stand; a work that moves alone learns its cost from its runs alone
+      already (`Took` feeds `Cost` from them), so the contended rows' inflated cut (79 chunks at 10k) decays once alone.
+      P1b is covered: a merging pass whose rows fit one chunk of its count cut runs uncut on the caller (perf-c0cd's
+      `SmallPass`); one of a few chunks under the floor goes to the runner, which settles it alone after its first runs
+      (RunAlone: the chunks in order on the caller), and what that still costs is the cut itself: C0f.
 - [x] **C12. P3: a query over tracked components stamps without a call per row** (`perf.md` P3). Files:
       ArityGenerator.cs (enumerator template), Query.cs. Proof: ChangeTrackingBenchmark QueryTick / Tick,
       MicroBenchmarks QueryIterate / QueryWrite (controls), tests of `[Changed<T>]` after a loop (full, break,
