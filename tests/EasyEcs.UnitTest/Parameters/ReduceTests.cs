@@ -701,6 +701,53 @@ public partial class ReduceTests
         }
     }
 
+    /// <summary>
+    /// A merging pass whose work chose to run alone walks its chunks in place (no cut kept, no runner), each chunk's
+    /// partial result merged as it ends: the same chunks combined in the same order, so the float sum keeps the bits of
+    /// the cut on one thread, run after run, and allocates nothing. The choice is driven with fixed times, as the
+    /// runner's tests do.
+    /// </summary>
+    [Test]
+    public void AMergingPassRunAloneKeepsTheBitsOfItsCut()
+    {
+        const int rows = 20_000; // three chunks of 8,192 rows of a 4-byte Weight
+        float cut = 0;
+        foreach (int threads in new[] { 1, 4 })
+        {
+            using var world = new World(new WorldOptions { MaxDegreeOfParallelism = threads });
+            var random = new Random(7);
+            var entities = new Entity[rows];
+            world.CreateEntities(entities, new Weight(0));
+            foreach (var e in entities) e.Weight = new Weight(random.NextSingle() * 1000);
+            world.AddSystem<DefaultChunkMass>();
+            world.Update();
+            if (threads == 1)
+            {
+                cut = world.WeightSum.Total; // the chunks one after the other on the caller (no runner on one thread)
+                continue;
+            }
+
+            var works = (World.ParallelWork[])typeof(World).GetField("_parallelWork", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(world)!;
+            var work = Array.Find(works, w => w != null)!;
+            while (!work.Alone)
+            {
+                // Helpers no faster than their items' summed time: the work moves alone (D22's rule).
+                bool helpers = work.Wide(out bool sample);
+                if (helpers && sample) work.Took(true, 1_000, 1_000);
+                else if (!helpers) work.Took(false, 1_000, 0);
+            }
+
+            for (int run = 0; run < 8; run++) // within the period before its next probe with helpers
+            {
+                world.Update();
+                Assert.That(world.WeightSum.Total, Is.EqualTo(cut), $"run {run}");
+                Assert.That(work.Alone, Is.True);
+            }
+
+            Assert.That(Allocations.Steady(world.Update, 10, 300), Is.Zero); // alone, its probes and back
+        }
+    }
+
     /// <summary>The entity with the fewest points ([MinBy], MINLOC): the generator writes Identity and Combine.</summary>
     public partial record struct Least(EntityId Holder, [MinBy] int Score) : ISingletonComponent;
 
