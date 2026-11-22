@@ -750,7 +750,7 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       work D22's rule moved alone (as base does, 0-25 times a process) stayed alone up to a tenth of its runs, its
       probes paying more than the quarter for the move. Cost of the probes: a run alone right after wide runs takes
       2-4x a steady run alone (ParallelSystems 220-370 against 147 us), one per 1,024 runs, about 0.3 % of a wide work.
-- [ ] **C0f. A merging pass of a few chunks still costs its cut**: SumParallelReduce 10k 702 ns against
+- [x] **C0f. A merging pass of a few chunks still costs its cut**: SumParallelReduce 10k 702 ns against
       SumSerialReduce 505 (2 chunks of 8,192 rows, the runner settled alone): Cut, the runner's claim and two clock
       reads, a job copy and the vector loop's prologue and folds per chunk. Tried in perf-c0cd: running the chunks of a
       work settled alone in RunChunks without the runner (FreezeAlone, no ParallelPasses count, no claim): Sum 10k 0.96 /
@@ -759,6 +759,31 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       and the runner's Tier1 listings in both builds: the extra branch and call in RunChunks may have changed what PGO
       inlines there, C0a's lesson): `ParallelWork.StaysAlone` consumed Wide's choice in RunChunks and left a probe for the
       runner's Wide. Opus.
+      **Done (perf-c0f: 76341fd4 Core, 659da598 Generator, 1d582e79 Tests).** perf-c0cd's slowdowns were not the branch:
+      rebuilt on 06443ddf (v1: the alone path out of line in RunChunks), PairsBenchmark.GeneratedParallel 10k Sparse
+      read 1.53 at one launch, then 1.22 and 1.01 at six; HeavyParallelFor 10k 0.79 and 0.89. A probe counting the
+      runner's choices showed those works wide (1,998 of 2,000 runs; 2 probes alone), so they never took the new path,
+      and their time per tick moves 95-160 us between processes in both builds alike. The Tier1 RunChunks of both
+      builds inlines the whole runner (TryRunChunks, TryRun, Run: about 1,200 lines), with the same calls and inlinees;
+      only the spin-wait's block layout differs, and its size varies 1.5-3.5 KB per process in base alone. Two causes
+      found on the way. (1) Going around the runner only saved 5 % (Sum 10k 0.94 / 0.95): the run alone's two clock
+      reads are a P/Invoke each, about 50 ns. (2) The alone path written inline in the generated ForEach*Parallel
+      method made BoundsParallelGenerated 1k (a one-chunk pass, its path untouched) 1.20 / 1.18: the method grew (4,168
+      to 10,609 bytes in one process); out of line it is level (1.00 / 1.01). Fix: the pass decides before it cuts
+      (`work.Alone && work.RanAlone(...)`, NoInlining; `ParallelWork.StaysAlone` leaves a probe in `Pending` for the
+      runner's Wide), and Cut with `alone` walks the same chunks running each as it is cut on a copy of the job merged
+      as it ends (same chunks, same order: the same bits); RunChunks unchanged. Wide times a settled run alone one in 8
+      after the first 8. A/B (default job; rows past the screen at six launches, order alternated): SumParallelReduce
+      10k 685 / 600, 704 / 623 ns (0.87, 0.88; serial 505), SumParallelGenerated 10k 0.88, 0.83, 0.85, 0.90;
+      LowestVector 10k 0.90 / 0.81, BoundsParallelGenerated 10k 0.89 / 0.94, SystemDispatch ParallelStage 0.81 / 0.84;
+      0 B. No row of the 13 proof classes (C0e's) slower in every round: the full run's flags were the untouched
+      controls (the DotNet Parallel.For rows, Serial, MassSerialRef, ParallelSystems False,False: head runs in a slower
+      stretch of the machine) and rows level at six launches (ChunkSize Light / Heavy 100k 1.11 / 0.87, 1.21 / 0.83;
+      Emit rows, BoundsParallelGenerated 1M 0.87 / 1.11, HeavyLambda 10k bimodal 11 or 15 us on both sides).
+      SumParallelGenerated 100k read 1.17-1.33 in five rounds, then level in eight alternated six-launch runs (pairs
+      0.98, 1.22, 1.02, 0.89) and with counters in BDN (4,977 / 5,233 against 5,259 / 5,150): a wide work (more than
+      99 % of runs) whose wide and alone costs (4.5, 5.7 us) are close. What is left of Sum 10k past its serial pass
+      (about 100 ns): Match, SmallPass's walk, Cut's per-table filters and two chunk walks.
 - [ ] **C0g. ComponentThenScan 100k and its serial scan**: the parallel pass writes PendingHit on the helpers' cores
       and the serial scan then reads every line from them (parts 36 + 88 us, whole 200-270 us); CollectOnly alone
       1.00 / 1.17 / 1.09 of 2ef8d8fd. Settle CollectOnly in more rounds (a real slowdown of the serial row walk becomes

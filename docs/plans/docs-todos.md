@@ -3994,6 +3994,20 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
       ConcurrentQueue) run at their serial cost (5x to 25x faster than before, link the threading page).
 - [ ] **Roadmap:** none (a fix of an existing feature).
 
+## perf-c0f (backlog C0f)
+
+- [ ] **Decision record** (beside the C0e / C11 record of perf-c0e-c11, or in it; cross-linked from D22 and D130): a
+      parallel pass whose work runs alone walks its chunks in place (no cut kept, no runner), each chunk merged as it
+      ends, so its result keeps the bits of the cut; a settled run alone is timed one run in eight after the first eight
+      (a pair of clock reads is about 50 ns). Why: SumParallelReduce at 10,000 rows cost 1.33x its serial pass; now
+      1.18x (0.87x of before). Considered: going around the runner in RunChunks (5 %), the alone path inline in the
+      generated pass (its one-chunk path 1.2x slower: the method grew). Numbers: backlog C0f.
+- [ ] **Guide** (`guide/performance/threading`, where a pass running alone is described): such a pass costs about its
+      serial form plus its cut; nothing to write differently.
+- [ ] **Changelog (Performance):** a parallel pass with a `Reduce<T>` or `Emit<T>` that runs on one thread costs less
+      (a short pass about 15 % less; link the threading page).
+- [ ] **Roadmap:** none.
+
 ## research-pair-churn (backlog research-pair-churn: rows that come and go every tick)
 
 - [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`, beside D137 and the pair records): a pair pass finds its cluster
