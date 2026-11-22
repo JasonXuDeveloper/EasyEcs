@@ -1610,7 +1610,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     }
 
                     var work = WorkOf<{{name}}Chunks<{{tps}}, TJob>>();
-                    int chunks = work.Cut(this, match, in filter, chunkSize, most, ref job, {{bits}});
+                    if (work.Alone && work.RanAlone(this, match, in filter, chunkSize, most, ref job, {{bits}})) return;
+                    int chunks = work.Cut(this, match, in filter, chunkSize, most, ref job, false, {{bits}});
                     try
                     {
                         RunChunks(work, chunks);
@@ -1648,8 +1649,38 @@ public sealed class ArityGenerator : IIncrementalGenerator
                     private int _cut; // chunks of the last Cut: Release clears those, not the whole reserve
             {{Lines(n, i => $"            private ushort _b{i};")}}
 
-                    /// <summary>Cut the matching rows into chunks (a job that merges: of <paramref name="merged"/> rows); returns how many.</summary>
-                    public int Cut(World world, QueryMatch match, in QueryFilter filter, int chunkSize, int merged, ref TJob job, {{ushorts}})
+                    /// <summary>
+                    /// Run the pass alone when the work chose to and this run is no probe (<see cref="ParallelWork.StaysAlone"/>):
+                    /// its chunks in order on this thread as <see cref="Cut"/> walks them, each on a copy of the job merged
+                    /// as it ends (the partial results of a cut, combined in the same order), with no cut kept and no
+                    /// runner; frozen as a serial pass is, timed as the runner's run alone. False otherwise: the caller cuts.
+                    /// Out of line, so the pass's own method (its one-chunk path inlined) compiles as it did without it.
+                    /// </summary>
+                    [MethodImpl(MethodImplOptions.NoInlining)]
+                    public bool RanAlone(World world, QueryMatch match, in QueryFilter filter, int chunkSize, int merged, ref TJob job, {{ushorts}})
+                    {
+                        if (!StaysAlone(out bool sample)) return false;
+                        bool froze = world.Gate.FreezeAlone();
+                        long began = sample ? global::System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+                        try
+                        {
+                            Cut(world, match, in filter, chunkSize, merged, ref job, true, {{bits}});
+                        }
+                        finally
+                        {
+                            if (froze) world.Gate.ThawAlone();
+                        }
+
+                        if (sample) Took(false, global::System.Diagnostics.Stopwatch.GetTimestamp() - began, 0);
+                        return true;
+                    }
+
+                    /// <summary>
+                    /// Cut the matching rows into chunks (a job that merges: of <paramref name="merged"/> rows); returns how many.
+                    /// <paramref name="alone"/>: run each chunk as it is cut instead, on a copy of the job, merged into
+                    /// <paramref name="job"/> as it ends (the order MergeInto takes), keeping nothing.
+                    /// </summary>
+                    public int Cut(World world, QueryMatch match, in QueryFilter filter, int chunkSize, int merged, ref TJob job, bool alone, {{ushorts}})
                     {
                         _world = world;
                         Job = job;
@@ -1677,6 +1708,15 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             for (int start = first, stop; start < end; start = stop)
                             {
                                 stop = Math.Min(start - start % size + size, end);
+                                if (alone)
+                                {
+                                    var part = Job;
+                                    world.{{name}}Chunk<{{tps}}, TJob>(ref part, archetype, rows, start, stop, {{bits}});
+                                    if (TJob.Merges) TJob.Merge(ref job, in part);
+                                    chunks++;
+                                    continue;
+                                }
+
                                 if (chunks == _starts.Length)
                                 {
                                     int grown = Math.Max(TJob.Merges ? 8 : world.ChunkCapacity, chunks * 2); // room for the most chunks a cost can ask for
@@ -1694,7 +1734,8 @@ public sealed class ArityGenerator : IIncrementalGenerator
                             }
                         }
 
-                        _cut = chunks;
+                        _cut = alone ? 0 : chunks;
+                        if (alone) Release();
                         return chunks;
                     }
 
