@@ -3970,6 +3970,30 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
       serial method (up to 1.3x faster than before at 1,000 rows).
 - [ ] **Roadmap:** none.
 
+## perf-c0e-c11 (backlog C0e, C11)
+
+- [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`): extend [D22](/en/docs/decisions#d22-parallel-runs-use-the-thread-pool-and-wake-helpers-only-when-they-pay)
+      (or a new record beside it, cross-linked from D22 and D130): helpers are kept while a run with them is a fifth
+      faster than its items' summed thread time and not a quarter slower than a run alone measured while wide (one run
+      in a period, the first after four runs, then 16 to 1,024 runs apart); a work moved alone by a run alone keeps
+      that test at its probes with helpers, one moved alone by the summed time comes back by it. Why: items contending
+      for a shared line (an interlocked total, a lock, a ConcurrentQueue) took 25 times longer each with helpers, so
+      the summed time stayed four times the wide run while one thread was six times faster; the contended rows went
+      from 4-13x slower than one thread to their serial cost (0.04x-0.21x of before). Considered: the alone test in
+      both directions without a margin (v2) and with a quarter both ways (v3), each stuck a light or heavy pass alone
+      because a probe pays for moving the rows from the other kind's caches; costs learned from runs alone only (the
+      probes are 2-4x a steady run alone); the probes' cost (about 0.3 % of a wide work at 1,024 runs). Numbers:
+      backlog C0e. D22's text ("a fifth faster than its work ... a probe of four runs with helpers") and D130's "the
+      runs it already times" stay true but must name the run alone.
+- [ ] **Guide** (`guide/performance/threading`, where waking helpers is described, and `architecture.mdx`,
+      `why-fast.mdx` (its mermaid: "a fifth faster than the work")): helpers stay while they beat a run alone too, which
+      the runner measures now and then while wide; a parallel pass whose rows contend (a shared total updated per row,
+      a lock, a concurrent queue) now runs on one thread at its serial cost instead of several times slower, but
+      Reduce<T> / Emit<T> remain the forms to write (they scale; the contended forms only stop losing).
+- [ ] **Changelog (Performance):** parallel passes whose rows contend for shared state (Interlocked, a lock, a
+      ConcurrentQueue) run at their serial cost (5x to 25x faster than before, link the threading page).
+- [ ] **Roadmap:** none (a fix of an existing feature).
+
 ## research-pair-churn (backlog research-pair-churn: rows that come and go every tick)
 
 - [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`, beside D137 and the pair records): a pair pass finds its cluster
