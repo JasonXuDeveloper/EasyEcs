@@ -266,7 +266,12 @@ Storage/HugePagesTests.cs  arrays zeroed over memory used before, on and off, pr
                            head and tail; populated arrays resident and keeping their values; a reservation's
                            columns, entity rows and records resident; reserved worlds alike with and without
                            prefault; the kernel backing a large array with huge pages; worlds, lookups and
-                           snapshots alike with and without, grown by doubling, reserved and trimmed too
+                           snapshots alike with and without, grown by doubling, reserved and trimmed too; Clear
+                           (a resize's tail) zeroing dirty memory and leaving pages never touched unfaulted
+Storage/ResizeTests.cs     a table grown and trimmed over memory dirtied before (Archetype.Resize allocates
+                           uninitialized): every byte past the rows zero (columns' slack and rows, entity rows,
+                           presence bits, change-tick summaries, managed columns), a component added unwritten reads
+                           its default, saves and snapshots of worlds grown over other dirt alike
 ```
 
 ## Systems/
