@@ -701,6 +701,35 @@ public class ParallelTests
     }
 
     [Test]
+    public void ASettledWorkTimesFewOfItsRunsAlone()
+    {
+        // A work that moved alone times each of its first runs alone (their average is what a grown work is checked
+        // against), then one in eight: a pair of clock reads is a quarter of what a short merging pass spent past its
+        // serial form. Its probes with helpers keep being timed.
+        var work = new CountingWork(1);
+        Choose(work, 3, wide: 5_000, items: 5_500, alone: 1_000);
+        Assume.That(work.Alone, Is.True);
+        int alone = 0, timed = 0;
+        for (int i = 0; i < 5_000; i++)
+        {
+            bool helpers = work.Wide(out bool sample);
+            if (helpers)
+            {
+                if (sample) work.Took(true, 5_000, 5_500); // helpers keep losing: the period doubles to 1,024 runs
+                continue;
+            }
+
+            alone++;
+            if (!sample) continue;
+            timed++;
+            work.Took(false, 1_000, 0);
+        }
+
+        Assert.That(work.Alone, Is.True);
+        Assert.That(timed, Is.InRange(alone / 8, alone / 4), $"{timed} of {alone} runs alone timed");
+    }
+
+    [Test]
     public void AnItemThatThrowsWhileRunningAloneLetsTheOthersRun()
     {
         using var world = new World(new WorldOptions { MaxDegreeOfParallelism = 4 });
