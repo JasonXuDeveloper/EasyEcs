@@ -611,6 +611,95 @@ public class ParallelTests
         Assert.That(Allocations.Steady(Step, 0, 100), Is.Zero);
     }
 
+    /// <summary>
+    /// Drive <paramref name="work"/>'s choice <paramref name="runs"/> times with fixed times instead of a clock: a run with
+    /// helpers takes <paramref name="wide"/> ticks and its items <paramref name="items"/> ticks summed, a run alone
+    /// <paramref name="alone"/>. Returns the runs made alone. The tests pass hundreds of ticks per unit their comments
+    /// name: the averages are integers, and a few ticks would round.
+    /// </summary>
+    private static int Choose(World.ParallelWork work, int runs, long wide, long items, long alone)
+    {
+        int single = 0;
+        for (int i = 0; i < runs; i++)
+        {
+            bool helpers = work.Wide(out bool sample);
+            if (!helpers) single++;
+            if (!helpers || sample) work.Took(helpers, helpers ? wide : alone, helpers ? items : 0);
+        }
+
+        return single;
+    }
+
+    [Test]
+    public void ContendedItemsRunAloneThoughHelpersBeatTheirSummedTime()
+    {
+        // Items on one shared line (an interlocked total): with helpers each takes 25 times longer, so a run with helpers
+        // (600) beats the items' summed time (2,400) but not a run alone (95). The runner measures runs alone while wide.
+        var work = new CountingWork(1);
+        Choose(work, 64, wide: 60_000, items: 240_000, alone: 9_500);
+        Assert.That(work.Alone, Is.True, "a run alone measured while wide shows the helpers lose");
+        int alone = Choose(work, 10_000, wide: 60_000, items: 240_000, alone: 9_500);
+        Assert.That(alone, Is.GreaterThan(9_900), "the probes with helpers keep confirming the run alone");
+        Assert.That(work.Alone, Is.True);
+    }
+
+    [Test]
+    public void ItemsThatScaleKeepTheirHelpersBetweenProbesAlone()
+    {
+        // Items that scale: a run with helpers (300) beats a run alone (1,000); the probes alone come at a doubling period.
+        var work = new CountingWork(1);
+        int alone = Choose(work, 10_000, wide: 30_000, items: 105_000, alone: 100_000);
+        Assert.That(work.Alone, Is.False);
+        Assert.That(alone, Is.InRange(1, 16), "one probe alone after 4 runs, then 16 to 1,024 runs apart: 15 in 10,000");
+
+        // The work turns contended: the next probe alone moves it to running alone.
+        Choose(work, 1_100, wide: 60_000, items: 240_000, alone: 9_500);
+        Assert.That(work.Alone, Is.True);
+
+        // And back: the probes with helpers find they pay again.
+        Choose(work, 2_100, wide: 30_000, items: 105_000, alone: 100_000);
+        Assert.That(work.Alone, Is.False);
+    }
+
+    [Test]
+    public void ProbesMayPayForMovingTheRows()
+    {
+        // A light pass that runs alone (its first runs were slow: 40 with helpers against 18 alone). Its probes with
+        // helpers run right after runs alone, pulling the rows from the caller's cache: 21 against 18 alone, within a
+        // quarter, and a fifth under their summed time (30), so they win back the helpers.
+        var work = new CountingWork(1);
+        Choose(work, 64, wide: 4_000, items: 6_000, alone: 1_800);
+        Assume.That(work.Alone, Is.True);
+        Choose(work, 64, wide: 2_100, items: 3_000, alone: 1_800);
+        Assert.That(work.Alone, Is.False, "within a quarter of a run alone right after runs alone");
+
+        // Helpers about as fast as a run alone keep the work: one margin both ways, no flipping between probes.
+        int alone = Choose(work, 5_000, wide: 1_900, items: 3_000, alone: 1_800);
+        Assert.That(work.Alone, Is.False);
+        Assert.That(alone, Is.LessThan(16), "only the probes alone");
+
+        // Helpers a quarter slower than a run alone lose it at the next probe alone, and the probes with them confirm it.
+        Choose(work, 2_100, wide: 2_400, items: 4_000, alone: 1_800);
+        Assert.That(work.Alone, Is.True);
+        alone = Choose(work, 5_000, wide: 2_400, items: 4_000, alone: 1_800);
+        Assert.That((work.Alone, alone), Is.EqualTo((true, 4_980)), "five probes of four runs with helpers");
+    }
+
+    [Test]
+    public void WorkMovedAloneByItsSummedTimeComesBackByIt()
+    {
+        // Helpers not a fifth under their items' summed time (50 against 55) move the work alone, as D22's rule did.
+        var work = new CountingWork(1);
+        Choose(work, 3, wide: 5_000, items: 5_500, alone: 1_000);
+        Assume.That(work.Alone, Is.True);
+
+        // Its probes with helpers right after runs alone pay for pulling the rows back (14 against 10 alone, more than
+        // the quarter); that choice came from the summed time, so they win back the helpers by it alone (14 < 20 x 0.8).
+        int alone = Choose(work, 20, wide: 1_400, items: 2_000, alone: 1_000);
+        Assert.That(work.Alone, Is.False, "back with helpers at the first probe");
+        Assert.That(alone, Is.EqualTo(14), "the runs alone until the probe");
+    }
+
     [Test]
     public void AnItemThatThrowsWhileRunningAloneLetsTheOthersRun()
     {
