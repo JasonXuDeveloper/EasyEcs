@@ -285,7 +285,10 @@ Storage/HugePages.cs         the large pinned arrays of the tables on 2 MiB page
                              records, free-id list) faulted in (MADV_POPULATE_WRITE, Linux 5.14+, on 4 KiB pages too,
                              the 2 MiB windows mincore shows resident skipped), so the rows it made room for are
                              written without a fault; arrays a call writes whole at once (load, restore, snapshot,
-                             CreateEntities) are left to the first touch; Prefault off after a failed call
+                             CreateEntities) are left to the first touch; Prefault off after a failed call;
+                             Clear: the part of a resized array the copy left (Archetype.Resize allocates
+                             uninitialized), zeroed on resident 4 KiB pages, the untouched ones dropped (mincore),
+                             plainly under 64 KiB
 Storage/MarkedRows.cs        the rows a vector loop marked for one structural change (words of 64 rows per table,
                              pooled per world), applied when the pass ends: SetAll / RemoveAll / DisableAll /
                              EnableAll / DestroyAll (Storage/World.Bulk.cs: SetMarked ... DestroyMarked, WalkMarks)

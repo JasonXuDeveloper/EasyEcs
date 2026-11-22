@@ -859,9 +859,24 @@ ArityGenerator.cs: not beside lane 4's generated-text steps.
       with the `Retired` column. Files: World.cs, World.Archetypes.cs, World.Indexes.cs; D57 updated. Proof:
       CleanupBenchmark (106 -> ~60 us), DestroyLogBenchmark, a `Without<Retired>` reader case, the headline worlds equal.
       **Dropped** (owner-review.md: 105.6 -> 133.5 us, the release pass tests every row and fills every hole).
-- [ ] **C16. P6: unsized resizes uninitialized** (`perf.md` P6), after `[PageFaultDiagnoser]` and Tier1 of `Resize`
+- [x] **C16. P6: unsized resizes uninitialized** (`perf.md` P6), after `[PageFaultDiagnoser]` and Tier1 of `Resize`
       show the clear costs. Files: ComponentInfo.cs, Archetype.cs. Proof: ColdCreateComparison PerEntity,
       MicroBenchmarks CreateAddDestroy, PageFaultBenchmark Grow, FullCopyBenchmark Grow.
+      **Done** (perf-c16, 93164c9 + 540d9f8). Measured first: Grow 1M allocates 104 MB and faults 14 MB a op (the
+      rest is memory the GC hands out again and zeroes inside `GC.AllocateNewArray`, not in the Tier1 listing, which
+      shows the allocation and a `MEMCPY`: 335 bytes); ColdCreate PerEntity faults 3.3-4 MB of 8-10 MB. Cause of the lost
+      run's ColdCreate 1.14-1.33x: the GC zeroes only reused memory and leaves fresh pages untouched, so a plain clear of
+      the whole tail (the first form, rebuilt here) writes pages a zeroed allocation never touches: round a, no row
+      faster, ColdCreate PerEntity 2/3 and Reserved 2/3 1.08-1.23 in both rounds (an attribution round then moved base
+      itself 26 %). Fix: `HugePages.Clear` zeroes the tail's resident 4 KiB pages and drops the untouched ones
+      (`mincore`, `MADV_DONTNEED`; a plain clear under 64 KiB); entity rows, presence bits and summaries too. A/B of that
+      form (four rounds alternated, launch count 2, flagged rows again at 6): FullCopy Grow 100k 0.78-0.99 in 6 of 6
+      rounds (faults 737-781 against 843-967), 4M 0.74-1.04; PageFault Grow 16M 0.88-1.00 in 8 of 8; Grow 1M, ColdCreate
+      PerEntity and CreateAddDestroy level (CreateAddDestroy at launch count 6, four rounds: 0.96-1.00). No row slower
+      than max(3 %, base spread) in every round, 0 B; no row beyond the bar in every round either: kept on the
+      consistent direction (L37's rule; no PMU on the VM, so the instruction count is by construction: the copied
+      rows' zeroing skipped, against a `mincore` per 2 MiB of tail). ResizeTests prove nothing past the rows is read
+      uninitialized (three of four fail without the clear, the saves among them).
 - [x] **C17. P7: `Removed<T>` from a log of removals** (`perf.md` P7, low). Files: Archetype.cs, a log file, Query.cs.
       Proof: RemovalComparison, removal writers' cost. **Not built** (owner-review.md: the cost is per visited row,
       which a log still pays).

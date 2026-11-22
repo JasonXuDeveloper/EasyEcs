@@ -4048,3 +4048,19 @@ layer it cannot read (another tile than the ground's, past the tile's layers, no
 - [ ] **Changelog (Performance):** pair methods whose filter passes few rows (3.4x at 3 of 1,000 rows passing, 1.4x at
       30), and pair passes whose lists are drawn often (churned tables: up to 1.1x).
 - [ ] **Roadmap:** none (a fix of an existing feature).
+
+## perf-c16 (backlog C16: a table's resize allocates uninitialized)
+
+- [ ] **Decision record** (`decisions.mdx` + `.zh.mdx`, beside D28's growth and the huge-page records): a doubling step
+      or a trim allocates its unmanaged arrays (columns, entity rows, presence bits, change-tick summaries)
+      uninitialized and zeroes only the part past the copy, through `HugePages.Clear`: resident pages cleared, pages
+      never touched dropped. Why: the GC zeroes memory it hands out again whole, the copied rows included, and leaves
+      fresh memory untouched; a plain clear of the tail wrote fresh pages a zeroed allocation never touches (a tail a
+      trim drops right after). Considered: the plain clear (ColdCreate 1.08-1.23 in both rounds), residency at 2 MiB
+      granularity (doubling steps of 100k rows never reach it). Numbers: backlog C16.
+- [ ] **Guide** (`guide/performance/memory` or wherever growth and `Reserve` are costed): a table grown without a
+      reservation copies its rows at each doubling; what the copy writes is no longer zeroed first. Only if the page
+      states what a growth step costs; otherwise nothing.
+- [ ] **Changelog (Performance):** tables grown or trimmed without a reservation (a grow and trim of 100k rows up to
+      1.2x faster, fewer page faults).
+- [ ] **Roadmap:** none.

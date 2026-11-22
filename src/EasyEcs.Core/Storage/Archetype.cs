@@ -1041,12 +1041,14 @@ internal sealed class Archetype
     /// <see cref="Count"/> (cold path: growth, <see cref="Trim"/>). <paramref name="sized"/> when the capacity is the
     /// one a reservation asked for, not a doubling step or a trim: only those columns go onto huge pages, as the entity
     /// records (World.AllocateMeta), so a table grown row by row allocates what it did without them.
-    /// <paramref name="prefault"/>: the entity rows and unmanaged columns faulted in (<see cref="Reserve"/>).
+    /// <paramref name="prefault"/>: the entity rows and unmanaged columns faulted in (<see cref="Reserve"/>). The arrays
+    /// of unmanaged elements are allocated uninitialized and only what the copy leaves is zeroed (<see cref="Resized{T}"/>,
+    /// <see cref="ComponentInfo.Resize"/>): the GC zeroes memory it hands out again whole, the copied rows included.
     /// </summary>
     [MethodImpl(MethodImplOptions.NoInlining)]
     private void Resize(int capacity, bool sized, bool prefault)
     {
-        Array.Resize(ref Slots, capacity);
+        Slots = Resized(Slots, capacity);
         if (prefault) HugePages.Populate(Slots); // the rows a reservation made room for, written without a fault per page
         for (int i = 0; i < Columns.Length; i++)
         {
@@ -1055,17 +1057,31 @@ internal sealed class Archetype
         }
         foreach (short c in _bitColumns)
         {
-            Array.Resize(ref Present[c], (capacity + 63) >> 6);
+            Present[c] = Resized(Present[c], (capacity + 63) >> 6);
             ByBit[Components[c]].Bits = Present[c];
         }
 
         for (int c = 0; c < Words.Length; c++)
             if (Words[c] != null)
             {
-                Array.Resize(ref Words[c], (capacity + 63) >> 6);
-                Array.Resize(ref Blocks[c], (capacity + 4095) >> 12);
-                Array.Resize(ref Removals[c], (capacity + 4095) >> 12);
+                Words[c] = Resized(Words[c], (capacity + 63) >> 6);
+                Blocks[c] = Resized(Blocks[c], (capacity + 4095) >> 12);
+                Removals[c] = Resized(Removals[c], (capacity + 4095) >> 12);
             }
+    }
+
+    /// <summary>
+    /// <paramref name="array"/> copied into a new array of <paramref name="length"/> elements, grown or shrunk: as
+    /// <see cref="Array.Resize{T}"/>, but allocated uninitialized and only the elements past the copy zeroed (the pages a
+    /// fresh allocation never touched left so, <see cref="HugePages.Clear"/>), where the GC would zero the copied ones too.
+    /// </summary>
+    private static unsafe T[] Resized<T>(T[] array, int length) where T : unmanaged
+    {
+        var resized = GC.AllocateUninitializedArray<T>(length);
+        int kept = Math.Min(array.Length, length);
+        array.AsSpan(0, kept).CopyTo(resized);
+        fixed (T* rows = resized) HugePages.Clear((byte*)(rows + kept), (nint)(length - kept) * sizeof(T));
+        return resized;
     }
 
     /// <summary>

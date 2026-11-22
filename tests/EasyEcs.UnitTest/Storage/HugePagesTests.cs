@@ -116,6 +116,35 @@ public partial class HugePagesTests
         }
     }
 
+    [Test]
+    public unsafe void ClearZeroesDirtyMemoryAndLeavesUntouchedPagesUnfaulted([Values(false, true)] bool residentOnly,
+        [Values(100, HugePages.ClearByResidency + 4093, (5 << 20) + 4093)] int length)
+    {
+        bool was = HugePages.ClearsResidentOnly;
+        HugePages.ClearsResidentOnly = residentOnly && was;
+        try
+        {
+            // Resident and dirty: every byte past an odd offset zeroed, the bytes before it kept.
+            var dirty = GC.AllocateUninitializedArray<byte>(length + 3, pinned: true);
+            dirty.AsSpan().Fill(0xA5);
+            fixed (byte* start = dirty) HugePages.Clear(start + 3, length);
+            Assert.That(dirty.AsSpan(0, 3).IndexOfAnyExcept((byte)0xA5), Is.EqualTo(-1), "the bytes before kept");
+            Assert.That(dirty.AsSpan(3).IndexOfAnyExcept((byte)0), Is.EqualTo(-1), "every byte cleared");
+
+            // Fresh: pages never touched stay so (where the kernel is asked) and read zero.
+            var fresh = GC.AllocateUninitializedArray<byte>(length + 64 * 4096, pinned: true);
+            int before = ResidentPages(fresh);
+            fixed (byte* start = fresh) HugePages.Clear(start, fresh.Length);
+            int after = ResidentPages(fresh);
+            Assert.That(fresh.AsSpan().IndexOfAnyExcept((byte)0), Is.EqualTo(-1), "every byte cleared");
+            if (HugePages.ClearsResidentOnly && before < fresh.Length / 4096 - 2) Assert.That(after, Is.EqualTo(before), "no page faulted in");
+        }
+        finally
+        {
+            HugePages.ClearsResidentOnly = was;
+        }
+    }
+
     /// <summary>The resident 4 KiB pages of the whole pages inside <paramref name="array"/> (mincore).</summary>
     private static unsafe int ResidentPages<T>(T[] array) where T : struct
     {
