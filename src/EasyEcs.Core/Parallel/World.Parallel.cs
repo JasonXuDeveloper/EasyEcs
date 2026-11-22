@@ -413,6 +413,14 @@ public sealed partial class World
         private const int Burst = 4, Settle = 8, MinPeriod = 16, MaxPeriod = 1024;
 
         /// <summary>
+        /// A settled run alone is timed one run in this many (each of the first <see cref="Settle"/> runs after the choice
+        /// is): a pair of clock reads costs about 50 ns (a P/Invoke each), a quarter of what a merging pass of two
+        /// chunks spent past its serial form, and the averages a run alone feeds (<see cref="Took"/>) only need to see the
+        /// work grow within a period.
+        /// </summary>
+        private const int Timed = 8;
+
+        /// <summary>
         /// Whether the next run wakes helpers, and whether its time counts (<see cref="Took"/>). Helpers pay only when
         /// the work outlasts their start: a parked helper thread takes from a few to a few hundred microseconds to
         /// start (bare metal vs. a small VM) and burns about as much CPU on the way, so a small pass between server
@@ -427,10 +435,18 @@ public sealed partial class World
         /// alone, the caller probes again after a period: four runs with helpers (the first only wakes them, and does
         /// not count: back-to-back runs find them awake). A probe that confirms the choice doubles the period (16 to
         /// 1,024 runs), and runs alone turning half as slow again as they settled at (the work grew) probe at once: the
-        /// choice follows the work and the machine as they change, and a settled one costs little.
+        /// choice follows the work and the machine as they change, and a settled one costs little: its runs alone are
+        /// timed one in <see cref="Timed"/> once the first <see cref="Settle"/> have set their average.
         /// </summary>
         public bool Wide(out bool sample)
         {
+            if (Pending != 0)
+            {
+                sample = Pending == 1;
+                Pending = 0;
+                return true;
+            }
+
             sample = true;
             int run = ++_run;
             if (!_single)
@@ -448,7 +464,12 @@ public sealed partial class World
             if (run < _period)
             {
                 if (run == Settle) _settled = _alone;
-                if (run <= Settle || _alone * 2 <= _settled * 3) return false;
+                if (run <= Settle || _alone * 2 <= _settled * 3)
+                {
+                    sample = run <= Settle || run % Timed == 0; // settled: a clock read pair one run in Timed
+                    return false;
+                }
+
                 run = _run = _period; // the work grew: probe now
             }
 
@@ -462,6 +483,27 @@ public sealed partial class World
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// A probe with helpers <see cref="StaysAlone"/> decided and left for the runner's <see cref="Wide"/> of the same
+        /// run: 1 sampled, 2 not (the run that wakes the helpers); 0 none. A runner busy with another run leaves it for
+        /// the next one it takes.
+        /// </summary>
+        internal int Pending;
+
+        /// <summary>
+        /// Whether this run of a work that chose to run alone (<see cref="Alone"/>) stays alone, as <see cref="Wide"/>
+        /// decides it; a probe with helpers is left in <see cref="Pending"/> for the runner's <see cref="Wide"/>, which
+        /// then does not decide again (nor does a second call of this one before it).
+        /// </summary>
+        internal bool StaysAlone(out bool sample)
+        {
+            sample = false;
+            if (Pending != 0) return false;
+            if (!Wide(out sample)) return true;
+            Pending = sample ? 1 : 2;
+            return false;
         }
 
         /// <summary>Whether the work has chosen to run alone (its runs wake no helper until the next probe).</summary>
@@ -620,7 +662,7 @@ public sealed partial class World
         private long Run(ParallelWork work, int count)
         {
             bool wide = work.Wide(out bool sample);
-            if (!wide) return RunAlone(work, count);
+            if (!wide) return RunAlone(work, count, sample);
 
             // Close the last run's claims first: a late participant of it that read its cursor before this can no longer
             // claim (its compare-exchange fails), and one reading after it finds no item. Without this, one that read
@@ -670,12 +712,13 @@ public sealed partial class World
         /// no claim, no per-item timestamp and no epoch. The last run's claims are closed already (each participant
         /// claimed until its count), and its count stays, so a helper queued by it that starts now still finds no
         /// item; the next run with helpers closes them again before it publishes anything. An item that throws does
-        /// not stop the others; the first exception is rethrown once all have run, as with helpers.
+        /// not stop the others; the first exception is rethrown once all have run, as with helpers. Timed only when
+        /// <paramref name="sample"/> (<see cref="ParallelWork.Wide"/>: a settled run one in <c>Timed</c>).
         /// </summary>
-        private static long RunAlone(ParallelWork work, int count)
+        private static long RunAlone(ParallelWork work, int count, bool sample)
         {
             Exception error = null;
-            long start = Stopwatch.GetTimestamp();
+            long start = sample ? Stopwatch.GetTimestamp() : 0;
             for (int i = 0; i < count; i++)
             {
                 try
@@ -688,7 +731,7 @@ public sealed partial class World
                 }
             }
 
-            work.Took(false, Stopwatch.GetTimestamp() - start, 0); // a run alone always counts
+            if (sample) work.Took(false, Stopwatch.GetTimestamp() - start, 0);
             if (error != null) ExceptionDispatchInfo.Throw(error);
             return 0;
         }
