@@ -258,6 +258,12 @@ its own worktree.
      zeroes it all ahead of the copy, where the first touch zeroes each page right before the copy writes it, still
      in the cache (Load 1M 1.04-1.06x slower, gone once loads stopped populating). A count inside a case with `[IterationSetup]` includes the setup (the extra launch reads around
      the whole actual stage): read the setup's share apart before crediting the measured method;
+   - `GC.AllocateUninitializedArray` saves only what the GC would zero: memory it hands out again (it leaves fresh
+     memory past a region's used mark untouched, knowing it is zero). Clearing the uncopied part by hand writes fresh
+     pages a zeroed allocation never touches, so clear only resident pages and drop the untouched ones
+     (`HugePages.Clear`: `mincore`, `MADV_DONTNEED`): a plain clear of a resize's tail made ColdCreate 1.08-1.23x
+     slower, the residency form left it level and made FullCopy Grow faster (perf-c16, backlog C16). The test of such
+     a change dirties the pinned heap first (arrays filled and freed) and checks the bytes, saves included;
    - a vector loop over a table that fills most of a core's L2 (100k entities of KernelBenchmark: 1.2-1.6 MB against
      2 MiB) varies 20-30 % between processes and between worlds made again in one process with the same compiled
      code (the physical pages the columns land on: L2 sets are physically indexed): before calling such a case slower,
