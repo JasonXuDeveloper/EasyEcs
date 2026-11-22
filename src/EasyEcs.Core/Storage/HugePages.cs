@@ -150,6 +150,74 @@ internal static unsafe partial class HugePages
         }
     }
 
+    /// <summary>
+    /// Whether <see cref="Clear"/> asks the kernel which pages are resident: Linux, until a call fails. Settable by tests.
+    /// </summary>
+    internal static bool ClearsResidentOnly = OperatingSystem.IsLinux();
+
+    /// <summary>The least bytes <see cref="Clear"/> asks the kernel about: under it a plain clear costs less than the calls.</summary>
+    internal const int ClearByResidency = 16 * BasePage;
+
+    /// <summary>
+    /// Zero <paramref name="bytes"/> at <paramref name="start"/> (the part of an array allocated uninitialized that a
+    /// resize did not copy into) without touching the pages the process never touched: resident 4 KiB pages are cleared,
+    /// runs of the others dropped (<c>MADV_DONTNEED</c>: a page never touched reads zero anyway, one swapped out is
+    /// discarded and reads zero), the partial pages at either end cleared. Fresh memory the GC zeroes for free (it knows
+    /// it is) stays unfaulted, as a zeroed allocation leaves it: a plain clear faulted it in and wrote each page the kernel had
+    /// just zeroed again, and a tail a trim drops right after was faulted for nothing. A <c>mincore</c> call per 2 MiB and a
+    /// <c>madvise</c> per run not resident; a plain clear under <see cref="ClearByResidency"/> bytes, elsewhere, or after a
+    /// failed call.
+    /// </summary>
+    internal static void Clear(byte* start, nint bytes)
+    {
+        if (bytes < ClearByResidency || !ClearsResidentOnly)
+        {
+            ClearPlain(start, bytes);
+            return;
+        }
+
+        byte* first = (byte*)(((nuint)start + BasePage - 1) & ~(nuint)(BasePage - 1));
+        byte* end = (byte*)(((nuint)start + (nuint)bytes) & ~(nuint)(BasePage - 1));
+        ClearPlain(start, (nint)(first - start));
+        ClearPlain(end, (nint)(start + bytes - end));
+        byte* residency = stackalloc byte[(int)(Page / BasePage)];
+        try
+        {
+            for (byte* chunk = first; chunk < end; chunk += Page)
+            {
+                nint length = Math.Min(Page, (nint)(end - chunk));
+                int pages = (int)(length / BasePage);
+                if (mincore(chunk, (nuint)length, residency) != 0)
+                {
+                    ClearPlain(chunk, (nint)(end - chunk)); // unknown: the rest the plain way
+                    ClearsResidentOnly = false;
+                    return;
+                }
+
+                for (int page = 0; page < pages;)
+                {
+                    int state = residency[page] & 1, run = page + 1;
+                    while (run < pages && (residency[run] & 1) == state) run++;
+                    byte* from = chunk + (nint)page * BasePage;
+                    nint size = (nint)(run - page) * BasePage;
+                    if (state == 1 || madvise(from, (nuint)size, MadvDontNeed) != 0) ClearPlain(from, size);
+                    page = run;
+                }
+            }
+        }
+        catch (Exception) // no libc.so.6 (musl), or no madvise / mincore in it: clearing the interior (again) is right either way
+        {
+            ClearsResidentOnly = false;
+            ClearPlain(first, (nint)(end - first));
+        }
+    }
+
+    private static void ClearPlain(byte* start, nint bytes)
+    {
+        for (nint done = 0; done < bytes; done += int.MaxValue)
+            new Span<byte>(start + done, (int)Math.Min(bytes - done, int.MaxValue)).Clear();
+    }
+
     /// <summary>One <c>MADV_POPULATE_WRITE</c> call over [<paramref name="from"/>, <paramref name="to"/>); a failure turns prefault off.</summary>
     private static bool PopulateRun(byte* from, byte* to)
     {

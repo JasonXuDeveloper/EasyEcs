@@ -426,10 +426,24 @@ internal sealed class ComponentInfo<T>(Type owner = null) : ComponentInfo(Runtim
             return typed;
         }
 
-        var resized = Create(capacity, sized);
+        // A doubling step or a trim: allocated uninitialized, every byte the copy leaves (the slack before row 0, the rows
+        // past the old capacity, the slack after them) zeroed below, so the column reads as one allocated zeroed would;
+        // the GC would zero the rows the copy overwrites as well. A sized one comes zeroed (HugePages).
+        var resized = sized ? Create(capacity) : GC.AllocateUninitializedArray<byte>(capacity * Size + Archetype.CacheLine, pinned: true);
+        var target = Unsafe.As<byte[]>(resized);
         // The smaller capacity in bytes: both arrays have a line of slack before their aligned rows.
-        int bytes = Math.Min(Unsafe.As<byte[]>(column).Length, Unsafe.As<byte[]>(resized).Length) - Archetype.CacheLine;
-        Unsafe.CopyBlockUnaligned(ref Archetype.Aligned(resized), ref Archetype.Aligned(column), (uint)bytes);
+        int bytes = Math.Min(Unsafe.As<byte[]>(column).Length, target.Length) - Archetype.CacheLine;
+        ref byte rows = ref Archetype.Aligned(resized);
+        Unsafe.CopyBlockUnaligned(ref rows, ref Archetype.Aligned(column), (uint)bytes);
+        if (sized) return resized;
+        int head = (int)Unsafe.ByteOffset(ref MemoryMarshal.GetArrayDataReference(target), ref rows);
+        target.AsSpan(0, head).Clear();
+        unsafe
+        {
+            // Pinned: the address holds. The pages past the copy a fresh allocation never touched stay untouched.
+            HugePages.Clear((byte*)Unsafe.AsPointer(ref rows) + bytes, target.Length - head - bytes);
+        }
+
         return resized;
     }
 
