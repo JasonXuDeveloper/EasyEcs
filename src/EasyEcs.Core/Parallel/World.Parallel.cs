@@ -401,33 +401,50 @@ public sealed partial class World
             _perItem = average == 0 ? perItem : (average * 3 + Math.Min(perItem, average * 1.5)) / 4;
         }
 
-        // Moving averages (timestamp ticks) of a run with helpers, of its items' summed thread time (what the caller
-        // alone would take), and of a run alone.
+        // Moving averages (timestamp ticks) of a run with helpers, of its items' summed thread time, and of a run alone
+        // (0 until one is measured).
         private long _wide, _work, _alone;
         private long _settled;           // the average alone a few runs after the choice (0 until then)
-        private int _run;                // runs alone since the last probe (or into the probe)
-        private int _period = MinPeriod; // runs alone between probes
+        private int _run;                // runs since the last probe (or into the probe), alone or with helpers
+        private int _period = Burst;     // runs between probes: the first alone comes after a few runs with helpers
         private bool _single;            // the choice: run alone
+        private bool _outran;            // a run alone measured while wide beat the runs with helpers (Pays)
 
         private const int Burst = 4, Settle = 8, MinPeriod = 16, MaxPeriod = 1024;
 
         /// <summary>
         /// Whether the next run wakes helpers, and whether its time counts (<see cref="Took"/>). Helpers pay only when
-        /// the work outlasts their start: a parked helper thread takes from a few to a few hundred microseconds to start
-        /// (bare metal vs. a small VM) and burns about as much CPU on the way, so a small pass between server ticks is as
-        /// fast on the caller alone, while back-to-back passes find the threads awake. Measured time decides: a run with
-        /// helpers yields both its time and its items' summed thread time, so helpers are kept while they make a run at
-        /// least a fifth faster than its work, with no run alone to compare. Once alone, the caller probes again after a
-        /// period: four runs with helpers (the first only wakes them, and does not count: back-to-back runs find them
-        /// awake). A probe that confirms running alone doubles the period (16 to 1,024 runs), and runs alone turning
-        /// half as slow again as they settled at (the work grew) probe at once: the choice follows the work and
-        /// the machine as they change, and a settled one costs little.
+        /// the work outlasts their start: a parked helper thread takes from a few to a few hundred microseconds to
+        /// start (bare metal vs. a small VM) and burns about as much CPU on the way, so a small pass between server
+        /// ticks is as fast on the caller alone, while back-to-back passes find the threads awake. Measured time
+        /// decides (<see cref="Pays(bool)"/>): a run with helpers yields both its time and its items' summed thread
+        /// time, and helpers are kept while they make a run at least a fifth faster than its work and not a quarter
+        /// slower than a run alone. While wide, one run in a period runs alone to measure that (the first after four
+        /// runs with helpers, the first of which, cold, does not count; then 16 to 1,024 runs apart, doubling while
+        /// helpers keep winning): the summed thread time alone is no stand-in for a run alone, since items contending
+        /// for a shared line (an interlocked total, a lock) take many times longer each on several threads than on one
+        /// (25 times at 4 threads), and helpers then beat the summed time while losing to one thread by six times. Once
+        /// alone, the caller probes again after a period: four runs with helpers (the first only wakes them, and does
+        /// not count: back-to-back runs find them awake). A probe that confirms the choice doubles the period (16 to
+        /// 1,024 runs), and runs alone turning half as slow again as they settled at (the work grew) probe at once: the
+        /// choice follows the work and the machine as they change, and a settled one costs little.
         /// </summary>
         public bool Wide(out bool sample)
         {
             sample = true;
-            if (!_single) return true;
             int run = ++_run;
+            if (!_single)
+            {
+                if (run < _period)
+                {
+                    if (run == 1 && _wide == 0) sample = false; // the first run: helpers and code still cold
+                    return true;
+                }
+
+                _run = 0;
+                return false; // a probe alone: Took weighs it against the runs with helpers
+            }
+
             if (run < _period)
             {
                 if (run == Settle) _settled = _alone;
@@ -439,7 +456,7 @@ public sealed partial class World
             else if (run == _period + Burst)
             {
                 _run = 0;
-                if (Beats(_wide, _work)) _single = false;
+                if (Pays(_outran)) Choose(false);
                 else _period = Math.Min(_period * 2, MaxPeriod);
                 return !_single;
             }
@@ -450,20 +467,55 @@ public sealed partial class World
         /// <summary>Whether the work has chosen to run alone (its runs wake no helper until the next probe).</summary>
         internal bool Alone => _single;
 
-        /// <summary>Helpers pay when they make a run at least a fifth faster than its work.</summary>
+        /// <summary>Helpers make a run at least a fifth faster than its items' summed thread time.</summary>
         private static bool Beats(long wide, long work) => wide < work - work / 5;
+
+        /// <summary>
+        /// Whether helpers pay: a run with them is a fifth faster than its items' summed thread time (D22's rule) and,
+        /// while wide or once a run alone has outrun them (<paramref name="measured"/>), not a quarter slower than the
+        /// last measured run alone (items contending for a shared line run several times slower with helpers). The
+        /// quarter is the probes' margin: each runs right after runs of the other kind and pays for moving the rows from
+        /// where those left them, from the helpers' caches into the caller's or back (a light pass of 100,000 rows: 21
+        /// µs with helpers right after runs alone, 15 µs once they keep running, 18 µs alone). A work that chose to run
+        /// alone by D22's rule alone comes back by it alone: its probes with helpers right after runs alone paid more
+        /// than the quarter for the move (a heavy pass of 1,000 rows: 11 µs with helpers, 13 µs alone), and they kept
+        /// it alone up to a tenth of its runs.
+        /// </summary>
+        private bool Pays(bool measured) => Beats(_wide, _work) && (!measured || _alone == 0 || _wide < _alone + _alone / 4);
+
+        /// <summary>Switch to running alone or with helpers, the next probe a short period away.</summary>
+        private void Choose(bool single)
+        {
+            _single = single;
+            _run = 0;
+            _period = MinPeriod;
+        }
 
         /// <summary>
         /// Record a run: its time and, with helpers, its items' summed thread time. The first sample of a probe restarts
         /// the averages; a later one counts at most 1.5 times the average (a preempted run says little). Helpers that no
-        /// longer pay switch to running alone.
+        /// longer beat their items' summed thread time, or a run alone measured while wide (a probe), switch to running
+        /// alone.
         /// </summary>
         public void Took(bool wide, long ticks, long work)
         {
             Cost(wide ? work : ticks);
             if (!wide)
             {
-                _alone = Blend(_alone, ticks);
+                if (_single)
+                {
+                    _alone = Blend(_alone, ticks);
+                    return;
+                }
+
+                _alone = ticks;
+                if (Pays(true)) _period = Math.Clamp(_period * 2, MinPeriod, MaxPeriod);
+                else
+                {
+                    Choose(true);
+                    _outran = true;
+                }
+
                 return;
             }
 
@@ -472,10 +524,9 @@ public sealed partial class World
             _work = first ? work : Blend(_work, work);
             if (!_single && !Beats(_wide, _work))
             {
-                _single = true;
-                _alone = _work;
-                _run = 0;
-                _period = MinPeriod;
+                Choose(true);
+                _outran = false;
+                _alone = _alone == 0 ? _work : Math.Min(_alone, _work);
             }
         }
 
